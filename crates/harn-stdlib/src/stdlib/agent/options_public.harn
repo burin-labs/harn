@@ -217,7 +217,7 @@ pub fn agent_options(options: AgentLoopOptions = {}) -> AgentLoopOptions {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_loop_options(options = nil) {
+pub fn agent_loop_options(harness: Harness, options = nil) {
   let opts = options ?? {}
   __validate_removed_agent_loop_options(opts)
   __validate_agent_loop_completion_options(opts)
@@ -265,7 +265,7 @@ pub fn agent_loop_options(options = nil) {
     if __judge_enabled(opts?.verify_completion_judge) {
       opts = opts
         + {
-        verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge, opts),
+        verify_completion_judge: __completion_judge_defaults(harness, opts?.verify_completion_judge, opts),
       }
     } else {
       opts = opts + {verify_completion_judge: nil}
@@ -273,7 +273,7 @@ pub fn agent_loop_options(options = nil) {
   }
   if __has_key(opts, "done_judge") {
     if __judge_enabled(opts?.done_judge) {
-      opts = opts + {done_judge: __completion_judge_defaults(opts?.done_judge, opts)}
+      opts = opts + {done_judge: __completion_judge_defaults(harness, opts?.done_judge, opts)}
     } else {
       opts = opts + {done_judge: nil}
     }
@@ -346,11 +346,11 @@ pub fn __stack_env_token(value) -> string {
   if text == nil {
     return ""
   }
-  const cleaned = regex_replace_all("[^A-Za-z0-9]+", "_", text)
-  return uppercase(regex_replace_all("^_+|_+$", "", cleaned))
+  const cleaned = regex_replace("[^A-Za-z0-9]+", "_", text)
+  return uppercase(regex_replace("^_+|_+$", "", cleaned))
 }
 
-pub fn __stack_env_value(name) {
+pub fn __stack_env_value(harness: Harness, name) {
   const key = __stack_non_empty_string(name)
   if key == nil {
     return nil
@@ -402,9 +402,9 @@ pub fn __stack_env_prefixes(config, role) {
   return prefixes
 }
 
-pub fn __stack_first_env(prefixes, suffix) {
+pub fn __stack_first_env(harness: Harness, prefixes, suffix) {
   for prefix in prefixes {
-    const value = __stack_env_value(prefix + "_" + suffix)
+    const value = __stack_env_value(harness, prefix + "_" + suffix)
     if value != nil {
       return value
     }
@@ -412,7 +412,7 @@ pub fn __stack_first_env(prefixes, suffix) {
   return nil
 }
 
-pub fn __stack_provider_model_pair(opts) {
+pub fn __stack_provider_model_pair(harness: Harness, opts) {
   const provider = __stack_non_empty_string(opts?.provider)
   const model = __stack_non_empty_string(opts?.model)
   if provider != nil && model != nil {
@@ -420,7 +420,7 @@ pub fn __stack_provider_model_pair(opts) {
   }
   if model != nil {
     const info = try {
-      llm_model_info(model)
+      harness.llm.model_info(model)
     }
     if !is_err(info) && type_of(unwrap(info)) == "dict" {
       const resolved = unwrap(info)
@@ -433,13 +433,13 @@ pub fn __stack_provider_model_pair(opts) {
   return nil
 }
 
-pub fn __stack_capabilities(opts) {
-  const pair = __stack_provider_model_pair(opts)
+pub fn __stack_capabilities(harness: Harness, opts) {
+  const pair = __stack_provider_model_pair(harness, opts)
   if pair == nil {
     return nil
   }
   const caps = try {
-    provider_capabilities(pair.provider ?? "auto", pair.model ?? "")
+    harness.llm.provider_capabilities(pair.provider ?? "auto", pair.model ?? "")
   }
   if is_err(caps) || type_of(unwrap(caps)) != "dict" {
     return nil
@@ -522,7 +522,7 @@ pub fn __stack_strip_option_keys(options, stripped, keys) {
   return {options: out, stripped: removed}
 }
 
-pub fn __stack_sanitize_result(options, policy = nil) {
+pub fn __stack_sanitize_result(harness: Harness, options, policy = nil) {
   let out = __stack_dict(options)
   let stripped = []
   const mode = __stack_sanitize_mode(policy)
@@ -531,7 +531,7 @@ pub fn __stack_sanitize_result(options, policy = nil) {
     out = deliberation.options
     stripped = deliberation.stripped
   }
-  const caps = __stack_capabilities(out)
+  const caps = __stack_capabilities(harness, out)
   if caps == nil {
     return {options: out, stripped: stripped}
   }
@@ -555,13 +555,13 @@ pub fn __stack_sanitize_result(options, policy = nil) {
   return {options: out, stripped: stripped}
 }
 
-pub fn __stack_pack_options(base) {
+pub fn __stack_pack_options(harness: Harness, base) {
   const opts = __stack_dict(base)
   if __stack_non_empty_string(opts?.model) == nil {
     return opts
   }
   const packed = try {
-    pack_for(opts)
+    pack_for(harness, opts)
   }
   if is_err(packed) {
     return opts
@@ -569,20 +569,20 @@ pub fn __stack_pack_options(base) {
   return unwrap(packed)
 }
 
-pub fn __stack_configured_model_options(cfg, prefixes) {
+pub fn __stack_configured_model_options(harness: Harness, cfg, prefixes) {
   const defaults = __stack_dict(cfg?.defaults) + __stack_dict(cfg?.model_defaults)
   const user = __stack_dict(cfg?.options) + __stack_dict(cfg?.llm_options)
   const provider = __stack_first_non_empty(
-    [cfg?.provider, user?.provider, __stack_first_env(prefixes, "PROVIDER"), defaults?.provider],
+    [cfg?.provider, user?.provider, __stack_first_env(harness, prefixes, "PROVIDER"), defaults?.provider],
   )
   const model = __stack_first_non_empty(
-    [cfg?.model, user?.model, __stack_first_env(prefixes, "MODEL"), defaults?.model],
+    [cfg?.model, user?.model, __stack_first_env(harness, prefixes, "MODEL"), defaults?.model],
   )
   const model_role = __stack_first_non_empty(
     [
       cfg?.model_role,
       user?.model_role,
-      __stack_first_env(prefixes, "MODEL_ROLE"),
+      __stack_first_env(harness, prefixes, "MODEL_ROLE"),
       defaults?.model_role,
     ],
   )
@@ -590,18 +590,18 @@ pub fn __stack_configured_model_options(cfg, prefixes) {
     [
       cfg?.reasoning_task,
       user?.reasoning_task,
-      __stack_first_env(prefixes, "REASONING_TASK"),
+      __stack_first_env(harness, prefixes, "REASONING_TASK"),
       defaults?.reasoning_task,
     ],
   )
   const effort = __stack_first_non_empty(
-    [cfg?.effort, user?.effort, __stack_first_env(prefixes, "EFFORT"), defaults?.effort],
+    [cfg?.effort, user?.effort, __stack_first_env(harness, prefixes, "EFFORT"), defaults?.effort],
   )
   const tool_format = __stack_first_non_empty(
     [
       cfg?.tool_format,
       user?.tool_format,
-      __stack_first_env(prefixes, "TOOL_FORMAT"),
+      __stack_first_env(harness, prefixes, "TOOL_FORMAT"),
       defaults?.tool_format,
     ],
   )
@@ -639,8 +639,8 @@ pub fn __stack_configured_model_options(cfg, prefixes) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_sanitize_model_options(options = nil, policy = nil) {
-  return __stack_sanitize_result(options, policy).options
+pub fn agent_sanitize_model_options(harness: Harness, options = nil, policy = nil) {
+  return __stack_sanitize_result(harness, options, policy).options
 }
 
 /**
@@ -658,13 +658,13 @@ pub fn agent_sanitize_model_options(options = nil, policy = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_model_options(config = nil) {
+pub fn agent_model_options(harness: Harness, config = nil) {
   const cfg = __stack_dict(config)
   const role = __stack_non_empty_string(cfg?.role) ?? "agent"
   const prefixes = __stack_env_prefixes(cfg, role)
-  const configured = __stack_configured_model_options(cfg, prefixes)
-  const packed = __stack_pack_options(configured)
-  const sanitized = __stack_sanitize_result(packed)
+  const configured = __stack_configured_model_options(harness, cfg, prefixes)
+  const packed = __stack_pack_options(harness, configured)
+  const sanitized = __stack_sanitize_result(harness, packed)
   let options = sanitized.options
   const resolution = agent_tool_format_resolution(options)
   if resolution.tool_format != nil {

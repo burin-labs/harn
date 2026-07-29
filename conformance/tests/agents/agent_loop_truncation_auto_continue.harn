@@ -35,20 +35,19 @@ fn truncated_turn() {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // (a) Length truncation + incomplete call -> auto-continue. The re-issue
   // consumes the next scripted turn (a complete call), dispatches it, then the
   // loop finishes. The continuation must NOT carry parse-guidance — the whole
   // point is that we did not burn the turn.
   with_llm_script(
-    [
+    harness.llm, [
       truncated_turn(),
       llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "Write a.txt.",
+      const result = agent_loop(harness, "Write a.txt.",
         nil,
         {
           provider: "mock",
@@ -59,18 +58,18 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(result.tools.successful[0])
-      __io_println(len(calls))
-      __io_println(!contains(json_stringify(calls[1].messages), "parse_guidance"))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(len(calls))
+      harness.stdio.println(!contains(json_stringify(calls[1].messages), "parse_guidance"))
     },
   )
   // (b) Still truncated after the cap -> fall back to parse-guidance, no
   // infinite loop. Two continuations are allowed (default cap), so the third
   // truncated result falls through; its successor call carries parse-guidance.
   with_llm_script(
-    [
+    harness.llm, [
       truncated_turn(),
       truncated_turn(),
       truncated_turn(),
@@ -78,8 +77,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "Write a.txt.",
+      const result = agent_loop(harness, "Write a.txt.",
         nil,
         {
           provider: "mock",
@@ -90,23 +88,22 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(contains(json_stringify(calls[3].messages), "parse_guidance"))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(contains(json_stringify(calls[3].messages), "parse_guidance"))
     },
   )
   // (c) Clean stop + malformed call -> NOT auto-continue. The same truncated
   // body but with `stop_reason: "stop"` is the #3137/#3142 domain: parse-guidance
   // fires immediately on the next call and the continuation count is not inflated.
   with_llm_script(
-    [
+    harness.llm, [
       {text: "<tool_call>\nwrite_note({ path: \"a.txt\", body: <<EOF\nhello", stop_reason: "stop"},
       llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "Write a.txt.",
+      const result = agent_loop(harness, "Write a.txt.",
         nil,
         {
           provider: "mock",
@@ -117,20 +114,19 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(len(calls))
-      __io_println(contains(json_stringify(calls[1].messages), "parse_guidance"))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(contains(json_stringify(calls[1].messages), "parse_guidance"))
     },
   )
   // (d) Length truncation with billed hidden work but no visible text/tool
   // calls is still budget exhaustion. Retry with a raised cap instead of
   // feeding an empty turn into parse/stall accounting.
   with_llm_script(
-    [{text: "", output_tokens: 342, stop_reason: "length"}, llm_text("<done>##DONE##</done>")],
+    harness.llm, [{text: "", output_tokens: 342, stop_reason: "length"}, llm_text("<done>##DONE##</done>")],
     { ->
-      const result = agent_loop(
-        "Think briefly, then finish.",
+      const result = agent_loop(harness, "Think briefly, then finish.",
         nil,
         {
           provider: "mock",
@@ -142,10 +138,10 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(len(calls))
-      __io_println(!contains(json_stringify(calls[1].messages), "parse_guidance"))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(!contains(json_stringify(calls[1].messages), "parse_guidance"))
     },
   )
 }

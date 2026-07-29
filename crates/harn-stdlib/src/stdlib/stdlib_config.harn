@@ -1,6 +1,6 @@
 // std/config — typed environment-variable readers and model-id parsing.
 //
-// Complements the `env(key)` and `env_or(key, default)` builtins with
+// Complements the `env(key)` and `env_or(harness, key, default)` builtins with
 // type-coerced readers (`env_int`, `env_float`, `env_bool`, `env_list`)
 // and the `parse_model_id` / `model_from_env` helpers every LLM-driven
 // Harn script reinvents. All readers fall back transparently when the
@@ -16,7 +16,7 @@ type ModelIdParts = {provider: string, model: string, raw: string}
  * @effects: []
  * @errors: []
  */
-pub fn env_str(key: string) -> any {
+pub fn env_str(harness: Harness, key: string) -> any {
   const raw = harness.env.get(key)
   if raw == nil {
     return nil
@@ -33,7 +33,7 @@ pub fn env_str(key: string) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn env_int(key: string, default: int) -> int {
+pub fn env_int(harness: Harness, key: string, default: int) -> int {
   const raw = harness.env.get(key)
   if raw == nil {
     return default
@@ -47,7 +47,7 @@ pub fn env_int(key: string, default: int) -> int {
  * @effects: []
  * @errors: []
  */
-pub fn env_float(key: string, default: float) -> float {
+pub fn env_float(harness: Harness, key: string, default: float) -> float {
   const raw = harness.env.get(key)
   if raw == nil {
     return default
@@ -63,7 +63,7 @@ pub fn env_float(key: string, default: float) -> float {
  * @effects: []
  * @errors: []
  */
-pub fn env_bool(key: string, default: bool) -> bool {
+pub fn env_bool(harness: Harness, key: string, default: bool) -> bool {
   const raw = harness.env.get(key)
   if raw == nil {
     return default
@@ -90,7 +90,7 @@ pub fn env_bool(key: string, default: bool) -> bool {
  * @errors: []
  * @example: env_list(key, separator, ")
  */
-pub fn env_list(key: string, separator: string = ",") -> list<string> {
+pub fn env_list(harness: Harness, key: string, separator: string = ",") -> list<string> {
   const raw = harness.env.get(key)
   if raw == nil {
     return []
@@ -176,8 +176,8 @@ pub fn parse_model_id(id: string) -> ModelIdParts {
  * @effects: []
  * @errors: []
  */
-pub fn model_from_env(env_key: string, default: string) -> string {
-  const resolved = env_str(env_key)
+pub fn model_from_env(harness: Harness, env_key: string, default: string) -> string {
+  const resolved = env_str(harness, env_key)
   if resolved == nil {
     return default
   }

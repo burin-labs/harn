@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // A task that throws inside a `scope { }` propagates its error out of the
   // block at scope exit (after cancelling any siblings), so `try` catches it.
   const result = try {
@@ -8,5 +8,5 @@ pipeline test(task) {
       }
     }
   }
-  __io_println(is_err(result))
+  harness.stdio.println(is_err(result))
 }

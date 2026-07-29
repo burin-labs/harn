@@ -9,7 +9,7 @@ import { assert_error_contains } from "std/testing"
  * crates/harn-vm/src/stdlib/jsonrpc.rs cover the success/response
  * paths against a synthetic envelope.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   assert_error_contains(
     { -> jsonrpc_batch("", [{method: "ping"}]) },
     "url is required",
@@ -25,5 +25,5 @@ pipeline test(task) {
     "missing 'method'",
     "missing method is rejected",
   )
-  log("jsonrpc_batch validation: all tests passed")
+  harness.stdio.println("jsonrpc_batch validation: all tests passed")
 }

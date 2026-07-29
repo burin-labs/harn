@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const double = { x -> x * 2 }
-  log(double(5))
+  harness.stdio.println(double(5))
 }

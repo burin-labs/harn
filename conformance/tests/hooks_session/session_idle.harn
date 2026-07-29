@@ -5,31 +5,30 @@ import { llm_text, with_llm_script } from "std/testing"
  * idle wait. Advisory only: the hook can observe iteration count and
  * `wake_interval_ms` but cannot block the wait.
  */
-const idle_seen = atomic(0)
+const idle_seen = harness.runtime.atomic(0)
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "session_idle",
     { event ->
       if type_of(event?.session?.id) == "string"
         && type_of(event?.wake_interval_ms) == "int" {
-        atomic_add(idle_seen, 1)
+        harness.runtime.atomic_add(idle_seen, 1)
       }
       return nil
     },
   )
   with_llm_script(
-    [llm_text("tick"), llm_text("tock")],
+    harness.llm, [llm_text("tick"), llm_text("tock")],
     { ->
-      const result = agent_loop(
-        "poll background",
+      const result = agent_loop(harness, "poll background",
         nil,
         {provider: "mock", daemon: true, max_iterations: 2, wake_interval_ms: 1},
       )
-      __io_println(result.status)
-      __io_println(atomic_get(idle_seen) >= 1)
-      clear_session_hooks()
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(idle_seen) >= 1)
+      harness.agent.clear_session_hooks()
     },
   )
 }

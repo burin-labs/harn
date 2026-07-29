@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -39,5 +39,5 @@ pipeline main() {
     committed_edit_handler({}) == "replace-body-ok",
     "workflow_commit should preserve edit handler",
   )
-  log("workflow tool handlers preserved")
+  harness.stdio.println("workflow tool handlers preserved")
 }

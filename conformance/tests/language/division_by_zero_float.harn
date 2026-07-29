@@ -6,9 +6,9 @@
  * The divisor is a `let` (not a literal) so the float path is exercised at
  * runtime rather than folded.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const z = 0.0
-  log(1.0 / z)
-  log(-1.0 / z)
-  log(z / z)
+  harness.stdio.println(1.0 / z)
+  harness.stdio.println(-1.0 / z)
+  harness.stdio.println(z / z)
 }

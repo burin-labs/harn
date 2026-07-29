@@ -229,11 +229,11 @@ struct AmbientCapabilityCall {
 #[derive(Debug, Clone, Copy, Default)]
 struct FixOptions {
     harness_threading: HarnessThreadingMode,
+    capability_migrations_only: bool,
 }
 
 struct AmbientRepairContext {
     harness_threading: HarnessThreadingMode,
-    allow_stdlib_public_global: bool,
     cross_module_importer_count: usize,
 }
 
@@ -314,6 +314,7 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
             args.dry_run,
             FixOptions {
                 harness_threading: args.harness_threading,
+                capability_migrations_only: args.capability_migrations_only,
             },
         )?;
         if args.json {
@@ -343,6 +344,7 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
         args.safety,
         FixOptions {
             harness_threading: args.harness_threading,
+            capability_migrations_only: args.capability_migrations_only,
         },
     )?;
     if args.json {
@@ -676,15 +678,53 @@ fn collect_file_candidates(
         .map_err(|error| skipped_file_from_analysis_error(path_str.clone(), error))?;
     let source = output.source;
     let program = output.program;
+    let exported_names = module_graph
+        .exports_for_module(file)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let ambient_context = AmbientRepairContext {
+        harness_threading: options.harness_threading,
+        cross_module_importer_count: module_graph.importers_of(file).len(),
+    };
 
     for diag in &output.diagnostics {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;
         }
-        let Some(repair) = diag.repair.clone() else {
-            continue;
+        let synthesized = (diag.code == Code::UndefinedVariable
+            && diag.message.contains("`harness`"))
+        .then(|| {
+            synthesize_missing_harness_repair(
+                diag.span?,
+                &source,
+                &program,
+                &exported_names,
+                &ambient_context,
+            )
+        })
+        .flatten();
+        let synthesized = synthesized.or_else(|| {
+            if diag.code != Code::ArgumentTypeMismatch {
+                return None;
+            }
+            synthesize_missing_capability_argument_repair(diag.span?, &diag.message)
+        });
+        let (repair, edits, impact) = if let Some(repair) = synthesized {
+            repair
+        } else {
+            let Some(repair) = diag.repair.clone() else {
+                continue;
+            };
+            (
+                repair,
+                diag.fix.clone().unwrap_or_default(),
+                RepairImpactWire::generic(),
+            )
         };
         if !repair_allowed(&repair, safety_ceiling) {
+            continue;
+        }
+        if options.capability_migrations_only && !is_capability_migration_repair(&repair) {
             continue;
         }
         out.push(RepairCandidate {
@@ -695,8 +735,8 @@ fn collect_file_candidates(
             message: diag.message.clone(),
             span: diag.span,
             repair,
-            impact: RepairImpactWire::generic(),
-            edits: diag.fix.clone().unwrap_or_default(),
+            impact,
+            edits,
         });
     }
 
@@ -718,6 +758,9 @@ fn collect_file_candidates(
             continue;
         };
         if !repair_allowed(&repair, safety_ceiling) {
+            continue;
+        }
+        if options.capability_migrations_only && !is_capability_migration_repair(&repair) {
             continue;
         }
         out.push(RepairCandidate {
@@ -811,6 +854,17 @@ fn skipped_file_from_analysis_error(
     }
 }
 
+fn is_capability_migration_repair(repair: &Repair) -> bool {
+    let id = repair.id.as_str();
+    id.starts_with("bindings/thread-harness")
+        || matches!(
+            id,
+            "bindings/thread-missing-harness"
+                | "bindings/prepend-capability-argument"
+                | "bindings/use-enclosing-harness-global"
+        )
+}
+
 fn lint_candidate_repair(
     diag: &harn_lint::LintDiagnostic,
     file: &Path,
@@ -826,7 +880,6 @@ fn lint_candidate_repair(
             .collect::<BTreeSet<_>>();
         let context = AmbientRepairContext {
             harness_threading: options.harness_threading,
-            allow_stdlib_public_global: commands::check::path_is_stdlib_source(file),
             cross_module_importer_count: module_graph.importers_of(file).len(),
         };
         return synthesize_ambient_capability_repair(
@@ -951,16 +1004,109 @@ fn synthesize_ambient_capability_repair(
     ))
 }
 
+fn synthesize_missing_capability_argument_repair(
+    span: Span,
+    message: &str,
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    let expected = message
+        .strip_prefix("argument 1 ")?
+        .split_once("expected ")?
+        .1
+        .split_once(", found")?
+        .0
+        .trim();
+    let argument = if expected == "Harness" {
+        "harness".to_string()
+    } else {
+        let capability = harn_builtin_meta::CapabilityId::from_type_name(expected)?;
+        format!("harness.{}", capability.field_name())
+    };
+    Some((
+        Repair {
+            id: harn_parser::RepairId::from_owned(
+                "bindings/prepend-capability-argument".to_string(),
+            ),
+            summary: format!(
+                "Pass the explicit `{expected}` capability required by the migrated callable"
+            ),
+            safety: RepairSafety::SurfaceChanging,
+        },
+        vec![FixEdit {
+            span: Span {
+                end: span.start,
+                ..span
+            },
+            replacement: format!("{argument}, "),
+        }],
+        RepairImpactWire::local_ambient("prepend-capability-argument"),
+    ))
+}
+
 fn should_use_global_harness(info: &CallableInfo, context: &AmbientRepairContext) -> bool {
     if info.bound_names.contains("harness") {
         return false;
     }
     match context.harness_threading {
         HarnessThreadingMode::LocalGlobal => true,
-        HarnessThreadingMode::ThreadParams => {
-            context.allow_stdlib_public_global && info.is_exported
+        HarnessThreadingMode::ThreadParams => false,
+    }
+}
+
+fn synthesize_missing_harness_repair(
+    span: Span,
+    source: &str,
+    program: &[SNode],
+    exported_names: &BTreeSet<String>,
+    context: &AmbientRepairContext,
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    if context.harness_threading != HarnessThreadingMode::ThreadParams {
+        return None;
+    }
+    let infos = collect_callable_infos(program, source, exported_names);
+    let owner_idx = infos
+        .iter()
+        .enumerate()
+        .filter(|(_, info)| info.span.start <= span.start && info.span.end >= span.end)
+        .min_by_key(|(_, info)| info.span.end.saturating_sub(info.span.start))
+        .map(|(index, _)| index)?;
+    if infos[owner_idx].harness_binding.is_some() {
+        return None;
+    }
+    let reverse_callers = build_reverse_callers(&infos);
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx, context);
+    let mut edits = Vec::new();
+    for &idx in &needed {
+        edits.push(add_harness_param_edit(&infos[idx])?);
+    }
+    for (callee_idx, callers) in reverse_callers.iter().enumerate() {
+        if !needed.contains(&callee_idx) {
+            continue;
+        }
+        for &(caller_idx, call_idx) in callers {
+            let caller = &infos[caller_idx];
+            let arg_name = match caller.harness_binding.as_deref() {
+                Some(binding) => binding,
+                None if needed.contains(&caller_idx) => harness_param_name_for_insert(caller)?,
+                None => continue,
+            };
+            edits.push(add_call_argument_edit(
+                source,
+                &caller.calls[call_idx].span,
+                arg_name,
+            )?);
         }
     }
+    Some((
+        Repair {
+            id: harn_parser::RepairId::from_owned("bindings/thread-missing-harness".to_string()),
+            summary:
+                "Thread the explicit Harness grant through this callable and its local callers"
+                    .to_string(),
+            safety: RepairSafety::SurfaceChanging,
+        },
+        dedupe_edits(edits),
+        repair_impact_for_signature_threading(&infos, &needed, context.cross_module_importer_count),
+    ))
 }
 
 fn use_enclosing_harness_global_repair(code: Code) -> Option<Repair> {
@@ -1234,11 +1380,40 @@ fn visit_callable_body(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
 
 fn callable_param_insert(source: &str, span: Span) -> Option<(usize, bool)> {
     let region = source.get(span.start..span.end)?;
-    let header_end = region.find('{').unwrap_or(region.len());
-    let header = &region[..header_end];
-    let open_paren = header.find('(')?;
-    let close_paren = header[open_paren + 1..].find(')')? + open_paren + 1;
-    let has_params = !header[open_paren + 1..close_paren].trim().is_empty();
+    let open_paren = region.find('(')?;
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut close_paren = None;
+    for (offset, ch) in region[open_paren..].char_indices() {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(ch, '"' | '\'') {
+            quote = Some(ch);
+            continue;
+        }
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    close_paren = Some(open_paren + offset);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close_paren = close_paren?;
+    let has_params = !region[open_paren + 1..close_paren].trim().is_empty();
     Some((span.start + open_paren + 1, has_params))
 }
 
@@ -1491,6 +1666,9 @@ fn candidates_overlap(left: &RepairCandidate, right: &RepairCandidate) -> bool {
 }
 
 fn edits_conflict(left: &FixEdit, right: &FixEdit) -> bool {
+    if left.span == right.span && left.replacement == right.replacement {
+        return false;
+    }
     let same_zero_width = left.span.start == left.span.end
         && right.span.start == right.span.end
         && left.span.start == right.span.start;

@@ -1,35 +1,35 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Close channel then iterate — should produce no items
-  const ch1 = channel("test1", 5)
-  close_channel(ch1)
+  const ch1 = harness.runtime.channel("test1", 5)
+  harness.runtime.close_channel(ch1)
   let count = 0
   for item in ch1 {
     count = count + 1
   }
-  __io_println(count)
+  harness.stdio.println(count)
   // Send items, close, then iterate — should drain all items
-  const ch2 = channel("test2", 5)
-  send(ch2, "a")
-  send(ch2, "b")
-  send(ch2, "c")
-  close_channel(ch2)
+  const ch2 = harness.runtime.channel("test2", 5)
+  harness.runtime.send(ch2, "a")
+  harness.runtime.send(ch2, "b")
+  harness.runtime.send(ch2, "c")
+  harness.runtime.close_channel(ch2)
   let items = []
   for item in ch2 {
     items = items + [item]
   }
-  __io_println(items)
+  harness.stdio.println(items)
   // try_receive on empty channel returns nil
-  const ch3 = channel("test3", 5)
-  const result = try_receive(ch3)
-  __io_println(result)
+  const ch3 = harness.runtime.channel("test3", 5)
+  const result = harness.runtime.try_receive(ch3)
+  harness.stdio.println(result)
   // send after close raises a structured ChannelClosed error
-  const ch4 = channel("test4", 5)
-  close_channel(ch4)
+  const ch4 = harness.runtime.channel("test4", 5)
+  harness.runtime.close_channel(ch4)
   const sent = try {
-    send(ch4, "too_late")
+    harness.runtime.send(ch4, "too_late")
   }
-  __io_println(is_err(sent))
+  harness.stdio.println(is_err(sent))
   const err = unwrap_err(sent)
-  __io_println(err.type)
-  __io_println(error_category(err))
+  harness.stdio.println(err.type)
+  harness.stdio.println(error_category(err))
 }

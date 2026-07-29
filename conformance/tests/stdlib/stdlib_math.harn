@@ -1,7 +1,7 @@
 import "std/math"
 import { assert_error_contains } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   assert_eq(clamp(5, 0, 10), 5)
   assert_eq(clamp(-1, 0, 10), 0)
   assert_eq(clamp(99, 0, 10), 10)
@@ -12,5 +12,5 @@ pipeline test(task) {
   assert_eq(sum([]), 0)
   assert_error_contains({ -> sum([1, "2"]) }, "items must contain only numbers or nil")
   assert_eq(avg([2, 4, 6]), 4)
-  log("stdlib math ok")
+  harness.stdio.println("stdlib math ok")
 }

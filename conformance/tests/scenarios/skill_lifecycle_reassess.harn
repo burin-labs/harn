@@ -12,7 +12,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *   Turn 1: sticky=false, reassess re-reads visible_messages,
  *     scores the pivot, activates `review`, deactivates `draft`.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -36,15 +36,14 @@ pipeline test(task) {
   // Turn 0: a tool call forces post_turn_callback to fire, giving
   // us a hook to inject a runtime user message that pivots intent.
   with_llm_script(
-    [{text: "Drafting.", tool_calls: [{id: "t0", name: "noop", arguments: {}}]}],
+    harness.llm, [{text: "Drafting.", tool_calls: [{id: "t0", name: "noop", arguments: {}}]}],
     { ->
     },
   )
   with_llm_script(
-    [llm_text("Reviewing now.")],
+    harness.llm, [llm_text("Reviewing now.")],
     { ->
-      const result = agent_loop(
-        "Please draft the launch memo",
+      const result = agent_loop(harness, "Please draft the launch memo",
         nil,
         {
           provider: "mock",
@@ -80,7 +79,7 @@ pipeline test(task) {
       assert(draft_activate, "draft activated on turn 0")
       assert(review_activate, "review activated after reassess on turn 1")
       assert(draft_deactivate, "draft deactivated before review took over")
-      log("skill_lifecycle_reassess tests passed")
+      harness.stdio.println("skill_lifecycle_reassess tests passed")
     },
   )
 }

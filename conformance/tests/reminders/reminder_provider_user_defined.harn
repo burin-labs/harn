@@ -3,9 +3,9 @@ import {
   agent_session_apply_reminder_post_turn,
 } from "std/agent/state"
 
-pipeline main() {
-  clear_reminder_providers()
-  register_reminder_provider(
+pipeline main(harness: Harness) {
+  harness.agent.clear_reminder_providers()
+  harness.agent.register_reminder_provider(
     {
       id: "custom_echo",
       subscribes_to: ["session_idle"],
@@ -21,21 +21,21 @@ pipeline main() {
       },
     },
   )
-  const session = agent_session_open("reminder-provider-user-defined")
-  agent_session_reset(session)
+  const session = harness.agent.open("reminder-provider-user-defined")
+  harness.agent.reset(session)
   const payload = {session: {id: session}, iteration: 1, wake_interval_ms: 0, note: "provider"}
-  const first = agent_reminder_providers_fire(session, "session_idle", payload, {})
-  const second = agent_reminder_providers_fire(session, "session_idle", payload, {})
-  const before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  const ttl = agent_session_apply_reminder_post_turn(session, 2)
-  const after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  __io_println(first.fired_count)
-  __io_println(second.reports[0].deduped_count)
-  __io_println(len(before))
-  __io_println(before[0].reminder.body)
-  __io_println(before[0].reminder.source)
-  __io_println(before[0].reminder.tags[0])
-  __io_println(ttl.decremented_count)
-  __io_println(after[0].reminder.ttl_turns)
-  clear_reminder_providers()
+  const first = agent_reminder_providers_fire(harness, session, "session_idle", payload, {})
+  const second = agent_reminder_providers_fire(harness, session, "session_idle", payload, {})
+  const before = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  const ttl = agent_session_apply_reminder_post_turn(harness, session, 2)
+  const after = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  harness.stdio.println(first.fired_count)
+  harness.stdio.println(second.reports[0].deduped_count)
+  harness.stdio.println(len(before))
+  harness.stdio.println(before[0].reminder.body)
+  harness.stdio.println(before[0].reminder.source)
+  harness.stdio.println(before[0].reminder.tags[0])
+  harness.stdio.println(ttl.decremented_count)
+  harness.stdio.println(after[0].reminder.ttl_turns)
+  harness.agent.clear_reminder_providers()
 }

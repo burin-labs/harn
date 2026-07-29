@@ -90,12 +90,14 @@ impl TypeChecker {
             };
             match &inner_node.node {
                 Node::Pipeline {
+                    name,
                     params,
                     return_type,
                     throws,
                     body,
                     ..
                 } => {
+                    self.check_pipeline_harness_parameter(name, params, inner_node.span);
                     let root_scope = Rc::clone(&self.scope);
                     let mut child = TypeScope::child_of(&self.scope);
                     self.check_and_define_declared_parameters(params, &mut child);
@@ -290,6 +292,38 @@ impl TypeChecker {
             "rewrite as `fn main(harness: Harness) { ... }` — the runtime threads its \
              capability handle through this single parameter"
                 .to_string(),
+        );
+    }
+
+    /// Pipelines are orchestration boundaries, so their first parameter is
+    /// always the explicit root grant. Remaining domain inputs follow it.
+    pub(in crate::typechecker) fn check_pipeline_harness_parameter(
+        &mut self,
+        name: &str,
+        params: &[TypedParam],
+        span: harn_lexer::Span,
+    ) {
+        let first_is_harness = matches!(
+            params.first(),
+            Some(TypedParam {
+                name,
+                type_expr: Some(TypeExpr::Named(ty)),
+                default_value: None,
+                rest: false,
+            }) if matches!(name.as_str(), "harness" | "_harness") && ty == "Harness"
+        );
+        if first_is_harness {
+            return;
+        }
+        self.error_at_with_help(
+            Code::InvalidMainSignature,
+            format!(
+                "pipeline `{name}` must begin with `harness: Harness`; effects flow from this explicit root grant"
+            ),
+            span,
+            format!(
+                "rewrite as `pipeline {name}(harness: Harness, ...) {{ ... }}` and pass `harness` at ordinary call sites"
+            ),
         );
     }
 

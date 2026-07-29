@@ -1,16 +1,16 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // list<int> type annotation
   const numbers: list<int> = [1, 2, 3]
-  __io_println(numbers.count)
+  harness.stdio.println(numbers.count)
   // dict<string, int> type annotation
   const ages: dict<string, int> = {alice: 30, bob: 25}
-  __io_println(ages["alice"])
+  harness.stdio.println(ages["alice"])
   // Nested: list of dicts
   const people: list<dict> = [{name: "Alice"}, {name: "Bob"}]
-  __io_println(people[0]?.["name"])
+  harness.stdio.println(people[0]?.["name"])
   // Type annotation on function params
   fn sum(items: list<int>) -> int {
     return items.sum()
   }
-  __io_println(sum([10, 20, 30]))
+  harness.stdio.println(sum([10, 20, 30]))
 }

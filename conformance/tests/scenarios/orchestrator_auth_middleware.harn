@@ -1,7 +1,7 @@
 import "../_common"
 
-pipeline test(task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-auth-" + uuid())
+pipeline test(harness: Harness, task) {
+  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-auth-" + harness.random.uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -9,7 +9,7 @@ pipeline test(task) {
   )
   harness.fs.write_text(
     path_join(root, "lib.harn"),
-    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  log(event.kind)\n}\n",
+    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  harness.stdio.println(event.kind)\n}\n",
   )
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = resolve_harn_bin(harness, repo_root)
@@ -32,7 +32,7 @@ pipeline test(task) {
     url + "/a2a/review",
     {body: body, headers: json_headers},
   )
-  __io_println(unauth.status == 401)
+  harness.stdio.println(unauth.status == 401)
   const ts = to_string(to_int(harness.clock.timestamp()))
   const wrong_hmac = harness.net.request(
     "POST",
@@ -45,14 +45,14 @@ pipeline test(task) {
       },
     },
   )
-  __io_println(wrong_hmac.status == 401)
+  harness.stdio.println(wrong_hmac.status == 401)
   const bearer = harness.net.request(
     "POST",
     url + "/a2a/review",
     {body: body, headers: {"Content-Type": "application/json", Authorization: "Bearer test-key-2"}},
   )
-  __io_println(bearer.status == 200)
+  harness.stdio.println(bearer.status == 200)
   const _ = shell("kill -TERM " + pid)
-  wait_for_exit(pid)
+  wait_for_exit(harness, pid)
   harness.fs.delete(root)
 }

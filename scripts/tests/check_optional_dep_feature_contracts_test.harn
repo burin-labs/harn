@@ -1,7 +1,7 @@
 import "../check_optional_dep_feature_contracts.harn"
 
 @test
-pipeline test_accepts_download_binaries_with_tls_rustls(task) {
+pipeline test_accepts_download_binaries_with_tls_rustls(harness: Harness, task) {
   const text = """
 [dependencies]
 ort = { version = "2", default-features = false, features = ["download-binaries", "tls-rustls"] }
@@ -10,7 +10,7 @@ ort = { version = "2", default-features = false, features = ["download-binaries"
 }
 
 @test
-pipeline test_accepts_download_binaries_when_defaults_remain_on(task) {
+pipeline test_accepts_download_binaries_when_defaults_remain_on(harness: Harness, task) {
   const text = """
 [dependencies]
 ort = { version = "2", features = ["download-binaries"] }
@@ -19,7 +19,7 @@ ort = { version = "2", features = ["download-binaries"] }
 }
 
 @test
-pipeline test_rejects_download_binaries_without_tls(task) {
+pipeline test_rejects_download_binaries_without_tls(harness: Harness, task) {
   const text = """
 [dependencies]
 ort = { version = "2", default-features = false, features = ["download-binaries"] }
@@ -30,7 +30,7 @@ ort = { version = "2", default-features = false, features = ["download-binaries"
 }
 
 @test
-pipeline test_rejects_multiple_tls_features(task) {
+pipeline test_rejects_multiple_tls_features(harness: Harness, task) {
   const text = """
 [dependencies]
 ort = { version = "2", default-features = false, features = ["download-binaries", "tls-rustls", "tls-native"] }

@@ -5,9 +5,9 @@ import { with_llm_script } from "std/testing"
  * for `[{model: "model-a"}, {model: "model-b"}]`. The first rung fails with a
  * retryable transport error and the ladder advances to the second.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         // This fixture owns route escalation, not production cooldown timing.
         error: {
@@ -22,12 +22,12 @@ pipeline test(task) {
       {text: "strong wins", model: "mock-strong", provider: "mock"},
     ],
     { ->
-      const result = llm_call("hi", nil, {models: ["mock-cheap", "mock-strong"]})
-      __io_println(result.text)
+      const result = harness.llm.call("hi", nil, {models: ["mock-cheap", "mock-strong"]})
+      harness.stdio.println(result.text)
       const attempts = result.routing.attempts
-      __io_println(len(attempts))
-      __io_println(attempts[0].status)
-      __io_println(attempts[1].status)
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(attempts[1].status)
     },
   )
 }

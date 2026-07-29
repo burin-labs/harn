@@ -1,4 +1,4 @@
-pipeline test(task) -> {text: string, code: int} {
-  log("typed dict ok")
+pipeline test(harness: Harness, task) -> {text: string, code: int} {
+  harness.stdio.println("typed dict ok")
   return {text: "hello", code: 0}
 }

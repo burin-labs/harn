@@ -2,7 +2,7 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 
 type WorkspacePackage = {dir: string, name: string}
 
-fn command_stdout(cmd: string, args: list<string>) -> string {
+fn command_stdout(harness: Harness, cmd: string, args: list<string>) -> string {
   const result = harness.process.spawn_captured({cmd: cmd, args: args})
   if result.exit_code != 0 {
     throw cmd + " " + args.join(" ") + " failed:\n" + result.stderr
@@ -10,8 +10,8 @@ fn command_stdout(cmd: string, args: list<string>) -> string {
   return result.stdout
 }
 
-fn repo_root() -> string {
-  return command_stdout("git", ["rev-parse", "--show-toplevel"]).trim()
+fn repo_root(harness: Harness) -> string {
+  return command_stdout(harness, "git", ["rev-parse", "--show-toplevel"]).trim()
 }
 
 fn rel_path(path: string, root: string) -> string {
@@ -57,8 +57,8 @@ pub fn workspace_packages_from_metadata(meta: dict, root: string) -> list<Worksp
   return packages.sorted_by({ package -> package.dir })
 }
 
-fn load_workspace_packages(root: string) -> list<WorkspacePackage> {
-  const raw = command_stdout(
+fn load_workspace_packages(harness: Harness, root: string) -> list<WorkspacePackage> {
+  const raw = command_stdout(harness, 
     "cargo",
     [
       "metadata",
@@ -88,7 +88,7 @@ fn add_filter(filters: list<string>, filter: string) -> list<string> {
   return filters + [filter]
 }
 
-pub fn filter_for_path(
+pub fn filter_for_path(harness: Harness, 
   raw_path: string,
   packages: list<WorkspacePackage>,
   root: string,
@@ -140,14 +140,14 @@ pub fn filter_for_path(
   return nil
 }
 
-pub fn nextest_filter_for_paths(
+pub fn nextest_filter_for_paths(harness: Harness, 
   paths: list<string>,
   packages: list<WorkspacePackage>,
   root: string,
 ) -> string {
   let filters: list<string> = []
   for path in paths {
-    const filter = filter_for_path(path, packages, root)
+    const filter = filter_for_path(harness, path, packages, root)
     if filter != nil {
       filters = add_filter(filters, filter)
     }
@@ -184,7 +184,7 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const invocation = unwrap(parsed_result)
   const parsed = invocation.options
@@ -193,13 +193,13 @@ fn main(harness: Harness) {
     return nil
   }
   const root = if to_string(parsed?.root ?? "") == "" {
-    repo_root()
+    repo_root(harness)
   } else {
     path_normalize(to_string(parsed?.root ?? ""))
   }
-  const filter = nextest_filter_for_paths(
+  const filter = nextest_filter_for_paths(harness, 
     paths.map({ path -> to_string(path) }).to_list(),
-    load_workspace_packages(root),
+    load_workspace_packages(harness, root),
     root,
   )
   if filter != "" {

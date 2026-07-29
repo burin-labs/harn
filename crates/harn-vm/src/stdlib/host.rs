@@ -1001,6 +1001,8 @@ pub(crate) fn register_missing_host_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "privileged_wire",
+    effects = ["host.mutate@arg0"],
     sig = "host_mock(capability: string, op: string, response_or_config?: any, params?: dict) -> nil",
     category = "host"
 )]
@@ -1011,13 +1013,21 @@ fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "host_mock_clear() -> nil", category = "host")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "host_mock_clear() -> nil", category = "host"
+)]
 fn host_mock_clear_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     reset_host_state();
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "host_mock_calls() -> list", category = "host")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "host_mock_calls() -> list", category = "host"
+)]
 fn host_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let calls = HOST_MOCK_CALLS.with(|calls| {
         calls
@@ -1029,13 +1039,21 @@ fn host_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmVal
     Ok(VmValue::List(std::sync::Arc::new(calls)))
 }
 
-#[harn_builtin(sig = "host_mock_push_scope() -> nil", category = "host")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "host_mock_push_scope() -> nil", category = "host"
+)]
 fn host_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     push_host_mock_scope();
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "host_mock_pop_scope() -> nil", category = "host")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "host_mock_pop_scope() -> nil", category = "host"
+)]
 fn host_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !pop_host_mock_scope() {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -1045,12 +1063,18 @@ fn host_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "host_capabilities() -> dict", category = "host")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "host_capabilities() -> dict", category = "host"
+)]
 fn host_capabilities_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(capability_manifest_with_mocks())
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "host_has(capability: string, op?: string) -> bool",
     category = "host"
 )]
@@ -1080,6 +1104,8 @@ fn host_has_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "host_call(name: string, args?: dict) -> any",
     kind = "async",
     category = "host"
@@ -1102,7 +1128,11 @@ async fn host_call_builtin(
     dispatch_host_operation_with_ctx(Some(&ctx), capability, operation, &params).await
 }
 
-#[harn_builtin(sig = "host_tool_list() -> list", kind = "async", category = "host")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "host_tool_list() -> list", kind = "async", category = "host"
+)]
 async fn host_tool_list_builtin(
     ctx: crate::vm::AsyncBuiltinCtx,
     _args: Vec<VmValue>,
@@ -1111,6 +1141,8 @@ async fn host_tool_list_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "host_tool_call(name: string, args?: any) -> any",
     kind = "async",
     category = "host"

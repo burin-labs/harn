@@ -367,6 +367,11 @@ pub struct Vm {
     pub(crate) output: String,
     pub(crate) builtins: Arc<BTreeMap<String, VmBuiltinFn>>,
     pub(crate) async_builtins: Arc<BTreeMap<String, VmAsyncBuiltinFn>>,
+    /// Host-supplied implementations keyed by the typed capability surface
+    /// they implement. Unlike ordinary builtins these names never enter the
+    /// source namespace: they are reachable only through a `Harness*` value.
+    pub(crate) capability_methods:
+        Arc<BTreeMap<(harn_builtin_meta::CapabilityId, String), VmBuiltinDispatch>>,
     pub(crate) builtin_metadata: Arc<BTreeMap<String, VmBuiltinMetadata>>,
     /// Numeric side index for builtins. Name-keyed maps remain authoritative;
     /// this index is the hot path for direct builtin bytecode and callback refs.
@@ -521,6 +526,16 @@ pub struct Vm {
     /// Global constants (e.g. `pi`, `e`). Checked as a fallback in `GetVar`
     /// after the environment, so user-defined variables can shadow them.
     pub(crate) globals: Arc<crate::value::DictMap>,
+    /// Root authority injected by the embedder for the compiler-generated
+    /// `main(harness: Harness)` call. This is deliberately not an environment
+    /// binding or global: user code can receive it only through an explicit
+    /// parameter.
+    pub(crate) root_harness: Option<VmValue>,
+    /// Runtime-resolved effects actually attempted by this execution tree.
+    /// Child VMs share the recorder; fresh roots and baseline instantiations
+    /// receive an empty set.
+    pub(crate) executed_effects:
+        Arc<Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>>,
     /// Optional debugger hook invoked when execution advances to a new source line.
     pub(crate) debug_hook: Option<parking_lot::Mutex<Box<DebugHook>>>,
     /// Effective runtime ceilings for this VM execution.
@@ -538,6 +553,7 @@ pub struct Vm {
 pub struct VmBaseline {
     builtins: Arc<BTreeMap<String, VmBuiltinFn>>,
     async_builtins: Arc<BTreeMap<String, VmAsyncBuiltinFn>>,
+    capability_methods: Arc<BTreeMap<(harn_builtin_meta::CapabilityId, String), VmBuiltinDispatch>>,
     builtin_metadata: Arc<BTreeMap<String, VmBuiltinMetadata>>,
     builtins_by_id: Arc<HashMap<BuiltinId, VmBuiltinEntry>>,
     builtin_id_collisions: Arc<HashSet<BuiltinId>>,
@@ -546,6 +562,7 @@ pub struct VmBaseline {
     source_text: Option<String>,
     project_root: Option<std::path::PathBuf>,
     globals: Arc<crate::value::DictMap>,
+    root_harness: Option<VmValue>,
     denied_builtins: Arc<HashSet<String>>,
     prepared_module_cache: crate::PreparedModuleCache,
     /// Carried so a VM rebuilt from this baseline keeps resolving modules
@@ -559,6 +576,7 @@ impl VmBaseline {
         Self {
             builtins: Arc::clone(&vm.builtins),
             async_builtins: Arc::clone(&vm.async_builtins),
+            capability_methods: Arc::clone(&vm.capability_methods),
             builtin_metadata: Arc::clone(&vm.builtin_metadata),
             builtins_by_id: Arc::clone(&vm.builtins_by_id),
             builtin_id_collisions: Arc::clone(&vm.builtin_id_collisions),
@@ -567,6 +585,7 @@ impl VmBaseline {
             source_text: vm.source_text.clone(),
             project_root: vm.project_root.clone(),
             globals: Arc::clone(&vm.globals),
+            root_harness: vm.root_harness.clone(),
             denied_builtins: Arc::clone(&vm.denied_builtins),
             prepared_module_cache: vm.prepared_module_cache.clone(),
             graph_link_table: vm.graph_link_table.clone(),
@@ -590,6 +609,7 @@ impl VmBaseline {
             output: String::new(),
             builtins: Arc::clone(&self.builtins),
             async_builtins: Arc::clone(&self.async_builtins),
+            capability_methods: Arc::clone(&self.capability_methods),
             builtin_metadata: Arc::clone(&self.builtin_metadata),
             builtins_by_id: Arc::clone(&self.builtins_by_id),
             builtin_id_collisions: Arc::clone(&self.builtin_id_collisions),
@@ -649,6 +669,8 @@ impl VmBaseline {
             yield_sender: None,
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
+            root_harness: self.root_harness.clone(),
+            executed_effects: Arc::new(Mutex::new(Default::default())),
             debug_hook: None,
             runtime_limits: self.runtime_limits,
         };
@@ -846,6 +868,7 @@ impl Vm {
             output: String::new(),
             builtins: Arc::new(BTreeMap::new()),
             async_builtins: Arc::new(BTreeMap::new()),
+            capability_methods: Arc::new(BTreeMap::new()),
             builtin_metadata: Arc::new(BTreeMap::new()),
             builtins_by_id: Arc::new(HashMap::new()),
             builtin_id_collisions: Arc::new(HashSet::new()),
@@ -905,6 +928,8 @@ impl Vm {
             yield_sender: None,
             project_root: None,
             globals: Arc::new(crate::value::DictMap::new()),
+            root_harness: None,
+            executed_effects: Arc::new(Mutex::new(Default::default())),
             debug_hook: None,
             runtime_limits: RuntimeLimits::default(),
         }
@@ -912,6 +937,80 @@ impl Vm {
 
     pub fn baseline(&self) -> VmBaseline {
         VmBaseline::from_vm(self)
+    }
+
+    /// Typed, runtime-resolved effects attempted by this VM execution tree.
+    pub fn executed_effects(&self) -> Vec<crate::orchestration::EffectRecord> {
+        self.executed_effects
+            .lock()
+            .expect("executed effect recorder poisoned")
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Clear the execution-local effect recorder.
+    pub fn clear_executed_effects(&self) {
+        self.executed_effects
+            .lock()
+            .expect("executed effect recorder poisoned")
+            .clear();
+    }
+
+    pub(crate) fn record_capability_effects(
+        &self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        args: &[VmValue],
+    ) {
+        Self::record_capability_effects_into(&self.executed_effects, capability, method, args);
+    }
+
+    pub(crate) fn record_capability_effects_into(
+        recorder: &Arc<Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>>,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        args: &[VmValue],
+    ) {
+        let Some(entry) = crate::stdlib::all_builtin_manifest().iter().find(|entry| {
+            matches!(
+                entry.contract.exposure,
+                harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                    capability: candidate,
+                    method: candidate_method,
+                } if candidate == capability && candidate_method == method
+            )
+        }) else {
+            return;
+        };
+        let effects =
+            crate::orchestration::runtime_effects_from_contract(entry.contract.effects, args);
+        recorder
+            .lock()
+            .expect("executed effect recorder poisoned")
+            .extend(effects);
+    }
+
+    pub(crate) fn record_builtin_contract_effects(&self, name: &str, args: &[VmValue]) {
+        let Some(entry) = crate::stdlib::all_builtin_manifest()
+            .iter()
+            .find(|entry| entry.name == name)
+        else {
+            return;
+        };
+        if !matches!(
+            entry.contract.exposure,
+            harn_builtin_meta::BuiltinExposure::CapabilityFunction { .. }
+                | harn_builtin_meta::BuiltinExposure::PrivilegedWire
+        ) {
+            return;
+        }
+        let effects =
+            crate::orchestration::runtime_effects_from_contract(entry.contract.effects, args);
+        self.executed_effects
+            .lock()
+            .expect("executed effect recorder poisoned")
+            .extend(effects);
     }
 
     /// Replace the scoped immutable module-template cache used by this VM.
@@ -1039,6 +1138,7 @@ impl Vm {
             output: String::new(),
             builtins: Arc::clone(&self.builtins),
             async_builtins: Arc::clone(&self.async_builtins),
+            capability_methods: Arc::clone(&self.capability_methods),
             builtin_metadata: Arc::clone(&self.builtin_metadata),
             builtins_by_id: Arc::clone(&self.builtins_by_id),
             builtin_id_collisions: Arc::clone(&self.builtin_id_collisions),
@@ -1098,6 +1198,8 @@ impl Vm {
             yield_sender: None,
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
+            root_harness: self.root_harness.clone(),
+            executed_effects: Arc::clone(&self.executed_effects),
             debug_hook: None,
             runtime_limits: self.runtime_limits,
         }
@@ -1180,22 +1282,29 @@ impl Vm {
         Arc::make_mut(&mut self.globals).insert(crate::value::intern_key(name), value);
     }
 
-    /// Read a previously-installed global (the value `set_global` /
-    /// `set_harness` recorded). Returns `None` for unknown names.
-    /// Hosts use this to look up runtime-installed capability handles
-    /// (e.g. the `harness` slot) without having to track them
-    /// separately.
+    /// Read a previously-installed ordinary global constant.
     pub fn global(&self, name: &str) -> Option<&VmValue> {
         self.globals.get(name)
     }
 
-    /// Install the script's `Harness` capability handle as the `harness`
-    /// global so the auto-call emitted by `Compiler::compile()` (for
-    /// `fn main(harness: Harness)` entrypoints) can read it. Hosts that
-    /// drive the VM directly (CLI, MCP server, composition runtime) call
-    /// this once before `execute()`.
+    /// Install the script's root authority for the compiler-generated
+    /// `main(harness: Harness)` call. It is kept out of all source-visible
+    /// namespaces.
     pub fn set_harness(&mut self, harness: crate::harness::Harness) {
-        self.set_global("harness", harness.into_vm_value());
+        self.root_harness = Some(harness.into_vm_value());
+    }
+
+    pub(crate) fn harness(&self) -> Option<&crate::harness::VmHarness> {
+        match self.root_harness.as_ref() {
+            Some(VmValue::Harness(handle)) => Some(handle),
+            _ => None,
+        }
+    }
+
+    /// Clone the embedder-owned root authority for an explicit exported
+    /// function parameter. This does not install a source-visible binding.
+    pub fn root_harness_value(&self) -> Option<VmValue> {
+        self.root_harness.clone()
     }
 
     /// Get the captured output.

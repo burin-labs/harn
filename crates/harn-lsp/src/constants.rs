@@ -105,10 +105,6 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "regex_replace(pattern, replacement, text, flags?) -> string",
     ),
     (
-        "regex_replace_all",
-        "regex_replace_all(pattern, replacement, text, flags?) -> string (alias of regex_replace)",
-    ),
-    (
         "regex_captures",
         "regex_captures(pattern, text, flags?) -> list",
     ),
@@ -373,8 +369,6 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("to_list", "to_list(s) -> list"),
     // String
     ("format", "format(template, args...) -> string"),
-    ("render", "render(path, bindings?) -> string"),
-    ("render_prompt", "render_prompt(path, bindings?) -> string"),
     ("trim", "trim(str) -> string"),
     ("lowercase", "lowercase(str) -> string"),
     ("uppercase", "uppercase(str) -> string"),
@@ -902,9 +896,6 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "regex_replace" => {
             "**regex_replace(pattern, replacement, text, flags?)** → string — Replace every regex match; supports `$1`, `$2`, `${name}` backrefs and optional `i`/`m`/`s`/`x` flags"
         }
-        "regex_replace_all" => {
-            "**regex_replace_all(pattern, replacement, text, flags?)** → string — Alias of `regex_replace`; same semantics, different spelling"
-        }
         "regex_captures" => "**regex_captures(pattern, text, flags?)** → list — Find matches with `{match, groups, start, end, line}` plus named capture keys. Optional flags: `i`, `m`, `s`, `x`.",
         "regex_split" => "**regex_split(text, pattern, flags?)** → list — Split text by regex matches. Optional flags: `i`, `m`, `s`, `x`.",
         "http_get" => "**http_get(url)** → string — HTTP GET request",
@@ -974,8 +965,6 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "stat" => "**stat(path)** → dict — File metadata: size, is_file, is_dir, readonly, modified",
         "exec" => "**exec(cmd, args...)** → dict — Run a command, returns {stdout, stderr, status, success}",
         "shell" => "**shell(cmd)** → dict — Run shell command, returns {stdout, stderr, status, success}",
-        "render" => "**render(path, bindings?)** → string — Render an asset with optional `${name}` bindings. `path` may be source-relative, `@/<rel>` (project root), or `@<alias>/<rel>` (`[asset_roots]` alias)",
-        "render_prompt" => "**render_prompt(path, bindings?)** → string — Prompt-oriented alias of `render(...)` that marks `.prompt` assets explicitly in bundle contracts. Accepts the same `@/<rel>` / `@<alias>/<rel>` forms as `render(...)`",
         "date_now" => "**date_now()** → dict — Current UTC date: {year, month, day, hour, minute, second, weekday, timestamp, iso8601}",
         "date_now_iso" => "**date_now_iso()** → string — Current UTC time as RFC 3339",
         "date_format" => "**date_format(timestamp, fmt?, tz?)** → string — Format timestamp with chrono/strftime codes",

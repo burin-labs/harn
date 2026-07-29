@@ -81,6 +81,8 @@ const SANDBOX_DENY_SUBSTRINGS: &[&str] = &[
 /// - `allow_tools` (list<string>, optional): if present, restricts which tool
 ///   names the script may call to this allowlist (the declared connector set).
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_code_mode_run(config: dict) -> dict",
     kind = "async",
     category = "agent.host",

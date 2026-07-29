@@ -27,10 +27,10 @@ fn write_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const tools = write_tools()
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "w1", name: "write_note", arguments: {path: "a"}}]},
       {text: "", tool_calls: [{id: "w2", name: "write_note", arguments: {path: "a"}}]},
       {text: "", tool_calls: [{id: "w3", name: "write_note", arguments: {path: "a"}}]},
@@ -38,11 +38,9 @@ pipeline default() {
       {text: "", tool_calls: [{id: "w5", name: "write_note", arguments: {path: "a"}}]},
     ],
     { ->
-      const session = "denial-loop-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Keep trying to write the note.",
+      const session = "denial-loop-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Keep trying to write the note.",
           nil,
           {
             provider: "mock",
@@ -57,8 +55,8 @@ pipeline default() {
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
       require len(stalls) >= 1, "repeated terminal denials must trip the loop detector"
-      __io_println(stalls[0].warning.pattern)
-      __io_println(captured.result.suspected_loop)
+      harness.stdio.println(stalls[0].warning.pattern)
+      harness.stdio.println(captured.result.suspected_loop)
     },
   )
 }

@@ -62,13 +62,13 @@ fn handle_instr(i: Instr) -> string {
   }
 }
 
-pipeline default(task) {
-  __io_println(handle_msg({kind: "ping", ttl: 30}))
-  __io_println(handle_msg({kind: "pong", latency_ms: 12}))
-  __io_println(handle_msg_if({kind: "ping", ttl: 1}))
-  __io_println(handle_msg_if({kind: "pong", latency_ms: 2}))
-  __io_println(handle_event({type: "click", x: 7, y: 9}))
-  __io_println(handle_event({type: "scroll", dy: -2}))
-  __io_println(handle_instr({op: "add", lhs: 2, rhs: 3}))
-  __io_println(handle_instr({op: "neg", arg: 11}))
+pipeline default(harness: Harness, task) {
+  harness.stdio.println(handle_msg({kind: "ping", ttl: 30}))
+  harness.stdio.println(handle_msg({kind: "pong", latency_ms: 12}))
+  harness.stdio.println(handle_msg_if({kind: "ping", ttl: 1}))
+  harness.stdio.println(handle_msg_if({kind: "pong", latency_ms: 2}))
+  harness.stdio.println(handle_event({type: "click", x: 7, y: 9}))
+  harness.stdio.println(handle_event({type: "scroll", dy: -2}))
+  harness.stdio.println(handle_instr({op: "add", lhs: 2, rhs: 3}))
+  harness.stdio.println(handle_instr({op: "neg", arg: 11}))
 }

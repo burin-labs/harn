@@ -80,9 +80,7 @@ fn __render_human(harness: Harness, report: dict) {
         line = line + " (" + summary_path + ")"
       }
       harness.stdio.println("    - " + line)
-      print_list(
-        harness,
-        "probe " + safe_string(probe["case_id"], "") + " failures",
+      print_list(harness,  "probe " + safe_string(probe["case_id"], "") + " failures",
         safe_list(probe["failed_case_reasons"]),
       )
     }

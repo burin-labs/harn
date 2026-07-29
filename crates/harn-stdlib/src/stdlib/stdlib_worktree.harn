@@ -281,8 +281,8 @@ fn __worktree_git_options(cwd, options) -> dict {
  * __worktree_git runs one argv-mode git command in `cwd` with the
  * non-interactive guard applied. `args` omits the leading "git".
  */
-fn __worktree_git(cwd, args, options) {
-  return process_run(["git"] + args, __worktree_git_options(cwd, options))
+fn __worktree_git(process: HarnessProcess, cwd, args, options) {
+  return process_run(process, ["git"] + args, __worktree_git_options(cwd, options))
 }
 
 /**
@@ -301,16 +301,16 @@ pub fn worktree_default_path(repo: string, name: string) -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_create(repo, name, base_ref, path, options = {}) {
+pub fn worktree_create(fs: HarnessFs, process: HarnessProcess, repo, name, base_ref, path, options = {}) {
   const layout = runtime_state_paths_under(repo)
   const target = if path == nil || path == "" {
     worktree_default_path(repo, name)
   } else {
     path
   }
-  harness.fs.mkdir(layout.state_root)
-  harness.fs.mkdir(layout.worktree_root)
-  const result = __worktree_git(repo, ["worktree", "add", "-B", name, target, base_ref], options)
+  fs.mkdir(layout.state_root)
+  fs.mkdir(layout.worktree_root)
+  const result = __worktree_git(process, repo, ["worktree", "add", "-B", name, target, base_ref], options)
   return {
     repo: repo,
     name: name,
@@ -327,11 +327,11 @@ pub fn worktree_create(repo, name, base_ref, path, options = {}) {
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_remove(repo, path, force, options = {}) {
+pub fn worktree_remove(process: HarnessProcess, repo, path, force, options = {}) {
   if force {
-    return __worktree_git(repo, ["worktree", "remove", "--force", path], options)
+    return __worktree_git(process, repo, ["worktree", "remove", "--force", path], options)
   }
-  return __worktree_git(repo, ["worktree", "remove", path], options)
+  return __worktree_git(process, repo, ["worktree", "remove", path], options)
 }
 
 /**
@@ -340,8 +340,8 @@ pub fn worktree_remove(repo, path, force, options = {}) {
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_status(path, options = {}) {
-  return __worktree_git(path, ["status", "--short", "--branch"], options)
+pub fn worktree_status(process: HarnessProcess, path, options = {}) {
+  return __worktree_git(process, path, ["status", "--short", "--branch"], options)
 }
 
 /**
@@ -350,11 +350,11 @@ pub fn worktree_status(path, options = {}) {
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_diff(path, base_ref, options = {}) {
+pub fn worktree_diff(process: HarnessProcess, path, base_ref, options = {}) {
   if base_ref == nil || base_ref == "" {
-    return __worktree_git(path, ["diff", "--stat"], options)
+    return __worktree_git(process, path, ["diff", "--stat"], options)
   }
-  return __worktree_git(path, ["diff", base_ref + "...HEAD"], options)
+  return __worktree_git(process, path, ["diff", base_ref + "...HEAD"], options)
 }
 
 /**
@@ -363,6 +363,6 @@ pub fn worktree_diff(path, base_ref, options = {}) {
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_shell(path, script, options = {}) {
-  return process_shell(script, __worktree_git_options(path, options))
+pub fn worktree_shell(process: HarnessProcess, path, script, options = {}) {
+  return process_shell(process, script, __worktree_git_options(path, options))
 }

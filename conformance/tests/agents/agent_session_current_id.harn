@@ -1,8 +1,8 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   assert(
-    agent_session_current_id() == nil,
+    harness.agent.current_id() == nil,
     "top-level current session lookup returns nil outside any active session",
   )
   const session = "current-id-session"
@@ -13,7 +13,7 @@ pipeline main(task) {
     "Return the current session id",
     {
       handler: { _args ->
-        const current = agent_session_current_id()
+        const current = harness.agent.current_id()
         assert(current == session, "tool handler sees the session it is running under")
         return current
       },
@@ -22,7 +22,7 @@ pipeline main(task) {
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "Checking the session.",
         tool_calls: [{id: "sid1", name: "read_current_id", arguments: {}}],
@@ -30,8 +30,7 @@ pipeline main(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "Report the current session id",
+      const result = agent_loop(harness, "Report the current session id",
         nil,
         {
           provider: "mock",
@@ -43,7 +42,7 @@ pipeline main(task) {
         },
       )
       assert(result?.status == "done", "loop completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) >= 2, "tool call produces a second turn")
       const turn2_messages = calls[1].messages
       let saw_session_feedback = false
@@ -55,9 +54,9 @@ pipeline main(task) {
       }
       assert(
         saw_session_feedback,
-        "next turn includes the tool result returned by agent_session_current_id()",
+        "next turn includes the tool result returned by harness.agent.current_id()",
       )
-      log("agent_session_current_id tests passed")
+      harness.stdio.println("agent_session_current_id tests passed")
     },
   )
 }

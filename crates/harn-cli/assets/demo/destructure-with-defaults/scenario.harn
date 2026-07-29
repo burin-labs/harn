@@ -25,9 +25,9 @@ fn pipeline_input() -> dict? {
   return {path: "src/main.harn", retries: 3}
 }
 
-pipeline default(_task) {
-  __io_println("=== destructure-with-defaults demo ===")
-  __io_println("")
+pipeline default(harness: Harness, _task) {
+  harness.stdio.println("=== destructure-with-defaults demo ===")
+  harness.stdio.println("")
   // BEFORE: capture the optional input, then one `let` per field — each line
   // repeats the source and the optional-chain + null-coalesce dance.
   const raw = pipeline_input()
@@ -35,24 +35,24 @@ pipeline default(_task) {
   const namespace_old = raw?.namespace
   const retries_old = raw?.retries ?? 0
   const verbose_old = raw?.verbose ?? false
-  __io_println("before — 4 lines, source repeated 4x:")
-  __io_println(
+  harness.stdio.println("before — 4 lines, source repeated 4x:")
+  harness.stdio.println(
     "  path=${path_old} namespace=${namespace_old} retries=${retries_old} verbose=${verbose_old}",
   )
-  __io_println("")
+  harness.stdio.println("")
   // AFTER: one destructuring bind over the same `?? {}` source. Present keys
   // (`path`, `retries`) win; missing keys (`namespace`, `verbose`) fall to
   // their defaults.
   const {namespace = nil, path = ".", retries = 0, verbose = false} = pipeline_input() ?? {}
-  __io_println("after — 1 line, source named once:")
-  __io_println("  path=${path} namespace=${namespace} retries=${retries} verbose=${verbose}")
-  __io_println("")
+  harness.stdio.println("after — 1 line, source named once:")
+  harness.stdio.println("  path=${path} namespace=${namespace} retries=${retries} verbose=${verbose}")
+  harness.stdio.println("")
   // Defaults apply per-key from an empty source, too.
   const {host = "0.0.0.0", port = 8080} = {}
-  __io_println("empty source -> every default applies: host=${host} port=${port}")
-  __io_println("")
-  __io_println("Both blocks bind identical values. The type checker now infers")
-  __io_println("`path: string`, `retries: int`, `port: int`, etc. from each")
-  __io_println("field + default — the same types the `?.`/`??` form produced.")
-  __io_println("See docs cookbooks/destructure-with-defaults.md to migrate.")
+  harness.stdio.println("empty source -> every default applies: host=${host} port=${port}")
+  harness.stdio.println("")
+  harness.stdio.println("Both blocks bind identical values. The type checker now infers")
+  harness.stdio.println("`path: string`, `retries: int`, `port: int`, etc. from each")
+  harness.stdio.println("field + default — the same types the `?.`/`??` form produced.")
+  harness.stdio.println("See docs cookbooks/destructure-with-defaults.md to migrate.")
 }

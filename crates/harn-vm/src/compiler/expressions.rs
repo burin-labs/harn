@@ -153,6 +153,26 @@ impl Compiler {
             self.emit_get_binding(name);
             return self.compile_value_call(args);
         }
+        if !self.source_callable_names.contains(name) {
+            if let Some(entry) = harn_builtin_registry::builtin_entry(name) {
+                let callable = matches!(
+                    entry.contract.exposure,
+                    harn_builtin_meta::BuiltinExposure::PureGlobal
+                        | harn_builtin_meta::BuiltinExposure::CapabilityFunction { .. }
+                ) || (matches!(
+                    entry.contract.exposure,
+                    harn_builtin_meta::BuiltinExposure::PrivilegedWire
+                ) && self.options.privileged_wire_authority());
+                if !callable {
+                    return Err(CompileError {
+                        message: format!(
+                            "`{name}` is not callable source API; effects must flow through a typed Harness capability"
+                        ),
+                        line: self.line,
+                    });
+                }
+            }
+        }
 
         // Schema lowering: `schema_of(TypeAlias)` emits a composable schema
         // expression. Falls through to

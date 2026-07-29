@@ -9,27 +9,26 @@ import { preset_run_command } from "std/tool_hooks"
  * original command. The verdict audit captures the error so the operator can
  * spot the failure mode without the dispatcher blowing up.
  */
-pipeline default() {
-  pipeline_lifecycle_audit_log_take()
-  __tool_hooks_classifier_cache_clear()
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.tools.classifier_cache_clear()
   /* Non-JSON model output — the parser should classify as kind=error
    * and the wrapper should passthrough rather than throw. */
   with_llm_script(
-    [llm_text("I am a chatty model and I do not return JSON.")],
+    harness.llm, [llm_text("I am a chatty model and I do not return JSON.")],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(
-        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
+      const wrapper = preset_run_command(harness,  harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
       )
       const r = wrapper({command: "echo hi"})
-      __io_println(r.ok)
-      __io_println(r.ran)
-      const log = pipeline_lifecycle_audit_log_take()
-      __io_println(len(log))
-      __io_println(log[0].kind)
-      __io_println(log[0].payload.kind)
-      __io_println(log[0].payload.action)
-      __io_println(contains(to_string(log[0].payload.error), "non-JSON"))
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.ran)
+      const log = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(len(log))
+      harness.stdio.println(log[0].kind)
+      harness.stdio.println(log[0].payload.kind)
+      harness.stdio.println(log[0].payload.action)
+      harness.stdio.println(contains(to_string(log[0].payload.error), "non-JSON"))
     },
   )
 }

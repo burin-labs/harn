@@ -40,20 +40,18 @@ fn verify_call(id, name) {
   return {text: "", tool_calls: [{id: id, name: name, arguments: {}}]}
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       verify_call("a", "verify_a"),
       verify_call("b", "verify_b"),
       verify_call("c", "verify_c"),
       verify_call("d", "verify_d"),
     ],
     { ->
-      const session = "no-net-hard-cap-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Make the failing verification pass.",
+      const session = "no-net-hard-cap-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Make the failing verification pass.",
           nil,
           {
             provider: "mock",
@@ -78,15 +76,15 @@ pipeline default() {
           },
         ) },
       )
-      __io_println(captured.result.status)
-      __io_println(captured.result.stop_reason)
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(captured.result.stop_reason)
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
       const hard_caps = stalls.filter({ s -> s.warning.pattern == "no_net_progress_hard_cap" })
-      __io_println(len(hard_caps))
-      __io_println(hard_caps[0].warning.pattern)
-      __io_println(hard_caps[0].warning.count)
-      __io_println(hard_caps[0].warning.hard_stop)
-      __io_println(captured.result?.current_failure?.same_diagnostic_streak)
+      harness.stdio.println(len(hard_caps))
+      harness.stdio.println(hard_caps[0].warning.pattern)
+      harness.stdio.println(hard_caps[0].warning.count)
+      harness.stdio.println(hard_caps[0].warning.hard_stop)
+      harness.stdio.println(captured.result?.current_failure?.same_diagnostic_streak)
     },
   )
 }

@@ -15,7 +15,7 @@ fn mock_error(category: string, message: string) -> MockError {
  * `llm_call`. The safe-envelope path mirrors the same shape under
  * `r.error`.
  */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const categories = [
     "rate_limit",
     "timeout",
@@ -35,12 +35,12 @@ pipeline default(task) {
   for category in categories {
     const model = "mock-" + category
     with_llm_script(
-      [{error: mock_error(category, "synthetic-" + category)}],
+      harness.llm, [{error: mock_error(category, "synthetic-" + category)}],
       { ->
         try {
-          llm_call("probe", nil, {provider: "mock", model: model})
+          harness.llm.call("probe", nil, {provider: "mock", model: model})
         } catch (e) {
-          __io_println(
+          harness.stdio.println(
             category + " thrown=" + e.category + " msg=" + e.message + " provider=" + e.provider
               + " model="
               + e.model,
@@ -49,10 +49,10 @@ pipeline default(task) {
       },
     )
     with_llm_script(
-      [{error: mock_error(category, "safe-" + category)}],
+      harness.llm, [{error: mock_error(category, "safe-" + category)}],
       { ->
-        const r = llm_call_safe("probe", nil, {provider: "mock", model: model})
-        __io_println(
+        const r = harness.llm.call_safe("probe", nil, {provider: "mock", model: model})
+        harness.stdio.println(
           category + " safe=" + r.error.category + " msg=" + r.error.message + " ok="
             + to_string(
             r.ok,

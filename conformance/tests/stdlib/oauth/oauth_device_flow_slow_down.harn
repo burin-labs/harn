@@ -7,7 +7,7 @@ import { device_flow } from "std/oauth/device_flow"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const _ = mock_time(1700000000000)
   const store = memory()
   const provider = custom(
@@ -49,8 +49,7 @@ pipeline test(task) {
     },
   )
   const start_ts = to_int(harness.clock.timestamp())
-  const token_set = device_flow(
-    provider,
+  const token_set = device_flow(harness,  harness, provider,
     {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }},
   )
   const end_ts = to_int(harness.clock.timestamp())
@@ -66,5 +65,5 @@ pipeline test(task) {
   const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 3, "device + 2 token polls")
   const _ = unmock_time()
-  log("oauth device flow slow_down ok")
+  harness.stdio.println("oauth device flow slow_down ok")
 }

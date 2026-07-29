@@ -1,11 +1,11 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const parsed = cookie_parse("sid=abc; theme=light; sid=old; badsegment")
   assert_eq(parsed.cookies.sid, "abc")
   assert_eq(parsed.cookies.theme, "light")
   assert_eq(parsed.duplicates.sid[0], "abc")
   assert_eq(parsed.duplicates.sid[1], "old")
   assert_eq(len(parsed.invalid), 1)
-  log("parsed")
+  harness.stdio.println("parsed")
   const serialized = cookie_serialize(
     "theme",
     "dark",
@@ -17,7 +17,7 @@ pipeline test(task) {
   assert(contains(serialized, "HttpOnly"), "serialized http only")
   assert(contains(serialized, "Secure"), "serialized secure")
   assert(contains(serialized, "SameSite=Strict"), "serialized same site")
-  const deleted = cookie_delete("sid", {secure: false})
+  const deleted = harness.net.cookie_delete("sid", {secure: false})
   assert(starts_with(deleted, "sid="), "delete prefix")
   assert(contains(deleted, "Path=/"), "delete path")
   assert(contains(deleted, "Max-Age=0"), "delete max age")
@@ -34,7 +34,7 @@ pipeline test(task) {
   assert(is_ok(cross_site), "cross site succeeds")
   assert(contains(unwrap(cross_site), "SameSite=None"), "cross site none")
   assert(contains(unwrap(cross_site), "Secure"), "cross site secure")
-  log("serialized")
+  harness.stdio.println("serialized")
   const secret = "0123456789abcdef0123456789abcdef"
   const short_secret = try {
     cookie_sign("plain-value", "secret")
@@ -47,7 +47,7 @@ pipeline test(task) {
   const forged = cookie_verify(signed + "x", secret)
   assert(!forged.ok)
   assert_eq(forged.error, "invalid_signature")
-  log("signed-cookie")
+  harness.stdio.println("signed-cookie")
   const token = session_sign({user: "alice", roles: ["operator"]}, secret)
   const session = session_verify(token, secret)
   assert(session.ok)
@@ -62,15 +62,15 @@ pipeline test(task) {
   assert(contains(set_cookie, "HttpOnly"), "session cookie http only")
   assert(contains(set_cookie, "Secure"), "session cookie secure")
   assert(contains(set_cookie, "SameSite=Lax"), "session cookie same site")
-  log("session")
+  harness.stdio.println("session")
   const round_trip = cookie_round_trip(
     "sid=old; theme=light",
-    [set_cookie, cookie_delete("sid", {secure: false})],
+    [set_cookie, harness.net.cookie_delete("sid", {secure: false})],
   )
   assert_eq(round_trip.cookies.theme, "light")
   assert_eq(round_trip.cookies.sid, nil)
   const from_cookie = session_from_cookies(round_trip.cookie_header, "harn_session", secret)
   assert(from_cookie.ok)
   assert_eq(from_cookie.payload.user, "alice")
-  log("round-trip")
+  harness.stdio.println("round-trip")
 }

@@ -1,17 +1,17 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   fn make_adder(n) {
     return { x -> x + n }
   }
   const add5 = make_adder(5)
   const add10 = make_adder(10)
-  log("Closures: ${add5(3)} ${add10(3)}")
+  harness.stdio.println("Closures: ${add5(3)} ${add10(3)}")
   fn compose(f, g) {
     return { x -> f(g(x)) }
   }
   const double = { x -> x * 2 }
   const inc = { x -> x + 1 }
   const double_then_inc = compose(inc, double)
-  log("Compose: ${double_then_inc(5)}")
+  harness.stdio.println("Compose: ${double_then_inc(5)}")
   const people = [
     {name: "Alice", scores: [90, 85, 92]},
     {name: "Bob", scores: [70, 75, 80]},
@@ -24,38 +24,38 @@ pipeline default(task) {
     },
   )
   for s in summaries {
-    log("${s.name}: total=${s.total}, avg=${s.avg}")
+    harness.stdio.println("${s.name}: total=${s.total}, avg=${s.avg}")
   }
   try {
     try {
       throw {code: 42, msg: "inner error"}
     } catch (e) {
-      log("Caught inner: code=${e.code}")
+      harness.stdio.println("Caught inner: code=${e.code}")
       throw "re-thrown"
     }
   } catch (e) {
-    log("Caught outer: ${e}")
+    harness.stdio.println("Caught outer: ${e}")
   }
-  log("First > 50: ${[10, 20, 60, 30].find({ x -> x > 50 })}")
-  log("First > 100: ${[10, 20, 60, 30].find({ x -> x > 100 })}")
+  harness.stdio.println("First > 50: ${[10, 20, 60, 30].find({ x -> x > 50 })}")
+  harness.stdio.println("First > 100: ${[10, 20, 60, 30].find({ x -> x > 100 })}")
   const config = {debug: true, verbose: false, level: 3}
   const overrides = {verbose: true, timeout: 30}
   const merged = config.merging(overrides)
-  log("Merged keys: ${merged.keys()}")
-  log("Verbose: ${merged.verbose}")
+  harness.stdio.println("Merged keys: ${merged.keys()}")
+  harness.stdio.println("Verbose: ${merged.verbose}")
   const nested = [[1, 2], [3], [4, 5, 6]]
   const flat = nested.flat_map({ x -> x })
-  log("Flat: ${flat}")
+  harness.stdio.println("Flat: ${flat}")
   const result = 3 + 1.5 * 2 - 0.5
-  log("Mixed: ${result}")
+  harness.stdio.println("Mixed: ${result}")
   const a = nil
   const b = nil
   const c = "found"
-  log("Coalesce: ${a ?? b ?? c}")
+  harness.stdio.println("Coalesce: ${a ?? b ?? c}")
   const processed = "  Hello, World!  " |> { s -> s.trim() } |> { s -> s.lowercase() }
     |> { s ->
     s.replace("world", "harn")
   }
-  log("Processed: ${processed}")
-  log("All stress tests passed!")
+  harness.stdio.println("Processed: ${processed}")
+  harness.stdio.println("All stress tests passed!")
 }

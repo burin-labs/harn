@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   http_mock_clear()
   transport_mock_clear()
   http_mock("GET", "https://api.example.test/session", {status: 200, body: "pooled", headers: {}})
@@ -36,5 +36,5 @@ pipeline test(task) {
   assert(is_err(limit_result))
   assert(websocket_close(limited))
   assert_eq(len(transport_mock_calls()), 6)
-  __io_println("transport_builtins_ok")
+  harness.stdio.println("transport_builtins_ok")
 }

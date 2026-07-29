@@ -48,6 +48,7 @@ fn hypothesis_options(options: HypothesisOptions?) -> SessionStoreOptions {
  * @errors: [runtime]
  */
 pub fn hypothesis_open(
+  harness: Harness,
   session_id: string?,
   record: dict,
   options: HypothesisOptions? = nil,
@@ -58,7 +59,7 @@ pub fn hypothesis_open(
   }
   const normalized = (record ?? {}) + {status: record?.status ?? "open"}
   session_store_append(
-    hypothesis_stream(session_id),
+    harness, hypothesis_stream(session_id),
     {operation: "upsert", record: normalized},
     hypothesis_options(options),
   )
@@ -71,9 +72,14 @@ pub fn hypothesis_open(
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn hypothesis_get(session_id: string?, id: string, options: HypothesisOptions? = nil) -> any? {
+pub fn hypothesis_get(
+  harness: Harness,
+  session_id: string?,
+  id: string,
+  options: HypothesisOptions? = nil,
+) -> any? {
   const target = to_string(id)
-  for record in session_store_project(hypothesis_stream(session_id), options ?? {}) {
+  for record in session_store_project(harness, hypothesis_stream(session_id), options ?? {}) {
     if to_string(record?.id ?? "") == target {
       return record
     }
@@ -89,18 +95,19 @@ pub fn hypothesis_get(session_id: string?, id: string, options: HypothesisOption
  * @errors: [runtime]
  */
 pub fn hypothesis_set_status(
+  harness: Harness,
   session_id: string?,
   id: string,
   status: string,
   options: HypothesisOptions? = nil,
 ) -> HypothesisMutationResult {
-  const current = hypothesis_get(session_id, id, options)
+  const current = hypothesis_get(harness, session_id, id, options)
   if current == nil {
     return {ok: false, error: "unknown hypothesis"}
   }
   const updated = current + {status: to_string(status)}
   session_store_append(
-    hypothesis_stream(session_id),
+    harness, hypothesis_stream(session_id),
     {operation: "upsert", record: updated},
     hypothesis_options(options),
   )
@@ -113,8 +120,12 @@ pub fn hypothesis_set_status(
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn hypothesis_list(session_id: string?, options: HypothesisOptions? = nil) -> list<any> {
-  const records = session_store_project(hypothesis_stream(session_id), options ?? {})
+pub fn hypothesis_list(
+  harness: Harness,
+  session_id: string?,
+  options: HypothesisOptions? = nil,
+) -> list<any> {
+  const records = session_store_project(harness, hypothesis_stream(session_id), options ?? {})
   const status = to_string((options ?? {})?.status ?? "")
   if status == "" {
     return records
@@ -129,12 +140,13 @@ pub fn hypothesis_list(session_id: string?, options: HypothesisOptions? = nil) -
  * @errors: [runtime]
  */
 pub fn hypothesis_delete(
+  harness: Harness,
   session_id: string?,
   id: string,
   options: HypothesisOptions? = nil,
 ) -> HypothesisMutationResult {
   session_store_append(
-    hypothesis_stream(session_id),
+    harness, hypothesis_stream(session_id),
     {operation: "delete", id: to_string(id)},
     hypothesis_options(options),
   )

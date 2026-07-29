@@ -16,7 +16,7 @@
  * validates, previews, runs, and meets every structural assertion in the
  * case; non-zero otherwise.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const opts = parse_argv(harness, argv)
   if opts.case == "" {
     __io_write_stderr(
@@ -38,7 +38,7 @@ pipeline default() {
       temperature: 0.0,
       max_tokens: 4000,
     }
-    const response = llm_call(case.user_prompt, case.system_prompt, opts_dict)
+    const response = harness.llm.call(case.user_prompt, case.system_prompt, opts_dict)
     bundle_text = extract_block(response.text, "bundle")
     if bundle_text == "" {
       __io_write_stderr("eval: model response missing <bundle>...</bundle>\n")

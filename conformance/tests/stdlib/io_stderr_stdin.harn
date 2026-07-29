@@ -7,32 +7,32 @@ fn legacy_line() {
   return nil
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // mock stdin with three lines and read them back individually
   mock_stdin("alpha\nbeta\ngamma\n")
-  log(legacy_line())
-  log(legacy_line())
-  log(legacy_line())
+  harness.stdio.println(legacy_line())
+  harness.stdio.println(legacy_line())
+  harness.stdio.println(legacy_line())
   // queue is now drained — next read_line returns nil
-  log(legacy_line())
+  harness.stdio.println(legacy_line())
   unmock_stdin()
   // bulk read
   mock_stdin("hello\nworld\n")
-  log(read_stdin())
+  harness.stdio.println(read_stdin())
   // after bulk read, the stream is consumed
-  log(legacy_line())
+  harness.stdio.println(legacy_line())
   unmock_stdin()
   // capture stderr produced by eprint / eprintln
   capture_stderr_start()
-  __io_eprint("warn: ")
-  __io_eprintln("disk full")
-  __io_eprintln("retry in 5s")
+  harness.stdio.eprint("warn: ")
+  harness.stdio.eprintln("disk full")
+  harness.stdio.eprintln("retry in 5s")
   const captured = capture_stderr_take()
-  log(captured)
+  harness.stdio.println(captured)
   // tty mocks are honored by is_*_tty
   mock_tty("stdin", true)
   mock_tty("stdout", false)
-  log(is_stdin_tty())
-  log(is_stdout_tty())
+  harness.stdio.println(is_stdin_tty())
+  harness.stdio.println(is_stdout_tty())
   unmock_tty()
 }

@@ -2,17 +2,17 @@
 // per-provider status list shape. Doesn't pin specific provider names
 // (the catalog evolves) — just asserts that every entry carries the
 // documented fields with valid types.
-const entries = llm_provider_status()
+const entries = harness.llm.providers()
 
-__io_println(len(entries) > 0)
+harness.stdio.println(len(entries) > 0)
 
 const first = entries[0]
 
-__io_println(first.name != nil)
+harness.stdio.println(first.name != nil)
 
-__io_println(first.available || !first.available)
+harness.stdio.println(first.available || !first.available)
 
-__io_println(first.credential_status != nil)
+harness.stdio.println(first.credential_status != nil)
 
 // Every credential_status must be one of the four documented values.
 let all_valid = true
@@ -24,4 +24,4 @@ for entry in entries {
   }
 }
 
-__io_println(all_valid)
+harness.stdio.println(all_valid)

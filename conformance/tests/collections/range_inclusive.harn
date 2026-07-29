@@ -1,12 +1,12 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // `to` is inclusive by default
   const nums = 1 to 5
-  log(nums)
+  harness.stdio.println(nums)
   // trailing `exclusive` makes it half-open
   const half = 0 to 3 exclusive
-  log(half)
+  harness.stdio.println(half)
   // Works in for-in
   for i in 1 to 3 {
-    log(i)
+    harness.stdio.println(i)
   }
 }

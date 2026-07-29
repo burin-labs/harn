@@ -69,7 +69,7 @@ fn main(harness: Harness) {
   const parsed_result = provider_tool_probe_campaign_parse_args(argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const include_expensive = parsed?.include_expensive ?? false
@@ -77,12 +77,12 @@ fn main(harness: Harness) {
   const route_specs = __as_string_list(parsed?.route)
   if catalog_routes && len(route_specs) > 0 {
     harness.stdio.eprintln("--catalog-routes cannot be combined with --route")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const requested_mode = to_string(parsed?.mode ?? "both")
   if len(provider_tool_probe_campaign_modes(requested_mode)) == 0 {
     harness.stdio.eprintln("--mode must be one of: both, non-streaming, streaming")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const behaviors = provider_tool_probe_campaign_filter_behavior_modes(
     provider_tool_probe_campaign_select_behaviors(__as_string_list(parsed?.behavior)),
@@ -90,7 +90,7 @@ fn main(harness: Harness) {
   )
   if len(behaviors) == 0 {
     harness.stdio.eprintln("no provider behaviors selected")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const live = parsed?.live ?? false
   const repeat = parsed?.repeat ?? 1
@@ -101,27 +101,27 @@ fn main(harness: Harness) {
   const max_cost_usd = parsed?.max_cost_usd ?? 10.0
   if repeat <= 0 {
     harness.stdio.eprintln("--repeat must be >= 1")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if timeout_secs <= 0 {
     harness.stdio.eprintln("--timeout-secs must be >= 1")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if shard_count <= 0 {
     harness.stdio.eprintln("--shard-count must be >= 1")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if shard_index < 0 || shard_index >= shard_count {
     harness.stdio.eprintln("--shard-index must be >= 0 and < --shard-count")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if max_probes < 0 {
     harness.stdio.eprintln("--max-probes must be >= 0")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if max_cost_usd <= 0.0 {
     harness.stdio.eprintln("--max-cost-usd must be > 0")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const target = __target_runtime_context(harness, parsed, live, catalog_routes)
   const harn_bin = target.harn_bin
@@ -137,7 +137,7 @@ fn main(harness: Harness) {
   }
   if len(routes) == 0 {
     harness.stdio.eprintln("no provider routes selected")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
   __ensure_dir(harness, ".harn-runs")
@@ -225,7 +225,7 @@ fn main(harness: Harness) {
     == "stopped_unpriced"
     || report.artifacts?.scorecard_status
     != "complete") {
-    exit(1)
+    harness.runtime.exit(1)
   }
   return nil
 }

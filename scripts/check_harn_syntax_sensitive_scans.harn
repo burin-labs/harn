@@ -13,8 +13,8 @@ const SKIP_SEGMENTS = [
 
 const SCANNED_SUFFIXES = [".harn", ".json", ".md", ".prompt", ".rs", ".ts", ".tsx"]
 
-fn repo_root() -> string {
-  return path_normalize(path_join(source_dir(), ".."))
+fn repo_root(harness: Harness) -> string {
+  return path_normalize(path_join(harness.fs.source_dir(), ".."))
 }
 
 fn rel_path(path: string, root: string) -> string {
@@ -40,16 +40,16 @@ fn is_skipped(path: string) -> bool {
   return false
 }
 
-pub fn harn_syntax_sensitive_files(root: string = "") -> list<string> {
+pub fn harn_syntax_sensitive_files(harness: Harness, root: string = "") -> list<string> {
   const resolved_root = if root == "" {
-    repo_root()
+    repo_root(harness)
   } else {
     path_normalize(root)
   }
   let out: list<string> = []
   for suffix in SCANNED_SUFFIXES {
     const pattern = "**/*" + suffix
-    for path in find_files(resolved_root, pattern) {
+    for path in find_files(harness.fs, resolved_root, pattern) {
       const rel = rel_path(path, resolved_root)
       if !is_skipped(rel) {
         out = out.appending(rel)
@@ -59,7 +59,7 @@ pub fn harn_syntax_sensitive_files(root: string = "") -> list<string> {
   return out.unique().sorted()
 }
 
-fn git_candidate_files(root: string) -> list<string>? {
+fn git_candidate_files(harness: Harness, root: string) -> list<string>? {
   // `git -C` walks parent directories when `root` is not itself a repository.
   // Test/temp trees nested inside a checkout must use the filesystem fallback;
   // otherwise git reports candidates relative to the parent repository and the
@@ -213,15 +213,15 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
   return findings
 }
 
-pub fn check_harn_syntax_sensitive_scans(root: string = "") -> dict {
+pub fn check_harn_syntax_sensitive_scans(harness: Harness, root: string = "") -> dict {
   const resolved_root = if root == "" {
-    repo_root()
+    repo_root(harness)
   } else {
     path_normalize(root)
   }
   let findings = []
-  const candidates = git_candidate_files(resolved_root)
-    ?? harn_syntax_sensitive_files(resolved_root)
+  const candidates = git_candidate_files(harness, resolved_root)
+    ?? harn_syntax_sensitive_files(harness, resolved_root)
   for rel in candidates {
     const path = path_join(resolved_root, rel)
     const text = harness.fs.read_text(path)
@@ -278,10 +278,10 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_harn_syntax_sensitive_scans(to_string(parsed?.root ?? ""))
+  const report = check_harn_syntax_sensitive_scans(harness, to_string(parsed?.root ?? ""))
   if parsed?.json ?? false {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
@@ -293,7 +293,7 @@ fn main(harness: Harness) {
     }
   }
   if report.violation_count > 0 {
-    exit(1)
+    harness.runtime.exit(1)
   }
   return nil
 }

@@ -20,7 +20,7 @@ pub fn init(ctx) {
 }
 
 pub fn activate(bindings) {
-  metrics_inc("bitbucket_contract_activations", len(bindings))
+  harness.obs.metrics_inc("bitbucket_contract_activations", len(bindings))
 }
 
 fn header(headers, name) {

@@ -3,13 +3,13 @@ import { clear_host_mocks, mock_host_response } from "std/testing"
 
 type Choice = {answer: string}
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   clear_host_mocks()
   mock_host_response("hitl", "question", {answer: {answer: "Ada"}})
-  const response: Choice = ask_user("Who should review this?", {schema: schema_of(Choice)})
-  __io_println(response.answer)
+  const response: Choice = harness.interaction.ask_user("Who should review this?", {schema: schema_of(Choice)})
+  harness.stdio.println(response.answer)
   clear_host_mocks()
   mock_host_response("hitl", "question", {answer: "9"})
-  const selected: int = ask_user("Pick a number", {default: 0})
-  __io_println(selected)
+  const selected: int = harness.interaction.ask_user("Pick a number", {default: 0})
+  harness.stdio.println(selected)
 }

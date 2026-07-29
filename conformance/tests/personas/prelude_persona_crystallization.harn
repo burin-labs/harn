@@ -37,7 +37,7 @@ fn repair_run(id, repo, status = "completed") {
   }
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const gated = persona_crystallization_candidates(
     [
       repair_run("r1", "burin-labs/harn"),
@@ -46,8 +46,8 @@ pipeline test(task) {
     ],
     {hosted_history_days: 30},
   )
-  __io_println(gated.status)
-  __io_println(len(gated.candidates))
+  harness.stdio.println(gated.status)
+  harness.stdio.println(len(gated.candidates))
   const history = [
     repair_run("r1", "burin-labs/harn"),
     repair_run("r2", "burin-labs/harn"),
@@ -58,13 +58,13 @@ pipeline test(task) {
     history,
     {hosted_history_days: 91, min_examples: 3, package_name: "merge-captain-workflows"},
   )
-  __io_println(bundle.schema)
-  __io_println(bundle.kind)
-  __io_println(len(bundle.source_traces))
-  __io_println(bundle.shadow.pass)
-  __io_println(bundle.savings.model_calls_avoided)
-  __io_println(bundle.workflow.package_name)
-  __io_println(bundle.patch.contains("@step"))
-  __io_println(bundle.patch.contains("dispatch"))
-  __io_println(len(bundle.report.rejected))
+  harness.stdio.println(bundle.schema)
+  harness.stdio.println(bundle.kind)
+  harness.stdio.println(len(bundle.source_traces))
+  harness.stdio.println(bundle.shadow.pass)
+  harness.stdio.println(bundle.savings.model_calls_avoided)
+  harness.stdio.println(bundle.workflow.package_name)
+  harness.stdio.println(bundle.patch.contains("@step"))
+  harness.stdio.println(bundle.patch.contains("dispatch"))
+  harness.stdio.println(len(bundle.report.rejected))
 }

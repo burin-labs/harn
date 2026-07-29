@@ -1,7 +1,7 @@
 /**
  * std/oauth/device_flow — RFC 8628 device authorization grant.
  *
- * `device_flow(provider, opts)` performs the full RFC 8628 dance for
+ * `device_flow(harness, provider, opts)` performs the full RFC 8628 dance for
  * headless contexts (CI runners, daemons, IDE side panes) where a
  * browser redirect is impractical. The function:
  *
@@ -27,8 +27,7 @@
  *     import { device_flow } from "std/oauth/device_flow"
  *     import { write_stderr } from "std/io"
  *
- *     let token = device_flow(
- *       providers().github,
+ *     let token = device_flow(harness, *       providers().github,
  *       {
  *         client_id: env("GITHUB_CLIENT_ID"),
  *         scopes: ["read:user"],
@@ -156,8 +155,8 @@ fn __now_seconds(harness: Harness) {
   return to_int(harness.clock.timestamp())
 }
 
-fn __default_on_user_code(user_code, verification_uri) {
-  const _ = __io_write_stderr(
+fn __default_on_user_code(stdio: HarnessStdio, user_code, verification_uri) {
+  const _ = stdio.eprint(
     "To authorize this device, open " + to_string(verification_uri) + " and enter code: "
       + to_string(
       user_code,
@@ -167,9 +166,9 @@ fn __default_on_user_code(user_code, verification_uri) {
   return nil
 }
 
-fn __invoke_user_code_handler(handler, user_code, verification_uri) {
+fn __invoke_user_code_handler(stdio: HarnessStdio, handler, user_code, verification_uri) {
   if handler == nil {
-    return __default_on_user_code(user_code, verification_uri)
+    return __default_on_user_code(stdio, user_code, verification_uri)
   }
   if type_of(handler) != "closure" && type_of(handler) != "builtin" {
     throw "std/oauth/device_flow: opts.on_user_code must be a function"
@@ -217,13 +216,13 @@ fn __build_token_set(parsed, scopes, issued_at) {
   return token_set
 }
 
-fn __audit_obtained(provider_id, storage_key, token_set) {
+fn __audit_obtained(harness: Harness, provider_id, storage_key, token_set) {
   const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
     next: __redact_token(token_set),
   }
-  const _ = event_log.emit(
+  const _ = harness.obs.event_log_emit(
     __AUDIT_TOPIC,
     __AUDIT_KIND_OBTAINED,
     payload,
@@ -358,7 +357,7 @@ fn __poll_until_done(
     if expires_in_seconds > 0 && elapsed_seconds + interval_seconds > expires_in_seconds {
       throw "std/oauth/device_flow: device code expired before authorization completed"
     }
-    sleep(interval_seconds * 1000)
+    harness.clock.sleep_ms(interval_seconds * 1000)
     elapsed_seconds = elapsed_seconds + interval_seconds
   }
 }
@@ -385,9 +384,9 @@ fn __poll_until_done(
  * @effects: [time, net, stderr]
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: device_flow(providers().github, {client_id: id, storage: memory()})
+ * @example: device_flow(harness, providers().github, {client_id: id, storage: memory()})
  */
-pub fn device_flow(provider, opts) {
+pub fn device_flow(harness: Harness, provider, opts) {
   if type_of(opts) != "dict" {
     throw "std/oauth/device_flow: opts must be a dict"
   }
@@ -410,6 +409,7 @@ pub fn device_flow(provider, opts) {
   }
   const device = __request_device_code(harness, cfg)
   const _ = __invoke_user_code_handler(
+    harness.stdio,
     opts?.on_user_code,
     device.user_code,
     device.verification_uri,
@@ -424,6 +424,6 @@ pub fn device_flow(provider, opts) {
   const issued_at = __now_seconds(harness)
   const token_set = __build_token_set(parsed, scopes, issued_at)
   storage.set(storage_key, token_set)
-  __audit_obtained(cfg.provider_id, storage_key, token_set)
+  __audit_obtained(harness, cfg.provider_id, storage_key, token_set)
   return token_set
 }

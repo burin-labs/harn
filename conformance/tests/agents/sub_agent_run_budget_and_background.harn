@@ -15,9 +15,9 @@ fn search_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [{id: "budget_1", name: "search", arguments: {query: "token budget"}}],
         input_tokens: 20,
@@ -25,8 +25,7 @@ pipeline main() {
       },
     ],
     { ->
-      const budgeted = sub_agent_run(
-        "Investigate under a tiny budget.",
+      const budgeted = sub_agent_run(harness, "Investigate under a tiny budget.",
         {
           provider: "mock",
           tools: search_tools(),
@@ -36,32 +35,30 @@ pipeline main() {
           token_budget: 8,
         },
       )
-      __io_println(budgeted?.budget_exceeded)
-      __io_println(budgeted?.tokens_used >= 32)
+      harness.stdio.println(budgeted?.budget_exceeded)
+      harness.stdio.println(budgeted?.tokens_used >= 32)
     },
   )
   with_llm_script(
-    [llm_text("background summary")],
+    harness.llm, [llm_text("background summary")],
     { ->
-      const handle = sub_agent_run(
-        "Summarize in the background.",
+      const handle = sub_agent_run(harness, "Summarize in the background.",
         {provider: "mock", background: true},
       )
-      __io_println(handle?.mode == "sub_agent")
+      harness.stdio.println(handle?.mode == "sub_agent")
       const done = wait_agent(handle)
-      __io_println(done?.status == "completed")
-      __io_println(done?.result?.ok)
-      __io_println(contains(done?.result?.summary ?? "", "background summary"))
+      harness.stdio.println(done?.status == "completed")
+      harness.stdio.println(done?.result?.ok)
+      harness.stdio.println(contains(done?.result?.summary ?? "", "background summary"))
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "bg_search_1", name: "search", arguments: {query: "background tool"}}]},
       llm_text("background tool summary"),
     ],
     { ->
-      const tool_handle = sub_agent_run(
-        "Search in the background with a Harn-owned tool.",
+      const tool_handle = sub_agent_run(harness, "Search in the background with a Harn-owned tool.",
         {
           provider: "mock",
           background: true,
@@ -71,11 +68,11 @@ pipeline main() {
           max_iterations: 3,
         },
       )
-      __io_println(tool_handle?.mode == "sub_agent")
+      harness.stdio.println(tool_handle?.mode == "sub_agent")
       const tool_done = wait_agent(tool_handle)
-      __io_println(tool_done?.status == "completed")
-      __io_println(tool_done?.result?.ok)
-      __io_println(contains(tool_done?.result?.summary ?? "", "background tool summary"))
+      harness.stdio.println(tool_done?.status == "completed")
+      harness.stdio.println(tool_done?.result?.ok)
+      harness.stdio.println(contains(tool_done?.result?.summary ?? "", "background tool summary"))
     },
   )
 }

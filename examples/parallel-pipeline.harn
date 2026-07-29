@@ -6,7 +6,7 @@
  *
  * Run with: cargo run --bin harn -- run examples/parallel-pipeline.harn
  */
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const prompts = [
     "What is 2 + 2?",
     "Name one planet in our solar system.",
@@ -14,24 +14,24 @@ pipeline main(task) {
     "How many legs does a spider have?",
     "What is the chemical symbol for water?",
   ]
-  log("Processing ${len(prompts)} prompts in parallel...")
+  harness.stdio.println("Processing ${len(prompts)} prompts in parallel...")
   // parallel each runs the closure concurrently for each item
   const results = parallel each prompts { prompt ->
     "Answer to: ${prompt}"
   }
-  // In production, replace with: llm_call(prompt, "Answer in one word.")
+  // In production, replace with: harness.llm.call(prompt, "Answer in one word.")
   // Using string transform here so the example runs without an API key.
-  log("")
-  log("=== Results ===")
+  harness.stdio.println("")
+  harness.stdio.println("=== Results ===")
   const idx = 0
   for result in results {
-    log("[${idx + 1}] ${prompts[idx]}")
-    log("    -> ${result}")
+    harness.stdio.println("[${idx + 1}] ${prompts[idx]}")
+    harness.stdio.println("    -> ${result}")
     idx = idx + 1
   }
-  log("")
-  log("Processed ${len(results)} items total.")
+  harness.stdio.println("")
+  harness.stdio.println("Processed ${len(results)} items total.")
   // Demonstrate chaining: filter results by length
   const short_answers = results.filter({ r -> len(r) < 40 })
-  log("Short answers (< 40 chars): ${len(short_answers)}")
+  harness.stdio.println("Short answers (< 40 chars): ${len(short_answers)}")
 }

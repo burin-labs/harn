@@ -32,9 +32,9 @@ fn resume_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {
@@ -50,9 +50,8 @@ pipeline main() {
       llm_text("operator brief acknowledged"),
     ],
     { ->
-      const session_id = "self-park-with-input-" + uuid()
-      const handle = sub_agent_run(
-        "Park then wait for an operator brief.",
+      const session_id = "self-park-with-input-" + harness.random.uuid()
+      const handle = sub_agent_run(harness, "Park then wait for an operator brief.",
         {
           provider: "mock",
           background: true,
@@ -65,28 +64,28 @@ pipeline main() {
       const suspended = wait_agent(handle)
       const resumed = resume_agent(handle, "operator brief: ship the patch", true)
       const done = wait_agent(handle)
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const resumed_msgs = calls[1].messages
       const resumed_tail = resumed_msgs[len(resumed_msgs) - 1].content
       const next_msgs = calls[2].messages
       const next_tail = next_msgs[len(next_msgs) - 1].content
-      __io_println("suspended_status=" + suspended.status)
-      __io_println("resume_status=" + resumed.status)
-      __io_println("final_status=" + done.status)
-      __io_println(
+      harness.stdio.println("suspended_status=" + suspended.status)
+      harness.stdio.println("resume_status=" + resumed.status)
+      harness.stdio.println("final_status=" + done.status)
+      harness.stdio.println(
         "input_in_reminder="
           + to_string(contains(resumed_tail, "operator brief: ship the patch")),
       )
-      __io_println(
+      harness.stdio.println(
         "reason_in_reminder=" + to_string(contains(resumed_tail, "needs operator brief")),
       )
-      __io_println(
+      harness.stdio.println(
         "reminder_present_on_resumed_turn="
           + to_string(
           contains(resumed_tail, "You were suspended at turn"),
         ),
       )
-      __io_println(
+      harness.stdio.println(
         "reminder_consumed_after_one_turn="
           + to_string(
           !contains(next_tail, "You were suspended at turn"),

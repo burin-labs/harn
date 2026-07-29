@@ -1,4 +1,4 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   fn step(value) {
     return value + 1
   }
@@ -9,6 +9,6 @@ pipeline default(task) {
     i = i + 1
   }
   if total < 0 {
-    log("unreachable")
+    harness.stdio.println("unreachable")
   }
 }

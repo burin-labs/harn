@@ -448,6 +448,8 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "read_file(path: string) -> string",
     category = "fs",
     doc = "Read an entire UTF-8 file or embedded stdlib prompt asset."
@@ -483,6 +485,8 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "read_file_result(path: string) -> Result<string, {error: \"io_error\", kind: \"not_found\" | \"permission_denied\" | \"already_exists\" | \"storage_full\" | \"quota_exceeded\" | \"file_too_large\" | \"read_only_filesystem\" | \"not_a_directory\" | \"is_a_directory\" | \"directory_not_empty\" | \"crosses_devices\" | \"too_many_links\" | \"invalid_input\" | \"invalid_data\" | \"timed_out\" | \"interrupted\" | \"unexpected_eof\" | \"would_block\" | \"out_of_memory\" | \"resource_busy\" | \"executable_file_busy\" | \"sandbox_denied\" | \"other\", message: string, category: \"tool_rejected\"?}>",
     category = "fs",
     doc = "Read a UTF-8 file and return Result.Ok(content) or a structured Result.Err."
@@ -522,6 +526,8 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "read_file_bytes(path: string) -> bytes",
     category = "fs",
     doc = "Read an entire file as bytes."
@@ -544,6 +550,8 @@ fn read_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "write_file(path: string, content: string) -> nil",
     category = "fs",
     doc = "Write UTF-8 text to a file."
@@ -572,6 +580,8 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "write_file_bytes(path: string, content: bytes) -> nil",
     category = "fs",
     doc = "Write bytes to a file."
@@ -623,6 +633,8 @@ fn edited_byte_count(bytes: u64) -> usize {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "file_exists(path: string) -> bool",
     category = "fs",
     doc = "Return whether a file-system path exists."
@@ -803,6 +815,8 @@ fn stat_error_path_status(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "path_status(path: string, access?: string) -> dict",
     category = "fs",
     doc = "Return structured filesystem visibility status without collapsing scope denial into absence."
@@ -824,6 +838,8 @@ fn path_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "delete_file(path: string) -> nil",
     category = "fs",
     doc = "Delete a file or directory."
@@ -864,6 +880,8 @@ fn delete_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "append_file(path: string, content: string) -> nil",
     category = "fs",
     doc = "Append UTF-8 text to a file."
@@ -894,6 +912,8 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "append_file_locked(path: string, content: string, options?: dict) -> nil",
     category = "fs",
     doc = "Append UTF-8 text to a file while holding a cross-process advisory lock."
@@ -938,6 +958,8 @@ fn append_file_locked_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "list_dir(path?: string) -> list",
     category = "fs",
     doc = "Return sorted directory entry names."
@@ -972,6 +994,8 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "mkdir(path: string, recursive?: bool) -> nil",
     category = "fs",
     doc = "Create a directory. By default missing parents are created; pass recursive=false for single-directory creation that fails if the target already exists."
@@ -997,6 +1021,8 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "path_join(...args: any) -> string",
     category = "fs",
     doc = "Join path segments with the platform path separator."
@@ -1012,6 +1038,8 @@ fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "copy_file(src: string, dst: string) -> nil",
     category = "fs",
     doc = "Copy a file to a destination path."
@@ -1052,6 +1080,8 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "temp_dir() -> string",
     category = "fs",
     doc = "Return the host temporary directory path."
@@ -1078,6 +1108,8 @@ fn temp_dir_path_string(path: &Path) -> String {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "workspace_temp_dir() -> string",
     category = "fs",
     doc = "Return a sandbox-writable workspace-local temporary directory path, creating it lazily."
@@ -1089,6 +1121,8 @@ fn workspace_temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "mkdtemp(prefix?: string) -> string",
     category = "fs",
     doc = "Create a new uniquely-named directory under the host temp dir and return its absolute path. The caller owns the directory lifecycle."
@@ -1113,6 +1147,8 @@ fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "mkdtemp_in_workspace(prefix?: string) -> string",
     category = "fs",
     doc = "Create a new uniquely-named directory under workspace_temp_dir() and return its path."
@@ -1186,6 +1222,8 @@ fn unique_temp_dir_name(args: &[VmValue], default_prefix: &str) -> String {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "stat(path: string) -> dict",
     category = "fs",
     doc = "Return metadata for a file-system path."
@@ -1217,6 +1255,8 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "move_file(src: string, dst: string) -> nil",
     category = "fs",
     doc = "Move a file to a destination path."
@@ -1269,6 +1309,8 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "read_lines(path: string) -> list",
     category = "fs",
     doc = "Read a UTF-8 file as a list of lines."
@@ -1291,6 +1333,8 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "walk_dir(path: string, options?: dict) -> list",
     category = "fs",
     doc = "Recursively list files and directories, honoring the project ignore stack by default."
@@ -1333,6 +1377,8 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "glob(pattern: string, base_or_options?: any, options?: dict) -> list",
     category = "fs",
     doc = "Match files under a base directory using a glob pattern, honoring the project ignore stack by default."

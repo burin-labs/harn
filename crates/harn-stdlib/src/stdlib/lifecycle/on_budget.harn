@@ -32,7 +32,7 @@
  *   import { OnBudget } from "std/lifecycle/on_budget"
  *   import { compose, with_telemetry } from "std/lifecycle/combinators"
  *
- *   register_persona_hook(
+ *   harness.agent.register_persona_hook(
  *     "*",
  *     "OnBudgetThreshold",
  *     compose([OnBudget.warn_and_continue, with_telemetry(my_logger)]),
@@ -102,7 +102,7 @@ fn __on_budget_terminate_error(state) {
  * @effects: [host]
  * @errors: ["budget_exceeded"]
  * @api_stability: experimental
- * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.terminate)
+ * @example: harness.agent.register_persona_hook("*", "OnBudgetThreshold", OnBudget.terminate)
  */
 pub fn terminate(harness, budget_state) {
   __on_budget_emit_audit(harness, "budget_exceeded", "terminate", budget_state)
@@ -126,7 +126,7 @@ pub fn terminate(harness, budget_state) {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.graceful_exit)
+ * @example: harness.agent.register_persona_hook("*", "OnBudgetThreshold", OnBudget.graceful_exit)
  */
 pub fn graceful_exit(harness, budget_state) {
   __on_budget_emit_audit(harness, "budget_graceful_exit", "graceful_exit", budget_state)
@@ -163,7 +163,7 @@ pub fn graceful_exit(harness, budget_state) {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.warn_and_continue)
+ * @example: harness.agent.register_persona_hook("*", "OnBudgetThreshold", OnBudget.warn_and_continue)
  */
 pub fn warn_and_continue(harness, budget_state) {
   __on_budget_emit_audit(harness, "budget_warn_and_continue", "warn_and_continue", budget_state)
@@ -172,7 +172,7 @@ pub fn warn_and_continue(harness, budget_state) {
     snapshot,
     "Your budget is exhausted (OnBudget.warn_and_continue). Consider wrapping up or asking for a budget extension.",
   )
-  tool_hooks_inject_reminder(
+  harness.tools.hooks_inject_reminder(
     {
       tags: ["budget_warning", "on_budget"],
       body: body,
@@ -191,17 +191,17 @@ fn __on_budget_int(value, fallback) {
   return parsed
 }
 
-fn __on_budget_session_id(snapshot) {
+fn __on_budget_session_id(harness: Harness, snapshot) {
   const nested = snapshot?.session?.id
   const direct = snapshot?.session_id
-  const current = agent_session_current_id()
+  const current = harness.agent.current_id()
   const session_id = direct ?? nested ?? current ?? ""
   return to_string(session_id)
 }
 
-fn __on_budget_replan_keep_first(src, snapshot, iteration) {
+fn __on_budget_replan_keep_first(harness: Harness, src, snapshot, iteration) {
   let keep_first = __on_budget_int(snapshot?.last_good_iteration, iteration)
-  const source = agent_session_snapshot(src) ?? {}
+  const source = harness.agent.snapshot(src) ?? {}
   const max_events = len(source.messages ?? [])
   if keep_first > max_events {
     keep_first = max_events
@@ -225,12 +225,12 @@ fn __on_budget_replan_reminder(kind, iteration) {
  * @effects: [host]
  * @errors: ["budget_replan_missing_session"]
  * @api_stability: experimental
- * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.replan)
+ * @example: harness.agent.register_persona_hook("*", "OnBudgetThreshold", OnBudget.replan)
  */
-pub fn replan(harness, budget_state) {
+pub fn replan(_harness: Harness, harness, budget_state) {
   __on_budget_emit_audit(harness, "budget_replan", "replan", budget_state)
   const snapshot = __on_budget_snapshot(budget_state)
-  const src = __on_budget_session_id(snapshot)
+  const src = __on_budget_session_id(harness, _harness, snapshot)
   if src == "" {
     throw {
       category: "budget_exceeded",
@@ -242,16 +242,16 @@ pub fn replan(harness, budget_state) {
     }
   }
   const iteration = __on_budget_int(snapshot?.iteration ?? snapshot?.n, 0)
-  const keep_first = __on_budget_replan_keep_first(src, snapshot, iteration)
+  const keep_first = __on_budget_replan_keep_first(harness, _harness, src, snapshot, iteration)
   const dst = snapshot?.dst_session_id
   const forked = if dst != nil {
-    agent_session_fork_at(src, keep_first, to_string(dst))
+    harness.agent.fork_at(src, keep_first, to_string(dst))
   } else {
-    agent_session_fork_at(src, keep_first)
+    harness.agent.fork_at(src, keep_first)
   }
   const budget_kind = to_string(snapshot?.budget_kind ?? snapshot?.kind ?? "budget")
   const reminder_body = __on_budget_replan_reminder(budget_kind, iteration)
-  agent_session_inject(
+  harness.agent.inject(
     forked,
     transcript_reminder_event(
       {
@@ -265,7 +265,7 @@ pub fn replan(harness, budget_state) {
   const task = snapshot?.task ?? snapshot?.message
   const base_options = snapshot?.options ?? {}
   const result = if task != nil {
-    agent_loop(task, snapshot?.system, base_options + {session_id: forked})
+    agent_loop(harness, task, snapshot?.system, base_options + {session_id: forked})
   } else {
     nil
   }

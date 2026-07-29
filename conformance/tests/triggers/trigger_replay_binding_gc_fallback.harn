@@ -1,7 +1,7 @@
-pipeline test(task) {
-  const result = trigger_test_harness("replay_binding_gc_fallback")
-  __io_println(result.ok)
-  __io_println(result.details.trigger_id == "replay.gc.fixture")
-  __io_println(result.details.recorded_version == 1)
-  __io_println(result.details.resolved_version == 3)
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("replay_binding_gc_fallback")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(result.details.trigger_id == "replay.gc.fixture")
+  harness.stdio.println(result.details.recorded_version == 1)
+  harness.stdio.println(result.details.resolved_version == 3)
 }

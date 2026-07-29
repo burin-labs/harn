@@ -27,7 +27,6 @@ const PASSING =
 // host-tools gate; a real consumer (an eval / agent loop) has it enabled. Enable
 // it for the test session.
 fn enable_verdict() -> nil {
-  hostlib_enable("tools:deterministic")
   return nil
 }
 
@@ -36,7 +35,7 @@ fn enable_verdict() -> nil {
 // execution under that reference, it can never be a pass — it is honestly
 // indeterminate. Authoring evidence is not executing tests: this is the
 // provenance-forgery negative the earlier path-based design missed.
-pipeline test_caller_authored_evidence_is_never_a_pass(_task) {
+pipeline test_caller_authored_evidence_is_never_a_pass(harness: Harness, _task) {
   enable_verdict()
   const dir = harness.fs.mkdtemp_in_workspace("verdict-neg")
   const path = harness.fs.path_join(dir, "green.txt")
@@ -48,7 +47,7 @@ pipeline test_caller_authored_evidence_is_never_a_pass(_task) {
 
 // A fabricated handle string — one no `run_test` ever issued — is indeterminate,
 // never a pass. A caller cannot guess a handle into the host execution store.
-pipeline test_fabricated_handle_is_indeterminate(_task) {
+pipeline test_fabricated_handle_is_indeterminate(harness: Harness, _task) {
   enable_verdict()
   const v = verdict_from_run(harness, {result_handle: "htr-deadbeef-999999"})
   assert_eq(verdict_disposition(v), "indeterminate")
@@ -57,7 +56,7 @@ pipeline test_fabricated_handle_is_indeterminate(_task) {
 
 // A run result carrying no handle at all cannot be a pass — there is no host
 // execution to attest, so the reference is empty and the verdict is undecided.
-pipeline test_run_result_without_handle_is_indeterminate(_task) {
+pipeline test_run_result_without_handle_is_indeterminate(harness: Harness, _task) {
   enable_verdict()
   const v = verdict_from_run(harness, {exit_code: 0, stdout: PASSING})
   assert_eq(verdict_disposition(v), "indeterminate")
@@ -65,20 +64,20 @@ pipeline test_run_result_without_handle_is_indeterminate(_task) {
 }
 
 // verdict_all: any fail dominates the aggregate (disposition == fail).
-pipeline test_verdict_all_with_a_fail_is_fail(_task) {
+pipeline test_verdict_all_with_a_fail_is_fail(harness: Harness, _task) {
   const v = verdict_all(harness, [verdict_fail("evidence_red", ""), verdict_indeterminate("x", "")])
   assert_eq(verdict_disposition(v), "fail")
 }
 
 // verdict_all: absent a fail, any indeterminate dominates — never a vacuous pass.
-pipeline test_verdict_all_with_an_indeterminate_is_indeterminate(_task) {
+pipeline test_verdict_all_with_an_indeterminate_is_indeterminate(harness: Harness, _task) {
   const v = verdict_all(harness, [verdict_indeterminate("judge_unavailable", "")])
   assert_eq(verdict_disposition(v), "indeterminate")
 }
 
 // verdict_all: an empty aggregate is indeterminate, never a vacuously combined
 // pass over zero host-issued receipts.
-pipeline test_verdict_all_empty_is_indeterminate(_task) {
+pipeline test_verdict_all_empty_is_indeterminate(harness: Harness, _task) {
   const v = verdict_all(harness, [])
   assert_eq(verdict_disposition(v), "indeterminate")
 }

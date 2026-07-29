@@ -100,9 +100,9 @@ fn scripted_consent(justification, _session_id) {
   return {verdict: "deny", consent: "none", reason: "no consent found"}
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "look-1", name: "look", arguments: {}}]},
       {
         tool_calls: [
@@ -126,11 +126,9 @@ pipeline default() {
       {text: "done ##DONE##"},
     ],
     { ->
-      const session = "read-only-stance-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "no code changes yet, just research the bug",
+      const session = "read-only-stance-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "no code changes yet, just research the bug",
           nil,
           {
             provider: "mock",
@@ -143,28 +141,28 @@ pipeline default() {
           },
         ) },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const first_tools = calls[0].tools
-      __io_println(has_tool(first_tools, "look"))
-      __io_println(has_tool(first_tools, "search"))
-      __io_println(has_tool(first_tools, "request_write_access"))
-      __io_println(has_tool(first_tools, "edit"))
-      __io_println(has_tool(first_tools, "run"))
-      __io_println(has_tool(first_tools, "mystery"))
+      harness.stdio.println(has_tool(first_tools, "look"))
+      harness.stdio.println(has_tool(first_tools, "search"))
+      harness.stdio.println(has_tool(first_tools, "request_write_access"))
+      harness.stdio.println(has_tool(first_tools, "edit"))
+      harness.stdio.println(has_tool(first_tools, "run"))
+      harness.stdio.println(has_tool(first_tools, "mystery"))
       const third_tools = calls[2].tools
-      __io_println(has_tool(third_tools, "edit"))
+      harness.stdio.println(has_tool(third_tools, "edit"))
       const fourth_tools = calls[3].tools
-      __io_println(has_tool(fourth_tools, "edit"))
+      harness.stdio.println(has_tool(fourth_tools, "edit"))
       const stance_events = events_of(captured.events, "stance_transition")
       const phases = stance_events.map({ event -> event.phase })
-      __io_println(contains(phases, "armed"))
-      __io_println(contains(phases, "write_access_denied"))
-      __io_println(contains(phases, "write_access_granted"))
-      __io_println(contains(phases, "disarmed"))
+      harness.stdio.println(contains(phases, "armed"))
+      harness.stdio.println(contains(phases, "write_access_denied"))
+      harness.stdio.println(contains(phases, "write_access_granted"))
+      harness.stdio.println(contains(phases, "disarmed"))
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {
@@ -177,11 +175,9 @@ pipeline default() {
       {text: "done ##DONE##"},
     ],
     { ->
-      const session = "read-only-stance-policy-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "inspect only",
+      const session = "read-only-stance-policy-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "inspect only",
           nil,
           {
             provider: "mock",
@@ -200,30 +196,29 @@ pipeline default() {
           },
         ) },
       )
-      const first_tools = llm_mock_calls()[0].tools
-      __io_println(has_tool(first_tools, "inspect"))
-      __io_println(has_tool(first_tools, "mutate"))
-      __io_println(has_tool(first_tools, "unknown"))
-      __io_println(has_tool(first_tools, "request_write_access"))
+      const first_tools = harness.llm.mock_calls()[0].tools
+      harness.stdio.println(has_tool(first_tools, "inspect"))
+      harness.stdio.println(has_tool(first_tools, "mutate"))
+      harness.stdio.println(has_tool(first_tools, "unknown"))
+      harness.stdio.println(has_tool(first_tools, "request_write_access"))
       const policy_phases = events_of(captured.events, "stance_transition").map(
         { event -> event.phase },
       )
-      __io_println(contains(policy_phases, "write_access_denied"))
+      harness.stdio.println(contains(policy_phases, "write_access_denied"))
     },
   )
   with_llm_script(
-    [{text: "{\"consent\":\"express\",\"reasoning\":\"user approved\"}"}],
+    harness.llm, [{text: "{\"consent\":\"express\",\"reasoning\":\"user approved\"}"}],
     { ->
-      const session = agent_session_open("read-only-stance-default-consent-" + uuid())
-      agent_session_reset(session)
-      agent_session_inject(session, {role: "user", content: "please make the change"})
-      const verdict = agent_stance_default_consent_check(
-        "the user requested an edit",
+      const session = harness.agent.open("read-only-stance-default-consent-" + harness.random.uuid())
+      harness.agent.reset(session)
+      harness.agent.inject(session, {role: "user", content: "please make the change"})
+      const verdict = agent_stance_default_consent_check(harness,  harness, "the user requested an edit",
         session,
         {provider: "mock"},
       )
-      __io_println(verdict.verdict)
-      __io_println(verdict.consent)
+      harness.stdio.println(verdict.verdict)
+      harness.stdio.println(verdict.consent)
     },
   )
 }

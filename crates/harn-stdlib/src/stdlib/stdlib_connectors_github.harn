@@ -348,8 +348,8 @@ pub fn reset() {
   github_connector_config = {}
 }
 
-fn __call(method: string, params: dict = {}) {
-  return connector_call("github", method, filter_nil(merge(github_connector_config, params)))
+fn __call(harness: Harness, method: string, params: dict = {}) {
+  return harness.net.connector_call("github", method, filter_nil(merge(github_connector_config, params)))
 }
 
 /**
@@ -358,8 +358,8 @@ fn __call(method: string, params: dict = {}) {
  * @effects: [net]
  * @errors: []
  */
-pub fn call(method: string, args: dict = {}, options: GitHubCallOptions = {}) {
-  return __call(method, merge(options, args ?? {}))
+pub fn call(harness: Harness, method: string, args: dict = {}, options: GitHubCallOptions = {}) {
+  return __call(harness, method, merge(options, args ?? {}))
 }
 
 /**
@@ -368,12 +368,12 @@ pub fn call(method: string, args: dict = {}, options: GitHubCallOptions = {}) {
  * @effects: [net]
  * @errors: []
  */
-pub fn pr_view(
+pub fn pr_view(harness: Harness, 
   repo: string,
   number: int,
   options: GitHubCallOptions = {},
 ) -> GitHubPullRequestResponse {
-  return __call("github.pr.view", merge(options, {repo: repo, number: number}))
+  return __call(harness, "github.pr.view", merge(options, {repo: repo, number: number}))
 }
 
 /**
@@ -382,12 +382,12 @@ pub fn pr_view(
  * @effects: [net]
  * @errors: []
  */
-pub fn pr_checks(
+pub fn pr_checks(harness: Harness, 
   repo: string,
   number: int,
   options: GitHubCallOptions = {},
 ) -> GitHubPullRequestChecksResponse {
-  return __call("github.pr.checks", merge(options, {repo: repo, number: number}))
+  return __call(harness, "github.pr.checks", merge(options, {repo: repo, number: number}))
 }
 
 /**
@@ -396,13 +396,13 @@ pub fn pr_checks(
  * @effects: [net]
  * @errors: []
  */
-pub fn pr_edit(
+pub fn pr_edit(harness: Harness, 
   repo: string,
   number: int,
   edits: GitHubPullRequestEdit,
   options: GitHubCallOptions = {},
 ) -> GitHubPullRequestResponse {
-  return __call("github.pr.edit", merge(merge(options, edits), {repo: repo, number: number}))
+  return __call(harness, "github.pr.edit", merge(merge(options, edits), {repo: repo, number: number}))
 }
 
 /**
@@ -411,12 +411,12 @@ pub fn pr_edit(
  * @effects: [net]
  * @errors: []
  */
-pub fn release_view(
+pub fn release_view(harness: Harness, 
   repo: string,
   tag: string? = nil,
   options: GitHubCallOptions = {},
 ) -> GitHubRelease {
-  return __call("github.release.view", merge(options, {repo: repo, tag: tag}))
+  return __call(harness, "github.release.view", merge(options, {repo: repo, tag: tag}))
 }
 
 fn __github_strip_git_suffix(value) {
@@ -522,8 +522,8 @@ fn __github_repo_or_throw(repo, name = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn comment(issue_url: string, body: string, options: GitHubCallOptions = {}) {
-  return __call("comment", merge(options, {issue_url: issue_url, body: body}))
+pub fn comment(harness: Harness, issue_url: string, body: string, options: GitHubCallOptions = {}) {
+  return __call(harness, "comment", merge(options, {issue_url: issue_url, body: body}))
 }
 
 /**
@@ -532,8 +532,8 @@ pub fn comment(issue_url: string, body: string, options: GitHubCallOptions = {})
  * @effects: []
  * @errors: []
  */
-pub fn add_labels(issue_url: string, labels: list<string>, options: GitHubCallOptions = {}) {
-  return __call("add_labels", merge(options, {issue_url: issue_url, labels: labels}))
+pub fn add_labels(harness: Harness, issue_url: string, labels: list<string>, options: GitHubCallOptions = {}) {
+  return __call(harness, "add_labels", merge(options, {issue_url: issue_url, labels: labels}))
 }
 
 /**
@@ -542,8 +542,8 @@ pub fn add_labels(issue_url: string, labels: list<string>, options: GitHubCallOp
  * @effects: []
  * @errors: []
  */
-pub fn request_review(pr_url: string, reviewers: list<string>, options: GitHubCallOptions = {}) {
-  return __call("request_review", merge(options, {pr_url: pr_url, reviewers: reviewers}))
+pub fn request_review(harness: Harness, pr_url: string, reviewers: list<string>, options: GitHubCallOptions = {}) {
+  return __call(harness, "request_review", merge(options, {pr_url: pr_url, reviewers: reviewers}))
 }
 
 /**
@@ -552,8 +552,8 @@ pub fn request_review(pr_url: string, reviewers: list<string>, options: GitHubCa
  * @effects: []
  * @errors: []
  */
-pub fn merge_pr(pr_url: string, options: GitHubCallOptions = {}) {
-  return __call("merge_pr", merge(options, {pr_url: pr_url}))
+pub fn merge_pr(harness: Harness, pr_url: string, options: GitHubCallOptions = {}) {
+  return __call(harness, "merge_pr", merge(options, {pr_url: pr_url}))
 }
 
 /**
@@ -562,8 +562,8 @@ pub fn merge_pr(pr_url: string, options: GitHubCallOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn list_stale_prs(repo: string, days: int, options: GitHubCallOptions = {}) {
-  return __call("list_stale_prs", merge(options, {repo: repo, days: days}))
+pub fn list_stale_prs(harness: Harness, repo: string, days: int, options: GitHubCallOptions = {}) {
+  return __call(harness, "list_stale_prs", merge(options, {repo: repo, days: days}))
 }
 
 /**
@@ -572,8 +572,8 @@ pub fn list_stale_prs(repo: string, days: int, options: GitHubCallOptions = {}) 
  * @effects: []
  * @errors: []
  */
-pub fn get_pr_diff(pr_url: string, options: GitHubCallOptions = {}) {
-  return __call("get_pr_diff", merge(options, {pr_url: pr_url}))
+pub fn get_pr_diff(harness: Harness, pr_url: string, options: GitHubCallOptions = {}) {
+  return __call(harness, "get_pr_diff", merge(options, {pr_url: pr_url}))
 }
 
 /**
@@ -582,14 +582,14 @@ pub fn get_pr_diff(pr_url: string, options: GitHubCallOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn create_issue(
+pub fn create_issue(harness: Harness, 
   repo: string,
   title: string,
   body: string? = nil,
   labels: list<string>? = nil,
   options: GitHubCallOptions = {},
 ) {
-  return __call(
+  return __call(harness, 
     "create_issue",
     filter_nil(merge(options, {repo: repo, title: title, body: body, labels: labels})),
   )
@@ -601,8 +601,8 @@ pub fn create_issue(
  * @effects: []
  * @errors: []
  */
-pub fn api_call(path: string, method: string, body: any = nil, options: GitHubCallOptions = {}) {
-  return __call("api_call", filter_nil(merge(options, {path: path, method: method, body: body})))
+pub fn api_call(harness: Harness, path: string, method: string, body: any = nil, options: GitHubCallOptions = {}) {
+  return __call(harness, "api_call", filter_nil(merge(options, {path: path, method: method, body: body})))
 }
 
 /**
@@ -611,7 +611,7 @@ pub fn api_call(path: string, method: string, body: any = nil, options: GitHubCa
  * @effects: []
  * @errors: []
  */
-pub fn workflow_dispatch(
+pub fn workflow_dispatch(harness: Harness, 
   repo: string | dict,
   workflow_id: any,
   ref: string = "main",
@@ -619,8 +619,7 @@ pub fn workflow_dispatch(
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubWorkflowDispatchResponse {
   const r = __github_repo_or_throw(repo)
-  return call(
-    "github.actions.workflow_dispatch",
+  return call(harness, "github.actions.workflow_dispatch",
     {repo: r.full_name, workflow_id: workflow_id, ref: ref, inputs: inputs ?? {}},
     options,
   )
@@ -632,13 +631,13 @@ pub fn workflow_dispatch(
  * @effects: []
  * @errors: []
  */
-pub fn workflow_runs(
+pub fn workflow_runs(harness: Harness, 
   repo: string | dict,
   query: GitHubWorkflowRunsQuery = {},
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsRunsResponse {
   const r = __github_repo_or_throw(repo)
-  return call("github.actions.runs", merge(query, {repo: r.full_name}), options)
+  return call(harness, "github.actions.runs", merge(query, {repo: r.full_name}), options)
 }
 
 /**
@@ -647,13 +646,13 @@ pub fn workflow_runs(
  * @effects: []
  * @errors: []
  */
-pub fn workflow_run(
+pub fn workflow_run(harness: Harness, 
   repo: string | dict,
   run_id: int | string,
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsRunResponse {
   const r = __github_repo_or_throw(repo)
-  return call("github.actions.run", {repo: r.full_name, run_id: run_id}, options)
+  return call(harness, "github.actions.run", {repo: r.full_name, run_id: run_id}, options)
 }
 
 /**
@@ -662,14 +661,14 @@ pub fn workflow_run(
  * @effects: [net]
  * @errors: [connector_error]
  */
-pub fn workflow_run_jobs(
+pub fn workflow_run_jobs(harness: Harness, 
   repo: string | dict,
   run_id: int | string,
   query: GitHubWorkflowJobsQuery = {},
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsJobsResponse {
   const r = __github_repo_or_throw(repo)
-  return call("github.actions.run_jobs", merge(query, {repo: r.full_name, run_id: run_id}), options)
+  return call(harness, "github.actions.run_jobs", merge(query, {repo: r.full_name, run_id: run_id}), options)
 }
 
 /**
@@ -678,13 +677,13 @@ pub fn workflow_run_jobs(
  * @effects: [net]
  * @errors: [connector_error]
  */
-pub fn workflow_run_cancel(
+pub fn workflow_run_cancel(harness: Harness, 
   repo: string | dict,
   run_id: int | string,
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubWorkflowCancelResponse {
   const r = __github_repo_or_throw(repo)
-  return call("github.actions.run_cancel", {repo: r.full_name, run_id: run_id}, options)
+  return call(harness, "github.actions.run_cancel", {repo: r.full_name, run_id: run_id}, options)
 }
 
 /**
@@ -693,7 +692,7 @@ pub fn workflow_run_cancel(
  * @effects: []
  * @errors: []
  */
-pub fn actions_workflow_dispatch(
+pub fn actions_workflow_dispatch(harness: Harness, 
   owner: string,
   repo: string,
   workflow_id: any,
@@ -701,7 +700,7 @@ pub fn actions_workflow_dispatch(
   inputs: dict? = nil,
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubWorkflowDispatchResponse {
-  return workflow_dispatch(owner + "/" + repo, workflow_id, ref, inputs, options)
+  return workflow_dispatch(harness, owner + "/" + repo, workflow_id, ref, inputs, options)
 }
 
 /**
@@ -710,13 +709,13 @@ pub fn actions_workflow_dispatch(
  * @effects: []
  * @errors: []
  */
-pub fn actions_workflow_runs(
+pub fn actions_workflow_runs(harness: Harness, 
   owner: string,
   repo: string,
   query: GitHubWorkflowRunsQuery = {},
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsRunsResponse {
-  return workflow_runs(owner + "/" + repo, query, options)
+  return workflow_runs(harness, owner + "/" + repo, query, options)
 }
 
 /**
@@ -725,13 +724,13 @@ pub fn actions_workflow_runs(
  * @effects: []
  * @errors: []
  */
-pub fn actions_workflow_run(
+pub fn actions_workflow_run(harness: Harness, 
   owner: string,
   repo: string,
   run_id: int | string,
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsRunResponse {
-  return workflow_run(owner + "/" + repo, run_id, options)
+  return workflow_run(harness, owner + "/" + repo, run_id, options)
 }
 
 /**
@@ -740,14 +739,14 @@ pub fn actions_workflow_run(
  * @effects: [net]
  * @errors: [connector_error]
  */
-pub fn actions_workflow_run_jobs(
+pub fn actions_workflow_run_jobs(harness: Harness, 
   owner: string,
   repo: string,
   run_id: int | string,
   query: GitHubWorkflowJobsQuery = {},
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsJobsResponse {
-  return workflow_run_jobs(owner + "/" + repo, run_id, query, options)
+  return workflow_run_jobs(harness, owner + "/" + repo, run_id, query, options)
 }
 
 /**
@@ -756,13 +755,13 @@ pub fn actions_workflow_run_jobs(
  * @effects: [net]
  * @errors: [connector_error]
  */
-pub fn actions_workflow_run_cancel(
+pub fn actions_workflow_run_cancel(harness: Harness, 
   owner: string,
   repo: string,
   run_id: int | string,
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubWorkflowCancelResponse {
-  return workflow_run_cancel(owner + "/" + repo, run_id, options)
+  return workflow_run_cancel(harness, owner + "/" + repo, run_id, options)
 }
 
 fn __actions_proof_report(reason: string) -> GitHubActionsExactProofReport {
@@ -942,15 +941,14 @@ pub fn github_actions_exact_proof(
  * @effects: []
  * @errors: []
  */
-pub fn read_file_at_ref(
+pub fn read_file_at_ref(harness: Harness, 
   repo: string | dict,
   path: string,
   ref: string? = nil,
   options: GitHubCallOptions = {},
 ) {
   const r = __github_repo_or_throw(repo)
-  return call(
-    "repos.get_text",
+  return call(harness, "repos.get_text",
     filter_nil({owner: r.owner, repo: r.name, path: path, ref: ref}),
     options,
   )
@@ -962,14 +960,14 @@ pub fn read_file_at_ref(
  * @effects: []
  * @errors: []
  */
-pub fn repos_get_text(
+pub fn repos_get_text(harness: Harness, 
   owner: string,
   repo: string,
   path: string,
   ref: string? = nil,
   options: GitHubCallOptions = {},
 ) {
-  return read_file_at_ref(owner + "/" + repo, path, ref, options)
+  return read_file_at_ref(harness, owner + "/" + repo, path, ref, options)
 }
 
 /**
@@ -978,9 +976,9 @@ pub fn repos_get_text(
  * @effects: []
  * @errors: []
  */
-pub fn latest_release(repo: string | dict, options: GitHubCallOptions = {}) {
+pub fn latest_release(harness: Harness, repo: string | dict, options: GitHubCallOptions = {}) {
   const r = __github_repo_or_throw(repo)
-  return call("github.release.latest", {repo: r.full_name}, options)
+  return call(harness, "github.release.latest", {repo: r.full_name}, options)
 }
 
 /**
@@ -989,10 +987,9 @@ pub fn latest_release(repo: string | dict, options: GitHubCallOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn release_assets(repo: string | dict, release_id: any = nil, options: GitHubCallOptions = {}) {
+pub fn release_assets(harness: Harness, repo: string | dict, release_id: any = nil, options: GitHubCallOptions = {}) {
   const r = __github_repo_or_throw(repo)
-  return call(
-    "github.release.assets",
+  return call(harness, "github.release.assets",
     filter_nil({repo: r.full_name, release_id: release_id}),
     options,
   )
@@ -1004,8 +1001,8 @@ pub fn release_assets(repo: string | dict, release_id: any = nil, options: GitHu
  * @effects: []
  * @errors: []
  */
-pub fn repos_get_latest_release(owner: string, repo: string, options: GitHubCallOptions = {}) {
-  return call("repos.get_latest_release", {owner: owner, repo: repo}, options)
+pub fn repos_get_latest_release(harness: Harness, owner: string, repo: string, options: GitHubCallOptions = {}) {
+  return call(harness, "repos.get_latest_release", {owner: owner, repo: repo}, options)
 }
 
 /**
@@ -1014,14 +1011,13 @@ pub fn repos_get_latest_release(owner: string, repo: string, options: GitHubCall
  * @effects: []
  * @errors: []
  */
-pub fn repos_list_release_assets(
+pub fn repos_list_release_assets(harness: Harness, 
   owner: string,
   repo: string,
   release_id: any,
   options: GitHubCallOptions = {},
 ) {
-  return call(
-    "repos.list_release_assets",
+  return call(harness, "repos.list_release_assets",
     {owner: owner, repo: repo, release_id: release_id},
     options,
   )
@@ -1033,8 +1029,8 @@ pub fn repos_list_release_assets(
  * @effects: [net]
  * @errors: []
  */
-pub fn github_latest_release(owner: string, repo: string, options: GitHubCallOptions = {}) {
-  return latest_release(owner + "/" + repo, options)
+pub fn github_latest_release(harness: Harness, owner: string, repo: string, options: GitHubCallOptions = {}) {
+  return latest_release(harness, owner + "/" + repo, options)
 }
 
 /**
@@ -1043,13 +1039,13 @@ pub fn github_latest_release(owner: string, repo: string, options: GitHubCallOpt
  * @effects: []
  * @errors: []
  */
-pub fn github_release_assets(
+pub fn github_release_assets(harness: Harness, 
   owner: string,
   repo: string,
   release_id: any = nil,
   options: GitHubCallOptions = {},
 ) {
-  return release_assets(owner + "/" + repo, release_id, options)
+  return release_assets(harness, owner + "/" + repo, release_id, options)
 }
 
 /**
@@ -1058,7 +1054,7 @@ pub fn github_release_assets(
  * @effects: []
  * @errors: []
  */
-pub fn enable_auto_merge(
+pub fn enable_auto_merge(harness: Harness, 
   repo: string | dict,
   pull_number: int | string,
   options: GitHubCallOptions = {},
@@ -1066,8 +1062,7 @@ pub fn enable_auto_merge(
   const r = __github_repo_or_throw(repo)
   const requested_method = uppercase(to_string(options.method ?? options.merge_method ?? "merge"))
   const result = try {
-    call(
-      "github.pr.enable_auto_merge",
+    call(harness, "github.pr.enable_auto_merge",
       {repo: r.full_name, pull_number: pull_number, method: requested_method},
       options,
     )
@@ -1084,13 +1079,13 @@ pub fn enable_auto_merge(
  * @effects: []
  * @errors: []
  */
-pub fn pulls_enable_auto_merge(
+pub fn pulls_enable_auto_merge(harness: Harness, 
   owner: string,
   repo: string,
   number: int | string,
   options: GitHubCallOptions = {},
 ) {
-  return enable_auto_merge(owner + "/" + repo, number, options)
+  return enable_auto_merge(harness, owner + "/" + repo, number, options)
 }
 
 /**
@@ -1099,13 +1094,13 @@ pub fn pulls_enable_auto_merge(
  * @effects: []
  * @errors: []
  */
-pub fn github_ensure_auto_merge(
+pub fn github_ensure_auto_merge(harness: Harness, 
   owner: string,
   repo: string,
   pull_number: int | string,
   options: GitHubCallOptions = {},
 ) {
-  return enable_auto_merge(owner + "/" + repo, pull_number, options)
+  return enable_auto_merge(harness, owner + "/" + repo, pull_number, options)
 }
 
 /**
@@ -1114,7 +1109,7 @@ pub fn github_ensure_auto_merge(
  * @effects: []
  * @errors: []
  */
-pub fn close_pr(
+pub fn close_pr(harness: Harness, 
   repo: string | dict,
   pull_number: int | string,
   comment: string? = nil,
@@ -1124,8 +1119,7 @@ pub fn close_pr(
   let comment_posted = false
   if comment != nil && trim(to_string(comment)) != "" {
     const posted = try {
-      call(
-        "issues.create_comment",
+      call(harness, "issues.create_comment",
         {owner: r.owner, repo: r.name, issue_number: pull_number, body: to_string(comment)},
         options,
       )
@@ -1136,8 +1130,7 @@ pub fn close_pr(
     comment_posted = true
   }
   const updated = try {
-    call(
-      "issues.update",
+    call(harness, "issues.update",
       {owner: r.owner, repo: r.name, issue_number: pull_number, state: "closed"},
       options,
     )
@@ -1154,14 +1147,14 @@ pub fn close_pr(
  * @effects: []
  * @errors: []
  */
-pub fn github_close_pr(
+pub fn github_close_pr(harness: Harness, 
   owner: string,
   repo: string,
   pull_number: int | string,
   comment: string? = nil,
   options: GitHubCallOptions = {},
 ) {
-  return close_pr(owner + "/" + repo, pull_number, comment, options)
+  return close_pr(harness, owner + "/" + repo, pull_number, comment, options)
 }
 
 /**
@@ -1278,13 +1271,13 @@ fn __github_repo_matches(payload, repo) {
  * @effects: []
  * @errors: []
  */
-pub fn deployment_status_source(repo: string, deployment_id: any, options: GitHubCallOptions = {}) {
+pub fn deployment_status_source(harness: Harness, repo: string, deployment_id: any, options: GitHubCallOptions = {}) {
   return {
     label: "github.deployment_status:" + repo + "#" + to_string(deployment_id),
     prefers_push: true,
     poll: { _ ->
       const path = "/repos/" + repo + "/deployments/" + to_string(deployment_id) + "/statuses"
-      const statuses = api_call(path, "GET", nil, options)
+      const statuses = api_call(harness, path, "GET", nil, options)
       let latest = nil
       if len(statuses) > 0 {
         latest = statuses[0]
@@ -1313,12 +1306,12 @@ pub fn deployment_status_source(repo: string, deployment_id: any, options: GitHu
  * @effects: []
  * @errors: []
  */
-pub fn check_run_source(repo: string, check_run_id: any, options: GitHubCallOptions = {}) {
+pub fn check_run_source(harness: Harness, repo: string, check_run_id: any, options: GitHubCallOptions = {}) {
   return {
     label: "github.check_run:" + repo + "#" + to_string(check_run_id),
     prefers_push: true,
     poll: { _ ->
-      const check_run = api_call(
+      const check_run = api_call(harness, 
         "/repos/" + repo + "/check-runs/" + to_string(check_run_id),
         "GET",
         nil,
@@ -1349,7 +1342,7 @@ pub fn check_run_source(repo: string, check_run_id: any, options: GitHubCallOpti
  * @effects: []
  * @errors: []
  */
-pub fn pull_request_merged_source(
+pub fn pull_request_merged_source(harness: Harness, 
   repo: string,
   number: int | string,
   options: GitHubCallOptions = {},
@@ -1358,7 +1351,7 @@ pub fn pull_request_merged_source(
     label: "github.pull_request_merged:" + repo + "#" + to_string(number),
     prefers_push: true,
     poll: { _ ->
-      const pull_request = api_call(
+      const pull_request = api_call(harness, 
         "/repos/" + repo + "/pulls/" + to_string(number),
         "GET",
         nil,
@@ -1409,15 +1402,14 @@ fn __github_wait_options(options: GitHubWaitOptions, source, condition) {
  * @effects: []
  * @errors: []
  */
-pub fn wait_until_deploy_succeeds(
+pub fn wait_until_deploy_succeeds(harness: Harness, 
   repo: string,
   deployment_id: any,
   options: GitHubWaitOptions = {},
 ) {
-  return wait_for(
-    __github_wait_options(
+  return wait_for(harness, __github_wait_options(
       options,
-      deployment_status_source(repo, deployment_id, options),
+      deployment_status_source(harness, repo, deployment_id, options),
       { state -> state.state == "success" },
     ),
   )
@@ -1429,11 +1421,10 @@ pub fn wait_until_deploy_succeeds(
  * @effects: []
  * @errors: []
  */
-pub fn wait_until_ci_green(repo: string, check_run_id: any, options: GitHubWaitOptions = {}) {
-  return wait_for(
-    __github_wait_options(
+pub fn wait_until_ci_green(harness: Harness, repo: string, check_run_id: any, options: GitHubWaitOptions = {}) {
+  return wait_for(harness, __github_wait_options(
       options,
-      check_run_source(repo, check_run_id, options),
+      check_run_source(harness, repo, check_run_id, options),
       { state -> state.status == "completed" && state.conclusion == "success" },
     ),
   )
@@ -1445,11 +1436,10 @@ pub fn wait_until_ci_green(repo: string, check_run_id: any, options: GitHubWaitO
  * @effects: []
  * @errors: []
  */
-pub fn wait_until_pr_merged(repo: string, number: int | string, options: GitHubWaitOptions = {}) {
-  return wait_for(
-    __github_wait_options(
+pub fn wait_until_pr_merged(harness: Harness, repo: string, number: int | string, options: GitHubWaitOptions = {}) {
+  return wait_for(harness, __github_wait_options(
       options,
-      pull_request_merged_source(repo, number, options),
+      pull_request_merged_source(harness, repo, number, options),
       { state -> state.merged },
     ),
   )

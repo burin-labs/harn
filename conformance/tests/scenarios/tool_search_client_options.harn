@@ -4,7 +4,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * Advanced client-mode options: explicit local fallback, budgeted
  * promotion with oldest-eviction, and a custom synthetic tool name.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -24,7 +24,7 @@ pipeline test(task) {
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "Searching via the custom name.",
         tool_calls: [{id: "s1", name: "find_a_tool", arguments: {query: "deploy"}}],
@@ -32,8 +32,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "deploy",
+      const result = agent_loop(harness, "deploy",
         nil,
         {
           provider: "mock",
@@ -43,7 +42,7 @@ pipeline test(task) {
           max_iterations: 3,
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(contains(calls[0].system, "find_a_tool"), "custom synthetic tool name advertised")
       assert(
         !contains(calls[0].system, "__harn_tool_search"),
@@ -91,7 +90,7 @@ pipeline test(task) {
     {parameters: {x: {type: "string"}}, defer_loading: true, handler: { _ -> "c" }},
   )
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "alpha",
         tool_calls: [{id: "q1", name: "__harn_tool_search", arguments: {query: "alpha"}}],
@@ -107,8 +106,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      agent_loop(
-        "go",
+      agent_loop(harness, "go",
         nil,
         {
           provider: "mock",
@@ -118,12 +116,12 @@ pipeline test(task) {
           max_iterations: 5,
         },
       )
-      const calls2 = llm_mock_calls()
+      const calls2 = harness.llm.mock_calls()
       const last_system = calls2[len(calls2) - 1].system
       assert(contains(last_system, "gamma"), "most-recently-promoted tool is visible")
       assert(!contains(last_system, "alpha"), "oldest promotion evicted under budget")
       assert(!contains(last_system, "beta"), "second-oldest promotion evicted under budget")
-      log("tool_search_client_options tests passed")
+      harness.stdio.println("tool_search_client_options tests passed")
     },
   )
 }

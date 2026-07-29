@@ -3,39 +3,39 @@
 // and escapes, and return the raw slice or nil.
 import { extract_first_json_object, extract_first_json_value } from "std/llm/safe"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Leading prose + trailing garbage.
-  __io_println(extract_first_json_object("Sure! {\"a\": 1} hope that helps"))
-  __io_println("---")
+  harness.stdio.println(extract_first_json_object("Sure! {\"a\": 1} hope that helps"))
+  harness.stdio.println("---")
   // Nested objects: outermost balanced span wins.
-  __io_println(extract_first_json_object("{\"outer\": {\"inner\": [1, 2]}} tail"))
-  __io_println("---")
+  harness.stdio.println(extract_first_json_object("{\"outer\": {\"inner\": [1, 2]}} tail"))
+  harness.stdio.println("---")
   // Braces inside string literals do not affect depth.
-  __io_println(extract_first_json_object("{\"text\": \"a } brace and a { brace\"}"))
-  __io_println("---")
+  harness.stdio.println(extract_first_json_object("{\"text\": \"a } brace and a { brace\"}"))
+  harness.stdio.println("---")
   // Escaped quotes inside strings do not end the string.
-  __io_println(extract_first_json_object("{\"quote\": \"she said \\\"}\\\" loudly\"}"))
-  __io_println("---")
+  harness.stdio.println(extract_first_json_object("{\"quote\": \"she said \\\"}\\\" loudly\"}"))
+  harness.stdio.println("---")
   // Unbalanced first opener is skipped; the later balanced object is found.
-  __io_println(extract_first_json_object("broken { oops... {\"ok\": true}"))
-  __io_println("---")
+  harness.stdio.println(extract_first_json_object("broken { oops... {\"ok\": true}"))
+  harness.stdio.println("---")
   // No JSON at all -> nil.
-  __io_println("[" + to_string(extract_first_json_object("no json here") ?? "nil") + "]")
-  __io_println("---")
+  harness.stdio.println("[" + to_string(extract_first_json_object("no json here") ?? "nil") + "]")
+  harness.stdio.println("---")
   // nil input -> nil.
-  __io_println("[" + to_string(extract_first_json_object(nil) ?? "nil") + "]")
-  __io_println("---")
+  harness.stdio.println("[" + to_string(extract_first_json_object(nil) ?? "nil") + "]")
+  harness.stdio.println("---")
   // Value variant: array opens first.
-  __io_println(extract_first_json_value("rows: [1, 2, 3] (3 total)"))
-  __io_println("---")
+  harness.stdio.println(extract_first_json_value("rows: [1, 2, 3] (3 total)"))
+  harness.stdio.println("---")
   // Value variant: object opens first even when an array follows.
-  __io_println(extract_first_json_value("{\"a\": 1} then [2]"))
-  __io_println("---")
+  harness.stdio.println(extract_first_json_value("{\"a\": 1} then [2]"))
+  harness.stdio.println("---")
   // Object variant ignores arrays entirely.
-  __io_println("[" + to_string(extract_first_json_object("[1, 2, 3]") ?? "nil") + "]")
-  __io_println("---")
+  harness.stdio.println("[" + to_string(extract_first_json_object("[1, 2, 3]") ?? "nil") + "]")
+  harness.stdio.println("---")
   // Non-ASCII prose prefix (smart quotes, accented é, emoji): char indices
   // must still line up with the returned slice. Also guards the O(n^2) perf
   // fix that materializes chars() instead of subscripting the string.
-  __io_println(extract_first_json_object("“Résumé” 😀 here: {\"a\": 1} done"))
+  harness.stdio.println(extract_first_json_object("“Résumé” 😀 here: {\"a\": 1} done"))
 }

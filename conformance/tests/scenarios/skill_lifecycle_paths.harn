@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * the `working_files:` option feeds the path-glob matcher — and a
  * path hit alone is enough to activate.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   skill infra_touch {
     description "Infrastructure work"
     paths ["infra/**", "Dockerfile"]
@@ -23,10 +23,9 @@ pipeline test(task) {
     skill_find(docs_touch, "docs_touch") ?? {},
   )
   with_llm_script(
-    [llm_text("All done.")],
+    harness.llm, [llm_text("All done.")],
     { ->
-      const result = agent_loop(
-        "fix the edge case",
+      const result = agent_loop(harness, "fix the edge case",
         nil,
         {
           provider: "mock",
@@ -52,12 +51,12 @@ pipeline test(task) {
       }
       assert(infra_activated, "path-match alone activates infra_touch")
       assert(!docs_activated, "non-matching skill stays inactive")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(
         contains(calls[0].system, "infra_touch"),
         "infra_touch prompt body weaves into system prompt",
       )
-      log("skill_lifecycle_paths tests passed")
+      harness.stdio.println("skill_lifecycle_paths tests passed")
     },
   )
 }

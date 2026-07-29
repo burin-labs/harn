@@ -1,21 +1,21 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const snake_dict = {first_name: "Ada", last_name: "Lovelace", birth_year: 1815}
   // Named builtin passed by reference (no lambda wrapper needed)
   const camel_dict = snake_dict.rekeyed(snake_to_camel)
-  log(camel_dict["firstName"])
-  log(camel_dict["lastName"])
-  log(camel_dict["birthYear"])
+  harness.stdio.println(camel_dict["firstName"])
+  harness.stdio.println(camel_dict["lastName"])
+  harness.stdio.println(camel_dict["birthYear"])
   // Original unchanged
-  log(snake_dict["first_name"])
+  harness.stdio.println(snake_dict["first_name"])
   // map_keys alias
   const upper_dict = snake_dict.map_keys({ k -> uppercase(k) })
-  log(upper_dict["FIRST_NAME"])
+  harness.stdio.println(upper_dict["FIRST_NAME"])
   // map_values continues to work
   const doubled = {a: 1, b: 2}.map_values({ v -> v * 2 })
-  log(doubled["a"])
-  log(doubled["b"])
+  harness.stdio.println(doubled["a"])
+  harness.stdio.println(doubled["b"])
   // Key collision: last write wins (sorted key order deterministic)
   const collided = {aa: 1, bb: 2}.rekeyed({ k -> "same" })
-  log(collided["same"])
-  log(len(keys(collided)))
+  harness.stdio.println(collided["same"])
+  harness.stdio.println(len(keys(collided)))
 }

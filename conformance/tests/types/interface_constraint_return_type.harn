@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface Sizable {
     fn size(self) -> int
   }
@@ -11,7 +11,7 @@ pipeline test(task) {
     }
   }
   fn measure<T>(item: T) where T: Sizable {
-    log(item.size())
+    harness.stdio.println(item.size())
   }
   measure(Box({width: 3}))
 }

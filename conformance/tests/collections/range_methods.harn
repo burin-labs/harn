@@ -1,24 +1,24 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // .first() and .last() on an inclusive range
   const inc = 1 to 5
-  log(inc.first())
-  log(inc.last())
+  harness.stdio.println(inc.first())
+  harness.stdio.println(inc.last())
   // .first() and .last() on an exclusive range
   const exc = 0 to 5 exclusive
-  log(exc.first())
-  log(exc.last())
+  harness.stdio.println(exc.first())
+  harness.stdio.println(exc.last())
   // Empty ranges — first/last return nil
   const empty = 5 to 1
-  log(empty.first())
-  log(empty.last())
-  log(empty.len())
+  harness.stdio.println(empty.first())
+  harness.stdio.println(empty.last())
+  harness.stdio.println(empty.len())
   // .contains(x) is O(1)
-  log(inc.contains(3))
-  log(inc.contains(5))
-  log(inc.contains(6))
-  log(exc.contains(0))
-  log(exc.contains(5))
+  harness.stdio.println(inc.contains(3))
+  harness.stdio.println(inc.contains(5))
+  harness.stdio.println(inc.contains(6))
+  harness.stdio.println(exc.contains(0))
+  harness.stdio.println(exc.contains(5))
   // .to_list() materializes on demand
-  log((1 to 4).to_list())
-  log((0 to 3 exclusive).to_list())
+  harness.stdio.println((1 to 4).to_list())
+  harness.stdio.println((0 to 3 exclusive).to_list())
 }

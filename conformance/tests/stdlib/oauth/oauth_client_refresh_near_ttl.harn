@@ -9,9 +9,9 @@ import { client, token } from "std/oauth/client"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const topic = "oauth.client.audit"
-  const cursor = event_log.latest(topic) ?? 0
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
   const _ = mock_time(1700000000000)
   const store = memory()
   const provider = custom(
@@ -34,8 +34,7 @@ pipeline test(task) {
       token_type: "Bearer",
     },
   )
-  const cli = client(
-    provider,
+  const cli = client(harness,  harness, provider,
     {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
   )
   http_mock_clear()
@@ -66,11 +65,11 @@ pipeline test(task) {
   const after = store.get("mockTTL")
   assert_eq(after.access_token, "ACCESS-2", "storage rotated")
   assert_eq(after.refresh_token, "REFRESH-2", "storage rotated refresh token")
-  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const logged = stream.next().value
   assert_eq(logged.kind, "token_refreshed", "audit kind near TTL")
   assert_eq(logged.payload.reason, "ttl_threshold", "audit reason for pre-refresh")
   assert(logged.payload.next?.access_token == nil, "audit never includes new access token")
   const _ = unmock_time()
-  log("oauth client refresh near ttl ok")
+  harness.stdio.println("oauth client refresh near ttl ok")
 }

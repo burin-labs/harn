@@ -1,6 +1,6 @@
 type OpenOptions = {foo?: string, ...rest}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   fn direct(options: {foo?: string, ...rest}? = nil) -> string {
     const opts: {foo?: string, ...rest} = options ?? {}
     return to_string(opts.foo ?? "missing")
@@ -9,8 +9,8 @@ pipeline default() {
     const opts: OpenOptions = options ?? {}
     return to_string(opts.foo ?? "missing")
   }
-  __io_println("direct:nil=" + direct(nil))
-  __io_println("direct:dict=" + direct({foo: "x", extra: 1}))
-  __io_println("alias:nil=" + aliased(nil))
-  __io_println("alias:dict=" + aliased({foo: "y", extra: 2}))
+  harness.stdio.println("direct:nil=" + direct(nil))
+  harness.stdio.println("direct:dict=" + direct({foo: "x", extra: 1}))
+  harness.stdio.println("alias:nil=" + aliased(nil))
+  harness.stdio.println("alias:dict=" + aliased({foo: "y", extra: 2}))
 }

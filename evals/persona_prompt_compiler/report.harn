@@ -197,21 +197,20 @@ fn main(harness: Harness) -> int {
     model: model,
     split: split,
   }
-  const baseline_rows = eval_ledger_read(common + {commit: baseline_commit}).rows
-  const treatment_rows = eval_ledger_read(common + {commit: treatment_commit}).rows
-  const manifest_path = path_join(source_dir(), "harn.eval.toml")
+  const baseline_rows = harness.runtime.eval_ledger_read(common + {commit: baseline_commit}).rows
+  const treatment_rows = harness.runtime.eval_ledger_read(common + {commit: treatment_commit}).rows
+  const manifest_path = path_join(harness.fs.source_dir(), "harn.eval.toml")
   const raw = eval_pack_manifest(
-    toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()},
+    toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: harness.fs.source_dir()},
   )
-  const manifest = persona_prompt_eval_manifest(
-    raw,
+  const manifest = persona_prompt_eval_manifest(harness,  harness, raw,
     split,
     minimum_trials,
     provider,
     model,
     ledger_path,
   )
-  const identity_plan = eval_ledger_resolve_resume_plan(
+  const identity_plan = harness.runtime.eval_ledger_resolve_resume_plan(
     manifest,
     common + {commit: baseline_commit},
   )

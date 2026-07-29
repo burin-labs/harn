@@ -1101,17 +1101,27 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &__PERSONA_OUTPUT_STYLE_DEF,
 ];
 
-#[harn_builtin(category = "step_runtime", runtime_only = true)]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    category = "step_runtime", runtime_only = true
+)]
 fn __register_step(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     register_step_from_dict(args.to_vec())
 }
 
-#[harn_builtin(category = "step_runtime", runtime_only = true)]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    category = "step_runtime", runtime_only = true
+)]
 fn __register_persona(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     register_persona_from_dict(args.to_vec())
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__persona_output_style(function?: string) -> dict",
     category = "step_runtime",
     runtime_only = true

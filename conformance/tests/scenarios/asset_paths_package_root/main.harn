@@ -6,23 +6,23 @@
 import { render_deep_alias } from "chain/00/caller"
 import "subdir/deeply/nested/caller"
 
-pipeline test() {
+pipeline test(harness: Harness) {
   // Top-level caller — anchor is the project root next to harn.toml.
-  const direct = render_prompt("@/prompts/greeting.harn.prompt", {who: "Alice"})
-  __io_println(direct)
-  const aliased = render_prompt("@partials/greeting.harn.prompt", {who: "Alice"})
-  __io_println(aliased)
+  const direct = harness.fs.render_prompt("@/prompts/greeting.harn.prompt", {who: "Alice"})
+  harness.stdio.println(direct)
+  const aliased = harness.fs.render_prompt("@partials/greeting.harn.prompt", {who: "Alice"})
+  harness.stdio.println(aliased)
   // Deeply nested caller using the same `@/...` string — same output.
-  __io_println(render_root("Alice"))
-  __io_println(render_alias("Alice"))
+  harness.stdio.println(render_root(harness, "Alice"))
+  harness.stdio.println(render_alias(harness, "Alice"))
   // The leaf closure is reached through ten sibling imports whose raw
   // joined path accumulates `..` components. The alias still resolves
   // from this project's harn.toml.
-  __io_println(render_deep_alias("Alice"))
+  harness.stdio.println(render_deep_alias(harness.fs, "Alice"))
   // Templates can include each other via `@/...` regardless of nesting.
-  __io_println(render_wrapper())
-  // Inline templates passed to `render_string(...)` honor `@/...` in
+  harness.stdio.println(render_wrapper(harness))
+  // Inline templates passed to `harness.fs.render_template(...)` honor `@/...` in
   // their `{{ include }}` directives too — same project-root anchor.
   const inline = "inline -> {{ include \"@/prompts/greeting.harn.prompt\" }}"
-  __io_println(render_string(inline, {who: "Carol"}))
+  harness.stdio.println(harness.fs.render_template(inline, {who: "Carol"}))
 }

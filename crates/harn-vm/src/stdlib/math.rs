@@ -14,7 +14,11 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
     vm.set_global("e", VmValue::Float(std::f64::consts::E));
 }
 
-#[harn_builtin(sig = "abs(value: number) -> number", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "abs(value: number) -> number", category = "math"
+)]
 fn abs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Int(i64::MIN) => Ok(VmValue::Float(9_223_372_036_854_775_808.0)),
@@ -24,7 +28,11 @@ fn abs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "min(...args: any) -> any", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "min(...args: any) -> any", category = "math"
+)]
 fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         match (&args[0], &args[1]) {
@@ -40,7 +48,11 @@ fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "max(...args: any) -> any", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "max(...args: any) -> any", category = "math"
+)]
 fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         match (&args[0], &args[1]) {
@@ -56,7 +68,11 @@ fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "floor(value: number) -> int", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "floor(value: number) -> int", category = "math"
+)]
 fn floor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => finite_float_to_i64(n.floor()).map(VmValue::Int),
@@ -65,7 +81,11 @@ fn floor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "ceil(value: number) -> int", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "ceil(value: number) -> int", category = "math"
+)]
 fn ceil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => finite_float_to_i64(n.ceil()).map(VmValue::Int),
@@ -75,6 +95,8 @@ fn ceil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "round(value: number | decimal, digits?: int) -> number | decimal",
     category = "math"
 )]
@@ -188,7 +210,11 @@ fn round_decimal_to_digits(x: rust_decimal::Decimal, digits: i64) -> rust_decima
     }
 }
 
-#[harn_builtin(sig = "sqrt(...args: any) -> any", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "sqrt(...args: any) -> any", category = "math"
+)]
 fn sqrt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => Ok(VmValue::Float(n.sqrt())),
@@ -199,7 +225,11 @@ fn sqrt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "pow(...args: any) -> any", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "pow(...args: any) -> any", category = "math"
+)]
 fn pow_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         match (&args[0], &args[1]) {
@@ -235,7 +265,11 @@ fn pow_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "rng_seed(...args: any) -> any", category = "math")]
+#[harn_builtin(
+    exposure = "harness.random.seed",
+    effects = ["random.mutate@const=generator"],
+    sig = "rng_seed(...args: any) -> any", category = "math"
+)]
 fn rng_seed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::SeedableRng;
     let seed = args
@@ -247,7 +281,11 @@ fn rng_seed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     }))
 }
 
-#[harn_builtin(sig = "random(...args: any) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "random(...args: any) -> float", category = "math"
+)]
 fn random_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::RngExt;
     let val: f64 = if let Some(VmValue::Rng(handle)) = args.first() {
@@ -258,7 +296,11 @@ fn random_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     Ok(VmValue::Float(val))
 }
 
-#[harn_builtin(sig = "random_int(...args: any) -> any", category = "math")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "random_int(...args: any) -> any", category = "math"
+)]
 fn random_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::RngExt;
     let (rng, min_idx) = match args.first() {
@@ -285,7 +327,11 @@ fn random_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "random_choice(...args: any) -> any", category = "math")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "random_choice(...args: any) -> any", category = "math"
+)]
 fn random_choice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::RngExt;
     let (rng, list_idx) = match args.first() {
@@ -306,7 +352,11 @@ fn random_choice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(items[idx].clone())
 }
 
-#[harn_builtin(sig = "random_shuffle(...args: any) -> list", category = "math")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "random_shuffle(...args: any) -> list", category = "math"
+)]
 fn random_shuffle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::seq::SliceRandom;
     let (rng, list_idx) = match args.first() {
@@ -325,7 +375,11 @@ fn random_shuffle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::List(std::sync::Arc::new(shuffled)))
 }
 
-#[harn_builtin(sig = "mean(...args: any) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "mean(...args: any) -> float", category = "math"
+)]
 fn mean_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let values = numeric_list_arg(args, "mean")?;
     if values.is_empty() {
@@ -336,7 +390,11 @@ fn mean_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     ))
 }
 
-#[harn_builtin(sig = "median(...args: any) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "median(...args: any) -> float", category = "math"
+)]
 fn median_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut values = non_empty_numeric_list_arg(args, "median")?;
     values.sort_by(|a, b| a.total_cmp(b));
@@ -348,7 +406,11 @@ fn median_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     }
 }
 
-#[harn_builtin(sig = "percentile(...args: any) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "percentile(...args: any) -> float", category = "math"
+)]
 fn percentile_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut values = non_empty_numeric_list_arg(args, "percentile")?;
     let p = number_arg(args.get(1), "percentile")?;
@@ -373,14 +435,22 @@ fn percentile_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::Float(lo + weight * (hi - lo)))
 }
 
-#[harn_builtin(sig = "variance(...args: any) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "variance(...args: any) -> float", category = "math"
+)]
 fn variance_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let values = non_empty_numeric_list_arg(args, "variance")?;
     let sample = args.get(1).is_some_and(VmValue::is_truthy);
     Ok(VmValue::Float(variance_for(&values, sample, "variance")?))
 }
 
-#[harn_builtin(sig = "stddev(...args: any) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "stddev(...args: any) -> float", category = "math"
+)]
 fn stddev_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let values = non_empty_numeric_list_arg(args, "stddev")?;
     let sample = args.get(1).is_some_and(VmValue::is_truthy);
@@ -389,57 +459,101 @@ fn stddev_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     ))
 }
 
-#[harn_builtin(sig = "sin(...args: any) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "sin(...args: any) -> float", category = "math"
+)]
 fn sin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::sin)
 }
 
-#[harn_builtin(sig = "cos(value: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "cos(value: number) -> float", category = "math"
+)]
 fn cos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::cos)
 }
 
-#[harn_builtin(sig = "tan(...args: any) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tan(...args: any) -> float", category = "math"
+)]
 fn tan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::tan)
 }
 
-#[harn_builtin(sig = "asin(value: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "asin(value: number) -> float", category = "math"
+)]
 fn asin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::asin)
 }
 
-#[harn_builtin(sig = "acos(value: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "acos(value: number) -> float", category = "math"
+)]
 fn acos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::acos)
 }
 
-#[harn_builtin(sig = "atan(value: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "atan(value: number) -> float", category = "math"
+)]
 fn atan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::atan)
 }
 
-#[harn_builtin(sig = "log2(value: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "log2(value: number) -> float", category = "math"
+)]
 fn log2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::log2)
 }
 
-#[harn_builtin(sig = "log10(value: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "log10(value: number) -> float", category = "math"
+)]
 fn log10_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::log10)
 }
 
-#[harn_builtin(sig = "ln(value: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "ln(value: number) -> float", category = "math"
+)]
 fn ln_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::ln)
 }
 
-#[harn_builtin(sig = "exp(value: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "exp(value: number) -> float", category = "math"
+)]
 fn exp_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     unary_float(args, f64::exp)
 }
 
-#[harn_builtin(sig = "atan2(y: number, x: number) -> float", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "atan2(y: number, x: number) -> float", category = "math"
+)]
 fn atan2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         let y = match &args[0] {
@@ -458,7 +572,11 @@ fn atan2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "sign(...args: any) -> int", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "sign(...args: any) -> int", category = "math"
+)]
 fn sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Int(n) => Ok(VmValue::Int(n.signum())),
@@ -484,7 +602,11 @@ fn sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "is_nan(value: number) -> bool", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "is_nan(value: number) -> bool", category = "math"
+)]
 fn is_nan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => Ok(VmValue::Bool(n.is_nan())),
@@ -492,7 +614,11 @@ fn is_nan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     }
 }
 
-#[harn_builtin(sig = "is_infinite(value: number) -> bool", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "is_infinite(value: number) -> bool", category = "math"
+)]
 fn is_infinite_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => Ok(VmValue::Bool(n.is_infinite())),
@@ -501,6 +627,8 @@ fn is_infinite_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__range__(start: int, end: int, inclusive?: bool) -> any",
     runtime_only = true,
     category = "math"
@@ -518,7 +646,11 @@ fn range_internal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 // `range()` is Python-style and always half-open. Use `a to b [exclusive]`
 // for human-readable inclusive math.
-#[harn_builtin(sig = "range(...args: any) -> list", category = "math")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "range(...args: any) -> list", category = "math"
+)]
 fn range_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (start, end) = match args.len() {
         1 => {

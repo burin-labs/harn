@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   fn registry() {
     return {items: ["x"]}
   }
@@ -10,5 +10,5 @@ pipeline default() {
     return registry
   }
   const r = build({items: ["a", "b"]})
-  __io_println(to_string(len(r.items)))
+  harness.stdio.println(to_string(len(r.items)))
 }

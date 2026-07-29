@@ -1,9 +1,8 @@
 // `done_sentinel` must be a non-empty string or nil. Passing an int is a
 // runtime type error, which guards against silent foot-guns where users
 // expect a number to coerce or be ignored.
-pipeline test(task) {
-  agent_loop(
-    "do work",
+pipeline test(harness: Harness, task) {
+  agent_loop(harness, "do work",
     nil,
     {provider: "mock", loop_until_done: true, max_iterations: 1, done_sentinel: 42},
   )

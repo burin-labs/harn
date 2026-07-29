@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * replays remain faithful and future versions can adopt the semantic
  * without another round of schema plumbing.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -66,9 +66,9 @@ pipeline test(task) {
   // `mode: "native"`, the OpenAI meta-tool collects distinct
   // namespaces into its `namespaces` field.
   with_llm_script(
-    [llm_text("ack")],
+    harness.llm, [llm_text("ack")],
     { ->
-      llm_call(
+      harness.llm.call(
         "x",
         nil,
         {
@@ -78,7 +78,7 @@ pipeline test(task) {
           tool_search: {variant: "bm25", mode: "native"},
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const meta = calls[0].tools[0]
       assert(meta.type == "tool_search", "meta-tool in slot 0")
       const ns_list = meta.namespaces
@@ -109,7 +109,7 @@ pipeline test(task) {
         true
       }
       assert(caught_bad_ns, "non-string namespace must be rejected")
-      log("tool_search_namespace tests passed")
+      harness.stdio.println("tool_search_namespace tests passed")
     },
   )
 }

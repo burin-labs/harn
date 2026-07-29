@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // mcp_tools should accept a tool_registry (renamed from mcp_serve)
   let tools = tool_registry()
   tools = tool_define(
@@ -13,5 +13,5 @@ pipeline test(task) {
   )
   const result = mcp_tools(tools)
   assert(result == nil, "mcp_tools should return nil")
-  __io_println("mcp_tools accepted tool_registry with annotations")
+  harness.stdio.println("mcp_tools accepted tool_registry with annotations")
 }

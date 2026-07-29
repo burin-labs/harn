@@ -1,6 +1,6 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Original pre-v2 syntax must still work unchanged.
-  __io_println(render("fixtures/template/backcompat.prompt", {name: "Alice", greeting: "howdy"}))
-  __io_println("---")
-  __io_println(render("fixtures/template/backcompat.prompt", {name: "Bob"}))
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/backcompat.prompt", {name: "Alice", greeting: "howdy"}))
+  harness.stdio.println("---")
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/backcompat.prompt", {name: "Bob"}))
 }

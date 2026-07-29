@@ -1,26 +1,26 @@
 import { replace_bytes, replace_text, replace_text_result } from "std/fs"
 
-pipeline main() {
-  const root = path_join(harness.fs.temp_dir(), "harn-fs-replace-" + uuid_v7())
+pipeline main(harness: Harness) {
+  const root = path_join(harness.fs.temp_dir(), "harn-fs-replace-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   defer {
     harness.fs.delete(root)
   }
   const text_path = path_join(root, "state.txt")
-  const created = replace_text(text_path, "one")
-  __io_println(created.status)
-  __io_println(created.durability)
+  const created = replace_text(harness.fs, text_path, "one")
+  harness.stdio.println(created.status)
+  harness.stdio.println(created.durability)
   const stale = replace_text(
-    text_path,
+    harness.fs, text_path,
     "two",
     {expected_sha256: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
   )
-  __io_println(stale.status)
-  __io_println(harness.fs.read_text(text_path))
-  const unchanged = replace_text_result(text_path, "one", {expected_sha256: created.after_sha256})
-  __io_println(is_ok(unchanged))
-  __io_println(unwrap(unchanged).status)
+  harness.stdio.println(stale.status)
+  harness.stdio.println(harness.fs.read_text(text_path))
+  const unchanged = replace_text_result(harness.fs, text_path, "one", {expected_sha256: created.after_sha256})
+  harness.stdio.println(is_ok(unchanged))
+  harness.stdio.println(unwrap(unchanged).status)
   const bytes_path = path_join(root, "state.bin")
-  __io_println(replace_bytes(bytes_path, bytes_from_string("binary")).status)
-  __io_println(harness.fs.read_bytes(bytes_path) == bytes_from_string("binary"))
+  harness.stdio.println(replace_bytes(harness.fs, bytes_path, bytes_from_string("binary")).status)
+  harness.stdio.println(harness.fs.read_bytes(bytes_path) == bytes_from_string("binary"))
 }

@@ -1,8 +1,8 @@
 import { with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "should not be consumed",
         input_tokens: 1,
@@ -12,7 +12,7 @@ pipeline test(task) {
     ],
     { ->
       const expensive = try {
-        llm_call(
+        harness.llm.call(
           "budget preflight",
           nil,
           {
@@ -24,25 +24,25 @@ pipeline test(task) {
         )
       }
       const expensive_err = unwrap_err(expensive)
-      __io_println(expensive_err.kind)
-      __io_println(expensive_err.reason)
-      __io_println(expensive_err.category)
-      __io_println(expensive_err.projected_cost_usd > 0.0001)
-      __io_println(len(llm_mock_calls()) == 0)
+      harness.stdio.println(expensive_err.kind)
+      harness.stdio.println(expensive_err.reason)
+      harness.stdio.println(expensive_err.category)
+      harness.stdio.println(expensive_err.projected_cost_usd > 0.0001)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 0)
       const input_limited = try {
-        llm_call(
+        harness.llm.call(
           "this prompt is longer than one estimated token",
           nil,
           {provider: "mock", model: "gpt-4o-mini", max_tokens: 16, budget: {max_input_tokens: 1}},
         )
       }
       const input_err = unwrap_err(input_limited)
-      __io_println(input_err.limit)
-      __io_println(input_err.projected_input_tokens > 1)
+      harness.stdio.println(input_err.limit)
+      harness.stdio.println(input_err.projected_input_tokens > 1)
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "still should not be consumed",
         input_tokens: 1,
@@ -51,8 +51,7 @@ pipeline test(task) {
       },
     ],
     { ->
-      const loop_result = agent_loop(
-        "agent budget preflight",
+      const loop_result = agent_loop(harness, "agent budget preflight",
         nil,
         {
           provider: "mock",
@@ -62,8 +61,8 @@ pipeline test(task) {
           budget: {total_budget_usd: 0.0001},
         },
       )
-      __io_println(loop_result.status)
-      __io_println(len(llm_mock_calls()) == 0)
+      harness.stdio.println(loop_result.status)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 0)
     },
   )
 }

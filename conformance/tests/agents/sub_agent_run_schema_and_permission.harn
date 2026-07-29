@@ -15,12 +15,11 @@ fn write_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [llm_text("{\"callers\":[\"crate::parse_config\",\"cli::parse_config\"]}")],
+    harness.llm, [llm_text("{\"callers\":[\"crate::parse_config\",\"cli::parse_config\"]}")],
     { ->
-      const typed = sub_agent_run(
-        "Find all callers of parse_config.",
+      const typed = sub_agent_run(harness, "Find all callers of parse_config.",
         {
           provider: "mock",
           returns: {
@@ -32,15 +31,14 @@ pipeline main() {
           },
         },
       )
-      __io_println(typed?.ok)
-      __io_println(len(typed?.data?.callers ?? []) == 2)
+      harness.stdio.println(typed?.ok)
+      harness.stdio.println(len(typed?.data?.callers ?? []) == 2)
     },
   )
   with_llm_script(
-    [{tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]}],
+    harness.llm, [{tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]}],
     { ->
-      const denied = sub_agent_run(
-        "Try to write a note.",
+      const denied = sub_agent_run(harness, "Try to write a note.",
         {
           provider: "mock",
           tools: write_tools(),
@@ -49,9 +47,9 @@ pipeline main() {
           max_iterations: 1,
         },
       )
-      __io_println(!denied?.ok)
-      __io_println(denied.error?.category == "permission_denied")
-      __io_println(denied.error?.tool == "write_note")
+      harness.stdio.println(!denied?.ok)
+      harness.stdio.println(denied.error?.category == "permission_denied")
+      harness.stdio.println(denied.error?.tool == "write_note")
     },
   )
 }

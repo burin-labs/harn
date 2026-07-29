@@ -304,8 +304,8 @@ pub fn release_audit_contract_parse(value) -> ReleaseAuditContract? {
   return contract
 }
 
-pub fn release_audit_contract_read(path: string) -> ReleaseAuditContract? {
-  const loaded = read_json_result(path)
+pub fn release_audit_contract_read(harness: Harness, path: string) -> ReleaseAuditContract? {
+  const loaded = read_json_result(harness.fs, path)
   if !is_ok(loaded) {
     return nil
   }
@@ -615,13 +615,13 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const contract_path = trim(parsed?.contract ?? "")
-  const contract = release_audit_contract_read(contract_path)
+  const contract = release_audit_contract_read(harness, contract_path)
   guard contract != nil else {
-    const loaded = read_json_result(contract_path)
+    const loaded = read_json_result(harness.fs, contract_path)
     const errors = if is_ok(loaded) {
       schema_validator(contract_schema()).report(unwrap(loaded)).errors.map(
         { error -> json_stringify(error) },
@@ -633,14 +633,14 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(
       json_stringify({ok: false, reason: "invalid_release_audit_contract", errors: errors}),
     )
-    exit(1)
+    harness.runtime.exit(1)
   }
   const ci_path = trim(parsed?.check_ci ?? "")
   if ci_path != "" {
-    const report = release_audit_ci_contract_report(contract, read_yaml(ci_path, nil))
+    const report = release_audit_ci_contract_report(contract, read_yaml(harness.fs, ci_path, nil))
     if !report.ok {
       harness.stdio.println(json_stringify(report))
-      exit(1)
+      harness.runtime.exit(1)
     }
   }
   const receipt_path = trim(parsed?.receipt ?? "")
@@ -654,7 +654,7 @@ fn main(harness: Harness) {
       return nil
     }
     harness.stdio.eprintln("--head-sha is required when rendering an audit plan")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if receipt_path == "" {
     if source_only {
@@ -664,7 +664,7 @@ fn main(harness: Harness) {
     print_plan(harness, release_audit_full_plan(contract, "no_receipt", expected_sha), shell_plan)
     return nil
   }
-  const loaded = read_json_result(receipt_path)
+  const loaded = read_json_result(harness.fs, receipt_path)
   const plan = if is_ok(loaded) {
     release_audit_receipt_plan(contract, unwrap(loaded), expected_sha, warm_binary_sha256)
   } else {

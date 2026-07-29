@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   gen fn inner(base: int) -> Stream<int> {
     emit base
     emit base + 1
@@ -9,7 +9,7 @@ pipeline test(task) {
   }
   for stream in outer() {
     for n in stream {
-      __io_println(n)
+      harness.stdio.println(n)
     }
   }
 }

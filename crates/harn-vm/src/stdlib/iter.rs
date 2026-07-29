@@ -163,6 +163,8 @@ pub(crate) fn register_iter_builtins(vm: &mut Vm) {
 // We express that as a hand-built signature via `sig_expr` so the `iter`, `Generator`, etc.
 // named types reach the parser as `Ty::Named("iter")`, matching the original entry.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "iter(value: list | dict | string | set | range | iter | Generator | stream | channel) -> iter",
     category = "iter"
 )]
@@ -174,7 +176,11 @@ fn iter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     iter_from_value(v)
 }
 
-#[harn_builtin(sig = "pair(...args: any) -> pair", category = "iter")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "pair(...args: any) -> pair", category = "iter"
+)]
 fn pair_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() != 2 {
         return Err(VmError::TypeError(format!(
@@ -192,7 +198,10 @@ fn pair_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 // so we build their `BuiltinSignature` literals directly with `sig_expr`.
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.map", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.map", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_map_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -205,7 +214,10 @@ fn stream_map_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.filter", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.filter", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -218,7 +230,10 @@ fn stream_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.tap", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.tap", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_tap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -231,7 +246,10 @@ fn stream_tap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.scan", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.scan", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -246,7 +264,10 @@ fn stream_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.take", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.take", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_take_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -259,7 +280,10 @@ fn stream_take_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.take_until", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.take_until", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_take_until_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -272,7 +296,10 @@ fn stream_take_until_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.merge", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@dynamic"],
+    sig_expr = BuiltinSignature::variadic("stream.merge", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -294,7 +321,10 @@ fn stream_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.interleave", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@dynamic"],
+    sig_expr = BuiltinSignature::variadic("stream.interleave", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_interleave_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -318,7 +348,10 @@ fn stream_interleave_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.zip", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@dynamic"],
+    sig_expr = BuiltinSignature::variadic("stream.zip", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_zip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -334,7 +367,10 @@ fn stream_zip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.broadcast", &[Param::new("args", TY_ANY)], TY_LIST),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.broadcast", &[Param::new("args", TY_ANY
+)], TY_LIST),
     category = "iter"
 )]
 fn stream_broadcast_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -346,7 +382,10 @@ fn stream_broadcast_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.race", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@dynamic"],
+    sig_expr = BuiltinSignature::variadic("stream.race", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_race_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -368,7 +407,10 @@ fn stream_race_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.throttle", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0", "clock.observe@const=monotonic"],
+    sig_expr = BuiltinSignature::variadic("stream.throttle", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_throttle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -383,7 +425,10 @@ fn stream_throttle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.debounce", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0", "clock.observe@const=monotonic"],
+    sig_expr = BuiltinSignature::variadic("stream.debounce", &[Param::new("args", TY_ANY
+)], TY_ANY),
     category = "iter"
 )]
 fn stream_debounce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -396,7 +441,10 @@ fn stream_debounce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.collect", &[Param::new("args", TY_ANY)], TY_LIST),
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.collect", &[Param::new("args", TY_ANY
+)], TY_LIST),
     kind = "async",
     category = "iter"
 )]
@@ -413,7 +461,10 @@ async fn stream_collect_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.fold", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.fold", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "iter"
 )]
@@ -434,7 +485,10 @@ async fn stream_fold_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("stream.first", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
+    sig_expr = BuiltinSignature::variadic("stream.first", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "iter"
 )]
@@ -448,6 +502,8 @@ async fn stream_first_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.parallel_race",
+    effects = ["worker.observe@dynamic"],
     sig = "parallel_race(...args: any) -> any",
     kind = "async",
     category = "iter"

@@ -223,7 +223,7 @@ impl LoadgenConfig {
         };
         format!(
             r#"import "std/postgres"
-let admin = pg_pool("env:{url_env}", {{max_connections: 1}})
+let admin = harness.postgres.pool("env:{url_env}", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_execute(admin, "SET search_path TO \"{schema}\"", [])
@@ -240,7 +240,7 @@ pg_close(admin)
     fn teardown_script(&self, schema: &str) -> String {
         format!(
             r#"import "std/postgres"
-let admin = pg_pool("env:{url_env}", {{max_connections: 1}})
+let admin = harness.postgres.pool("env:{url_env}", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(admin)
 "#,
@@ -251,7 +251,7 @@ pg_close(admin)
     fn worker_script(&self, schema: &str) -> String {
         worker_script(
             &format!(
-                "pg_pool(\"env:{}\", {{max_connections: {}}})",
+                "harness.postgres.pool(\"env:{}\", {{max_connections: {}}})",
                 self.url_env, self.pool_max_connections
             ),
             &probe_query(schema),

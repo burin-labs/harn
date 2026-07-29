@@ -5,28 +5,28 @@ import { llm_text, with_llm_script } from "std/testing"
  * before post-turn control logic decides whether the loop should continue.
  * They are advisory and are meant for enqueueing background work.
  */
-const post_seen = atomic(0)
+const post_seen = harness.runtime.atomic(0)
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "post_turn",
     { event ->
       if event?.session_id == event?.session?.id
         && type_of(event?.iteration) == "int"
         && type_of(event?.tool_count) == "int" {
-        atomic_add(post_seen, 1)
+        harness.runtime.atomic_add(post_seen, 1)
       }
       return nil
     },
   )
   with_llm_script(
-    [llm_text("ok")],
+    harness.llm, [llm_text("ok")],
     { ->
-      const result = agent_loop("hi", nil, {provider: "mock"})
-      __io_println(result.status)
-      __io_println(atomic_get(post_seen))
-      clear_session_hooks()
+      const result = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(post_seen))
+      harness.agent.clear_session_hooks()
     },
   )
 }

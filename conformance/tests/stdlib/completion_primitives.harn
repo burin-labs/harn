@@ -9,7 +9,7 @@ import {
   completion_usage_record,
 } from "std/agent/completions"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const context = completion_context(
     {
       surface: "editor",
@@ -61,29 +61,28 @@ pipeline test(task) {
       replacement_range: {location: 42, length: 0},
     },
   )
-  const shown = completion_shown_event(
-    proposal,
+  const shown = completion_shown_event(harness,  harness, proposal,
     context,
     {input_tokens: 100, output_tokens: 4, cost_usd: 0.0},
     {record_id: "rec-1", session_id: "session-1", prompt: "private prompt", policy: policy},
   )
-  const decision = completion_decision_event(shown, "accepted", {decision_latency_ms: 120})
-  const trust = completion_trust_record(decision)
+  const decision = completion_decision_event(harness, shown, "accepted", {decision_latency_ms: 120})
+  const trust = completion_trust_record(harness, decision)
   const usage = completion_usage_record(shown, {recorded_at_ms: 12345})
-  log(context.schema)
-  log(context.language)
-  log(policy.prompt_recording)
-  log(allowed.allowed)
-  log(blocked.reason_code)
-  log(camel_policy.prompt_recording)
-  log(camel_blocked.reason_code)
-  log(proposal.kind)
-  log(starts_with(shown.context_hash, "sha256:"))
-  log(shown.prompt == nil)
-  log(starts_with(shown.prompt_hash, "sha256:"))
-  log(decision.accepted)
-  log(trust.actor_id)
-  log(trust.outcome)
-  log(usage.surface)
-  log(usage.input_tokens)
+  harness.stdio.println(context.schema)
+  harness.stdio.println(context.language)
+  harness.stdio.println(policy.prompt_recording)
+  harness.stdio.println(allowed.allowed)
+  harness.stdio.println(blocked.reason_code)
+  harness.stdio.println(camel_policy.prompt_recording)
+  harness.stdio.println(camel_blocked.reason_code)
+  harness.stdio.println(proposal.kind)
+  harness.stdio.println(starts_with(shown.context_hash, "sha256:"))
+  harness.stdio.println(shown.prompt == nil)
+  harness.stdio.println(starts_with(shown.prompt_hash, "sha256:"))
+  harness.stdio.println(decision.accepted)
+  harness.stdio.println(trust.actor_id)
+  harness.stdio.println(trust.outcome)
+  harness.stdio.println(usage.surface)
+  harness.stdio.println(usage.input_tokens)
 }

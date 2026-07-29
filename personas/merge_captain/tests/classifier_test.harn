@@ -46,7 +46,7 @@ fn _checks(success) {
   return [{name: "ci", status: "completed", conclusion: "failure"}]
 }
 
-pipeline test_clean_pr_with_passing_checks_enqueues(task) {
+pipeline test_clean_pr_with_passing_checks_enqueues(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(_pr({}), _checks(true), policy.required_checks)
   const result = classify(obs, policy, "discovered")
@@ -54,7 +54,7 @@ pipeline test_clean_pr_with_passing_checks_enqueues(task) {
   assert_eq(result.action, "enqueue_merge_queue")
 }
 
-pipeline test_draft_waits(task) {
+pipeline test_draft_waits(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(_pr({draft: true}), [], policy.required_checks)
   const result = classify(obs, policy, "discovered")
@@ -62,7 +62,7 @@ pipeline test_draft_waits(task) {
   assert_eq(result.action, "wait")
 }
 
-pipeline test_dirty_pr_comments(task) {
+pipeline test_dirty_pr_comments(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(
     _pr({mergeable: false, mergeable_state: "dirty"}),
@@ -74,7 +74,7 @@ pipeline test_dirty_pr_comments(task) {
   assert_eq(result.action, "comment")
 }
 
-pipeline test_behind_branch_updates(task) {
+pipeline test_behind_branch_updates(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(
     _pr({behind_by: 4, mergeable_state: "behind"}),
@@ -86,7 +86,7 @@ pipeline test_behind_branch_updates(task) {
   assert_eq(result.action, "update_branch")
 }
 
-pipeline test_failing_ci_with_local_verify_repairs(task) {
+pipeline test_failing_ci_with_local_verify_repairs(harness: Harness, task) {
   const policy = _policy({local_verification: [{name: "t", command: "true"}]})
   const obs = from_github(_pr({}), _checks(false), policy.required_checks)
   const result = classify(obs, policy, "waiting_checks")
@@ -94,7 +94,7 @@ pipeline test_failing_ci_with_local_verify_repairs(task) {
   assert_eq(result.action, "run_local_verification")
 }
 
-pipeline test_failing_ci_without_local_verify_escalates(task) {
+pipeline test_failing_ci_without_local_verify_escalates(harness: Harness, task) {
   const policy = _policy({local_verification: []})
   const obs = from_github(_pr({}), _checks(false), policy.required_checks)
   const result = classify(obs, policy, "waiting_checks")
@@ -102,7 +102,7 @@ pipeline test_failing_ci_without_local_verify_escalates(task) {
   assert_eq(result.action, "escalate_human")
 }
 
-pipeline test_blocked_label_escalates(task) {
+pipeline test_blocked_label_escalates(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(_pr({labels: ["do-not-merge"]}), _checks(true), policy.required_checks)
   const result = classify(obs, policy, "queued")
@@ -110,7 +110,7 @@ pipeline test_blocked_label_escalates(task) {
   assert_eq(result.action, "escalate_human")
 }
 
-pipeline test_missing_approvals_requests_review(task) {
+pipeline test_missing_approvals_requests_review(harness: Harness, task) {
   const policy = _policy({required_review_count: 2})
   const obs = from_github(_pr({approvals: 1}), _checks(true), policy.required_checks)
   const result = classify(obs, policy, "discovered")
@@ -118,7 +118,7 @@ pipeline test_missing_approvals_requests_review(task) {
   assert_eq(result.action, "request_review")
 }
 
-pipeline test_pending_checks_wait(task) {
+pipeline test_pending_checks_wait(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(_pr({}), [], policy.required_checks)
   const result = classify(obs, policy, "discovered")
@@ -126,7 +126,7 @@ pipeline test_pending_checks_wait(task) {
   assert_eq(result.action, "wait")
 }
 
-pipeline test_merged_observation_marks_merged(task) {
+pipeline test_merged_observation_marks_merged(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(
     _pr({merged: true, state: "closed"}),
@@ -138,7 +138,7 @@ pipeline test_merged_observation_marks_merged(task) {
   assert_eq(result.action, "mark_merged")
 }
 
-pipeline test_closed_observation_archives(task) {
+pipeline test_closed_observation_archives(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(_pr({merged: false, state: "closed"}), [], policy.required_checks)
   const result = classify(obs, policy, "queued")
@@ -146,7 +146,7 @@ pipeline test_closed_observation_archives(task) {
   assert_eq(result.action, "archive")
 }
 
-pipeline test_in_merge_queue_holds_state(task) {
+pipeline test_in_merge_queue_holds_state(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(_pr({in_merge_queue: true}), _checks(true), policy.required_checks)
   const result = classify(obs, policy, "queued")
@@ -154,20 +154,20 @@ pipeline test_in_merge_queue_holds_state(task) {
   assert_eq(result.action, "wait")
 }
 
-pipeline test_active_merge_group_visible(task) {
+pipeline test_active_merge_group_visible(harness: Harness, task) {
   const policy = _policy({})
   const obs = from_github(_pr({merge_group_active: true}), _checks(true), policy.required_checks)
   const result = classify(obs, policy, "queued")
   assert_eq(result.state, "merge_group_running")
 }
 
-pipeline test_verify_rejects_illegal_edge(task) {
+pipeline test_verify_rejects_illegal_edge(harness: Harness, task) {
   const edge = verify("merged", {state: "queued", action: "wait", reason: "x", evidence: {}})
   assert(!edge.ok)
   assert(edge.error.contains("illegal transition"))
 }
 
-pipeline test_verify_accepts_legal_edge(task) {
+pipeline test_verify_accepts_legal_edge(harness: Harness, task) {
   const edge = verify(
     "waiting_checks",
     {state: "queued", action: "wait", reason: "x", evidence: {}},

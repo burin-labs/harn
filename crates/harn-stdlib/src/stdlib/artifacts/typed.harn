@@ -218,7 +218,7 @@ fn __malformed_failure(path: string, raw: string, detail: string) -> ArtifactRea
  * @errors: []
  * @example: read_versioned_json_result(path, agent_result_contract())
  */
-pub fn read_versioned_json_result<T>(
+pub fn read_versioned_json_result<T>(harness: Harness, 
   path: string,
   versioned: VersionedContract<T>,
 ) -> Result<VersionedValue<T>, ArtifactReadFailure> {
@@ -339,14 +339,14 @@ pub fn decode_event(
  *
  * @effects: [fs.read]
  * @errors: []
- * @example: read_typed_events_page_result(path, transcript_event_spec(), {max_records: 128})
+ * @example: read_typed_events_page_result(harness, path, transcript_event_spec(), {max_records: 128})
  */
-pub fn read_typed_events_page_result(
+pub fn read_typed_events_page_result(harness: Harness, 
   path: string,
   spec: DiscriminatedSpec,
   options: JsonlPageOptions = {},
 ) -> TypedEventPageResult {
-  const source = read_jsonl_page_result(path, options)
+  const source = read_jsonl_page_result(harness, path, options)
   if !is_ok(source) {
     return Err(unwrap_err(source))
   }

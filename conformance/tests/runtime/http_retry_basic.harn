@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   http_mock(
     "GET",
     "https://api.example.com/retry-basic",
@@ -11,6 +11,6 @@ pipeline test(task) {
   const calls = http_mock_calls()
   assert_eq(resp.status, 200)
   assert_eq(len(calls), 3)
-  log("basic status: " + to_string(resp.status))
-  log("basic calls: " + to_string(len(calls)))
+  harness.stdio.println("basic status: " + to_string(resp.status))
+  harness.stdio.println("basic calls: " + to_string(len(calls)))
 }

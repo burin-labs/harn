@@ -621,6 +621,8 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "log(message: any) -> nil",
     category = "io",
     doc = "Write a Harn-prefixed message to stdout."
@@ -632,6 +634,8 @@ fn log_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "color(text: any, color: string) -> string",
     category = "io",
     doc = "Apply an ANSI foreground color when color output is enabled."
@@ -648,6 +652,8 @@ fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "bold(text: any) -> string",
     category = "io",
     doc = "Apply ANSI bold styling when color output is enabled."
@@ -663,6 +669,8 @@ fn bold_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "dim(text: any) -> string",
     category = "io",
     doc = "Apply ANSI dim styling when color output is enabled."
@@ -678,6 +686,8 @@ fn dim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "set_color_mode(mode: string) -> nil",
     category = "io",
     doc = "Set ANSI color handling to auto, always, or never."
@@ -701,6 +711,8 @@ fn set_color_mode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__ansi_enabled(stream?: string) -> bool",
     category = "io",
     doc = "Return whether ANSI styling is enabled for stdin, stdout, or stderr."
@@ -721,6 +733,8 @@ fn ansi_enabled_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "read_stdin() -> string",
     category = "io",
     doc = "Read all remaining stdin as a string."
@@ -764,6 +778,8 @@ pub(crate) fn read_line_structured_value(args: &[VmValue]) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__io_read_line(options?: any) -> dict",
     category = "io",
     doc = "Read one line from stdin with structured status metadata."
@@ -773,6 +789,8 @@ fn io_read_line_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__io_write_stderr(message: any) -> nil",
     category = "io",
     doc = "Write text to stderr without appending a newline."
@@ -784,6 +802,8 @@ fn io_write_stderr_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__io_write_stdout(message: any) -> nil",
     category = "io",
     doc = "Write text to stdout without appending a newline."
@@ -795,6 +815,8 @@ fn io_write_stdout_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__io_print(...args: any) -> nil",
     category = "io",
     doc = "Internal compatibility bridge for stdout without newline."
@@ -806,6 +828,8 @@ fn io_print_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__io_println(...args: any) -> nil",
     category = "io",
     doc = "Internal compatibility bridge for stdout with newline."
@@ -817,6 +841,8 @@ fn io_println_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__io_eprint(message: any) -> nil",
     category = "io",
     doc = "Internal compatibility bridge for stderr without newline."
@@ -828,6 +854,8 @@ fn io_eprint_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__io_eprintln(message: any) -> nil",
     category = "io",
     doc = "Internal compatibility bridge for stderr with newline."
@@ -839,6 +867,8 @@ fn io_eprintln_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "is_stdin_tty() -> bool",
     category = "io",
     doc = "Return whether stdin is attached to a terminal."
@@ -848,6 +878,8 @@ fn is_stdin_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "is_stdout_tty() -> bool",
     category = "io",
     doc = "Return whether stdout is attached to a terminal."
@@ -857,6 +889,8 @@ fn is_stdout_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "is_stderr_tty() -> bool",
     category = "io",
     doc = "Return whether stderr is attached to a terminal."
@@ -866,6 +900,8 @@ fn is_stderr_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "mock_stdin(text: string) -> nil",
     category = "io",
     doc = "Install mocked stdin text for tests."
@@ -878,6 +914,8 @@ fn mock_stdin_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "unmock_stdin() -> nil",
     category = "io",
     doc = "Clear mocked stdin text and line state."
@@ -889,6 +927,8 @@ fn unmock_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "mock_tty(stream: string, is_tty: bool) -> nil",
     category = "io",
     doc = "Override terminal detection for stdin, stdout, or stderr."
@@ -915,6 +955,8 @@ fn mock_tty_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "unmock_tty() -> nil",
     category = "io",
     doc = "Clear terminal detection overrides."
@@ -925,6 +967,8 @@ fn unmock_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "capture_stderr_start() -> nil",
     category = "io",
     doc = "Start capturing stderr into an in-memory buffer."
@@ -936,6 +980,8 @@ fn capture_stderr_start_builtin(_args: &[VmValue], _out: &mut String) -> Result<
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "capture_stderr_take() -> string",
     category = "io",
     doc = "Stop stderr capture and return the buffered text."
@@ -947,6 +993,8 @@ fn capture_stderr_take_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "uuid() -> string",
     category = "io",
     doc = "Generate a random version 4 UUID."
@@ -958,6 +1006,8 @@ fn uuid_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "uuid_parse(value: any) -> string",
     category = "io",
     doc = "Parse and normalize a UUID string, or return nil."
@@ -971,6 +1021,8 @@ fn uuid_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "uuid_v7() -> string",
     category = "io",
     doc = "Generate a time-ordered version 7 UUID."
@@ -982,6 +1034,8 @@ fn uuid_v7_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "uuid_v5(namespace: string, name: string) -> string",
     category = "io",
     doc = "Generate a deterministic version 5 UUID."
@@ -1003,6 +1057,8 @@ fn uuid_v5_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "uuid_nil() -> string",
     category = "io",
     doc = "Return the nil UUID."
@@ -1060,6 +1116,8 @@ pub(crate) fn read_password_legacy_value(prompt: &str) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "log_debug(message: any, fields?: dict) -> nil",
     category = "io",
     doc = "Write a structured debug log line."
@@ -1070,6 +1128,8 @@ fn log_debug_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "log_info(message: any, fields?: dict) -> nil",
     category = "io",
     doc = "Write a structured info log line."
@@ -1080,6 +1140,8 @@ fn log_info_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "log_warn(message: any, fields?: dict) -> nil",
     category = "io",
     doc = "Write a structured warning log line."
@@ -1090,6 +1152,8 @@ fn log_warn_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "log_error(message: any, fields?: dict) -> nil",
     category = "io",
     doc = "Write a structured error log line."
@@ -1100,6 +1164,8 @@ fn log_error_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "log_set_level(level: string) -> nil",
     category = "io",
     doc = "Set the minimum structured log level."
@@ -1120,6 +1186,8 @@ fn log_set_level_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "progress(phase: string, message: string, progress_or_options?: any, total?: int) -> nil",
     category = "io",
     doc = "Write a human-readable progress log line."
@@ -1130,6 +1198,8 @@ fn progress_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "log_json(key: string, value?: any) -> nil",
     category = "io",
     doc = "Write a structured JSON log line."

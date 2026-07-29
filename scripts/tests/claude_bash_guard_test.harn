@@ -6,7 +6,7 @@ fn payload(command: string) -> string {
 }
 
 @test
-pipeline test_program_of_sees_through_env_prefixes(task) {
+pipeline test_program_of_sees_through_env_prefixes(harness: Harness, task) {
   assert_eq(program_of("cargo test"), "cargo")
   assert_eq(program_of("  cargo   test  "), "cargo")
   assert_eq(program_of("env -u HARN_EGRESS_BLOCK_PRIVATE cargo test"), "cargo")
@@ -17,7 +17,7 @@ pipeline test_program_of_sees_through_env_prefixes(task) {
 }
 
 @test
-pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(task) {
+pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(harness: Harness, task) {
   for verb in ["build", "check", "clippy", "fmt", "test", "nextest", "bench"] {
     assert(
       cargo_violation("cargo " + verb + " -p harn-vm") != "",
@@ -30,7 +30,7 @@ pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(task) {
 }
 
 @test
-pipeline test_one_off_cargo_verbs_pass_through(task) {
+pipeline test_one_off_cargo_verbs_pass_through(harness: Harness, task) {
   // No Makefile owner: these are inspection commands, not build/test lanes.
   for command in ["cargo tree -p harn-vm", "cargo add serde", "cargo --version"] {
     assert_eq(cargo_violation(command), "")
@@ -38,7 +38,7 @@ pipeline test_one_off_cargo_verbs_pass_through(task) {
 }
 
 @test
-pipeline test_cargo_is_caught_anywhere_in_a_pipeline(task) {
+pipeline test_cargo_is_caught_anywhere_in_a_pipeline(harness: Harness, task) {
   assert(cargo_violation("cd /repo && cargo test") != "")
   assert(cargo_violation("make build; cargo test | tail") != "")
   // A `cargo` substring inside another word is not a cargo call.
@@ -46,7 +46,7 @@ pipeline test_cargo_is_caught_anywhere_in_a_pipeline(task) {
 }
 
 @test
-pipeline test_piping_a_slow_command_into_a_filter_is_denied(task) {
+pipeline test_piping_a_slow_command_into_a_filter_is_denied(harness: Harness, task) {
   for command in [
     "cargo test -p harn-vm | grep FAILED",
     "make test | tail -20",
@@ -61,7 +61,7 @@ pipeline test_piping_a_slow_command_into_a_filter_is_denied(task) {
 }
 
 @test
-pipeline test_redirecting_first_is_allowed(task) {
+pipeline test_redirecting_first_is_allowed(harness: Harness, task) {
   for command in [
     "make test > /tmp/out.log 2>&1; grep FAILED /tmp/out.log",
     "cargo test 2>&1 | tee /tmp/out.log | tail",
@@ -72,14 +72,14 @@ pipeline test_redirecting_first_is_allowed(task) {
 }
 
 @test
-pipeline test_fast_commands_may_pipe_freely(task) {
+pipeline test_fast_commands_may_pipe_freely(harness: Harness, task) {
   for command in ["git status --short | head", "ls -la | grep harn", "echo hi | wc -l"] {
     assert_eq(discarded_output_violation(command), "")
   }
 }
 
 @test
-pipeline test_decision_only_gates_bash_and_honors_the_escape_hatch(task) {
+pipeline test_decision_only_gates_bash_and_honors_the_escape_hatch(harness: Harness, task) {
   assert(!decision(payload("cargo test")).allow)
   assert(decision(payload("HARN_ALLOW_RAW_CARGO=1 cargo test")).allow)
   assert(decision(payload("make test")).allow)

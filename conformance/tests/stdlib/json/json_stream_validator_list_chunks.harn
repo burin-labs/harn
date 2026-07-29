@@ -1,8 +1,8 @@
 import { stream_validator } from "std/json"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const validator = stream_validator({type: "list", items: {type: "int"}})
-  __io_println(validator.feed("[1,").variant)
-  __io_println(validator.feed("2,3]").variant)
-  __io_println(validator.value()[2])
+  harness.stdio.println(validator.feed("[1,").variant)
+  harness.stdio.println(validator.feed("2,3]").variant)
+  harness.stdio.println(validator.value()[2])
 }

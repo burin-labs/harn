@@ -4,9 +4,9 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 import { delegated_claims, token_type } from "std/oauth/token_exchange"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const topic = "oauth.client.audit"
-  const cursor = event_log.latest(topic) ?? 0
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
   const provider = custom(
     {
       id: "rfc8693",
@@ -15,8 +15,7 @@ pipeline test(task) {
       default_scopes: [],
     },
   )
-  const cli = client(
-    provider,
+  const cli = client(harness,  harness, provider,
     {
       client_id: "rs08",
       client_secret: "long-secure-random-secret",
@@ -86,12 +85,12 @@ pipeline test(task) {
   assert_eq(round_trip.sub, "user@example.com", "RFC nested act subject")
   assert_eq(round_trip.act.sub, "https://service16.example.com", "RFC nested act current actor")
   assert_eq(round_trip.act.act.sub, "https://service77.example.com", "RFC nested act prior actor")
-  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const logged = stream.next().value
   assert_eq(logged.kind, "token_exchanged", "audit event kind")
   assert_eq(logged.payload.provider, "rfc8693", "audit provider")
   assert_eq(logged.payload.mode, "delegation", "audit mode")
   assert_eq(logged.payload.next.has_access_token, true, "audit records access presence")
   assert(logged.payload.next?.access_token == nil, "audit does not leak exchanged token")
-  log("oauth token exchange rfc8693 ok")
+  harness.stdio.println("oauth token exchange rfc8693 ok")
 }

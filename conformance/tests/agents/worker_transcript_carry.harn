@@ -1,17 +1,16 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [llm_text("first carried answer"), llm_text("second reset answer")],
+    harness.llm, [llm_text("first carried answer"), llm_text("second reset answer")],
     { ->
-      const worker = sub_agent_run(
-        "Answer the first prompt.",
+      const worker = sub_agent_run(harness, "Answer the first prompt.",
         {provider: "mock", background: true, carry: {transcript_mode: "reset"}},
       )
       const first = wait_agent(worker)
       const first_snapshot = json_parse(harness.fs.read_text(first?.snapshot_path))
-      __io_println(first_snapshot?.carry_policy?.transcript_mode == "reset")
-      __io_println(
+      harness.stdio.println(first_snapshot?.carry_policy?.transcript_mode == "reset")
+      harness.stdio.println(
         contains(
           json_stringify(first_snapshot?.transcript?.messages ?? []),
           "first carried answer",
@@ -21,8 +20,8 @@ pipeline main() {
       const second = wait_agent(resumed)
       const second_snapshot = json_parse(harness.fs.read_text(second?.snapshot_path))
       const second_messages = json_stringify(second_snapshot?.transcript?.messages ?? [])
-      __io_println(contains(second_messages, "second reset answer"))
-      __io_println(!contains(second_messages, "first carried answer"))
+      harness.stdio.println(contains(second_messages, "second reset answer"))
+      harness.stdio.println(!contains(second_messages, "first carried answer"))
     },
   )
 }

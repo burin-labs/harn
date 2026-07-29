@@ -4,17 +4,17 @@ import "std/triggers"
  * CH-02 (#1872): session-scoped selector matches an emit on the same
  * session scope but ignores emits on the default tenant scope.
  */
-fn handle_session(event) {
+fn handle_session(harness: Harness, event) {
   const payload = event.provider_payload
-  emit_channel("ch.session.fired", {scope: payload.scope, name: payload.name})
+  harness.channels.append("ch.session.fired", {scope: payload.scope, name: payload.name})
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-session-" + unique,
       kind: "channel.emit",
@@ -33,11 +33,11 @@ pipeline test(task) {
     },
   )
   // Tenant-scoped emit must NOT fire the session-scoped trigger.
-  const _ = emit_channel("sess.input", {n: 1})
+  const _ = harness.channels.append("sess.input", {n: 1})
   // Session-scoped emit fires the trigger.
-  const _ = emit_channel("session:sess.input", {n: 2})
-  const fired = channel_events("ch.session.fired")
-  __io_println(len(fired))
-  __io_println(fired[0].payload.scope)
-  __io_println(fired[0].payload.name)
+  const _ = harness.channels.append("session:sess.input", {n: 2})
+  const fired = harness.channels.events("ch.session.fired")
+  harness.stdio.println(len(fired))
+  harness.stdio.println(fired[0].payload.scope)
+  harness.stdio.println(fired[0].payload.name)
 }

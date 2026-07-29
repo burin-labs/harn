@@ -5,6 +5,7 @@
 //! remaining helpers reduce expressions to the literal values, paths, and
 //! summaries the invariants can reason about.
 
+use harn_builtin_meta::{BuiltinContract, EffectAccess, EffectKind, ResourceSelector};
 use harn_parser::{Node, SNode};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 
@@ -20,23 +21,19 @@ pub(crate) fn scoped_policy_call(name: &str) -> Option<PolicyScopeKind> {
     }
 }
 
-/// Collect the literal-arg vector for a synthesized harness CallSemantics
-/// node. Mirrors the equivalent line in [`classify_call`] but avoids
-/// re-running the classifier — the caller already supplies the ambient
-/// name to dispatch through.
 pub(crate) fn literal_args(args: &[SNode]) -> Vec<LiteralValue> {
     args.iter().map(literal_value).collect()
 }
 
-/// If `object` is the `harness.<sub_handle>` chain and `method` maps
-/// to an ambient builtin via the per-sub-handle dispatch table, return
-/// the sub-handle name and the ambient builtin to attribute the call
-/// to. Returns `None` for arbitrary method calls so the existing
-/// pass-through walk continues to handle them.
+/// Resolve a root Harness method to its manifest entry. No legacy builtin
+/// name is reconstructed: the typed contract is the semantic owner.
 pub(crate) fn harness_sub_handle_for(
     object: &SNode,
     method: &str,
-) -> Option<(&'static str, &'static str)> {
+) -> Option<(
+    &'static str,
+    &'static harn_builtin_registry::BuiltinManifestEntry,
+)> {
     let (sub_handle, root) = match &object.node {
         Node::PropertyAccess { object, property }
         | Node::OptionalPropertyAccess { object, property } => (property.as_str(), object.as_ref()),
@@ -48,107 +45,27 @@ pub(crate) fn harness_sub_handle_for(
     if receiver != "harness" && receiver != "_harness" {
         return None;
     }
-    crate::call_semantics::HARNESS_SUB_HANDLES
-        .iter()
-        .find(|slug| **slug == sub_handle)
-        .and_then(|slug| {
-            harn_parser::harness_methods::harness_sub_handle_ambient(slug, method)
-                .map(|ambient| (*slug, ambient))
-        })
+    let entry = harn_parser::builtin_signatures::capability_method_entry(sub_handle, method)?;
+    let harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, .. } =
+        entry.contract.exposure
+    else {
+        return None;
+    };
+    Some((capability.field_name(), entry))
 }
 
 pub(crate) fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
     let literal_args = args.iter().map(literal_value).collect::<Vec<_>>();
-    let mut display_name = name.to_string();
+    let display_name = name.to_string();
     let classification = match name {
         "request_approval" => CallClassification::ApprovalGate,
         "llm_budget_remaining" | "llm_budget" => CallClassification::BudgetRead,
         "egress_policy" => CallClassification::PolicyGate(PolicyScopeKind::Egress),
         "command_policy_push" => CallClassification::PolicyPush(PolicyScopeKind::Command),
         "command_policy_pop" => CallClassification::PolicyPop(PolicyScopeKind::Command),
-        _ if crate::call_semantics::is_workspace_mutation(name) => {
-            let path = literal_args
-                .first()
-                .and_then(LiteralValue::as_str)
-                .map(str::to_string);
-            capability_classification(vec![CapabilityEffect::new(
-                Capability::WorkspaceMutation,
-                name,
-                path,
-            )])
-        }
-        "copy_file" => {
-            let path = literal_args
-                .get(1)
-                .and_then(LiteralValue::as_str)
-                .map(str::to_string);
-            capability_classification(vec![CapabilityEffect::new(
-                Capability::WorkspaceMutation,
-                name,
-                path,
-            )])
-        }
-        "exec" | "exec_at" | "shell" | "shell_at" | "spawn_captured" => {
-            capability_classification(vec![CapabilityEffect::new(
-                Capability::CommandExecution,
-                name,
-                None,
-            )])
-        }
-        "mcp_call" => {
-            let tool_name = literal_args
-                .get(1)
-                .and_then(LiteralValue::as_str)
-                .map(str::to_string);
-            if let Some(tool_name) = tool_name {
-                display_name = tool_name.clone();
-                classify_tool_call(&tool_name, literal_args.get(2))
-            } else {
-                capability_classification(vec![CapabilityEffect::new(
-                    Capability::ConnectorAccess,
-                    name,
-                    None,
-                )])
-            }
-        }
-        "host_tool_call" => {
-            let tool_name = literal_args
-                .first()
-                .and_then(LiteralValue::as_str)
-                .map(str::to_string);
-            if let Some(tool_name) = tool_name {
-                display_name = tool_name.clone();
-                classify_tool_call(&tool_name, literal_args.get(1))
-            } else {
-                capability_classification(vec![CapabilityEffect::new(
-                    Capability::ConnectorAccess,
-                    name,
-                    None,
-                )])
-            }
-        }
-        "host_call" => classify_host_call(literal_args.first()),
-        _ if is_model_call(name) => capability_classification(vec![CapabilityEffect::new(
-            Capability::ModelCall,
-            name,
-            None,
-        )]),
-        _ if is_worker_dispatch(name) => capability_classification(vec![CapabilityEffect::new(
-            Capability::WorkerDispatch,
-            name,
-            None,
-        )]),
-        _ if is_network_call(name) => capability_classification(vec![CapabilityEffect::new(
-            Capability::NetworkAccess,
-            name,
-            None,
-        )]),
-        _ if name.starts_with("mcp_") => capability_classification(vec![CapabilityEffect::new(
-            Capability::ConnectorAccess,
-            name,
-            None,
-        )]),
-        _ => CallClassification::Other,
+        _ => harn_builtin_registry::builtin_contract(name)
+            .map(|contract| classify_contract(name, contract, &literal_args))
+            .unwrap_or(CallClassification::Other),
     };
 
     CallSemantics {
@@ -159,90 +76,68 @@ pub(crate) fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
     }
 }
 
-fn classify_tool_call(tool_name: &str, args: Option<&LiteralValue>) -> CallClassification {
-    let normalized = tool_name.to_ascii_lowercase();
-    let path = args.and_then(extract_path_from_tool_args);
-    let mut effects = vec![CapabilityEffect::new(
-        Capability::ConnectorAccess,
-        tool_name,
-        None,
-    )];
-    if matches!(
-        normalized.as_str(),
-        "write_file"
-            | "copy_file"
-            | "delete_file"
-            | "mkdir"
-            | "apply_edit"
-            | "write"
-            | "edit"
-            | "delete"
-            | "move"
-            | "rename"
-            | "patch"
-    ) || normalized.contains("append")
-        || normalized.contains("write")
-        || normalized.contains("edit")
-        || normalized.contains("delete")
-        || normalized.contains("move")
-        || normalized.contains("rename")
-        || normalized.contains("patch")
-    {
-        effects.push(CapabilityEffect::new(
-            Capability::WorkspaceMutation,
-            tool_name,
-            path,
-        ));
-    }
-    if normalized.contains("exec")
-        || normalized.contains("shell")
-        || normalized.contains("run")
-        || normalized.contains("push_pr")
-        || normalized.contains("create_pr")
-        || normalized.contains("deploy")
-    {
-        effects.push(CapabilityEffect::new(
-            Capability::CommandExecution,
-            tool_name,
-            None,
-        ));
-    }
+pub(crate) fn classify_contract(
+    operation: &str,
+    contract: &BuiltinContract,
+    args: &[LiteralValue],
+) -> CallClassification {
+    let effects = contract
+        .effects
+        .iter()
+        .map(|spec| {
+            let capability = capability_for_effect(spec.kind, spec.access);
+            let path = spec
+                .resources
+                .iter()
+                .find_map(|selector| resolve_resource(selector, args));
+            CapabilityEffect::from_contract(capability, operation, path, spec.access)
+        })
+        .collect();
     capability_classification(effects)
 }
 
-fn classify_host_call(name: Option<&LiteralValue>) -> CallClassification {
-    let Some(operation) = name.and_then(LiteralValue::as_str) else {
-        return capability_classification(vec![CapabilityEffect::new(
-            Capability::ConnectorAccess,
-            "host_call",
-            None,
-        )]);
-    };
-    if operation == "process.exec" || operation.starts_with("process.") {
-        return capability_classification(vec![CapabilityEffect::new(
-            Capability::CommandExecution,
-            operation,
-            None,
-        )]);
+fn capability_for_effect(kind: EffectKind, access: EffectAccess) -> Capability {
+    match kind {
+        EffectKind::Fs if access == EffectAccess::Read => Capability::FilesystemRead,
+        EffectKind::Fs => Capability::WorkspaceMutation,
+        EffectKind::Process => Capability::CommandExecution,
+        EffectKind::Network => Capability::NetworkAccess,
+        EffectKind::Llm => Capability::ModelCall,
+        EffectKind::Tool | EffectKind::Host => Capability::ConnectorAccess,
+        EffectKind::Worker => Capability::WorkerDispatch,
+        EffectKind::Stdio => Capability::Stdio,
+        EffectKind::Env => Capability::Environment,
+        EffectKind::Clock => Capability::Clock,
+        EffectKind::Random => Capability::Random,
+        EffectKind::Secret => Capability::Secret,
+        EffectKind::Observability => Capability::Observability,
+        EffectKind::Channel => Capability::Channel,
+        EffectKind::State => Capability::State,
     }
-    if operation.starts_with("workspace.")
-        && (operation.contains("write")
-            || operation.contains("edit")
-            || operation.contains("delete")
-            || operation.contains("move")
-            || operation.contains("patch"))
-    {
-        return capability_classification(vec![CapabilityEffect::new(
-            Capability::WorkspaceMutation,
-            operation,
-            None,
-        )]);
+}
+
+fn resolve_resource(selector: &ResourceSelector, args: &[LiteralValue]) -> Option<String> {
+    match selector {
+        ResourceSelector::Argument(index) => args
+            .get(*index as usize)
+            .and_then(LiteralValue::as_str)
+            .map(str::to_string),
+        ResourceSelector::Field { argument, path } => {
+            let mut value = args.get(*argument as usize)?;
+            for field in *path {
+                value = value.dict_field(field)?;
+            }
+            value.as_str().map(str::to_string)
+        }
+        ResourceSelector::EachArgument(index) => args
+            .get(*index as usize)
+            .and_then(LiteralValue::list_items)
+            .and_then(|items| items.first())
+            .and_then(LiteralValue::as_str)
+            .map(str::to_string),
+        ResourceSelector::Constant(value) => Some((*value).to_string()),
+        ResourceSelector::Dynamic => None,
     }
-    capability_classification(vec![CapabilityEffect::new(
-        Capability::ConnectorAccess,
-        operation,
-        None,
-    )])
 }
 
 fn capability_classification(effects: Vec<CapabilityEffect>) -> CallClassification {
@@ -253,89 +148,7 @@ fn capability_classification(effects: Vec<CapabilityEffect>) -> CallClassificati
     }
 }
 
-fn is_model_call(name: &str) -> bool {
-    matches!(
-        name,
-        "llm_call"
-            | "llm_call_safe"
-            | "llm_stream_call"
-            | "llm_call_structured"
-            | "llm_call_structured_safe"
-            | "llm_call_structured_result"
-            | "llm_completion"
-            | "agent_llm_turn"
-            | "agent_turn"
-            | "agent_loop"
-    )
-}
-
-fn is_worker_dispatch(name: &str) -> bool {
-    matches!(
-        name,
-        "spawn_agent"
-            | "send_input"
-            | "resume_agent"
-            | "wait_agent"
-            | "close_agent"
-            | "worker_trigger"
-            | "__host_sub_agent_run"
-            | "__host_worker_spawn"
-            | "__host_worker_send_input"
-            | "__host_worker_resume"
-            | "__host_worker_trigger"
-            | "__host_worker_wait"
-            | "__host_worker_close"
-    )
-}
-
-fn is_network_call(name: &str) -> bool {
-    matches!(
-        name,
-        "http_get"
-            | "http_post"
-            | "http_put"
-            | "http_patch"
-            | "http_delete"
-            | "http_request"
-            | "http_download"
-            | "http_session"
-            | "http_session_request"
-            | "http_session_close"
-            | "http_stream_open"
-            | "http_stream_read"
-            | "http_stream_close"
-            | "sse_connect"
-            | "sse_receive"
-            | "sse_close"
-            | "sse_server_response"
-            | "sse_server_send"
-            | "sse_server_heartbeat"
-            | "sse_server_flush"
-            | "sse_server_close"
-            | "sse_server_cancel"
-            | "websocket_accept"
-            | "websocket_connect"
-            | "websocket_send"
-            | "websocket_receive"
-            | "websocket_close"
-            | "websocket_route"
-            | "websocket_server"
-            | "websocket_server_close"
-            | "unix_socket_json_request"
-            | "__net_unix_socket_json_request"
-    )
-}
-
-fn extract_path_from_tool_args(value: &LiteralValue) -> Option<String> {
-    for key in ["path", "dst", "destination", "target"] {
-        if let Some(path) = value.dict_field(key).and_then(LiteralValue::as_str) {
-            return Some(path.to_string());
-        }
-    }
-    None
-}
-
-pub(crate) fn literal_value(node: &SNode) -> LiteralValue {
+pub fn literal_value(node: &SNode) -> LiteralValue {
     match &node.node {
         Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
             LiteralValue::String(value.clone())

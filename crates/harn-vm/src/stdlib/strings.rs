@@ -137,6 +137,8 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "format(template: string, ...rest: any) -> string",
     category = "strings"
 )]
@@ -184,25 +186,39 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     Ok(VmValue::String(arcstr::ArcStr::from(result)))
 }
 
-#[harn_builtin(sig = "trim(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "trim(text: string?) -> string", category = "strings"
+)]
 fn trim_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(s.trim())))
 }
 
-#[harn_builtin(sig = "lowercase(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "lowercase(text: string?) -> string", category = "strings"
+)]
 fn lowercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase())))
 }
 
-#[harn_builtin(sig = "uppercase(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "uppercase(text: string?) -> string", category = "strings"
+)]
 fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase())))
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "split(text: string?, separator?: string) -> list",
     category = "strings"
 )]
@@ -220,6 +236,8 @@ fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "unicode_normalize(text: string?, form?: string) -> string",
     category = "strings"
 )]
@@ -243,7 +261,11 @@ fn unicode_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::String(arcstr::ArcStr::from(normalized)))
 }
 
-#[harn_builtin(sig = "unicode_graphemes(text: string?) -> list", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "unicode_graphemes(text: string?) -> list", category = "strings"
+)]
 fn unicode_graphemes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::List(std::sync::Arc::new(
@@ -254,6 +276,8 @@ fn unicode_graphemes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "str_pad(text: string?, width: int, fill?: string, side?: string) -> string",
     category = "strings"
 )]
@@ -296,6 +320,8 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "starts_with(text: string?, prefix: string?) -> bool",
     category = "strings"
 )]
@@ -306,6 +332,8 @@ fn starts_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "ends_with(text: string?, suffix: string) -> bool",
     category = "strings"
 )]
@@ -316,6 +344,8 @@ fn ends_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "contains(haystack: string | list, needle: any) -> bool",
     category = "strings"
 )]
@@ -336,6 +366,8 @@ fn contains_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "index_of(haystack: string?, needle: string, from?: int) -> int",
     category = "strings"
 )]
@@ -357,6 +389,8 @@ fn index_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "replace(text: string?, old: string, new: string) -> string",
     category = "strings"
 )]
@@ -368,6 +402,8 @@ fn replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "join(items: list, separator?: string) -> string",
     category = "strings"
 )]
@@ -401,6 +437,8 @@ pub(crate) fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "substring(text: string?, start: int, end?: int) -> string",
     category = "strings"
 )]
@@ -413,7 +451,11 @@ fn substring_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     ))))
 }
 
-#[harn_builtin(sig = "chars(text: string?) -> list", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "chars(text: string?) -> list", category = "strings"
+)]
 fn chars_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first() {
         // Borrow the backing `Arc<str>` directly for the common string case so
@@ -424,7 +466,11 @@ fn chars_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "snake_to_camel(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "snake_to_camel(text: string?) -> string", category = "strings"
+)]
 fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(words_to_camel(
@@ -432,7 +478,11 @@ fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     ))))
 }
 
-#[harn_builtin(sig = "snake_to_pascal(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "snake_to_pascal(text: string?) -> string", category = "strings"
+)]
 fn snake_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(words_to_pascal(
@@ -440,7 +490,11 @@ fn snake_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     ))))
 }
 
-#[harn_builtin(sig = "camel_to_snake(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "camel_to_snake(text: string?) -> string", category = "strings"
+)]
 fn camel_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
@@ -448,7 +502,11 @@ fn camel_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     ))))
 }
 
-#[harn_builtin(sig = "pascal_to_snake(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "pascal_to_snake(text: string?) -> string", category = "strings"
+)]
 fn pascal_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
@@ -456,7 +514,11 @@ fn pascal_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     ))))
 }
 
-#[harn_builtin(sig = "kebab_to_camel(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "kebab_to_camel(text: string?) -> string", category = "strings"
+)]
 fn kebab_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(words_to_camel(
@@ -464,7 +526,11 @@ fn kebab_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     ))))
 }
 
-#[harn_builtin(sig = "camel_to_kebab(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "camel_to_kebab(text: string?) -> string", category = "strings"
+)]
 fn camel_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(words_to_kebab(
@@ -472,7 +538,11 @@ fn camel_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     ))))
 }
 
-#[harn_builtin(sig = "snake_to_kebab(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "snake_to_kebab(text: string?) -> string", category = "strings"
+)]
 fn snake_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(words_to_kebab(
@@ -480,7 +550,11 @@ fn snake_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     ))))
 }
 
-#[harn_builtin(sig = "kebab_to_snake(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "kebab_to_snake(text: string?) -> string", category = "strings"
+)]
 fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
@@ -488,19 +562,31 @@ fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     ))))
 }
 
-#[harn_builtin(sig = "pascal_to_camel(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "pascal_to_camel(text: string?) -> string", category = "strings"
+)]
 fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first(&s))))
 }
 
-#[harn_builtin(sig = "camel_to_pascal(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "camel_to_pascal(text: string?) -> string", category = "strings"
+)]
 fn camel_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first(&s))))
 }
 
-#[harn_builtin(sig = "title_case(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "title_case(text: string?) -> string", category = "strings"
+)]
 fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let mut out = String::with_capacity(s.len());
@@ -519,19 +605,31 @@ fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::String(arcstr::ArcStr::from(out)))
 }
 
-#[harn_builtin(sig = "uppercase_first(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "uppercase_first(text: string?) -> string", category = "strings"
+)]
 fn uppercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first(&s))))
 }
 
-#[harn_builtin(sig = "lowercase_first(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "lowercase_first(text: string?) -> string", category = "strings"
+)]
 fn lowercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first(&s))))
 }
 
-#[harn_builtin(sig = "dirname(path: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "dirname(path: string?) -> string", category = "strings"
+)]
 fn dirname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
@@ -543,7 +641,11 @@ fn dirname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     }
 }
 
-#[harn_builtin(sig = "basename(path: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "basename(path: string?) -> string", category = "strings"
+)]
 fn basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
@@ -555,7 +657,11 @@ fn basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     }
 }
 
-#[harn_builtin(sig = "extname(path: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "extname(path: string?) -> string", category = "strings"
+)]
 fn extname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
@@ -569,8 +675,9 @@ fn extname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "render(path: string?, bindings?: dict) -> string",
-    aliases = ["render_prompt"],
     category = "strings"
 )]
 fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -578,6 +685,8 @@ fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "render_string(template: string, bindings?: dict) -> string",
     category = "strings"
 )]
@@ -586,6 +695,8 @@ fn render_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "render_with_provenance(path: string?, bindings?: dict) -> dict",
     category = "strings"
 )]
@@ -603,6 +714,8 @@ fn render_with_provenance_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 // JSONL, or via the monotonic per-session render counter when
 // scrubbing by render ordinal.
 #[harn_builtin(
+    exposure = "harness.agent.prompt_mark_rendered",
+    effects = ["state.write@arg0"],
     sig = "prompt_mark_rendered(prompt_id: string) -> int",
     category = "strings"
 )]
@@ -624,6 +737,8 @@ fn prompt_mark_rendered_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 // LLM-aware frame. Userspace never calls these directly; the stdlib
 // wraps every push in a matching `defer { __pop_llm_render_context() }`.
 #[harn_builtin(
+    exposure = "harness.agent.push_llm_render_context",
+    effects = ["state.mutate@const=llm-render-context"],
     sig = "__push_llm_render_context(provider: string, model?: string) -> bool",
     category = "strings"
 )]
@@ -644,13 +759,19 @@ fn push_llm_render_context_impl(args: &[VmValue], _out: &mut String) -> Result<V
     Ok(VmValue::Bool(true))
 }
 
-#[harn_builtin(sig = "__pop_llm_render_context() -> nil", category = "strings")]
+#[harn_builtin(
+    exposure = "harness.agent.pop_llm_render_context",
+    effects = ["state.mutate@const=llm-render-context"],
+    sig = "__pop_llm_render_context() -> nil", category = "strings"
+)]
 fn pop_llm_render_context_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     crate::stdlib::template::pop_llm_render_context();
     Ok(VmValue::Nil)
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "repeat(text: string?, count: int) -> string",
     category = "strings"
 )]
@@ -667,6 +788,8 @@ fn repeat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "indent(text: string?, prefix?: string) -> string",
     category = "strings"
 )]
@@ -693,13 +816,19 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     Ok(VmValue::String(arcstr::ArcStr::from(out)))
 }
 
-#[harn_builtin(sig = "dedent(text: string?) -> string", category = "strings")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "dedent(text: string?) -> string", category = "strings"
+)]
 fn dedent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(arcstr::ArcStr::from(dedent_str(&text))))
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "word_wrap(text: string?, width?: int) -> string",
     category = "strings"
 )]

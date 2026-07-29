@@ -17,24 +17,24 @@ fn half(v: int) -> Result<int, string> {
   return Err("odd: ${v}")
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Bare call-shaped variant patterns on the builtin Result enum.
   match half(10) {
-    Ok(v) -> { log("ok ${v}") }
-    Err(e) -> { log("err ${e}") }
+    Ok(v) -> { harness.stdio.println("ok ${v}") }
+    Err(e) -> { harness.stdio.println("err ${e}") }
   }
   match half(7) {
-    Ok(v) -> { log("ok ${v}") }
-    Err(e) -> { log("err ${e}") }
+    Ok(v) -> { harness.stdio.println("ok ${v}") }
+    Err(e) -> { harness.stdio.println("err ${e}") }
   }
   // Bare patterns on a user-declared enum, via a typed fn.
-  log(describe(Shape.Circle(2)))
-  log(describe(Shape.Square(3)))
+  harness.stdio.println(describe(Shape.Circle(2)))
+  harness.stdio.println(describe(Shape.Square(3)))
   // Guards still apply to bare variant arms.
   match half(10) {
-    Ok(v) if v > 100 -> { log("big ${v}") }
-    Ok(v) -> { log("small ${v}") }
-    Err(e) -> { log("err ${e}") }
+    Ok(v) if v > 100 -> { harness.stdio.println("big ${v}") }
+    Ok(v) -> { harness.stdio.println("small ${v}") }
+    Err(e) -> { harness.stdio.println("err ${e}") }
   }
   // A call-shaped pattern that is NOT a variant stays an
   // expression-equality pattern.
@@ -42,7 +42,7 @@ pipeline test(task) {
     return 3
   }
   match 3 {
-    code_red() -> { log("red") }
-    _ -> { log("other") }
+    code_red() -> { harness.stdio.println("red") }
+    _ -> { harness.stdio.println("other") }
   }
 }

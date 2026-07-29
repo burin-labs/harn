@@ -1,4 +1,4 @@
-pipeline test(task) {
-  const _held = sync_mutex_acquire("builtin-self")
-  sync_mutex_acquire("builtin-self")
+pipeline test(harness: Harness, task) {
+  const _held = harness.runtime.sync_mutex_acquire("builtin-self")
+  harness.runtime.sync_mutex_acquire("builtin-self")
 }

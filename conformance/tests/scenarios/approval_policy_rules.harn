@@ -61,12 +61,11 @@ fn capability_policy() {
   }
 }
 
-fn one_call(name, args, approval_policy) {
+fn one_call(harness: Harness, name, args, approval_policy) {
   return with_llm_script(
-    [{tool_calls: [{id: "call_1", name: name, arguments: args}]}],
+    harness.llm, [{tool_calls: [{id: "call_1", name: name, arguments: args}]}],
     { ->
-      agent_loop(
-        "Use the requested tool.",
+      agent_loop(harness, "Use the requested tool.",
         "Use tools.",
         {
           provider: "mock",
@@ -81,15 +80,15 @@ fn one_call(name, args, approval_policy) {
   )
 }
 
-pipeline main() {
-  const secret = one_call("read_secret", {path: "config/.env"}, {rules: [{allow: "*"}]})
+pipeline main(harness: Harness) {
+  const secret = one_call(harness, "read_secret", {path: "config/.env"}, {rules: [{allow: "*"}]})
   const secret_events = json_stringify(
     transcript_events_by_kind(secret?.transcript, "PermissionDeny"),
   )
-  __io_println(secret?.tools?.rejected[0] == "read_secret")
-  __io_println(secret_events.contains("sensitive_path"))
-  __io_println(secret_events.contains("harn.permission_policy_decision.v1"))
-  const ask = one_call(
+  harness.stdio.println(secret?.tools?.rejected[0] == "read_secret")
+  harness.stdio.println(secret_events.contains("sensitive_path"))
+  harness.stdio.println(secret_events.contains("harn.permission_policy_decision.v1"))
+  const ask = one_call(harness, 
     "fetch_url",
     {url: "https://api.example.com/v1/issues", method: "post"},
     {
@@ -102,10 +101,10 @@ pipeline main() {
     },
   )
   const ask_events = json_stringify(transcript_events_by_kind(ask?.transcript, "PermissionDeny"))
-  __io_println(ask?.tools?.rejected[0] == "fetch_url")
-  __io_println(ask_events.contains("managed network approval"))
-  __io_println(ask_events.contains("\"action\":\"ask\""))
-  const allowed = one_call(
+  harness.stdio.println(ask?.tools?.rejected[0] == "fetch_url")
+  harness.stdio.println(ask_events.contains("managed network approval"))
+  harness.stdio.println(ask_events.contains("\"action\":\"ask\""))
+  const allowed = one_call(harness, 
     "run_command",
     {argv: ["npm", "test"]},
     {allow_sensitive_paths: true, rules: [{allow: {tool: "run_command", command_identity: "npm"}}]},
@@ -113,9 +112,9 @@ pipeline main() {
   const grant_events = json_stringify(
     transcript_events_by_kind(allowed?.transcript, "PermissionGrant"),
   )
-  __io_println(len(allowed?.tools?.rejected) == 0)
-  __io_println(grant_events.contains("command_rule"))
-  const mcp = one_call(
+  harness.stdio.println(len(allowed?.tools?.rejected) == 0)
+  harness.stdio.println(grant_events.contains("command_rule"))
+  const mcp = one_call(harness, 
     "github__create_issue",
     {title: "blocked"},
     {
@@ -128,10 +127,10 @@ pipeline main() {
     },
   )
   const mcp_events = json_stringify(transcript_events_by_kind(mcp?.transcript, "PermissionDeny"))
-  __io_println(mcp?.tools?.rejected[0] == "github__create_issue")
-  __io_println(mcp_events.contains("mcp_rule"))
+  harness.stdio.println(mcp?.tools?.rejected[0] == "github__create_issue")
+  harness.stdio.println(mcp_events.contains("mcp_rule"))
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "repeat_1", name: "run_command", arguments: {argv: ["echo", "ok"]}},
@@ -140,8 +139,7 @@ pipeline main() {
       },
     ],
     { ->
-      const repeated = agent_loop(
-        "Run twice.",
+      const repeated = agent_loop(harness, "Run twice.",
         "Use tools.",
         {
           provider: "mock",
@@ -155,8 +153,8 @@ pipeline main() {
       const repeat_events = json_stringify(
         transcript_events_by_kind(repeated?.transcript, "PermissionDeny"),
       )
-      __io_println(repeated?.tools?.rejected[0] == "run_command")
-      __io_println(repeat_events.contains("repeated_call"))
+      harness.stdio.println(repeated?.tools?.rejected[0] == "run_command")
+      harness.stdio.println(repeat_events.contains("repeated_call"))
     },
   )
 }

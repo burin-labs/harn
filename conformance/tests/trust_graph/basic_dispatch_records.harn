@@ -1,7 +1,7 @@
 import "std/triggers"
 
 fn handle_issue(event: TriggerEvent) -> dict {
-  const context = handler_context()
+  const context = harness.runtime.handler_context()
   return {
     agent: context?.agent,
     action: context?.action,
@@ -11,13 +11,13 @@ fn handle_issue(event: TriggerEvent) -> dict {
   }
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
   const agent_id = "github-triage-bot-" + unique
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: agent_id,
       kind: "issue.opened",
@@ -35,17 +35,17 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const fired: DispatchHandle = trigger_fire(
+  const fired: DispatchHandle = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  const records: list<TrustRecord> = trust_query({agent: agent_id, action: "webhook.issue.opened"})
-  __io_println(fired.status == "dispatched" && fired.error == nil)
-  __io_println(fired.result?.agent == agent_id)
-  __io_println(fired.result?.action == "webhook.issue.opened")
-  __io_println(fired.result?.autonomy_tier == "act_auto")
-  __io_println(len(records) == 1)
-  __io_println(records[0]?.schema == "opentrustgraph/v0.1")
-  __io_println(records[0]?.outcome == "success" && records[0]?.autonomy_tier == "act_auto")
-  __io_println(records[0]?.trace_id == fired.result?.trace_id)
+  const records: list<TrustRecord> = harness.runtime.trust_query({agent: agent_id, action: "webhook.issue.opened"})
+  harness.stdio.println(fired.status == "dispatched" && fired.error == nil)
+  harness.stdio.println(fired.result?.agent == agent_id)
+  harness.stdio.println(fired.result?.action == "webhook.issue.opened")
+  harness.stdio.println(fired.result?.autonomy_tier == "act_auto")
+  harness.stdio.println(len(records) == 1)
+  harness.stdio.println(records[0]?.schema == "opentrustgraph/v0.1")
+  harness.stdio.println(records[0]?.outcome == "success" && records[0]?.autonomy_tier == "act_auto")
+  harness.stdio.println(records[0]?.trace_id == fired.result?.trace_id)
 }

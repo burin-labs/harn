@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const base = transcript_from_messages(
     [
       {role: "user", content: "one"},
@@ -30,8 +30,8 @@ pipeline main() {
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
-  __io_println(len(reminders))
-  __io_println(reminders[0].reminder.body)
-  __io_println(reminders[0].reminder.preserve_on_compact)
-  __io_println(reminders[0].reminder.ttl_turns)
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
+  harness.stdio.println(reminders[0].reminder.preserve_on_compact)
+  harness.stdio.println(reminders[0].reminder.ttl_turns)
 }

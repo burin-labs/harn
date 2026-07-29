@@ -130,7 +130,7 @@ fn opts(overrides = {}) -> BumpOptions {
   return bump_options({repo: "burin-labs/example"} + overrides)
 }
 
-pipeline test_pure_predicates_are_v_insensitive(task) {
+pipeline test_pure_predicates_are_v_insensitive(harness: Harness, task) {
   assert_eq(bump_is_current("v0.10.30", "0.10.30"), true)
   assert_eq(bump_is_current("v0.10.29", "v0.10.30"), false)
   assert_eq(bump_is_current("", ""), false)
@@ -139,7 +139,7 @@ pipeline test_pure_predicates_are_v_insensitive(task) {
 }
 
 /** 1. No-op: the pin already matches the target. Zero mutation. */
-pipeline test_already_current_is_a_clean_noop(task) {
+pipeline test_already_current_is_a_clean_noop(harness: Harness, task) {
   const fake = make_fake({current: "v0.10.30", target: "v0.10.30"})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "already_current")
@@ -148,7 +148,7 @@ pipeline test_already_current_is_a_clean_noop(task) {
 }
 
 /** 2. Delayed asset publication: readiness gate stops before any change. */
-pipeline test_release_not_ready_stops_before_mutation(task) {
+pipeline test_release_not_ready_stops_before_mutation(harness: Harness, task) {
   const fake = make_fake({ready: false, readiness_detail: "missing release assets: SHA256SUMS"})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "not_ready")
@@ -162,7 +162,7 @@ pipeline test_release_not_ready_stops_before_mutation(task) {
  * 3. Lockfile regeneration flows through to a created PR with the refreshed
  * files recorded on the receipt.
  */
-pipeline test_lockfile_refresh_produces_committed_pr(task) {
+pipeline test_lockfile_refresh_produces_committed_pr(harness: Harness, task) {
   const fake = make_fake({refreshed: ["harn.lock", "generated/schema.json"]})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "committed")
@@ -174,7 +174,7 @@ pipeline test_lockfile_refresh_produces_committed_pr(task) {
 }
 
 /** 4. Refresh failure: fail closed before validation, commit, or PR mutation. */
-pipeline test_refresh_failure_blocks_validation_and_commit(task) {
+pipeline test_refresh_failure_blocks_validation_and_commit(harness: Harness, task) {
   const fake = make_fake({apply_ok: false})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "refresh_failed")
@@ -185,7 +185,7 @@ pipeline test_refresh_failure_blocks_validation_and_commit(task) {
 }
 
 /** 5. Validation failure: no commit, no PR, ok=false. */
-pipeline test_validation_failure_blocks_commit(task) {
+pipeline test_validation_failure_blocks_commit(harness: Harness, task) {
   const fake = make_fake({validation_ok: false, validation_detail: "harn check failed"})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "validation_failed")
@@ -199,7 +199,7 @@ pipeline test_validation_failure_blocks_commit(task) {
  * 6. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
  * BEFORE the branch is reset, then refreshed. Order matters.
  */
-pipeline test_stale_lease_is_disarmed_before_reset(task) {
+pipeline test_stale_lease_is_disarmed_before_reset(harness: Harness, task) {
   const stale: BumpPrState = {
     number: 71,
     head_oid: "stale99",
@@ -224,7 +224,7 @@ pipeline test_stale_lease_is_disarmed_before_reset(task) {
  * 7. Existing PR refresh: an open PR without armed auto-merge is edited in
  * place, not recreated, and NOT disarmed.
  */
-pipeline test_existing_pr_is_refreshed_in_place(task) {
+pipeline test_existing_pr_is_refreshed_in_place(harness: Harness, task) {
   const open: BumpPrState = {
     number: 88,
     head_oid: "old123",
@@ -242,7 +242,7 @@ pipeline test_existing_pr_is_refreshed_in_place(task) {
 }
 
 /** 8. Successful auto-merge: a fresh bump creates a PR and arms auto-merge. */
-pipeline test_successful_bump_arms_auto_merge(task) {
+pipeline test_successful_bump_arms_auto_merge(harness: Harness, task) {
   const fake = make_fake({})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "committed")
@@ -258,7 +258,7 @@ pipeline test_successful_bump_arms_auto_merge(task) {
  * of opening an empty one — the concurrency-safe "someone already landed it"
  * path.
  */
-pipeline test_branch_matching_base_closes_stale_pr(task) {
+pipeline test_branch_matching_base_closes_stale_pr(harness: Harness, task) {
   const stale: BumpPrState = {
     number: 12,
     head_oid: "x",

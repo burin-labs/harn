@@ -38,15 +38,15 @@ fn typed_catch_mismatch_propagates(body, _sample: AppError) {
   }
 }
 
-pipeline default() {
-  __io_println(
+pipeline default(harness: Harness) {
+  harness.stdio.println(
     direct_return_catches(
       { ->
         throw "body"
       },
     ),
   )
-  __io_println(pipe_return_catches())
+  harness.stdio.println(pipe_return_catches())
   const propagated = try {
     typed_catch_mismatch_propagates(
       { ->
@@ -58,5 +58,5 @@ pipeline default() {
   } catch (e) {
     "outer:" + to_string(e)
   }
-  __io_println(propagated)
+  harness.stdio.println(propagated)
 }

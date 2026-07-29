@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let cleanup_ran = false
   try {
     try {
@@ -7,7 +7,7 @@ pipeline test(task) {
       cleanup_ran = true
     }
   } catch (e) {
-    log("outer caught: ${e}")
+    harness.stdio.println("outer caught: ${e}")
   }
-  log("cleanup_ran: ${cleanup_ran}")
+  harness.stdio.println("cleanup_ran: ${cleanup_ran}")
 }

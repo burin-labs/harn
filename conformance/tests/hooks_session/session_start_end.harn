@@ -4,35 +4,35 @@ import { llm_text, with_llm_script } from "std/testing"
  * SessionStart and SessionEnd hooks fire around an agent loop, can
  * observe the session id, and run in registration order.
  */
-const observed = atomic(0)
+const observed = harness.runtime.atomic(0)
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "session_start",
     { event ->
       if type_of(event?.session?.id) == "string" {
-        atomic_add(observed, 1)
+        harness.runtime.atomic_add(observed, 1)
       }
       return nil
     },
   )
-  register_session_hook(
+  harness.agent.register_session_hook(
     "session_end",
     { event ->
       if event?.final_status == "done" {
-        atomic_add(observed, 10)
+        harness.runtime.atomic_add(observed, 10)
       }
       return nil
     },
   )
   with_llm_script(
-    [llm_text("ok")],
+    harness.llm, [llm_text("ok")],
     { ->
-      const result = agent_loop("hi", nil, {provider: "mock"})
-      __io_println(result.status)
-      __io_println(atomic_get(observed))
-      clear_session_hooks()
+      const result = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(observed))
+      harness.agent.clear_session_hooks()
     },
   )
 }

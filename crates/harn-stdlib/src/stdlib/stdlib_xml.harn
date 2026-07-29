@@ -31,7 +31,7 @@ type XmlOptions = {root?: string, item_tag?: string, pretty?: bool, declaration?
  * @example: to_xml({previous_chats: ["x.jsonl", "y.jsonl"]})
  */
 pub fn to_xml(value, options: XmlOptions = {}) -> string {
-  return __to_xml(value, options ?? {})
+  return to_xml(value, options ?? {})
 }
 
 /**
@@ -57,5 +57,5 @@ type FromXmlOptions = {preserve_repeated_tag?: bool}
  * @example: from_xml("<root><a>1</a></root>")
  */
 pub fn from_xml(text: string, options: FromXmlOptions = {}) {
-  return __from_xml(text ?? "", options ?? {})
+  return from_xml(text ?? "", options ?? {})
 }

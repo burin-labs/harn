@@ -19,7 +19,7 @@
 //   * `envelope` / `write_envelope` — stable-shape JSON envelope wrappers
 //     for `--json` mode, with pinned top-level key ordering so snapshot
 //     tests stay stable across runs.
-//   * `mode()` — small helper for "am I in JSON mode?" so port scripts
+//   * `mode(harness)` — small helper for "am I in JSON mode?" so port scripts
 //     don't have to read `HARN_OUTPUT_JSON` directly.
 //   * Small coercion and shell-argv helpers for renderer scripts consuming
 //     JSON payloads collected by Rust shims.
@@ -43,7 +43,7 @@ pub fn mode(harness: Harness) -> string {
 
 /**
  * True when the script should emit a JSON envelope instead of human
- * output. Sugar over `mode() == "json"`.
+ * output. Sugar over `mode(harness) == "json"`.
  *
  * @effects: [env.read]
  * @errors: []
@@ -128,15 +128,15 @@ pub fn cli_json_envelope(spec: CliJsonEnvelope) -> dict {
  *
  * @effects: [stdio.write]
  * @errors: []
- * @example: write_envelope(envelope({schema_version: 1, api_stability: "stable", payload: result}))
+ * @example: write_envelope(harness, envelope({schema_version: 1, api_stability: "stable", payload: result}))
  */
-pub fn write_envelope(env: dict) {
-  const text = if is_tty(1) {
+pub fn write_envelope(harness: Harness, env: dict) {
+  const text = if is_tty(harness.term, 1) {
     json_stringify_pretty(env)
   } else {
     json_stringify(env)
   }
-  __io_println(text)
+  harness.stdio.println(text)
 }
 
 /**

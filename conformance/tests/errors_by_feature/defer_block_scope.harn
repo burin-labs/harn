@@ -1,71 +1,71 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Defer is block-scoped: runs at end of its enclosing { ... } block,
   // not at end of the surrounding function.
   fn block_scoped() {
-    log("before block")
+    harness.stdio.println("before block")
     if true {
       defer {
-        log("if-block exit")
+        harness.stdio.println("if-block exit")
       }
-      log("inside if")
+      harness.stdio.println("inside if")
     }
-    log("after block")
+    harness.stdio.println("after block")
   }
   block_scoped()
   // Block-scoped defer + LIFO order inside the same block.
   fn lifo_in_block() {
     if true {
       defer {
-        log("first")
+        harness.stdio.println("first")
       }
       defer {
-        log("second")
+        harness.stdio.println("second")
       }
       defer {
-        log("third")
+        harness.stdio.println("third")
       }
-      log("body")
+      harness.stdio.println("body")
     }
-    log("outside")
+    harness.stdio.println("outside")
   }
   lifo_in_block()
   // Defer inside a for-body runs at each iteration's end (block-scope).
   fn loop_per_iteration() {
     for i in [1, 2, 3] {
       defer {
-        log("end iter")
+        harness.stdio.println("end iter")
       }
-      log(i)
+      harness.stdio.println(i)
     }
-    log("loop done")
+    harness.stdio.println("loop done")
   }
   loop_per_iteration()
   // Break still runs pending defers in the loop body before exiting.
   fn break_runs_defers() {
     for i in [1, 2, 3] {
       defer {
-        log("iter cleanup")
+        harness.stdio.println("iter cleanup")
       }
       if i == 2 {
         break
       }
-      log(i)
+      harness.stdio.println(i)
     }
-    log("after break")
+    harness.stdio.println("after break")
   }
   break_runs_defers()
   // Continue runs pending defers in the loop body before continuing.
   fn continue_runs_defers() {
     for i in [1, 2, 3] {
       defer {
-        log("iter cleanup")
+        harness.stdio.println("iter cleanup")
       }
       if i == 2 {
         continue
       }
-      log(i)
+      harness.stdio.println(i)
     }
-    log("after continue")
+    harness.stdio.println("after continue")
   }
   continue_runs_defers()
 }

@@ -41,24 +41,24 @@ fn gc_transcript() {
   )
 }
 
-pipeline test() {
+pipeline test(harness: Harness) {
   // Taxonomy is data; role_hint lanes mirror Burin (binding vs evidence).
   assert(contains(pin_kinds(), "goal"), "goal kind registered")
   assert(contains(pin_kinds(), "no_compact"), "no_compact kind registered")
-  const goal_pin = pin("goal", "Ship the migration", {dedupe_key: "pin/goal"})
+  const goal_pin = pin(harness, "goal", "Ship the migration", {dedupe_key: "pin/goal"})
   assert(goal_pin.kind == "goal" && goal_pin.role_hint == "system", "goal rides system lane")
-  const artifact = pin("artifact_ref", "src/old.rs", {})
+  const artifact = pin(harness, "artifact_ref", "src/old.rs", {})
   assert(artifact.role_hint == "developer", "artifact_ref rides developer lane")
-  assert_throws({ -> return pin("bogus", "x") }, "unknown pin kind rejected")
+  assert_throws({ -> return pin(harness, "bogus", "x") }, "unknown pin kind rejected")
   // unpin is a pure removal over a caller-held collection.
   const pins = [goal_pin, artifact]
   assert(len(unpin(pins, goal_pin.id)) == 1, "unpin removes by id")
   assert(len(pin_reachability_roots(pins)) == 2, "roots collected from content")
   // `[no-compact]` ingestion adapter.
-  const recognized = recognize_no_compact("## Session goal [no-compact]\nObjective: X")
+  const recognized = recognize_no_compact(harness, "## Session goal [no-compact]\nObjective: X")
   assert(recognized != nil && recognized.kind == "no_compact", "marker recognized as pin")
   assert(!recognized.content.contains("[no-compact]"), "marker stripped from content")
-  assert(recognize_no_compact("## plain heading") == nil, "no marker yields nil")
+  assert(recognize_no_compact(harness, "## plain heading") == nil, "no marker yields nil")
   // Pins survive a FORCED compaction by construction: the pin reminder carries
   // preserve_on_compact and remains after truncating compaction drops turns.
   const base = transcript_from_messages(
@@ -69,7 +69,7 @@ pipeline test() {
       {role: "assistant", content: "four"},
     ],
   )
-  const pinned = transcript.inject_reminder(base, pin_reminder(goal_pin)).transcript
+  const pinned = transcript.inject_reminder(base, pin_reminder(harness, goal_pin)).transcript
   const compacted = transcript_compact(
     pinned,
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
@@ -86,11 +86,11 @@ pipeline test() {
   const without_pin = transcript_project(transcript_value, opts)
   const with_pin = transcript_project(
     transcript_value,
-    with_pin_roots(opts, [pin("artifact_ref", "src/old.rs")]),
+    with_pin_roots(opts, [pin(harness, "artifact_ref", "src/old.rs")]),
   )
   assert(
     without_pin.redacted_count > with_pin.redacted_count,
     "pin root keeps referenced stale result alive",
   )
-  log("agent pins tests passed")
+  harness.stdio.println("agent pins tests passed")
 }

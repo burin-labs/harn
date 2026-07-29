@@ -64,7 +64,11 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "trace_start(...args: any) -> dict", category = "tracing")]
+#[harn_builtin(
+    exposure = "harness.obs.trace_start",
+    effects = ["observability.write@arg0"],
+    sig = "trace_start(...args: any) -> dict", category = "tracing"
+)]
 fn trace_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::RngExt;
     let name = args.first().map(|a| a.display()).unwrap_or_default();
@@ -102,7 +106,11 @@ fn trace_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::dict(span))
 }
 
-#[harn_builtin(sig = "trace_end(...args: any) -> nil", category = "tracing")]
+#[harn_builtin(
+    exposure = "harness.obs.trace_end",
+    effects = ["observability.write@arg0"],
+    sig = "trace_end(...args: any) -> nil", category = "tracing"
+)]
 fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let (name, trace_id, span_id, duration_ms) = finish_span_from_args(args)?;
     let level_num = 1_u8;
@@ -121,7 +129,11 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "trace_id(...args: any) -> string?", category = "tracing")]
+#[harn_builtin(
+    exposure = "harness.obs.trace_id",
+    effects = ["observability.read@const=current-trace"],
+    sig = "trace_id(...args: any) -> string?", category = "tracing"
+)]
 fn trace_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match current_trace_context().map(|context| context.0) {
         Some(trace_id) => Ok(VmValue::String(arcstr::ArcStr::from(trace_id))),
@@ -129,7 +141,11 @@ fn trace_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     }
 }
 
-#[harn_builtin(sig = "llm_info() -> dict", category = "tracing")]
+#[harn_builtin(
+    exposure = "harness.obs.llm_info",
+    effects = ["observability.read@const=current-trace"],
+    sig = "llm_info() -> dict", category = "tracing"
+)]
 fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw_model = crate::test_env::env_var_seamed("HARN_LLM_MODEL").unwrap_or_default();
     let resolved = crate::llm_config::resolve_model_info(&raw_model);
@@ -151,7 +167,11 @@ fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::dict(info))
 }
 
-#[harn_builtin(sig = "enable_tracing(enabled?: bool) -> nil", category = "tracing")]
+#[harn_builtin(
+    exposure = "harness.obs.enable_tracing",
+    effects = ["observability.mutate@const=configuration"],
+    sig = "enable_tracing(enabled?: bool) -> nil", category = "tracing"
+)]
 fn enable_tracing_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let enabled = match args.first() {
         Some(VmValue::Bool(b)) => *b,
@@ -161,14 +181,22 @@ fn enable_tracing_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "trace_spans(...args: any) -> list", category = "tracing")]
+#[harn_builtin(
+    exposure = "harness.obs.trace_spans",
+    effects = ["observability.read@const=trace-spans"],
+    sig = "trace_spans(...args: any) -> list", category = "tracing"
+)]
 fn trace_spans_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let spans = crate::tracing::peek_spans();
     let vm_spans: Vec<VmValue> = spans.iter().map(crate::tracing::span_to_vm_value).collect();
     Ok(VmValue::List(std::sync::Arc::new(vm_spans)))
 }
 
-#[harn_builtin(sig = "trace_summary(...args: any) -> string", category = "tracing")]
+#[harn_builtin(
+    exposure = "harness.obs.trace_summary",
+    effects = ["observability.read@const=trace-spans"],
+    sig = "trace_summary(...args: any) -> string", category = "tracing"
+)]
 fn trace_summary_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(arcstr::ArcStr::from(
         crate::tracing::format_summary(),
@@ -176,6 +204,8 @@ fn trace_summary_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "harness.obs.lifecycle_span_start",
+    effects = ["observability.write@arg0"],
     sig = "__lifecycle_span_start(name: string) -> int",
     category = "tracing"
 )]
@@ -186,6 +216,8 @@ fn lifecycle_span_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 }
 
 #[harn_builtin(
+    exposure = "harness.obs.lifecycle_span_end",
+    effects = ["observability.write@arg0"],
     sig = "__lifecycle_span_end(span_id: int) -> nil",
     category = "tracing"
 )]
@@ -201,7 +233,11 @@ fn lifecycle_span_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "llm_usage() -> dict", category = "tracing")]
+#[harn_builtin(
+    exposure = "harness.obs.llm_usage",
+    effects = ["observability.read@const=current-trace"],
+    sig = "llm_usage() -> dict", category = "tracing"
+)]
 fn llm_usage_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (total_input, total_output, total_duration, call_count) = crate::llm::peek_trace_summary();
     let mut usage = crate::value::DictMap::new();

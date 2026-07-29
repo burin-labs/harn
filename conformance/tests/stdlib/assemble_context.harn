@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const long_body = "paragraph one sentence one.\nparagraph one sentence two.\n\n"
     + "paragraph two sentence one.\nparagraph two sentence two.\n\n"
     + "paragraph three sentence one.\nparagraph three sentence two.\n\n"
@@ -21,10 +21,10 @@ pipeline test(task) {
       microcompact_threshold: 20,
     },
   )
-  __io_println(packed.budget_tokens == 64)
-  __io_println(len(packed.chunks) > 0)
+  harness.stdio.println(packed.budget_tokens == 64)
+  harness.stdio.println(len(packed.chunks) > 0)
   // short_a should score highest on the query and appear first.
-  __io_println(packed.chunks[0].artifact_id == "short_a")
+  harness.stdio.println(packed.chunks[0].artifact_id == "short_a")
   // Chunk ids are content-addressed: same text → same id across calls.
   const second = assemble_context(
     {
@@ -36,7 +36,7 @@ pipeline test(task) {
       microcompact_threshold: 20,
     },
   )
-  __io_println(packed.chunks[0].id == second.chunks[0].id)
+  harness.stdio.println(packed.chunks[0].id == second.chunks[0].id)
   // Large artifact was microcompacted into multiple chunks.
   let large_chunk_count = 0
   for chunk in packed.chunks {
@@ -44,25 +44,25 @@ pipeline test(task) {
       large_chunk_count = large_chunk_count + 1
     }
   }
-  __io_println(large_chunk_count > 1)
+  harness.stdio.println(large_chunk_count > 1)
   // Reasons capture the strategy and inclusion decision.
-  __io_println(packed.reasons[0].strategy == "relevance")
-  __io_println(packed.reasons[0].included)
+  harness.stdio.println(packed.reasons[0].strategy == "relevance")
+  harness.stdio.println(packed.reasons[0].included)
   // Exact-duplicate dedup drops later copies.
   const dup_a = artifact({id: "dup_a", kind: "summary", text: "shared body"})
   const dup_b = artifact({id: "dup_b", kind: "summary", text: "shared body"})
   const deduped = assemble_context(
     {artifacts: [dup_a, dup_b], budget_tokens: 10000, dedup: "chunked", strategy: "recency"},
   )
-  __io_println(len(deduped.chunks) == 1)
-  __io_println(len(deduped.dropped) >= 1)
+  harness.stdio.println(len(deduped.chunks) == 1)
+  harness.stdio.println(len(deduped.dropped) >= 1)
   let saw_duplicate = false
   for entry in deduped.dropped {
     if entry.reason == "duplicate" {
       saw_duplicate = true
     }
   }
-  __io_println(saw_duplicate)
+  harness.stdio.println(saw_duplicate)
   // Round-robin interleaves artifacts.
   const rr_a = artifact({id: "rr_a", kind: "summary", text: "alpha aaaa\n\nbeta bbbb\n\ngamma cc"})
   const rr_b = artifact({id: "rr_b", kind: "summary", text: "delta dddd\n\nepsilon ee\n\nzeta ff"})
@@ -75,11 +75,11 @@ pipeline test(task) {
       microcompact_threshold: 3,
     },
   )
-  __io_println(len(rr.chunks) >= 4)
-  __io_println(rr.chunks[0].artifact_id == "rr_a")
-  __io_println(rr.chunks[1].artifact_id == "rr_b")
-  __io_println(rr.chunks[2].artifact_id == "rr_a")
-  __io_println(rr.chunks[3].artifact_id == "rr_b")
+  harness.stdio.println(len(rr.chunks) >= 4)
+  harness.stdio.println(rr.chunks[0].artifact_id == "rr_a")
+  harness.stdio.println(rr.chunks[1].artifact_id == "rr_b")
+  harness.stdio.println(rr.chunks[2].artifact_id == "rr_a")
+  harness.stdio.println(rr.chunks[3].artifact_id == "rr_b")
   // Custom ranker callback overrides default keyword scoring.
   const custom = assemble_context(
     {
@@ -101,8 +101,8 @@ pipeline test(task) {
       },
     },
   )
-  __io_println(len(custom.chunks) == 1)
-  __io_println(custom.chunks[0].artifact_id == "short_b")
+  harness.stdio.println(len(custom.chunks) == 1)
+  harness.stdio.println(custom.chunks[0].artifact_id == "short_b")
   // Budget enforcement: chunks over budget get reported in dropped/reasons.
   const tight = assemble_context(
     {
@@ -113,12 +113,12 @@ pipeline test(task) {
       microcompact_threshold: 5,
     },
   )
-  __io_println(tight.total_tokens <= 10)
+  harness.stdio.println(tight.total_tokens <= 10)
   let saw_budget = false
   for r in tight.reasons {
     if !r.included && r.reason == "budget_exceeded" {
       saw_budget = true
     }
   }
-  __io_println(saw_budget)
+  harness.stdio.println(saw_budget)
 }

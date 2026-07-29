@@ -1,9 +1,9 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Turn 1: weak assistant response → judge will veto.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("<user_response>idk</user_response>\n<done>##DONE##</done>"),
       llm_text(
         "{\"verdict\":\"revise\",\"reasoning\":\"too terse\",\"critique\":\"Show the arithmetic explicitly.\",\"confidence\":0.9}",
@@ -14,8 +14,7 @@ pipeline default() {
       ),
     ],
     { ->
-      const result = agent_loop(
-        "What is 2 + 2?",
+      const result = agent_loop(harness, "What is 2 + 2?",
         nil,
         {
           provider: "mock",
@@ -24,13 +23,13 @@ pipeline default() {
           step_judge: {provider: "mock", on_veto: "replace"},
         },
       )
-      __io_println(result.status)
-      __io_println(result.visible_text)
-      __io_println(result.llm.iterations)
-      const calls = llm_mock_calls()
-      __io_println(len(calls))
-      __io_println(!json_stringify(calls[2].messages).contains("idk"))
-      __io_println(json_stringify(calls[2].messages).contains("Show the arithmetic explicitly."))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(result.llm.iterations)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls))
+      harness.stdio.println(!json_stringify(calls[2].messages).contains("idk"))
+      harness.stdio.println(json_stringify(calls[2].messages).contains("Show the arithmetic explicitly."))
     },
   )
 }

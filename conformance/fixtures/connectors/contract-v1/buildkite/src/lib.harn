@@ -144,13 +144,13 @@ pub fn shutdown() {
  *
  * Fails closed when no webhook token is configured.
  */
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body_text = raw?.body_text ?? raw?.body ?? ""
   if len(body_text) > MAX_BODY_BYTES {
     return __reject(413, "payload_too_large", "buildkite webhook body exceeds 1 MiB cap")
   }
   const headers = raw?.headers ?? {}
-  const verified = __verify_webhook(raw, headers, body_text)
+  const verified = __verify_webhook(harness, raw, headers, body_text)
   if is_err(verified) {
     return __reject_err(unwrap_err(verified))
   }
@@ -178,17 +178,17 @@ pub fn normalize_inbound(raw) {
 
 @complexity(allow)
 /** Dispatch a supported Buildkite REST / GraphQL method. */
-pub fn call(method, args = {}) {
+pub fn call(harness: Harness, method, args = {}) {
   if !contains(BUILDKITE_OUTBOUND_METHODS, method) {
     return __err("method_not_found", "buildkite connector does not implement outbound method `" + method + "`")
   }
   if method == "github_commit_pulls" {
-    return __github_commit_pulls(args ?? {})
+    return __github_commit_pulls(harness, args ?? {})
   }
   if method == "graphql" {
     return __graphql(args ?? {})
   }
-  const config = __outbound_config(args ?? {})
+  const config = __outbound_config(harness, args ?? {})
   if is_err(config) {
     return config
   }
@@ -196,14 +196,14 @@ pub fn call(method, args = {}) {
   if method == "api.request" {
     const http_method = __upcase_method(args?.method ?? "GET")
     const path = to_string(args?.path ?? "")
-    return __buildkite_json(http_method, __api_url(cfg.api_base_url, path), args?.body, cfg)
+    return __buildkite_json(harness, http_method, __api_url(cfg.api_base_url, path), args?.body, cfg)
   }
   const org = __require(args, "org")
   if is_err(org) {
     return org
   }
   if method == "job.log" {
-    return __buildkite_json(
+    return __buildkite_json(harness, 
       "GET",
       __api_url(
         cfg.api_base_url,
@@ -219,7 +219,7 @@ pub fn call(method, args = {}) {
     )
   }
   if method == "job.retry" {
-    return __buildkite_json(
+    return __buildkite_json(harness, 
       "PUT",
       __api_url(
         cfg.api_base_url,
@@ -231,7 +231,7 @@ pub fn call(method, args = {}) {
     )
   }
   if method == "job.unblock" {
-    return __buildkite_json(
+    return __buildkite_json(harness, 
       "PUT",
       __api_url(
         cfg.api_base_url,
@@ -243,7 +243,7 @@ pub fn call(method, args = {}) {
     )
   }
   if method == "build.rebuild" {
-    return __buildkite_json(
+    return __buildkite_json(harness, 
       "PUT",
       __api_url(cfg.api_base_url, __build_path(unwrap(org), args) + "/rebuild"),
       nil,
@@ -251,14 +251,14 @@ pub fn call(method, args = {}) {
     )
   }
   if method == "build.cancel" {
-    return __buildkite_json(
+    return __buildkite_json(harness, 
       "PUT",
       __api_url(cfg.api_base_url, __build_path(unwrap(org), args) + "/cancel"),
       nil,
       cfg,
     )
   }
-  return __buildkite_json("GET", __api_url(cfg.api_base_url, __build_path(unwrap(org), args)), nil, cfg)
+  return __buildkite_json(harness, "GET", __api_url(cfg.api_base_url, __build_path(unwrap(org), args)), nil, cfg)
 }
 
 fn __state() {
@@ -329,7 +329,7 @@ fn __webhook_token(raw) {
   const secret_id = __webhook_token_id(raw)
   if secret_id != nil {
     const resolved = try {
-      secret_get(secret_id)
+      harness.secrets.read(secret_id)
     }
     if !is_err(resolved) {
       const value = to_string(unwrap(resolved))
@@ -339,7 +339,7 @@ fn __webhook_token(raw) {
     }
   }
   const fallback = try {
-    secret_get(BUILDKITE_WEBHOOK_TOKEN_SECRET)
+    harness.secrets.read(BUILDKITE_WEBHOOK_TOKEN_SECRET)
   }
   if !is_err(fallback) {
     const value = to_string(unwrap(fallback))
@@ -370,7 +370,7 @@ fn __webhook_token_id(raw) {
 }
 
 @complexity(allow)
-fn __verify_webhook(raw, headers, body_text) {
+fn __verify_webhook(harness: Harness, raw, headers, body_text) {
   const token = __webhook_token(raw)
   if token == nil || trim(to_string(token)) == "" {
     return __err(
@@ -380,7 +380,7 @@ fn __verify_webhook(raw, headers, body_text) {
   }
   const signature_header = __header(headers, "x-buildkite-signature")
   if signature_header != nil && signature_header != "" {
-    return __verify_signature(raw, signature_header, body_text, to_string(token))
+    return __verify_signature(harness, raw, signature_header, body_text, to_string(token))
   }
   const provided_token = __header(headers, "x-buildkite-token")
   if provided_token == nil || provided_token == "" {
@@ -393,7 +393,7 @@ fn __verify_webhook(raw, headers, body_text) {
 }
 
 @complexity(allow)
-fn __verify_signature(raw, signature_header, body_text, token) {
+fn __verify_signature(harness: Harness, raw, signature_header, body_text, token) {
   const fields = __parse_signature_header(signature_header)
   const timestamp = fields.get("timestamp")
   const signature = fields.get("signature")
@@ -412,7 +412,7 @@ fn __verify_signature(raw, signature_header, body_text, token) {
   if is_err(parsed_ts) {
     return __err("invalid_signature", "x-buildkite-signature timestamp is not an integer")
   }
-  const now = __verification_timestamp(raw)
+  const now = __verification_timestamp(harness, raw)
   const age = now - unwrap(parsed_ts)
   if age > SIGNATURE_MAX_AGE_SECONDS || age < -SIGNATURE_MAX_AGE_SECONDS {
     return __err(
@@ -424,7 +424,7 @@ fn __verify_signature(raw, signature_header, body_text, token) {
   return Ok("signed")
 }
 
-fn __verification_timestamp(raw) {
+fn __verification_timestamp(harness: Harness, raw) {
   const received_at = raw?.received_at
   if received_at != nil && trim(to_string(received_at)) != "" {
     const parsed = try {
@@ -581,7 +581,7 @@ fn __upcase_method(method) {
 }
 
 @complexity(allow)
-fn __outbound_config(args) {
+fn __outbound_config(harness: Harness, args) {
   const api_base_url = args?.api_base_url ?? harness.env.get_or("BUILDKITE_API_BASE_URL", BUILDKITE_API_BASE_URL)
   const base_check = __validate_url_host(api_base_url, "api_base_url")
   if is_err(base_check) {
@@ -711,7 +711,7 @@ fn __is_disallowed_host(host_lc) {
 }
 
 @complexity(allow)
-fn __buildkite_json(method, url, body, cfg) {
+fn __buildkite_json(harness: Harness, method, url, body, cfg) {
   let options = {
     headers: {Accept: "application/json", Authorization: "Bearer " + cfg.api_token},
     retry: {backoff_ms: 0, max: 0},
@@ -729,7 +729,7 @@ fn __buildkite_json(method, url, body, cfg) {
       return __err("transport", to_string(unwrap_err(response_result)))
     }
     const response = unwrap(response_result)
-    const limited = __maybe_wait_for_rate_limit(response)
+    const limited = __maybe_wait_for_rate_limit(harness, response)
     if is_err(limited) {
       return limited
     }
@@ -776,7 +776,7 @@ fn __decode_response(response) {
 }
 
 @complexity(allow)
-fn __maybe_wait_for_rate_limit(response) {
+fn __maybe_wait_for_rate_limit(harness: Harness, response) {
   const remaining = __header(response.headers ?? {}, "ratelimit-remaining")
   if remaining == nil || trim(to_string(remaining)) != "0" {
     return Ok(false)
@@ -796,13 +796,13 @@ fn __maybe_wait_for_rate_limit(response) {
     return __err("rate_limited", "buildkite API rate limit reset is more than 60 seconds away")
   }
   if wait_seconds > 0 {
-    sleep(wait_seconds * 1000)
+    harness.clock.sleep_ms(wait_seconds * 1000)
   }
   return Ok(true)
 }
 
 @complexity(allow)
-fn __graphql(args) {
+fn __graphql(harness: Harness, args) {
   const api_token = args?.api_token ?? args?.access_token ?? args?.token
     ?? harness.env.get("BUILDKITE_API_TOKEN")
     ?? harness.env.get("BUILDKITE_TOKEN")
@@ -817,7 +817,7 @@ fn __graphql(args) {
   if is_err(base_check) {
     return base_check
   }
-  return __buildkite_json(
+  return __buildkite_json(harness, 
     "POST",
     to_string(url),
     {query: to_string(args.query), variables: args?.variables ?? {}},
@@ -826,7 +826,7 @@ fn __graphql(args) {
 }
 
 @complexity(allow)
-fn __github_commit_pulls(args) {
+fn __github_commit_pulls(harness: Harness, args) {
   const owner = __require(args, "owner")
   if is_err(owner) {
     return owner
@@ -854,5 +854,5 @@ fn __github_commit_pulls(args) {
       + url_encode(unwrap(sha))
       + "/pulls",
   )
-  return __buildkite_json("GET", url, nil, {api_token: to_string(github_token)})
+  return __buildkite_json(harness, "GET", url, nil, {api_token: to_string(github_token)})
 }

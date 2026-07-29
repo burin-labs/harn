@@ -7,7 +7,7 @@
  * effects at execution time, but this fixture exercises the silent
  * pass-through path.
  */
-pipeline main() {
+pipeline main(harness: Harness) {
   const _worker = spawn_agent(
     {
       name: "opaque-child",
@@ -15,5 +15,5 @@ pipeline main() {
       node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}},
     },
   )
-  __io_println("opaque ok")
+  harness.stdio.println("opaque ok")
 }

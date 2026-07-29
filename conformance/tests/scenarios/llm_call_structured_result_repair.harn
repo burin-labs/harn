@@ -4,21 +4,21 @@ import { llm_text, with_llm_script } from "std/testing"
  * Repair pass success: first call produces malformed-but-salvageable
  * JSON, repair pass returns valid JSON. Envelope marks repaired=true.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
-    [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"PASS\"}")],
+    harness.llm, [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"PASS\"}")],
     { ->
-      const r = llm_call_structured_result(
+      const r = harness.llm.call_structured_result(
         "Grade",
         schema,
         {provider: "mock", retries: 0, repair: {enabled: true}},
       )
-      __io_println(r.ok)
-      __io_println(r.data.verdict)
-      __io_println(r.repaired)
-      __io_println(r.attempts)
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.data.verdict)
+      harness.stdio.println(r.repaired)
+      harness.stdio.println(r.attempts)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
 }

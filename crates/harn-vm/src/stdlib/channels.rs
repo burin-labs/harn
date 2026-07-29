@@ -9,6 +9,8 @@ pub(crate) fn register_channel_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "emit_channel(name: string, payload: any, options?: dict) -> dict",
     kind = "async",
     category = "channels"
@@ -21,6 +23,8 @@ async fn emit_channel_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "channel_events(name: string, options?: dict) -> list",
     kind = "async",
     category = "channels"
@@ -33,6 +37,8 @@ async fn channel_events_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "channel_subscribe(name: string, options?: dict) -> stream",
     kind = "async",
     category = "channels"
@@ -45,6 +51,8 @@ async fn channel_subscribe_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "channel_consumer_cursor(name: string, consumer_id: string, options?: dict) -> int?",
     kind = "async",
     category = "channels"
@@ -57,6 +65,8 @@ async fn channel_consumer_cursor_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "channel_ack(name: string, consumer_id: string, cursor: int, options?: dict) -> dict",
     kind = "async",
     category = "channels"
@@ -69,6 +79,8 @@ async fn channel_ack_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "flush_trigger_aggregations() -> nil",
     kind = "async",
     category = "channels"

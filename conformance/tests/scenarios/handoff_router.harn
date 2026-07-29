@@ -10,7 +10,7 @@ fn review_captain_mock(envelope) {
   }
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const routes = [
     {
       id: "merge-receipt-review",
@@ -30,14 +30,13 @@ pipeline main() {
     requested_capabilities: ["review"],
     allowed_side_effects: ["comment_on_pr"],
   }
-  const routed = handoff_routed(seed, routes, {})
+  const routed = handoff_routed(harness, seed, routes, {})
   const dispatch = handoff_dispatch(
     routed,
     nil,
     {dispatchers: {review_captain: review_captain_mock}},
   )
-  const exhausted = handoff_routed(
-    seed + {budget_remaining: {tokens: 0, tool_calls: 0}},
+  const exhausted = handoff_routed(harness,  harness, seed + {budget_remaining: {tokens: 0, tool_calls: 0}},
     routes,
     {budget_exhausted: true},
   )
@@ -48,16 +47,16 @@ pipeline main() {
     [handoff_artifact(routed)],
     {},
   )
-  __io_println(routed?.target_persona_or_human?.id == "review_captain")
-  __io_println(routed?.route_decision?.matched_when == "always")
-  __io_println(dispatch?.dispatch_status == "enqueued")
-  __io_println(dispatch?.dispatch_receipt?.topic == "handoff.persona.invocations")
-  __io_println(dispatch?.dispatch_receipt?.invocation_result?.persona == "review_captain")
-  __io_println(
+  harness.stdio.println(routed?.target_persona_or_human?.id == "review_captain")
+  harness.stdio.println(routed?.route_decision?.matched_when == "always")
+  harness.stdio.println(dispatch?.dispatch_status == "enqueued")
+  harness.stdio.println(dispatch?.dispatch_receipt?.topic == "handoff.persona.invocations")
+  harness.stdio.println(dispatch?.dispatch_receipt?.invocation_result?.persona == "review_captain")
+  harness.stdio.println(
     dispatch?.dispatch_receipt?.invocation_result?.received_handoff_kind == "merge_receipt",
   )
-  __io_println(exhausted?.target_persona_or_human?.kind == "human")
-  __io_println(exhausted?.target_persona_or_human?.id == "maintainers")
-  __io_println(run?.handoffs[0]?.kind == "merge_receipt")
-  __io_println(run?.handoffs[0]?.route_decision?.target == "review_captain")
+  harness.stdio.println(exhausted?.target_persona_or_human?.kind == "human")
+  harness.stdio.println(exhausted?.target_persona_or_human?.id == "maintainers")
+  harness.stdio.println(run?.handoffs[0]?.kind == "merge_receipt")
+  harness.stdio.println(run?.handoffs[0]?.route_decision?.target == "review_captain")
 }

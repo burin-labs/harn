@@ -406,6 +406,9 @@ impl super::super::Vm {
 
     fn try_harness_method_sync_fast(
         output: &mut String,
+        executed_effects: &std::sync::Arc<
+            std::sync::Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>,
+        >,
         obj: &VmValue,
         method: &str,
         args: &[VmValue],
@@ -413,7 +416,7 @@ impl super::super::Vm {
         let VmValue::Harness(handle) = obj else {
             return None;
         };
-        Self::call_harness_method_sync_fast(output, handle, method, args)
+        Self::call_harness_method_sync_fast(output, executed_effects, handle, method, args)
     }
 
     fn method_cache_target(obj: &VmValue, method: &str, argc: usize) -> Option<MethodCacheTarget> {
@@ -465,10 +468,13 @@ impl super::super::Vm {
                 "print" | "println" | "eprint" | "eprintln" | "read_line" | "prompt"
             ),
             crate::harness::HarnessKind::Term => {
-                matches!(method, "width" | "height" | "read_password")
+                matches!(method, "width" | "height" | "is_tty" | "read_password")
             }
             crate::harness::HarnessKind::Clock => {
-                matches!(method, "now_ms" | "timestamp" | "monotonic_ms" | "elapsed")
+                matches!(
+                    method,
+                    "now_ms" | "timestamp" | "monotonic_ms" | "elapsed" | "date_iso"
+                )
             }
             crate::harness::HarnessKind::Env => matches!(method, "get" | "get_or"),
             crate::harness::HarnessKind::Random => matches!(
@@ -486,8 +492,9 @@ impl super::super::Vm {
                     | "random_choice"
                     | "shuffle"
                     | "random_shuffle"
+                    | "uuid"
+                    | "uuid_v7"
             ),
-            crate::harness::HarnessKind::Crypto => matches!(method, "sha256"),
             crate::harness::HarnessKind::Tenant => matches!(method, "id" | "try_id"),
             crate::harness::HarnessKind::Auth => matches!(
                 method,
@@ -509,6 +516,7 @@ impl super::super::Vm {
             | crate::harness::HarnessKind::Llm
             | crate::harness::HarnessKind::Obs
             | crate::harness::HarnessKind::Verdict => false,
+            _ => false,
         };
         cacheable.then_some(MethodCacheTarget::Harness(handle.kind()))
     }
@@ -1488,7 +1496,13 @@ impl super::super::Vm {
             self.stack.truncate(obj_idx);
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
-                Self::call_harness_method_sync_fast(&mut self.output, &handle, method, &args)
+                Self::call_harness_method_sync_fast(
+                    &mut self.output,
+                    &self.executed_effects,
+                    &handle,
+                    method,
+                    &args,
+                )
             };
             let result = if let Some(result) = sync_result {
                 result?
@@ -1502,7 +1516,13 @@ impl super::super::Vm {
             let args = &self.stack[args_start..];
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
-                Self::try_harness_method_sync_fast(&mut self.output, &obj, method, args)
+                Self::try_harness_method_sync_fast(
+                    &mut self.output,
+                    &self.executed_effects,
+                    &obj,
+                    method,
+                    args,
+                )
             };
             let result = if let Some(result) = sync_result {
                 self.stack.truncate(obj_idx);
@@ -1609,6 +1629,7 @@ impl super::super::Vm {
                 let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::call_harness_method_sync_fast(
                     &mut self.output,
+                    &self.executed_effects,
                     &handle,
                     method,
                     &self.stack[args_start..],
@@ -1645,7 +1666,13 @@ impl super::super::Vm {
             let args = &self.stack[args_start..];
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
-                Self::try_harness_method_sync_fast(&mut self.output, obj, method, args)
+                Self::try_harness_method_sync_fast(
+                    &mut self.output,
+                    &self.executed_effects,
+                    obj,
+                    method,
+                    args,
+                )
             };
             let result = if let Some(result) = sync_result {
                 result
@@ -1736,7 +1763,13 @@ impl super::super::Vm {
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
-                Self::call_harness_method_sync_fast(&mut self.output, &handle, method, &args)
+                Self::call_harness_method_sync_fast(
+                    &mut self.output,
+                    &self.executed_effects,
+                    &handle,
+                    method,
+                    &args,
+                )
             };
             let result = if let Some(result) = sync_result {
                 result?
@@ -1749,7 +1782,13 @@ impl super::super::Vm {
             let cache_target = Self::method_cache_target(&obj, method, args.len());
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
-                Self::try_harness_method_sync_fast(&mut self.output, &obj, method, &args)
+                Self::try_harness_method_sync_fast(
+                    &mut self.output,
+                    &self.executed_effects,
+                    &obj,
+                    method,
+                    &args,
+                )
             };
             let result = if let Some(result) = sync_result {
                 result?

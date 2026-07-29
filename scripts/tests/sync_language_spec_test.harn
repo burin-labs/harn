@@ -8,20 +8,20 @@ const EXPECTED_HEADER =
   "<!-- Generated from spec/chapters/*.md by scripts/sync_language_spec.harn -->\n\n"
 
 @test
-pipeline test_render_mirror_starts_with_header(task) {
+pipeline test_render_mirror_starts_with_header(harness: Harness, task) {
   const rendered = render_mirror_from("hello\n")
   assert(rendered.starts_with(EXPECTED_HEADER))
 }
 
 @test
-pipeline test_render_mirror_preserves_body(task) {
+pipeline test_render_mirror_preserves_body(harness: Harness, task) {
   const body = "## Title\n\nbody line\n"
   const rendered = render_mirror_from(body)
   assert(rendered.ends_with(body))
 }
 
 @test
-pipeline test_render_mirror_empty_body(task) {
+pipeline test_render_mirror_empty_body(harness: Harness, task) {
   const rendered = render_mirror_from("")
   assert_eq(rendered, EXPECTED_HEADER)
 }

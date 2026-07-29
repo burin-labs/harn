@@ -17,7 +17,7 @@ impl Basket {
   }
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Assigning the result back is the correct spelling, and is never flagged.
   let built = []
   built = built.appending(1)
@@ -51,5 +51,5 @@ pipeline test(task) {
     []
   }
   assert_eq(from_try[0], 1, "try tail is a value, not a discard")
-  log("discarded pure result allowed: all tests passed")
+  harness.stdio.println("discarded pure result allowed: all tests passed")
 }

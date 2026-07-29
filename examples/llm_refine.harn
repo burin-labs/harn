@@ -7,24 +7,23 @@
 // Run with: cargo run --quiet --bin harn -- run examples/llm_refine.harn
 import { refine_prompt } from "std/llm/refine"
 
-pipeline default() {
-  llm_mock_clear()
-  llm_mock(
+pipeline default(harness: Harness) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {
       text:
         "Summarize the article in 3 bullet points, each under 12 words.\nDIFF: tightened length, added bullet structure",
     },
   )
-  const result = refine_prompt(
-    {
+  const result = refine_prompt(harness,  harness, {
       user_prompt: "please summarize this article briefly with bullets",
       provider: "mock",
       model: "mock-small",
       style: "imperative",
     },
   )
-  __io_println("ok           = " + to_string(result.ok))
-  __io_println("original     = " + result.original)
-  __io_println("refined      = " + result.refined)
-  __io_println("diff_summary = " + result.diff_summary)
+  harness.stdio.println("ok           = " + to_string(result.ok))
+  harness.stdio.println("original     = " + result.original)
+  harness.stdio.println("refined      = " + result.refined)
+  harness.stdio.println("diff_summary = " + result.diff_summary)
 }

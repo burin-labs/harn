@@ -5,21 +5,21 @@ import { llm_text, with_llm_script } from "std/testing"
  * second response satisfies the schema. The envelope reports
  * attempts=2 and ok=true.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {
     type: "object",
     required: ["verdict"],
     properties: {verdict: {type: "string"}, note: {type: "string"}},
   }
   with_llm_script(
-    [llm_text("{\"note\": \"hmm\"}"), llm_text("{\"verdict\": \"PASS\", \"note\": \"\"}")],
+    harness.llm, [llm_text("{\"note\": \"hmm\"}"), llm_text("{\"verdict\": \"PASS\", \"note\": \"\"}")],
     { ->
-      const r = llm_call_structured_result("Grade", schema, {provider: "mock"})
-      __io_println(r.ok)
-      __io_println(r.data.verdict)
-      __io_println(r.attempts)
-      __io_println(r.repaired)
-      __io_println(r.extracted_json)
+      const r = harness.llm.call_structured_result("Grade", schema, {provider: "mock"})
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.data.verdict)
+      harness.stdio.println(r.attempts)
+      harness.stdio.println(r.repaired)
+      harness.stdio.println(r.extracted_json)
     },
   )
 }

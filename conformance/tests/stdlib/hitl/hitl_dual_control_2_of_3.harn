@@ -4,13 +4,13 @@ fn destructive_step() -> string {
   return "deleted"
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   clear_host_mocks()
   mock_host_response(
     "hitl",
     "dual_control",
     [{approved: true, reviewer: "alice"}, {approved: true, reviewer: "bob"}],
   )
-  const result = dual_control(2, 3, destructive_step, ["alice", "bob", "carol"])
-  __io_println(result)
+  const result = harness.interaction.dual_control(2, 3, destructive_step, ["alice", "bob", "carol"])
+  harness.stdio.println(result)
 }

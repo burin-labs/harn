@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn bad(value: string) -> int {
     match value {
       _ -> { return "wrong" }

@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const first = transcript.inject_reminder(
     transcript(),
     {body: "old", dedupe_key: "slot", ttl_turns: 2},
@@ -8,9 +8,9 @@ pipeline main() {
     {body: "new", dedupe_key: "slot", ttl_turns: 3},
   )
   const events = transcript_events_by_kind(second.transcript, "system_reminder")
-  __io_println(second.deduped_count)
-  __io_println(len(events))
-  __io_println(events[0].text)
-  __io_println(events[0].reminder.body)
-  __io_println(events[0].reminder.ttl_turns)
+  harness.stdio.println(second.deduped_count)
+  harness.stdio.println(len(events))
+  harness.stdio.println(events[0].text)
+  harness.stdio.println(events[0].reminder.body)
+  harness.stdio.println(events[0].reminder.ttl_turns)
 }

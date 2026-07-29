@@ -839,10 +839,6 @@ impl Lexer {
             "select" => TokenKind::Select,
             "impl" => TokenKind::Impl,
             "skill" => TokenKind::Skill,
-            "request_approval" => TokenKind::RequestApproval,
-            "dual_control" => TokenKind::DualControl,
-            "ask_user" => TokenKind::AskUser,
-            "escalate_to" => TokenKind::EscalateTo,
             _ => TokenKind::Identifier(ident),
         };
 

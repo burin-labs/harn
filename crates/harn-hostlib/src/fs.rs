@@ -72,13 +72,18 @@ impl HostlibCapability for FsCapability {
         );
         // `safe_text_patch` and `read_text` touch arbitrary host paths, so
         // they share the deterministic-tools gate with `tools::*` file I/O.
-        registry.register_gated_fn(
+        registry.register_fn(
             "fs",
             SAFE_TEXT_PATCH_BUILTIN,
             "safe_text_patch",
             safe_text_patch_builtin,
         );
-        registry.register_gated_fn("fs", READ_TEXT_BUILTIN, "read_text", read_text_builtin);
+        registry.register_fn(
+            "fs",
+            READ_TEXT_BUILTIN,
+            "staged_read_text",
+            read_text_builtin,
+        );
         registry.register_fn(
             "fs",
             EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN,

@@ -5,30 +5,30 @@ import { llm_text, with_llm_script } from "std/testing"
  * `{block: true}`. `post_compact` hooks observe the archived-message
  * count once compaction completes successfully.
  */
-const pre_seen = atomic(0)
+const pre_seen = harness.runtime.atomic(0)
 
-const post_seen = atomic(0)
+const post_seen = harness.runtime.atomic(0)
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "pre_compact",
     { event ->
       if type_of(event?.session?.id) == "string" {
-        atomic_add(pre_seen, 1)
+        harness.runtime.atomic_add(pre_seen, 1)
       }
-      if atomic_get(pre_seen) == 1 {
+      if harness.runtime.atomic_get(pre_seen) == 1 {
         return {block: true, reason: "first compact intentionally vetoed"}
       }
       return nil
     },
   )
   // First call: block. Second call: allow.
-  register_session_hook(
+  harness.agent.register_session_hook(
     "post_compact",
     { event ->
       if (event?.archived_messages ?? 0) > 0 {
-        atomic_add(post_seen, 1)
+        harness.runtime.atomic_add(post_seen, 1)
       }
       return nil
     },
@@ -36,10 +36,9 @@ pipeline default() {
   // Force compaction with a hostile threshold so the autocompactor
   // tries to compress even with a tiny transcript.
   with_llm_script(
-    [llm_text("round one"), llm_text("round two")],
+    harness.llm, [llm_text("round one"), llm_text("round two")],
     { ->
-      const result = agent_loop(
-        "compact me",
+      const result = agent_loop(harness, "compact me",
         nil,
         {
           provider: "mock",
@@ -50,10 +49,10 @@ pipeline default() {
           compact_keep_last: 0,
         },
       )
-      __io_println(result.status)
-      __io_println(atomic_get(pre_seen))
-      __io_println(atomic_get(post_seen))
-      clear_session_hooks()
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(pre_seen))
+      harness.stdio.println(harness.runtime.atomic_get(post_seen))
+      harness.agent.clear_session_hooks()
     },
   )
 }

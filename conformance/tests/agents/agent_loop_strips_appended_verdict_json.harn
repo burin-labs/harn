@@ -1,21 +1,20 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "What can I help with today?{ \"verdict\": \"done\", \"reasoning\": \"greeting\", \"next_step\": \"\" }",
       ),
     ],
     { ->
-      const result = agent_loop(
-        "Hi, how are you?",
+      const result = agent_loop(harness, "Hi, how are you?",
         nil,
         {provider: "mock", max_iterations: 1, done_judge: false},
       )
-      __io_println(result.status)
-      __io_println(result.visible_text)
-      __io_println(!contains(result.visible_text, "\"verdict\""))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(!contains(result.visible_text, "\"verdict\""))
     },
   )
 }

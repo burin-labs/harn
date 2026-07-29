@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const base = transcript_from_messages(
     [
       {role: "user", content: "one"},
@@ -29,7 +29,7 @@ pipeline main() {
     },
   )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
-  __io_println(transcript_summary(compacted)?.contains("2 reminders compactable"))
-  __io_println(len(reminders))
-  __io_println(reminders[0].reminder.body)
+  harness.stdio.println(transcript_summary(compacted)?.contains("2 reminders compactable"))
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
 }

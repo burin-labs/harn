@@ -1,8 +1,8 @@
 import "std/project"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const root = path_join(harness.fs.temp_dir(), "project_deep_scan_ignore")
-  const namespace = "ambient-${uuid()}"
+  const namespace = "ambient-${harness.random.uuid()}"
   harness.fs.mkdir(path_join(root, "app/src"))
   harness.fs.mkdir(path_join(root, "ignored/src"))
   harness.fs.mkdir(path_join(root, "target/tooling"))
@@ -21,11 +21,11 @@ pipeline test(task) {
   )
   harness.fs.write_text(path_join(root, "node_modules/pkg/package.json"), "{\"name\":\"pkg\"}\n")
   const tree = project_deep_scan(
-    root,
+    harness.project, root,
     {namespace: namespace, tiers: ["ambient"], incremental: true, depth: nil},
   )
-  __io_println(tree.app.ambient.languages[0] == "rust")
-  __io_println(tree["ignored"] == nil)
-  __io_println(tree["target/tooling"] == nil)
-  __io_println(tree["node_modules/pkg"] == nil)
+  harness.stdio.println(tree.app.ambient.languages[0] == "rust")
+  harness.stdio.println(tree["ignored"] == nil)
+  harness.stdio.println(tree["target/tooling"] == nil)
+  harness.stdio.println(tree["node_modules/pkg"] == nil)
 }

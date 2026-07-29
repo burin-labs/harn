@@ -288,7 +288,6 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "trust" => "stdlib/stdlib_trust.harn",
     "corrections" => "stdlib/stdlib_corrections.harn",
     "plan" => "stdlib/stdlib_plan.harn",
-    "waitpoints" => "stdlib/stdlib_waitpoints.harn",
     "waitpoint" => "stdlib/stdlib_waitpoint.harn",
     "monitors" => "stdlib/stdlib_monitors.harn",
     "worktree" => "stdlib/stdlib_worktree.harn",

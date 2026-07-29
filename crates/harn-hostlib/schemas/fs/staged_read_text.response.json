@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://harnlang.com/schemas/hostlib/fs/read_text.response.json",
-  "title": "fs.read_text response",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/staged_read_text.response.json",
+  "title": "fs.staged_read_text response",
   "type": "object",
   "properties": {
     "path": { "type": "string" },

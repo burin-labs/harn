@@ -6,9 +6,9 @@ fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
 }
 
-fn tool_message_count(session_id) {
+fn tool_message_count(harness: Harness, session_id) {
   let count = 0
-  for message in agent_session_messages(session_id) {
+  for message in agent_session_messages(harness, session_id) {
     if message?.role == "tool" && message?.name == "noop" {
       count = count + 1
     }
@@ -16,7 +16,7 @@ fn tool_message_count(session_id) {
   return count
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   let dispatches = 0
   let tools = tool_registry()
   tools = tool_define(
@@ -34,7 +34,7 @@ pipeline default() {
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]},
       {text: "", tool_calls: [{id: "noop2", name: "noop", arguments: {}}]},
       {text: "", tool_calls: [{id: "noop3", name: "noop", arguments: {}}]},
@@ -44,11 +44,9 @@ pipeline default() {
       llm_text("still working"),
     ],
     { ->
-      const session = "stall-judge-continue-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Continue when the stall judge vetoes.",
+      const session = "stall-judge-continue-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Continue when the stall judge vetoes.",
           nil,
           {
             provider: "mock",
@@ -65,26 +63,26 @@ pipeline default() {
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
       const judges = events_of(captured.events, "judge_decision")
-      const messages = json_stringify(agent_session_messages(session))
-      __io_println(captured.result.status)
-      __io_println(len(stalls))
-      __io_println(len(judges))
-      __io_println(judges[0].trigger)
-      __io_println(judges[0].verdict)
-      __io_println(
+      const messages = json_stringify(agent_session_messages(harness, session))
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(len(stalls))
+      harness.stdio.println(len(judges))
+      harness.stdio.println(judges[0].trigger)
+      harness.stdio.println(judges[0].verdict)
+      harness.stdio.println(
         "completion.invocations=" + to_string(captured.result.completion_judge.invocations),
       )
-      __io_println("completion.vetoes=" + to_string(captured.result.completion_judge.vetoes))
-      __io_println("completion.max=" + to_string(captured.result.completion_judge.max_invocations))
-      __io_println(
+      harness.stdio.println("completion.vetoes=" + to_string(captured.result.completion_judge.vetoes))
+      harness.stdio.println("completion.max=" + to_string(captured.result.completion_judge.max_invocations))
+      harness.stdio.println(
         "completion.cap_reached=" + to_string(captured.result.completion_judge.cap_reached),
       )
-      __io_println("done.cap_reached=" + to_string(captured.result.done_judge.cap_reached))
-      __io_println(tool_message_count(session))
-      __io_println(dispatches)
-      __io_println(contains(messages, "Stall diagnostic"))
-      __io_println(contains(messages, "change approach"))
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println("done.cap_reached=" + to_string(captured.result.done_judge.cap_reached))
+      harness.stdio.println(tool_message_count(harness, session))
+      harness.stdio.println(dispatches)
+      harness.stdio.println(contains(messages, "Stall diagnostic"))
+      harness.stdio.println(contains(messages, "change approach"))
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
   let other_tools = tool_registry()
@@ -100,16 +98,14 @@ pipeline default() {
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "noopA", name: "noop", arguments: {}}]},
       {text: "", tool_calls: [{id: "noopB", name: "noop", arguments: {}}]},
     ],
     { ->
-      const other_session = "stall-judge-other-" + uuid()
-      const other = agent_capture_events(
-        other_session,
-        fn() { return agent_loop(
-          "Do not run a stall judge for non-stalled cadence.",
+      const other_session = "stall-judge-other-" + harness.random.uuid()
+      const other = agent_capture_events(harness,  harness, other_session,
+        fn() { return agent_loop(harness, "Do not run a stall judge for non-stalled cadence.",
           nil,
           {
             provider: "mock",
@@ -123,10 +119,10 @@ pipeline default() {
           },
         ) },
       )
-      __io_println(other.result.status)
-      __io_println(len(events_of(other.events, "agent_loop_stall_warning")))
-      __io_println(len(events_of(other.events, "judge_decision")))
-      __io_println(tool_message_count(other_session))
+      harness.stdio.println(other.result.status)
+      harness.stdio.println(len(events_of(other.events, "agent_loop_stall_warning")))
+      harness.stdio.println(len(events_of(other.events, "judge_decision")))
+      harness.stdio.println(tool_message_count(harness, other_session))
     },
   )
 }

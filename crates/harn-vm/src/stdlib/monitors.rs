@@ -111,7 +111,10 @@ pub(crate) fn register_monitor_builtins(vm: &mut Vm) {
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&MONITOR_WAIT_FOR_NATIVE_BUILTIN_DEF];
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("monitor_wait_for_native", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "harness.runtime.monitor_wait_for_native",
+    effects = ["clock.observe@const=monotonic", "state.observe@dynamic"],
+    sig_expr = BuiltinSignature::variadic("monitor_wait_for_native", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "monitor"
 )]

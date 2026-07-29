@@ -1,7 +1,7 @@
 import { obs } from "std/observability"
 
-pipeline default() {
-  const o = obs()
+pipeline default(harness: Harness) {
+  const o = obs(harness)
   o.reset()
   o.configure(
     {
@@ -25,12 +25,12 @@ pipeline default() {
   o.log("bad", "error", {component: "router"})
   o.metric("requests", 7, {route: "/v1"})
   const emitted = o.events_take()
-  __io_println(len(emitted))
-  __io_println(emitted[0].backend)
-  __io_println(emitted[0].payload.resourceLogs[0].scopeLogs[0].logRecords[0].body)
-  __io_println(emitted[1].backend)
-  __io_println(emitted[1].payload.event.level)
-  __io_println(emitted[2].backend)
-  __io_println(emitted[2].payload.name)
-  __io_println(emitted[2].payload.route)
+  harness.stdio.println(len(emitted))
+  harness.stdio.println(emitted[0].backend)
+  harness.stdio.println(emitted[0].payload.resourceLogs[0].scopeLogs[0].logRecords[0].body)
+  harness.stdio.println(emitted[1].backend)
+  harness.stdio.println(emitted[1].payload.event.level)
+  harness.stdio.println(emitted[2].backend)
+  harness.stdio.println(emitted[2].payload.name)
+  harness.stdio.println(emitted[2].payload.route)
 }

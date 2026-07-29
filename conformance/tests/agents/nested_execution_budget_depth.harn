@@ -1,6 +1,6 @@
 import { with_llm_script } from "std/testing"
 
-fn delegated_tools() {
+fn delegated_tools(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -8,8 +8,7 @@ fn delegated_tools() {
     "Start a nested child agent.",
     {
       handler: { _args ->
-        const child = sub_agent_run(
-          "Nested child should be rejected by the remaining recursion budget.",
+        const child = sub_agent_run(harness, "Nested child should be rejected by the remaining recursion budget.",
           {provider: "mock", max_iterations: 1},
         )
         require !child?.ok, "nested sub-agent must fail closed"
@@ -29,24 +28,23 @@ fn delegated_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [{tool_calls: [{id: "delegate_1", name: "delegate", arguments: {}}]}],
+    harness.llm, [{tool_calls: [{id: "delegate_1", name: "delegate", arguments: {}}]}],
     { ->
-      const parent = agent_loop(
-        "Ask the tool to delegate.",
+      const parent = agent_loop(harness, "Ask the tool to delegate.",
         nil,
         {
           provider: "mock",
-          tools: delegated_tools(),
+          tools: delegated_tools(harness),
           allowed_tools: ["delegate"],
           tool_format: "native",
           max_iterations: 1,
           policy: {recursion_limit: 0},
         },
       )
-      __io_println(contains(parent?.tools?.successful ?? [], "delegate"))
-      __io_println(len(parent?.tools?.rejected ?? []) == 0)
+      harness.stdio.println(contains(parent?.tools?.successful ?? [], "delegate"))
+      harness.stdio.println(len(parent?.tools?.rejected ?? []) == 0)
       const flow = workflow_graph(
         {
           name: "budgeted_workflow",
@@ -63,20 +61,19 @@ pipeline main() {
           edges: [],
         },
       )
-      const workflow = workflow_execute(
-        "Nested workflow stage should be rejected.",
+      const workflow = workflow_execute(harness, "Nested workflow stage should be rejected.",
         flow,
         [],
         {max_steps: 1},
       )
       const stage = workflow?.run?.stages[0]
       const artifact = stage?.artifacts[0]?.data
-      __io_println(stage?.status == "failed")
-      __io_println(stage?.outcome == "blocked")
-      __io_println(stage?.branch == "failed")
-      __io_println(artifact?.stop_reason == "nested_execution_budget_exhausted")
-      __io_println(artifact?.error?.category == "budget_exceeded")
-      __io_println(contains(artifact?.error?.message ?? "", "workflow_stage: act"))
+      harness.stdio.println(stage?.status == "failed")
+      harness.stdio.println(stage?.outcome == "blocked")
+      harness.stdio.println(stage?.branch == "failed")
+      harness.stdio.println(artifact?.stop_reason == "nested_execution_budget_exhausted")
+      harness.stdio.println(artifact?.error?.category == "budget_exceeded")
+      harness.stdio.println(contains(artifact?.error?.message ?? "", "workflow_stage: act"))
     },
   )
 }

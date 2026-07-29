@@ -6,7 +6,7 @@
  * Body entries are `<field_name> <expression>` pairs; lifecycle hooks
  * are fn literal expressions like any other value.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Test 1: basic skill declaration with string/list fields
   skill deploy {
     description "Deploy the application to production"
@@ -35,8 +35,8 @@ pipeline test(task) {
   // Test 2: skill with lifecycle hooks (fn expressions)
   skill onboard {
     description "Onboarding flow"
-    on_activate fn() { log("onboard activated") }
-    on_deactivate fn() { log("onboard deactivated") }
+    on_activate fn() { harness.stdio.println("onboard activated") }
+    on_deactivate fn() { harness.stdio.println("onboard deactivated") }
   }
   const o = skill_find(onboard, "onboard")
   assert(o.on_activate != nil, "on_activate hook present")
@@ -91,5 +91,5 @@ pipeline test(task) {
   assert(skill_count(updated) == 1, "re-register keeps count at 1")
   const u = skill_find(updated, "review")
   assert(u.description == "Updated", "re-register overwrites description")
-  log("skill_decl tests passed")
+  harness.stdio.println("skill_decl tests passed")
 }

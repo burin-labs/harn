@@ -1,13 +1,13 @@
 import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 
 fn fixture(harness: Harness, name) {
-  const root = project_root() ?? cwd()
+  const root = harness.fs.project_root() ?? cwd()
   return json_parse(
     harness.fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
   )
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const local = fixture(harness, "local_job_stream")
   let events = []
   for item in local.events {
@@ -18,7 +18,7 @@ pipeline default() {
   )
   const view = dashboard_jobs_view(events, {title: "Jobs", generated_at: "fixture"})
   for job in view.jobs {
-    __io_println(job.job_id + " " + job.status)
+    harness.stdio.println(job.job_id + " " + job.status)
   }
-  __io_println("jobs=" + to_string(len(view.jobs)))
+  harness.stdio.println("jobs=" + to_string(len(view.jobs)))
 }

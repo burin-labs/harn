@@ -493,7 +493,7 @@ pub fn __agent_stall_warning_record(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stall_inject_feedback(
+pub fn agent_stall_inject_feedback(harness: Harness, 
   session_id: string,
   warning: AgentStallWarning,
   config: AgentStallConfig,
@@ -502,8 +502,7 @@ pub fn agent_stall_inject_feedback(
   const wants_feedback = config.inject_feedback ?? true
   const should_feedback = wants_feedback && state.feedback_count < config.max_feedback
   if should_feedback {
-    agent_feedback_emit(
-      session_id,
+    agent_feedback_emit(harness,  session_id,
       [
         {
           kind: "stall_diagnostics",
@@ -523,19 +522,19 @@ pub fn agent_stall_inject_feedback(
   return state
 }
 
-pub fn __agent_stall_maybe_emit(
+pub fn __agent_stall_maybe_emit(harness: Harness, 
   session_id: string,
   warning: AgentStallWarning,
   config: AgentStallConfig,
   state: AgentStallState,
   defer_feedback: bool,
 ) {
-  agent_emit_event(session_id, "agent_loop_stall_warning", warning)
+  agent_emit_event(harness, session_id, "agent_loop_stall_warning", warning)
   if defer_feedback {
     return {state: state, warning: warning, feedback_deferred: true}
   }
   return {
-    state: agent_stall_inject_feedback(session_id, warning, config, state),
+    state: agent_stall_inject_feedback(harness, session_id, warning, config, state),
     warning: warning,
     feedback_deferred: false,
   }
@@ -658,7 +657,7 @@ pub fn __agent_stall_observation(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_emit_diagnostic_trip(
+pub fn __agent_stall_emit_diagnostic_trip(harness: Harness, 
   session_id: string,
   config: AgentStallConfig,
   tripped: AgentStallState,
@@ -689,7 +688,7 @@ pub fn __agent_stall_emit_diagnostic_trip(
   if remediation_delivered {
     warning = warning + {remediation_delivered: true}
   }
-  const emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
+  const emitted = __agent_stall_maybe_emit(harness, session_id, warning, config, tripped, defer_feedback)
   const next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
@@ -701,7 +700,7 @@ pub fn __agent_stall_emit_diagnostic_trip(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_observe_no_progress(
+pub fn __agent_stall_observe_no_progress(harness: Harness, 
   session_id: string,
   iteration: int,
   config: AgentStallConfig,
@@ -739,7 +738,7 @@ pub fn __agent_stall_observe_no_progress(
     config,
     config.no_progress_messages,
   )
-  const emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+  const emitted = __agent_stall_maybe_emit(harness, session_id, warning, config, next_state, defer_feedback)
   next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
@@ -749,7 +748,7 @@ pub fn __agent_stall_observe_no_progress(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_observe_parse_rejection(
+pub fn __agent_stall_observe_parse_rejection(harness: Harness, 
   session_id: string,
   iteration: int,
   config: AgentStallConfig,
@@ -775,7 +774,7 @@ pub fn __agent_stall_observe_parse_rejection(
     config,
     config.repeat_parse_rejection,
   )
-  const emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+  const emitted = __agent_stall_maybe_emit(harness, session_id, warning, config, next_state, defer_feedback)
   next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
@@ -1000,7 +999,7 @@ pub fn __agent_stall_classify_trip(config: AgentStallConfig, s) {
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn __agent_stall_observe_core(
+pub fn __agent_stall_observe_core(harness: Harness, 
   session_id: string,
   tool_calls: list,
   iteration: int,
@@ -1029,7 +1028,7 @@ pub fn __agent_stall_observe_core(
   // bounded warning/feedback/hard-stop ladder so recovery does not depend on a
   // successfully parsed call.
   if had_parse_errors {
-    return __agent_stall_observe_parse_rejection(
+    return __agent_stall_observe_parse_rejection(harness, 
       session_id,
       iteration,
       config,
@@ -1050,7 +1049,7 @@ pub fn __agent_stall_observe_core(
     // no-progress monologue candidate; a fully empty turn resets the action
     // stream.
     if to_string(turn_text) != "" || len(tool_calls) > 0 {
-      return __agent_stall_observe_no_progress(
+      return __agent_stall_observe_no_progress(harness, 
         session_id,
         iteration,
         config,
@@ -1099,7 +1098,7 @@ pub fn __agent_stall_observe_core(
         config,
         trip.threshold,
       )
-      const emitted = __agent_stall_maybe_emit(
+      const emitted = __agent_stall_maybe_emit(harness, 
         session_id,
         warning,
         config,
@@ -1180,7 +1179,7 @@ pub fn __agent_stall_eval_remediation(state: AgentStallState, signature: string,
   )
 }
 
-pub fn __agent_stall_apply_repair(
+pub fn __agent_stall_apply_repair(harness: Harness, 
   session_id: string,
   config: AgentStallConfig,
   observation: AgentStallObservation,
@@ -1213,7 +1212,7 @@ pub fn __agent_stall_apply_repair(
     .no_net_progress_hard_cap_after
   if hard_cap_due {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
-    return __agent_stall_emit_diagnostic_trip(
+    return __agent_stall_emit_diagnostic_trip(harness, 
       session_id,
       config,
       tripped,
@@ -1240,7 +1239,7 @@ pub fn __agent_stall_apply_repair(
     .turns_since_clean_verify
   if clean_floor_due {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
-    return __agent_stall_emit_diagnostic_trip(
+    return __agent_stall_emit_diagnostic_trip(harness, 
       session_id,
       config,
       tripped,
@@ -1297,7 +1296,7 @@ pub fn __agent_stall_apply_repair(
     }
     if evaluated.delivered {
       const tripped = __agent_stall_register_trip(current, config)
-      return __agent_stall_emit_diagnostic_trip(
+      return __agent_stall_emit_diagnostic_trip(harness, 
         session_id,
         config,
         tripped,
@@ -1329,7 +1328,7 @@ pub fn __agent_stall_apply_repair(
     return observation + {state: current}
   }
   const tripped = __agent_stall_register_trip(current, config)
-  return __agent_stall_emit_diagnostic_trip(
+  return __agent_stall_emit_diagnostic_trip(harness, 
     session_id,
     config,
     tripped,
@@ -1362,7 +1361,7 @@ pub fn __agent_stall_apply_repair(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_apply_action_signal(
+pub fn __agent_stall_apply_action_signal(harness: Harness, 
   session_id: string,
   config: AgentStallConfig,
   observation: AgentStallObservation,
@@ -1395,7 +1394,7 @@ pub fn __agent_stall_apply_action_signal(
   const trips = observation.state.action_flail_trips + 1
   const hard_stop = trips >= config.hard_stop_after_trips
   const tripped = observation.state + {action_flail_trips: trips, hard_stop: hard_stop}
-  return __agent_stall_emit_diagnostic_trip(
+  return __agent_stall_emit_diagnostic_trip(harness, 
     session_id,
     config,
     tripped,
@@ -1433,7 +1432,7 @@ pub fn __agent_stall_observe_monologue_actuation(
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_stall_observe_tool_calls(
+pub fn agent_stall_observe_tool_calls(harness: Harness, 
   session_id: string,
   tool_calls: list,
   iteration: int,
@@ -1447,7 +1446,7 @@ pub fn agent_stall_observe_tool_calls(
   turn_stop_reason = "",
   payload = nil,
 ) -> AgentStallObservation {
-  const observation = __agent_stall_observe_core(
+  const observation = __agent_stall_observe_core(harness, 
     session_id,
     tool_calls,
     iteration,
@@ -1463,7 +1462,7 @@ pub fn agent_stall_observe_tool_calls(
   if !observation.enabled {
     return observation
   }
-  const repaired = __agent_stall_apply_repair(
+  const repaired = __agent_stall_apply_repair(harness, 
     session_id,
     observation.config,
     observation,
@@ -1476,7 +1475,7 @@ pub fn agent_stall_observe_tool_calls(
   // unchanged) unless an `action_signal` callback is configured, so the default is
   // byte-identical. Applied after the repair overlay so it respects the one-warning-
   // per-turn discipline.
-  const signaled = __agent_stall_apply_action_signal(
+  const signaled = __agent_stall_apply_action_signal(harness, 
     session_id,
     observation.config,
     repaired,

@@ -1,18 +1,18 @@
-pipeline main(task) {
-  const session = agent_session_open(
+pipeline main(harness: Harness, task) {
+  const session = harness.agent.open(
     "anchor-conformance",
     {workspace_anchor: {primary: "/workspace/main", anchored_at: "2026-05-23T00:00:00Z"}},
   )
-  const opened = agent_session_workspace_anchor(session)
+  const opened = harness.agent.workspace_anchor(session)
   assert(opened?.primary == "/workspace/main", "open pins the typed anchor")
   assert(opened?.anchored_at == "2026-05-23T00:00:00Z", "open preserves the anchored_at")
   assert(len(opened?.additional_roots) == 0, "additional_roots starts empty")
-  const default_policy = agent_session_workspace_policy(session)
+  const default_policy = harness.agent.workspace_policy(session)
   assert(
     default_policy.default_mount_mode == "read_only",
     "workspace policy defaults mounted roots to read_only",
   )
-  const snap = agent_session_snapshot(session)
+  const snap = harness.agent.snapshot(session)
   assert(
     snap.workspace_anchor?.primary == "/workspace/main",
     "snapshot surfaces the workspace anchor",
@@ -21,14 +21,14 @@ pipeline main(task) {
     snap.workspace_policy.default_mount_mode == "read_only",
     "snapshot surfaces the workspace policy",
   )
-  const policy_changed = agent_session_set_workspace_policy(session, {default_mount_mode: "extend"})
+  const policy_changed = harness.agent.set_workspace_policy(session, {default_mount_mode: "extend"})
   assert(policy_changed, "workspace policy setter reports change")
-  const updated_policy = agent_session_workspace_policy(session)
+  const updated_policy = harness.agent.workspace_policy(session)
   assert(
     updated_policy.default_mount_mode == "extend",
     "workspace policy setter updates default mount mode",
   )
-  const changed = agent_session_set_workspace_anchor(
+  const changed = harness.agent.set_workspace_anchor(
     session,
     {
       primary: "/workspace/lib",
@@ -37,11 +37,11 @@ pipeline main(task) {
     },
   )
   assert(changed, "setter reports change when value differs")
-  const mutated = agent_session_workspace_anchor(session)
+  const mutated = harness.agent.workspace_anchor(session)
   assert(mutated?.primary == "/workspace/lib", "setter replaces primary")
   assert(len(mutated?.additional_roots) == 1, "setter populates additional_roots")
   assert(mutated?.additional_roots[0]?.mount_mode == "extend", "setter preserves mount_mode")
-  const same = agent_session_set_workspace_anchor(
+  const same = harness.agent.set_workspace_anchor(
     session,
     {
       primary: "/workspace/lib",
@@ -50,8 +50,8 @@ pipeline main(task) {
     },
   )
   assert(!same, "setter reports unchanged when value matches")
-  const cleared = agent_session_set_workspace_anchor(session, nil)
+  const cleared = harness.agent.set_workspace_anchor(session, nil)
   assert(cleared, "clearing reports change")
-  assert(agent_session_workspace_anchor(session) == nil, "clearing returns nil")
-  log("agent_session_workspace_anchor tests passed")
+  assert(harness.agent.workspace_anchor(session) == nil, "clearing returns nil")
+  harness.stdio.println("agent_session_workspace_anchor tests passed")
 }

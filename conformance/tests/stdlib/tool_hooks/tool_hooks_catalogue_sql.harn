@@ -5,24 +5,24 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * scans; stays quiet when a WHERE / LIMIT / aggregate caps the result
  * set or when the literal text appears in a non-leading context.
  */
-fn probe(reg, cmd) {
-  const m = tool_hooks_match(reg, cmd, {stacks: ["sql"]})
+fn probe(harness: Harness, reg, cmd) {
+  const m = harness.tools.hooks_match(reg, cmd, {stacks: ["sql"]})
   if len(m) > 0 {
-    __io_println(m[0].rule_id + " " + m[0].severity)
+    harness.stdio.println(m[0].rule_id + " " + m[0].severity)
   } else {
-    __io_println("miss")
+    harness.stdio.println("miss")
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const reg = tool_hooks_seed_registry(["sql"])
   /* Unbounded scans — fire. */
-  probe(reg, "SELECT * FROM users")
-  probe(reg, "select * from logs")
+  probe(harness, reg, "SELECT * FROM users")
+  probe(harness, reg, "select * from logs")
   /* Bounded — quiet. */
-  probe(reg, "SELECT * FROM users WHERE id = 1")
-  probe(reg, "SELECT * FROM users LIMIT 10")
-  probe(reg, "SELECT COUNT(*) FROM users")
+  probe(harness, reg, "SELECT * FROM users WHERE id = 1")
+  probe(harness, reg, "SELECT * FROM users LIMIT 10")
+  probe(harness, reg, "SELECT COUNT(*) FROM users")
   /* Non-leading usage (e.g. inside a shell echo) — quiet. */
-  probe(reg, "echo SELECT * FROM users")
+  probe(harness, reg, "echo SELECT * FROM users")
 }

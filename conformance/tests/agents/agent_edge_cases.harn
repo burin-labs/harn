@@ -13,7 +13,7 @@ fn read_only_tools() {
   return tools
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Test agent() edge cases
   // Agent with no config
   const a1 = agent("minimal", {})
@@ -38,5 +38,5 @@ pipeline test(task) {
   const cfg2 = agent_config(a2, "test")
   assert_eq(cfg2.options.provider, "mock")
   assert_eq(cfg2.options.tool_format, "native")
-  log("agent edge case tests passed")
+  harness.stdio.println("agent edge case tests passed")
 }

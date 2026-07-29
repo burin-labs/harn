@@ -12,14 +12,12 @@
 // the parser fully understood would waste a turn.
 import { probe, sample_registry } from "_tool_parse_probe"
 
-pipeline main() {
-  probe(
-    "mistral TOOL_CALLS ARGS markers",
+pipeline main(harness: Harness) {
+  probe(harness,  harness, "mistral TOOL_CALLS ARGS markers",
     "I'll inspect first.[TOOL_CALLS]edit[ARGS]{\"action\":\"create\",\"path\":\"a.rs\"}",
     sample_registry(),
   )
-  probe(
-    "mistral TOOL_CALLS json array payload",
+  probe(harness,  harness, "mistral TOOL_CALLS json array payload",
     """I'll inspect first.
 [TOOL_CALLS] [{"name":"edit","arguments":{"action":"create","path":"a.rs","content":"fn a() {}"}},{"name":"run","arguments":"{\"command\":\"cargo test\"}"}]""",
     sample_registry(),
@@ -27,8 +25,7 @@ pipeline main() {
   // DeepSeek DSML: two complete invoke blocks under different wrapper tags,
   // plus a third that is cut off after its opener. The complete ones dispatch;
   // a `string="false"` parameter is parsed as JSON, so `command` is a list.
-  probe(
-    "deepseek dsml invoke blocks",
+  probe(harness,  harness, "deepseek dsml invoke blocks",
     """I'll inspect first.
 <｜DSML｜tool_calls>
 <｜DSML｜invoke name="edit">

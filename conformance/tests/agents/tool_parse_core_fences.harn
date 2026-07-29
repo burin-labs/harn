@@ -9,11 +9,10 @@
 // code example, must stay text.
 import { probe, sample_registry } from "_tool_parse_probe"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // Both the fenced call and the bare one dispatch, and the fence markers are
   // stripped out of the visible prose rather than replayed to the user.
-  probe(
-    "fenced and bare call both dispatch",
+  probe(harness,  harness, "fenced and bare call both dispatch",
     """Here's how to use it:
 ```python
 edit({ action: "create", path: "fenced.go" })
@@ -24,8 +23,7 @@ edit({ action: "create", path: "bare.go" })
     sample_registry(),
   )
   // A tool name inside an inline code span is a mention, not an invocation.
-  probe(
-    "inline code span mention is not a call",
+  probe(harness,  harness, "inline code span mention is not a call",
     """I considered `edit({...})` but chose a different approach.
 edit({ action: "create", path: "real.go" })
 """,
@@ -35,38 +33,33 @@ edit({ action: "create", path: "real.go" })
   // the rest of the response, so every later bare call was silently skipped and
   // the loop stalled. The flag resets at each newline — inline code never spans
   // lines — so the call on the following line still parses.
-  probe(
-    "unbalanced backtick does not suppress a later call",
+  probe(harness,  harness, "unbalanced backtick does not suppress a later call",
     """The file is `src/main.rs (note path).
 edit({ action: "create", path: "real.go" })
 """,
     sample_registry(),
   )
   // A whole response that is one inline-wrapped call.
-  probe(
-    "inline wrapped call as the entire response",
+  probe(harness,  harness, "inline wrapped call as the entire response",
     "`edit({ action: \"create\", path: \"wrapped.go\" })`",
     sample_registry(),
   )
   // A whole response that is one fenced call, in three fence spellings.
-  probe(
-    "fenced call as the entire response",
+  probe(harness,  harness, "fenced call as the entire response",
     """```typescript
 edit({ action: "create", path: "wrapped.go" })
 ```""",
     sample_registry(),
   )
   // Gemma's other native form: a ```tool_code fence around a bare call.
-  probe(
-    "gemma tool_code fence",
+  probe(harness,  harness, "gemma tool_code fence",
     """```tool_code
 run({ command: "ls" })
 ```""",
     sample_registry(),
   )
   // A fenced batch edit whose `ops` carry a nested heredoc body.
-  probe(
-    "fenced edit batch ops with nested heredoc",
+  probe(harness,  harness, "fenced edit batch ops with nested heredoc",
     """```tool_code
 edit({ path: "tests/test_service.py", ops: [
   { op: "replace_body", function_name: "test_handle", new_body: <<EOF
@@ -80,8 +73,7 @@ EOF
     sample_registry(),
   )
   // Function calls in a code example that name no registered tool are code.
-  probe(
-    "non-tool calls in a code example stay prose",
+  probe(harness,  harness, "non-tool calls in a code example stay prose",
     """Here is the target test body:
 
     assert divide(10, 2) == 5.0
@@ -90,8 +82,7 @@ EOF
     sample_registry(),
   )
   // Two calls in one response, in document order.
-  probe(
-    "multiple calls in one response",
+  probe(harness,  harness, "multiple calls in one response",
     """edit({ action: "create", path: "a.go", content: "a" })
 Then we will:
 edit({ action: "patch", path: "b.go" })
@@ -102,8 +93,7 @@ edit({ action: "patch", path: "b.go" })
   // `<tool_call>` block look fenced. The fence-parity check used to count every
   // marker before the cursor and call an odd count "inside a fence", which
   // dropped the call and injected a spurious violation.
-  probe(
-    "tool call after an unbalanced fence",
+  probe(harness,  harness, "tool call after an unbalanced fence",
     """<assistant_prose>
 Here is the rough shape:
 ```
@@ -116,8 +106,7 @@ edit({ action: "create", path: "a.rs", content: "x" })
   )
   // A protocol tag inside a fence is an example, not a block; the real block
   // after it is the one that counts.
-  probe(
-    "user_response inside a markdown fence is an example",
+  probe(harness,  harness, "user_response inside a markdown fence is an example",
     """```xml
 <user_response>example only</user_response>
 ```
@@ -126,8 +115,7 @@ edit({ action: "create", path: "a.rs", content: "x" })
   )
   // Same rule stated inline: a placeholder in backticks is prose about the
   // protocol, not a response block.
-  probe(
-    "inline user_response placeholder is stray prose",
+  probe(harness,  harness, "inline user_response placeholder is stray prose",
     """Use `<user_response>...</user_response>` as the wrapper.
 Actual answer in plain prose.""",
     sample_registry(),

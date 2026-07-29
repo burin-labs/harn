@@ -1,9 +1,9 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "Load the unsigned instructions.",
         tool_calls: [
@@ -17,8 +17,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "Use the unsigned skill",
+      const result = agent_loop(harness, "Use the unsigned skill",
         catalog,
         {
           provider: "mock",
@@ -31,7 +30,7 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "agent loop finishes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const second_messages = json_stringify(calls[1].messages)
       assert(
         contains(second_messages, "UnsignedSkillError"),
@@ -51,7 +50,7 @@ pipeline test(task) {
         }
       }
       assert(saw_record, "skill.loaded trust record emitted")
-      log("load_skill_rejects_unsigned_when_required passed")
+      harness.stdio.println("load_skill_rejects_unsigned_when_required passed")
     },
   )
 }

@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // `return` inside a finally overrides the body's outcome (Java/JS semantics)
   // rather than crashing the compiler with unbounded recursion.
   fn ret_in_finally() {
@@ -8,7 +8,7 @@ pipeline test(task) {
       return "finally"
     }
   }
-  log(ret_in_finally())
+  harness.stdio.println(ret_in_finally())
   // `break`/`continue` that escape a finally run it and transfer normally.
   fn break_in_finally() {
     let seen = []
@@ -23,5 +23,5 @@ pipeline test(task) {
     }
     return seen
   }
-  log(break_in_finally())
+  harness.stdio.println(break_in_finally())
 }

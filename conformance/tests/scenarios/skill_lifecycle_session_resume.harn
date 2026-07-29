@@ -10,17 +10,16 @@ import { llm_text, with_llm_script } from "std/testing"
  * agent_loop invocation and checks the skill stayed hot without
  * re-matching.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   skill sticky_skill {
     description "Handle every task"
     prompt "Take a careful, confirmed approach."
   }
   with_llm_script(
-    [llm_text("First turn done."), llm_text("Resume done.")],
+    harness.llm, [llm_text("First turn done."), llm_text("Resume done.")],
     { ->
       const sid = "skill-resume-test"
-      const r1 = agent_loop(
-        "please handle this task carefully",
+      const r1 = agent_loop(harness, "please handle this task carefully",
         nil,
         {
           provider: "mock",
@@ -31,8 +30,7 @@ pipeline test(task) {
         },
       )
       assert(r1?.status == "done", "first run completes")
-      const r2 = agent_loop(
-        "continue",
+      const r2 = agent_loop(harness, "continue",
         nil,
         {
           provider: "mock",
@@ -43,10 +41,10 @@ pipeline test(task) {
         },
       )
       assert(r2?.status == "done", "resume run completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const last = calls[len(calls) - 1]
       assert(contains(last.system, "sticky_skill"), "resume turn keeps skill active")
-      log("skill_lifecycle_session_resume tests passed")
+      harness.stdio.println("skill_lifecycle_session_resume tests passed")
     },
   )
 }

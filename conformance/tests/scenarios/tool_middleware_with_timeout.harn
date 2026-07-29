@@ -5,7 +5,7 @@
  * `audit.layers[0].status == "timeout"` on the result.
  *
  * The middleware does not cancel the in-flight dispatch (hard cancel
- * belongs in `agent_loop({deadline_ms})`); it observes the breach so
+ * belongs in `agent_loop(harness, {deadline_ms})`); it observes the breach so
  * upstream layers can react.
  */
 import { with_timeout } from "std/llm/tool_middleware"
@@ -29,7 +29,7 @@ fn fast_next() {
 }
 
 fn slow_next(elapsed_simulator) {
-  // The middleware reads `now_ms()` directly, so we can't easily mock
+  // The middleware reads `harness.clock.now_ms()` directly, so we can't easily mock
   // wall clock from a synthetic next. Instead, drive the breach path by
   // setting `max_ms: -1` so any non-negative elapsed is over budget.
   return { call ->
@@ -61,24 +61,24 @@ fn envelope(name) {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // (1) Generous budget — call passes, layer status "ok".
-  const mw_ok = with_timeout({max_ms: 60000})
+  const mw_ok = with_timeout(harness, {max_ms: 60000})
   const r1 = mw_ok(envelope("read"), fast_next())
-  __io_println(r1.ok)
-  __io_println(r1.audit.layers[0].name)
-  __io_println(r1.audit.layers[0].status)
+  harness.stdio.println(r1.ok)
+  harness.stdio.println(r1.audit.layers[0].name)
+  harness.stdio.println(r1.audit.layers[0].status)
   // (2) max_ms = 0 — every call breaches; tag and pass-through preserved.
-  const mw_strict = with_timeout({max_ms: 0, message: "tool over budget"})
+  const mw_strict = with_timeout(harness, {max_ms: 0, message: "tool over budget"})
   const r2 = mw_strict(envelope("write"), slow_next(50))
-  __io_println(r2.ok)
-  __io_println(r2.error_category)
-  __io_println(r2.audit.layers[0].status)
+  harness.stdio.println(r2.ok)
+  harness.stdio.println(r2.error_category)
+  harness.stdio.println(r2.audit.layers[0].status)
   // (3) per_tool override — `read` keeps the generous budget; `write`
   // gets the strict 0 budget that breaches.
-  const mw_mixed = with_timeout({max_ms: 60000, per_tool: {write: 0}})
+  const mw_mixed = with_timeout(harness, {max_ms: 60000, per_tool: {write: 0}})
   const r3 = mw_mixed(envelope("read"), fast_next())
   const r4 = mw_mixed(envelope("write"), fast_next())
-  __io_println(r3.ok)
-  __io_println(r4.error_category)
+  harness.stdio.println(r3.ok)
+  harness.stdio.println(r4.error_category)
 }

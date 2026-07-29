@@ -1,38 +1,38 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
- * `llm_call_structured_safe(prompt, schema, options?)` returns the
+ * `harness.llm.call_structured_safe(prompt, schema, options?)` returns the
  * `{ok, data, error}` envelope on both success and failure. Mirrors
  * `llm_call_safe` but with `.data` pre-unwrapped.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   // Success path: parsed data surfaces in `.data`, error is nil.
   with_llm_script(
-    [llm_text("{\"verdict\": \"PASS\"}")],
+    harness.llm, [llm_text("{\"verdict\": \"PASS\"}")],
     { ->
-      const ok = llm_call_structured_safe("Grade", schema, {provider: "mock"})
-      __io_println(ok.ok)
-      __io_println(ok.data.verdict)
-      __io_println(ok.error == nil)
+      const ok = harness.llm.call_structured_safe("Grade", schema, {provider: "mock"})
+      harness.stdio.println(ok.ok)
+      harness.stdio.println(ok.data.verdict)
+      harness.stdio.println(ok.error == nil)
     },
   )
   with_llm_script(
-    [llm_text("{\"other\": \"nope\"}")],
+    harness.llm, [llm_text("{\"other\": \"nope\"}")],
     { ->
-      const bad = llm_call_structured_safe("Grade", schema, {provider: "mock", retries: 0})
-      __io_println(bad.ok)
-      __io_println(bad.data == nil)
-      __io_println(bad.error.category)
+      const bad = harness.llm.call_structured_safe("Grade", schema, {provider: "mock", retries: 0})
+      harness.stdio.println(bad.ok)
+      harness.stdio.println(bad.data == nil)
+      harness.stdio.println(bad.error.category)
     },
   )
   with_llm_script(
-    [{error: {category: "rate_limit", message: "429 slow down"}}],
+    harness.llm, [{error: {category: "rate_limit", message: "429 slow down"}}],
     { ->
-      const rate = llm_call_structured_safe("Grade", schema, {provider: "mock"})
-      __io_println(rate.ok)
-      __io_println(rate.error.category)
-      __io_println(contains(rate.error.message, "429"))
+      const rate = harness.llm.call_structured_safe("Grade", schema, {provider: "mock"})
+      harness.stdio.println(rate.ok)
+      harness.stdio.println(rate.error.category)
+      harness.stdio.println(contains(rate.error.message, "429"))
     },
   )
 }

@@ -232,10 +232,10 @@ pub use corrections::{
     CORRECTION_EVENT_KIND, CORRECTION_SCHEMA_V0,
 };
 pub use harness::{
-    DenyEvent, Harness, HarnessCall, HarnessClock, HarnessCrypto, HarnessEnv, HarnessFs,
-    HarnessKind, HarnessLlm, HarnessNet, HarnessObs, HarnessProcess, HarnessRandom, HarnessSecrets,
-    HarnessStdio, HarnessSystem, HarnessTenant, HarnessTerm, MockAwareClock, MockHarnessBuilder,
-    VmHarness,
+    DenyEvent, Harness, HarnessAgent, HarnessCall, HarnessChannels, HarnessClock, HarnessEnv,
+    HarnessFs, HarnessKind, HarnessLlm, HarnessMemory, HarnessNet, HarnessObs, HarnessPostgres,
+    HarnessProcess, HarnessRandom, HarnessSecrets, HarnessSqlite, HarnessStdio, HarnessSystem,
+    HarnessTenant, HarnessTerm, HarnessTesting, MockAwareClock, MockHarnessBuilder, VmHarness,
 };
 pub use harness_auth::{
     current_auth_principal, enter_auth_principal, AuthPrincipal, AuthPrincipalScopeGuard,

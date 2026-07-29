@@ -24,17 +24,17 @@ import { with_llm_script } from "std/testing"
  * Revert the debug edit before committing. The brittleness here is the
  * point — every regen requires explicit review.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [{text: "fidelity-response", input_tokens: 5, output_tokens: 3, model: "mock"}],
+    harness.llm, [{text: "fidelity-response", input_tokens: 5, output_tokens: 3, model: "mock"}],
     { ->
       mock_time(1767225600000)
       const before = harness.clock.now_ms()
-      const resp = llm_call("replay test", nil, {provider: "mock", model: "mock"})
+      const resp = harness.llm.call("replay test", nil, {provider: "mock", model: "mock"})
       advance_time(1000)
       const after = harness.clock.now_ms()
-      __io_println(resp.text == "fidelity-response")
-      __io_println(after - before == 1000)
+      harness.stdio.println(resp.text == "fidelity-response")
+      harness.stdio.println(after - before == 1000)
       unmock_time()
     },
   )

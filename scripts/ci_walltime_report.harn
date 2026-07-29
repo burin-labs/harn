@@ -163,7 +163,7 @@ pub fn build_report(
   }
 }
 
-fn gh_api_json(path: string) {
+fn gh_api_json(harness: Harness, path: string) {
   const result = harness.process.spawn_captured({cmd: "gh", args: ["api", path]})
   if !result.success {
     throw "gh api ${path} failed: ${result.stderr.trim()}"
@@ -211,7 +211,7 @@ fn render_report(report: CiWalltimeReport) -> string {
   )
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   if help_requested(argv) {
     harness.stdio.println(usage())
     return 0
@@ -227,7 +227,7 @@ pipeline main(task) {
   const workflow = to_string(parsed.workflow)
   const event = to_string(parsed.event)
   const limit = min(100, max(1, to_int(parsed.limit) ?? DEFAULT_LIMIT))
-  const runs_data = gh_api_json(
+  const runs_data = gh_api_json(harness, 
     "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}",
   )
   const runs = run_samples_from_api(runs_data)
@@ -236,7 +236,7 @@ pipeline main(task) {
     jobs = jobs
       + job_samples_from_api(
       run.id,
-      gh_api_json("/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100"),
+      gh_api_json(harness, "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100"),
     )
   }
   const report = build_report(repository, workflow, event, runs, jobs)

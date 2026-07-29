@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn repeat_text(text: string, count: int = 3) -> string {
     return text.repeat(count)
   }
-  log(repeat_text("ha"))
-  log(repeat_text("ha", 5))
+  harness.stdio.println(repeat_text("ha"))
+  harness.stdio.println(repeat_text("ha", 5))
 }

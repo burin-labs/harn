@@ -1,14 +1,14 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // r[k] is O(1) and computes start + k with a bounds check.
   const r = 1 to 10
-  log(r[0])
-  log(r[3])
-  log(r[9])
+  harness.stdio.println(r[0])
+  harness.stdio.println(r[3])
+  harness.stdio.println(r[9])
   // Negative indices count from the end (Python-style).
-  log(r[-1])
-  log(r[-10])
+  harness.stdio.println(r[-1])
+  harness.stdio.println(r[-10])
   // Exclusive ranges index the same way
   const e = 0 to 5 exclusive
-  log(e[0])
-  log(e[4])
+  harness.stdio.println(e[0])
+  harness.stdio.println(e[4])
 }

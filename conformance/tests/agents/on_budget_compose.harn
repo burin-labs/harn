@@ -10,8 +10,8 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
 import { compose } from "std/lifecycle/combinators"
 import { warn_and_continue } from "std/lifecycle/on_budget"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const custom = { h, state ->
         h.emit_audit(

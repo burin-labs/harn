@@ -1,5 +1,5 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   deadline 10ms {
-    sleep(25ms)
+    harness.clock.sleep_ms(25ms)
   }
 }

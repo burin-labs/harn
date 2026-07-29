@@ -1,18 +1,18 @@
 import { upload } from "std/files"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const pdf_path = path_join(harness.fs.temp_dir(), "sample.pdf")
   harness.fs.write_bytes(pdf_path, bytes_from_string("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n"))
-  const file_id = upload(pdf_path, "mock")
-  const file_id_again = upload(pdf_path, "mock")
+  const file_id = upload(harness.llm, pdf_path, "mock")
+  const file_id_again = upload(harness.llm, pdf_path, "mock")
   harness.fs.delete(pdf_path)
   assert_eq(file_id, file_id_again)
   assert(contains(file_id, "mock_file_"), "mock upload should return a stable file_id")
   with_llm_script(
-    [llm_text("summary")],
+    harness.llm, [llm_text("summary")],
     { ->
-      const result = llm_call(
+      const result = harness.llm.call(
         "",
         nil,
         {
@@ -31,7 +31,7 @@ pipeline test(task) {
         },
       )
       assert_eq(result.text, "summary")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert_eq(len(calls), 1)
       const blocks = calls[0].messages[0].content
       assert_eq(blocks[0].type, "pdf")
@@ -39,7 +39,7 @@ pipeline test(task) {
       assert_eq(blocks[1].type, "audio")
       assert_eq(blocks[1].media_type, "audio/wav")
       assert_eq(blocks[1].base64, "UklGRg==")
-      log("llm_call_pdf_audio_content tests passed")
+      harness.stdio.println("llm_call_pdf_audio_content tests passed")
     },
   )
 }

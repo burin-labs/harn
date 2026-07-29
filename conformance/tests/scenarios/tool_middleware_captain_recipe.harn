@@ -18,11 +18,11 @@ import {
 } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
-const audit_records = atomic(0)
+const audit_records = harness.runtime.atomic(0)
 
-const telemetry_records = atomic(0)
+const telemetry_records = harness.runtime.atomic(0)
 
-const handoff_records = atomic(0)
+const handoff_records = harness.runtime.atomic(0)
 
 /**
  * Tool schemas omit `reason` deliberately. with_required_reason adds it
@@ -79,9 +79,9 @@ fn tools() {
   return r
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "t1", name: "read", arguments: {path: "/tmp/a", reason: "inspect target file"}},
@@ -93,16 +93,13 @@ pipeline default() {
     ],
     { ->
       const reason_mw = with_required_reason()
-      const stack = compose_tool_callers(
-        [
-          with_audit_log(
-            { _record ->
-              let _ = atomic_add(audit_records, 1)
+      const stack = compose_tool_callers(harness,  harness, [
+          with_audit_log(harness,  harness, { _record ->
+              let _ = harness.runtime.atomic_add(audit_records, 1)
             },
           ),
-          with_telemetry(
-            { _record ->
-              let _ = atomic_add(telemetry_records, 1)
+          with_telemetry(harness, { _record ->
+              let _ = harness.runtime.atomic_add(telemetry_records, 1)
             },
           ),
           with_summary({ call, _result -> return call.tool_name + " ran" }),
@@ -110,7 +107,7 @@ pipeline default() {
           with_handoff_artifact(
             {
               sink: { _record, _call ->
-                let _ = atomic_add(handoff_records, 1)
+                let _ = harness.runtime.atomic_add(handoff_records, 1)
               },
             },
           ),
@@ -119,8 +116,7 @@ pipeline default() {
         ],
       )
       const registry = tools()
-      const result = agent_loop(
-        "polish + handoff",
+      const result = agent_loop(harness, "polish + handoff",
         nil,
         {
           provider: "mock",
@@ -131,14 +127,14 @@ pipeline default() {
           tool_caller: stack,
         },
       )
-      __io_println(result.status)
-      __io_println(atomic_get(audit_records))
-      __io_println(atomic_get(telemetry_records))
-      __io_println(atomic_get(handoff_records))
-      __io_println(len(result.tools.successful))
-      __io_println(contains(result.tools.successful, "read"))
-      __io_println(contains(result.tools.successful, "edit"))
-      __io_println(contains(result.tools.successful, "escalate"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(audit_records))
+      harness.stdio.println(harness.runtime.atomic_get(telemetry_records))
+      harness.stdio.println(harness.runtime.atomic_get(handoff_records))
+      harness.stdio.println(len(result.tools.successful))
+      harness.stdio.println(contains(result.tools.successful, "read"))
+      harness.stdio.println(contains(result.tools.successful, "edit"))
+      harness.stdio.println(contains(result.tools.successful, "escalate"))
     },
   )
 }

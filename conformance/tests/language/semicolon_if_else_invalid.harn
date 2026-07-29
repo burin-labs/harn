@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   if true {
-    log("then")
+    harness.stdio.println("then")
   }; else {
-    log("else")
+    harness.stdio.println("else")
   }
 }

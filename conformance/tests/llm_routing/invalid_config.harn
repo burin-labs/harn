@@ -2,33 +2,33 @@
  * routing_policy validates the config dict and throws clear errors
  * when shape is wrong.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const r1 = try {
-    routing_policy({chain: []})
+    harness.llm.routing_policy({chain: []})
     "no_error"
   } catch (e) {
     "empty_chain"
   }
-  __io_println(r1)
+  harness.stdio.println(r1)
   const r2 = try {
-    routing_policy({chain: [{provider: "mock"}]})
+    harness.llm.routing_policy({chain: [{provider: "mock"}]})
     "no_error"
   } catch (e) {
     "missing_model"
   }
-  __io_println(r2)
+  harness.stdio.println(r2)
   const r3 = try {
-    routing_policy({chain: [{provider: "mock", model: "mock"}], failover: {on_status: [99]}})
+    harness.llm.routing_policy({chain: [{provider: "mock", model: "mock"}], failover: {on_status: [99]}})
     "no_error"
   } catch (e) {
     "bad_status"
   }
-  __io_println(r3)
+  harness.stdio.println(r3)
   const r4 = try {
-    routing_policy({chain: [{provider: "mock", model: "mock"}], budget: {on_exceed: "explode"}})
+    harness.llm.routing_policy({chain: [{provider: "mock", model: "mock"}], budget: {on_exceed: "explode"}})
     "no_error"
   } catch (e) {
     "bad_on_exceed"
   }
-  __io_println(r4)
+  harness.stdio.println(r4)
 }

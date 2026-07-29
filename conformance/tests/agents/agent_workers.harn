@@ -1,6 +1,6 @@
 import "std/agents"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const stage_worker = spawn_agent(
     {
       name: "stage-worker",
@@ -13,18 +13,18 @@ pipeline main() {
       },
     },
   )
-  __io_println(stage_worker.status)
-  __io_println(stage_worker.mode)
+  harness.stdio.println(stage_worker.status)
+  harness.stdio.println(stage_worker.mode)
   const stage_done = wait_agent(stage_worker)
-  __io_println(stage_done?.status)
-  __io_println(stage_done?.artifact_count >= 1)
-  __io_println(stage_done?.has_transcript)
-  __io_println(stage_done?.parent_stage_id == nil)
+  harness.stdio.println(stage_done?.status)
+  harness.stdio.println(stage_done?.artifact_count >= 1)
+  harness.stdio.println(stage_done?.has_transcript)
+  harness.stdio.println(stage_done?.parent_stage_id == nil)
   const resumed = send_input(stage_done, "Continue and add one more sentence")
-  __io_println(resumed?.status)
+  harness.stdio.println(resumed?.status)
   const resumed_done = wait_agent(stage_done)
-  __io_println(resumed_done?.status)
-  __io_println(len(list_agents()) >= 1)
+  harness.stdio.println(resumed_done?.status)
+  harness.stdio.println(len(list_agents()) >= 1)
   const flow = workflow_graph(
     {
       name: "worker-flow",
@@ -43,20 +43,20 @@ pipeline main() {
   const workflow_worker = spawn_agent(
     {name: "flow-worker", task: "Write a workflow summary", graph: flow, options: {max_steps: 2}},
   )
-  __io_println(workflow_worker.mode)
+  harness.stdio.println(workflow_worker.mode)
   const workflow_done = wait_agent(workflow_worker)
-  __io_println(workflow_done?.status)
-  __io_println(workflow_done?.result?.status == "completed")
-  __io_println(workflow_done?.child_run_id != nil)
-  __io_println(workflow_done?.child_run_path != nil)
-  __io_println(workflow_done?.snapshot_path != nil)
+  harness.stdio.println(workflow_done?.status)
+  harness.stdio.println(workflow_done?.result?.status == "completed")
+  harness.stdio.println(workflow_done?.child_run_id != nil)
+  harness.stdio.println(workflow_done?.child_run_path != nil)
+  harness.stdio.println(workflow_done?.snapshot_path != nil)
   const restored = resume_agent(workflow_done?.snapshot_path)
-  __io_println(restored?.status == "completed")
+  harness.stdio.println(restored?.status == "completed")
   const restored_resumed = send_input(restored, "Continue the workflow with one more update")
-  __io_println(restored_resumed?.status)
+  harness.stdio.println(restored_resumed?.status)
   const restored_done = wait_agent(restored_resumed)
-  __io_println(restored_done?.status == "completed")
-  __io_println(restored_done?.child_run_path != nil)
+  harness.stdio.println(restored_done?.status == "completed")
+  harness.stdio.println(restored_done?.child_run_path != nil)
   const closed = close_agent(workflow_done)
-  __io_println(closed?.status)
+  harness.stdio.println(closed?.status)
 }

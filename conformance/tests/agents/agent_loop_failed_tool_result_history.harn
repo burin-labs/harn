@@ -18,16 +18,15 @@ fn failing_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const tools = failing_tools()
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "bad1", name: "explode", arguments: {}}]},
       llm_text("I saw the failed tool result."),
     ],
     { ->
-      const result = agent_loop(
-        "Call the failing tool, then summarize the failure.",
+      const result = agent_loop(harness, "Call the failing tool, then summarize the failure.",
         nil,
         {
           provider: "mock",
@@ -38,13 +37,13 @@ pipeline main() {
           done_judge: nil,
         },
       )
-      __io_println(result.status)
-      __io_println(result.tools.successful == [])
-      __io_println(contains(result.tools.rejected, "explode"))
-      const calls = llm_mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.tools.successful == [])
+      harness.stdio.println(contains(result.tools.rejected, "explode"))
+      const calls = harness.llm.mock_calls()
       const second_turn = json_stringify(calls[1].messages)
-      __io_println(contains(second_turn, "boom from tool handler"))
-      __io_println(contains(second_turn, "error"))
+      harness.stdio.println(contains(second_turn, "boom from tool handler"))
+      harness.stdio.println(contains(second_turn, "error"))
     },
   )
 }

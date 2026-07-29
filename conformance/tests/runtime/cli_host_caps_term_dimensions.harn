@@ -2,6 +2,6 @@
 // `harness.term.height()`. They fall back to a default 80x24 when the
 // host cannot report terminal dimensions, so this fixture only asserts
 // positive values.
-__io_println(term_width() > 0)
+harness.stdio.println(harness.term.width() > 0)
 
-__io_println(term_height() > 0)
+harness.stdio.println(harness.term.height() > 0)

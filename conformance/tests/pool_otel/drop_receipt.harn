@@ -6,40 +6,40 @@ import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
  * dropped + replacement task ids — alongside the standard `pool_submit`
  * receipt that fires on every accepted submit.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const bp = Backpressure()
   const topic = "lifecycle.pool.audit"
-  const cursor = event_log.latest(topic) ?? 0
-  const gate = channel(nil, 1)
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
+  const gate = harness.runtime.channel(nil, 1)
   const pool = pool_create(
     {name: "otel-drop-demo", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
   )
   const warmup = pool.submit(
     { ->
-      receive(gate)
+      harness.runtime.receive(gate)
       return "warmup"
     },
   )
   const queued = pool.submit({ -> "queued" })
   const dropped = pool.submit({ -> "dropped" })
   // The drop_newest policy rejects the third submission immediately.
-  send(gate, "go")
-  const drops = event_log.read(
+  harness.runtime.send(gate, "go")
+  const drops = harness.obs.event_log_read(
     {topic: topic, from_cursor: cursor, kind_prefix: "pool_drop", limit: 10},
   )
   require len(drops) == 1
   const drop_receipt = drops[0]
-  __io_println(drop_receipt.kind)
-  __io_println(drop_receipt.headers.schema)
-  __io_println(drop_receipt.payload.policy)
-  __io_println(drop_receipt.payload.reason)
-  __io_println(drop_receipt.payload.pool)
-  __io_println(drop_receipt.payload.max_depth)
-  __io_println(drop_receipt.payload.queue_depth)
+  harness.stdio.println(drop_receipt.kind)
+  harness.stdio.println(drop_receipt.headers.schema)
+  harness.stdio.println(drop_receipt.payload.policy)
+  harness.stdio.println(drop_receipt.payload.reason)
+  harness.stdio.println(drop_receipt.payload.pool)
+  harness.stdio.println(drop_receipt.payload.max_depth)
+  harness.stdio.println(drop_receipt.payload.queue_depth)
   // Wait for the two surviving tasks after the gate has been released.
   const results = pool_wait([warmup, queued, dropped])
-  __io_println(results[0].status)
-  __io_println(results[1].result)
-  __io_println(results[2].status)
-  __io_println(results[2].rejection_policy)
+  harness.stdio.println(results[0].status)
+  harness.stdio.println(results[1].result)
+  harness.stdio.println(results[2].status)
+  harness.stdio.println(results[2].rejection_policy)
 }

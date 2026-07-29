@@ -12,18 +12,17 @@ const CATEGORIES: DiagnosticCategories = {
   ],
 }
 
-fn observe(previous: RecurringDiagnosticState?, diagnostics: list, attempt: int) {
+fn observe(harness: Harness, previous: RecurringDiagnosticState?, diagnostics: list, attempt: int) {
   return agent_unheeded_recurring_diagnostic(
-    previous,
+    harness, previous,
     {diagnostics: diagnostics, diagnostic_count: len(diagnostics)},
     attempt,
     CATEGORIES,
   )
 }
 
-pipeline test(task) {
-  const syntax_first = observe(
-    nil,
+pipeline test(harness: Harness, task) {
+  const syntax_first = observe(harness, nil,
     [
       {
         path: "src/schema.zig",
@@ -41,8 +40,7 @@ pipeline test(task) {
     throw "first syntax observation must retain state"
   }
   assert_eq(syntax_first_state.streak, 1)
-  const syntax_second = observe(
-    syntax_first_state,
+  const syntax_second = observe(harness, syntax_first_state,
     [
       {
         path: "src/schema.zig",
@@ -65,8 +63,7 @@ pipeline test(task) {
   assert_eq(syntax_signal.location, "src/schema.zig")
   assert_eq(syntax_signal.message, "expected ';' after statement")
   assert_eq(syntax_signal.signature, "src/schema.zig expected ';' after statement")
-  const resolution_first = observe(
-    nil,
+  const resolution_first = observe(harness, nil,
     [{path: "src/main.rs", line: 8, code: "missing-symbol", message: "cannot find symbol Widget"}],
     1,
   )
@@ -74,8 +71,7 @@ pipeline test(task) {
   guard resolution_first_state != nil else {
     throw "first resolution observation must retain state"
   }
-  const resolution_second = observe(
-    resolution_first_state,
+  const resolution_second = observe(harness, resolution_first_state,
     [{path: "src/main.rs", line: 9, code: "missing-symbol", message: "cannot find symbol Widget"}],
     2,
   )
@@ -84,8 +80,7 @@ pipeline test(task) {
     throw "second unchanged resolution observation must fire"
   }
   assert_eq(resolution_signal.category, "resolution")
-  const unknown_first = observe(
-    nil,
+  const unknown_first = observe(harness, nil,
     [{path: "src/main.rs", line: 1, message: "compiler said nope"}],
     1,
   )
@@ -93,8 +88,7 @@ pipeline test(task) {
   guard unknown_first_state != nil else {
     throw "first unknown observation must retain state"
   }
-  const unknown_second = observe(
-    unknown_first_state,
+  const unknown_second = observe(harness, unknown_first_state,
     [{path: "src/main.rs", line: 2, message: "compiler said nope"}],
     2,
   )
@@ -103,8 +97,7 @@ pipeline test(task) {
     throw "second unchanged unknown observation must fire"
   }
   assert_eq(unknown_signal.category, "unknown")
-  const falling_first = observe(
-    nil,
+  const falling_first = observe(harness, nil,
     [
       {path: "src/main.rs", line: 1, message: "same error"},
       {path: "src/main.rs", line: 2, message: "same error"},
@@ -115,8 +108,7 @@ pipeline test(task) {
   guard falling_first_state != nil else {
     throw "first multi-diagnostic observation must retain state"
   }
-  const falling_second = observe(
-    falling_first_state,
+  const falling_second = observe(harness, falling_first_state,
     [{path: "src/main.rs", line: 3, message: "same error"}],
     2,
   )
@@ -126,8 +118,7 @@ pipeline test(task) {
     throw "falling diagnostic set must retain new state"
   }
   assert_eq(falling_second_state.streak, 1)
-  const changing_second = observe(
-    syntax_first_state,
+  const changing_second = observe(harness, syntax_first_state,
     [{path: "src/schema.zig", line: 126, message: "expected type expression"}],
     5,
   )
@@ -138,7 +129,7 @@ pipeline test(task) {
   }
   assert_eq(changing_second_state.streak, 1)
   const advisory = agent_unheeded_recurring_diagnostic(
-    syntax_first_state,
+    harness, syntax_first_state,
     {
       diagnostics: [{path: "src/schema.zig", line: 126, message: "expected ';' after statement"}],
       feedsGates: false,
@@ -148,5 +139,5 @@ pipeline test(task) {
   )
   assert_eq(advisory.state, nil)
   assert_eq(advisory.signal, nil)
-  __io_println("unheeded recurring diagnostic ok")
+  harness.stdio.println("unheeded recurring diagnostic ok")
 }

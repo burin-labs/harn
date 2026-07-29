@@ -9,6 +9,8 @@ use super::convert::to_vm;
 
 /// Select workflow artifacts according to a context policy.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "select_artifacts_adaptive(artifacts?: list|nil, policy?: dict|nil) -> list",
     category = "workflow.host"
 )]
@@ -26,6 +28,8 @@ pub(super) fn select_artifacts_adaptive_builtin(
 
 /// Estimate tokens for a list of message objects.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "estimate_tokens(messages?: list) -> int",
     category = "workflow.host"
 )]
@@ -50,6 +54,8 @@ pub(super) fn estimate_tokens_builtin(
 
 /// Compact long tool output with the host microcompaction primitive.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "microcompact(text: string, max_chars?: int) -> string",
     category = "workflow.host"
 )]
@@ -99,6 +105,8 @@ fn non_negative_usize(value: &VmValue, builtin: &str, key: &str) -> Result<usize
 /// insertion index depends on `keep_first`, so reading `messages[0]` is wrong
 /// whenever the first turns are preserved.
 #[harn_builtin(
+    exposure = "harness.agent.transcript_auto_compact",
+    effects = ["llm.write@dynamic"],
     sig = "transcript_auto_compact(messages: list, options?: dict|nil) -> dict",
     kind = "async",
     category = "workflow.host"

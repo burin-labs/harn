@@ -9,8 +9,8 @@ fn handler(event) {
   return nil
 }
 
-pipeline test(task) {
-  const _ = trigger_register(
+pipeline test(harness: Harness, task) {
+  const _ = harness.runtime.trigger_register(
     {
       id: "batch-bad-count",
       kind: "channel.emit",

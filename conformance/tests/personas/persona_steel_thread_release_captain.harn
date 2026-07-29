@@ -10,24 +10,23 @@ import {
   step_assertions_end,
 } from "std/testing"
 
-fn release_receipt(step, result) {
-  const wrapped = with_audit_receipt(
-    fn() { return result },
+fn release_receipt(harness: Harness, step, result) {
+  const wrapped = with_audit_receipt(harness,  harness, fn() { return result },
     {persona: "release_captain", step: step, started_at: "2026-01-01T00:00:00Z"},
   )
   return wrapped()
 }
 
 @persona(name: "release_captain")
-fn release_captain(fixture) {
-  const branch = setup_branch(fixture)
-  const stash = stash_dirty_worktree(branch.result)
-  const changelog = analyze_changelog(stash.result)
-  const notes = rewrite_release_notes(changelog.result)
-  const recovered = recover_shell_error(
+fn release_captain(harness: Harness, fixture) {
+  const branch = setup_branch(harness, fixture)
+  const stash = stash_dirty_worktree(harness, branch.result)
+  const changelog = analyze_changelog(harness, stash.result)
+  const notes = rewrite_release_notes(harness, changelog.result)
+  const recovered = recover_shell_error(harness, 
     {step: "cargo publish --dry-run", stderr: "network unavailable"},
   )
-  const pr = plan_release_pr(notes.result + {recovery: recovered.result})
+  const pr = plan_release_pr(harness, notes.result + {recovery: recovered.result})
   const merge = enable_auto_merge(pr.result)
   return {
     branch: branch,
@@ -41,8 +40,8 @@ fn release_captain(fixture) {
 }
 
 @step(name: "setup_branch")
-fn setup_branch(fixture) {
-  return release_receipt(
+fn setup_branch(harness: Harness, fixture) {
+  return release_receipt(harness, 
     "setup_branch",
     {
       repo: fixture.repo,
@@ -55,16 +54,16 @@ fn setup_branch(fixture) {
 }
 
 @step(name: "stash_dirty_worktree")
-fn stash_dirty_worktree(branch) {
-  return release_receipt(
+fn stash_dirty_worktree(harness: Harness, branch) {
+  return release_receipt(harness, 
     "stash_dirty_worktree",
     {stashed: true, branch: branch.to, unstash_policy: "restore_after_plan"},
   )
 }
 
 @step(name: "analyze_changelog")
-fn analyze_changelog(state) {
-  return release_receipt(
+fn analyze_changelog(harness: Harness, state) {
+  return release_receipt(harness, 
     "analyze_changelog",
     {
       branch: state.branch,
@@ -76,7 +75,7 @@ fn analyze_changelog(state) {
 }
 
 @step(name: "rewrite_release_notes")
-fn rewrite_release_notes(changelog) {
+fn rewrite_release_notes(harness: Harness, changelog) {
   const library = prompt_library(
     [
       prompt_fragment(
@@ -86,20 +85,19 @@ fn rewrite_release_notes(changelog) {
       ),
     ],
   )
-  const payload = prompt_library_payload(
-    library,
+  const payload = prompt_library_payload(harness, library,
     "release-note-rewrite",
     {count: len(changelog.missing_entries)},
   )
-  return release_receipt(
+  return release_receipt(harness, 
     "rewrite_release_notes",
     {text: payload.text, prompt: payload, agentic_checkpoint: true, review_required: true},
   )
 }
 
 @step(name: "recover_shell_error")
-fn recover_shell_error(error) {
-  return release_receipt(
+fn recover_shell_error(harness: Harness, error) {
+  return release_receipt(harness, 
     "recover_shell_error",
     {
       failed_step: error.step,
@@ -111,8 +109,8 @@ fn recover_shell_error(error) {
 }
 
 @step(name: "plan_release_pr")
-fn plan_release_pr(notes) {
-  return release_receipt(
+fn plan_release_pr(harness: Harness, notes) {
+  return release_receipt(harness, 
     "plan_release_pr",
     {
       title: "Release v0.7.56",
@@ -124,16 +122,16 @@ fn plan_release_pr(notes) {
 }
 
 @step(name: "enable_auto_merge")
-fn enable_auto_merge(pr) {
-  return release_receipt(
+fn enable_auto_merge(harness: Harness, pr) {
+  return release_receipt(harness, 
     "enable_auto_merge",
     {title: pr.title, status: "planned", live_github_side_effects: false},
   )
 }
 
-pipeline test() {
+pipeline test(harness: Harness) {
   step_assertions_begin("release_captain")
-  const result = release_captain(
+  const result = release_captain(harness, 
     {repo: "burin-labs/harn", starting_branch: "feature/release", release_branch: "release/0.7.x"},
   )
   assert_steps_ran(
@@ -179,6 +177,6 @@ pipeline test() {
     },
   )
   step_assertions_end()
-  __io_println("persona_steel_thread release")
-  __io_println(result.pr.result.auto_merge_requested)
+  harness.stdio.println("persona_steel_thread release")
+  harness.stdio.println(result.pr.result.auto_merge_requested)
 }

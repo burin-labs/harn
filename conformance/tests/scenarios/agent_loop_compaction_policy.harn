@@ -9,9 +9,8 @@ fn noisy_tools() {
   return tools
 }
 
-pipeline default() {
-  const result = agent_loop(
-    "Keep observing until the iteration budget is exhausted.",
+pipeline default(harness: Harness) {
+  const result = agent_loop(harness, "Keep observing until the iteration budget is exhausted.",
     "You are a compacting test agent.",
     {
       provider: "mock",
@@ -24,10 +23,10 @@ pipeline default() {
     },
   )
   const events = transcript_events_by_kind(result?.transcript, "compaction")
-  __io_println(result?.llm?.iterations == 100)
-  __io_println(result?.status == "budget_exhausted")
-  __io_println(result?.trace?.compactions > 0)
-  __io_println(len(events) > 0)
-  __io_println(events[0]?.metadata?.strategy == "hybrid")
-  __io_println(events[0]?.metadata?.engine_strategy == "llm")
+  harness.stdio.println(result?.llm?.iterations == 100)
+  harness.stdio.println(result?.status == "budget_exhausted")
+  harness.stdio.println(result?.trace?.compactions > 0)
+  harness.stdio.println(len(events) > 0)
+  harness.stdio.println(events[0]?.metadata?.strategy == "hybrid")
+  harness.stdio.println(events[0]?.metadata?.engine_strategy == "llm")
 }

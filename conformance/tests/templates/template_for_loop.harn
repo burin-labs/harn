@@ -1,5 +1,5 @@
-pipeline default() {
-  __io_println(render("fixtures/template/for_loop.prompt", {xs: ["apple", "banana", "cherry"]}))
-  __io_println("---")
-  __io_println(render("fixtures/template/for_loop.prompt", {xs: []}))
+pipeline default(harness: Harness) {
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/for_loop.prompt", {xs: ["apple", "banana", "cherry"]}))
+  harness.stdio.println("---")
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/for_loop.prompt", {xs: []}))
 }

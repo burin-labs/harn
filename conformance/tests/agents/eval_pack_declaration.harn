@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const dir = path_join(harness.fs.temp_dir(), "harn_eval_pack_declaration")
   harness.fs.mkdir(dir)
   const run = run_record(
@@ -22,7 +22,7 @@ pipeline main() {
       ],
     },
   )
-  run_record_save(run, path_join(dir, "candidate.json"))
+  harness.fs.run_record_save(run, path_join(dir, "candidate.json"))
   eval_pack pack "regression-pack" {
     base_dir: dir
     baseline: "candidate.json"
@@ -36,15 +36,15 @@ pipeline main() {
     ]
     cases: [{id: "case_1", run: "candidate-run", rubrics: ["status"]}]
     for case in cases {
-      __io_println(case.id)
+      harness.stdio.println(case.id)
     }
     summarize {
-      const report = eval_pack_run(pack)
-      __io_println(report.pass)
-      __io_println(report.total)
-      __io_println(report.cases[0].comparison.identical)
+      const report = harness.runtime.eval_pack_run(pack)
+      harness.stdio.println(report.pass)
+      harness.stdio.println(report.total)
+      harness.stdio.println(report.cases[0].comparison.identical)
     }
   }
-  __io_println(pack.id)
-  __io_println(pack.version)
+  harness.stdio.println(pack.id)
+  harness.stdio.println(pack.version)
 }

@@ -4,14 +4,14 @@ import { llm_text, with_llm_script } from "std/testing"
  * llm_call_safe wraps a successful llm_call in an {ok, response, error}
  * envelope with no throwing.
  */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   with_llm_script(
-    [llm_text("ok")],
+    harness.llm, [llm_text("ok")],
     { ->
-      const r = llm_call_safe("hello", nil, {provider: "mock"})
-      __io_println(r.ok)
-      __io_println(r.response.text)
-      __io_println(r.error == nil)
+      const r = harness.llm.call_safe("hello", nil, {provider: "mock"})
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.response.text)
+      harness.stdio.println(r.error == nil)
     },
   )
 }

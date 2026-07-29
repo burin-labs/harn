@@ -1,8 +1,8 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const x: int = 42
-  log(x)
+  harness.stdio.println(x)
   const name: string = "hello"
-  log(name)
+  harness.stdio.println(name)
   const flag: bool = true
-  log(flag)
+  harness.stdio.println(flag)
 }

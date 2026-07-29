@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // pub fn is parsed and works
   /** multiply. */
   pub fn multiply(a, b) {
@@ -7,6 +7,6 @@ pipeline default() {
   fn divide(a, b) {
     return a / b
   }
-  __io_println(multiply(6, 7))
-  __io_println(divide(42, 6))
+  harness.stdio.println(multiply(6, 7))
+  harness.stdio.println(divide(42, 6))
 }

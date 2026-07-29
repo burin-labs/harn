@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
-  const path = path_join(harness.fs.temp_dir(), "harn-seed-" + uuid() + ".jsonl")
+pipeline main(harness: Harness) {
+  const path = path_join(harness.fs.temp_dir(), "harn-seed-" + harness.random.uuid() + ".jsonl")
   harness.fs.write_text(
     path,
     join(
@@ -33,10 +33,10 @@ pipeline main() {
     )
       + "\n",
   )
-  const seeded = agent_session_seed_from_jsonl(
+  const seeded = harness.agent.seed_from_jsonl(
     path,
     {
-      rename_session: "seeded-" + uuid(),
+      rename_session: "seeded-" + harness.random.uuid(),
       drop_tool_calls: true,
       truncate_to_last: 3,
       provider: "mock",
@@ -48,26 +48,26 @@ pipeline main() {
       recommend_compaction: true,
     },
   )
-  __io_println(seeded.ok)
-  __io_println(seeded.turns_loaded)
-  __io_println(seeded.source_format)
-  __io_println(seeded.partial)
-  __io_println(seeded.source.kind)
-  __io_println(seeded.source.agent)
-  __io_println(seeded.source.session_id)
-  __io_println(seeded.recommend_compaction)
-  const snap = agent_session_snapshot(seeded.session_id)
+  harness.stdio.println(seeded.ok)
+  harness.stdio.println(seeded.turns_loaded)
+  harness.stdio.println(seeded.source_format)
+  harness.stdio.println(seeded.partial)
+  harness.stdio.println(seeded.source.kind)
+  harness.stdio.println(seeded.source.agent)
+  harness.stdio.println(seeded.source.session_id)
+  harness.stdio.println(seeded.recommend_compaction)
+  const snap = harness.agent.snapshot(seeded.session_id)
   const seeded_meta = snap.metadata.seeded_from_jsonl
-  __io_println(seeded_meta.source.label)
-  __io_println(seeded_meta.source.provenance.workspace)
-  __io_println(seeded_meta.recommend_compaction)
-  __io_println(agent_session_system_prompt(seeded.session_id) != nil)
-  __io_println(agent_session_tool_format(seeded.session_id))
-  __io_println(len(snap.messages))
-  __io_println(snap.messages[0].role)
-  __io_println(snap.messages[1].content)
-  __io_println(snap.messages[1].tool_calls == nil)
-  const legacy_path = path_join(harness.fs.temp_dir(), "harn-legacy-seed-" + uuid() + ".jsonl")
+  harness.stdio.println(seeded_meta.source.label)
+  harness.stdio.println(seeded_meta.source.provenance.workspace)
+  harness.stdio.println(seeded_meta.recommend_compaction)
+  harness.stdio.println(harness.agent.system_prompt(seeded.session_id) != nil)
+  harness.stdio.println(harness.agent.tool_format(seeded.session_id))
+  harness.stdio.println(len(snap.messages))
+  harness.stdio.println(snap.messages[0].role)
+  harness.stdio.println(snap.messages[1].content)
+  harness.stdio.println(snap.messages[1].tool_calls == nil)
+  const legacy_path = path_join(harness.fs.temp_dir(), "harn-legacy-seed-" + harness.random.uuid() + ".jsonl")
   harness.fs.write_text(
     legacy_path,
     join(
@@ -88,19 +88,18 @@ pipeline main() {
     )
       + "\n",
   )
-  const legacy = agent_session_seed_from_jsonl(legacy_path)
-  const legacy_snap = agent_session_snapshot(legacy.session_id)
-  __io_println(legacy.ok)
-  __io_println(legacy.source_format)
-  __io_println(len(legacy_snap.messages))
-  __io_println(legacy_snap.messages[1].content)
+  const legacy = harness.agent.seed_from_jsonl(legacy_path)
+  const legacy_snap = harness.agent.snapshot(legacy.session_id)
+  harness.stdio.println(legacy.ok)
+  harness.stdio.println(legacy.source_format)
+  harness.stdio.println(len(legacy_snap.messages))
+  harness.stdio.println(legacy_snap.messages[1].content)
   with_llm_script(
-    [llm_text("recorded assistant")],
+    harness.llm, [llm_text("recorded assistant")],
     { ->
-      const transcript_dir = path_join(harness.fs.temp_dir(), "harn-seed-sidecar-" + uuid())
-      const source_session = agent_session_open()
-      agent_loop(
-        "record this",
+      const transcript_dir = path_join(harness.fs.temp_dir(), "harn-seed-sidecar-" + harness.random.uuid())
+      const source_session = harness.agent.open()
+      agent_loop(harness, "record this",
         nil,
         {
           provider: "mock",
@@ -110,11 +109,11 @@ pipeline main() {
         },
       )
       const sidecar = path_join(transcript_dir, "llm_transcript.jsonl")
-      __io_println(contains(harness.fs.read_text(sidecar), "\"type\":\"message\""))
-      const imported = agent_session_seed_from_jsonl(sidecar, {provider: "mock"})
-      __io_println(imported.ok)
-      __io_println(imported.source_format)
-      __io_println(imported.turns_loaded >= 2)
+      harness.stdio.println(contains(harness.fs.read_text(sidecar), "\"type\":\"message\""))
+      const imported = harness.agent.seed_from_jsonl(sidecar, {provider: "mock"})
+      harness.stdio.println(imported.ok)
+      harness.stdio.println(imported.source_format)
+      harness.stdio.println(imported.turns_loaded >= 2)
     },
   )
 }

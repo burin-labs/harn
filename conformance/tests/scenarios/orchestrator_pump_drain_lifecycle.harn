@@ -1,7 +1,7 @@
 import "../_common"
 
-pipeline default() {
-  const unique = uuid()
+pipeline default(harness: Harness) {
+  const unique = harness.random.uuid()
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const base = path_join(harness.fs.temp_dir(), "harn-orchestrator-pump-drain-lifecycle-" + unique)
   const workspace = path_join(base, "workspace")
@@ -130,12 +130,12 @@ pipeline default() {
     PY
     """
   const result = shell(script)
-  __io_println(result.success)
+  harness.stdio.println(result.success)
   if !result.success {
     return
   }
   const summary = json_parse(result.stdout.trim())
-  __io_println(summary.pending_started)
-  __io_println(summary.waitpoint_started)
-  __io_println(summary.stopped)
+  harness.stdio.println(summary.pending_started)
+  harness.stdio.println(summary.waitpoint_started)
+  harness.stdio.println(summary.stopped)
 }

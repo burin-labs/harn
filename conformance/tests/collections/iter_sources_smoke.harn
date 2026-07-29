@@ -1,6 +1,6 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const it = iter([1, 2, 3])
   for x in it {
-    log(x)
+    harness.stdio.println(x)
   }
 }

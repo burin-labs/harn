@@ -20,6 +20,7 @@ use harn_ir::{CallClassification, Capability, LiteralValue, NodeSemantics};
 use harn_parser::{Node, SNode};
 
 use super::CapabilityPolicy;
+use crate::VmValue;
 
 /// Discriminator for the kind of effect captured. Matches the
 /// classification used by the OpenTrustGraph receipt format (E5.5).
@@ -32,6 +33,24 @@ pub enum EffectKind {
     Fs,
     /// Network access (HTTP, SSE, WebSocket).
     Net,
+    /// Environment-variable access.
+    Env,
+    /// Wall or monotonic clock access.
+    Clock,
+    /// Nondeterministic random source access.
+    Random,
+    /// Child-process execution or observation.
+    Process,
+    /// Secret custody access.
+    Secret,
+    /// Logs, traces, metrics, and request-correlation state.
+    Observability,
+    /// Durable transcript channel access.
+    Channel,
+    /// Durable or execution-local state access.
+    State,
+    /// Other typed host-service access.
+    Host,
     /// LLM model calls — captures the provider and model when statically
     /// known so the receipt chain can name the inference dependency.
     Llm {
@@ -139,7 +158,7 @@ pub fn compute_handoff_effects(
     // where the IR handler pass cannot always attribute harness calls. Keep
     // this broad direct pass so parent/child effect checks stay conservative.
     for node in &program {
-        walk_for_harness_effects(node, &mut collected);
+        walk_for_harness_effects(node, &mut CapabilityBindings::default(), &mut collected);
     }
 
     let mut effects: Vec<EffectRecord> = collected.into_iter().collect();
@@ -150,42 +169,9 @@ pub fn compute_handoff_effects(
 }
 
 fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<EffectRecord> {
-    // Primary extraction: name-based builtin recognition. This path
-    // carries the richest information (resource from literal args,
-    // provider/model on LLM calls) and is the authoritative shape.
-    if call.name == "__files_upload" || call.name == "upload" {
-        let mut effects = Vec::with_capacity(2);
-        let mut fs = EffectRecord::new(EffectKind::Fs, EffectScope::Read);
-        if let Some(path) = call.literal_args.first().and_then(literal_as_str) {
-            fs = fs.with_resource(path);
-        }
-        effects.push(fs);
-        let mut net = EffectRecord::new(EffectKind::Net, EffectScope::Write);
-        if let Some(provider) = call.literal_args.get(1).and_then(literal_as_str) {
-            net = net.with_resource(provider);
-        }
-        effects.push(net);
-        return effects;
-    }
-    if let Some(effect) = builtin_effect(&call.name) {
-        return vec![annotate_with_resource(effect, call)];
-    }
-    if call.name == "host_call" {
-        if let Some(operation) = call.literal_args.first().and_then(literal_as_str) {
-            return vec![EffectRecord::new(
-                EffectKind::Hostcall {
-                    name: operation.to_string(),
-                },
-                hostcall_scope(operation),
-            )];
-        }
-    }
-    // Fallback: pipeline-declared tools and other capabilities the
-    // builtin recognizer doesn't know about (custom tool_call dispatch,
-    // user-defined capability classifications). Only consulted when the
-    // primary extraction returns nothing — same call shouldn't produce
-    // two records with different `resource` fields just because two
-    // extraction paths happen to match.
+    // `harn-ir` projects this classification directly from the builtin
+    // contract manifest. Keeping name tables here would create a competing
+    // semantic owner and let static ceilings drift from runtime receipts.
     if let CallClassification::Capabilities(capability_effects) = &call.classification {
         return capability_effects
             .iter()
@@ -193,6 +179,172 @@ fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<EffectRecord> {
             .collect();
     }
     Vec::new()
+}
+
+pub(crate) fn runtime_effects_from_contract(
+    specs: &[harn_builtin_meta::EffectSpec],
+    args: &[VmValue],
+) -> Vec<EffectRecord> {
+    let mut records = Vec::new();
+    for spec in specs {
+        let kind = effect_kind_from_contract(spec.kind);
+        let scope = effect_scope_from_contract(spec.access);
+        let resources = spec
+            .resources
+            .iter()
+            .flat_map(|selector| resolve_runtime_resources(*selector, args))
+            .collect::<Vec<_>>();
+        if resources.is_empty() {
+            records.push(EffectRecord::new(kind, scope));
+        } else {
+            records.extend(
+                resources
+                    .into_iter()
+                    .map(|resource| EffectRecord::new(kind.clone(), scope).with_resource(resource)),
+            );
+        }
+    }
+    records
+}
+
+fn resolve_runtime_resources(
+    selector: harn_builtin_meta::ResourceSelector,
+    args: &[VmValue],
+) -> Vec<String> {
+    use harn_builtin_meta::ResourceSelector;
+    match selector {
+        ResourceSelector::Argument(index) => args
+            .get(index as usize)
+            .and_then(runtime_resource_string)
+            .into_iter()
+            .collect(),
+        ResourceSelector::Field { argument, path } => {
+            let mut value = args.get(argument as usize);
+            for field in path {
+                value = value
+                    .and_then(VmValue::as_dict)
+                    .and_then(|map| map.get(*field));
+            }
+            value
+                .and_then(runtime_resource_string)
+                .into_iter()
+                .collect()
+        }
+        ResourceSelector::EachArgument(index) => args
+            .get(index as usize)
+            .and_then(|value| match value {
+                VmValue::List(items) => Some(items.as_slice()),
+                _ => None,
+            })
+            .into_iter()
+            .flatten()
+            .filter_map(runtime_resource_string)
+            .collect(),
+        ResourceSelector::Constant(value) => vec![value.to_string()],
+        ResourceSelector::Dynamic => Vec::new(),
+    }
+}
+
+fn runtime_resource_string(value: &VmValue) -> Option<String> {
+    match value {
+        VmValue::String(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn effect_kind_from_contract(kind: harn_builtin_meta::EffectKind) -> EffectKind {
+    use harn_builtin_meta::EffectKind as ContractKind;
+    match kind {
+        ContractKind::Stdio => EffectKind::Stdio,
+        ContractKind::Fs => EffectKind::Fs,
+        ContractKind::Network => EffectKind::Net,
+        ContractKind::Llm => EffectKind::Llm {
+            provider: None,
+            model: None,
+        },
+        ContractKind::Tool => EffectKind::Tool {
+            name: String::new(),
+        },
+        ContractKind::Worker => EffectKind::Spawn,
+        ContractKind::Process => EffectKind::Process,
+        ContractKind::Env => EffectKind::Env,
+        ContractKind::Clock => EffectKind::Clock,
+        ContractKind::Random => EffectKind::Random,
+        ContractKind::Host => EffectKind::Host,
+        ContractKind::Secret => EffectKind::Secret,
+        ContractKind::Observability => EffectKind::Observability,
+        ContractKind::Channel => EffectKind::Channel,
+        ContractKind::State => EffectKind::State,
+    }
+}
+
+fn effect_scope_from_contract(access: harn_builtin_meta::EffectAccess) -> EffectScope {
+    match access {
+        harn_builtin_meta::EffectAccess::Read => EffectScope::Read,
+        harn_builtin_meta::EffectAccess::Write => EffectScope::Write,
+        harn_builtin_meta::EffectAccess::Mutate => EffectScope::Mutate,
+        harn_builtin_meta::EffectAccess::Observe => EffectScope::Observe,
+    }
+}
+
+fn resolve_contract_resources(
+    selector: harn_builtin_meta::ResourceSelector,
+    args: &[LiteralValue],
+) -> Vec<String> {
+    use harn_builtin_meta::ResourceSelector;
+    match selector {
+        ResourceSelector::Argument(index) => args
+            .get(index as usize)
+            .and_then(LiteralValue::as_str)
+            .map(|value| vec![value.to_string()])
+            .unwrap_or_default(),
+        ResourceSelector::Field { argument, path } => {
+            let mut value = args.get(argument as usize);
+            for field in path {
+                value = value.and_then(|value| value.dict_field(field));
+            }
+            value
+                .and_then(LiteralValue::as_str)
+                .map(|value| vec![value.to_string()])
+                .unwrap_or_default()
+        }
+        ResourceSelector::EachArgument(index) => args
+            .get(index as usize)
+            .and_then(LiteralValue::list_items)
+            .into_iter()
+            .flatten()
+            .filter_map(LiteralValue::as_str)
+            .map(str::to_string)
+            .collect(),
+        ResourceSelector::Constant(value) => vec![value.to_string()],
+        ResourceSelector::Dynamic => Vec::new(),
+    }
+}
+
+fn effect_specs_to_records(
+    specs: &[harn_builtin_meta::EffectSpec],
+    args: &[LiteralValue],
+) -> Vec<EffectRecord> {
+    let mut records = Vec::new();
+    for spec in specs {
+        let kind = effect_kind_from_contract(spec.kind);
+        let scope = effect_scope_from_contract(spec.access);
+        let resources = spec
+            .resources
+            .iter()
+            .flat_map(|selector| resolve_contract_resources(*selector, args))
+            .collect::<Vec<_>>();
+        if resources.is_empty() {
+            records.push(EffectRecord::new(kind, scope));
+        } else {
+            records.extend(
+                resources
+                    .into_iter()
+                    .map(|resource| EffectRecord::new(kind.clone(), scope).with_resource(resource)),
+            );
+        }
+    }
+    records
 }
 
 fn builtin_effect(name: &str) -> Option<EffectRecord> {
@@ -345,39 +497,15 @@ pub(super) fn builtin_has_network_effect(name: &str) -> bool {
     builtin_effect(name).is_some_and(|effect| matches!(effect.kind, EffectKind::Net))
 }
 
-fn annotate_with_resource(mut effect: EffectRecord, call: &harn_ir::CallSemantics) -> EffectRecord {
-    // Effect resources are best-effort: first literal arg (path / url /
-    // tool name) when statically derivable. Unknown literals stay
-    // unannotated rather than guessed.
-    match &mut effect.kind {
-        EffectKind::Llm { provider, model } => {
-            for arg in &call.literal_args {
-                if let LiteralValue::Dict(entries) = arg {
-                    if let Some(value) = entries.get("provider").and_then(literal_as_str) {
-                        *provider = Some(value.to_string());
-                    }
-                    if let Some(value) = entries.get("model").and_then(literal_as_str) {
-                        *model = Some(value.to_string());
-                    }
-                }
-            }
-        }
-        EffectKind::Tool { name } => {
-            if let Some(value) = call.literal_args.first().and_then(literal_as_str) {
-                *name = value.to_string();
-            }
-        }
-        _ => {
-            if let Some(value) = call.literal_args.first().and_then(literal_as_str) {
-                effect.resource = Some(value.to_string());
-            }
-        }
-    }
-    effect
-}
-
 fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<EffectRecord> {
+    let contract_scope = match effect.access {
+        harn_builtin_meta::EffectAccess::Read => EffectScope::Read,
+        harn_builtin_meta::EffectAccess::Write => EffectScope::Write,
+        harn_builtin_meta::EffectAccess::Mutate => EffectScope::Mutate,
+        harn_builtin_meta::EffectAccess::Observe => EffectScope::Observe,
+    };
     let (kind, scope) = match effect.capability {
+        Capability::FilesystemRead => (EffectKind::Fs, contract_scope),
         Capability::WorkspaceMutation => (EffectKind::Fs, EffectScope::Mutate),
         Capability::CommandExecution => (
             EffectKind::Hostcall {
@@ -404,6 +532,14 @@ fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<Eff
             EffectScope::Write,
         ),
         Capability::WorkerDispatch => (EffectKind::Spawn, EffectScope::Write),
+        Capability::Stdio => (EffectKind::Stdio, contract_scope),
+        Capability::Environment => (EffectKind::Env, contract_scope),
+        Capability::Clock => (EffectKind::Clock, contract_scope),
+        Capability::Random => (EffectKind::Random, contract_scope),
+        Capability::Secret => (EffectKind::Secret, contract_scope),
+        Capability::Observability => (EffectKind::Observability, contract_scope),
+        Capability::Channel => (EffectKind::Channel, contract_scope),
+        Capability::State => (EffectKind::State, contract_scope),
         Capability::HumanApproval => return None,
         Capability::AutonomyPolicy => return None,
     };
@@ -415,109 +551,110 @@ fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<Eff
     })
 }
 
-fn hostcall_scope(operation: &str) -> EffectScope {
-    match operation {
-        op if op.starts_with("workspace.read") || op.starts_with("workspace.list") => {
-            EffectScope::Read
+#[derive(Clone, Default)]
+struct CapabilityBindings {
+    roots: BTreeSet<String>,
+    handles: BTreeMap<String, harn_builtin_meta::CapabilityId>,
+}
+
+fn walk_for_harness_effects(
+    node: &SNode,
+    bindings: &mut CapabilityBindings,
+    out: &mut BTreeSet<EffectRecord>,
+) {
+    match &node.node {
+        Node::FnDecl { params, body, .. }
+        | Node::ToolDecl { params, body, .. }
+        | Node::Pipeline { params, body, .. } => {
+            let mut callable_bindings = bindings.clone();
+            for param in params {
+                let Some(harn_parser::TypeExpr::Named(type_name)) = &param.type_expr else {
+                    continue;
+                };
+                if type_name == "Harness" {
+                    callable_bindings.roots.insert(param.name.clone());
+                } else if let Some(capability) =
+                    harn_builtin_meta::CapabilityId::from_type_name(type_name)
+                {
+                    callable_bindings
+                        .handles
+                        .insert(param.name.clone(), capability);
+                }
+            }
+            for statement in body {
+                walk_for_harness_effects(statement, &mut callable_bindings, out);
+            }
+            return;
         }
-        op if op.starts_with("workspace.write") || op == "workspace.apply_edit" => {
-            EffectScope::Mutate
+        Node::LetBinding { pattern, value, .. } | Node::ConstBinding { pattern, value, .. } => {
+            if let harn_parser::BindingPattern::Identifier(name) = pattern {
+                if let Some(capability) = capability_value(value, bindings) {
+                    bindings.handles.insert(name.clone(), capability);
+                }
+            }
         }
-        op if op.starts_with("process.") => EffectScope::Write,
-        _ => EffectScope::Write,
+        _ => {}
+    }
+    out.extend(harness_method_effects(node, bindings));
+    for child in child_nodes(node) {
+        walk_for_harness_effects(child, bindings, out);
     }
 }
 
-fn literal_as_str(value: &LiteralValue) -> Option<&str> {
-    match value {
-        LiteralValue::String(value) | LiteralValue::Identifier(value) => Some(value.as_str()),
+fn capability_value(
+    node: &SNode,
+    bindings: &CapabilityBindings,
+) -> Option<harn_builtin_meta::CapabilityId> {
+    match &node.node {
+        Node::Identifier(name) => bindings.handles.get(name).copied(),
+        Node::PropertyAccess { object, property }
+        | Node::OptionalPropertyAccess { object, property }
+            if matches!(&object.node, Node::Identifier(root) if bindings.roots.contains(root)) =>
+        {
+            harn_builtin_meta::CapabilityId::from_field_name(property)
+        }
         _ => None,
     }
 }
 
-fn walk_for_harness_effects(node: &SNode, out: &mut BTreeSet<EffectRecord>) {
-    if let Some(effect) = harness_method_effect(node) {
-        out.insert(effect);
-    }
-    for child in child_nodes(node) {
-        walk_for_harness_effects(child, out);
-    }
-}
-
-fn harness_method_effect(node: &SNode) -> Option<EffectRecord> {
-    let (object, method) = match &node.node {
-        Node::MethodCall { object, method, .. }
-        | Node::OptionalMethodCall { object, method, .. } => (object, method),
-        _ => return None,
-    };
-    let (sub_handle, root) = harness_sub_handle(object)?;
-    if !is_harness_root(root) {
-        return None;
-    }
-    let (kind, scope) = match (sub_handle.as_str(), method.as_str()) {
-        ("stdio", "print" | "println" | "eprint" | "eprintln") => {
-            (EffectKind::Stdio, EffectScope::Observe)
+fn harness_method_effects(node: &SNode, bindings: &CapabilityBindings) -> Vec<EffectRecord> {
+    let (object, method, args) = match &node.node {
+        Node::MethodCall {
+            object,
+            method,
+            args,
+            ..
         }
-        ("stdio", "read_line" | "prompt") => (EffectKind::Stdio, EffectScope::Read),
-        ("term", "width" | "height" | "read_password") => (EffectKind::Stdio, EffectScope::Read),
-        ("clock", _) => return None,
-        ("env", "set" | "unset") => (
-            EffectKind::Hostcall {
-                name: "env.set".to_string(),
-            },
-            EffectScope::Mutate,
-        ),
-        ("env", _) => (
-            EffectKind::Hostcall {
-                name: "env.get".to_string(),
-            },
-            EffectScope::Read,
-        ),
-        ("random", _) => return None,
-        (
-            "fs",
-            "read_file" | "read_text" | "read" | "exists" | "status" | "path_status" | "list_dir"
-            | "stat",
-        ) => (EffectKind::Fs, EffectScope::Read),
-        (
-            "fs",
-            "write_file"
-            | "write_text"
-            | "append_file"
-            | "append_file_locked"
-            | "mkdir"
-            | "mkdtemp"
-            | "mkdtemp_in_workspace"
-            | "copy_file",
-        ) => (EffectKind::Fs, EffectScope::Write),
-        ("fs", "delete_file" | "delete" | "remove") => (EffectKind::Fs, EffectScope::Mutate),
-        ("fs", _) => (EffectKind::Fs, EffectScope::Read),
-        ("net", _) => (EffectKind::Net, EffectScope::Write),
-        ("process", "spawn_captured") => (
-            EffectKind::Hostcall {
-                name: "process.spawn_captured".to_string(),
-            },
-            EffectScope::Write,
-        ),
-        ("crypto", "sha256") => return None,
-        // System-introspection methods (`cpu`, `memory`, `gpus`,
-        // `temperature`, `platform`, `processes`) are pure host reads
-        // — no state mutation, no resource consumed. They're gated by
-        // the harness capability handle itself, so deny-by-default
-        // policies still block them, but they don't produce a typed
-        // effect record for child grant enforcement.
-        ("system", _) => return None,
-        ("llm", "catalog" | "providers") => (
-            EffectKind::Llm {
-                provider: None,
-                model: None,
-            },
-            EffectScope::Read,
-        ),
-        ("llm", _) => return None,
-        _ => return None,
+        | Node::OptionalMethodCall {
+            object,
+            method,
+            args,
+            ..
+        } => (object, method, args),
+        _ => return Vec::new(),
     };
-    Some(EffectRecord::new(kind, scope))
+    let capability = capability_value(object, bindings).or_else(|| {
+        let (sub_handle, root) = harness_sub_handle(object)?;
+        matches!(&root.node, Node::Identifier(name) if bindings.roots.contains(name))
+            .then(|| harn_builtin_meta::CapabilityId::from_field_name(&sub_handle))
+            .flatten()
+    });
+    let Some(capability) = capability else {
+        return Vec::new();
+    };
+    let Some(entry) = crate::stdlib::all_builtin_manifest().iter().find(|entry| {
+        matches!(
+            entry.contract.exposure,
+            harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                capability: candidate,
+                method: candidate_method,
+            } if candidate == capability && candidate_method == method
+        )
+    }) else {
+        return Vec::new();
+    };
+    let literal_args = args.iter().map(harn_ir::literal_value).collect::<Vec<_>>();
+    effect_specs_to_records(entry.contract.effects, &literal_args)
 }
 
 fn harness_sub_handle(node: &SNode) -> Option<(String, &SNode)> {
@@ -530,15 +667,11 @@ fn harness_sub_handle(node: &SNode) -> Option<(String, &SNode)> {
     }
 }
 
-fn is_harness_root(node: &SNode) -> bool {
-    matches!(&node.node, Node::Identifier(name) if name == "harness")
-}
-
 fn child_nodes(node: &SNode) -> Vec<&SNode> {
     harn_parser::visit::immediate_children(node)
 }
 
-fn effect_allowed_by_ceiling(effect: &EffectRecord, ceiling: &CapabilityPolicy) -> bool {
+pub(super) fn effect_allowed_by_ceiling(effect: &EffectRecord, ceiling: &CapabilityPolicy) -> bool {
     if ceiling.capabilities_are_restricted() {
         let (capability, op) = effect_capability_op(effect);
         let allowed = ceiling
@@ -567,6 +700,20 @@ fn effect_capability_op(effect: &EffectRecord) -> (&'static str, &'static str) {
         (EffectKind::Fs, EffectScope::Mutate) => ("workspace", "apply_edit"),
         (EffectKind::Fs, EffectScope::Observe) => ("workspace", "exists"),
         (EffectKind::Net, _) => ("network", "http"),
+        (EffectKind::Env, EffectScope::Read | EffectScope::Observe) => ("environment", "read"),
+        (EffectKind::Env, _) => ("environment", "write"),
+        (EffectKind::Clock, _) => ("clock", "now"),
+        (EffectKind::Random, _) => ("random", "bytes"),
+        (EffectKind::Process, EffectScope::Read | EffectScope::Observe) => ("process", "inspect"),
+        (EffectKind::Process, _) => ("process", "run"),
+        (EffectKind::Secret, EffectScope::Read | EffectScope::Observe) => ("secrets", "read"),
+        (EffectKind::Secret, _) => ("secrets", "write"),
+        (EffectKind::Observability, _) => ("observability", "emit"),
+        (EffectKind::Channel, EffectScope::Read | EffectScope::Observe) => ("channel", "read"),
+        (EffectKind::Channel, _) => ("channel", "write"),
+        (EffectKind::State, EffectScope::Read | EffectScope::Observe) => ("state", "read"),
+        (EffectKind::State, _) => ("state", "write"),
+        (EffectKind::Host, _) => ("connector", "call"),
         (EffectKind::Llm { .. }, EffectScope::Read) => ("llm", "catalog"),
         (EffectKind::Llm { .. }, _) => ("llm", "call"),
         (EffectKind::Tool { .. }, _) => ("host", "tool_call"),
@@ -582,6 +729,21 @@ fn side_effect_level_for(effect: &EffectRecord) -> &'static str {
         (EffectKind::Fs, EffectScope::Read | EffectScope::Observe) => "read_only",
         (EffectKind::Fs, _) => "workspace_write",
         (EffectKind::Net, _) => "network",
+        (EffectKind::Env, EffectScope::Read | EffectScope::Observe) => "read_only",
+        (EffectKind::Env, _) => "workspace_write",
+        (EffectKind::Clock, _) => "read_only",
+        (EffectKind::Random, _) => "read_only",
+        (EffectKind::Process, EffectScope::Read | EffectScope::Observe) => "read_only",
+        (EffectKind::Process, _) => "process_exec",
+        (EffectKind::Secret, EffectScope::Read | EffectScope::Observe) => "read_only",
+        (EffectKind::Secret, _) => "workspace_write",
+        (EffectKind::Observability, _) => "read_only",
+        (EffectKind::Channel, EffectScope::Read | EffectScope::Observe) => "read_only",
+        (EffectKind::Channel, _) => "workspace_write",
+        (EffectKind::State, EffectScope::Read | EffectScope::Observe) => "read_only",
+        (EffectKind::State, _) => "workspace_write",
+        (EffectKind::Host, EffectScope::Read | EffectScope::Observe) => "read_only",
+        (EffectKind::Host, _) => "workspace_write",
         (EffectKind::Llm { .. }, EffectScope::Read) => "read_only",
         (EffectKind::Llm { .. }, _) => "network",
         (EffectKind::Tool { .. }, _) => "workspace_write",
@@ -638,6 +800,15 @@ fn effect_kind_family_matches(parent: &EffectKind, child: &EffectKind) -> bool {
         (EffectKind::Stdio, EffectKind::Stdio)
         | (EffectKind::Fs, EffectKind::Fs)
         | (EffectKind::Net, EffectKind::Net)
+        | (EffectKind::Env, EffectKind::Env)
+        | (EffectKind::Clock, EffectKind::Clock)
+        | (EffectKind::Random, EffectKind::Random)
+        | (EffectKind::Process, EffectKind::Process)
+        | (EffectKind::Secret, EffectKind::Secret)
+        | (EffectKind::Observability, EffectKind::Observability)
+        | (EffectKind::Channel, EffectKind::Channel)
+        | (EffectKind::State, EffectKind::State)
+        | (EffectKind::Host, EffectKind::Host)
         | (EffectKind::Spawn, EffectKind::Spawn) => true,
         (EffectKind::Llm { .. }, EffectKind::Llm { .. }) => true,
         (
@@ -706,6 +877,15 @@ pub fn effect_kind_label(kind: &EffectKind) -> String {
         EffectKind::Stdio => "stdio".to_string(),
         EffectKind::Fs => "fs".to_string(),
         EffectKind::Net => "net".to_string(),
+        EffectKind::Env => "env".to_string(),
+        EffectKind::Clock => "clock".to_string(),
+        EffectKind::Random => "random".to_string(),
+        EffectKind::Process => "process".to_string(),
+        EffectKind::Secret => "secret".to_string(),
+        EffectKind::Observability => "observability".to_string(),
+        EffectKind::Channel => "channel".to_string(),
+        EffectKind::State => "state".to_string(),
+        EffectKind::Host => "host".to_string(),
         EffectKind::Llm { provider, model } => match (provider.as_deref(), model.as_deref()) {
             (Some(provider), Some(model)) => format!("llm:{provider}/{model}"),
             (Some(provider), None) => format!("llm:{provider}"),
@@ -755,22 +935,23 @@ mod tests {
             effects
                 .iter()
                 .any(|effect| matches!(effect.kind, EffectKind::Net)
-                    && effect.scope == EffectScope::Write),
-            "expected Net write effect, got {effects:?}"
+                    && effect.scope == EffectScope::Read
+                    && effect.resource.as_deref() == Some("https://example.test")),
+            "expected Net read effect, got {effects:?}"
         );
     }
 
     #[test]
-    fn harness_process_spawn_captured_yields_process_hostcall_effect() {
-        let source =
-            r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf"}) }"#;
+    fn harness_process_run_yields_process_hostcall_effect() {
+        let source = r#"fn main(harness: Harness) {
+            harness.process.run({program: "printf", args: ["hello"]})
+        }"#;
         let effects = compute_handoff_effects(source, None);
         assert!(
             effects.iter().any(|effect| {
-                matches!(
-                    &effect.kind,
-                    EffectKind::Hostcall { name } if name == "process.spawn_captured"
-                ) && effect.scope == EffectScope::Write
+                matches!(&effect.kind, EffectKind::Process)
+                    && effect.scope == EffectScope::Write
+                    && effect.resource.as_deref() == Some("printf")
             }),
             "expected process hostcall write effect, got {effects:?}"
         );
@@ -849,14 +1030,80 @@ fn main() { upload("/tmp/input.pdf", "gemini") }
 
     #[test]
     fn harness_fs_write_yields_fs_write_effect() {
-        let source = r#"fn main(harness: Harness) { harness.fs.write_file("/tmp/out", "hi") }"#;
+        let source = r#"fn main(harness: Harness) { harness.fs.write_text("/tmp/out", "hi") }"#;
         let effects = compute_handoff_effects(source, None);
         assert!(
             effects
                 .iter()
                 .any(|effect| matches!(effect.kind, EffectKind::Fs)
-                    && effect.scope == EffectScope::Write),
+                    && effect.scope == EffectScope::Write
+                    && effect.resource.as_deref() == Some("/tmp/out")),
             "expected Fs write effect, got {effects:?}"
+        );
+    }
+
+    #[test]
+    fn granular_capability_parameter_preserves_effect_contract() {
+        let source = r#"
+fn write_output(fs: HarnessFs) {
+    fs.write_text("/tmp/out", "hi")
+}
+
+fn main(harness: Harness) {
+    write_output(harness.fs)
+}
+"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::Fs)
+                    && effect.scope == EffectScope::Write
+                    && effect.resource.as_deref() == Some("/tmp/out")
+            }),
+            "expected granular HarnessFs effect, got {effects:?}"
+        );
+    }
+
+    #[test]
+    fn capability_alias_preserves_effect_contract() {
+        let source = r#"
+fn main(harness: Harness) {
+    const fs = harness.fs
+    fs.write_text("/tmp/out", "hi")
+}
+"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::Fs)
+                    && effect.scope == EffectScope::Write
+                    && effect.resource.as_deref() == Some("/tmp/out")
+            }),
+            "expected aliased HarnessFs effect, got {effects:?}"
+        );
+    }
+
+    #[test]
+    fn capability_method_can_declare_multiple_effects() {
+        let source = r#"fn main(harness: Harness) {
+            harness.net.download("https://example.test/data", "/tmp/data")
+        }"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::Net)
+                    && effect.scope == EffectScope::Read
+                    && effect.resource.as_deref() == Some("https://example.test/data")
+            }),
+            "expected download network effect, got {effects:?}"
+        );
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::Fs)
+                    && effect.scope == EffectScope::Write
+                    && effect.resource.as_deref() == Some("/tmp/data")
+            }),
+            "expected download filesystem effect, got {effects:?}"
         );
     }
 
@@ -875,7 +1122,7 @@ fn main() { upload("/tmp/input.pdf", "gemini") }
 
     #[test]
     fn harness_fs_mkdtemp_yields_fs_write_effect() {
-        let source = r#"fn main(harness: Harness) { harness.fs.mkdtemp_in_workspace("harn-") }"#;
+        let source = r#"fn main(harness: Harness) { harness.fs.mkdtemp("harn-") }"#;
         let effects = compute_handoff_effects(source, None);
         assert!(
             effects
@@ -888,7 +1135,7 @@ fn main() { upload("/tmp/input.pdf", "gemini") }
 
     #[test]
     fn harness_crypto_sha256_is_pure_for_handoff_effects() {
-        let source = r#"fn main(harness: Harness) { harness.crypto.sha256("hello") }"#;
+        let source = r#"fn main(harness: Harness) { sha256_hex("hello") }"#;
         let effects = compute_handoff_effects(source, None);
         assert!(effects.is_empty(), "expected no effects, got {effects:?}");
     }
@@ -943,7 +1190,7 @@ fn main() { upload("/tmp/input.pdf", "gemini") }
     fn ceiling_drops_disallowed_capabilities() {
         let source = r#"fn main(harness: Harness) {
             harness.net.get("https://example.test")
-            harness.fs.read_file("/tmp/in")
+            harness.fs.read_text("/tmp/in")
         }"#;
         let mut ceiling = CapabilityPolicy::default();
         ceiling

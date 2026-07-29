@@ -170,19 +170,19 @@ fn main(harness: Harness) {
   const trace_id = harness.env.get_or("HARN_TRACE_ID", "")
   if trace_file == "" || output == "" {
     harness.stdio.eprintln("trace import: HARN_TRACE_FILE and HARN_TRACE_OUTPUT must be set")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const content = try {
     harness.fs.read_text(trace_file)
   } catch (e) {
     harness.stdio.eprintln("failed to read " + trace_file + ": " + to_string(e))
-    exit(1)
+    harness.runtime.exit(1)
   }
   const fixtures = try {
     __convert_jsonl(content, trace_id)
   } catch (e) {
     harness.stdio.eprintln(to_string(e))
-    exit(1)
+    harness.runtime.exit(1)
   }
   const body = if len(fixtures) == 0 {
     ""
@@ -195,14 +195,14 @@ fn main(harness: Harness) {
       harness.fs.mkdir(parent)
     } catch (e) {
       harness.stdio.eprintln("failed to create " + parent + ": " + to_string(e))
-      exit(1)
+      harness.runtime.exit(1)
     }
   }
   try {
     harness.fs.write_text(output, body)
   } catch (e) {
     harness.stdio.eprintln("failed to write " + output + ": " + to_string(e))
-    exit(1)
+    harness.runtime.exit(1)
   }
   harness.stdio.println(output)
 }

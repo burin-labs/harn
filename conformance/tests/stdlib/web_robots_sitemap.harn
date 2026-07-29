@@ -1,6 +1,6 @@
 import { robots_allowed, sitemap_urls, web_origin_url } from "std/web"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   http_mock_clear()
   http_mock(
     "GET",
@@ -43,20 +43,18 @@ pipeline test(task) {
       """,
     },
   )
-  assert_eq(robots_allowed("https://example.com/docs"), true)
-  assert_eq(robots_allowed("https://example.com/private/secret"), false)
-  assert_eq(robots_allowed("https://example.com/private/public/page"), true)
+  assert_eq(robots_allowed(harness, "https://example.com/docs"), true)
+  assert_eq(robots_allowed(harness, "https://example.com/private/secret"), false)
+  assert_eq(robots_allowed(harness, "https://example.com/private/public/page"), true)
   assert_eq(
-    robots_allowed(
-      "https://example.com/private/secret",
+    robots_allowed(harness,  harness, "https://example.com/private/secret",
       "AuditBot",
       {robots_url: "https://example.com/specific-robots.txt"},
     ),
     false,
   )
   assert_eq(
-    robots_allowed(
-      "https://example.com/private/secret",
+    robots_allowed(harness,  harness, "https://example.com/private/secret",
       "OtherBot",
       {robots_url: "https://example.com/specific-robots.txt"},
     ),
@@ -67,8 +65,8 @@ pipeline test(task) {
     "https://example.com/robots.txt",
   )
   assert_eq(
-    sitemap_urls("https://example.com/docs"),
+    sitemap_urls(harness, "https://example.com/docs"),
     ["https://example.com/", "https://example.com/docs"],
   )
-  __io_println("web_robots_sitemap_ok")
+  harness.stdio.println("web_robots_sitemap_ok")
 }

@@ -2,7 +2,7 @@ import { agent_capture_events } from "std/agent/events"
 import { typed_output_checkpoint } from "std/checkpoint"
 import { assert_approx, assert_eq, with_llm_script } from "std/testing"
 
-pipeline test_typed_output_checkpoint_usage_cost() {
+pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -14,7 +14,7 @@ pipeline test_typed_output_checkpoint_usage_cost() {
     },
   }
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "{\"decision\":\"merge\",\"confidence\":0.9,\"evidence\":[\"green\"]}",
         provider: "anthropic",
@@ -38,10 +38,8 @@ pipeline test_typed_output_checkpoint_usage_cost() {
       },
     ],
     { ->
-      const captured = agent_capture_events(
-        "usage-cost-success",
-        fn() { typed_output_checkpoint(
-          "usage.success",
+      const captured = agent_capture_events(harness,  harness, "usage-cost-success",
+        fn() { typed_output_checkpoint(harness,  harness, "usage.success",
           "Choose an action.",
           schema,
           {provider: "mock", session_id: "usage-cost-success", validator_retries: 0},
@@ -54,8 +52,7 @@ pipeline test_typed_output_checkpoint_usage_cost() {
       assert_eq(success.usage.cache_write_tokens, 1000)
       assert_approx(success.usage.cost_usd, 0.01875)
       assert_eq(captured.events[0].checkpoint.usage, success.usage)
-      const schema_failure = typed_output_checkpoint(
-        "usage.schema_failure",
+      const schema_failure = typed_output_checkpoint(harness,  harness, "usage.schema_failure",
         "Choose an action.",
         schema,
         {provider: "mock", schema_retries: 0, validator_retries: 0, repair: {enabled: false}},
@@ -66,8 +63,7 @@ pipeline test_typed_output_checkpoint_usage_cost() {
       assert_eq(schema_failure.usage.output_tokens, 500)
       assert_eq(schema_failure.usage.cache_read_tokens, 2000)
       assert_approx(schema_failure.usage.cost_usd, 0.0081)
-      const validator_failure = typed_output_checkpoint(
-        "usage.validator_failure",
+      const validator_failure = typed_output_checkpoint(harness,  harness, "usage.validator_failure",
         "Choose an action.",
         schema,
         {provider: "mock", validator_retries: 0, repair: {enabled: false}},
@@ -79,7 +75,7 @@ pipeline test_typed_output_checkpoint_usage_cost() {
       assert_eq(validator_failure.usage.output_tokens, 2000)
       assert_eq(validator_failure.usage.cache_read_tokens, 500)
       assert_approx(validator_failure.usage.cost_usd, 0.03015)
-      __io_println("ok")
+      harness.stdio.println("ok")
     },
   )
 }

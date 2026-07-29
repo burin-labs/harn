@@ -3,7 +3,7 @@
  * unchanged so provider-specific code can honour it (Anthropic native,
  * harn#70 client fallback, harn#71 OpenAI Responses API).
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   // Eager tool (no defer_loading → not present on entry).
   registry = tool_define(
@@ -54,5 +54,5 @@ pipeline test(task) {
     true
   }
   assert(caught_bad_type, "non-bool defer_loading must be rejected")
-  log("tool_defer_loading tests passed")
+  harness.stdio.println("tool_defer_loading tests passed")
 }

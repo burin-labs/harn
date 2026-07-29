@@ -12,7 +12,7 @@ const WORKSPACE = {
 }
 
 @test
-pipeline test_global_hits_include_harn_selector_script(task) {
+pipeline test_global_hits_include_harn_selector_script(harness: Harness, task) {
   const global_paths = global_path_prefixes_from_text(
     "Cargo.toml\nscripts/affected-crates.harn\n.github/workflows/ci.yml\n",
   )
@@ -24,7 +24,7 @@ pipeline test_global_hits_include_harn_selector_script(task) {
 }
 
 @test
-pipeline test_global_path_prefixes_from_text_ignores_comments_and_blanks(task) {
+pipeline test_global_path_prefixes_from_text_ignores_comments_and_blanks(harness: Harness, task) {
   assert_eq(
     global_path_prefixes_from_text("\n# comment\nCargo.toml\n.github/workflows/ci.yml\n"),
     [".github/workflows/ci.yml", "Cargo.toml"],
@@ -32,7 +32,7 @@ pipeline test_global_path_prefixes_from_text_ignores_comments_and_blanks(task) {
 }
 
 @test
-pipeline test_workspace_from_metadata_extracts_workspace_deps(task) {
+pipeline test_workspace_from_metadata_extracts_workspace_deps(harness: Harness, task) {
   const meta = {
     workspace_members: ["id-core", "id-cli"],
     packages: [
@@ -62,14 +62,14 @@ pipeline test_workspace_from_metadata_extracts_workspace_deps(task) {
 }
 
 @test
-pipeline test_owning_crate_prefers_longest_directory(task) {
+pipeline test_owning_crate_prefers_longest_directory(harness: Harness, task) {
   const dirs = {parent: "/repo/crates", child: "/repo/crates/harn-cli"}
   assert_eq(owning_crate("crates/harn-cli/src/main.rs", dirs, "/repo"), "child")
   assert_eq(owning_crate("docs/index.md", dirs, "/repo"), nil)
 }
 
 @test
-pipeline test_reverse_dep_closure_selects_dependents(task) {
+pipeline test_reverse_dep_closure_selects_dependents(harness: Harness, task) {
   assert_eq(
     reverse_dep_closure(["harn-core"], WORKSPACE.deps),
     ["harn-cli", "harn-core", "harn-tools"],
@@ -78,7 +78,7 @@ pipeline test_reverse_dep_closure_selects_dependents(task) {
 }
 
 @test
-pipeline test_selected_packages_global_change_forces_full_workspace(task) {
+pipeline test_selected_packages_global_change_forces_full_workspace(harness: Harness, task) {
   const selected = selected_packages(["Cargo.lock"], WORKSPACE, "/repo", ["Cargo.lock"])
   assert_eq(selected.mode, "full")
   assert_eq(selected.selected, WORKSPACE.all_crates)
@@ -86,7 +86,7 @@ pipeline test_selected_packages_global_change_forces_full_workspace(task) {
 }
 
 @test
-pipeline test_selected_packages_unowned_change_selects_nothing(task) {
+pipeline test_selected_packages_unowned_change_selects_nothing(harness: Harness, task) {
   const selected = selected_packages(["docs/index.md"], WORKSPACE, "/repo", ["Cargo.lock"])
   assert_eq(selected.mode, "empty")
   assert_eq(selected.selected, [])
@@ -94,7 +94,7 @@ pipeline test_selected_packages_unowned_change_selects_nothing(task) {
 }
 
 @test
-pipeline test_selected_packages_crate_change_expands_reverse_deps(task) {
+pipeline test_selected_packages_crate_change_expands_reverse_deps(harness: Harness, task) {
   const selected = selected_packages(
     ["crates/harn-core/src/lib.rs"],
     WORKSPACE,
@@ -107,7 +107,7 @@ pipeline test_selected_packages_crate_change_expands_reverse_deps(task) {
 }
 
 @test
-pipeline test_emit_selection_modes(task) {
+pipeline test_emit_selection_modes(harness: Harness, task) {
   assert_eq(emit_selection(["harn-cli"], WORKSPACE.all_crates, "filter"), "package(harn-cli)")
   assert_eq(emit_selection(["harn-cli"], WORKSPACE.all_crates, "args"), "-p harn-cli")
   assert_eq(emit_selection(["harn-cli"], WORKSPACE.all_crates, "packages"), "harn-cli")

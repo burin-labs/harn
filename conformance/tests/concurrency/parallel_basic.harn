@@ -1,6 +1,6 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const results = parallel 3 { i ->
     i * 10
   }
-  log(results)
+  harness.stdio.println(results)
 }

@@ -457,7 +457,7 @@ pub fn pct(num, den) -> string {
   return "${whole}.${tenth}%"
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const stdlib = "crates/harn-stdlib/src/stdlib"
   let total = 0
   let backfilled = 0
@@ -480,7 +480,7 @@ pipeline main(task) {
     }
   }
   const coverage = pct(already_complete + backfilled, total)
-  __io_println(
+  harness.stdio.println(
     "public fns: ${total}; already complete: ${already_complete}; backfilled: ${backfilled}; skipped (no /** */ block): ${skipped_no_block}; final coverage: ${coverage}",
   )
   return 0

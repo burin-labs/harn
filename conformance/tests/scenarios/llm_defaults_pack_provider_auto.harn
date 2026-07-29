@@ -3,17 +3,17 @@
 // the returned request.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // "auto" is treated as a normal user-supplied provider — the runtime
   // catalog overwrites it with the inferred openai entry. (We don't
   // hardcode a special-case for "auto" — resolved_options() just echoes
   // it back, but the model id starts with "gpt-" so the inference rule
   // overrides to "openai" by the time pack_for assembles the result.)
   // For test purposes, omit provider so inference runs cleanly.
-  const r = pack_for({model: "gpt-5"})
+  const r = pack_for(harness, {model: "gpt-5"})
   assert_eq(r.model, "gpt-5")
   assert_eq(r.provider, "openai")
   // Medium scale calibration populates the low-level effort.
   assert_eq(r.effort, "medium")
-  log("llm_defaults_pack_provider_auto passed")
+  harness.stdio.println("llm_defaults_pack_provider_auto passed")
 }

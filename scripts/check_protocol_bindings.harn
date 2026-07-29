@@ -71,27 +71,27 @@ if __name__ == "__main__":
     sys.exit(main())
 """
 
-fn repo_root() -> string {
-  return path_normalize(path_join(source_dir(), ".."))
+fn repo_root(harness: Harness) -> string {
+  return path_normalize(path_join(harness.fs.source_dir(), ".."))
 }
 
-fn effective_repo_root(root: string = "") -> string {
+fn effective_repo_root(harness: Harness, root: string = "") -> string {
   if root != "" {
     return path_normalize(root)
   }
-  return repo_root()
+  return repo_root(harness)
 }
 
-fn artifact_root(root: string = "") -> string {
-  return path_join(effective_repo_root(root), ARTIFACTS_REL)
+fn artifact_root(harness: Harness, root: string = "") -> string {
+  return path_join(effective_repo_root(harness, root), ARTIFACTS_REL)
 }
 
 pub fn python_binding_probe_args(artifacts: string) -> list<string> {
   return ["-c", PYTHON_BINDING_PROBE, artifacts]
 }
 
-pub fn check_python_protocol_bindings(python: string = "python3", root: string = "") -> dict {
-  const artifacts = artifact_root(root)
+pub fn check_python_protocol_bindings(harness: Harness, python: string = "python3", root: string = "") -> dict {
+  const artifacts = artifact_root(harness, root)
   const binding = path_join(artifacts, "python", "harn_protocol.py")
   const compile = harness.process.spawn_captured({cmd: python, args: ["-m", "py_compile", binding]})
   if !compile.success {
@@ -131,7 +131,7 @@ fn arg_spec() {
   )
 }
 
-fn emit_captured(report: dict) -> nil {
+fn emit_captured(harness: Harness, report: dict) -> nil {
   const stdout = to_string(report.stdout ?? "")
   const stderr = to_string(report.stderr ?? "")
   if stdout.trim() != "" {
@@ -153,15 +153,15 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_python_protocol_bindings(
+  const report = check_python_protocol_bindings(harness, 
     to_string(parsed?.python ?? "python3"),
     to_string(parsed?.root ?? ""),
   )
   if report.ok ?? false {
-    emit_captured(report)
+    emit_captured(harness, report)
     return nil
   }
   harness.stdio.eprintln(
@@ -170,6 +170,6 @@ fn main(harness: Harness) {
       + " check failed for "
       + to_string(report.artifacts),
   )
-  emit_captured(report)
-  exit(1)
+  emit_captured(harness, report)
+  harness.runtime.exit(1)
 }

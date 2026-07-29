@@ -67,12 +67,11 @@ fn error_contains(result, fragment) {
   return is_err(result) && contains(to_string(unwrap_err(result)), fragment)
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const next = synthetic_next()
   const schema = file_schema()
   // (1) Args already validate → binder is skipped, no hop, status="skipped".
-  const mw_skip = with_natural_language_executor(
-    {
+  const mw_skip = with_natural_language_executor(harness,  harness, {
       provider: "cerebras",
       model: "gpt-oss-120b",
       timeout_ms: 100,
@@ -82,23 +81,23 @@ pipeline default() {
     },
   )
   const r1 = mw_skip(envelope("file_read", {path: "/etc/hosts"}, schema), next)
-  __io_println(r1.ok)
-  __io_println(r1.audit.binder.status)
-  __io_println(r1.audit.binder.reason)
-  __io_println(r1.audit.binder.attempts)
-  __io_println(r1.arguments.path)
+  harness.stdio.println(r1.ok)
+  harness.stdio.println(r1.audit.binder.status)
+  harness.stdio.println(r1.audit.binder.reason)
+  harness.stdio.println(r1.audit.binder.attempts)
+  harness.stdio.println(r1.arguments.path)
   // (2) No intent provided AND args don't validate → still skipped because
   // there's nothing to bind from. Audit reason = "no_intent".
   const r2 = mw_skip(envelope("file_read", {}, schema), next)
-  __io_println(r2.audit.binder.status)
-  __io_println(r2.audit.binder.reason)
+  harness.stdio.println(r2.audit.binder.status)
+  harness.stdio.println(r2.audit.binder.reason)
   // (3) Successful binder dispatch — invalid args + intent → binder rewrites.
   // Also capture the binder opts so we can assert the configured `timeout_ms`
   // is forwarded to the inner caller (this is how the wall-clock budget is
   // expressed to a real `llm_call` substrate).
-  const captured_timeout_ms = atomic(0)
+  const captured_timeout_ms = harness.runtime.atomic(0)
   const mock_binder = { _prompt, _system, opts ->
-    let _ = atomic_set(captured_timeout_ms, to_int(opts?.timeout_ms ?? 0))
+    let _ = harness.runtime.atomic_set(captured_timeout_ms, to_int(opts?.timeout_ms ?? 0))
     return {
       text: "{\"path\":\"/var/log/syslog\",\"contents\":\"hello\"}",
       model: "mock",
@@ -107,8 +106,7 @@ pipeline default() {
       output_tokens: 0,
     }
   }
-  const mw_ok = with_natural_language_executor(
-    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
+  const mw_ok = with_natural_language_executor(harness,  harness, {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
   const _ = mock_time(0)
   const r3 = mw_ok(
@@ -116,25 +114,25 @@ pipeline default() {
     next,
   )
   const _ = unmock_time()
-  __io_println(r3.ok)
-  __io_println(r3.audit.binder.status)
-  __io_println(r3.audit.binder.attempts)
-  __io_println(r3.arguments.path)
-  __io_println(r3.arguments.contents)
+  harness.stdio.println(r3.ok)
+  harness.stdio.println(r3.audit.binder.status)
+  harness.stdio.println(r3.audit.binder.attempts)
+  harness.stdio.println(r3.arguments.path)
+  harness.stdio.println(r3.arguments.contents)
   // Intent must be stripped before dispatch.
-  __io_println(contains(r3.arguments.keys(), "_nl_intent"))
+  harness.stdio.println(contains(r3.arguments.keys(), "_nl_intent"))
   // The configured `timeout_ms` must reach the binder substrate so a real
   // `llm_call` (which now recognizes `timeout_ms`) can apply an HTTP-level
   // backstop in addition to the middleware's post-call wall-clock check.
-  __io_println(atomic_get(captured_timeout_ms))
+  harness.stdio.println(harness.runtime.atomic_get(captured_timeout_ms))
   // (4) Defaults: the production defaults should be usable with reasoning
   // binder models without callers having to remember the empirical token
   // and latency budget.
-  const captured_default_timeout_ms = atomic(0)
-  const captured_default_max_tokens = atomic(0)
+  const captured_default_timeout_ms = harness.runtime.atomic(0)
+  const captured_default_max_tokens = harness.runtime.atomic(0)
   const default_binder = { _prompt, _system, opts ->
-    let _ = atomic_set(captured_default_timeout_ms, to_int(opts?.timeout_ms ?? 0))
-    let _ = atomic_set(captured_default_max_tokens, to_int(opts?.max_tokens ?? 0))
+    let _ = harness.runtime.atomic_set(captured_default_timeout_ms, to_int(opts?.timeout_ms ?? 0))
+    let _ = harness.runtime.atomic_set(captured_default_max_tokens, to_int(opts?.max_tokens ?? 0))
     return {
       text: "{\"path\":\"/var/log/syslog\",\"contents\":\"hello\"}",
       model: "mock",
@@ -143,8 +141,7 @@ pipeline default() {
       output_tokens: 0,
     }
   }
-  const mw_defaults = with_natural_language_executor(
-    {provider: "cerebras", model: "gpt-oss-120b", binder_fn: default_binder},
+  const mw_defaults = with_natural_language_executor(harness,  harness, {provider: "cerebras", model: "gpt-oss-120b", binder_fn: default_binder},
   )
   const _ = mock_time(0)
   const r_defaults = mw_defaults(
@@ -152,9 +149,9 @@ pipeline default() {
     next,
   )
   const _ = unmock_time()
-  __io_println(r_defaults.audit.binder.status)
-  __io_println(atomic_get(captured_default_timeout_ms))
-  __io_println(atomic_get(captured_default_max_tokens))
+  harness.stdio.println(r_defaults.audit.binder.status)
+  harness.stdio.println(harness.runtime.atomic_get(captured_default_timeout_ms))
+  harness.stdio.println(harness.runtime.atomic_get(captured_default_max_tokens))
   // (5) Timeout: binder takes longer than timeout_ms; envelope passes through.
   const slow_binder = { _prompt, _system, _opts ->
     let _ = advance_time(250)
@@ -166,17 +163,16 @@ pipeline default() {
       output_tokens: 0,
     }
   }
-  const mw_timeout = with_natural_language_executor(
-    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: slow_binder},
+  const mw_timeout = with_natural_language_executor(harness,  harness, {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: slow_binder},
   )
   const _ = mock_time(0)
   const r4 = mw_timeout(envelope("file_read", {_nl_intent: "do something slow"}, schema), next)
   const _ = unmock_time()
-  __io_println(r4.ok)
-  __io_println(r4.audit.binder.status)
-  __io_println(r4.audit.binder.latency_ms >= 100)
+  harness.stdio.println(r4.ok)
+  harness.stdio.println(r4.audit.binder.status)
+  harness.stdio.println(r4.audit.binder.latency_ms >= 100)
   // Stripped args reach next() — intent is gone, original args (empty here) pass through.
-  __io_println(contains(r4.arguments.keys(), "_nl_intent"))
+  harness.stdio.println(contains(r4.arguments.keys(), "_nl_intent"))
   // (6) on_failure: "reject" — bad binder JSON short-circuits with schema_violation.
   const bad_binder = { _prompt, _system, _opts ->
     return {
@@ -187,13 +183,12 @@ pipeline default() {
       output_tokens: 0,
     }
   }
-  const was_dispatched = atomic(0)
+  const was_dispatched = harness.runtime.atomic(0)
   const watch_next = { call ->
-    let _ = atomic_set(was_dispatched, 1)
+    let _ = harness.runtime.atomic_set(was_dispatched, 1)
     return next(call)
   }
-  const mw_reject = with_natural_language_executor(
-    {
+  const mw_reject = with_natural_language_executor(harness,  harness, {
       provider: "cerebras",
       model: "gpt-oss-120b",
       timeout_ms: 100,
@@ -202,21 +197,21 @@ pipeline default() {
     },
   )
   const r5 = mw_reject(envelope("file_read", {_nl_intent: "anything"}, schema), watch_next)
-  __io_println(r5.ok)
-  __io_println(r5.error_category)
-  __io_println(r5.audit.binder.status)
-  __io_println(atomic_get(was_dispatched) == 0)
+  harness.stdio.println(r5.ok)
+  harness.stdio.println(r5.error_category)
+  harness.stdio.println(r5.audit.binder.status)
+  harness.stdio.println(harness.runtime.atomic_get(was_dispatched) == 0)
   // (7) compose_tool_callers stacks cleanly with the binder.
-  const composed = compose_tool_callers([mw_ok])
+  const composed = compose_tool_callers(harness, [mw_ok])
   const _ = mock_time(0)
   const r6 = composed(
     envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
     next,
   )
   const _ = unmock_time()
-  __io_println(r6.ok)
-  __io_println(r6.audit.binder.status)
-  __io_println(r6.arguments.path)
+  harness.stdio.println(r6.ok)
+  harness.stdio.println(r6.audit.binder.status)
+  harness.stdio.println(r6.arguments.path)
   // (8) The binder's schema-time companion exposes an optional fallback
   // intent field, and the paired middleware returns both pieces together.
   let tools = tool_registry()
@@ -228,49 +223,45 @@ pipeline default() {
   )
   const transform = natural_language_executor_schema_transform()
   const transformed = transform(tools.tools[0])
-  __io_println(contains(transformed.parameters.properties.keys(), "_nl_intent"))
-  __io_println(contains(transformed.parameters.required, "_nl_intent"))
-  __io_println(transformed.parameters.properties._nl_intent.required)
-  const paired = natural_language_executor_middleware(
-    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
+  harness.stdio.println(contains(transformed.parameters.properties.keys(), "_nl_intent"))
+  harness.stdio.println(contains(transformed.parameters.required, "_nl_intent"))
+  harness.stdio.println(transformed.parameters.properties._nl_intent.required)
+  const paired = natural_language_executor_middleware(harness,  harness, {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
   const paired_entry = paired.schema_transform(tools.tools[0])
-  __io_println(contains(paired_entry.parameters.properties.keys(), "_nl_intent"))
+  harness.stdio.println(contains(paired_entry.parameters.properties.keys(), "_nl_intent"))
   const _ = mock_time(0)
   const r7 = paired.caller(
     envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
     next,
   )
   const _ = unmock_time()
-  __io_println(r7.ok)
-  __io_println(r7.audit.binder.status)
-  __io_println(r7.arguments.path)
+  harness.stdio.println(r7.ok)
+  harness.stdio.println(r7.audit.binder.status)
+  harness.stdio.println(r7.arguments.path)
   // (9) Option validation is schema-backed: malformed public options fail
   // deterministically before any binder hop can run.
   let missing_provider = try {
-    with_natural_language_executor({model: "gpt-oss-120b", binder_fn: mock_binder})
+    with_natural_language_executor(harness, {model: "gpt-oss-120b", binder_fn: mock_binder})
   }
-  __io_println(error_contains(missing_provider, "provider"))
+  harness.stdio.println(error_contains(missing_provider, "provider"))
   let bad_timeout = try {
-    with_natural_language_executor(
-      {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 0, binder_fn: mock_binder},
+    with_natural_language_executor(harness,  harness, {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 0, binder_fn: mock_binder},
     )
   }
-  __io_println(error_contains(bad_timeout, "timeout_ms"))
+  harness.stdio.println(error_contains(bad_timeout, "timeout_ms"))
   let bad_intent_field = try {
-    with_natural_language_executor(
-      {provider: "cerebras", model: "gpt-oss-120b", intent_field: "   ", binder_fn: mock_binder},
+    with_natural_language_executor(harness,  harness, {provider: "cerebras", model: "gpt-oss-120b", intent_field: "   ", binder_fn: mock_binder},
     )
   }
-  __io_println(error_contains(bad_intent_field, "intent_field"))
+  harness.stdio.println(error_contains(bad_intent_field, "intent_field"))
   let bad_failure_mode = try {
-    with_natural_language_executor(
-      {provider: "cerebras", model: "gpt-oss-120b", on_failure: "retry", binder_fn: mock_binder},
+    with_natural_language_executor(harness,  harness, {provider: "cerebras", model: "gpt-oss-120b", on_failure: "retry", binder_fn: mock_binder},
     )
   }
-  __io_println(error_contains(bad_failure_mode, "on_failure"))
+  harness.stdio.println(error_contains(bad_failure_mode, "on_failure"))
   let bad_binder_fn = try {
-    with_natural_language_executor({provider: "cerebras", model: "gpt-oss-120b", binder_fn: "nope"})
+    with_natural_language_executor(harness, {provider: "cerebras", model: "gpt-oss-120b", binder_fn: "nope"})
   }
-  __io_println(error_contains(bad_binder_fn, "binder_fn"))
+  harness.stdio.println(error_contains(bad_binder_fn, "binder_fn"))
 }

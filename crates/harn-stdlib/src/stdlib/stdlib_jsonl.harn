@@ -86,11 +86,11 @@ fn __parse_line(line: FileLine) -> Result<JsonlRecord<unknown>?, JsonlRecordFail
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_jsonl_page_result(
+pub fn read_jsonl_page_result(harness: Harness, 
   path: string,
   options: JsonlPageOptions = {},
 ) -> JsonlPageResult<unknown> {
-  const source = read_lines_page_result(path, __page_options(options))
+  const source = read_lines_page_result(harness.fs, path, __page_options(options))
   if !is_ok(source) {
     return Err(unwrap_err(source))
   }
@@ -121,8 +121,8 @@ pub fn read_jsonl_page_result(
  * @effects: [fs.read]
  * @errors: [FsFailure]
  */
-pub fn read_jsonl_page(path: string, options: JsonlPageOptions = {}) -> JsonlPage<unknown> {
-  return unwrap(read_jsonl_page_result(path, options))
+pub fn read_jsonl_page(harness: Harness, path: string, options: JsonlPageOptions = {}) -> JsonlPage<unknown> {
+  return unwrap(read_jsonl_page_result(harness, path, options))
 }
 
 fn __contract_failure(record: JsonlRecord<unknown>, failure) -> JsonlRecordFailure {
@@ -146,12 +146,12 @@ fn __contract_failure(record: JsonlRecord<unknown>, failure) -> JsonlRecordFailu
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_jsonl_contract_page_result<T>(
+pub fn read_jsonl_contract_page_result<T>(harness: Harness, 
   path: string,
   contract: SchemaContract<T>,
   options: JsonlPageOptions = {},
 ) -> JsonlPageResult<T> {
-  const raw = read_jsonl_page_result(path, options)
+  const raw = read_jsonl_page_result(harness, path, options)
   if !is_ok(raw) {
     return Err(unwrap_err(raw))
   }
@@ -178,12 +178,12 @@ pub fn read_jsonl_contract_page_result<T>(
  * @effects: [fs.read]
  * @errors: [FsFailure]
  */
-pub fn read_jsonl_contract_page<T>(
+pub fn read_jsonl_contract_page<T>(harness: Harness, 
   path: string,
   contract: SchemaContract<T>,
   options: JsonlPageOptions = {},
 ) -> JsonlPage<T> {
-  return unwrap(read_jsonl_contract_page_result(path, contract, options))
+  return unwrap(read_jsonl_contract_page_result(harness, path, contract, options))
 }
 
 /**
@@ -206,7 +206,7 @@ pub fn parse_jsonl(text: string, options: ReadJsonlOptions = {}) -> list {
  * @effects: [fs.read]
  * @errors: [FsFailure, JsonlRecordFailure]
  */
-pub fn read_jsonl(path: string, options: ReadJsonlOptions = {}) -> list {
+pub fn read_jsonl(harness: Harness, path: string, options: ReadJsonlOptions = {}) -> list {
   const opts = __read_options(options)
   let out = []
   let cursor: JsonlCursor = {offset: 0, line: 1}
@@ -225,7 +225,7 @@ pub fn read_jsonl(path: string, options: ReadJsonlOptions = {}) -> list {
       max_records: page_records,
       max_bytes: opts.max_bytes,
     }
-    const page = read_jsonl_page_result(path, page_options)
+    const page = read_jsonl_page_result(harness, path, page_options)
     if !is_ok(page) {
       if opts.strict {
         throw unwrap_err(page)
@@ -266,7 +266,7 @@ fn __serialize(items: list) -> string {
  * @effects: [fs.write]
  * @errors: [FsFailure]
  */
-pub fn write_jsonl(path: string, items: list) -> int {
+pub fn write_jsonl(harness: Harness, path: string, items: list) -> int {
   harness.fs.write_text(path, __serialize(items))
   return len(items ?? [])
 }
@@ -277,7 +277,7 @@ pub fn write_jsonl(path: string, items: list) -> int {
  * @effects: [fs.write]
  * @errors: [FsFailure]
  */
-pub fn append_jsonl(path: string, item) -> int {
+pub fn append_jsonl(harness: Harness, path: string, item) -> int {
   const line = json_stringify(item) + "\n"
   harness.fs.append(path, line)
   return len(line)
@@ -325,7 +325,7 @@ pub fn fold_jsonl(text: string, initial, reducer, options: ReadJsonlOptions = {}
  * @effects: [fs.read]
  * @errors: [FsFailure, JsonlRecordFailure]
  */
-pub fn fold_jsonl_file(path: string, initial, reducer, options: ReadJsonlOptions = {}) -> any {
+pub fn fold_jsonl_file(harness: Harness, path: string, initial, reducer, options: ReadJsonlOptions = {}) -> any {
   const opts = __read_options(options)
   let state = initial
   let index = 0
@@ -336,7 +336,7 @@ pub fn fold_jsonl_file(path: string, initial, reducer, options: ReadJsonlOptions
       max_records: 256,
       max_bytes: opts.max_bytes,
     }
-    const page = read_jsonl_page_result(path, page_options)
+    const page = read_jsonl_page_result(harness, path, page_options)
     if !is_ok(page) {
       throw unwrap_err(page)
     }

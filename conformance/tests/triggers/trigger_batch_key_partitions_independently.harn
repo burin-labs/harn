@@ -6,7 +6,7 @@ import "std/triggers"
  * and fires immediately; repo-B fires later when its own threshold is
  * reached.
  */
-fn handle_batch(event) {
+fn handle_batch(harness: Harness, event) {
   const batch_len = if event.batch == nil {
     0
   } else {
@@ -14,15 +14,15 @@ fn handle_batch(event) {
   }
   const first = event.batch[0]
   const repo = first.provider_payload.payload.repo
-  emit_channel("batch.key.fired", {repo: repo, batch_size: batch_len})
+  harness.channels.append("batch.key.fired", {repo: repo, batch_size: batch_len})
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "batch-key-" + unique,
       kind: "channel.emit",
@@ -41,16 +41,16 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const _ = emit_channel("batch.key.input", {repo: "repoA", seq: 1})
-  const _ = emit_channel("batch.key.input", {repo: "repoB", seq: 1})
-  const only_a = channel_events("batch.key.fired")
-  __io_println("after-one-each:" + to_string(len(only_a)))
-  const _ = emit_channel("batch.key.input", {repo: "repoA", seq: 2})
-  const one_fired = channel_events("batch.key.fired")
-  __io_println("after-repoA-pair:" + to_string(len(one_fired)))
-  __io_println("first-fired-repo:" + one_fired[0].payload.repo)
-  const _ = emit_channel("batch.key.input", {repo: "repoB", seq: 2})
-  const both_fired = channel_events("batch.key.fired")
-  __io_println("after-repoB-pair:" + to_string(len(both_fired)))
-  __io_println("second-fired-repo:" + both_fired[1].payload.repo)
+  const _ = harness.channels.append("batch.key.input", {repo: "repoA", seq: 1})
+  const _ = harness.channels.append("batch.key.input", {repo: "repoB", seq: 1})
+  const only_a = harness.channels.events("batch.key.fired")
+  harness.stdio.println("after-one-each:" + to_string(len(only_a)))
+  const _ = harness.channels.append("batch.key.input", {repo: "repoA", seq: 2})
+  const one_fired = harness.channels.events("batch.key.fired")
+  harness.stdio.println("after-repoA-pair:" + to_string(len(one_fired)))
+  harness.stdio.println("first-fired-repo:" + one_fired[0].payload.repo)
+  const _ = harness.channels.append("batch.key.input", {repo: "repoB", seq: 2})
+  const both_fired = harness.channels.events("batch.key.fired")
+  harness.stdio.println("after-repoB-pair:" + to_string(len(both_fired)))
+  harness.stdio.println("second-fired-repo:" + both_fired[1].payload.repo)
 }

@@ -74,9 +74,7 @@ fn __render_human(harness: Harness, report: dict) {
       + " license="
       + safe_string(request["default_license"], ""),
   )
-  print_list(
-    harness,
-    "required example metadata",
+  print_list(harness,  "required example metadata",
     safe_list(training_contract["required_example_metadata"]),
   )
   harness.stdio.println("  target base: " + safe_string(target["base_model"], ""))

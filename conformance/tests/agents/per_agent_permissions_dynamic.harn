@@ -25,9 +25,9 @@ fn note_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "read_1", name: "read_note", arguments: {path: "/workspace/a.txt"}},
@@ -36,8 +36,7 @@ pipeline main() {
       },
     ],
     { ->
-      const result = agent_loop(
-        "Read then write.",
+      const result = agent_loop(harness, "Read then write.",
         "Use tools.",
         {
           provider: "mock",
@@ -51,10 +50,10 @@ pipeline main() {
         },
       )
       const events = transcript_events(result?.transcript)
-      __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1)
-      __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1)
-      __io_println(result?.tools?.rejected[0] == "write_note")
-      __io_println(json_stringify(events).contains("/workspace/a.txt"))
+      harness.stdio.println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1)
+      harness.stdio.println(len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1)
+      harness.stdio.println(result?.tools?.rejected[0] == "write_note")
+      harness.stdio.println(json_stringify(events).contains("/workspace/a.txt"))
     },
   )
 }

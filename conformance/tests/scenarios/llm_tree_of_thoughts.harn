@@ -17,7 +17,7 @@ fn grid_done(state) {
   return state.x == 2 && state.y == 2
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const bfs = tree_of_thoughts(
     {
       initial_state: {name: "start", x: 0, y: 0},
@@ -88,5 +88,5 @@ pipeline test(task) {
   )
   assert(!stopped.ok, "stop predicate can end search before a terminal state")
   assert_eq(stopped.stop_reason, "stop")
-  log("llm tree_of_thoughts ok")
+  harness.stdio.println("llm tree_of_thoughts ok")
 }

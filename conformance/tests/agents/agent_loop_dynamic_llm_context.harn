@@ -4,38 +4,38 @@ fn iteration_events(events) {
   return events.filter({ event -> event.type == "iteration_start" })
 }
 
-pipeline test(task) {
-  const call_count = atomic(0)
-  const first_context_ok = atomic(0)
-  const second_context_ok = atomic(0)
-  const second_call_options_ok = atomic(0)
-  const first_thinking_kept = atomic(0)
-  const second_thinking_stripped = atomic(0)
+pipeline test(harness: Harness, task) {
+  const call_count = harness.runtime.atomic(0)
+  const first_context_ok = harness.runtime.atomic(0)
+  const second_context_ok = harness.runtime.atomic(0)
+  const second_call_options_ok = harness.runtime.atomic(0)
+  const first_thinking_kept = harness.runtime.atomic(0)
+  const second_thinking_stripped = harness.runtime.atomic(0)
   const caller = { call ->
-    let index = atomic_add(call_count, 1) + 1
+    let index = harness.runtime.atomic_add(call_count, 1) + 1
     if index == 1
       && contains(call?.system ?? "", "ctx provider=anthropic model=claude-sonnet-4-6") {
-      atomic_set(first_context_ok, 1)
+      harness.runtime.atomic_set(first_context_ok, 1)
     }
     if index == 2
       && contains(
       call?.system ?? "",
       "ctx provider=openrouter model=anthropic/claude-sonnet-4-6",
     ) {
-      atomic_set(second_context_ok, 1)
+      harness.runtime.atomic_set(second_context_ok, 1)
     }
     if index == 1
       && call?.opts?.thinking?.mode == "enabled" {
-      atomic_set(first_thinking_kept, 1)
+      harness.runtime.atomic_set(first_thinking_kept, 1)
     }
     if index == 2
       && call?.opts?.provider == "openrouter"
       && call?.opts?.model == "anthropic/claude-sonnet-4-6" {
-      atomic_set(second_call_options_ok, 1)
+      harness.runtime.atomic_set(second_call_options_ok, 1)
     }
     if index == 2
       && call?.opts?.thinking == nil {
-      atomic_set(second_thinking_stripped, 1)
+      harness.runtime.atomic_set(second_thinking_stripped, 1)
     }
     let text = if index == 1 {
       "still working"
@@ -53,11 +53,9 @@ pipeline test(task) {
       },
     }
   }
-  const session = "agent-loop-dynamic-llm-context-" + uuid()
-  const captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "finish",
+  const session = "agent-loop-dynamic-llm-context-" + harness.random.uuid()
+  const captured = agent_capture_events(harness,  harness, session,
+    fn() { return agent_loop(harness, "finish",
       nil,
       {
         provider: "anthropic",
@@ -88,13 +86,13 @@ pipeline test(task) {
   )
   const starts = iteration_events(captured.events)
   assert(captured.result.status == "done", "loop completed after dynamic model switch")
-  assert(atomic_get(call_count) == 2, "two LLM calls were made")
-  assert(atomic_get(first_context_ok) == 1, "first turn rendered primary model context")
-  assert(atomic_get(second_context_ok) == 1, "second turn rendered escalated model context")
-  assert(atomic_get(first_thinking_kept) == 1, "direct Anthropic route kept supported thinking")
-  assert(atomic_get(second_call_options_ok) == 1, "second call used escalated options")
+  assert(harness.runtime.atomic_get(call_count) == 2, "two LLM calls were made")
+  assert(harness.runtime.atomic_get(first_context_ok) == 1, "first turn rendered primary model context")
+  assert(harness.runtime.atomic_get(second_context_ok) == 1, "second turn rendered escalated model context")
+  assert(harness.runtime.atomic_get(first_thinking_kept) == 1, "direct Anthropic route kept supported thinking")
+  assert(harness.runtime.atomic_get(second_call_options_ok) == 1, "second call used escalated options")
   assert(
-    atomic_get(second_thinking_stripped) == 1,
+    harness.runtime.atomic_get(second_thinking_stripped) == 1,
     "OpenRouter route stripped unsupported thinking",
   )
   assert(starts[1].provider == "openrouter", "iteration telemetry used escalated provider")
@@ -102,5 +100,5 @@ pipeline test(task) {
     starts[1].model == "anthropic/claude-sonnet-4-6",
     "iteration telemetry used escalated model",
   )
-  __io_println("dynamic llm context ok")
+  harness.stdio.println("dynamic llm context ok")
 }

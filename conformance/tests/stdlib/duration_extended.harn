@@ -1,12 +1,12 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Existing duration suffixes
-  log(500ms)
-  log(5s)
-  log(30m)
-  log(2h)
+  harness.stdio.println(500ms)
+  harness.stdio.println(5s)
+  harness.stdio.println(30m)
+  harness.stdio.println(2h)
   // New: days and weeks
-  log(1d)
-  log(2d)
-  log(1w)
-  log(2w)
+  harness.stdio.println(1d)
+  harness.stdio.println(2d)
+  harness.stdio.println(1w)
+  harness.stdio.println(2w)
 }

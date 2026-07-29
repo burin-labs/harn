@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let ran = false
   while false {
     ran = true
   }
-  log(ran)
+  harness.stdio.println(ran)
 }

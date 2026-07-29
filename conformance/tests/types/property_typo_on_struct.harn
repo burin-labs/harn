@@ -6,7 +6,7 @@ struct User {
   email: string
 }
 
-pipeline default(_) {
+pipeline default(harness: Harness, _) {
   const u = User {name: "Ada", email: "ada@x"}
-  __io_println(u.emial)
+  harness.stdio.println(u.emial)
 }

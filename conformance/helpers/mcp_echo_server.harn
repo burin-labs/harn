@@ -5,7 +5,7 @@ fn record_echo_call(harness: Harness, state_file: string, args) {
   harness.fs.append(state_file, json_stringify({name: "echo", arguments: args}) + "\n")
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const state_file = harness.env.get_or("HARN_MCP_ECHO_STATE_FILE", "")
   mcp_server_metadata(
     {

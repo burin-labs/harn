@@ -6,7 +6,7 @@
  * the stack `applies_to` filter. Acts as the executable spec for the
  * primitive epic #1884 builds on.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const rule = tool_rule(
     {
       id: "rust.cargo.target_dir_conflict",
@@ -17,9 +17,9 @@ pipeline default() {
       references: ["https://github.com/rust-lang/cargo/issues/4282"],
     },
   )
-  __io_println(rule._type)
-  __io_println(rule.id)
-  __io_println(rule.priority)
+  harness.stdio.println(rule._type)
+  harness.stdio.println(rule.id)
+  harness.stdio.println(rule.priority)
   const predicate_rule = tool_rule(
     {
       id: "shell.dangerous_rm",
@@ -29,55 +29,55 @@ pipeline default() {
       explanation: "Refusing recursive root deletion",
     },
   )
-  __io_println(predicate_rule._type)
+  harness.stdio.println(predicate_rule._type)
   const rust_cat = catalogue(
     {id: "harn-canon/rust", stack: "rust", version: "0.1.0", source: "harn-canon", rules: [rule]},
   )
-  __io_println(rust_cat._type)
+  harness.stdio.println(rust_cat._type)
   const shell_cat = catalogue(
     {id: "harn-canon/shell", stack: "shell", version: "0.1.0", rules: [predicate_rule]},
   )
   /* Round-trip catalogue through JSON to satisfy the serde criterion. */
   const json = json_stringify(rust_cat)
   const decoded = json_parse(json)
-  __io_println(decoded._type)
-  __io_println(decoded.id)
-  __io_println(len(decoded.rules))
+  harness.stdio.println(decoded._type)
+  harness.stdio.println(decoded.id)
+  harness.stdio.println(len(decoded.rules))
   /* register / list / unregister */
-  const registry = tool_hooks_registry()
-  const r1 = tool_hooks_register(registry, rust_cat)
-  const r2 = tool_hooks_register(r1, shell_cat)
-  const listed = tool_hooks_list(r2)
-  __io_println(len(listed))
-  __io_println(listed[0].id)
-  __io_println(listed[0].rule_count)
+  const registry = harness.tools.hooks_registry()
+  const r1 = harness.tools.hooks_register(registry, rust_cat)
+  const r2 = harness.tools.hooks_register(r1, shell_cat)
+  const listed = harness.tools.hooks_list(r2)
+  harness.stdio.println(len(listed))
+  harness.stdio.println(listed[0].id)
+  harness.stdio.println(listed[0].rule_count)
   /* Re-registering the same id replaces in place. */
-  const r3 = tool_hooks_register(r2, rust_cat)
-  __io_println(len(tool_hooks_list(r3)))
+  const r3 = harness.tools.hooks_register(r2, rust_cat)
+  harness.stdio.println(len(harness.tools.hooks_list(r3)))
   /* Unregistering by id prunes the catalogue. */
-  const pruned = tool_hooks_unregister(r3, "harn-canon/shell")
-  __io_println(len(tool_hooks_list(pruned)))
+  const pruned = harness.tools.hooks_unregister(r3, "harn-canon/shell")
+  harness.stdio.println(len(harness.tools.hooks_list(pruned)))
   /* Regex match (rust stack scoped). */
-  const matches = tool_hooks_match(r3, "cargo build --release", {stacks: ["rust"]})
-  __io_println(len(matches))
-  __io_println(matches[0].rule_id)
-  __io_println(matches[0].catalogue_id)
-  __io_println(matches[0].severity)
+  const matches = harness.tools.hooks_match(r3, "cargo build --release", {stacks: ["rust"]})
+  harness.stdio.println(len(matches))
+  harness.stdio.println(matches[0].rule_id)
+  harness.stdio.println(matches[0].catalogue_id)
+  harness.stdio.println(matches[0].severity)
   /* applies_to filter rejects non-matching stacks. */
-  const py_matches = tool_hooks_match(r3, "cargo build --release", {stacks: ["python"]})
-  __io_println(len(py_matches))
+  const py_matches = harness.tools.hooks_match(r3, "cargo build --release", {stacks: ["python"]})
+  harness.stdio.println(len(py_matches))
   /* Empty stack context — `applies_to: []` rule (shell) still matches. */
-  const shell_matches = tool_hooks_match(r3, "rm -rf / now", nil)
-  __io_println(len(shell_matches))
-  __io_println(shell_matches[0].rule_id)
+  const shell_matches = harness.tools.hooks_match(r3, "rm -rf / now", nil)
+  harness.stdio.println(len(shell_matches))
+  harness.stdio.println(shell_matches[0].rule_id)
   /* Non-matching command produces no hits. */
-  __io_println(len(tool_hooks_match(r3, "echo hello", {stacks: ["rust"]})))
+  harness.stdio.println(len(harness.tools.hooks_match(r3, "echo hello", {stacks: ["rust"]})))
   /* Priority sorting: higher rule priority sorts first across catalogues. */
   const low = tool_rule({id: "low", pattern: "git push", priority: 1})
   const high = tool_rule({id: "high", pattern: "git push", priority: 9})
   const pri_cat = catalogue({id: "pri", stack: "general", rules: [low, high]})
-  const pri_reg = tool_hooks_register(tool_hooks_registry(), pri_cat)
-  const pri_matches = tool_hooks_match(pri_reg, "git push --force", nil)
-  __io_println(pri_matches[0].rule_id)
-  __io_println(pri_matches[1].rule_id)
+  const pri_reg = harness.tools.hooks_register(harness.tools.hooks_registry(), pri_cat)
+  const pri_matches = harness.tools.hooks_match(pri_reg, "git push --force", nil)
+  harness.stdio.println(pri_matches[0].rule_id)
+  harness.stdio.println(pri_matches[1].rule_id)
 }

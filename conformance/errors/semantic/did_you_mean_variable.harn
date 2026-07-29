@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const response = "hello"
-  log(reponse)
+  harness.stdio.println(reponse)
 }

@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const first = transcript.inject_reminder(
     transcript(),
     {body: "clear by id", tags: ["id_tag"], dedupe_key: "id-key"},
@@ -15,8 +15,8 @@ pipeline main() {
   const by_dedupe = transcript.clear_reminders(by_id.transcript, {dedupe_key: "dedupe-key"})
   const by_tag = transcript.clear_reminders(by_dedupe.transcript, {tag: "tagged"})
   const events = transcript_events_by_kind(by_tag.transcript, "system_reminder")
-  __io_println(by_id.removed_count)
-  __io_println(by_dedupe.removed_count)
-  __io_println(by_tag.removed_count)
-  __io_println(len(events))
+  harness.stdio.println(by_id.removed_count)
+  harness.stdio.println(by_dedupe.removed_count)
+  harness.stdio.println(by_tag.removed_count)
+  harness.stdio.println(len(events))
 }

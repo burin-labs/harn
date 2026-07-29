@@ -4,16 +4,16 @@ import "std/triggers"
  * CH-02 (#1872): JSON-path-equality filter restricts trigger fires to
  * matching payloads.
  */
-fn handle_match(event) {
-  emit_channel("ch.filter.fired", {repo: event.provider_payload.payload.repo})
+fn handle_match(harness: Harness, event) {
+  harness.channels.append("ch.filter.fired", {repo: event.provider_payload.payload.repo})
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-filter-" + unique,
       kind: "channel.emit",
@@ -31,10 +31,10 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const _ = emit_channel("filter.input", {repo: "other-repo"})
-  const _ = emit_channel("filter.input", {repo: "harn"})
-  const _ = emit_channel("filter.input", {repo: "burin"})
-  const fired = channel_events("ch.filter.fired")
-  __io_println(len(fired))
-  __io_println(fired[0].payload.repo)
+  const _ = harness.channels.append("filter.input", {repo: "other-repo"})
+  const _ = harness.channels.append("filter.input", {repo: "harn"})
+  const _ = harness.channels.append("filter.input", {repo: "burin"})
+  const fired = harness.channels.events("ch.filter.fired")
+  harness.stdio.println(len(fired))
+  harness.stdio.println(fired[0].payload.repo)
 }

@@ -1,9 +1,9 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn bad() -> int {
     defer {
       return "wrong"
     }
     return 1
   }
-  __io_println(bad())
+  harness.stdio.println(bad())
 }

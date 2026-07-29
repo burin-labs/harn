@@ -14,24 +14,24 @@ fn successful_tool_result(_call) {
   return {ok: true, status: "ok", result: {value: "persist me"}, audit: {}}
 }
 
-pipeline default() {
-  const receipts_root = path_join(runtime_paths().state_root, "receipts")
+pipeline default(harness: Harness) {
+  const receipts_root = path_join(harness.fs.runtime_paths().state_root, "receipts")
   harness.fs.write_text(receipts_root, "block directory creation")
-  const local_caller = compose_tool_callers([with_audit_log({sink: "local"})])
+  const local_caller = compose_tool_callers(harness, [with_audit_log(harness, {sink: "local"})])
   const local_result = local_caller(receipt_call("unwritable-local"), successful_tool_result)
-  __io_println(local_result.error_category == "tool_middleware_exception")
-  __io_println(contains(local_result.error, "receipts"))
-  __io_println(local_result?.audit?.receipt_uri == nil)
+  harness.stdio.println(local_result.error_category == "tool_middleware_exception")
+  harness.stdio.println(contains(local_result.error, "receipts"))
+  harness.stdio.println(local_result?.audit?.receipt_uri == nil)
   const failing_sink = { _receipt ->
     throw "receipt sink refused write"
   }
-  const callable_caller = compose_tool_callers([with_audit_log({sink: failing_sink})])
+  const callable_caller = compose_tool_callers(harness, [with_audit_log(harness, {sink: failing_sink})])
   const callable_result = callable_caller(
     receipt_call("unwritable-callable"),
     successful_tool_result,
   )
-  __io_println(callable_result.error_category == "tool_middleware_exception")
-  __io_println(contains(callable_result.error, "receipt sink refused write"))
+  harness.stdio.println(callable_result.error_category == "tool_middleware_exception")
+  harness.stdio.println(contains(callable_result.error, "receipt sink refused write"))
   const deferred_result = callable_caller(
     receipt_call("unwritable-deferred", true),
     successful_tool_result,
@@ -40,6 +40,6 @@ pipeline default() {
   const drained = try {
     __drain_audit_flushes(tasks)
   }
-  __io_println(is_err(drained))
-  __io_println(contains(to_string(unwrap_err(drained)), "receipt sink refused write"))
+  harness.stdio.println(is_err(drained))
+  harness.stdio.println(contains(to_string(unwrap_err(drained)), "receipt sink refused write"))
 }

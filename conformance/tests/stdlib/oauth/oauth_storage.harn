@@ -60,16 +60,16 @@ fn exercise_memory() {
 }
 
 fn exercise_file(harness: Harness) {
-  const path = path_join(harness.fs.temp_dir(), "harn-oauth-storage-" + uuid() + ".bin")
+  const path = path_join(harness.fs.temp_dir(), "harn-oauth-storage-" + harness.random.uuid() + ".bin")
   const key = "high-entropy-test-key-must-be-long-enough"
-  const s = file(path, key)
+  const s = file(harness.auth, path, key)
   exercise_backend("file", s, "file")
   // After exercise_backend deletes both keys the file should be gone.
   if harness.fs.exists(path) {
     throw "file: expected file to be removed once empty"
   }
   // Persistence + at-rest encryption: re-open with the same key.
-  const s2 = file(path, key)
+  const s2 = file(harness.auth, path, key)
   s2.set("github", {access_token: "persistent"}, 600)
   const raw = harness.fs.read_text(path)
   if contains(raw, "persistent") {
@@ -79,10 +79,10 @@ fn exercise_file(harness: Harness) {
   if envelope.version != 1 {
     throw "file: envelope version should be 1, got " + to_string(envelope.version)
   }
-  const s3 = file(path, key)
+  const s3 = file(harness.auth, path, key)
   require_token("file.persistence", s3.get("github"), "persistent")
   // Wrong key fails fast.
-  const bad = file(path, "wrong-key")
+  const bad = file(harness.auth, path, "wrong-key")
   let saw_error = false
   try {
     const _ = bad.get("github")
@@ -95,14 +95,14 @@ fn exercise_file(harness: Harness) {
   s3.delete("github")
 }
 
-fn exercise_custom() {
+fn exercise_custom(harness: Harness) {
   // Delegate to an in-process memory backend so the user-supplied
   // closures exercise real state without relying on closure capture
   // semantics. The contract is what matters here: get/set/delete are
   // dispatched to the closures the caller registered.
   const inner = memory()
   const s = custom(
-    {
+    harness.auth, {
       get: { key -> inner.get(key) },
       set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },
       delete: { key -> inner.delete(key) },
@@ -115,7 +115,7 @@ fn exercise_custom() {
   exercise_backend("custom", s, "custom")
   const locked_inner = memory()
   const locked = custom(
-    {
+    harness.auth, {
       get: { key -> locked_inner.get(key) },
       set: { key, tok, ttl = nil -> locked_inner.set(key, tok, ttl) },
       delete: { key -> locked_inner.delete(key) },
@@ -192,17 +192,17 @@ fn exercise_cloud(scope, factory, expect_kind) {
 }
 
 fn exercise_namespace(harness: Harness) {
-  const ns = storage()
+  const ns = storage(harness)
   if ns.memory.kind != "memory" {
-    throw "storage(): expected memory handle on namespace"
+    throw "storage(harness): expected memory handle on namespace"
   }
   if ns.harn_cloud_session.kind != "harn_cloud_session" {
-    throw "storage(): expected harn_cloud_session handle on namespace"
+    throw "storage(harness): expected harn_cloud_session handle on namespace"
   }
   if ns.harn_cloud_org.kind != "harn_cloud_org" {
-    throw "storage(): expected harn_cloud_org handle on namespace"
+    throw "storage(harness): expected harn_cloud_org handle on namespace"
   }
-  const path = path_join(harness.fs.temp_dir(), "harn-oauth-storage-ns-" + uuid() + ".bin")
+  const path = path_join(harness.fs.temp_dir(), "harn-oauth-storage-ns-" + harness.random.uuid() + ".bin")
   const s = ns.file(path, "ns-key")
   s.set("ns", {access_token: "ns-tok"}, 60)
   require_token("namespace.file", s.get("ns"), "ns-tok")
@@ -219,12 +219,12 @@ fn exercise_namespace(harness: Harness) {
   require_token("namespace.custom", cs.get("ns"), "ns-custom")
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   exercise_memory()
   exercise_file(harness)
-  exercise_custom()
+  exercise_custom(harness)
   exercise_cloud("session", harn_cloud_session, "harn_cloud_session")
   exercise_cloud("org", harn_cloud_org, "harn_cloud_org")
-  exercise_namespace(harness)
-  log("oauth storage ok")
+  exercise_namespace()
+  harness.stdio.println("oauth storage ok")
 }

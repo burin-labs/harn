@@ -1,26 +1,26 @@
 /** Unicode string operations: slicing, contains, split, replace, interpolation */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const emoji = "Hello 🌍🔥 World"
   // len counts characters, not bytes
-  log(len(emoji))
+  harness.stdio.println(len(emoji))
   // contains with multi-byte
-  log(emoji.contains("🌍"))
-  log(emoji.contains("🎉"))
+  harness.stdio.println(emoji.contains("🌍"))
+  harness.stdio.println(emoji.contains("🎉"))
   // replace multi-byte
-  log(emoji.replace("🔥", "💧"))
+  harness.stdio.println(emoji.replace("🔥", "💧"))
   // split around multi-byte
-  log("a🔥b🔥c".split("🔥"))
+  harness.stdio.println("a🔥b🔥c".split("🔥"))
   // starts_with / ends_with
-  log("café".starts_with("caf"))
-  log("café".ends_with("fé"))
+  harness.stdio.println("café".starts_with("caf"))
+  harness.stdio.println("café".ends_with("fé"))
   // interpolation with multi-byte
   const name = "André"
-  log("Hello ${name}!")
+  harness.stdio.println("Hello ${name}!")
   // CJK characters
   const cjk = "中文测试"
-  log(len(cjk))
-  log(cjk.contains("文"))
+  harness.stdio.println(len(cjk))
+  harness.stdio.println(cjk.contains("文"))
   // Accented characters
   const accented = "naïve résumé"
-  log(accented.replace("é", "e"))
+  harness.stdio.println(accented.replace("é", "e"))
 }

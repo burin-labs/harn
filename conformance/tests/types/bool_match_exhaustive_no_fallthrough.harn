@@ -5,7 +5,7 @@ fn classify(b: bool) -> string {
   }
 }
 
-pipeline default() {
-  __io_println(classify(true))
-  __io_println(classify(false))
+pipeline default(harness: Harness) {
+  harness.stdio.println(classify(true))
+  harness.stdio.println(classify(false))
 }

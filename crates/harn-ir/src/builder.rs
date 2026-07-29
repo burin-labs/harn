@@ -436,15 +436,8 @@ impl<'a> HandlerIrBuilder<'a> {
         vec![call_id]
     }
 
-    /// Lower a method call. The common case is a pass-through (walk the
-    /// receiver + args). When the receiver is a `harness.<sub_handle>`
-    /// access, we synthesize the ambient builtin name so capability
-    /// classification (`harn graph --json`, routes, IR analysis) sees
-    /// `harness.fs.read_text("x")` as having the same effect surface as
-    /// the legacy `read_file("x")`. This is the single place the IR
-    /// needs to know about the `Harness` sub-handle shape; everything
-    /// downstream (`direct_capabilities`, `classify_call`) keeps using
-    /// the canonical ambient name table.
+    /// Lower a method call. Harness methods are attributed directly from the
+    /// typed builtin contract; arbitrary method calls remain pass-through.
     pub(crate) fn build_method_call(
         &mut self,
         node: &SNode,
@@ -457,12 +450,14 @@ impl<'a> HandlerIrBuilder<'a> {
         for arg in args {
             exits = self.build_expr(arg, exits);
         }
-        if let Some((sub_handle, ambient)) = harness_sub_handle_for(object, method) {
+        if let Some((sub_handle, entry)) = harness_sub_handle_for(object, method) {
+            let display_name = format!("harness.{sub_handle}.{method}");
+            let literal_args = literal_args(args);
             let call = CallSemantics {
-                name: ambient.to_string(),
-                display_name: format!("harness.{sub_handle}.{method}"),
-                classification: classify_call(ambient, args).classification,
-                literal_args: literal_args(args),
+                name: display_name.clone(),
+                display_name,
+                classification: classify_contract(entry.name, &entry.contract, &literal_args),
+                literal_args,
             };
             let call_id = self.push_node(
                 node.span,

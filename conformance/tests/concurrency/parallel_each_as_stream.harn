@@ -1,24 +1,24 @@
-pipeline default() {
-  const gate = atomic(0)
+pipeline default(harness: Harness) {
+  const gate = harness.runtime.atomic(0)
   const results = parallel each [30, 5, 10] with { max_concurrent: 2 } { n ->
     if n == 30 {
-      while atomic_get(gate) < 2 {
-        yield_now()
+      while harness.runtime.atomic_get(gate) < 2 {
+        harness.runtime.yield_now()
       }
     }
     if n == 5 {
-      atomic_set(gate, 1)
+      harness.runtime.atomic_set(gate, 1)
     }
     if n == 10 {
-      while atomic_get(gate) < 1 {
-        yield_now()
+      while harness.runtime.atomic_get(gate) < 1 {
+        harness.runtime.yield_now()
       }
-      atomic_set(gate, 2)
+      harness.runtime.atomic_set(gate, 2)
     }
     return n
   } as stream
-  __io_println(type_of(results))
+  harness.stdio.println(type_of(results))
   for result in results {
-    __io_println(result)
+    harness.stdio.println(result)
   }
 }

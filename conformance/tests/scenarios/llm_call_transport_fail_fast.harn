@@ -1,23 +1,23 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // llm_call is fail-fast on transient transport errors: there is no hidden
   // in-call retry budget (the pre-v0.10 `llm_retries` / `llm_backoff_ms`
   // options were removed). Retry policy is composed via `with_retry` from
   // std/llm/handlers — see llm_handlers_with_retry*.harn for that surface.
   with_llm_script(
-    [
+    harness.llm, [
       {error: {category: "server_error", message: "HTTP 503 Service Unavailable"}},
       llm_text("unreachable without a composed retry handler"),
     ],
     { ->
       const fail_fast = try {
-        llm_call("transport fail-fast", nil, {provider: "mock"})
+        harness.llm.call("transport fail-fast", nil, {provider: "mock"})
       }
-      __io_println(is_err(fail_fast))
-      __io_println(unwrap_err(fail_fast)?.kind)
-      __io_println(unwrap_err(fail_fast)?.reason)
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(is_err(fail_fast))
+      harness.stdio.println(unwrap_err(fail_fast)?.kind)
+      harness.stdio.println(unwrap_err(fail_fast)?.reason)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
   const schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
@@ -25,10 +25,10 @@ pipeline default() {
   // schema_retries budget only, and with schema_retries: 0 it surfaces on
   // the first call.
   with_llm_script(
-    [llm_text("{\"wrong\": true}")],
+    harness.llm, [llm_text("{\"wrong\": true}")],
     { ->
       const schema_failure = try {
-        llm_call(
+        harness.llm.call(
           "schema failure is not a transport retry",
           nil,
           {
@@ -38,16 +38,16 @@ pipeline default() {
           },
         )
       }
-      __io_println(is_err(schema_failure))
-      __io_println(unwrap_err(schema_failure)?.category)
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(is_err(schema_failure))
+      harness.stdio.println(unwrap_err(schema_failure)?.category)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
   // The schema-retry loop still re-prompts on invalid structured output.
   with_llm_script(
-    [llm_text("{\"wrong\": true}"), llm_text("{\"answer\": \"fixed\"}")],
+    harness.llm, [llm_text("{\"wrong\": true}"), llm_text("{\"answer\": \"fixed\"}")],
     { ->
-      const structured = llm_call(
+      const structured = harness.llm.call(
         "schema retry",
         nil,
         {
@@ -56,8 +56,8 @@ pipeline default() {
           schema_retries: 1,
         },
       )
-      __io_println(structured.data.answer)
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(structured.data.answer)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
 }

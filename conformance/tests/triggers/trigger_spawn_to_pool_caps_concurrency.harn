@@ -7,13 +7,13 @@ import "std/triggers"
  * the named pool via its task_factory, and the pool's max_concurrent cap
  * bounds in-flight closures regardless of the inbound event rate.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   mock_time(1700000000000)
   const bp = Backpressure()
-  const gate = channel(nil, 8)
-  const inflight = atomic(0)
-  const peak = atomic(0)
-  const completed = atomic(0)
+  const gate = harness.runtime.channel(nil, 8)
+  const inflight = harness.runtime.atomic(0)
+  const peak = harness.runtime.atomic(0)
+  const completed = harness.runtime.atomic(0)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
@@ -24,18 +24,18 @@ pipeline test(task) {
   )
   const task_factory = { _event ->
     return { ->
-      let now = atomic_add(inflight, 1) + 1
-      if now > atomic_get(peak) {
-        atomic_set(peak, now)
+      let now = harness.runtime.atomic_add(inflight, 1) + 1
+      if now > harness.runtime.atomic_get(peak) {
+        harness.runtime.atomic_set(peak, now)
       }
-      receive(gate)
-      atomic_add(inflight, -1)
-      atomic_add(completed, 1)
+      harness.runtime.receive(gate)
+      harness.runtime.atomic_add(inflight, -1)
+      harness.runtime.atomic_add(completed, 1)
       return now
     }
   }
   const trigger_id = "trigger-spawn-to-pool-" + unique
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -56,7 +56,7 @@ pipeline test(task) {
   // closures running concurrently regardless of inbound event rate.
   let handles = []
   for i in 0 to 8 exclusive {
-    const dispatch: DispatchHandle = trigger_fire(
+    const dispatch: DispatchHandle = harness.runtime.trigger_fire(
       handle,
       {
         provider: "webhook",
@@ -68,14 +68,14 @@ pipeline test(task) {
       handles = handles.appending(dispatch.result)
     }
   }
-  __io_println(len(handles) == 8)
+  harness.stdio.println(len(handles) == 8)
   for _i in 0 to len(handles) exclusive {
-    send(gate, "go")
+    harness.runtime.send(gate, "go")
   }
   const results = pool_wait(handles)
-  __io_println(len(results) == 8)
-  __io_println(atomic_get(peak) <= 3)
-  __io_println(atomic_get(inflight) == 0)
-  __io_println(atomic_get(completed) == 8)
+  harness.stdio.println(len(results) == 8)
+  harness.stdio.println(harness.runtime.atomic_get(peak) <= 3)
+  harness.stdio.println(harness.runtime.atomic_get(inflight) == 0)
+  harness.stdio.println(harness.runtime.atomic_get(completed) == 8)
   unmock_time()
 }

@@ -1,7 +1,7 @@
 import "std/agents"
 import "std/context"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const flow = workflow(
     {
       name: "session-demo",
@@ -10,22 +10,22 @@ pipeline default() {
       act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
     },
   )
-  const result = task_run("Write a note", flow, {provider: "mock"})
+  const result = task_run(harness, "Write a note", flow, {provider: "mock"})
   const session = workflow_session(result)
-  __io_println(session?._type == "workflow_session")
-  __io_println(session?.message_count >= 1)
+  harness.stdio.println(session?._type == "workflow_session")
+  harness.stdio.println(session?.message_count >= 1)
   const forked = workflow_session_fork(session)
-  __io_println(forked?.transcript_state == "forked")
+  harness.stdio.println(forked?.transcript_state == "forked")
   const archived = workflow_session_archive(forked)
-  __io_println(archived?.transcript_state == "archived")
+  harness.stdio.println(archived?.transcript_state == "archived")
   const resumed = workflow_session_resume(archived)
-  __io_println(resumed?.transcript_state == "active")
+  harness.stdio.println(resumed?.transcript_state == "active")
   const compacted = workflow_session_compact(resumed, {provider: "mock", keep_last: 1})
-  __io_println(compacted?.summary != nil)
+  harness.stdio.println(compacted?.summary != nil)
   const persisted = workflow_session_persist(result, ".harn-runs/conformance-session.json")
-  __io_println(persisted?.run?.persisted_path != nil)
+  harness.stdio.println(persisted?.run?.persisted_path != nil)
   const restored = workflow_session_restore(persisted?.run?.persisted_path)
-  __io_println(restored?.message_count >= 1)
+  harness.stdio.println(restored?.message_count >= 1)
   const reset = workflow_session_reset(restored, true)
-  __io_println(reset?.message_count == 0)
+  harness.stdio.println(reset?.message_count == 0)
 }

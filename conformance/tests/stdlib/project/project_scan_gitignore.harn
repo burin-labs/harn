@@ -1,6 +1,6 @@
 import "std/project"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const root = path_join(harness.fs.temp_dir(), "project_scan_ignored")
   harness.fs.mkdir(path_join(root, "app/src"))
   harness.fs.mkdir(path_join(root, "ignored"))
@@ -21,16 +21,16 @@ pipeline test(task) {
     path_join(root, "target/tooling/Cargo.toml"),
     "[package]\nname = \"tooling\"\nversion = \"0.1.0\"\n",
   )
-  const default_tree = project_scan_tree(root, {tiers: ["ambient"], depth: 4})
+  const default_tree = project_scan_tree(harness.project, root, {tiers: ["ambient"], depth: 4})
   const expanded_tree = project_scan_tree(
-    root,
+    harness.project, root,
     {tiers: ["ambient"], depth: 4, ignore_policy: "none", include_vendor: true},
   )
-  __io_println(default_tree.app.languages[0] == "rust")
-  __io_println(!contains(keys(default_tree), "ignored"))
-  __io_println(!contains(keys(default_tree), "node_modules/pkg"))
-  __io_println(!contains(keys(default_tree), "target/tooling"))
-  __io_println(expanded_tree.ignored.languages[0] == "go")
-  __io_println(expanded_tree["node_modules/pkg"].languages[0] == "javascript")
-  __io_println(expanded_tree["target/tooling"].languages[0] == "rust")
+  harness.stdio.println(default_tree.app.languages[0] == "rust")
+  harness.stdio.println(!contains(keys(default_tree), "ignored"))
+  harness.stdio.println(!contains(keys(default_tree), "node_modules/pkg"))
+  harness.stdio.println(!contains(keys(default_tree), "target/tooling"))
+  harness.stdio.println(expanded_tree.ignored.languages[0] == "go")
+  harness.stdio.println(expanded_tree["node_modules/pkg"].languages[0] == "javascript")
+  harness.stdio.println(expanded_tree["target/tooling"].languages[0] == "rust")
 }

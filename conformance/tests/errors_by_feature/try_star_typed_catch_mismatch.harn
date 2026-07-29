@@ -1,6 +1,6 @@
 // A typed catch that does not match the rethrown value's type lets the
 // throw propagate past it — the rethrown enum keeps its original type.
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   enum AppError {
     NotFound(msg)
   }
@@ -16,5 +16,5 @@ pipeline test(task) {
   } catch (e: OtherError) {
     "wont-fire"
   }
-  log("unreachable")
+  harness.stdio.println("unreachable")
 }

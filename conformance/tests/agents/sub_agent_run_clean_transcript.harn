@@ -25,7 +25,7 @@ fn child_tools() {
   return tools
 }
 
-fn parent_tools() {
+fn parent_tools(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -33,8 +33,7 @@ fn parent_tools() {
     "Run a sub-agent",
     {
       handler: { args ->
-        sub_agent_run(
-          args.task,
+        sub_agent_run(harness, args.task,
           {
             provider: "mock",
             tools: child_tools(),
@@ -51,9 +50,9 @@ fn parent_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "parent_1", name: "delegate", arguments: {task: "Find the config path"}}]},
       {tool_calls: [{id: "child_1", name: "search", arguments: {query: "config path"}}]},
       {tool_calls: [{id: "child_2", name: "read", arguments: {path: "crates/harn-vm/src/lib.rs"}}]},
@@ -61,18 +60,17 @@ pipeline main() {
       llm_text("Delegation complete."),
     ],
     { ->
-      const result = agent_loop(
-        "Investigate the config path",
+      const result = agent_loop(harness, "Investigate the config path",
         "You are helpful.",
-        {provider: "mock", tools: parent_tools(), tool_format: "native", max_iterations: 2},
+        {provider: "mock", tools: parent_tools(harness), tool_format: "native", max_iterations: 2},
       )
       const stats = transcript_stats(result?.transcript)
       const transcript = json_stringify(transcript_messages(result?.transcript))
-      __io_println(stats?.tool_call_count == 1)
-      __io_println(stats?.tool_result_message_count == 1)
-      __io_println(contains(transcript, "delegate"))
-      __io_println(!contains(transcript, "\"search\""))
-      __io_println(!contains(transcript, "\"read\""))
+      harness.stdio.println(stats?.tool_call_count == 1)
+      harness.stdio.println(stats?.tool_result_message_count == 1)
+      harness.stdio.println(contains(transcript, "delegate"))
+      harness.stdio.println(!contains(transcript, "\"search\""))
+      harness.stdio.println(!contains(transcript, "\"read\""))
     },
   )
 }

@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   struct Point {
     x: int
     y: int
@@ -15,9 +15,9 @@ pipeline test(task) {
     }
   }
   const p = Point({x: 3, y: 4})
-  log(p.distance())
-  log(p.to_string())
+  harness.stdio.println(p.distance())
+  harness.stdio.println(p.to_string())
   const p2 = p.translate(10, 20)
-  log(p2.x)
-  log(p2.y)
+  harness.stdio.println(p2.x)
+  harness.stdio.println(p2.y)
 }

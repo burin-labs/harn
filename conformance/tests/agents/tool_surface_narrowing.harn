@@ -52,7 +52,7 @@ fn narrowing_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   skill runner {
     description "Run command workflow"
     when_to_use "Use when the model explicitly loads command execution"
@@ -60,7 +60,7 @@ pipeline default() {
     allowed_tools ["run"]
   }
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "look-1", name: "look", arguments: {}}]},
       {tool_calls: [{id: "search-1", name: "search", arguments: {}}]},
       {tool_calls: [{id: "look-2", name: "look", arguments: {}}]},
@@ -69,11 +69,9 @@ pipeline default() {
       {tool_calls: [{id: "done-1", name: "done_sentinel", arguments: {}}]},
     ],
     { ->
-      const session = "tool-surface-narrowing-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Narrow unused tools.",
+      const session = "tool-surface-narrowing-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Narrow unused tools.",
           nil,
           {
             provider: "mock",
@@ -90,32 +88,32 @@ pipeline default() {
       const narrow = events_of(captured.events, "skill_narrow")
       require len(narrow) >= 1, "skill_narrow should be emitted after the configured window"
       const first = narrow[0]
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const sixth_tools = calls[5].tools
-      __io_println(captured.result.status)
-      __io_println(len(narrow) >= 1)
-      __io_println(contains(first.removed_tools, "read_docs"))
-      __io_println(detail_for(first.removed_tool_details, "read_docs").class)
-      __io_println(detail_for(first.kept_tool_details, "run").class)
-      __io_println(detail_for(first.kept_tool_details, "custom_host").class)
-      __io_println(!contains(first.removed_tools, "run"))
-      __io_println(!contains(first.removed_tools, "scaffold"))
-      __io_println(!contains(first.removed_tools, "replace_symbol"))
-      __io_println(!contains(first.removed_tools, "custom_host"))
-      __io_println(!contains(first.remaining_tools, "read_docs"))
-      __io_println(contains(first.remaining_tools, "run"))
-      __io_println(contains(first.remaining_tools, "scaffold"))
-      __io_println(contains(first.remaining_tools, "replace_symbol"))
-      __io_println(!has_tool(sixth_tools, "read_docs"))
-      __io_println(has_tool(sixth_tools, "run"))
-      __io_println(has_tool(sixth_tools, "scaffold"))
-      __io_println(has_tool(sixth_tools, "replace_symbol"))
-      __io_println(has_tool(sixth_tools, "custom_host"))
-      __io_println(has_tool(sixth_tools, "done_sentinel"))
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(len(narrow) >= 1)
+      harness.stdio.println(contains(first.removed_tools, "read_docs"))
+      harness.stdio.println(detail_for(first.removed_tool_details, "read_docs").class)
+      harness.stdio.println(detail_for(first.kept_tool_details, "run").class)
+      harness.stdio.println(detail_for(first.kept_tool_details, "custom_host").class)
+      harness.stdio.println(!contains(first.removed_tools, "run"))
+      harness.stdio.println(!contains(first.removed_tools, "scaffold"))
+      harness.stdio.println(!contains(first.removed_tools, "replace_symbol"))
+      harness.stdio.println(!contains(first.removed_tools, "custom_host"))
+      harness.stdio.println(!contains(first.remaining_tools, "read_docs"))
+      harness.stdio.println(contains(first.remaining_tools, "run"))
+      harness.stdio.println(contains(first.remaining_tools, "scaffold"))
+      harness.stdio.println(contains(first.remaining_tools, "replace_symbol"))
+      harness.stdio.println(!has_tool(sixth_tools, "read_docs"))
+      harness.stdio.println(has_tool(sixth_tools, "run"))
+      harness.stdio.println(has_tool(sixth_tools, "scaffold"))
+      harness.stdio.println(has_tool(sixth_tools, "replace_symbol"))
+      harness.stdio.println(has_tool(sixth_tools, "custom_host"))
+      harness.stdio.println(has_tool(sixth_tools, "done_sentinel"))
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "rewiden-look-1", name: "look", arguments: {}}]},
       {tool_calls: [{id: "rewiden-search-1", name: "search", arguments: {}}]},
       {tool_calls: [{id: "rewiden-look-2", name: "look", arguments: {}}]},
@@ -125,9 +123,8 @@ pipeline default() {
       {tool_calls: [{id: "run-1", name: "run", arguments: {}}]},
     ],
     { ->
-      const rewiden_session = "tool-surface-rewiden-" + uuid()
-      const rewidened = agent_loop(
-        "Narrow unused tools, then load runner.",
+      const rewiden_session = "tool-surface-rewiden-" + harness.random.uuid()
+      const rewidened = agent_loop(harness, "Narrow unused tools, then load runner.",
         nil,
         {
           provider: "mock",
@@ -142,7 +139,7 @@ pipeline default() {
           tool_surface_narrowing: {enabled: true, window_turns: 5, mode: "aggressive"},
         },
       )
-      const rewiden_calls = llm_mock_calls()
+      const rewiden_calls = harness.llm.mock_calls()
       require rewidened.status == "done", "explicit load_skill rewiden scenario should complete"
       require !has_tool(rewiden_calls[5].tools, "run"),
         "run should be narrow before explicit skill load"

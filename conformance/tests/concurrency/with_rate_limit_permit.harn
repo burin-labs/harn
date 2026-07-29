@@ -5,16 +5,22 @@ import { llm_text, with_llm_script } from "std/testing"
  * invokes the closure. With a high RPM limit, successive calls return
  * immediately.
  */
-pipeline default(task) {
-  llm_rate_limit("mock", {rpm: 1000})
+pipeline default(harness: Harness, task) {
+  harness.llm.rate_limit("mock", {rpm: 1000})
   with_llm_script(
-    [llm_text("one"), llm_text("two")],
+    harness.llm, [llm_text("one"), llm_text("two")],
     { ->
-      const a = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
-      const b = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
-      __io_println(a.text)
-      __io_println(b.text)
-      llm_rate_limit("mock", {rpm: 0})
+      const a = harness.llm.with_rate_limit(
+        "mock",
+        fn() { harness.llm.call("hello", nil, {provider: "mock"}) },
+      )
+      const b = harness.llm.with_rate_limit(
+        "mock",
+        fn() { harness.llm.call("hello", nil, {provider: "mock"}) },
+      )
+      harness.stdio.println(a.text)
+      harness.stdio.println(b.text)
+      harness.llm.rate_limit("mock", {rpm: 0})
     },
   )
 }

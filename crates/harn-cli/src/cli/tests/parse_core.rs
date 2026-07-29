@@ -166,7 +166,7 @@ fn test_parses_fix_plan_json_args() {
         args.safety.map(|safety| safety.as_str()),
         Some("behavior-preserving")
     );
-    assert_eq!(args.harness_threading, HarnessThreadingMode::LocalGlobal);
+    assert_eq!(args.harness_threading, HarnessThreadingMode::ThreadParams);
     assert_eq!(args.path, PathBuf::from("main.harn"));
 }
 

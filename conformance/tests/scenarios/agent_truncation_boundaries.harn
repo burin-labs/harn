@@ -4,7 +4,7 @@
 import { command_failure_text } from "std/command"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn truncating_tools() {
+fn truncating_tools(harness: Harness) {
   return tool_define(
     tool_registry(),
     "show_failure",
@@ -12,8 +12,7 @@ fn truncating_tools() {
     {
       parameters: {},
       handler: { _args ->
-        command_failure_text(
-          {status: "failed", exit_code: 1, stdout: "x".repeat(32)},
+        command_failure_text(harness,  harness, {status: "failed", exit_code: 1, stdout: "x".repeat(32)},
           {max_stdout_chars: 8},
         )
       },
@@ -21,24 +20,23 @@ fn truncating_tools() {
   )
 }
 
-pipeline test(task) {
-  const session_id = "agent-truncation-boundary-" + uuid()
-  const seen = atomic(0)
-  const dropped_bytes = atomic(0)
-  agent_subscribe(
+pipeline test(harness: Harness, task) {
+  const session_id = "agent-truncation-boundary-" + harness.random.uuid()
+  const seen = harness.runtime.atomic(0)
+  const dropped_bytes = harness.runtime.atomic(0)
+  harness.agent.subscribe(
     session_id,
     { event ->
       if event?.type == "boundary_failure" && event?.boundary == "agent_prompt_content" {
-        const _ = atomic_add(seen, 1)
-        const _ = atomic_set(dropped_bytes, event?.dropped_bytes ?? 0)
+        const _ = harness.runtime.atomic_add(seen, 1)
+        const _ = harness.runtime.atomic_set(dropped_bytes, event?.dropped_bytes ?? 0)
       }
     },
   )
   with_llm_script(
-    [llm_text("<tool_call>\nshow_failure({})\n</tool_call>"), llm_text("##DONE##")],
+    harness.llm, [llm_text("<tool_call>\nshow_failure({})\n</tool_call>"), llm_text("##DONE##")],
     { ->
-      const _ = agent_loop(
-        "Show the failure once.",
+      const _ = agent_loop(harness, "Show the failure once.",
         nil,
         {
           provider: "mock",
@@ -52,7 +50,7 @@ pipeline test(task) {
       )
     },
   )
-  assert(atomic_get(seen) == 1, "the model-visible command cap emits one typed boundary")
-  assert(atomic_get(dropped_bytes) == 24, "the boundary carries exact dropped source bytes")
-  log("ok")
+  assert(harness.runtime.atomic_get(seen) == 1, "the model-visible command cap emits one typed boundary")
+  assert(harness.runtime.atomic_get(dropped_bytes) == 24, "the boundary carries exact dropped source bytes")
+  harness.stdio.println("ok")
 }

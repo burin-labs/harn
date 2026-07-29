@@ -5,8 +5,8 @@ fn handler(event: TriggerEvent) -> dict {
   return {handled: true, kind: event.kind}
 }
 
-fn classify(event: TriggerEvent) -> bool {
-  const result = llm_call(
+fn classify(harness: Harness, event: TriggerEvent) -> bool {
+  const result = harness.llm.call(
     "predicate breaker " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -14,9 +14,9 @@ fn classify(event: TriggerEvent) -> bool {
   return contains(result.text, "yes")
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [
+    harness.llm, [
       {error: {category: "server_error", message: "503 upstream"}, model: "gpt-4o-mini"},
       {error: {category: "server_error", message: "503 upstream"}, model: "gpt-4o-mini"},
       {error: {category: "server_error", message: "503 upstream"}, model: "gpt-4o-mini"},
@@ -26,7 +26,7 @@ pipeline test(task) {
         + to_string(
         harness.random.gen_range(100000, 999999),
       )
-      const handle: TriggerHandle = trigger_register(
+      const handle: TriggerHandle = harness.runtime.trigger_register(
         {
           id: "llm-predicate-breaker-" + unique,
           kind: "issue.opened",
@@ -44,7 +44,7 @@ pipeline test(task) {
           package_name: nil,
         },
       )
-      const first: DispatchHandle = trigger_fire(
+      const first: DispatchHandle = harness.runtime.trigger_fire(
         handle,
         {
           provider: "webhook",
@@ -52,7 +52,7 @@ pipeline test(task) {
           headers: {x_delivery: "evt-breaker-1-" + unique},
         },
       )
-      const second: DispatchHandle = trigger_fire(
+      const second: DispatchHandle = harness.runtime.trigger_fire(
         handle,
         {
           provider: "webhook",
@@ -60,7 +60,7 @@ pipeline test(task) {
           headers: {x_delivery: "evt-breaker-2-" + unique},
         },
       )
-      const third: DispatchHandle = trigger_fire(
+      const third: DispatchHandle = harness.runtime.trigger_fire(
         handle,
         {
           provider: "webhook",
@@ -68,7 +68,7 @@ pipeline test(task) {
           headers: {x_delivery: "evt-breaker-3-" + unique},
         },
       )
-      const fourth: DispatchHandle = trigger_fire(
+      const fourth: DispatchHandle = harness.runtime.trigger_fire(
         handle,
         {
           provider: "webhook",
@@ -76,16 +76,16 @@ pipeline test(task) {
           headers: {x_delivery: "evt-breaker-4-" + unique},
         },
       )
-      const evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(
+      const evaluated = harness.runtime.trigger_inspect_lifecycle("predicate.evaluated").filter(
         { entry -> entry?.headers?.trigger_id == handle.id },
       )
       const last = evaluated[len(evaluated) - 1]
-      __io_println(len(llm_mock_calls()) == 3)
-      __io_println(contains(json_stringify(first.result ?? {}), "\"skipped\":true"))
-      __io_println(contains(json_stringify(second.result ?? {}), "\"skipped\":true"))
-      __io_println(contains(json_stringify(third.result ?? {}), "\"skipped\":true"))
-      __io_println(contains(json_stringify(fourth.result ?? {}), "\"reason\":\"circuit_open\""))
-      __io_println(len(evaluated) == 4 && last?.payload?.reason == "circuit_open")
+      harness.stdio.println(len(harness.llm.mock_calls()) == 3)
+      harness.stdio.println(contains(json_stringify(first.result ?? {}), "\"skipped\":true"))
+      harness.stdio.println(contains(json_stringify(second.result ?? {}), "\"skipped\":true"))
+      harness.stdio.println(contains(json_stringify(third.result ?? {}), "\"skipped\":true"))
+      harness.stdio.println(contains(json_stringify(fourth.result ?? {}), "\"reason\":\"circuit_open\""))
+      harness.stdio.println(len(evaluated) == 4 && last?.payload?.reason == "circuit_open")
     },
   )
 }

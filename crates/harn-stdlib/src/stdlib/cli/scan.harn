@@ -48,7 +48,7 @@ fn summary_line(total: int, files: int) -> string {
   return to_string(total) + " match(es) in " + to_string(files) + " file(s)"
 }
 
-fn run_search(plan: list) -> dict {
+fn run_search(harness: Harness, plan: list) -> dict {
   let lines = []
   let results = []
   let total = 0
@@ -57,7 +57,7 @@ fn run_search(plan: list) -> dict {
     if len(entry.files) == 0 {
       continue
     }
-    const res = rules_search({rule: entry.rule, paths: entry.files})
+    const res = rules_search(harness.rules, {rule: entry.rule, paths: entry.files})
     const matches = res.matches ?? []
     total = total + len(matches)
     for m in matches {
@@ -73,7 +73,7 @@ fn run_search(plan: list) -> dict {
   return {lines: lines, results: results, total: total, files: len(keys(seen))}
 }
 
-fn run_report(plan: list) -> dict {
+fn run_report(harness: Harness, plan: list) -> dict {
   let lines = []
   let tables = []
   let total = 0
@@ -82,7 +82,7 @@ fn run_report(plan: list) -> dict {
     if len(entry.files) == 0 {
       continue
     }
-    const table = rules_report({rule: entry.rule, paths: entry.files})
+    const table = rules_report(harness.rules, {rule: entry.rule, paths: entry.files})
     const summary = table.summary ?? {total_rows: 0, files: 0, per_file: {}}
     total = total + summary.total_rows
     const per_file = summary.per_file ?? {}
@@ -99,13 +99,13 @@ fn main(harness: Harness) {
   const raw = harness.env.get_or("HARN_SCAN_PLAN_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("scan: internal error — HARN_SCAN_PLAN_JSON not set by the shim")
-    exit(70)
+    harness.runtime.exit(70)
   }
   const plan = json_parse(raw)
   const report_only = harness.env.get_or("HARN_SCAN_REPORT_ONLY", "0") == "1"
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if report_only {
-    const out = run_report(plan)
+    const out = run_report(harness, plan)
     if json_mode {
       const envelope = {
         schemaVersion: 1,
@@ -121,7 +121,7 @@ fn main(harness: Harness) {
       harness.stdio.println(summary_line(out.total, out.files))
     }
   } else {
-    const out = run_search(plan)
+    const out = run_search(harness, plan)
     if json_mode {
       const envelope = {
         schemaVersion: 1,

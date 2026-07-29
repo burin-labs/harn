@@ -2,10 +2,10 @@ import { xdg_config_home } from "std/cli/paths"
 
 fn main(_harness: Harness) {
   const message = try {
-    xdg_config_home("harn")
+    xdg_config_home(harness, "harn")
     "ok"
   } catch (e) {
     to_string(e)
   }
-  __io_println(message == "std/cli/paths: HOME or USERPROFILE must be an absolute path")
+  harness.stdio.println(message == "std/cli/paths: HOME or USERPROFILE must be an absolute path")
 }

@@ -2,7 +2,7 @@ import { agent_capture_events } from "std/agent/events"
 import { typed_output_checkpoint } from "std/checkpoint"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -14,7 +14,7 @@ pipeline default() {
     },
   }
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "Here is the JSON:\n```json\n{\"decision\":\"merge\",\"confidence\":0.2,\"evidence\":[]}\n```",
       ),
@@ -22,10 +22,8 @@ pipeline default() {
     ],
     { ->
       const session_id = "typed-checkpoint-session"
-      const captured = agent_capture_events(
-        session_id,
-        fn() { typed_output_checkpoint(
-          "merge_captain.next_action",
+      const captured = agent_capture_events(harness,  harness, session_id,
+        fn() { typed_output_checkpoint(harness,  harness, "merge_captain.next_action",
           "Choose the next Merge Captain action.",
           schema,
           {
@@ -47,25 +45,25 @@ pipeline default() {
         ) },
       )
       const checkpoint = captured.result
-      __io_println(checkpoint.ok)
-      __io_println(checkpoint.data.decision)
-      __io_println(checkpoint.attempts)
-      __io_println(checkpoint.checkpoint_attempts)
-      __io_println(checkpoint.extracted_json)
-      __io_println(len(checkpoint.validator_failures))
-      __io_println(
-        contains(llm_mock_calls()[1].messages[0].content, "confidence must be at least 0.7"),
+      harness.stdio.println(checkpoint.ok)
+      harness.stdio.println(checkpoint.data.decision)
+      harness.stdio.println(checkpoint.attempts)
+      harness.stdio.println(checkpoint.checkpoint_attempts)
+      harness.stdio.println(checkpoint.extracted_json)
+      harness.stdio.println(len(checkpoint.validator_failures))
+      harness.stdio.println(
+        contains(harness.llm.mock_calls()[1].messages[0].content, "confidence must be at least 0.7"),
       )
-      __io_println(captured.events[0].type)
-      __io_println(captured.events[0].checkpoint.final_accepted)
-      const trace = agent_trace()
+      harness.stdio.println(captured.events[0].type)
+      harness.stdio.println(captured.events[0].checkpoint.final_accepted)
+      const trace = harness.obs.agent_trace()
       let found = false
       for event in trace {
         if event.type == "typed_checkpoint" && event.name == "merge_captain.next_action" {
           found = event.final_accepted
         }
       }
-      __io_println(found)
+      harness.stdio.println(found)
     },
   )
 }

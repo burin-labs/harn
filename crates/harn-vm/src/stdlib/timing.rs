@@ -77,6 +77,8 @@ pub(crate) fn register_timing_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "harness.clock.timing_start",
+    effects = ["clock.read@const=monotonic"],
     sig = "__timing_start(name: string, attributes?: dict) -> dict",
     category = "timing"
 )]
@@ -119,12 +121,18 @@ fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::dict(handle))
 }
 
-#[harn_builtin(sig = "__timing_now_monotonic_ms() -> int", category = "timing")]
+#[harn_builtin(
+    exposure = "harness.clock.timing_now_monotonic_ms",
+    effects = ["clock.read@const=monotonic"],
+    sig = "__timing_now_monotonic_ms() -> int", category = "timing"
+)]
 fn timing_now_monotonic_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(now_monotonic_ms()))
 }
 
 #[harn_builtin(
+    exposure = "harness.clock.timing_event",
+    effects = ["clock.read@const=monotonic", "observability.write@dynamic"],
     sig = "__timing_event(handle: dict, name: string, attributes?: dict) -> bool",
     category = "timing"
 )]
@@ -142,6 +150,8 @@ fn timing_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "harness.clock.timing_end",
+    effects = ["clock.read@const=monotonic", "observability.write@dynamic"],
     sig = "__timing_end(handle: dict, final_attributes?: dict) -> dict",
     category = "timing"
 )]

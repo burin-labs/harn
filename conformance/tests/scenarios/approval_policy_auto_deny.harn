@@ -13,9 +13,8 @@ fn write_tools() {
   return tools
 }
 
-pipeline main() {
-  const denied = agent_loop(
-    "Try to run shell",
+pipeline main(harness: Harness) {
+  const denied = agent_loop(harness, "Try to run shell",
     "You are helpful",
     {
       provider: "mock",
@@ -25,8 +24,8 @@ pipeline main() {
       approval_policy: {auto_deny: ["shell*"]},
     },
   )
-  __io_println(denied?.tools?.rejected[0] == "shell_exec")
+  harness.stdio.println(denied?.tools?.rejected[0] == "shell_exec")
   const transcript = json_stringify(transcript_messages(denied?.transcript))
-  __io_println(transcript.contains("permission_denied"))
-  __io_println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
+  harness.stdio.println(transcript.contains("permission_denied"))
+  harness.stdio.println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
 }

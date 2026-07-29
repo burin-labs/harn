@@ -1,11 +1,11 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const ts = date_parse("2026-04-25T00:00:00Z")
-  __io_println(weekday_name(ts))
-  __io_println(month_name(ts))
-  __io_println(date_format(ts, "%A %B %j %s"))
+  harness.stdio.println(weekday_name(ts))
+  harness.stdio.println(month_name(ts))
+  harness.stdio.println(date_format(ts, "%A %B %j %s"))
   const built = date_from_components(
     {year: 2026, month: 4, day: 25, hour: 10, minute: 32, second: 9},
     "America/Los_Angeles",
   )
-  __io_println(date_to_zone(built, "UTC"))
+  harness.stdio.println(date_to_zone(built, "UTC"))
 }

@@ -10,12 +10,12 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  */
 import { with_telemetry } from "std/lifecycle/combinators"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const happy = { _harness, return_value -> return return_value + "_done" }
   const sad = { _harness, _return_value ->
     throw "boom"
   }
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const wrapped = with_telemetry(happy, "happy_cb")
       const result = wrapped(harness, return_value)

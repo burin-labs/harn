@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   mcp_server_metadata({name: "roots-test-server", version: "1.0.0"})
   let tools = tool_registry()
   tools = tool_define(

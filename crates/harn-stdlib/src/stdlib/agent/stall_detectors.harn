@@ -188,8 +188,8 @@ pub fn token_runaway_made_progress(payload) -> bool {
 }
 
 /**
- * token_runaway_post_turn(config) returns a `post_turn_callback` closure. It
- * reads the session's cumulative INPUT tokens (`agent_session_totals().input_tokens`
+ * token_runaway_post_turn(harness, config) returns a `post_turn_callback` closure. It
+ * reads the session's cumulative INPUT tokens (`agent_session_totals(harness).input_tokens`
  * — the re-sent ballooning context burin's guard keys on, NOT the input+output
  * `tokens_used` sum), classifies progress as a passing verification this turn
  * (`token_runaway_made_progress`, NOT "any tool succeeded"), and on an abort
@@ -201,10 +201,10 @@ pub fn token_runaway_made_progress(payload) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn token_runaway_post_turn(config: dict) {
+pub fn token_runaway_post_turn(harness: Harness, config: dict) {
   return { payload ->
     const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
-    const totals = agent_session_totals(session_id)
+    const totals = agent_session_totals(harness, session_id)
     const obs = {
       making_progress: token_runaway_made_progress(payload),
       tokens: to_float(totals?.input_tokens ?? 0),
@@ -227,7 +227,7 @@ pub fn token_runaway_post_turn(config: dict) {
         threshold: to_int(decision.cap),
         tool_name: "",
       }
-      agent_emit_event(session_id, "agent_loop_stall_warning", warning)
+      agent_emit_event(harness, session_id, "agent_loop_stall_warning", warning)
       {
         message: "Token-runaway detector: output has grown well past this task's typical size ("
           + to_string(
@@ -306,12 +306,12 @@ pub fn detector_spec_token_runaway(spec: DetectorSpec) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn unified_detectors_post_turn(spec: DetectorSpec) {
+pub fn unified_detectors_post_turn(harness: Harness, spec: DetectorSpec) {
   const token_runaway = detector_spec_token_runaway(spec)
   if token_runaway == nil {
     return nil
   }
-  return token_runaway_post_turn(token_runaway)
+  return token_runaway_post_turn(harness, token_runaway)
 }
 
 /**

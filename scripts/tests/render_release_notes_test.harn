@@ -7,39 +7,39 @@ const SAMPLE =
   "# Changelog\n\n## v0.8.71\n\n### Added\n\n- thing one\n- thing two\n\n## v0.8.70\n\nolder body\n\n## v0.8.69\n\noldest body\n"
 
 @test
-pipeline test_normalize_version(task) {
+pipeline test_normalize_version(harness: Harness, task) {
   assert_eq(normalize_version("v0.8.71"), "0.8.71")
   assert_eq(normalize_version("0.8.71"), "0.8.71")
   assert_eq(normalize_version("v1.2.3"), "1.2.3")
 }
 
 @test
-pipeline test_escape_regex(task) {
+pipeline test_escape_regex(harness: Harness, task) {
   assert_eq(escape_regex("0.8.71"), "0\\.8\\.71")
   assert_eq(escape_regex("abc"), "abc")
   assert_eq(escape_regex("a+b"), "a\\+b")
 }
 
 @test
-pipeline test_changelog_versions(task) {
+pipeline test_changelog_versions(harness: Harness, task) {
   assert_eq(changelog_versions(SAMPLE), ["0.8.71", "0.8.70", "0.8.69"])
   assert_eq(changelog_versions("no versions here"), [])
 }
 
 @test
-pipeline test_extract_section_middle(task) {
+pipeline test_extract_section_middle(harness: Harness, task) {
   /* Body stops at the next `## ` heading and is trimmed. */
   assert_eq(extract_section(SAMPLE, "0.8.71"), "### Added\n\n- thing one\n- thing two")
 }
 
 @test
-pipeline test_extract_section_last(task) {
+pipeline test_extract_section_last(harness: Harness, task) {
   /* Last section runs to end of file. */
   assert_eq(extract_section(SAMPLE, "0.8.69"), "oldest body")
 }
 
 @test
-pipeline test_extract_section_missing_throws(task) {
+pipeline test_extract_section_missing_throws(harness: Harness, task) {
   const r = try {
     extract_section(SAMPLE, "9.9.9")
   } catch (_) {
@@ -49,7 +49,7 @@ pipeline test_extract_section_missing_throws(task) {
 }
 
 @test
-pipeline test_previous_version(task) {
+pipeline test_previous_version(harness: Harness, task) {
   const vs = ["0.8.71", "0.8.70", "0.8.69"]
   assert_eq(previous_version(vs, "0.8.71"), "0.8.70")
   assert_eq(previous_version(vs, "0.8.70"), "0.8.69")
@@ -58,7 +58,7 @@ pipeline test_previous_version(task) {
 }
 
 @test
-pipeline test_parse_remote(task) {
+pipeline test_parse_remote(harness: Harness, task) {
   assert_eq(parse_remote("git@github.com:owner/repo.git"), "owner/repo")
   assert_eq(parse_remote("https://github.com/owner/repo.git"), "owner/repo")
   assert_eq(parse_remote("https://github.com/owner/repo"), "owner/repo")
@@ -66,7 +66,7 @@ pipeline test_parse_remote(task) {
 }
 
 @test
-pipeline test_render_notes_with_link(task) {
+pipeline test_render_notes_with_link(harness: Harness, task) {
   const got = render_notes("body text", "owner/name", "0.8.70", "0.8.71")
   const want =
     "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n\n**Full Changelog**: https://github.com/owner/name/compare/v0.8.70...v0.8.71\n"
@@ -74,21 +74,21 @@ pipeline test_render_notes_with_link(task) {
 }
 
 @test
-pipeline test_render_notes_no_link_when_no_repo(task) {
+pipeline test_render_notes_no_link_when_no_repo(harness: Harness, task) {
   const got = render_notes("body text", nil, "0.8.70", "0.8.71")
   const want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n"
   assert_eq(got, want)
 }
 
 @test
-pipeline test_render_notes_no_link_when_no_prev(task) {
+pipeline test_render_notes_no_link_when_no_prev(harness: Harness, task) {
   const got = render_notes("body text", "owner/name", nil, "0.8.0")
   const want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n"
   assert_eq(got, want)
 }
 
 @test
-pipeline test_flag_value(task) {
+pipeline test_flag_value(harness: Harness, task) {
   const args = ["--version", "0.8.71", "--repo=owner/name"]
   assert_eq(flag_value(args, "--version"), "0.8.71")
   assert_eq(flag_value(args, "--repo"), "owner/name")
@@ -96,7 +96,7 @@ pipeline test_flag_value(task) {
 }
 
 @test
-pipeline test_flag_value_equals_form(task) {
+pipeline test_flag_value_equals_form(harness: Harness, task) {
   const args = ["--version=v1.2.3", "--output=/tmp/notes.md"]
   assert_eq(flag_value(args, "--version"), "v1.2.3")
   assert_eq(flag_value(args, "--output"), "/tmp/notes.md")

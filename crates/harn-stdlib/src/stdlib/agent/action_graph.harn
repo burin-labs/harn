@@ -926,7 +926,7 @@ pub fn action_graph_flow(graph, config = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
+pub fn action_graph_run(harness: Harness, task, graph, config = nil, overrides = nil) {
   const plan = if graph?._type == "action_graph" {
     graph
   } else {

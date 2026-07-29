@@ -1,8 +1,8 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const x = "outer"
   if true {
     const y = "inner"
-    log(y)
+    harness.stdio.println(y)
   }
-  log(x)
+  harness.stdio.println(x)
 }

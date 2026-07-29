@@ -7,7 +7,7 @@
  */
 import { with_budget } from "std/llm/handlers"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const synthetic = { _call ->
     return {
       ok: true,
@@ -22,8 +22,7 @@ pipeline default() {
     }
   }
   const caller = with_budget(synthetic, {max_total_tokens: 350, on_exceed: "short_circuit"})
-  const result = agent_loop(
-    "hi",
+  const result = agent_loop(harness, "hi",
     nil,
     {
       provider: "mock",
@@ -34,5 +33,5 @@ pipeline default() {
       done_sentinel: "STOP",
     },
   )
-  __io_println(result.status)
+  harness.stdio.println(result.status)
 }

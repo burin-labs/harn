@@ -1,6 +1,6 @@
 import { render, slack_message_disclosure } from "std/disclosure"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
   const config = {
     identities: {
@@ -14,21 +14,21 @@ pipeline default() {
     surfaces: {slack: {customize_icon_emoji: ":harn:"}},
   }
   const options = {project: false, env: false, config: config}
-  const byline = render(chain, "slack", options)
-  const disclosure = slack_message_disclosure(chain, options)
-  __io_println(byline)
-  __io_println(disclosure.kind)
-  __io_println(disclosure.byline)
-  __io_println(disclosure.customize.scope)
-  __io_println(disclosure.customize.username)
-  __io_println(disclosure.customize.icon_emoji)
-  __io_println(disclosure.ai_mark.event_type)
-  __io_println(disclosure.ai_mark.event_payload.kind)
-  __io_println(disclosure.ai_mark.event_payload.standard)
-  __io_println(disclosure.ai_mark.event_payload.principals[0].subject)
-  __io_println(disclosure.ai_mark.event_payload.principals[0].email == nil)
-  __io_println(disclosure.ai_mark.event_payload.actor_chain[0].email == nil)
-  __io_println(disclosure.principals[0].email == nil)
-  __io_println(disclosure.actor_chain[0].email == nil)
-  __io_println(disclosure.ai_mark.event_payload.principals[1].subject)
+  const byline = render(harness, chain, "slack", options)
+  const disclosure = slack_message_disclosure(harness, chain, options)
+  harness.stdio.println(byline)
+  harness.stdio.println(disclosure.kind)
+  harness.stdio.println(disclosure.byline)
+  harness.stdio.println(disclosure.customize.scope)
+  harness.stdio.println(disclosure.customize.username)
+  harness.stdio.println(disclosure.customize.icon_emoji)
+  harness.stdio.println(disclosure.ai_mark.event_type)
+  harness.stdio.println(disclosure.ai_mark.event_payload.kind)
+  harness.stdio.println(disclosure.ai_mark.event_payload.standard)
+  harness.stdio.println(disclosure.ai_mark.event_payload.principals[0].subject)
+  harness.stdio.println(disclosure.ai_mark.event_payload.principals[0].email == nil)
+  harness.stdio.println(disclosure.ai_mark.event_payload.actor_chain[0].email == nil)
+  harness.stdio.println(disclosure.principals[0].email == nil)
+  harness.stdio.println(disclosure.actor_chain[0].email == nil)
+  harness.stdio.println(disclosure.ai_mark.event_payload.principals[1].subject)
 }

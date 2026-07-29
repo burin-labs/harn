@@ -68,7 +68,11 @@ pub(crate) fn reset_compaction_state() {
 // compaction.policy
 // ---------------------------------------------------------------------------
 
-#[harn_builtin(sig = "compaction.policy(opts: dict) -> dict", category = "compaction")]
+#[harn_builtin(
+    exposure = "harness.agent.compaction_policy",
+    effects = ["state.mutate@dynamic"],
+    sig = "compaction.policy(opts: dict) -> dict", category = "compaction"
+)]
 fn compaction_policy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let opts = require_dict(args.first(), "compaction.policy", "opts")?;
     let session_id = optional_string(&opts, "session_id", "compaction.policy")?;
@@ -82,6 +86,8 @@ fn compaction_policy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 // ---------------------------------------------------------------------------
 
 #[harn_builtin(
+    exposure = "harness.agent.compaction_check",
+    effects = ["state.read@dynamic"],
     sig = "compaction.check(session_id?: string) -> dict",
     category = "compaction"
 )]
@@ -116,6 +122,8 @@ fn compaction_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 // ---------------------------------------------------------------------------
 
 #[harn_builtin(
+    exposure = "harness.agent.compaction_run",
+    effects = ["state.mutate@dynamic", "llm.write@dynamic"],
     sig = "compaction.run(session_id?: string, plan?: dict) -> dict",
     kind = "async",
     category = "compaction"

@@ -1,6 +1,6 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-fn parent_tools(child_session) {
+fn parent_tools(harness: Harness, child_session) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -8,8 +8,7 @@ fn parent_tools(child_session) {
     "Run a child sub-agent",
     {
       handler: { _args ->
-        sub_agent_run(
-          "Child task.",
+        sub_agent_run(harness, "Child task.",
           {provider: "mock", session_id: child_session, max_iterations: 1, done_judge: nil},
         )
       },
@@ -20,42 +19,41 @@ fn parent_tools(child_session) {
   return tools
 }
 
-pipeline main() {
-  const parent = agent_session_open("reminder-propagate-none-parent")
+pipeline main(harness: Harness) {
+  const parent = harness.agent.open("reminder-propagate-none-parent")
   const child = "reminder-propagate-none-child"
-  agent_session_open(child)
-  agent_session_reset(parent)
-  agent_session_reset(child)
-  agent_session_inject(
+  harness.agent.open(child)
+  harness.agent.reset(parent)
+  harness.agent.reset(child)
+  harness.agent.inject(
     parent,
     transcript_reminder_event(
       {body: "none reminder", tags: ["none"], dedupe_key: "none-key", propagate: "none"},
     ),
   )
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "parent_delegate", name: "delegate_child", arguments: {}}]},
       llm_text("child done"),
       llm_text("parent done"),
     ],
     { ->
-      agent_loop(
-        "Run child.",
+      agent_loop(harness, "Run child.",
         nil,
         {
           provider: "mock",
           session_id: parent,
-          tools: parent_tools(child),
+          tools: parent_tools(harness, child),
           tool_format: "native",
           max_iterations: 2,
           done_judge: nil,
         },
       )
       const child_reminders = transcript_events_by_kind(
-        agent_session_snapshot(child),
+        harness.agent.snapshot(child),
         "system_reminder",
       )
-      __io_println(len(child_reminders))
+      harness.stdio.println(len(child_reminders))
     },
   )
 }

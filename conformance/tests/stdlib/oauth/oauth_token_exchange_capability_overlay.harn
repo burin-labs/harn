@@ -18,7 +18,7 @@ fn catches_message(label, fn_call, needle) {
   require matched, label
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const subject_type = token_type("access_token")
   const actor_type = token_type("jwt")
   const requested_type = token_type("access_token")
@@ -102,7 +102,7 @@ pipeline test(task) {
       default_scopes: [],
     },
   )
-  const bare_cli = client(bare_provider, {client_id: "cli-id", storage: memory()})
+  const bare_cli = client(harness, bare_provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "unsupported provider should fail closed",
     { ->
@@ -126,7 +126,7 @@ pipeline test(task) {
       token_exchange: {supported: true},
     },
   )
-  const incomplete_cli = client(incomplete_provider, {client_id: "cli-id", storage: memory()})
+  const incomplete_cli = client(harness, incomplete_provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "capability rows without token types fail closed",
     { ->
@@ -150,7 +150,7 @@ pipeline test(task) {
       token_exchange: overlay_row,
     },
   )
-  const cli = client(provider, {client_id: "cli-id", storage: memory()})
+  const cli = client(harness, provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "overlay can disable impersonation",
     { ->
@@ -237,5 +237,5 @@ pipeline test(task) {
   assert_eq(calls[0].url, "https://idp.example/exchange", "overlay token_url used")
   assert(contains(calls[0].body, "actor_token=actor"), "actor token sent")
   assert_eq(cli.current_token(), nil, "token exchange does not overwrite client access token")
-  log("oauth token exchange capability overlay ok")
+  harness.stdio.println("oauth token exchange capability overlay ok")
 }

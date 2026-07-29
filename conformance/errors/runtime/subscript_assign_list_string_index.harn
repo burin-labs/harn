@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let xs = [1, 2]
   xs["a"] = 9
 }

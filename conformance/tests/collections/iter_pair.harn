@@ -1,10 +1,10 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const p = pair(1, "hello")
-  log(p.first)
-  log(p.second)
-  log(p)
+  harness.stdio.println(p.first)
+  harness.stdio.println(p.second)
+  harness.stdio.println(p)
   const d = {a: 1, b: 2}
   for (k, v) in iter(d) {
-    log("${k}=${v}")
+    harness.stdio.println("${k}=${v}")
   }
 }

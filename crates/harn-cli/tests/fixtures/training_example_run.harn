@@ -64,10 +64,10 @@ fn main(harness: Harness) -> int {
     [first_turn]
   }
   const result = with_llm_mocks(
+    harness.llm,
     responses,
     { _ ->
-      agent_loop(
-        "read main.rs and report",
+      agent_loop(harness, "read main.rs and report",
         "You are a coding agent.",
         {
           model: "mock",
@@ -80,7 +80,7 @@ fn main(harness: Harness) -> int {
       )
     },
   )
-  const persisted = run_record_save(
+  const persisted = harness.fs.run_record_save(
     run_record(
       {
         id: run_id,

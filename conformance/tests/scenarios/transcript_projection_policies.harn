@@ -114,25 +114,25 @@ fn long_gc_transcript(stale_count) {
   return {transcript: transcript_from_messages(messages), live_result_index: live_result_index}
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const transcript = raw_transcript()
   const raw_result = transcript_project(transcript, {policy: "raw"})
-  __io_println("raw_policy:" + raw_result.policy)
-  __io_println("raw_kept:" + to_string(raw_result.kept_count))
-  __io_println("raw_dropped:" + to_string(raw_result.dropped_count))
+  harness.stdio.println("raw_policy:" + raw_result.policy)
+  harness.stdio.println("raw_kept:" + to_string(raw_result.kept_count))
+  harness.stdio.println("raw_dropped:" + to_string(raw_result.dropped_count))
   const hash_prefix = substring(raw_result.prefix_hash, 0, 7)
-  __io_println("raw_hash_prefix:" + hash_prefix)
+  harness.stdio.println("raw_hash_prefix:" + hash_prefix)
   const clean = transcript_project(transcript, {policy: "clean_tool_repair"})
-  __io_println("clean_policy:" + clean.policy)
-  __io_println("clean_kept:" + to_string(clean.kept_count))
-  __io_println("clean_dropped:" + to_string(clean.dropped_count))
-  __io_println("clean_blocked:" + to_string(clean.provider_safety_blocked))
-  __io_println("clean_event_kind:" + clean.event.kind)
+  harness.stdio.println("clean_policy:" + clean.policy)
+  harness.stdio.println("clean_kept:" + to_string(clean.kept_count))
+  harness.stdio.println("clean_dropped:" + to_string(clean.dropped_count))
+  harness.stdio.println("clean_blocked:" + to_string(clean.provider_safety_blocked))
+  harness.stdio.println("clean_event_kind:" + clean.event.kind)
   const squashed = transcript_project(transcript, "squash_failed_calls")
-  __io_println("squash_dropped:" + to_string(squashed.dropped_count))
+  harness.stdio.println("squash_dropped:" + to_string(squashed.dropped_count))
   const summary = transcript_project(transcript, {policy: "summary_prefix", keep_last: 2})
-  __io_println("summary_kept:" + to_string(summary.kept_count))
-  __io_println("summary_first_role:" + summary.messages[0].role)
+  harness.stdio.println("summary_kept:" + to_string(summary.kept_count))
+  harness.stdio.println("summary_first_role:" + summary.messages[0].role)
   const user_only_projector = fn(messages) {
     let kept = []
     for message in messages {
@@ -143,40 +143,40 @@ pipeline default() {
     return {messages: kept, reason: "user_only"}
   }
   const custom = transcript_project(transcript, {policy: "custom", projector: user_only_projector})
-  __io_println("custom_messages:" + to_string(len(custom.messages)))
-  __io_println("custom_reason:" + custom.reason)
+  harness.stdio.println("custom_messages:" + to_string(len(custom.messages)))
+  harness.stdio.println("custom_reason:" + custom.reason)
   const blocked = transcript_project(signed_reasoning_transcript(), {policy: "clean_tool_repair"})
-  __io_println("blocked_safety:" + to_string(blocked.provider_safety_blocked))
-  __io_println("blocked_dropped:" + to_string(blocked.dropped_count))
+  harness.stdio.println("blocked_safety:" + to_string(blocked.provider_safety_blocked))
+  harness.stdio.println("blocked_dropped:" + to_string(blocked.dropped_count))
   const bypassed = transcript_project(
     signed_reasoning_transcript(),
     {policy: "clean_tool_repair", respect_provider_signatures: false},
   )
-  __io_println("bypassed_safety:" + to_string(bypassed.provider_safety_blocked))
-  __io_println("bypassed_dropped:" + to_string(bypassed.dropped_count))
+  harness.stdio.println("bypassed_safety:" + to_string(bypassed.provider_safety_blocked))
+  harness.stdio.println("bypassed_dropped:" + to_string(bypassed.dropped_count))
   const gc = transcript_project(
     gc_transcript(),
     {policy: "reachability_gc", root_window: 2, min_chars: 100},
   )
-  __io_println("gc_policy:" + gc.policy)
-  __io_println("gc_redacted:" + to_string(gc.redacted_count))
-  __io_println("gc_reclaimed:" + to_string(gc.reclaimed_tokens > 0))
-  __io_println(
+  harness.stdio.println("gc_policy:" + gc.policy)
+  harness.stdio.println("gc_redacted:" + to_string(gc.redacted_count))
+  harness.stdio.println("gc_reclaimed:" + to_string(gc.reclaimed_tokens > 0))
+  harness.stdio.println(
     "gc_old_reclaimed:"
       + to_string(gc.messages[2].content.contains("reclaimed by reachability_gc")),
   )
-  __io_println(
+  harness.stdio.println(
     "gc_live_preserved:" + to_string(gc.messages[4].content.contains("IMPORTANT_LIVE_VALUE")),
   )
-  __io_println(
+  harness.stdio.println(
     "gc_roots:" + to_string(gc.event.metadata.roots_consulted.contains("last_2_messages")),
   )
-  __io_println("gc_pointer:" + gc.redaction_pointers[0].source)
+  harness.stdio.println("gc_pointer:" + gc.redaction_pointers[0].source)
   const blocked_gc = transcript_project(
     gc_transcript(),
     {policy: "reachability_gc", root_window: 2, min_chars: 100, require_write_barrier: true},
   )
-  __io_println("gc_barrier_blocked:" + to_string(blocked_gc.redacted_count == 0))
+  harness.stdio.println("gc_barrier_blocked:" + to_string(blocked_gc.redacted_count == 0))
   const long_case = long_gc_transcript(60)
   const long_raw = transcript_project(long_case.transcript, {policy: "raw"})
   const long_gc = transcript_project(
@@ -193,14 +193,14 @@ pipeline default() {
       write_barrier_refs: ["scratchpad:live-file-state"],
     },
   )
-  __io_println("long_raw_redacted:" + to_string(long_raw.redacted_count))
-  __io_println("long_gc_redacted:" + to_string(long_gc.redacted_count))
-  __io_println("long_gc_reclaimed:" + to_string(long_gc.reclaimed_tokens > 1000))
-  __io_println(
+  harness.stdio.println("long_raw_redacted:" + to_string(long_raw.redacted_count))
+  harness.stdio.println("long_gc_redacted:" + to_string(long_gc.redacted_count))
+  harness.stdio.println("long_gc_reclaimed:" + to_string(long_gc.reclaimed_tokens > 1000))
+  harness.stdio.println(
     "long_gc_live_preserved:"
       + to_string(
       long_gc.messages[long_case.live_result_index].content.contains("IMPORTANT_LIVE_VALUE"),
     ),
   )
-  __io_println("long_barrier_gc_redacted:" + to_string(long_barrier_gc.redacted_count))
+  harness.stdio.println("long_barrier_gc_redacted:" + to_string(long_barrier_gc.redacted_count))
 }

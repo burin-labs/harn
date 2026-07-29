@@ -251,8 +251,8 @@ pub fn fact_id(kind, claim, evidence = nil, provenance = nil) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn fact_key(fact_value) -> string {
-  const fact = fact_validate(fact_value)
+pub fn fact_key(harness: Harness, fact_value) -> string {
+  const fact = fact_validate(harness, fact_value)
   return "fact:" + fact.kind + ":" + fact.id
 }
 
@@ -263,8 +263,8 @@ pub fn fact_key(fact_value) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn fact_tags(fact_value, tags = nil) -> list<string> {
-  const fact = fact_validate(fact_value)
+pub fn fact_tags(harness: Harness, fact_value, tags = nil) -> list<string> {
+  const fact = fact_validate(harness, fact_value)
   let out = ["fact", "fact:" + fact.kind, "schema:" + FACT_SCHEMA]
   for tag in __fact_evidence_tags(fact.kind, fact.evidence) {
     out = __fact_push_tag(out, tag)
@@ -285,7 +285,7 @@ pub fn fact_tags(fact_value, tags = nil) -> list<string> {
  * @errors: [HARN-FACT-001, HARN-FACT-002, HARN-FACT-003, HARN-FACT-004, HARN-FACT-005, HARN-FACT-006, HARN-FACT-007]
  * @api_stability: experimental
  */
-pub fn fact(input, options = nil) -> Fact {
+pub fn fact(harness: Harness, input, options = nil) -> Fact {
   if input == nil || type_of(input) != "dict" {
     __fact_error("HARN-FACT-001", "fact input must be a dict")
   }
@@ -318,7 +318,7 @@ pub fn fact(input, options = nil) -> Fact {
       confidence: confidence,
       provenance: provenance,
       valid_until: valid_until,
-      asserted_at: asserted_at == "" ? date_now_iso() : asserted_at,
+      asserted_at: asserted_at == "" ? harness.clock.date_iso() : asserted_at,
     },
   )
 }
@@ -330,8 +330,8 @@ pub fn fact(input, options = nil) -> Fact {
  * @errors: [HARN-FACT-001, HARN-FACT-002, HARN-FACT-003, HARN-FACT-004, HARN-FACT-005, HARN-FACT-006, HARN-FACT-007, HARN-FACT-009]
  * @api_stability: experimental
  */
-pub fn fact_validate(input) -> Fact {
-  return fact(input, {require_asserted_at: true})
+pub fn fact_validate(harness: Harness, input) -> Fact {
+  return fact(harness, input, {require_asserted_at: true})
 }
 
 /**
@@ -344,12 +344,13 @@ pub fn fact_validate(input) -> Fact {
  * @errors: [HARN-FACT-001, HARN-FACT-002, HARN-FACT-003, HARN-FACT-004, HARN-FACT-005, HARN-FACT-006, HARN-FACT-007]
  * @api_stability: experimental
  */
-pub fn store_fact(input, options = nil) {
+pub fn store_fact(harness: Harness, memory: HarnessMemory, input, options = nil) {
   const opts = __fact_options(options, "store_fact")
-  const fact_value = fact(input, opts)
-  const {namespace = fact_namespace(opts?.scope), key = fact_key(fact_value)} = opts ?? {}
-  const tags = fact_tags(fact_value, opts?.tags)
+  const fact_value = fact(harness, input, opts)
+  const {namespace = fact_namespace(opts?.scope), key = fact_key(harness, fact_value)} = opts ?? {}
+  const tags = fact_tags(harness, fact_value, opts?.tags)
   return memory_store(
+    memory,
     namespace,
     key,
     fact_value,
@@ -375,8 +376,8 @@ fn __fact_positive_int(value, fallback) {
   return fallback
 }
 
-fn __fact_recall_hit(record) {
-  const fact_value = fact_validate(record.value)
+fn __fact_recall_hit(harness: Harness, record) {
+  const fact_value = fact_validate(harness, record.value)
   return filter_nil(
     fact_value
       + {
@@ -400,21 +401,33 @@ fn __fact_recall_hit(record) {
  * @errors: [HARN-FACT-001, HARN-FACT-002, HARN-FACT-004]
  * @api_stability: experimental
  */
-pub fn recall_facts(query, kind = nil, min_confidence = nil, scope = nil) -> list {
+pub fn recall_facts(harness: Harness, 
+  memory: HarnessMemory,
+  query,
+  kind = nil,
+  min_confidence = nil,
+  scope = nil,
+) -> list {
   const opts = __fact_scope_options(scope)
   const namespace = opts?.namespace ?? fact_namespace(opts?.scope)
   const resolved_kind = kind == nil ? nil : __fact_kind(kind)
   const min = min_confidence == nil ? 0.0 : __fact_confidence(min_confidence)
   const limit = __fact_positive_int(opts?.limit ?? opts?.k, 5)
   const recall_limit = __fact_positive_int(opts?.recall_limit, limit * 4)
-  const records = memory_recall(namespace, query, recall_limit < limit ? limit : recall_limit, opts)
+  const records = memory_recall(
+    memory,
+    namespace,
+    query,
+    recall_limit < limit ? limit : recall_limit,
+    opts,
+  )
   let out = []
   for record in records {
     if record?.value?.schema != FACT_SCHEMA {
       continue
     }
     const hit_result = try {
-      __fact_recall_hit(record)
+      __fact_recall_hit(harness, record)
     }
     if is_err(hit_result) {
       continue
@@ -559,8 +572,8 @@ fn __fact_forget_evidence_entry(out, fact_kind, entry) -> list<string> {
  * @errors: [HARN-FACT-002, HARN-FACT-008]
  * @api_stability: experimental
  */
-pub fn invalidate_facts(predicate, scope = nil) {
+pub fn invalidate_facts(memory: HarnessMemory, predicate, scope = nil) {
   const opts = __fact_scope_options(scope)
   const namespace = opts?.namespace ?? fact_namespace(opts?.scope)
-  return memory_forget(namespace, __fact_forget_predicate(predicate), opts)
+  return memory_forget(memory, namespace, __fact_forget_predicate(predicate), opts)
 }

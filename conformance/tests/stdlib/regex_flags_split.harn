@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   assert_eq(regex_match("hello", "HeLLo", "i"), ["HeLLo"])
   assert_eq(regex_match("^b", "a\nB", "im"), ["B"])
   assert_eq(regex_match("a.+c", "a\nb\nc", "s"), ["a\nb\nc"])
@@ -6,5 +6,5 @@ pipeline test(task) {
   assert_eq(regex_split("a, b, c", ",\\s*"), ["a", "b", "c"])
   assert_eq(regex_replace("hello", "hi", "HeLLo HELLO", "i"), "hi hi")
   assert_eq(regex_match("hello", "world", "i"), nil)
-  log("regex flags ok")
+  harness.stdio.println("regex flags ok")
 }

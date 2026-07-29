@@ -1,7 +1,7 @@
 import { agent_session_drain_bridge_injections } from "std/agent/state"
 
-pipeline main() {
-  const result = agent_session_drain_bridge_injections("bridge-remind-conformance", "audit_only")
-  __io_println(result.delivered)
-  __io_println(result.reason)
+pipeline main(harness: Harness) {
+  const result = agent_session_drain_bridge_injections(harness, "bridge-remind-conformance", "audit_only")
+  harness.stdio.println(result.delivered)
+  harness.stdio.println(result.reason)
 }

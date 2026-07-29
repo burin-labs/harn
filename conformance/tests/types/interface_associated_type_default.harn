@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface IntCollection {
     type Item = int
     fn get(self, index: int) -> Item
@@ -11,7 +11,7 @@ pipeline test(task) {
     }
   }
   fn first<C>(collection: C) where C: IntCollection {
-    log(collection.get(0))
+    harness.stdio.println(collection.get(0))
   }
   first(Labels {})
 }

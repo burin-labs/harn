@@ -1,13 +1,13 @@
 import { triage_emit, triage_normalize, triage_start_my_day } from "std/triage"
 
 fn fixture(harness: Harness, name) {
-  const root = project_root() ?? cwd()
+  const root = harness.fs.project_root() ?? cwd()
   return json_parse(
     harness.fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")),
   )
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const github = fixture(harness, "github_issue")
   const slack = fixture(harness, "slack_message")
   const notion = fixture(harness, "notion_page")
@@ -20,14 +20,14 @@ pipeline default() {
   const slack_event = triage_normalize(slack)
   const notion_event = triage_normalize(notion)
   const github_retry_event = triage_normalize(github_retry)
-  __io_println(github_event.schema)
-  __io_println(github_event.provider + ":" + github_event.source_kind)
-  __io_println(slack_event.source_url.starts_with("slack://channel"))
-  __io_println(notion_event.source_url.starts_with("https://www.notion.so/"))
-  __io_println(github_event.dedupe_key == github_retry_event.dedupe_key)
-  __io_println(github_event.id == github_retry_event.id)
-  __io_println(github_event.raw_payload.issue.title)
-  __io_println(
+  harness.stdio.println(github_event.schema)
+  harness.stdio.println(github_event.provider + ":" + github_event.source_kind)
+  harness.stdio.println(slack_event.source_url.starts_with("slack://channel"))
+  harness.stdio.println(notion_event.source_url.starts_with("https://www.notion.so/"))
+  harness.stdio.println(github_event.dedupe_key == github_retry_event.dedupe_key)
+  harness.stdio.println(github_event.id == github_retry_event.id)
+  harness.stdio.println(github_event.raw_payload.issue.title)
+  harness.stdio.println(
     github_event.action_intents.find({ intent -> intent.kind == "convert_to_task" })
       .requires_approval,
   )
@@ -36,7 +36,7 @@ pipeline default() {
       {provider: "slack", kind: "message", provider_payload: {provider: "slack", event: "message"}},
     )
   }
-  __io_println(is_err(missing_source))
+  harness.stdio.println(is_err(missing_source))
   const ungated_write = try {
     triage_normalize(
       github,
@@ -53,19 +53,19 @@ pipeline default() {
       },
     )
   }
-  __io_println(is_err(ungated_write))
+  harness.stdio.println(is_err(ungated_write))
   const feed = triage_start_my_day(
     [github, slack, notion, github_retry],
     {emit: true, topic: "triage.inbox.test", generated_at: "fixture"},
   )
-  __io_println(len(feed.events))
-  __io_println(len(feed.receipts))
+  harness.stdio.println(len(feed.events))
+  harness.stdio.println(len(feed.receipts))
   const receipt = triage_emit(github_event, {topic: "triage.inbox.test.single"})
-  const stream = event_log.subscribe(
+  const stream = harness.obs.event_log_subscribe(
     {topic: "triage.inbox.test.single", from_cursor: receipt.event_log_id - 1},
   )
   const logged = stream.next().value
-  __io_println(logged.kind)
-  __io_println(logged.payload.provider)
-  __io_println(logged.headers.schema)
+  harness.stdio.println(logged.kind)
+  harness.stdio.println(logged.payload.provider)
+  harness.stdio.println(logged.headers.schema)
 }

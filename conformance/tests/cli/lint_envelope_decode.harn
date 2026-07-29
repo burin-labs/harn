@@ -2,7 +2,7 @@ import { decode_lint_envelope, decode_lint_json, lint_envelope_schema } from "st
 import { assert, assert_eq } from "std/testing"
 
 fn fixture_root(harness: Harness) -> string {
-  const root = project_root() ?? cwd()
+  const root = harness.fs.project_root() ?? cwd()
   return path_join(root, "crates/harn-cli/src/commands/check/lint_json_fixtures")
 }
 
@@ -10,7 +10,7 @@ fn read_fixture(harness: Harness, kind: string, name: string) -> string {
   return harness.fs.read_text(path_join(fixture_root(harness), kind, name + ".json"))
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   assert(type_of(lint_envelope_schema()) == "dict")
   for name in ["clean_ok", "warning_ok", "multiline_utf8_span", "changed_scope"] {
     const text = read_fixture(harness, "positive", name)

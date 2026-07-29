@@ -6,7 +6,7 @@
  * visible on the pre-populated `skills` global (same shape as the
  * `skill_registry()` builtin).
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Two fixtures land in the registry: `deploy` (with a rich
   // frontmatter) and `review` (minimal).
   assert(skill_count(skills) == 2, "two bundled skills should load")
@@ -43,5 +43,5 @@ pipeline test(task) {
   // `disable-model-invocation: false` is the default and isn't round-tripped
   // as an explicit field — keep the assertion focused on what we know to be
   // present to avoid schema fragility.
-  log("skill_fs_basic passed")
+  harness.stdio.println("skill_fs_basic passed")
 }

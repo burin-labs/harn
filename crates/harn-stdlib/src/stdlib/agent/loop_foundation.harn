@@ -7,11 +7,11 @@ import "std/agent/loop_support"
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_clock_now_ms() {
+pub fn __agent_loop_clock_now_ms(harness: Harness) {
   return harness.clock.now_ms()
 }
 
-pub fn __agent_loop_clock_sleep_ms(delay_ms) {
+pub fn __agent_loop_clock_sleep_ms(harness: Harness, delay_ms) {
   harness.clock.sleep_ms(delay_ms)
 }
 
@@ -158,7 +158,7 @@ pub fn __autocontinue_should_continue(call, turn_opts) {
  * @effects: []
  * @errors: []
  */
-pub fn __invoke_llm_with_autocontinue(
+pub fn __invoke_llm_with_autocontinue(harness: Harness, 
   message,
   turn_system,
   llm_opts,
@@ -167,8 +167,8 @@ pub fn __invoke_llm_with_autocontinue(
   iteration_index,
 ) {
   const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
-  agent_session_flush(session_id)
-  let call = agent_invoke_llm(message, turn_system, llm_opts)
+  agent_session_flush(harness, session_id)
+  let call = agent_invoke_llm(harness, message, turn_system, llm_opts)
   const max_continuations = __autocontinue_max_continuations(llm_opts)
   let attempts = 0
   let cap = llm_opts?.max_tokens ?? 0
@@ -180,8 +180,7 @@ pub fn __invoke_llm_with_autocontinue(
       break
     }
     attempts = attempts + 1
-    agent_emit_event(
-      session_id,
+    agent_emit_event(harness, session_id,
       "llm_auto_continue",
       {
         iteration: iteration_index + 1,
@@ -198,7 +197,7 @@ pub fn __invoke_llm_with_autocontinue(
       max_tokens: raised,
       _truncation_auto_continue_attempt: attempts,
     }
-    call = agent_invoke_llm(message, turn_system, retry_opts)
+    call = agent_invoke_llm(harness, message, turn_system, retry_opts)
   }
   return call
 }
@@ -258,6 +257,7 @@ pub fn __agent_loop_context_overflow_max_recoveries(llm_opts) {
  * @errors: []
  */
 pub fn __agent_loop_recover_context_overflow(
+  harness: Harness,
   call,
   message,
   turn_system,
@@ -272,9 +272,8 @@ pub fn __agent_loop_recover_context_overflow(
   while attempt < max_recoveries && !current.ok
     && __agent_loop_is_context_overflow(current?.error) {
     attempt = attempt + 1
-    const archived = agent_emergency_compact(session, llm_opts, attempt)
-    agent_emit_event(
-      session.session_id,
+    const archived = agent_emergency_compact(harness, session, llm_opts, attempt)
+    agent_emit_event(harness, session.session_id,
       "context_overflow_recovery",
       {
         iteration: iteration_index + 1,
@@ -291,14 +290,14 @@ pub fn __agent_loop_recover_context_overflow(
       break
     }
     // Rebuild the turn prompt against the now-compacted transcript and re-issue.
-    const turn_prompt = __agent_loop_build_turn_prompt(session, llm_opts, iteration_index)
+    const turn_prompt = __agent_loop_build_turn_prompt(harness, session, llm_opts, iteration_index)
     const retry_opts = llm_clear_one_shot_prefill(llm_opts)
       + {
       messages: turn_prompt.messages,
       _system_fragments: turn_prompt.fragments,
       _context_overflow_recovery_attempt: attempt,
     }
-    current = __invoke_llm_with_autocontinue(
+    current = __invoke_llm_with_autocontinue(harness, 
       message,
       turn_prompt.system,
       retry_opts,
@@ -311,4 +310,3 @@ pub fn __agent_loop_recover_context_overflow(
 }
 
 // -------------------------------------------------------------------------------------------------
-

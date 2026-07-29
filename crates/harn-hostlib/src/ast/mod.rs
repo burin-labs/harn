@@ -244,13 +244,13 @@ fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<Shar
     );
     // These two write edited source back to disk, so they share the
     // deterministic-tools gate with `tools::*` file I/O.
-    registry.register_gated_fn(
+    registry.register_fn(
         "ast",
         "hostlib_ast_apply_node",
         "apply_node",
         apply_node::run,
     );
-    registry.register_gated_fn(
+    registry.register_fn(
         "ast",
         "hostlib_ast_insert_at_anchor",
         "insert_at_anchor",
@@ -258,7 +258,7 @@ fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<Shar
     );
     // Multi-file codemod runner. Writes when `dry_run: false`, so it shares
     // the deterministic-tools write gate with the other mutating builtins.
-    registry.register_gated_fn(
+    registry.register_fn(
         "ast",
         "hostlib_ast_batch_apply",
         "batch_apply",

@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn divide(a: int, b: int) -> Result<int, string> {
     if b == 0 {
       return Result.Err("division by zero")
@@ -11,10 +11,10 @@ pipeline test(task) {
   }
   const ok: Result<int, string> = halve_division(12, 3)
   const err: Result<int, string> = halve_division(12, 0)
-  log(ok)
-  log(err)
+  harness.stdio.println(ok)
+  harness.stdio.println(err)
   match ok {
-    Result.Ok(value) -> { log("ok: ${value}") }
-    Result.Err(message) -> { log("err: ${message}") }
+    Result.Ok(value) -> { harness.stdio.println("ok: ${value}") }
+    Result.Err(message) -> { harness.stdio.println("err: ${message}") }
   }
 }

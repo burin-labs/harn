@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   http_mock("POST", "https://api.example.com/upload", {status: 201, body: "uploaded", headers: {}})
   const response = harness.net.post(
     "https://api.example.com/upload",
@@ -11,9 +11,9 @@ pipeline default() {
   )
   const calls = http_mock_calls()
   const body = calls[0].body ?? ""
-  __io_println(response.status)
-  __io_println(calls[0].headers["content-type"])
-  __io_println(contains(body, "name=\"meta\""))
-  __io_println(contains(body, "hello"))
-  __io_println(contains(body, "filename=\"blob.txt\""))
+  harness.stdio.println(response.status)
+  harness.stdio.println(calls[0].headers["content-type"])
+  harness.stdio.println(contains(body, "name=\"meta\""))
+  harness.stdio.println(contains(body, "hello"))
+  harness.stdio.println(contains(body, "filename=\"blob.txt\""))
 }

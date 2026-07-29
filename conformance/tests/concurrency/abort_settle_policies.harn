@@ -6,9 +6,8 @@
 //   - neither option means the form behaves exactly like `parallel settle`.
 import { settle_with_abort } from "std/abort"
 
-pipeline default() {
-  const threshold = settle_with_abort(
-    [1, 2, 3, 4],
+pipeline default(harness: Harness) {
+  const threshold = settle_with_abort(harness,  harness, [1, 2, 3, 4],
     { item ->
       if item == 2 {
         throw "boom"
@@ -17,12 +16,11 @@ pipeline default() {
     },
     {max_concurrent: 1, max_failures: 1},
   )
-  __io_println(threshold.succeeded)
-  __io_println(threshold.failed)
-  __io_println(threshold.abandoned)
-  __io_println(to_string(threshold.aborted))
-  const selective = settle_with_abort(
-    [1, 2, 3, 4],
+  harness.stdio.println(threshold.succeeded)
+  harness.stdio.println(threshold.failed)
+  harness.stdio.println(threshold.abandoned)
+  harness.stdio.println(to_string(threshold.aborted))
+  const selective = settle_with_abort(harness,  harness, [1, 2, 3, 4],
     { item ->
       if item <= 2 {
         return Err({code: "network", message: "blip"})
@@ -42,13 +40,12 @@ pipeline default() {
       },
     },
   )
-  __io_println(selective.succeeded)
-  __io_println(selective.failed)
-  __io_println(selective.abandoned)
-  __io_println(to_string(selective.aborted))
-  __io_println(selective.reason?.code)
-  const collect = settle_with_abort(
-    [1, 2, 3],
+  harness.stdio.println(selective.succeeded)
+  harness.stdio.println(selective.failed)
+  harness.stdio.println(selective.abandoned)
+  harness.stdio.println(to_string(selective.aborted))
+  harness.stdio.println(selective.reason?.code)
+  const collect = settle_with_abort(harness,  harness, [1, 2, 3],
     { item ->
       if item == 2 {
         throw "boom"
@@ -56,8 +53,8 @@ pipeline default() {
       return item
     },
   )
-  __io_println(collect.succeeded)
-  __io_println(collect.failed)
-  __io_println(collect.abandoned)
-  __io_println(to_string(collect.aborted))
+  harness.stdio.println(collect.succeeded)
+  harness.stdio.println(collect.failed)
+  harness.stdio.println(collect.abandoned)
+  harness.stdio.println(to_string(collect.aborted))
 }

@@ -40,9 +40,12 @@ use super::{
 };
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_advisory_xact_lock",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_BOOL,
     ),
     kind = "async",
@@ -56,9 +59,12 @@ async fn pg_advisory_xact_lock_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_try_advisory_xact_lock",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_BOOL,
     ),
     kind = "async",
@@ -72,9 +78,12 @@ async fn pg_try_advisory_xact_lock_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_with_advisory_lock",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_ANY,
     ),
     kind = "async",

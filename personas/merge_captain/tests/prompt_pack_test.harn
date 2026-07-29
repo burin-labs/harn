@@ -19,7 +19,7 @@ import {
   value_model_eval_fixture,
 } from "../lib/prompt_pack"
 
-pipeline test_prompt_pack_has_required_narrow_decisions(task) {
+pipeline test_prompt_pack_has_required_narrow_decisions(harness: Harness, task) {
   const ids = prompt_ids()
   assert_eq(len(ids), 6)
   assert(ids.contains("classify_pr"))
@@ -30,7 +30,7 @@ pipeline test_prompt_pack_has_required_narrow_decisions(task) {
   assert(ids.contains("audit_release_changelog"))
 }
 
-pipeline test_every_prompt_has_strict_schema_prompt_budget_and_goldens(task) {
+pipeline test_every_prompt_has_strict_schema_prompt_budget_and_goldens(harness: Harness, task) {
   for id in prompt_ids() {
     const schema = schema_for(id)
     assert_eq(schema.type, "object")
@@ -52,7 +52,7 @@ pipeline test_every_prompt_has_strict_schema_prompt_budget_and_goldens(task) {
   }
 }
 
-pipeline test_context_assembly_filters_raw_logs_and_caps_selected_spans(task) {
+pipeline test_context_assembly_filters_raw_logs_and_caps_selected_spans(harness: Harness, task) {
   const context = assemble_context(
     "diagnose_ci_category",
     {
@@ -75,7 +75,7 @@ pipeline test_context_assembly_filters_raw_logs_and_caps_selected_spans(task) {
   assert(validation.ok, json_stringify(validation.errors))
 }
 
-pipeline test_release_audit_context_caps_git_log_summary(task) {
+pipeline test_release_audit_context_caps_git_log_summary(harness: Harness, task) {
   const context = assemble_context(
     "audit_release_changelog",
     {
@@ -121,7 +121,7 @@ pipeline test_release_audit_context_caps_git_log_summary(task) {
   assert(validate_context(context).ok)
 }
 
-pipeline test_validate_output_rejects_missing_and_extra_keys(task) {
+pipeline test_validate_output_rejects_missing_and_extra_keys(harness: Harness, task) {
   const missing = validate_output("decide_approval", {ask_approval: true})
   assert(!missing.ok)
   assert(missing.errors[0].contains("missing required key"))
@@ -139,22 +139,22 @@ pipeline test_validate_output_rejects_missing_and_extra_keys(task) {
   assert(json_stringify(extra.errors).contains("unexpected key"))
 }
 
-pipeline test_next_action_checkpoint_repairs_missing_evidence(task) {
-  llm_mock_clear()
-  llm_mock(
+pipeline test_next_action_checkpoint_repairs_missing_evidence(harness: Harness, task) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {
       text:
         "```json\n{\"action\":\"update_branch\",\"deterministic_inputs\":[],\"approval_required\":false,\"reason\":\"behind\"}\n```",
     },
   )
-  llm_mock(
+  harness.llm.mock_enqueue(
     {
       text:
         "{\"action\":\"update_branch\",\"deterministic_inputs\":[\"behind_by\",\"base_ref\",\"head_ref\"],\"approval_required\":false,\"reason\":\"branch is behind base\"}",
     },
   )
   const checkpoint = choose_next_action_checkpoint(
-    {state: "behind", action: "update_branch", evidence: {behind_by: 2}},
+    harness, {state: "behind", action: "update_branch", evidence: {behind_by: 2}},
     {merge_queue_enabled: true},
     true,
     {required: false},
@@ -167,22 +167,22 @@ pipeline test_next_action_checkpoint_repairs_missing_evidence(task) {
   assert(checkpoint.validator_failures[0].contains("deterministic_inputs"))
 }
 
-pipeline test_ci_failure_checkpoint_rejects_unknown_log_span(task) {
-  llm_mock_clear()
-  llm_mock(
+pipeline test_ci_failure_checkpoint_rejects_unknown_log_span(harness: Harness, task) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {
       text:
         "{\"category\":\"deterministic_failure\",\"selected_log_span_ids\":[\"not-present\"],\"likely_owner\":\"repair_worker\",\"next_inspection_commands\":[\"cargo test\"],\"confidence\":0.91,\"reason\":\"failure\"}",
     },
   )
-  llm_mock(
+  harness.llm.mock_enqueue(
     {
       text:
         "{\"category\":\"flaky_test\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"merge_captain\",\"next_inspection_commands\":[\"cargo test -- --exact test_flake\"],\"confidence\":0.82,\"reason\":\"same test is nondeterministic\"}",
     },
   )
   const checkpoint = diagnose_ci_failure_checkpoint(
-    {
+    harness, {
       failing_checks: ["ci / rust"],
       selected_log_spans: [{id: "span-1", text: "test_flake failed then passed"}],
       tool_errors: [],
@@ -194,22 +194,22 @@ pipeline test_ci_failure_checkpoint_rejects_unknown_log_span(task) {
   assert(checkpoint.validator_failures[0].contains("not in prompt context"))
 }
 
-pipeline test_flake_checkpoint_requires_flake_or_missing_context(task) {
-  llm_mock_clear()
-  llm_mock(
+pipeline test_flake_checkpoint_requires_flake_or_missing_context(harness: Harness, task) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {
       text:
         "{\"category\":\"deterministic_failure\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"repair_worker\",\"next_inspection_commands\":[\"cargo test\"],\"confidence\":0.91,\"reason\":\"single failure\"}",
     },
   )
-  llm_mock(
+  harness.llm.mock_enqueue(
     {
       text:
         "{\"category\":\"flaky_test\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"merge_captain\",\"next_inspection_commands\":[\"cargo test -- --exact test_flake\"],\"confidence\":0.82,\"reason\":\"rerun passed\"}",
     },
   )
   const checkpoint = classify_flake_checkpoint(
-    {
+    harness, {
       failing_checks: ["ci / rust"],
       selected_log_spans: [{id: "span-1", text: "test_flake failed once and passed on rerun"}],
       tool_errors: [],
@@ -221,16 +221,16 @@ pipeline test_flake_checkpoint_requires_flake_or_missing_context(task) {
   assert(checkpoint.validator_failures[0].contains("flake classification"))
 }
 
-pipeline test_release_changelog_checkpoint_separates_commit_evidence(task) {
-  llm_mock_clear()
-  llm_mock(
+pipeline test_release_changelog_checkpoint_separates_commit_evidence(harness: Harness, task) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {
       text:
         "{\"gaps\":[\"missing note\"],\"rewrite_sections\":[{\"section\":\"Unreleased / Added\",\"after\":\"Add release audit.\",\"evidence_commit_shas\":[\"abc123\"],\"uncertainty\":\"none\"}],\"blockers\":[],\"evidence_checked\":[\"commit abc123\"],\"confidence\":0.88}",
     },
   )
   const checkpoint = audit_release_changelog_checkpoint(
-    {
+    harness, {
       commits: [{sha: "abc123", subject: "feat: add release audit"}],
       changelog_excerpt: "## Unreleased",
       shell_observations: [{command: "git log", status: "ok"}],
@@ -242,7 +242,7 @@ pipeline test_release_changelog_checkpoint_separates_commit_evidence(task) {
   assert_eq(checkpoint.context.commits[0].subject, "feat: add release audit")
 }
 
-pipeline test_value_model_eval_fixture_records_failure_modes(task) {
+pipeline test_value_model_eval_fixture_records_failure_modes(harness: Harness, task) {
   const fixture = value_model_eval_fixture()
   assert_eq(fixture._type, "merge_captain.prompt_pack_eval")
   assert_eq(fixture.route, "local/gemma-value")
@@ -253,14 +253,14 @@ pipeline test_value_model_eval_fixture_records_failure_modes(task) {
   }
 }
 
-pipeline test_known_failure_modes_include_release_harness_oracle_gap(task) {
+pipeline test_known_failure_modes_include_release_harness_oracle_gap(harness: Harness, task) {
   const modes = known_failure_modes()
   assert_eq(len(modes), 1)
   assert(modes[0].artifact.contains("release_harness_crystallization"))
   assert(modes[0].findings[0].contains("approval_gate"))
 }
 
-pipeline test_revision_gate_requires_oracle_diff_and_timeout_ladder(task) {
+pipeline test_revision_gate_requires_oracle_diff_and_timeout_ladder(harness: Harness, task) {
   const gate = revision_gate()
   assert(gate.required_artifacts.contains("transcript_oracle_diff"))
   assert(gate.required_artifacts.contains("timeout_ladder_results"))
@@ -269,7 +269,7 @@ pipeline test_revision_gate_requires_oracle_diff_and_timeout_ladder(task) {
   assert(gate.timeout_ladder.command.contains("merge-captain ladder"))
 }
 
-pipeline test_pack_manifest_is_inspectable(task) {
+pipeline test_pack_manifest_is_inspectable(harness: Harness, task) {
   const pack = pack_manifest()
   assert_eq(pack._type, "merge_captain.prompt_pack")
   assert_eq(pack.id, "merge-captain-value-pack-v1")

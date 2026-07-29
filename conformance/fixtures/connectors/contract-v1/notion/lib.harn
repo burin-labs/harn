@@ -17,7 +17,7 @@ pub fn init(ctx) {
 }
 
 pub fn activate(bindings) {
-  metrics_inc("notion_contract_activations", len(bindings))
+  harness.obs.metrics_inc("notion_contract_activations", len(bindings))
 }
 
 pub fn normalize_inbound(raw) {

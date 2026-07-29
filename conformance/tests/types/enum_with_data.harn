@@ -1,13 +1,13 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   enum Result {
     Ok(value)
     Err(message)
   }
   const success = Result.Ok(42)
-  log(success)
-  log(success.variant)
+  harness.stdio.println(success)
+  harness.stdio.println(success.variant)
   const failure = Result.Err("something went wrong")
-  log(failure)
-  log(failure.variant)
-  log(failure.fields)
+  harness.stdio.println(failure)
+  harness.stdio.println(failure.variant)
+  harness.stdio.println(failure.fields)
 }

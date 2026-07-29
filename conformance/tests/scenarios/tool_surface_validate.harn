@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -60,5 +60,5 @@ pipeline main() {
   require saw_arg_key, "invalid arg constraint key is reported"
   require saw_prompt_policy, "unknown prompt tool reference is reported"
   require saw_approval, "approval pattern mismatch is reported"
-  log("tool_surface_validate tests passed")
+  harness.stdio.println("tool_surface_validate tests passed")
 }

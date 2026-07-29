@@ -7,6 +7,7 @@
 //! call site against the surrounding scope.
 
 use crate::ast::TypeExpr;
+use harn_builtin_meta::{BuiltinExposure, CapabilityId};
 
 use super::signatures;
 use super::{BuiltinMetadata, BuiltinSignature, Ty, TyExt};
@@ -18,9 +19,13 @@ use super::{BuiltinMetadata, BuiltinSignature, Ty, TyExt};
 /// typecheck hot path, and explicitly NOT cached so installs after the
 /// first call are picked up without leaking an old merged slice.
 pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
-    for sig in harn_builtin_registry::installed_signatures() {
-        if sig.name == name {
-            return Some(*sig);
+    for entry in harn_builtin_registry::installed_manifest() {
+        if entry.name == name {
+            return matches!(
+                entry.contract.exposure,
+                BuiltinExposure::PureGlobal | BuiltinExposure::CapabilityFunction { .. }
+            )
+            .then_some(entry.signature);
         }
     }
     for group in signatures::groups() {
@@ -33,6 +38,36 @@ pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
     None
 }
 
+/// Resolve the signature paired with one capability method contract.
+pub fn lookup_capability_method(
+    capability: CapabilityId,
+    method: &str,
+) -> Option<&'static BuiltinSignature> {
+    capability_method_entry(capability.field_name(), method).map(|entry| entry.signature)
+}
+
+/// Resolve the single manifest entry that owns a `harness.<field>.<method>`
+/// call. Consumers that need effects or the internal dispatch name use this
+/// rather than reconstructing either from strings.
+pub fn capability_method_entry(
+    field: &str,
+    method: &str,
+) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
+    let capability = CapabilityId::from_field_name(field)?;
+    harn_builtin_registry::installed_manifest()
+        .iter()
+        .copied()
+        .find(|entry| {
+            matches!(
+                entry.contract.exposure,
+                BuiltinExposure::HarnessMethod {
+                    capability: candidate,
+                    method: candidate_method,
+                } if candidate == capability && candidate_method == method
+            )
+        })
+}
+
 /// Is `name` a builtin known to the parser?
 pub fn is_builtin(name: &str) -> bool {
     lookup(name).is_some()
@@ -42,10 +77,21 @@ pub fn is_builtin(name: &str) -> bool {
 /// names that aren't shadowed by installed entries. Output is NOT
 /// alphabetically sorted (callers that need that re-sort themselves).
 pub fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
-    let installed = harn_builtin_registry::installed_signatures();
+    let installed: Vec<_> = harn_builtin_registry::installed_manifest()
+        .into_iter()
+        .filter(|entry| {
+            matches!(
+                entry.contract.exposure,
+                BuiltinExposure::PureGlobal | BuiltinExposure::CapabilityFunction { .. }
+            )
+        })
+        .collect();
     let installed_names: std::collections::HashSet<&'static str> =
-        installed.iter().map(|s| s.name).collect();
-    installed.iter().map(|s| s.name).chain(
+        harn_builtin_registry::installed_manifest()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+    installed.into_iter().map(|entry| entry.name).chain(
         signatures::groups()
             .into_iter()
             .flat_map(|g| g.iter())
@@ -74,14 +120,25 @@ pub fn static_signature_names() -> impl Iterator<Item = &'static str> {
 /// lightweight "what does this builtin return" view without bringing in
 /// the full type IR.
 pub fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
-    let installed = harn_builtin_registry::installed_signatures();
+    let installed: Vec<_> = harn_builtin_registry::installed_manifest()
+        .into_iter()
+        .filter(|entry| {
+            matches!(
+                entry.contract.exposure,
+                BuiltinExposure::PureGlobal | BuiltinExposure::CapabilityFunction { .. }
+            )
+        })
+        .collect();
     let installed_names: std::collections::HashSet<&'static str> =
-        installed.iter().map(|s| s.name).collect();
+        harn_builtin_registry::installed_manifest()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
     installed
-        .iter()
-        .map(|sig| BuiltinMetadata {
-            name: sig.name,
-            return_types: builtin_return_type_names(sig),
+        .into_iter()
+        .map(|entry| BuiltinMetadata {
+            name: entry.name,
+            return_types: builtin_return_type_names(entry.signature),
         })
         .chain(
             signatures::groups()

@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const template = """
 // Auto-generated code - do not edit.
 pub fn {{ fn_name }}() -> dict {
@@ -12,6 +12,6 @@ root:
   nested:
     keep: exact  
 """
-  log(template)
-  log(report)
+  harness.stdio.println(template)
+  harness.stdio.println(report)
 }

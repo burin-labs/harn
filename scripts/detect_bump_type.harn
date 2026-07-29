@@ -22,7 +22,7 @@ const CHANGELOG_PATH = "CHANGELOG.md"
  * Pull the workspace version literal from a Cargo.toml. Errors loudly
  * if no `version = "..."` line is at the top of the file.
  */
-pub fn read_cargo_version() -> string {
+pub fn read_cargo_version(harness: Harness) -> string {
   const captures = regex_captures(
     r"(?m)^version = \x22([^\x22]+)\x22",
     harness.fs.read_text(CARGO_PATH),
@@ -34,7 +34,7 @@ pub fn read_cargo_version() -> string {
 }
 
 /** Pull the topmost `## vX.Y.Z` heading from CHANGELOG.md. */
-pub fn read_changelog_top_version() -> string {
+pub fn read_changelog_top_version(harness: Harness) -> string {
   const captures = regex_captures(
     r"(?m)^## v(\d+\.\d+\.\d+)\s*$",
     harness.fs.read_text(CHANGELOG_PATH),
@@ -60,18 +60,18 @@ pub fn detect(current: string, target: string) -> BumpKind {
   return kind
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   try {
-    const current = read_cargo_version()
-    const target = read_changelog_top_version()
+    const current = read_cargo_version(harness)
+    const target = read_changelog_top_version(harness)
     if current == target {
-      __io_eprintln("warning: Cargo.toml and CHANGELOG.md both at ${current}; nothing to bump")
+      harness.stdio.eprintln("warning: Cargo.toml and CHANGELOG.md both at ${current}; nothing to bump")
       return 2
     }
-    __io_println(detect(current, target))
+    harness.stdio.println(detect(current, target))
     return 0
   } catch (e) {
-    __io_eprintln("error: ${e}")
+    harness.stdio.eprintln("error: ${e}")
     return 1
   }
 }

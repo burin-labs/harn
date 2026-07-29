@@ -1,5 +1,5 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   for item in [1, 2, 3] {
-    log(item)
+    harness.stdio.println(item)
   }
 }

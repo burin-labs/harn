@@ -102,6 +102,8 @@ pub(super) async fn flush_terminal(
 
 /// Flush the live transcript journal at the common pre-provider boundary.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_flush(session_id: string) -> nil",
     kind = "async",
     category = "agent.host",
@@ -126,6 +128,8 @@ async fn host_agent_session_flush(
 
 /// Emit an agent event and persist transcript-backed lifecycle types.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_emit_event(session_id: string, event_type: string, payload: dict) -> nil",
     kind = "async",
     category = "agent.host",

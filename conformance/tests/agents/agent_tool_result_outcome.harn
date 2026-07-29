@@ -1,6 +1,6 @@
 import { agent_tool_result_is_ok, agent_tool_result_outcome } from "std/agent/tool_lifecycle"
 
-pipeline test() {
+pipeline test(harness: Harness) {
   // A non-dict envelope carries no structured signal at all.
   const missing = agent_tool_result_outcome(nil)
   assert_eq(missing.kind, "unknown")
@@ -79,5 +79,5 @@ pipeline test() {
   assert_eq(prose_only.kind, "unknown")
   assert_eq(prose_only.from_structured, false)
   assert_eq(agent_tool_result_is_ok(prose_only), nil)
-  log("agent tool result outcome ok")
+  harness.stdio.println("agent tool result outcome ok")
 }

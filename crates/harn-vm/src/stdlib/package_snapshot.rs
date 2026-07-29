@@ -44,6 +44,8 @@ pub(crate) fn register_package_snapshot_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "package_snapshot_open(project_root: string) -> {handle: string, generation: string, packages_root: string, lock_path: string, lock_digest: string, packages: list<string>}?",
     kind = "async",
     category = "fs",
@@ -99,6 +101,8 @@ async fn package_snapshot_open_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "package_snapshot_close(handle: string) -> bool",
     kind = "async",
     category = "fs",
@@ -162,7 +166,7 @@ mod tests {
 
     fn open_source(root: &std::path::Path) -> String {
         format!(
-            "fn main(harness: Harness) {{ return package_snapshot_open({}) }}\nmain(harness)",
+            "fn main(harness: Harness) {{ return package_snapshot_open({}) }}",
             serde_json::to_string(&root.to_string_lossy()).unwrap()
         )
     }
@@ -248,7 +252,7 @@ mod tests {
             "close" => {
                 let root = serde_json::to_string(&root.to_string_lossy()).unwrap();
                 let chunk = crate::compile_source(&format!(
-                    "fn main(harness: Harness) {{\n  const snapshot = package_snapshot_open({root})\n  return package_snapshot_close(snapshot.handle)\n}}\nmain(harness)"
+                    "fn main(harness: Harness) {{\n  const snapshot = package_snapshot_open({root})\n  return package_snapshot_close(snapshot.handle)\n}}"
                 ))
                 .unwrap();
                 assert!(matches!(

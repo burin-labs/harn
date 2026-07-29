@@ -10,9 +10,9 @@ import { client, exchange_code, start_authorization, token } from "std/oauth/cli
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const topic = "oauth.client.audit"
-  const cursor = event_log.latest(topic) ?? 0
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
   const store = memory()
   const provider = custom(
     {
@@ -22,8 +22,7 @@ pipeline test(task) {
       default_scopes: ["repo"],
     },
   )
-  const cli = client(
-    provider,
+  const cli = client(harness,  harness, provider,
     {
       client_id: "cli-id",
       client_secret: "cli-secret",
@@ -73,7 +72,7 @@ pipeline test(task) {
   assert_eq(access, "AAA", "token() returns stored access token without refreshing")
   const calls_after_token = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls_after_token), 1, "token() did not re-issue token call")
-  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const logged = stream.next().value
   assert_eq(logged.kind, "token_exchanged", "audit event kind")
   assert_eq(logged.payload.provider, "mock", "audit provider id")
@@ -91,5 +90,5 @@ pipeline test(task) {
     }
   }
   assert(threw, "state mismatch should have thrown")
-  log("oauth client auth code ok")
+  harness.stdio.println("oauth client auth code ok")
 }

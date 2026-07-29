@@ -1,18 +1,18 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Basic multiline string
   const s = """
     hello
     world
     """
-  log(s)
+  harness.stdio.println(s)
   // Multiline preserves internal newlines
   const multi = """
     line1
     line2
     line3
     """
-  log(len(multi.split("\n")))
+  harness.stdio.println(len(multi.split("\n")))
   // Empty multiline
   const empty = ""
-  log(len(empty))
+  harness.stdio.println(len(empty))
 }

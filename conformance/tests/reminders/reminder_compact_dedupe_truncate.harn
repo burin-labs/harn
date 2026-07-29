@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const old = transcript_reminder_event(
     {body: "old duplicate", dedupe_key: "slot", ttl_turns: 3, preserve_on_compact: true},
   )
@@ -20,7 +20,7 @@ pipeline main() {
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
-  __io_println(len(reminders))
-  __io_println(reminders[0].reminder.body)
-  __io_println(reminders[0].reminder.ttl_turns)
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
+  harness.stdio.println(reminders[0].reminder.ttl_turns)
 }

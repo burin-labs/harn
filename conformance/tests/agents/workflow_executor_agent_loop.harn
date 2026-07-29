@@ -14,7 +14,7 @@ import { workflow_run_repair } from "std/workflow/repair"
  * nested loop's task and the mock echoes it back, so verify passes — proving the
  * nested agent_loop ran under (and consumed the feedback from) the retry loop.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const token = "AGENTOK"
   // The executor is a bespoke in-process agent loop with a mock llm_caller. It
   // emits the pass token only after the (feedback-threaded) task carries it.
@@ -36,18 +36,17 @@ pipeline default() {
         },
       }
     }
-    let r = agent_loop(ctx.task, nil, {provider: "mock", llm_caller: caller, max_iterations: 1})
+    let r = agent_loop(harness, ctx.task, nil, {provider: "mock", llm_caller: caller, max_iterations: 1})
     return {text: r.text}
   }
   const verifier = { r ->
     return {ok: contains(to_string(r?.visible_text), token), findings: [token]}
   }
-  const out = workflow_run_repair(
-    {task: "do the work", executor: executor, verify: verifier, max_attempts: 2},
+  const out = workflow_run_repair(harness,  harness, {task: "do the work", executor: executor, verify: verifier, max_attempts: 2},
   )
-  __io_println(out.ok)
-  __io_println(len(out.attempts))
-  __io_println(out.attempts[0].status)
-  __io_println(out.attempts[1].status)
-  __io_println(contains(out.text, token))
+  harness.stdio.println(out.ok)
+  harness.stdio.println(len(out.attempts))
+  harness.stdio.println(out.attempts[0].status)
+  harness.stdio.println(out.attempts[1].status)
+  harness.stdio.println(contains(out.text, token))
 }

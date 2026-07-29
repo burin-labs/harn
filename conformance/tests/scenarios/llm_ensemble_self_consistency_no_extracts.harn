@@ -4,12 +4,11 @@
 import { self_consistency } from "std/llm/ensemble"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [llm_text("noise-1"), llm_text("noise-2"), llm_text("noise-3")],
+    harness.llm, [llm_text("noise-1"), llm_text("noise-2"), llm_text("noise-3")],
     { ->
-      const result = self_consistency(
-        "anything",
+      const result = self_consistency(harness,  harness, "anything",
         "",
         {
           n: 3,
@@ -19,8 +18,8 @@ pipeline default() {
           extract: { _text -> nil },
         },
       )
-      __io_println(result.ok)
-      __io_println(result.status)
+      harness.stdio.println(result.ok)
+      harness.stdio.println(result.status)
     },
   )
 }

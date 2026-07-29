@@ -97,7 +97,7 @@ fn __mock_blueprint(prompt: string, expected: PersonaPromptEvalExpected) -> dict
   return blueprint
 }
 
-fn __compile_prompt(
+fn __compile_prompt(harness: Harness, 
   prompt: string,
   expected: PersonaPromptEvalExpected,
   provider: string,
@@ -105,8 +105,8 @@ fn __compile_prompt(
   max_tokens: int,
 ) -> PersonaPromptCompileReceipt {
   if provider == "mock" {
-    llm_mock_clear()
-    llm_mock(
+    harness.llm.mock_clear()
+    harness.llm.mock_enqueue(
       {
         text: json_stringify(__mock_blueprint(prompt, expected)),
         provider: "mock",
@@ -116,8 +116,7 @@ fn __compile_prompt(
       },
     )
   }
-  return persona_compile_prompt(
-    prompt,
+  return persona_compile_prompt(harness,  harness, prompt,
     {provider: provider, model: model, max_tokens: max_tokens, name_override: expected.name},
   )
 }
@@ -157,7 +156,7 @@ fn __materialize(
   const output_root = path_join(trial_root, "personas")
   harness.fs.write_text(blueprint_path, json_stringify_pretty(blueprint))
   const result = command_run(
-    {
+    harness.tools, {
       argv: [
         "harn",
         "persona",
@@ -229,7 +228,7 @@ fn __fire(
   }
   const trigger_id = trigger.id
   const result = command_run(
-    {
+    harness.tools, {
       argv: [
         "harn",
         "orchestrator",
@@ -294,16 +293,14 @@ fn main(harness: Harness) -> int {
   const started_ms = harness.clock.monotonic_ms()
   const raw = read_stdin()
   if raw == nil || trim(raw) == "" {
-    return __write_outcome(
-      harness,
+    return __write_outcome(harness,  harness,
       __failure_outcome(harness, started_ms, "invalid_request", "eval executor request is empty"),
     )
   }
   const request = try {
     schema_expect(json_parse(raw), __request_schema())
   } catch (e) {
-    return __write_outcome(
-      harness,
+    return __write_outcome(harness,  harness,
       __failure_outcome(
         harness,
         started_ms,
@@ -317,8 +314,7 @@ fn main(harness: Harness) -> int {
   const prompt = request.case.task
   const trial = request.trial
   if !__safe_token(case_id) || !__safe_token(expected.name) || trial < 1 {
-    return __write_outcome(
-      harness,
+    return __write_outcome(harness,  harness,
       __failure_outcome(
         harness,
         started_ms,
@@ -333,7 +329,7 @@ fn main(harness: Harness) -> int {
   if !harness.fs.exists("generated") {
     harness.fs.mkdir("generated")
   }
-  const receipt = __compile_prompt(
+  const receipt = __compile_prompt(harness, 
     prompt,
     expected,
     request.manifest.metadata.provider,
@@ -378,8 +374,7 @@ fn main(harness: Harness) -> int {
   const artifact_json = json_stringify_pretty(artifact)
   harness.fs.write_text(artifact_path, artifact_json)
   harness.fs.write_text(latest_artifact_path, artifact_json)
-  return __write_outcome(
-    harness,
+  return __write_outcome(harness,  harness,
     {
       verification: if pass {
         "PASS"

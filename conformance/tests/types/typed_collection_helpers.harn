@@ -4,18 +4,18 @@
 // type argument pins the value type at the call site.
 import { filter_nil, pick_keys } from "std/collections"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const counts: dict<string, int> = {a: 1, b: 2, c: 3}
   const cleaned: dict<string, int> = filter_nil(counts)
-  __io_println(cleaned.a)
-  __io_println(cleaned.b)
-  __io_println(cleaned.c)
+  harness.stdio.println(cleaned.a)
+  harness.stdio.println(cleaned.b)
+  harness.stdio.println(cleaned.c)
   const picked: dict<string, int> = pick_keys(counts, ["a", "c"])
-  __io_println(picked.a)
-  __io_println(picked.c)
-  __io_println(contains(picked.keys(), "b"))
+  harness.stdio.println(picked.a)
+  harness.stdio.println(picked.c)
+  harness.stdio.println(contains(picked.keys(), "b"))
   const dropped = pick_keys<int?>({a: 1, b: nil, c: 3}, ["a", "b", "c"], {drop_nil: true})
-  __io_println(dropped.a)
-  __io_println(dropped.c)
-  __io_println(contains(dropped.keys(), "b"))
+  harness.stdio.println(dropped.a)
+  harness.stdio.println(dropped.c)
+  harness.stdio.println(contains(dropped.keys(), "b"))
 }

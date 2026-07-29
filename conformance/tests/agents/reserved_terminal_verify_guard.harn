@@ -70,9 +70,9 @@ fn has_phase(events, phase) {
 // survives the nested agent_loop execution, unlike a closure-captured counter):
 // with a low value the repair lands within the reserve (case 1), with a value
 // the reserve can never reach the repair never lands (case 2).
-fn run_scenario(reserved_on, reserve_iterations, green_at_iteration) {
+fn run_scenario(harness: Harness, reserved_on, reserve_iterations, green_at_iteration) {
   return with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
       {text: "", tool_calls: [{id: "e2", name: "apply_fix", arguments: {}}]},
       {text: "", tool_calls: [{id: "e3", name: "apply_fix", arguments: {}}]},
@@ -80,11 +80,9 @@ fn run_scenario(reserved_on, reserve_iterations, green_at_iteration) {
       {text: "", tool_calls: [{id: "e5", name: "apply_fix", arguments: {}}]},
     ],
     { ->
-      const session = "reserved-verify-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Make the build green.",
+      const session = "reserved-verify-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Make the build green.",
           nil,
           {
             provider: "mock",
@@ -128,14 +126,14 @@ fn terminal_verify_ran(events) -> bool {
   return has_phase(events, "verify_passed") || has_phase(events, "verify_failed")
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Case 1: ON, repair lands green. First terminal verify (iter 2) is red and
   // grants a repair turn; the re-verify at iter 3 is green -> the run completes
   // `done` instead of a silent `budget_exhausted`.
-  const case1 = run_scenario(true, 2, 3)
-  __io_println("case1.status=" + case1.status)
-  __io_println("case1.grant=" + to_string(has_phase(case1.events, "grant")))
-  __io_println("case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")))
+  const case1 = run_scenario(harness, true, 2, 3)
+  harness.stdio.println("case1.status=" + case1.status)
+  harness.stdio.println("case1.grant=" + to_string(has_phase(case1.events, "grant")))
+  harness.stdio.println("case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")))
   assert(
     case1.status == "done",
     "case1: run must terminate done after a passing reserved verify, not a blind budget_exhausted",
@@ -151,10 +149,10 @@ pipeline default() {
   // Case 2: ON, repair never lands (verifier never green) — the reserve is spent
   // and the FINAL state is a verify that RAN and surfaced the red build, never a
   // blind exhaust. Bounded: the reserve cannot loop forever (one grant here).
-  const case2 = run_scenario(true, 1, 999)
-  __io_println("case2.status=" + case2.status)
-  __io_println("case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")))
-  __io_println("case2.grants=" + to_string(count_events(case2.events, "reserved_terminal_verify")))
+  const case2 = run_scenario(harness, true, 1, 999)
+  harness.stdio.println("case2.status=" + case2.status)
+  harness.stdio.println("case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")))
+  harness.stdio.println("case2.grants=" + to_string(count_events(case2.events, "reserved_terminal_verify")))
   assert(
     terminal_verify_ran(case2.events),
     "case2: a terminal verify must RUN even when repair never lands",
@@ -166,9 +164,9 @@ pipeline default() {
   assert(case2.status != "done", "case2: an unrepaired red build must not terminate done")
   // Case 3: OFF control — byte-identical to today. No reserved-verify events,
   // no terminal verify, plain budget_exhausted.
-  const case3 = run_scenario(false, 2, 3)
-  __io_println("case3.status=" + case3.status)
-  __io_println(
+  const case3 = run_scenario(harness, false, 2, 3)
+  harness.stdio.println("case3.status=" + case3.status)
+  harness.stdio.println(
     "case3.reserved_events=" + to_string(count_events(case3.events, "reserved_terminal_verify")),
   )
   assert(

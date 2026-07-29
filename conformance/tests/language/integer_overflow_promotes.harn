@@ -5,11 +5,11 @@
  * wrong, wrapped magnitude. In-range arithmetic stays int. Operands are `let`
  * bindings so the runtime arithmetic path is exercised, not just folding.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const big = 9223372036854775807
   const one = 1
-  log(type_of(big + one))
-  log(big + one > 9000000000000000000.0)
-  log(type_of(2 + 3))
-  log(2 + 3)
+  harness.stdio.println(type_of(big + one))
+  harness.stdio.println(big + one > 9000000000000000000.0)
+  harness.stdio.println(type_of(2 + 3))
+  harness.stdio.println(2 + 3)
 }

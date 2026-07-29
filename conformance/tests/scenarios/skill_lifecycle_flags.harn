@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * - An empty top-1 match produces `skill_matched` with no candidates
  *   and no activation.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   skill private_work {
     description "Rotate database credentials"
     when_to_use "User requests a credential rotation"
@@ -29,10 +29,9 @@ pipeline test(task) {
     },
   )
   with_llm_script(
-    [llm_text("Nothing to do.")],
+    harness.llm, [llm_text("Nothing to do.")],
     { ->
-      const result = agent_loop(
-        "Please rotate the staging credentials for me",
+      const result = agent_loop(harness, "Please rotate the staging credentials for me",
         nil,
         {provider: "mock", max_iterations: 1, skills: guarded, skill_match: {strategy: "metadata"}},
       )
@@ -49,12 +48,12 @@ pipeline test(task) {
       }
       assert(activated == 0, "disable-model-invocation hides the skill from the matcher")
       assert(matched_events >= 1, "skill_matched event fires even with zero candidates")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(
         !contains(calls[0].system, "## Active skills"),
         "no active-skill section when no match",
       )
-      log("skill_lifecycle_flags tests passed")
+      harness.stdio.println("skill_lifecycle_flags tests passed")
     },
   )
 }

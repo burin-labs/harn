@@ -688,14 +688,14 @@ pub fn triage_dedupe_events(events: list) -> list<TriageEvent> {
  * @effects: [transcript.write]
  * @errors: []
  */
-pub fn triage_emit(input, options = nil) -> TriageEmitReceipt {
+pub fn triage_emit(harness: Harness, input, options = nil) -> TriageEmitReceipt {
   const opts = options ?? {}
   const event = input?.schema == TRIAGE_EVENT_SCHEMA ? triage_validate(input) : triage_normalize(
     input,
     opts,
   )
   const topic = opts.topic ?? TRIAGE_EVENT_TOPIC
-  const event_log_id = event_log.emit(
+  const event_log_id = harness.obs.event_log_emit(
     topic,
     TRIAGE_EVENT_KIND,
     event,
@@ -717,13 +717,13 @@ pub fn triage_emit(input, options = nil) -> TriageEmitReceipt {
  * @effects: []
  * @errors: []
  */
-pub fn triage_start_my_day(inputs: list, options = nil) {
+pub fn triage_start_my_day(harness: Harness, inputs: list, options = nil) {
   const opts = options ?? {}
   const events = triage_dedupe_events(inputs)
   let receipts = []
   if opts.emit ?? false {
     for event in events {
-      receipts = receipts.appending(triage_emit(event, {topic: opts.topic ?? TRIAGE_EVENT_TOPIC}))
+      receipts = receipts.appending(triage_emit(harness, event, {topic: opts.topic ?? TRIAGE_EVENT_TOPIC}))
     }
   }
   return {

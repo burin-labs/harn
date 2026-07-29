@@ -18,8 +18,11 @@ pub(crate) struct FixArgs {
     #[arg(long, value_parser = parse_repair_safety, value_name = "SAFETY")]
     pub safety: Option<RepairSafety>,
     /// How Harness migrations should satisfy call sites without a local Harness binding.
-    #[arg(long, value_enum, default_value_t = HarnessThreadingMode::LocalGlobal)]
+    #[arg(long, value_enum, default_value_t = HarnessThreadingMode::ThreadParams)]
     pub harness_threading: HarnessThreadingMode,
+    /// Restrict the plan/apply pass to explicit Harness capability migrations.
+    #[arg(long)]
+    pub capability_migrations_only: bool,
     /// Emit the machine-readable RepairPlan JSON.
     #[arg(long)]
     pub json: bool,
@@ -31,9 +34,9 @@ pub(crate) struct FixArgs {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum HarnessThreadingMode {
     /// Use the VM-level `harness` binding and preserve helper signatures.
-    #[default]
     LocalGlobal,
     /// Add `harness: Harness` parameters and update same-file callers.
+    #[default]
     ThreadParams,
 }
 

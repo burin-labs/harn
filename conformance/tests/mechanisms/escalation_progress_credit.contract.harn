@@ -25,7 +25,7 @@
 import { agent_capture_events } from "std/agent/events"
 import { contract_effect, contract_negative, count_contract_events } from "./lib/mechanism_contract"
 
-fn shrinking_error_set_case() {
+fn shrinking_error_set_case(harness: Harness) {
   // Strictly shrinking, NON-identical failing error sets, then completion.
   // Each turn is a real model result (ok:true) — genuine progress, not an
   // outage — so the no-progress terminator must credit it and keep going.
@@ -54,11 +54,9 @@ fn shrinking_error_set_case() {
       },
     }
   }
-  const session = "contract-shrink-" + uuid()
-  const captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "fix the build",
+  const session = "contract-shrink-" + harness.random.uuid()
+  const captured = agent_capture_events(harness,  harness, session,
+    fn() { return agent_loop(harness, "fix the build",
       nil,
       {
         session_id: session,
@@ -75,11 +73,11 @@ fn shrinking_error_set_case() {
   const breaker_count = count_contract_events(captured.events, "budget_circuit_breaker")
   const stuck_count = count_contract_events(captured.events, "loop_stuck")
   // NEGATIVE: no premature circuit-break / no-progress stop while shrinking.
-  contract_negative("no_premature_stop_while_shrinking", breaker_count > 0 || stuck_count > 0)
+  contract_negative(harness, "no_premature_stop_while_shrinking", breaker_count > 0 || stuck_count > 0)
   // EFFECT: the run reached DONE rather than being cut at budget.
-  contract_effect("ran_to_completion_not_budget_cut", to_string(captured.result.status) == "done")
+  contract_effect(harness, "ran_to_completion_not_budget_cut", to_string(captured.result.status) == "done")
 }
 
-pipeline default() {
-  shrinking_error_set_case()
+pipeline default(harness: Harness) {
+  shrinking_error_set_case(harness)
 }

@@ -1,4 +1,4 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   let i = 0
   while i < 10 {
     if i == 5 {
@@ -6,5 +6,5 @@ pipeline default(task) {
     }
     i = i + 1
   }
-  log(i)
+  harness.stdio.println(i)
 }

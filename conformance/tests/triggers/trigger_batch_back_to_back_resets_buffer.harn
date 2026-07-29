@@ -5,21 +5,21 @@ import "std/triggers"
  * matching event starts a fresh window. Counter increments cleanly from
  * 0 again.
  */
-fn handle_batch(event) {
+fn handle_batch(harness: Harness, event) {
   const batch_len = if event.batch == nil {
     0
   } else {
     len(event.batch)
   }
-  emit_channel("batch.btb.fired", {batch_size: batch_len})
+  harness.channels.append("batch.btb.fired", {batch_size: batch_len})
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "batch-btb-" + unique,
       kind: "channel.emit",
@@ -38,14 +38,14 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const _ = emit_channel("batch.btb.input", {seq: 1})
-  const _ = emit_channel("batch.btb.input", {seq: 2})
-  const first = channel_events("batch.btb.fired")
-  __io_println("after-first-pair:" + to_string(len(first)))
-  const _ = emit_channel("batch.btb.input", {seq: 3})
-  const mid = channel_events("batch.btb.fired")
-  __io_println("after-third:" + to_string(len(mid)))
-  const _ = emit_channel("batch.btb.input", {seq: 4})
-  const second = channel_events("batch.btb.fired")
-  __io_println("after-second-pair:" + to_string(len(second)))
+  const _ = harness.channels.append("batch.btb.input", {seq: 1})
+  const _ = harness.channels.append("batch.btb.input", {seq: 2})
+  const first = harness.channels.events("batch.btb.fired")
+  harness.stdio.println("after-first-pair:" + to_string(len(first)))
+  const _ = harness.channels.append("batch.btb.input", {seq: 3})
+  const mid = harness.channels.events("batch.btb.fired")
+  harness.stdio.println("after-third:" + to_string(len(mid)))
+  const _ = harness.channels.append("batch.btb.input", {seq: 4})
+  const second = harness.channels.events("batch.btb.fired")
+  harness.stdio.println("after-second-pair:" + to_string(len(second)))
 }

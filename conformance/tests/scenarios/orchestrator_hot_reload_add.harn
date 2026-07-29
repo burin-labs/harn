@@ -1,7 +1,7 @@
 import "../_common"
 
-pipeline default() {
-  const unique = uuid()
+pipeline default(harness: Harness) {
+  const unique = harness.random.uuid()
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const base = path_join(harness.fs.temp_dir(), "harn-orchestrator-hot-reload-add-" + unique)
   const workspace = path_join(base, "workspace")
@@ -146,5 +146,5 @@ pipeline default() {
   const summary = json_parse(result?.stdout)
   assert(summary.status == 200, "new route accepts after add reload")
   assert(summary.version == 1, "added binding starts at version 1")
-  log("orchestrator hot reload add status: " + to_string(summary.status))
+  harness.stdio.println("orchestrator hot reload add status: " + to_string(summary.status))
 }

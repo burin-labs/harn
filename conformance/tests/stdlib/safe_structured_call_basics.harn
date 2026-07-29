@@ -3,21 +3,20 @@
 // envelope with `value` (lowercase keys) and `status` populated.
 import { safe_structured_call } from "std/llm/safe"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const schema = {
     type: "object",
     required: ["verdict", "bullets"],
     properties: {verdict: {type: "string"}, bullets: {type: "array", items: {type: "string"}}},
   }
-  const envelope = safe_structured_call(
-    "Grade this output.",
+  const envelope = safe_structured_call(harness,  harness, "Grade this output.",
     schema,
     {provider: "mock", model: "mock-model", system: "you are a judge", max_tokens: 200},
   )
-  __io_println(envelope.ok)
-  __io_println(envelope.status)
-  __io_println(envelope.value.verdict)
-  __io_println(len(envelope.value.bullets))
-  __io_println(envelope.value.bullets[0])
-  __io_println(envelope.attempts)
+  harness.stdio.println(envelope.ok)
+  harness.stdio.println(envelope.status)
+  harness.stdio.println(envelope.value.verdict)
+  harness.stdio.println(len(envelope.value.bullets))
+  harness.stdio.println(envelope.value.bullets[0])
+  harness.stdio.println(envelope.attempts)
 }

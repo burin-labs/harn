@@ -2,12 +2,12 @@ import { JsonParseFailure } from "std/json"
 import "std/schema"
 
 /** Resolve the LLM provider for Burin Mini runs. */
-pub fn provider_name() {
+pub fn provider_name(harness: Harness) {
   return harness.env.get_or("BURIN_MINI_PROVIDER", harness.env.get_or("HARN_LLM_PROVIDER", "mock"))
 }
 
 /** Resolve the generator model for Burin Mini runs. */
-pub fn generator_model() {
+pub fn generator_model(harness: Harness) {
   return harness.env.get_or(
     "BURIN_MINI_GENERATOR_MODEL",
     harness.env.get_or("HARN_LLM_MODEL", "mock"),
@@ -15,8 +15,8 @@ pub fn generator_model() {
 }
 
 /** Resolve the evaluator model for Burin Mini runs. */
-pub fn evaluator_model() {
-  return harness.env.get_or("BURIN_MINI_EVALUATOR_MODEL", generator_model())
+pub fn evaluator_model(harness: Harness) {
+  return harness.env.get_or("BURIN_MINI_EVALUATOR_MODEL", generator_model(harness))
 }
 
 fn bool_env(value) {
@@ -46,9 +46,9 @@ fn reasoning_scale_for_model(harness: Harness, _provider, _model) {
 }
 
 /** Apply the Burin Mini reasoning policy defaults to agent options. */
-pub fn apply_reasoning_policy(opts, task) {
-  const provider = opts?.provider ?? provider_name()
-  const model = opts?.model ?? generator_model()
+pub fn apply_reasoning_policy(harness: Harness, opts, task) {
+  const provider = opts?.provider ?? provider_name(harness)
+  const model = opts?.model ?? generator_model(harness)
   const policy = reasoning_policy_for_model(harness, provider, model)
   if policy == "manual_on" {
     return opts + {thinking: true}
@@ -708,7 +708,7 @@ pub fn render_action_results(results) {
   return join(lines, "\n")
 }
 
-/** Structured planner output schema for `sub_agent_run(... returns.schema)`. */
+/** Structured planner output schema for `sub_agent_run(harness, ... returns.schema)`. */
 pub fn planner_schema() {
   return {
     type: "object",
@@ -750,7 +750,7 @@ pub fn planner_schema() {
   }
 }
 
-/** Structured research output schema for `sub_agent_run(... returns.schema)`. */
+/** Structured research output schema for `sub_agent_run(harness, ... returns.schema)`. */
 pub fn research_schema() {
   return {
     type: "object",
@@ -764,10 +764,10 @@ pub fn research_schema() {
 }
 
 /** Build common generator sub-agent options. */
-pub fn generator_options(system, tools, allowed_tools) {
+pub fn generator_options(harness: Harness, system, tools, allowed_tools) {
   const opts = {
-    provider: provider_name(),
-    model: generator_model(),
+    provider: provider_name(harness),
+    model: generator_model(harness),
     system: system,
     tools: tools,
     allowed_tools: allowed_tools,
@@ -780,14 +780,14 @@ pub fn generator_options(system, tools, allowed_tools) {
   } else {
     "code"
   }
-  return apply_reasoning_policy(opts, task)
+  return apply_reasoning_policy(harness, opts, task)
 }
 
 /** Build common evaluator sub-agent options. */
-pub fn evaluator_options(system, tools) {
+pub fn evaluator_options(harness: Harness, system, tools) {
   const opts = {
-    provider: provider_name(),
-    model: evaluator_model(),
+    provider: provider_name(harness),
+    model: evaluator_model(harness),
     system: system,
     tools: tools,
     allowed_tools: ["read", "search", "run"],
@@ -795,7 +795,7 @@ pub fn evaluator_options(system, tools) {
     temperature: 0,
     max_iterations: 4,
   }
-  return apply_reasoning_policy(opts, "verify")
+  return apply_reasoning_policy(harness, opts, "verify")
 }
 
 /** Safely parse a JSON object from model output. */

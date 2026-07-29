@@ -2,13 +2,13 @@
 // preserves input order even with bounded concurrency.
 import { parallel_judge } from "std/llm/ensemble"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const judge_fn = { item -> {verdict: "score-" + to_string(item)} }
-  const results = parallel_judge([1, 2, 3, 4, 5, 6], judge_fn, {max_concurrent: 2})
-  __io_println(len(results))
-  __io_println(results[0].item)
-  __io_println(results[0].verdict.verdict)
-  __io_println(results[5].item)
-  __io_println(results[5].verdict.verdict)
-  __io_println(results[3].ok)
+  const results = parallel_judge(harness, [1, 2, 3, 4, 5, 6], judge_fn, {max_concurrent: 2})
+  harness.stdio.println(len(results))
+  harness.stdio.println(results[0].item)
+  harness.stdio.println(results[0].verdict.verdict)
+  harness.stdio.println(results[5].item)
+  harness.stdio.println(results[5].verdict.verdict)
+  harness.stdio.println(results[3].ok)
 }

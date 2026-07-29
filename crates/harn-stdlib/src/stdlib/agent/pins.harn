@@ -29,7 +29,7 @@ const __PIN_KINDS = ["artifact_ref", "constraint", "decision", "goal", "no_compa
 const __NO_COMPACT_MARKER = "[no-compact]"
 
 /**
- * PinSpec is the normalized shape returned by `pin(...)`: a typed pin the
+ * PinSpec is the normalized shape returned by `pin(harness, ...)`: a typed pin the
  * caller threads through the compaction/reachability seams. `kind` is one of
  * `pin_kinds()`; `content` is the verbatim text to preserve; `dedupe_key` makes
  * a pin self-replacing across re-injection; `role_hint` selects the reminder
@@ -75,8 +75,8 @@ fn __pin_role_hint(kind) {
 // Taxonomy-registration seam (ADDITIVE, default-off). The fixed 5 kinds are the
 // generic taxonomy; a caller (e.g. burin's structural working-set with
 // guardrails/task_contract/file_view/remaining_failures/verification_hud) may
-// widen the accepted set for a single `pin(...)` call via `opts.register_kinds`
-// instead of `pin()` throwing on its domain kinds. When `register_kinds` is
+// widen the accepted set for a single `pin(harness, ...)` call via `opts.register_kinds`
+// instead of `pin(harness)` throwing on its domain kinds. When `register_kinds` is
 // unset the accepted set is EXACTLY `__PIN_KINDS`, so validation — and its
 // throw message — is byte-identical to the pre-seam behavior.
 fn __pin_allowed_kinds(options) {
@@ -98,7 +98,7 @@ fn __pin_allowed_kinds(options) {
 }
 
 /**
- * pin(kind, content, opts?) builds a normalized PinSpec. `kind` must be one of
+ * pin(harness, kind, content, opts?) builds a normalized PinSpec. `kind` must be one of
  * `pin_kinds()` (or, additively, of the caller taxonomy named in
  * `opts.register_kinds`); `content` must be a non-empty string. `opts` may
  * carry `id`, `dedupe_key`, `role_hint`, `meta`, and `register_kinds`.
@@ -110,9 +110,9 @@ fn __pin_allowed_kinds(options) {
  * @effects: []
  * @errors: [runtime]
  * @api_stability: stable
- * @example: pin("goal", "Ship the migration", {dedupe_key: "pin/goal"})
+ * @example: pin(harness, "goal", "Ship the migration", {dedupe_key: "pin/goal"})
  */
-pub fn pin(kind, content, opts = nil) {
+pub fn pin(harness: Harness, kind, content, opts = nil) {
   const options = if type_of(opts) == "dict" {
     opts
   } else {
@@ -120,15 +120,15 @@ pub fn pin(kind, content, opts = nil) {
   }
   const allowed = __pin_allowed_kinds(options)
   if type_of(kind) != "string" || !contains(allowed, kind) {
-    throw "pin(kind, content, opts?): kind must be one of " + join(allowed, ", ") + "; got "
+    throw "pin(harness, kind, content, opts?): kind must be one of " + join(allowed, ", ") + "; got "
       + to_string(
       kind,
     )
   }
   if type_of(content) != "string" || content == "" {
-    throw "pin(\"" + kind + "\", content): content must be a non-empty string"
+    throw "pin(harness, \"" + kind + "\", content): content must be a non-empty string"
   }
-  const id = options?.id ?? ("pin_" + uuid_v7())
+  const id = options?.id ?? ("pin_" + harness.random.uuid_v7())
   return {
     content: content,
     dedupe_key: options?.dedupe_key ?? ("pin/" + kind + "/" + id),
@@ -326,15 +326,14 @@ fn __pin_reminder_validate(options) {
   return options
 }
 
-fn __pin_reminder_body(content, options) {
+fn __pin_reminder_body(harness: Harness, content, options) {
   const limit = options?.max_body
   const text = to_string(content ?? "")
   if type_of(limit) != "int" || limit <= 0 || len(text) <= limit {
     return content
   }
   const retained = text.substring(0, limit)
-  let _ = agent_report_truncation(
-    text,
+  let _ = agent_report_truncation(harness,  harness, text,
     retained,
     "pin reminder exceeded its model-visible body budget",
   )
@@ -356,10 +355,10 @@ fn __pin_reminder_tags(base_tags, options) {
 }
 
 /**
- * pin_reminder(pin, opts?) lowers a PinSpec to a system-reminder options dict
+ * pin_reminder(harness, pin, opts?) lowers a PinSpec to a system-reminder options dict
  * with `preserve_on_compact: true`, `tags: ["pin", <kind>]`, the pin's
  * `dedupe_key`, and its `role_hint`. Spread it into
- * `transcript.inject_reminder(...)` or `agent_session_inject_reminder(...)` —
+ * `transcript.inject_reminder(...)` or `agent_session_inject_reminder(harness, ...)` —
  * this is the "survives compaction by construction" mechanism (the
  * structured-metadata twin of `[no-compact]`).
  *
@@ -374,7 +373,7 @@ fn __pin_reminder_tags(base_tags, options) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn pin_reminder(pin, opts = nil) {
+pub fn pin_reminder(harness: Harness, pin, opts = nil) {
   const raw = if type_of(opts) == "dict" {
     opts
   } else {
@@ -383,7 +382,7 @@ pub fn pin_reminder(pin, opts = nil) {
   const options = __pin_reminder_validate(raw)
   const kind = to_string(pin?.kind ?? "note")
   let reminder = {
-    body: __pin_reminder_body(pin.content, options),
+    body: __pin_reminder_body(harness, pin.content, options),
     dedupe_key: pin?.dedupe_key ?? ("pin/" + kind),
     preserve_on_compact: true,
     role_hint: pin?.role_hint ?? __pin_role_hint(kind),
@@ -397,7 +396,7 @@ pub fn pin_reminder(pin, opts = nil) {
 }
 
 /**
- * agent_pin(session_id, pin) persists a pin into a live session by injecting its
+ * agent_pin(harness, session_id, pin) persists a pin into a live session by injecting its
  * `preserve_on_compact` reminder. Returns the reminder id. The pin re-renders
  * each turn and is carried across compaction by the reminder lifecycle.
  *
@@ -405,8 +404,8 @@ pub fn pin_reminder(pin, opts = nil) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn agent_pin(session_id, pin) {
-  return agent_session_inject_reminder(session_id, pin_reminder(pin))
+pub fn agent_pin(harness: Harness, session_id, pin) {
+  return agent_session_inject_reminder(harness, session_id, pin_reminder(harness, pin))
 }
 
 /**
@@ -423,7 +422,7 @@ pub fn strip_no_compact(text) {
 }
 
 /**
- * recognize_no_compact(text, opts?) is an input adapter for Burin's `[no-compact]`
+ * recognize_no_compact(harness, text, opts?) is an input adapter for Burin's `[no-compact]`
  * message-text marker: if `text` carries the marker it returns a `no_compact`
  * pin whose content is the marker-stripped text, else nil. This is an ingestion
  * FORMAT recognizer (not a back-compat shim for a removed API).
@@ -431,11 +430,11 @@ pub fn strip_no_compact(text) {
  * @effects: []
  * @errors: []
  * @api_stability: stable
- * @example: recognize_no_compact("## Session goal [no-compact]\nObjective: X")
+ * @example: recognize_no_compact(harness, "## Session goal [no-compact]\nObjective: X")
  */
-pub fn recognize_no_compact(text, opts = nil) {
+pub fn recognize_no_compact(harness: Harness, text, opts = nil) {
   if type_of(text) != "string" || !text.contains(__NO_COMPACT_MARKER) {
     return nil
   }
-  return pin("no_compact", strip_no_compact(text), opts)
+  return pin(harness, "no_compact", strip_no_compact(text), opts)
 }

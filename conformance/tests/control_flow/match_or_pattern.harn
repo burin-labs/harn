@@ -4,7 +4,7 @@
  * mixed int/string arms on an int/string-tagged value, and guarded
  * or-pattern arms.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   fn classify(n: int) -> string {
     return match n {
       0 | 1 | 2 -> { "small" }
@@ -12,20 +12,20 @@ pipeline default() {
       _ -> { "large" }
     }
   }
-  __io_println(classify(0))
-  __io_println(classify(2))
-  __io_println(classify(4))
-  __io_println(classify(100))
+  harness.stdio.println(classify(0))
+  harness.stdio.println(classify(2))
+  harness.stdio.println(classify(4))
+  harness.stdio.println(classify(100))
   fn verdict(v: "pass" | "fail" | "unclear" | "skip") -> string {
     return match v {
       "pass" -> { "ok" }
       "fail" | "unclear" | "skip" -> { "not ok" }
     }
   }
-  __io_println(verdict("pass"))
-  __io_println(verdict("fail"))
-  __io_println(verdict("unclear"))
-  __io_println(verdict("skip"))
+  harness.stdio.println(verdict("pass"))
+  harness.stdio.println(verdict("fail"))
+  harness.stdio.println(verdict("unclear"))
+  harness.stdio.println(verdict("skip"))
   // Or-pattern with a guard applies the guard once per match.
   fn describe(n: int) -> string {
     return match n {
@@ -34,7 +34,7 @@ pipeline default() {
       _ -> { "other" }
     }
   }
-  __io_println(describe(1))
-  __io_println(describe(3))
-  __io_println(describe(10))
+  harness.stdio.println(describe(1))
+  harness.stdio.println(describe(3))
+  harness.stdio.println(describe(10))
 }

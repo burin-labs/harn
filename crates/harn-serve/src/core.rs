@@ -791,14 +791,13 @@ fn build_vm_args(
     // qualifies (matches the language convention).
     if first_param_is_harness(function) {
         let harness = vm
-            .global("harness")
+            .root_harness_value()
             .ok_or_else(|| {
                 DispatchError::Execution(
                     "Harness handle not installed; DispatchCore must call vm.set_harness() before invoking exported functions that take a harness param"
                         .to_string(),
                 )
-            })?
-            .clone();
+            })?;
         prefix.push(harness);
         params = &params[1..];
     }

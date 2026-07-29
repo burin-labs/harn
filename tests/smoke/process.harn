@@ -8,15 +8,15 @@
  */
 import { command_run } from "std/command"
 
-fn echo_argv(text) {
-  if platform() == "windows" {
+fn echo_argv(harness: Harness, text) {
+  if harness.system.platform().os == "windows" {
     return ["cmd", "/C", "echo " + text]
   }
   return ["printf", "%s", text]
 }
 
-fn file_capture_shell_spec() {
-  if platform() == "windows" {
+fn file_capture_shell_spec(harness: Harness) {
+  if harness.system.platform().os == "windows" {
     return {
       mode: "shell",
       shell_id: "cmd",
@@ -30,8 +30,8 @@ fn file_capture_shell_spec() {
   }
 }
 
-pipeline default() {
-  const result = command_run(echo_argv("smoke"), {capture: {max_inline_bytes: 64}})
+pipeline default(harness: Harness) {
+  const result = command_run(harness.tools, echo_argv(harness, "smoke"), {capture: {max_inline_bytes: 64}})
   if !result.success {
     throw "process smoke failed: success=${result.success} exit_code=${result.exit_code} stderr=${result.stderr}"
   }
@@ -42,7 +42,7 @@ pipeline default() {
     throw "process smoke failed: stdout did not contain expected marker (got ${result.stdout})"
   }
   const file_result = command_run(
-    file_capture_shell_spec(),
+    harness.tools, file_capture_shell_spec(harness),
     {capture: {transport: "file", max_inline_bytes: 128}},
   )
   if file_result.success {
@@ -57,5 +57,5 @@ pipeline default() {
   if !contains(file_result.stderr, "file-stderr") {
     throw "process file-capture smoke failed: stderr missing marker (got ${file_result.stderr})"
   }
-  __io_println("process ok on " + platform())
+  harness.stdio.println("process ok on " + harness.system.platform().os)
 }

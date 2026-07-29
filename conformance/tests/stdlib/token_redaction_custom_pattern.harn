@@ -8,7 +8,7 @@ import {
   register_pattern,
 } from "std/oauth/redaction"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Start from a clean thread — prior conformance cases may have
   // installed their own patterns.
   clear_custom_patterns()
@@ -38,5 +38,5 @@ pipeline test(task) {
   if !contains(after, "ACME-ABCDEF123456") {
     throw "after clearing, ACME tokens should not be scrubbed: " + after
   }
-  log("token_redaction custom ok")
+  harness.stdio.println("token_redaction custom ok")
 }

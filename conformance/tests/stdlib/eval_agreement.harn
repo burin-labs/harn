@@ -17,7 +17,7 @@ fn weak(id: string, verdict: string) -> dict {
   return evaluator_verdict(id, verdict, false, "artifact/substring")
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // --- agreement_decision: two execution signals concur -> PASS ---
   const two = agreement_decision([e1(verdict_pass()), e2(verdict_pass())])
   assert(two.evaluator_agreement, "2-of-2 execution concurrence -> PASS")
@@ -93,5 +93,5 @@ pipeline test(task) {
   // --- fewer than 2 jointly-decided cases -> kappa undefined ---
   const one = cohen_kappa([[e1(verdict_pass()), e2(verdict_pass())]])
   assert(one.kappa == nil, "fewer than 2 jointly-decided cases -> kappa undefined")
-  log("stdlib eval agreement ok")
+  harness.stdio.println("stdlib eval agreement ok")
 }

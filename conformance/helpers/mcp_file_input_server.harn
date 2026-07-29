@@ -18,7 +18,7 @@ fn decode_data_uri(value: string) -> dict {
   return {media_type: media_type, size: len(text), text: text}
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   harn.mcp
     .configure(
     {experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}},

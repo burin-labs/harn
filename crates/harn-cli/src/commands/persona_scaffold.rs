@@ -878,7 +878,7 @@ mod tests {
                 .expect("canonical persona template capabilities");
 
             assert!(
-                source.contains("render_prompt("),
+                source.contains("harness.fs.render_prompt("),
                 "{template} renders a prompt"
             );
             assert!(

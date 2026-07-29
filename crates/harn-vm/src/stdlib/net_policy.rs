@@ -27,6 +27,8 @@ pub fn register_net_policy_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__net_policy_domain(host: string) -> dict",
     category = "net_policy"
 )]
@@ -39,6 +41,8 @@ fn net_policy_domain_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__net_policy_domain_wildcard(pattern: string) -> dict",
     category = "net_policy"
 )]
@@ -59,6 +63,8 @@ fn net_policy_domain_wildcard_impl(
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__net_policy_cidr(range: string) -> dict",
     category = "net_policy"
 )]
@@ -74,6 +80,8 @@ fn net_policy_cidr_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__net_policy_host(host: string, ports?: list) -> dict",
     category = "net_policy"
 )]
@@ -109,6 +117,8 @@ fn net_policy_host_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__net_policy_create(config: dict) -> dict",
     category = "net_policy"
 )]

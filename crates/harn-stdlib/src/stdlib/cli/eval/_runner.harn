@@ -106,7 +106,7 @@ fn __md_escape(s: string) -> string {
  * wedge surfaces a software-error exit code if anyone tries to invoke
  * it directly. Registered in `STDLIB_CLI_SCRIPTS` for discoverability
  * (so `harn cli scripts list` shows it) and drift-check coverage.
- * Returns an int rather than calling `exit()` so the dispatch wedge's
+ * Returns an int rather than calling `harness.runtime.exit()` so the dispatch wedge's
  * captured stderr buffer flushes back to the Rust shim.
  */
 fn main(harness: Harness) -> int {

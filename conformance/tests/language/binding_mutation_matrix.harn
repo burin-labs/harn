@@ -30,7 +30,7 @@ fn rejected(body) -> string {
   }
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // ---- const + every assignment form: uniformly rejected -----------------
   const frozen_list = [0]
   const frozen_dict = {k: 0}
@@ -96,5 +96,5 @@ pipeline test(task) {
   let copy = original
   copy["k"] = 99
   assert_eq(original["k"], 1, "dict assignment is a value copy, not an alias")
-  log("binding mutation matrix: all tests passed")
+  harness.stdio.println("binding mutation matrix: all tests passed")
 }

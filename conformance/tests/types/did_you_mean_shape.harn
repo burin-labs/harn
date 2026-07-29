@@ -1,15 +1,15 @@
 /** Test "did you mean" suggestions on shape validation errors */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   fn process(data: {name: string, email: string}) {
-    __io_println(data.name)
+    harness.stdio.println(data.name)
   }
   // Pass boundary data with typo: "emial" instead of "email"
   const bad = json_parse("{\"name\":\"test\",\"emial\":\"foo@bar.com\"}")
   const result = try {
     process(bad)
   }
-  __io_println(is_err(result))
+  harness.stdio.println(is_err(result))
   // The error should mention "email" as a suggestion
   const msg = unwrap_err(result)
-  __io_println(contains(msg, "email"))
+  harness.stdio.println(contains(msg, "email"))
 }

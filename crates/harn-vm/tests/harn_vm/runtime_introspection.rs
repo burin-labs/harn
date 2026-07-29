@@ -45,8 +45,8 @@ fn out(source: &str) -> Vec<String> {
 #[test]
 fn runtime_introspection_starts_unresolved() {
     let lines = out(r"
-pipeline main(task) {
-  const snap = runtime_introspection()
+pipeline main(harness: Harness, task) {
+  const snap = harness.runtime.introspection()
   log(snap.provider == nil)
   log(snap.model == nil)
   log(snap.harn_version != nil)

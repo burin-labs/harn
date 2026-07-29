@@ -1,7 +1,7 @@
 import "../_common"
 
-pipeline default(task) {
-  const unique = uuid()
+pipeline default(harness: Harness, task) {
+  const unique = harness.random.uuid()
   const root = path_join(harness.fs.temp_dir(), "harn-worker-claim-expiry-" + unique)
   const producer_dir = path_join(root, "producer")
   const failing_consumer_dir = path_join(root, "consumer-fail")
@@ -66,10 +66,10 @@ pipeline default(task) {
     "--json",
   )
   const first_data = json_parse(first.stdout)
-  __io_println(
+  harness.stdio.println(
     first.success && first_data.drained == 1 && first_data.acked == 0 && first_data.deferred == 1,
   )
-  __io_println(
+  harness.stdio.println(
     first_data.summary.in_flight == 1
       && first_data.summary.responses == 1
       && first_data.responses[0].outcome?.status == "dlq"
@@ -107,15 +107,15 @@ pipeline default(task) {
       }
       second_data = parsed
     }
-    sleep(50ms)
+    harness.clock.sleep_ms(50ms)
   }
-  __io_println(
+  harness.stdio.println(
     second.success && second_data.drained == 1 && second_data.acked == 1
       && second_data.deferred == 0,
   )
   const first_has_response = len(first_data.responses ?? []) > 0
   const second_has_response = len(second_data.responses ?? []) > 0
-  __io_println(
+  harness.stdio.println(
     first_has_response
       && second_has_response
       && second_data.responses[0].job_event_id
@@ -123,7 +123,7 @@ pipeline default(task) {
       .job_event_id
       && second_data.responses[0].outcome?.status == "succeeded",
   )
-  __io_println(
+  harness.stdio.println(
     second_data.summary.ready == 0 && second_data.summary.in_flight == 0
       && second_data.summary
       .responses

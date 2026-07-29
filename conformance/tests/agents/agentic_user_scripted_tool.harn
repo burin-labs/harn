@@ -2,9 +2,9 @@ import { agent_capture_events } from "std/agent/events"
 import { scripted_user, simulated_user_status, user_tools } from "std/agent/user"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "ask_1", name: "ask_user", arguments: {question: "Which test runner should I use?"}},
@@ -13,8 +13,7 @@ pipeline main() {
       llm_text("Created index.test.ts with Vitest edge coverage."),
     ],
     { ->
-      const answerer = scripted_user(
-        [
+      const answerer = scripted_user(harness,  harness, [
           {
             match: "*test runner*",
             reply: "Use Vitest and cover empty, invalid, and boundary inputs.",
@@ -23,10 +22,8 @@ pipeline main() {
         {max_replies: 2},
       )
       const session = "agentic-user-scripted-tool"
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Create index.test.ts with edge coverage.",
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Create index.test.ts with edge coverage.",
           nil,
           {
             provider: "mock",
@@ -43,13 +40,13 @@ pipeline main() {
           return event.type == "tool_call_audit" && event.audit.event_type == "simulated_user_reply"
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const status = simulated_user_status(answerer)
-      __io_println(captured.result.status)
-      __io_println(contains(captured.result.text, "Vitest edge coverage"))
-      __io_println(status.state.replies)
-      __io_println(simulated_audit != nil)
-      __io_println(contains(json_stringify(calls[1].messages), "Use Vitest"))
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(contains(captured.result.text, "Vitest edge coverage"))
+      harness.stdio.println(status.state.replies)
+      harness.stdio.println(simulated_audit != nil)
+      harness.stdio.println(contains(json_stringify(calls[1].messages), "Use Vitest"))
     },
   )
 }

@@ -3,7 +3,7 @@
 // "cheapest" via silent zero pricing.
 import { compare_model_costs } from "std/llm/economics"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const ranked = compare_model_costs(
     [
       "claude-sonnet-4-20250514",
@@ -16,7 +16,7 @@ pipeline default() {
   // A model under a non-existent provider has no catalog row and no
   // provider-level economics, so pricing is genuinely unknown.
   for entry in ranked {
-    __io_println(
+    harness.stdio.println(
       entry.model
         + " known="
         + to_string(entry.pricing_known)
@@ -32,7 +32,7 @@ pipeline default() {
     ],
     {input_tokens: 1000, output_tokens: 200, calls: 10},
   )
-  __io_println("scaled calls=" + to_string(scaled[0].calls))
+  harness.stdio.println("scaled calls=" + to_string(scaled[0].calls))
   // gpt-4o-mini should be cheaper than claude-sonnet-4.
-  __io_println("scaled cheapest=" + scaled[0].model)
+  harness.stdio.println("scaled cheapest=" + scaled[0].model)
 }

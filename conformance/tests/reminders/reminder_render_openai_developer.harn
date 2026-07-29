@@ -1,38 +1,38 @@
 import { agent_reminder_providers_fire, agent_session_messages } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
-  clear_reminder_providers()
-  register_reminder_provider(
+pipeline main(harness: Harness) {
+  harness.agent.clear_reminder_providers()
+  harness.agent.register_reminder_provider(
     {
       id: "render_openai",
       subscribes_to: ["session_idle"],
       evaluate: { _ctx -> return {reminder: {body: "openai reminder", role_hint: "user_block"}} },
     },
   )
-  const session = agent_session_open("reminder-render-openai")
-  agent_session_reset(session)
-  agent_session_inject(session, {role: "user", content: "hello"})
-  agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
+  const session = harness.agent.open("reminder-render-openai")
+  harness.agent.reset(session)
+  harness.agent.inject(session, {role: "user", content: "hello"})
+  agent_reminder_providers_fire(harness, session, "session_idle", {session: {id: session}}, {})
   with_llm_script(
-    [llm_text("ok")],
+    harness.llm, [llm_text("ok")],
     { ->
-      llm_call(
+      harness.llm.call(
         "ignored",
         nil,
         {
           provider: "mock",
           model: "o3",
-          messages: agent_session_messages(session),
+          messages: agent_session_messages(harness, session),
           session_id: session,
         },
       )
-      const call = llm_mock_calls()[0]
-      __io_println(call.messages[0].role)
-      __io_println(contains(call.messages[0].content, "openai reminder"))
-      __io_println(call.messages[1].role)
-      __io_println(call.system == nil || !contains(call.system, "openai reminder"))
-      clear_reminder_providers()
+      const call = harness.llm.mock_calls()[0]
+      harness.stdio.println(call.messages[0].role)
+      harness.stdio.println(contains(call.messages[0].content, "openai reminder"))
+      harness.stdio.println(call.messages[1].role)
+      harness.stdio.println(call.system == nil || !contains(call.system, "openai reminder"))
+      harness.agent.clear_reminder_providers()
     },
   )
 }

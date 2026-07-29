@@ -13,9 +13,8 @@ fn list_tools() {
   return tools
 }
 
-pipeline test(task) {
-  const result = agent_loop(
-    "Inspect the workspace",
+pipeline test(harness: Harness, task) {
+  const result = agent_loop(harness, "Inspect the workspace",
     "You are helpful",
     {
       provider: "mock",
@@ -25,8 +24,8 @@ pipeline test(task) {
       policy: {tool_arg_constraints: [{tool: "list_directory", arg_key: "path", arg_patterns: ["src/*"]}]},
     },
   )
-  log(result?.tools?.rejected[0])
-  log(
+  harness.stdio.println(result?.tools?.rejected[0])
+  harness.stdio.println(
     json_stringify(transcript_messages(result?.transcript)).contains("is outside your allowed scope"),
   )
 }

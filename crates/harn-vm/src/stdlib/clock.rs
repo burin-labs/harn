@@ -161,27 +161,45 @@ pub(crate) fn register_clock_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "timestamp(...args: any) -> float", category = "clock")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "timestamp(...args: any) -> float", category = "clock"
+)]
 fn timestamp_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Float(now_wall_seconds()))
 }
 
-#[harn_builtin(sig = "elapsed() -> int", category = "clock")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "elapsed() -> int", category = "clock"
+)]
 fn elapsed_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(now_monotonic_ms()))
 }
 
-#[harn_builtin(sig = "monotonic_ms(...args: any) -> int", category = "clock")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "monotonic_ms(...args: any) -> int", category = "clock"
+)]
 fn monotonic_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(now_monotonic_ms()))
 }
 
-#[harn_builtin(sig = "now_ms(...args: any) -> int", category = "clock")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "now_ms(...args: any) -> int", category = "clock"
+)]
 fn now_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(now_wall_ms()))
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sleep_ms(...args: any) -> nil",
     kind = "async",
     category = "clock"
@@ -202,7 +220,11 @@ async fn sleep_ms_impl(
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "mock_time(...args: any) -> nil", category = "clock")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "mock_time(...args: any) -> nil", category = "clock"
+)]
 fn mock_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(ms) = args.first().and_then(|a| a.as_int()) else {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -213,7 +235,11 @@ fn mock_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(sig = "advance_time(ms: int) -> int", category = "clock")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "advance_time(ms: int) -> int", category = "clock"
+)]
 fn advance_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
     if !is_mocked() {
@@ -225,7 +251,11 @@ fn advance_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::Int(now_wall_ms()))
 }
 
-#[harn_builtin(sig = "unmock_time(...args: any) -> nil", category = "clock")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "unmock_time(...args: any) -> nil", category = "clock"
+)]
 fn unmock_time_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     pop_mock();
     Ok(VmValue::Nil)

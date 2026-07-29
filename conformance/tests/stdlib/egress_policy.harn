@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   http_mock_clear()
   transport_mock_clear()
   egress_policy(
@@ -56,5 +56,5 @@ pipeline test(task) {
   }
   assert(is_err(ws_blocked))
   assert_eq(unwrap_err(ws_blocked).type, "EgressBlocked")
-  __io_println("egress_policy_ok")
+  harness.stdio.println("egress_policy_ok")
 }

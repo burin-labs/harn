@@ -14,6 +14,8 @@ use super::args::value_from_serde;
 use super::journal::ensure_trigger_event_log;
 
 #[harn_builtin(
+    exposure = "harness.runtime.correction_record",
+    effects = ["state.write@dynamic"],
     sig = "correction_record(correction: dict) -> dict",
     kind = "async",
     category = "triggers"
@@ -34,6 +36,8 @@ async fn correction_record_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.correction_query",
+    effects = ["state.read@dynamic"],
     sig = "correction_query(filters?: dict) -> list",
     kind = "async",
     category = "triggers"
@@ -60,6 +64,8 @@ async fn correction_query_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.corrections_record",
+    effects = ["state.write@dynamic"],
     sig = "corrections.record(correction: dict) -> string",
     kind = "async",
     category = "triggers"
@@ -80,6 +86,8 @@ async fn corrections_record_ns_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.corrections_query",
+    effects = ["state.read@dynamic"],
     sig = "corrections.query(filters?: dict) -> list",
     kind = "async",
     category = "triggers"

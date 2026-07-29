@@ -268,12 +268,11 @@ parameter supplies tuple context. Constant out-of-bounds indexes are
 ```harn
 const matches  = regex_match("[0-9]+", "abc 42 def 7")
 const swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
-const same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 const captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
 ```
 
-Both `regex_replace` and `regex_replace_all` replace every match;
-both support `$1`, `$2`, `${name}` backrefs from the `regex` crate.
+`regex_replace` replaces every match and supports `$1`, `$2`, and
+`${name}` backrefs from the `regex` crate.
 
 ## LLM calls
 

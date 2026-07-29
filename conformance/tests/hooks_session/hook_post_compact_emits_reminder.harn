@@ -1,12 +1,12 @@
-pipeline main() {
-  clear_session_hooks()
-  const session = agent_session_open("hook-post-compact-emits-reminder")
-  agent_session_reset(session)
-  agent_session_inject(session, {role: "user", content: "one"})
-  agent_session_inject(session, {role: "assistant", content: "two"})
-  agent_session_inject(session, {role: "user", content: "three"})
-  agent_session_inject(session, {role: "assistant", content: "four"})
-  register_session_hook(
+pipeline main(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  const session = harness.agent.open("hook-post-compact-emits-reminder")
+  harness.agent.reset(session)
+  harness.agent.inject(session, {role: "user", content: "one"})
+  harness.agent.inject(session, {role: "assistant", content: "two"})
+  harness.agent.inject(session, {role: "user", content: "three"})
+  harness.agent.inject(session, {role: "assistant", content: "four"})
+  harness.agent.register_session_hook(
     "post_compact",
     { _event ->
       return {
@@ -18,9 +18,9 @@ pipeline main() {
       }
     },
   )
-  const snapshot = agent_session_snapshot(session) ?? {}
+  const snapshot = harness.agent.snapshot(session) ?? {}
   transcript_compact(snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
-  const events = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const events = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   // Two reminders fire post-compact: our hook reminder plus the built-in
   // compaction recap. Assert ours is present and tagged correctly.
   const hook_event = if events[0].reminder.dedupe_key == "post-compact-hook" {
@@ -28,9 +28,9 @@ pipeline main() {
   } else {
     events[1]
   }
-  __io_println(len(events) >= 1)
-  __io_println(hook_event.reminder.body)
-  __io_println(hook_event.reminder.tags[0])
-  __io_println(hook_event.reminder.source)
-  clear_session_hooks()
+  harness.stdio.println(len(events) >= 1)
+  harness.stdio.println(hook_event.reminder.body)
+  harness.stdio.println(hook_event.reminder.tags[0])
+  harness.stdio.println(hook_event.reminder.source)
+  harness.agent.clear_session_hooks()
 }

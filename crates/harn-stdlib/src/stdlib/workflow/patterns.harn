@@ -135,7 +135,7 @@ pub fn workflow_self_verifying_graph(config = nil) {
  *
  * The graph is explicit: verification failure follows branch `"failed"` into
  * the repair stage, then repair returns to verify. Callers bound total work
- * with workflow_execute({max_steps}) and per-agent `iteration_budget`.
+ * with workflow_execute(harness, {max_steps}) and per-agent `iteration_budget`.
  *
  * @effects: []
  * @errors: []

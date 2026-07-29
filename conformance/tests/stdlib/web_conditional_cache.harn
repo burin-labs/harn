@@ -1,7 +1,7 @@
 import { mem_cache } from "std/cache"
 import { web_fetch } from "std/web"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   http_mock_clear()
   http_mock(
     "GET",
@@ -33,8 +33,7 @@ pipeline test(task) {
     {status: 200, headers: {etag: "\"item-2\""}, body: "two"},
   )
   const store = mem_cache({namespace: "web-conditional-cache"})
-  const first = web_fetch(
-    "https://example.com/catalog",
+  const first = web_fetch(harness,  harness, "https://example.com/catalog",
     {
       store: store,
       http_options: {headers: {Accept: "text/html"}},
@@ -42,8 +41,7 @@ pipeline test(task) {
       fetched_at: "t1",
     },
   )
-  const second = web_fetch(
-    "https://example.com/catalog",
+  const second = web_fetch(harness,  harness, "https://example.com/catalog",
     {
       store: store,
       http_options: {headers: {Accept: "text/html"}},
@@ -63,9 +61,9 @@ pipeline test(task) {
   assert_eq(calls[1].headers["x-source"], "fixture")
   assert_eq(calls[1].headers["if-none-match"], "\"catalog-v1\"")
   assert_eq(calls[1].headers["if-modified-since"], "Mon, 11 May 2026 00:00:00 GMT")
-  const item_one = web_fetch("https://example.com/item", {store: store, query: {id: 1}})
-  const item_two = web_fetch("https://example.com/item", {store: store, query: {id: 2}})
-  const item_one_again = web_fetch("https://example.com/item", {store: store, query: {id: 1}})
+  const item_one = web_fetch(harness, "https://example.com/item", {store: store, query: {id: 1}})
+  const item_two = web_fetch(harness, "https://example.com/item", {store: store, query: {id: 2}})
+  const item_one_again = web_fetch(harness, "https://example.com/item", {store: store, query: {id: 1}})
   assert_eq(item_one.body, "one")
   assert_eq(item_two.cache_status, "miss")
   assert_eq(item_two.body, "two")
@@ -74,5 +72,5 @@ pipeline test(task) {
   const query_calls = http_mock_calls({redact_sensitive: false})
   assert_eq(query_calls[3].url, "https://example.com/item?id=2")
   assert_eq(query_calls[3].headers["if-none-match"], nil)
-  __io_println("web_conditional_cache_ok")
+  harness.stdio.println("web_conditional_cache_ok")
 }

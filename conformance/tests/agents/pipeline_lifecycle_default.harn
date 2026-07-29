@@ -12,23 +12,23 @@
  */
 import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "pre_finish",
     { event ->
-      __io_println("pre_finish has_on_finish=" + to_string(event.has_on_finish))
+      harness.stdio.println("pre_finish has_on_finish=" + to_string(event.has_on_finish))
       return nil
     },
   )
-  register_session_hook(
+  harness.agent.register_session_hook(
     "post_finish",
     { event ->
-      __io_println("post_finish return_value=" + to_string(event.return_value))
+      harness.stdio.println("post_finish return_value=" + to_string(event.return_value))
       return nil
     },
   )
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const result = on_finish_drain(harness, return_value)
       const audits = lifecycle_audit_log_take()

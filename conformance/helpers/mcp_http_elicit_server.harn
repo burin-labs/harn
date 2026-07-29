@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   mcp_server_metadata(
     {
       name: "harn-http-elicit-test",

@@ -1,19 +1,18 @@
 /**
- * project-metadata demo: standalone host-call fallbacks use Harn's
+ * project-metadata demo: `HarnessProject` uses Harn's
  * built-in metadata store when no product host bridge handles them.
  *
- * This exercises the host-shaped `project.metadata_*` operations directly:
+ * This exercises the typed `harness.project.metadata_*` operations directly:
  * set a namespace on a parent directory, read it from a child directory via
  * inheritance, inspect the origin, refresh structure hashes, and flush the
  * store. Product embedders such as Burin can still override these operations
  * through their host bridge; this offline demo covers the standalone CLI path.
  */
-pipeline default(_task) {
+pipeline default(harness: Harness, _task) {
   harness.fs.mkdir("demo", true)
   harness.fs.mkdir("demo/src", true)
   harness.fs.write_text("demo/src/lib.harn", "pipeline default(_) { return 1 }\n")
-  host_call(
-    "project.metadata_set",
+  harness.project.metadata_set(
     {
       dir: "demo",
       namespace: "learning",
@@ -26,11 +25,10 @@ pipeline default(_task) {
       },
     },
   )
-  const exact = host_call("project.metadata_get", {dir: "demo", namespace: "learning"})
-  const inherited = host_call("project.metadata_get", {dir: "demo/src", namespace: "learning"})
-  const all = host_call("project.metadata_get", {dir: "demo/src"})
-  const before = host_call(
-    "project.metadata_inspect",
+  const exact = harness.project.metadata_get({dir: "demo", namespace: "learning"})
+  const inherited = harness.project.metadata_get({dir: "demo/src", namespace: "learning"})
+  const all = harness.project.metadata_get({dir: "demo/src"})
+  const before = harness.project.metadata_inspect(
     {dir: "demo/src", namespace: "learning", key: "gotchas"},
   )
   require exact.gotchas[0] == "prefer relative imports for sibling modules"
@@ -38,18 +36,17 @@ pipeline default(_task) {
   require all.learning.source == "demo"
   require before.origin_dir == "demo"
   require before.missing_structure_hash
-  const stale_before = host_call("project.metadata_stale", {dir: "demo"})
+  const stale_before = harness.project.metadata_stale({dir: "demo"})
   require type_of(stale_before.tier1) == "list"
   require type_of(stale_before.tier2) == "list"
-  host_call("project.metadata_refresh_hashes", {dir: "demo"})
-  const after = host_call(
-    "project.metadata_inspect",
+  harness.project.metadata_refresh_hashes({dir: "demo"})
+  const after = harness.project.metadata_inspect(
     {dir: "demo/src", namespace: "learning", key: "gotchas"},
   )
   require after.origin_dir == "demo"
   require !after.missing_structure_hash
   require !after.stale_tier1
-  host_call("project.metadata_save", {})
+  harness.project.metadata_save({})
   const receipt = {
     receipt_kind: "project_metadata_receipt",
     origin_dir: after.origin_dir,
@@ -59,7 +56,7 @@ pipeline default(_task) {
       && type_of(stale_before.tier2) == "list",
     hash_refreshed: !after.missing_structure_hash,
   }
-  __io_println("=== project-metadata receipt ===")
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== project-metadata receipt ===")
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

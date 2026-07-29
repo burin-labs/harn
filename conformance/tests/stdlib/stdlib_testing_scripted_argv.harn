@@ -1,6 +1,6 @@
 import { argv_step, assert_error_contains, scripted_argv } from "std/testing"
 
-pipeline test_scripted_argv(task) {
+pipeline test_scripted_argv(harness: Harness, task) {
   const commands = scripted_argv<dict>(
     [
       argv_step(["tool", "status"], {success: true, stdout: "ready"}),
@@ -24,5 +24,5 @@ pipeline test_scripted_argv(task) {
   assert_eq(extra.calls(), [["once"], ["twice"]])
   const incomplete = scripted_argv<bool>([argv_step(["required"], true)])
   assert_error_contains(incomplete.assert_consumed, "remaining: [[required]]")
-  __io_println("ok")
+  harness.stdio.println("ok")
 }

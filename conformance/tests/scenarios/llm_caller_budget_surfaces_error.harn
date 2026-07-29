@@ -10,8 +10,8 @@ import { default_llm_caller } from "std/llm/caller"
 import { safe_call } from "std/llm/safe"
 import { with_llm_mocks } from "std/testing"
 
-pipeline default() {
-  const caller = default_llm_caller()
+pipeline default(harness: Harness) {
+  const caller = default_llm_caller(harness)
   const call = {
     prompt: "hi",
     system: "",
@@ -19,17 +19,17 @@ pipeline default() {
     turn: {iteration: 0, session_id: "s", attempt: 1},
   }
   with_llm_mocks(
-    [{error: {reason: "budget_exceeded", message: "over budget"}}],
+    harness.llm, [{error: {reason: "budget_exceeded", message: "over budget"}}],
     { ->
       const env = caller(call)
-      __io_println("caller ok=${env.ok} status=${env.status} has_error=${env.error != nil}")
+      harness.stdio.println("caller ok=${env.ok} status=${env.status} has_error=${env.error != nil}")
     },
   )
   with_llm_mocks(
-    [{error: {reason: "budget_exceeded", message: "over budget"}}],
+    harness.llm, [{error: {reason: "budget_exceeded", message: "over budget"}}],
     { ->
-      const s = safe_call("hi", "", {provider: "mock", model: "m"})
-      __io_println("safe   ok=${s.ok} status=${s.status} has_error=${s.error != nil}")
+      const s = safe_call(harness, "hi", "", {provider: "mock", model: "m"})
+      harness.stdio.println("safe   ok=${s.ok} status=${s.status} has_error=${s.error != nil}")
     },
   )
 }

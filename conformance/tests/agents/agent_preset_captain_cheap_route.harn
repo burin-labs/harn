@@ -17,17 +17,17 @@
  */
 import { agent_preset } from "std/agent/presets"
 
-fn preset_agent(kind, prompt, options = nil) {
+fn preset_agent(harness: Harness, kind, prompt, options = nil) {
   const opts = agent_preset(kind, options)
-  return agent_loop(prompt, opts?.system, opts)
+  return agent_loop(harness, prompt, opts?.system, opts)
 }
 
-pipeline default() {
-  const cheap_calls = atomic(0)
-  const frontier_calls = atomic(0)
-  const log_records = atomic(0)
+pipeline default(harness: Harness) {
+  const cheap_calls = harness.runtime.atomic(0)
+  const frontier_calls = harness.runtime.atomic(0)
+  const log_records = harness.runtime.atomic(0)
   const cheap = { _call ->
-    let _ = atomic_add(cheap_calls, 1)
+    let _ = harness.runtime.atomic_add(cheap_calls, 1)
     return {
       ok: true,
       value: {
@@ -40,7 +40,7 @@ pipeline default() {
     }
   }
   const frontier = { _call ->
-    let _ = atomic_add(frontier_calls, 1)
+    let _ = harness.runtime.atomic_add(frontier_calls, 1)
     return {
       ok: true,
       value: {
@@ -54,10 +54,10 @@ pipeline default() {
   }
   const escalate = { call -> contains(call.prompt, "Frontier") }
   const logging_sink = { _record ->
-    let _ = atomic_add(log_records, 1)
+    let _ = harness.runtime.atomic_add(log_records, 1)
   }
   // Default route: cheap caller handles the call without escalation.
-  const cheap_run = preset_agent(
+  const cheap_run = preset_agent(harness, 
     "release_captain",
     "Cheap path.",
     {
@@ -70,13 +70,13 @@ pipeline default() {
       max_iterations: 2,
     },
   )
-  __io_println(cheap_run.status)
-  __io_println(cheap_run.text)
-  __io_println(atomic_get(cheap_calls))
-  __io_println(atomic_get(frontier_calls))
-  __io_println(atomic_get(log_records))
+  harness.stdio.println(cheap_run.status)
+  harness.stdio.println(cheap_run.text)
+  harness.stdio.println(harness.runtime.atomic_get(cheap_calls))
+  harness.stdio.println(harness.runtime.atomic_get(frontier_calls))
+  harness.stdio.println(harness.runtime.atomic_get(log_records))
   // Escalated route: the predicate classifies the prompt before dispatch.
-  const frontier_run = preset_agent(
+  const frontier_run = preset_agent(harness, 
     "release_captain",
     "Frontier path.",
     {
@@ -89,9 +89,9 @@ pipeline default() {
       max_iterations: 2,
     },
   )
-  __io_println(frontier_run.status)
-  __io_println(frontier_run.text)
-  __io_println(atomic_get(cheap_calls))
-  __io_println(atomic_get(frontier_calls))
-  __io_println(atomic_get(log_records))
+  harness.stdio.println(frontier_run.status)
+  harness.stdio.println(frontier_run.text)
+  harness.stdio.println(harness.runtime.atomic_get(cheap_calls))
+  harness.stdio.println(harness.runtime.atomic_get(frontier_calls))
+  harness.stdio.println(harness.runtime.atomic_get(log_records))
 }

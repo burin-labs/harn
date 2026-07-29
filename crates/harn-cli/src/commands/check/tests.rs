@@ -117,7 +117,7 @@ pipeline main() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Acceptance for issue #771: `render_prompt(...)` literal-string targets
+/// Acceptance for issue #771: `harness.fs.render_prompt(...)` literal-string targets
 /// must be validated alongside `render(...)`, name the actual builtin
 /// (`render_prompt`), and show the resolved candidate path so authors can
 /// see exactly where lookup was attempted.
@@ -129,7 +129,7 @@ fn preflight_reports_missing_literal_render_prompt_target() {
     let source = r#"
 pub fn chat() -> string {
   const trimmed = "hello"
-  return render_prompt("lane-classifier.harn.prompt", {task: trimmed})
+  return harness.fs.render_prompt("lane-classifier.harn.prompt", {task: trimmed})
 }
 "#;
     let program = parse_program(source);
@@ -164,7 +164,7 @@ fn preflight_accepts_embedded_stdlib_prompt_target() {
     let file = dir.join("chat.harn");
     let source = r#"
 pub fn chat() -> string {
-  return render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+  return harness.fs.render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
 }
 "#;
     let program = parse_program(source);
@@ -181,7 +181,7 @@ pub fn chat() -> string {
 }
 
 /// Acceptance for issue #771: dynamic first arguments are not statically
-/// checkable, so `render_prompt(some_var, ...)` must be silently
+/// checkable, so `harness.fs.render_prompt(some_var, ...)` must be silently
 /// skipped — no false positives on legitimate dynamic dispatch.
 #[test]
 fn preflight_skips_non_literal_render_prompt_target() {
@@ -191,9 +191,9 @@ fn preflight_skips_non_literal_render_prompt_target() {
     let source = r#"
 pipeline main() {
   const path = "missing.harn.prompt"
-  const prompt = render_prompt(path, {})
+  const prompt = harness.fs.render_prompt(path, {})
   const key = "1"
-  const interp = render_prompt("missing_${key}.prompt", {})
+  const interp = harness.fs.render_prompt("missing_${key}.prompt", {})
   __io_println(prompt + interp)
 }
 "#;
@@ -229,7 +229,7 @@ pipeline main() {
     "Read a file",
     {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.read"},
   )
-  const system = render_prompt("agent.harn.prompt", {})
+  const system = harness.fs.render_prompt("agent.harn.prompt", {})
   agent_loop("task", system, {tools: tools})
 }
 "#;
@@ -265,7 +265,7 @@ pipeline main() {
     "Read a file",
     {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.read"},
   )
-  const system = render_prompt("agent.harn.prompt", {})
+  const system = harness.fs.render_prompt("agent.harn.prompt", {})
   agent_loop("task", system, {tools: tools})
 }
 "#;
@@ -291,7 +291,7 @@ fn preflight_reports_missing_render_prompt_target_for_raw_string() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  const prompt = render_prompt(r"missing.prompt", {})
+  const prompt = harness.fs.render_prompt(r"missing.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -309,7 +309,7 @@ pipeline main() {
 }
 
 /// Acceptance for issue #771: the diagnostic span must point at the
-/// literal-string argument, not the whole `render_prompt(...)`
+/// literal-string argument, not the whole `harness.fs.render_prompt(...)`
 /// expression — this is what enables an editor's quick-fix to jump
 /// straight to the path that needs editing.
 #[test]
@@ -319,7 +319,7 @@ fn preflight_render_prompt_diagnostic_spans_literal_argument() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  const prompt = render_prompt("missing.prompt", {})
+  const prompt = harness.fs.render_prompt("missing.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -349,7 +349,7 @@ fn preflight_reports_missing_project_root_asset_path() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  const prompt = render_prompt("@/prompts/missing.harn.prompt", {})
+  const prompt = harness.fs.render_prompt("@/prompts/missing.harn.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -382,7 +382,7 @@ fn preflight_reports_unknown_asset_alias() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  const prompt = render_prompt("@unknown/foo.harn.prompt", {})
+  const prompt = harness.fs.render_prompt("@unknown/foo.harn.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -416,7 +416,7 @@ fn preflight_reports_missing_aliased_asset_path() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  const prompt = render_prompt("@partials/missing.harn.prompt", {})
+  const prompt = harness.fs.render_prompt("@partials/missing.harn.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -454,7 +454,7 @@ fn preflight_suggests_misfiled_render_prompt_target() {
     let file = dir.join("lib/runtime/chat.harn");
     let source = r#"
 pub fn chat() -> string {
-  return render_prompt("lane-classifier.harn.prompt", {task: "hi"})
+  return harness.fs.render_prompt("lane-classifier.harn.prompt", {task: "hi"})
 }
 "#;
     let program = parse_program(source);
@@ -490,7 +490,7 @@ fn preflight_omits_did_you_mean_when_no_near_miss() {
     let file = dir.join("main.harn");
     let source = r#"
 pipeline main() {
-  const prompt = render_prompt("nowhere.harn.prompt", {})
+  const prompt = harness.fs.render_prompt("nowhere.harn.prompt", {})
   __io_println(prompt)
 }
 "#;
@@ -1283,9 +1283,9 @@ pub fn helper() -> string {
 import "lib/helper.harn"
 
 pipeline main() {
-  const review = render_prompt("prompts/review.harn.prompt")
+  const review = harness.fs.render_prompt("prompts/review.harn.prompt")
   const snippet = render("shared/snippet.prompt")
-  const contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt")
+  const contract = harness.fs.render_prompt("std/agent/prompts/tool_contract_text.harn.prompt")
   host_call("project.scan", {})
   exec_at("shared", "pwd")
   spawn_agent({

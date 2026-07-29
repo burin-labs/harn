@@ -1,16 +1,16 @@
-pipeline default() {
-  const prompt = render_prompt("fixtures/greeting.prompt", {name: "Casey", place: "Harn"})
-  const paths = runtime_paths()
-  __io_println(prompt.contains("Casey"))
-  __io_println(paths.execution_root == execution_root())
-  __io_println(paths.asset_root == asset_root())
-  __io_println(paths.asset_root == source_dir())
-  __io_println(paths.state_root.ends_with(".harn"))
-  __io_println(paths.run_root.ends_with(".harn-runs"))
-  __io_println(paths.worktree_root.ends_with(".harn/worktrees"))
+pipeline default(harness: Harness) {
+  const prompt = harness.fs.render_prompt("fixtures/greeting.prompt", {name: "Casey", place: "Harn"})
+  const paths = harness.fs.runtime_paths()
+  harness.stdio.println(prompt.contains("Casey"))
+  harness.stdio.println(paths.execution_root == harness.fs.runtime_paths().execution_root)
+  harness.stdio.println(paths.asset_root == harness.fs.runtime_paths().asset_root)
+  harness.stdio.println(paths.asset_root == harness.fs.source_dir())
+  harness.stdio.println(paths.state_root.ends_with(".harn"))
+  harness.stdio.println(paths.run_root.ends_with(".harn-runs"))
+  harness.stdio.println(paths.worktree_root.ends_with(".harn/worktrees"))
   // `.harn` is only the default. When an operator names a state directory,
   // the resolved root is that directory — the reason scripts must ask
-  // `runtime_paths()` instead of joining `.harn` onto their own cwd.
+  // `harness.fs.runtime_paths()` instead of joining `.harn` onto their own cwd.
   const state_override = harness.env.get("HARN_STATE_DIR")
-  __io_println(state_override == nil || paths.state_root == state_override)
+  harness.stdio.println(state_override == nil || paths.state_root == state_override)
 }

@@ -1,6 +1,6 @@
-pipeline default() {
-  const starts = atomic(0)
-  const sup = supervisor_start(
+pipeline default(harness: Harness) {
+  const starts = harness.runtime.atomic(0)
+  const sup = harness.runtime.supervisor_start(
     {
       name: "circuit",
       strategy: "one_for_one",
@@ -10,7 +10,7 @@ pipeline default() {
           kind: "workflow_runner",
           restart: {mode: "on_failure", max_restarts: 0, backoff_ms: 1, circuit_open_ms: 1},
           task: { _ctx ->
-            let attempt = atomic_add(starts, 1) + 1
+            let attempt = harness.runtime.atomic_add(starts, 1) + 1
             if attempt == 1 {
               throw "open-circuit"
             }
@@ -20,10 +20,10 @@ pipeline default() {
       ],
     },
   )
-  sleep(25ms)
-  const state = supervisor_state(sup)
-  __io_println(atomic_get(starts))
-  __io_println(state.children[0].status)
-  __io_println(state.metrics.failed)
-  __io_println(state.metrics.suppressed)
+  harness.clock.sleep_ms(25ms)
+  const state = harness.runtime.supervisor_state(sup)
+  harness.stdio.println(harness.runtime.atomic_get(starts))
+  harness.stdio.println(state.children[0].status)
+  harness.stdio.println(state.metrics.failed)
+  harness.stdio.println(state.metrics.suppressed)
 }

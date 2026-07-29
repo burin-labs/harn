@@ -1,10 +1,10 @@
 fn main(harness: Harness) {
   const entries = harness.llm.catalog()
-  __io_println(len(entries) > 0)
+  harness.stdio.println(len(entries) > 0)
   const first = entries[0]
-  __io_println(first.id != nil)
-  __io_println(first.name != nil)
-  __io_println(first.provider != nil)
-  __io_println(first.capabilities != nil)
-  __io_println(first.context_window >= 0)
+  harness.stdio.println(first.id != nil)
+  harness.stdio.println(first.name != nil)
+  harness.stdio.println(first.provider != nil)
+  harness.stdio.println(first.capabilities != nil)
+  harness.stdio.println(first.context_window >= 0)
 }

@@ -12,14 +12,14 @@ fn wait_for_readyz(harness: Harness, url, pid) {
         return true
       }
     }
-    sleep(25ms)
+    harness.clock.sleep_ms(25ms)
     attempts = attempts + 1
   }
   return false
 }
 
-pipeline test(task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-recover-" + uuid())
+pipeline test(harness: Harness, task) {
+  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-recover-" + harness.random.uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -51,7 +51,7 @@ pipeline test(task) {
       headers: {"Content-Type": "application/json", Authorization: "Bearer test-key"},
     },
   )
-  const crash_exited = wait_for_exit(crash_pid)
+  const crash_exited = wait_for_exit(harness, crash_pid)
   if !crash_exited && process_alive(crash_pid) {
     // Under heavy CI load the dispatcher can be scheduling-starved past
     // the wait_for_exit timeout. Force-kill so the restart orchestrator
@@ -59,9 +59,9 @@ pipeline test(task) {
     // assertion below still reflects whether the crash happened
     // naturally under HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX.
     const _ = shell("kill -KILL " + crash_pid)
-    wait_for_exit(crash_pid)
+    wait_for_exit(harness, crash_pid)
   }
-  __io_println(response.status == 200 && crash_exited)
+  harness.stdio.println(response.status == 200 && crash_exited)
   const restart = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
@@ -87,7 +87,7 @@ pipeline test(task) {
       + " --state-dir "
       + state_dir,
   )
-  __io_println(
+  harness.stdio.println(
     queue.success
       && queue.stdout.contains("stranded_envelopes=1")
       && queue.stdout.contains("Stranded envelopes:")
@@ -103,13 +103,13 @@ pipeline test(task) {
       + state_dir
       + " --envelope-age 0s --dry-run",
   )
-  __io_println(
+  harness.stdio.println(
     recover.success
       && recover.stdout.contains("stranded_envelopes=1")
       && recover.stdout.contains("Candidates:")
       && recover.stdout.contains("event_id=trigger_evt_"),
   )
   const _ = shell("kill -TERM " + restart_pid)
-  wait_for_exit(restart_pid)
+  wait_for_exit(harness, restart_pid)
   harness.fs.delete(root)
 }

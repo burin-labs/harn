@@ -385,6 +385,8 @@ fn now_id() -> String {
 
 /// Initialize a Harn-driven agent session: open transcript, seed user message.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> string",
     kind = "async",
     category = "agent.host",
@@ -713,6 +715,8 @@ fn agent_init_control_done(
 
 /// Tear down a Harn-driven agent session and emit the final result dict.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_finalize(session_id: string, status: dict) -> dict",
     kind = "async",
     category = "agent.host",
@@ -1061,6 +1065,8 @@ fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
 
 /// Return the visible message list for an agent session.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_messages(session_id: string) -> list",
     category = "agent.host",
     runtime_only = true
@@ -1222,6 +1228,8 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
 
 /// Append the assistant turn from an llm_call result to the session log.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_record_assistant(session_id: string, llm_result: dict) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -1267,6 +1275,8 @@ fn host_agent_session_record_assistant_builtin(
 /// step_judge replace mode to discard a vetoed turn before regeneration.
 /// Errors if the trailing message is not an assistant turn.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_pop_last_assistant(session_id: string) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -1444,6 +1454,8 @@ fn record_write_provenance(
 
 /// Append per-tool observation messages from a dispatch result.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_record_tool_results(session_id: string, dispatch: dict) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -1709,6 +1721,8 @@ fn host_agent_session_record_tool_results_builtin(
 /// the number of blocks repaired (`0` = no-op: not an assistant turn, no
 /// structured tool calls, or already paired). See `pair_orphaned_tool_use`.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_pair_orphaned_tool_use(session_id: string, feedback: string) -> int",
     category = "agent.host",
     runtime_only = true
@@ -1725,6 +1739,8 @@ fn host_agent_session_pair_orphaned_tool_use_builtin(
 
 /// Accumulate token + cost usage from an llm_call result, return totals.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_record_usage(session_id: string, llm_result: dict) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -1842,6 +1858,8 @@ fn host_agent_session_record_usage_builtin(
 /// cleanly-finished-but-malformed call — so it never overlaps the
 /// parse-tolerance (#3137) or reasoning-leak (#3142) paths.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_truncated_tool_call(stop_reason: string|nil, text: string, tool_call_count: int, has_parse_errors: bool) -> bool",
     category = "agent.host",
     runtime_only = true
@@ -1870,6 +1888,8 @@ fn host_agent_truncated_tool_call_builtin(
 
 /// Drain pending runtime-feedback notes for a session (no-op shim).
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_drain_feedback(session_id: string) -> list",
     category = "agent.host",
     runtime_only = true
@@ -1919,6 +1939,8 @@ fn host_agent_session_drain_feedback_builtin(
 /// ledger parses loop-side (offsets, stderr counts, terminal status), keeping
 /// snapshot parsing in one place (Harn).
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_drain_command_updates(session_id: string) -> list",
     category = "agent.host",
     runtime_only = true
@@ -1972,6 +1994,8 @@ fn host_agent_session_drain_command_updates_builtin(
 /// future refactor must never narrow the wake condition — kind-filtering belongs
 /// only where the loop BUILDS the digest, never at the wake decision.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_await_inbox(session_id: string, timeout_ms: int) -> bool",
     kind = "async",
     category = "agent.host",
@@ -1995,8 +2019,8 @@ async fn host_agent_session_await_inbox(
     // without an installed harness. Globals are shared into the child VM.
     let clock: Arc<dyn harn_clock::Clock> = {
         let vm = ctx.child_vm();
-        match vm.global("harness") {
-            Some(VmValue::Harness(handle)) => handle.inner().clock().clone(),
+        match vm.harness() {
+            Some(handle) => handle.inner().clock().clone(),
             _ => Arc::new(harn_clock::RealClock::new()),
         }
     };
@@ -2012,6 +2036,8 @@ async fn host_agent_session_await_inbox(
 /// Drain queued typed host injections for a delivery seam and append them to the
 /// live transcript.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_drain_host_injections(session_id: string, delivery: string, seam: string) -> list",
     category = "agent.host",
     runtime_only = true
@@ -2066,6 +2092,8 @@ fn host_agent_session_drain_host_injections_builtin(
 
 /// Read accumulated token + cost totals for a session.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_totals(session_id: string) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -2119,6 +2147,8 @@ fn host_agent_session_totals_builtin(
 
 /// Append a runtime-feedback note to the session as a synthetic user turn.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_inject_feedback(session_id: string, kind: string, content: string) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -2156,6 +2186,8 @@ fn host_agent_session_inject_feedback_builtin(
 /// into the next model prompt and the loop's existing `apply_reminder_post_turn`
 /// pass evicts it once its `ttl_turns` reaches zero. Returns the reminder id.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_inject_reminder(session_id: string, options: dict) -> string",
     category = "agent.host",
     runtime_only = true
@@ -2197,6 +2229,8 @@ fn host_agent_session_inject_reminder_builtin(
 /// Post an event into a running session's agent_inbox. Used by triggers,
 /// connectors, and external host integrations to nudge a mid-loop session.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_post_event(session_id: string, kind: string, content: string, source?: string|nil) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -2236,6 +2270,8 @@ fn host_agent_session_post_event_builtin(
 
 /// Apply reminder TTL lifecycle after an agent turn.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_apply_reminder_post_turn(session_id: string, turn?: dict|nil) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -2260,6 +2296,8 @@ fn host_agent_session_apply_reminder_post_turn_builtin(
 
 /// Replace the session's active skill list.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_set_active_skills(session_id: string, skills: list) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -2284,6 +2322,8 @@ fn host_agent_session_set_active_skills_builtin(
 
 /// Return the session's active skill list.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_active_skills(session_id: string) -> list",
     category = "agent.host",
     runtime_only = true
@@ -2309,6 +2349,8 @@ fn host_agent_session_active_skills_builtin(
 
 /// Append a skill lifecycle event and notify live agent-event sinks.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_record_skill_event(session_id: string, kind: string, metadata: dict) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -2430,6 +2472,8 @@ fn host_agent_session_record_skill_event_builtin(
 
 /// No-op compaction hook; Harn implements compaction via llm_call.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_compact_if_needed(session_id: string, options: dict) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -2443,6 +2487,8 @@ fn host_agent_session_compact_builtin(
 
 /// Replace the session's transcript message list (used by Harn-driven auto-compact).
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -2482,6 +2528,8 @@ fn host_agent_session_replace_messages_builtin(
 
 /// Score skills against the current task context.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_skill_score(context: dict, registry: dict, options: dict) -> dict",
     kind = "async",
     category = "agent.host",
@@ -2505,6 +2553,8 @@ async fn host_skill_score(
 
 /// Pre-call budget projection hook (returns false for now).
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_budget_pre_call_blocked(session_id: string, envelope: dict) -> bool",
     category = "agent.host",
     runtime_only = true
@@ -2518,6 +2568,8 @@ fn host_agent_budget_pre_call_builtin(
 
 /// Record a native→text tool-call fallback as a transcript event and trace counter.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_record_native_tool_fallback(session_id: string, payload: dict) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -2577,6 +2629,8 @@ fn host_agent_record_native_tool_fallback_builtin(
 
 /// Record a transcript compaction as a transcript event and trace counter.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_record_compaction(session_id: string, payload: dict) -> nil",
     category = "agent.host",
     runtime_only = true
@@ -2638,6 +2692,8 @@ fn host_agent_record_compaction_builtin(
 /// transcript.projection event, and return the projected messages
 /// with metadata.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_project_turn(session_id: string, options?: dict|nil) -> dict",
     kind = "async",
     category = "agent.host",
@@ -2695,6 +2751,8 @@ async fn host_agent_session_project_turn(
 
 /// Claim the session's tool_format contract; rejects mid-session changes.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_claim_tool_format(session_id: string, tool_format: string) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -2730,6 +2788,8 @@ fn host_agent_session_claim_tool_format_builtin(
 
 /// Persist a daemon snapshot for a Harn-driven agent session.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_daemon_snapshot(session_id: string, options: dict) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -2946,6 +3006,8 @@ async fn daemon_checkpoint_drain(
 /// Push a system-reminder onto the session's host bridge queue;
 /// returns the reminder id. Inverse of drain_bridge_injections.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_push_bridge_injection(session_id: string, options: dict) -> string",
     kind = "async",
     category = "agent.host",
@@ -2999,6 +3061,8 @@ async fn host_agent_session_push_bridge_injection(
 /// land in the transcript at `loop_exit` only. Returns the message id so
 /// callers can correlate with later events / revoke the message.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_push_user_message(session_id: string, options: dict) -> string",
     kind = "async",
     category = "agent.host",
@@ -3047,6 +3111,8 @@ async fn host_agent_session_push_user_message(
 
 /// Return a FIFO snapshot of pending bridge user-message and reminder injections.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_pending_injections(session_id: string) -> list",
     kind = "async",
     category = "agent.host",
@@ -3073,6 +3139,8 @@ async fn host_agent_session_pending_injections(
 
 /// Revoke a queued bridge reminder before an agent checkpoint drains it.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_revoke_reminder(session_id: string, reminder_id: string) -> bool",
     kind = "async",
     category = "agent.host",
@@ -3114,6 +3182,8 @@ async fn host_agent_session_revoke_reminder(
 
 /// Drain queued bridge transcript injections for a delivery checkpoint.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_session_drain_bridge_injections(session_id: string, checkpoint: dict) -> list",
     kind = "async",
     category = "agent.host",
@@ -3151,6 +3221,8 @@ async fn host_agent_session_drain_bridge_injections(
 
 /// Wait for daemon wake input or a timeout.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_daemon_wait(session_id: string, timeout_ms: int) -> dict",
     kind = "async",
     category = "agent.host",
@@ -3217,6 +3289,8 @@ fn nil_json() -> serde_json::Value {
 
 /// Check per-agent autonomy budget and return an approval-shaped denial.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_autonomy_budget_check(session_id: string, budget_config: dict) -> dict",
     kind = "async",
     category = "agent.host",

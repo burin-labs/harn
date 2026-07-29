@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const body = "{\"hello\":\"world\"}"
   const signed = aws_sigv4_headers(
     {
@@ -101,5 +101,5 @@ pipeline test(task) {
       throw "expected aws_sigv4_headers to reject invalid URL"
     }
   }
-  __io_println("aws_sigv4_headers_ok")
+  harness.stdio.println("aws_sigv4_headers_ok")
 }

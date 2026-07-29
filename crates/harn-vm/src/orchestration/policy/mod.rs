@@ -25,6 +25,7 @@ pub use approval_rules::{
     PolicyAction, PolicyEvaluation, PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
     ToolApprovalRequest,
 };
+pub(crate) use effects::runtime_effects_from_contract;
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
     effects_from_metadata, EffectKind, EffectRecord, EffectScope,
@@ -376,6 +377,31 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
+    if let Some(entry) = crate::stdlib::all_builtin_manifest()
+        .iter()
+        .find(|entry| entry.name == name)
+    {
+        if let harn_builtin_meta::BuiltinExposure::CapabilityFunction { authority_argument } =
+            entry.contract.exposure
+        {
+            if args.get(usize::from(authority_argument)).is_none() {
+                return reject_policy(format!(
+                    "capability function '{name}' is missing authority argument {authority_argument}"
+                ));
+            }
+            if let Some(effect) =
+                effects::runtime_effects_from_contract(entry.contract.effects, args)
+                    .into_iter()
+                    .find(|effect| !effects::effect_allowed_by_ceiling(effect, &policy))
+            {
+                return reject_policy(format!(
+                    "capability function '{name}' exceeds the active effect ceiling: {}",
+                    effects::effect_record_summary(&effect)
+                ));
+            }
+            return Ok(());
+        }
+    }
     if effects::builtin_has_network_effect(name)
         && (!policy_allows_capability(&policy, "network", "http")
             || !policy_allows_side_effect(&policy, "network"))
@@ -584,6 +610,45 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
             return reject_policy(format!("builtin '{name}' exceeds host.tool_call ceiling"));
         }
         _ => {}
+    }
+    Ok(())
+}
+
+/// Enforce one typed Harness method from the same contract that powers static
+/// analysis and runtime receipts. This is the authoritative source-facing
+/// policy boundary; implementation builtin names are deliberately absent.
+pub fn enforce_current_policy_for_capability(
+    capability: harn_builtin_meta::CapabilityId,
+    method: &str,
+    args: &[VmValue],
+) -> Result<(), VmError> {
+    let Some(policy) = current_execution_policy() else {
+        return Ok(());
+    };
+    let entry = crate::stdlib::all_builtin_manifest().iter().find(|entry| {
+        matches!(
+            entry.contract.exposure,
+            harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                capability: candidate,
+                method: candidate_method,
+            } if candidate == capability && candidate_method == method
+        )
+    });
+    let Some(entry) = entry else {
+        return reject_policy(format!(
+            "undeclared Harness capability method `harness.{}.{method}`",
+            capability.field_name()
+        ));
+    };
+    let denied = effects::runtime_effects_from_contract(entry.contract.effects, args)
+        .into_iter()
+        .find(|effect| !effects::effect_allowed_by_ceiling(effect, &policy));
+    if let Some(effect) = denied {
+        return reject_policy(format!(
+            "harness.{}.{method} exceeds the active effect ceiling: {}",
+            capability.field_name(),
+            effects::effect_record_summary(&effect)
+        ));
     }
     Ok(())
 }

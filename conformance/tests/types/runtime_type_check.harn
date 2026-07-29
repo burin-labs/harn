@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Typed function should work with correct types
   fn add(a: int, b: int) -> int {
     return a + b
@@ -14,5 +14,5 @@ pipeline test(task) {
     return "hi " + name
   }
   assert_eq(greet("world"), "hi world")
-  log("type checks ok")
+  harness.stdio.println("type checks ok")
 }

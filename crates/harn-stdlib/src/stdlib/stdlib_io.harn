@@ -9,15 +9,15 @@ type ReadLineResult = {ok: bool, value?: string, status?: string, error?: string
  * @effects: []
  * @errors: []
  */
-pub fn is_tty(fd: int = 0) -> bool {
+pub fn is_tty(term: HarnessTerm, fd: int = 0) -> bool {
   if fd == 0 {
-    return is_stdin_tty()
+    return term.is_tty("stdin")
   }
   if fd == 1 {
-    return is_stdout_tty()
+    return term.is_tty("stdout")
   }
   if fd == 2 {
-    return is_stderr_tty()
+    return term.is_tty("stderr")
   }
   throw "std/io.is_tty: fd must be 0, 1, or 2"
 }
@@ -28,8 +28,8 @@ pub fn is_tty(fd: int = 0) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn read_line(opts: ReadLineOptions = {}) -> ReadLineResult {
-  return __io_read_line(opts ?? {})
+pub fn read_line(stdio: HarnessStdio, opts: ReadLineOptions = {}) -> ReadLineResult {
+  return stdio.read_line(opts ?? {})
 }
 
 /**
@@ -38,11 +38,11 @@ pub fn read_line(opts: ReadLineOptions = {}) -> ReadLineResult {
  * @effects: []
  * @errors: []
  */
-pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineResult {
+pub fn read_password(stdio: HarnessStdio, prompt: string = "", timeout_ms: int? = nil) -> ReadLineResult {
   if timeout_ms == nil {
-    return __io_read_line({prompt: prompt, echo: false})
+    return stdio.read_line({prompt: prompt, echo: false})
   }
-  return __io_read_line({prompt: prompt, timeout_ms: timeout_ms, echo: false})
+  return stdio.read_line({prompt: prompt, timeout_ms: timeout_ms, echo: false})
 }
 
 /**
@@ -51,8 +51,8 @@ pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineRes
  * @effects: []
  * @errors: []
  */
-pub fn write_stdout(text: string) {
-  __io_write_stdout(text)
+pub fn write_stdout(stdio: HarnessStdio, text: string) {
+  stdio.print(text)
 }
 
 /**
@@ -61,6 +61,6 @@ pub fn write_stdout(text: string) {
  * @effects: []
  * @errors: []
  */
-pub fn write_stderr(text: string) {
-  __io_write_stderr(text)
+pub fn write_stderr(stdio: HarnessStdio, text: string) {
+  stdio.eprint(text)
 }

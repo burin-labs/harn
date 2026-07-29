@@ -14,14 +14,14 @@ fn handle_event(event) {
   const _ = event
 }
 
-pipeline default() {
-  enable_tracing(true)
-  const stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
+pipeline default(harness: Harness) {
+  harness.obs.enable_tracing(true)
+  const stream = harness.obs.event_log_subscribe({topic: "transcript.channel.lifecycle"})
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-otel-idem-" + unique,
       kind: "channel.emit",
@@ -40,17 +40,17 @@ pipeline default() {
     },
   )
   const event_id = "fixed-event-id-" + unique
-  const _ = emit_channel("ch.otel.idem.input", {seq: 1}, {id: event_id})
-  const _ = emit_channel("ch.otel.idem.input", {seq: 1}, {id: event_id})
+  const _ = harness.channels.append("ch.otel.idem.input", {seq: 1}, {id: event_id})
+  const _ = harness.channels.append("ch.otel.idem.input", {seq: 1}, {id: event_id})
   const first = stream.next().value
   const second = stream.next().value
   const third = stream.next().value
-  __io_println(first.kind)
-  __io_println(first.payload.inserted)
-  __io_println(first.payload.duplicate)
-  __io_println(second.kind)
-  __io_println(third.kind)
-  __io_println(third.payload.inserted)
-  __io_println(third.payload.duplicate)
-  enable_tracing(false)
+  harness.stdio.println(first.kind)
+  harness.stdio.println(first.payload.inserted)
+  harness.stdio.println(first.payload.duplicate)
+  harness.stdio.println(second.kind)
+  harness.stdio.println(third.kind)
+  harness.stdio.println(third.payload.inserted)
+  harness.stdio.println(third.payload.duplicate)
+  harness.obs.enable_tracing(false)
 }

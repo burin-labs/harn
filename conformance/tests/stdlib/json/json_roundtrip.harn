@@ -1,26 +1,26 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Parse JSON object
   const obj = json_parse("{\"name\": \"alice\", \"age\": 30}")
-  log(obj.name)
-  log(obj.age)
+  harness.stdio.println(obj.name)
+  harness.stdio.println(obj.age)
   // Parse JSON array
   const arr = json_parse("[1, 2, 3]")
-  log(arr[0])
-  log(arr.count)
+  harness.stdio.println(arr[0])
+  harness.stdio.println(arr.count)
   // Parse primitives
-  log(json_parse("true"))
-  log(json_parse("null"))
-  log(json_parse("42"))
-  log(json_parse("\"hello\""))
+  harness.stdio.println(json_parse("true"))
+  harness.stdio.println(json_parse("null"))
+  harness.stdio.println(json_parse("42"))
+  harness.stdio.println(json_parse("\"hello\""))
   // Roundtrip
   const data = {x: 1, y: [2, 3]}
   const json = json_stringify(data)
   const parsed = json_parse(json)
-  log(parsed.x)
-  log(parsed.y)
+  harness.stdio.println(parsed.x)
+  harness.stdio.println(parsed.y)
   const full_range = json_parse(
     json_stringify({pre_epoch: -2208988800, max_i64: 9223372036854775807}),
   )
-  log(full_range.pre_epoch)
-  log(full_range.max_i64)
+  harness.stdio.println(full_range.pre_epoch)
+  harness.stdio.println(full_range.max_i64)
 }

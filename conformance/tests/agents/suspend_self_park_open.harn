@@ -17,9 +17,9 @@ import { llm_text, with_llm_script } from "std/testing"
  *   - An operator-style `resume_agent(handle)` with no input drives the
  *     loop to completion.
  */
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "park_open", name: "agent_await_resumption", arguments: {reason: "blocked"}},
@@ -30,23 +30,22 @@ pipeline main() {
       llm_text("resumed by operator"),
     ],
     { ->
-      const handle = sub_agent_run(
-        "Park open until an operator resumes.",
+      const handle = sub_agent_run(harness, "Park open until an operator resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
       const suspended = wait_agent(handle)
-      __io_println("status=" + suspended.status)
-      __io_println("initiator=" + (suspended?.suspension?.initiator ?? ""))
-      __io_println("reason=" + (suspended?.suspension?.reason ?? ""))
-      __io_println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
-      __io_println(
+      harness.stdio.println("status=" + suspended.status)
+      harness.stdio.println("initiator=" + (suspended?.suspension?.initiator ?? ""))
+      harness.stdio.println("reason=" + (suspended?.suspension?.reason ?? ""))
+      harness.stdio.println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
+      harness.stdio.println(
         "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
       )
       const resumed = resume_agent(handle)
       const done = wait_agent(handle)
-      __io_println("resume_status=" + resumed.status)
-      __io_println("final_status=" + done.status)
-      __io_println("has_transcript=" + to_string(done.has_transcript))
+      harness.stdio.println("resume_status=" + resumed.status)
+      harness.stdio.println("final_status=" + done.status)
+      harness.stdio.println("has_transcript=" + to_string(done.has_transcript))
     },
   )
 }

@@ -4,6 +4,10 @@ use std::process;
 
 use serde_json::json;
 
+use harn_builtin_meta::{
+    BuiltinContract, BuiltinExposure, EffectAccess, EffectKind, ResourceSelector,
+};
+
 use crate::cli::{
     ContractsArgs, ContractsBundleArgs, ContractsCommand, ContractsHostCapabilitiesArgs,
     ContractsOutputArgs,
@@ -58,33 +62,126 @@ fn builtin_contract_value(_args: &ContractsOutputArgs) -> serde_json::Value {
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let contracts = harn_vm::stdlib::all_builtin_manifest()
+        .iter()
+        .map(|entry| (entry.name.to_string(), entry.contract))
+        .collect::<BTreeMap<_, _>>();
     let mut rows = Vec::new();
     let names = runtime
         .iter()
         .cloned()
         .chain(parser.keys().cloned())
+        .chain(contracts.keys().cloned())
         .collect::<BTreeSet<_>>();
     for name in names {
         let parser_known = parser.contains_key(&name);
         let runtime_registered = runtime.contains(&name);
-        let alignment_status = match (parser_known, runtime_registered) {
-            (true, true) => "matched",
-            (true, false) => "parser_only",
-            (false, true) => "runtime_only",
-            (false, false) => unreachable!(),
+        let contract = contracts.get(&name).copied();
+        let alignment_status = match (parser_known, runtime_registered, contract.is_some()) {
+            (true, true, _) => "matched",
+            (true, false, _) => "parser_only",
+            (false, true, _) => "runtime_only",
+            (false, false, true) => "contract_only",
+            (false, false, false) => unreachable!(),
         };
         rows.push(json!({
             "name": name,
             "parser_known": parser_known,
             "runtime_registered": runtime_registered,
+            "contract_declared": contract.is_some(),
             "return_types": parser.get(&name).cloned().unwrap_or_default(),
             "alignment_status": alignment_status,
+            "contract": contract.map(contract_json),
         }));
     }
     json!({
-        "version": 1,
+        "version": 2,
         "builtins": rows,
     })
+}
+
+fn contract_json(contract: BuiltinContract) -> serde_json::Value {
+    json!({
+        "exposure": exposure_json(contract.exposure),
+        "effects": contract.effects.iter().map(effect_json).collect::<Vec<_>>(),
+    })
+}
+
+fn exposure_json(exposure: BuiltinExposure) -> serde_json::Value {
+    match exposure {
+        BuiltinExposure::Undeclared => json!({"kind": "undeclared"}),
+        BuiltinExposure::PureGlobal => json!({"kind": "pure_global"}),
+        BuiltinExposure::CapabilityFunction { authority_argument } => json!({
+            "kind": "capability_function",
+            "authority_argument": authority_argument,
+        }),
+        BuiltinExposure::HarnessMethod { capability, method } => json!({
+            "kind": "harness_method",
+            "capability": capability.field_name(),
+            "handle_type": capability.type_name(),
+            "method": method,
+            "source_name": format!("harness.{}.{}", capability.field_name(), method),
+        }),
+        BuiltinExposure::PrivilegedWire => json!({"kind": "privileged_wire"}),
+        BuiltinExposure::RuntimeInternal => json!({"kind": "runtime_internal"}),
+    }
+}
+
+fn effect_json(effect: &harn_builtin_meta::EffectSpec) -> serde_json::Value {
+    json!({
+        "kind": effect_kind_name(effect.kind),
+        "access": effect_access_name(effect.access),
+        "resources": effect.resources.iter().map(resource_selector_json).collect::<Vec<_>>(),
+    })
+}
+
+fn effect_kind_name(kind: EffectKind) -> &'static str {
+    match kind {
+        EffectKind::Stdio => "stdio",
+        EffectKind::Fs => "fs",
+        EffectKind::Env => "env",
+        EffectKind::Clock => "clock",
+        EffectKind::Random => "random",
+        EffectKind::Network => "network",
+        EffectKind::Process => "process",
+        EffectKind::Llm => "llm",
+        EffectKind::Tool => "tool",
+        EffectKind::Host => "host",
+        EffectKind::Worker => "worker",
+        EffectKind::Secret => "secret",
+        EffectKind::Observability => "observability",
+        EffectKind::Channel => "channel",
+        EffectKind::State => "state",
+    }
+}
+
+fn effect_access_name(access: EffectAccess) -> &'static str {
+    match access {
+        EffectAccess::Read => "read",
+        EffectAccess::Write => "write",
+        EffectAccess::Mutate => "mutate",
+        EffectAccess::Observe => "observe",
+    }
+}
+
+fn resource_selector_json(selector: &ResourceSelector) -> serde_json::Value {
+    match selector {
+        ResourceSelector::Argument(argument) => {
+            json!({"kind": "argument", "argument": argument})
+        }
+        ResourceSelector::Field { argument, path } => json!({
+            "kind": "field",
+            "argument": argument,
+            "path": path,
+        }),
+        ResourceSelector::EachArgument(argument) => {
+            json!({"kind": "each_argument", "argument": argument})
+        }
+        ResourceSelector::Constant(value) => {
+            json!({"kind": "constant", "value": value})
+        }
+        ResourceSelector::Dynamic => json!({"kind": "dynamic"}),
+    }
 }
 
 fn host_capabilities_value(args: &ContractsHostCapabilitiesArgs) -> serde_json::Value {
@@ -165,5 +262,41 @@ pub(crate) async fn handle_contracts_command(args: ContractsArgs) {
                 process::exit(1);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_export_projects_typed_exposure_and_effect_contracts() {
+        harn_vm::stdlib::force_link();
+        let value = builtin_contract_value(&ContractsOutputArgs { pretty: false });
+        assert_eq!(value["version"], 2);
+
+        let builtins = value["builtins"].as_array().expect("builtin rows");
+        let fs_read = builtins
+            .iter()
+            .find(|row| row["name"] == "__cap_fs_read_text")
+            .expect("filesystem capability contract");
+        assert_eq!(fs_read["alignment_status"], "contract_only");
+        assert_eq!(fs_read["contract"]["exposure"]["kind"], "harness_method");
+        assert_eq!(
+            fs_read["contract"]["exposure"]["source_name"],
+            "harness.fs.read_text"
+        );
+        assert_eq!(fs_read["contract"]["effects"][0]["kind"], "fs");
+        assert_eq!(fs_read["contract"]["effects"][0]["access"], "read");
+        assert_eq!(
+            fs_read["contract"]["effects"][0]["resources"][0]["kind"],
+            "argument"
+        );
+
+        let pure = builtins
+            .iter()
+            .find(|row| row["contract"]["exposure"]["kind"] == "pure_global")
+            .expect("at least one pure builtin");
+        assert_eq!(pure["contract"]["effects"], json!([]));
     }
 }

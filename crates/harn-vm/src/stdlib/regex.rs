@@ -115,6 +115,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "regex_match(pattern: string?, text: string?, flags?: string) -> list | nil",
     category = "regex"
 )]
@@ -134,12 +136,12 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::List(std::sync::Arc::new(matches)))
 }
 
-// Both `regex_replace` and `regex_replace_all` replace every match via the
-// `regex` crate (supports `$1`, `${name}` backrefs). The `_all` spelling is
-// a discoverability alias on the same implementation.
+// Replace every match via the `regex` crate (supports `$1` and `${name}`
+// backreferences).
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "regex_replace(pattern: string?, replacement: string?, text: string?, flags?: string) -> string",
-    aliases = ["regex_replace_all"],
     category = "regex"
 )]
 fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -158,6 +160,8 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "regex_captures(pattern: string?, text: string?, flags?: string) -> list",
     category = "regex"
 )]
@@ -238,6 +242,8 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "regex_split(text: string?, pattern: string?, flags?: string) -> list",
     category = "regex"
 )]

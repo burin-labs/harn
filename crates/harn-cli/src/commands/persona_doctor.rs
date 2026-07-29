@@ -399,7 +399,9 @@ fn prompt_asset_check(
     let uses_prompt_asset = entry_source
         .as_ref()
         .and_then(|path| fs::read_to_string(path).ok())
-        .is_some_and(|source| source.contains("render_prompt(") || source.contains("render("));
+        .is_some_and(|source| {
+            source.contains("harness.fs.render_prompt(") || source.contains("render(")
+        });
     let status = if uses_prompt_asset {
         DoctorStatus::Green
     } else {

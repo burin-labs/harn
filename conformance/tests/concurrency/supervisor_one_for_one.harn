@@ -1,7 +1,7 @@
-pipeline default() {
-  const flaky_starts = atomic(0)
-  const stable_starts = atomic(0)
-  const sup = supervisor_start(
+pipeline default(harness: Harness) {
+  const flaky_starts = harness.runtime.atomic(0)
+  const stable_starts = harness.runtime.atomic(0)
+  const sup = harness.runtime.supervisor_start(
     {
       name: "fixture",
       strategy: "one_for_one",
@@ -11,7 +11,7 @@ pipeline default() {
           kind: "generic_task",
           restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 1},
           task: { _ctx ->
-            let attempt = atomic_add(flaky_starts, 1) + 1
+            let attempt = harness.runtime.atomic_add(flaky_starts, 1) + 1
             if attempt == 1 {
               throw "flaky-boom"
             }
@@ -23,24 +23,24 @@ pipeline default() {
           kind: "actor_mailbox",
           restart: "never",
           task: { _ctx ->
-            atomic_add(stable_starts, 1)
+            harness.runtime.atomic_add(stable_starts, 1)
             "stable"
           },
         },
       ],
     },
   )
-  const state = supervisor_wait(sup)
-  const events = supervisor_events(sup)
+  const state = harness.runtime.supervisor_wait(sup)
+  const events = harness.runtime.supervisor_events(sup)
   const debug = runtime_context().debug
-  __io_println(atomic_get(flaky_starts))
-  __io_println(atomic_get(stable_starts))
-  __io_println(state.status)
-  __io_println(state.metrics.failed)
-  __io_println(state.metrics.restarted)
-  __io_println(state.children[0].status)
-  __io_println(state.children[0].restart_count)
-  __io_println(state.children[1].status)
-  __io_println(events[0].kind)
-  __io_println(debug.supervisors[0].name)
+  harness.stdio.println(harness.runtime.atomic_get(flaky_starts))
+  harness.stdio.println(harness.runtime.atomic_get(stable_starts))
+  harness.stdio.println(state.status)
+  harness.stdio.println(state.metrics.failed)
+  harness.stdio.println(state.metrics.restarted)
+  harness.stdio.println(state.children[0].status)
+  harness.stdio.println(state.children[0].restart_count)
+  harness.stdio.println(state.children[1].status)
+  harness.stdio.println(events[0].kind)
+  harness.stdio.println(debug.supervisors[0].name)
 }

@@ -5,16 +5,16 @@ import { agent_render_tool_call_exemplar, agent_tool_call_paradigm } from "std/a
 // the current model's tool-calling format expects. These assertions pin the two
 // shipped paradigms (text heredoc / native JSON) so a regression in the IR is
 // caught before it silently mis-formats every agent prompt.
-pipeline default() {
+pipeline default(harness: Harness) {
   const text = agent_tool_call_paradigm({tool_format: "text"})
-  __io_println(text.kind == "text")
-  __io_println(text.call_open == "<tool_call>")
-  __io_println(contains(text.body_hint, "heredoc"))
-  __io_println(contains(text.body_hint, "Never wrap code"))
+  harness.stdio.println(text.kind == "text")
+  harness.stdio.println(text.call_open == "<tool_call>")
+  harness.stdio.println(contains(text.body_hint, "heredoc"))
+  harness.stdio.println(contains(text.body_hint, "Never wrap code"))
   const native = agent_tool_call_paradigm({tool_format: "native"})
-  __io_println(native.kind == "native")
-  __io_println(contains(native.body_hint, "JSON string"))
-  __io_println(!contains(native.body_hint, "heredoc"))
+  harness.stdio.println(native.kind == "native")
+  harness.stdio.println(contains(native.body_hint, "JSON string"))
+  harness.stdio.println(!contains(native.body_hint, "heredoc"))
   // The exemplar renderer uses the escape-free body channel for body-marked args
   // and quoted scalars otherwise — in the CURRENT paradigm.
   const ex = agent_render_tool_call_exemplar(
@@ -26,6 +26,6 @@ pipeline default() {
     ],
     {tool_format: "text"},
   )
-  __io_println(contains(ex, "<tool_call>edit({ action: \"create\""))
-  __io_println(contains(ex, "content: <<EOF\nfn main() {}\nEOF })"))
+  harness.stdio.println(contains(ex, "<tool_call>edit({ action: \"create\""))
+  harness.stdio.println(contains(ex, "content: <<EOF\nfn main() {}\nEOF })"))
 }

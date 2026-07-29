@@ -16,7 +16,7 @@
 //! proc-macro (see `harn-builtin-macros`), which emits both the runtime
 //! handler registration AND the parser `BuiltinSignature` from a single
 //! annotated function. The vm crate aggregates them and installs them here
-//! at driver startup via [`harn_builtin_registry::install_builtin_signatures`].
+//! at driver startup via [`harn_builtin_registry::install_builtin_manifest`].
 //!
 //! During migration the legacy static `signatures::groups()` tables remain
 //! as a fallback so unmigrated builtins still type-check. Lookups always
@@ -31,8 +31,9 @@ mod signatures;
 mod types;
 
 pub use lookup::{
-    builtin_return_type, is_builtin, is_untyped_boundary_source, iter_builtin_metadata,
-    iter_builtin_names, lookup, static_signature_names,
+    builtin_return_type, capability_method_entry, is_builtin, is_untyped_boundary_source,
+    iter_builtin_metadata, iter_builtin_names, lookup, lookup_capability_method,
+    static_signature_names,
 };
 pub use types::{
     ty_to_type_expr, BuiltinMetadata, BuiltinSignature, BuiltinSignatureExt, Param,
@@ -41,7 +42,7 @@ pub use types::{
     TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 
-pub use harn_builtin_registry::install_builtin_signatures;
+pub use harn_builtin_registry::{builtin_contract, install_builtin_manifest};
 
 #[cfg(test)]
 mod tests {

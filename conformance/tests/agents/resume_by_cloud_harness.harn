@@ -11,9 +11,9 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  *
  * Tracking: harn#1864 (S-14).
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const RB = ResumeBy()
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const result = RB.cloud_harness(
         harness,

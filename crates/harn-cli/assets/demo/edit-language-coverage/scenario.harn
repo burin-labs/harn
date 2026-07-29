@@ -35,21 +35,20 @@ fn count_supporting(rows, field) {
   return total
 }
 
-pipeline default(_task) {
+pipeline default(harness: Harness, _task) {
   // The edit primitives that write to disk share the deterministic-tools
   // gate; enable it once before any apply_node call (even dry-run).
-  const _ = hostlib_enable("tools:deterministic")
   // 1. Capability matrix — the onboarding contract, queryable.
   const caps = edit_capabilities()
   const rows = caps.languages
   const apply_count = count_supporting(rows, "apply_node")
   const rename_count = count_supporting(rows, "rename_symbol")
   // 2. Graceful degradation for a language with no registered grammar.
-  const dockerfile = edit_capabilities({language: "dockerfile"})
+  const dockerfile = edit_capabilities(harness.ast, {language: "dockerfile"})
   // 3. Real format-preserving edits against bundled data-format seeds.
-  const assets = asset_root()
+  const assets = harness.fs.runtime_paths().asset_root
   const json_edit = edit_apply_node(
-    {
+    harness.ast, {
       path: assets + "/seed/config.json",
       query: "(pair value: (number) @target)",
       replacement: "2",
@@ -57,7 +56,7 @@ pipeline default(_task) {
     },
   )
   const css_edit = edit_apply_node(
-    {
+    harness.ast, {
       path: assets + "/seed/theme.css",
       query: "(declaration (plain_value) @target)",
       replacement: "blue",
@@ -65,23 +64,23 @@ pipeline default(_task) {
       dry_run: true,
     },
   )
-  __io_println("=== edit-language-coverage demo ===")
-  __io_println(
+  harness.stdio.println("=== edit-language-coverage demo ===")
+  harness.stdio.println(
     "languages: " + to_string(len(rows)) + " — apply_node=" + to_string(apply_count)
       + ", rename_symbol="
       + to_string(rename_count),
   )
-  __io_println(
+  harness.stdio.println(
     "dockerfile: " + dockerfile.result + " — fallback: "
       + (dockerfile.fallback_suggestion ?? "none"),
   )
-  __io_println(
+  harness.stdio.println(
     "json apply_node: " + json_edit.result + " — " + to_string(json_edit.match_count) + " edit(s)",
   )
-  __io_println(
+  harness.stdio.println(
     "css apply_node: " + css_edit.result + " — " + to_string(css_edit.match_count) + " edit(s)",
   )
-  __io_println("")
+  harness.stdio.println("")
   const receipt = {
     receipt_kind: "edit_language_coverage_receipt",
     language_count: len(rows),
@@ -94,6 +93,6 @@ pipeline default(_task) {
     css_result: css_edit.result,
     css_match_count: css_edit.match_count,
   }
-  __io_println(json_stringify(receipt))
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

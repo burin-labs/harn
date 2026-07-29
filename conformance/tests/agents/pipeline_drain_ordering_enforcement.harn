@@ -18,8 +18,8 @@
  */
 import { lifecycle_audit_log_take } from "std/lifecycle"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("triage-pipeline", {subagent: "worker://triage/42"})
       const ack = harness.acknowledge_trigger("trigger://inbox/event-1")

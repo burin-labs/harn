@@ -138,47 +138,47 @@ pub fn native_registry() -> dict {
 }
 
 /** Print the observable outcome of one parse under `label`. */
-pub fn report(label: string, parsed) -> nil {
-  __io_println("# ${label}")
-  __io_println(
+pub fn report(harness: Harness, label: string, parsed) -> nil {
+  harness.stdio.println("# ${label}")
+  harness.stdio.println(
     "  calls=${len(parsed.tool_calls)} errors=${len(parsed.tool_parse_errors)} violations=${len(parsed.protocol_violations)} stray=${parsed.recovered_from_stray_count}",
   )
   for call in parsed.tool_calls {
-    __io_println("  call ${call.name} ${json_stringify(call.arguments)}")
+    harness.stdio.println("  call ${call.name} ${json_stringify(call.arguments)}")
   }
   for error in parsed.tool_parse_errors {
-    __io_println("  err ${json_stringify(error)}")
+    harness.stdio.println("  err ${json_stringify(error)}")
   }
   for violation in parsed.protocol_violations {
-    __io_println("  vio ${json_stringify(violation.message)}")
+    harness.stdio.println("  vio ${json_stringify(violation.message)}")
   }
-  __io_println("  prose=${json_stringify(parsed.prose)}")
-  __io_println("  answer=${json_stringify(parsed.user_response)}")
-  __io_println("  done=${json_stringify(parsed.done_marker)}")
+  harness.stdio.println("  prose=${json_stringify(parsed.prose)}")
+  harness.stdio.println("  answer=${json_stringify(parsed.user_response)}")
+  harness.stdio.println("  done=${json_stringify(parsed.done_marker)}")
   return nil
 }
 
 /** Parse `text` through the canonical tagged/heredoc text grammar and report it. */
-pub fn probe(label: string, text: string, tools) -> nil {
-  return report(label, agent_parse_tool_calls(text, tools, "text"))
+pub fn probe(harness: Harness, label: string, text: string, tools) -> nil {
+  return report(harness, label, agent_parse_tool_calls(text, tools, "text"))
 }
 
 /**
  * Parse `text` through the fenced-JSON grammar. That grammar carries no
  * registry — it resolves nothing against tool names — so none is passed.
  */
-pub fn probe_json(label: string, text: string) -> nil {
-  return report(label, agent_parse_tool_calls(text, nil, "json"))
+pub fn probe_json(harness: Harness, label: string, text: string) -> nil {
+  return report(harness, label, agent_parse_tool_calls(text, nil, "json"))
 }
 
 /**
  * Report the canonical replay text, which is what the agent loop writes back
  * into assistant history in place of the model's raw bytes.
  */
-pub fn probe_canonical(label: string, text: string, tools) -> nil {
+pub fn probe_canonical(harness: Harness, label: string, text: string, tools) -> nil {
   const parsed = agent_parse_tool_calls(text, tools, "text")
-  __io_println("# ${label}")
-  __io_println("  canonical=${json_stringify(parsed.canonical_text)}")
+  harness.stdio.println("# ${label}")
+  harness.stdio.println("  canonical=${json_stringify(parsed.canonical_text)}")
   return nil
 }
 
@@ -186,12 +186,12 @@ pub fn probe_canonical(label: string, text: string, tools) -> nil {
  * Report the dropped-fragment ledger: every path that consumes text without
  * producing a call must record what it swallowed.
  */
-pub fn probe_drops(label: string, text: string, tools) -> nil {
+pub fn probe_drops(harness: Harness, label: string, text: string, tools) -> nil {
   const parsed = agent_parse_tool_calls(text, tools, "text")
-  __io_println("# ${label}")
-  __io_println("  calls=${len(parsed.tool_calls)} dropped=${len(parsed.dropped ?? [])}")
+  harness.stdio.println("# ${label}")
+  harness.stdio.println("  calls=${len(parsed.tool_calls)} dropped=${len(parsed.dropped ?? [])}")
   for fragment in parsed.dropped ?? [] {
-    __io_println("  drop ${json_stringify(fragment)}")
+    harness.stdio.println("  drop ${json_stringify(fragment)}")
   }
   return nil
 }

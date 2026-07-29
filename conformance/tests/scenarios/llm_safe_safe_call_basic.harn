@@ -3,13 +3,13 @@
 import { safe_call } from "std/llm/safe"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [llm_text("ok")],
+    harness.llm, [llm_text("ok")],
     { ->
-      const r = safe_call("hi", nil, {provider: "mock", model: "mock-model"})
-      __io_println(r.ok)
-      __io_println(r.value.text)
+      const r = safe_call(harness, "hi", nil, {provider: "mock", model: "mock-model"})
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.value.text)
     },
   )
 }

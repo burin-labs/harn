@@ -1,30 +1,30 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
   with_llm_script(
-    [llm_text("{\"answer\":\"typed\"}")],
+    harness.llm, [llm_text("{\"answer\":\"typed\"}")],
     { ->
-      const typed = llm_call(
+      const typed = harness.llm.call(
         "Return JSON",
         nil,
         {provider: "mock", output: {schema: schema, strict: true, validation: "error"}},
       )
-      __io_println(typed.data.answer)
+      harness.stdio.println(typed.data.answer)
     },
   )
   with_llm_script(
-    [llm_text("{\"answer\":\"legacy\"}")],
+    harness.llm, [llm_text("{\"answer\":\"legacy\"}")],
     { ->
-      const legacy = llm_call("Return JSON", nil, {provider: "mock", output: schema})
-      __io_println(legacy.data?.answer)
+      const legacy = harness.llm.call("Return JSON", nil, {provider: "mock", output: schema})
+      harness.stdio.println(legacy.data?.answer)
     },
   )
   with_llm_script(
-    [llm_text("{\"answer\":\"loose\"}")],
+    harness.llm, [llm_text("{\"answer\":\"loose\"}")],
     { ->
-      const loose = llm_call("Return JSON", nil, {provider: "mock", output: "json"})
-      __io_println(loose.data.answer)
+      const loose = harness.llm.call("Return JSON", nil, {provider: "mock", output: "json"})
+      harness.stdio.println(loose.data.answer)
     },
   )
 }

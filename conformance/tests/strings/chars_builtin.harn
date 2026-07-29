@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // `chars` materializes a string into a list of single-character strings,
   // the linear-scan-friendly counterpart to repeated substring/index calls.
   const cs = chars("a{b}")
@@ -25,5 +25,5 @@ pipeline test(task) {
     i = i + 1
   }
   assert_eq(depth, 2)
-  log("chars builtin ok")
+  harness.stdio.println("chars builtin ok")
 }

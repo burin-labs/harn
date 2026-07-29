@@ -1,10 +1,10 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const pairs = iter(["a", "b", "c"]).enumerate().to_list()
   for p in pairs {
-    log("${p.first}:${p.second}")
+    harness.stdio.println("${p.first}:${p.second}")
   }
   for (i, x) in iter(["x", "y", "z"]).enumerate() {
-    log("${i}-${x}")
+    harness.stdio.println("${i}-${x}")
   }
-  log(iter([]).enumerate().to_list())
+  harness.stdio.println(iter([]).enumerate().to_list())
 }

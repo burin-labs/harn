@@ -14,7 +14,7 @@ fn failure_of(body) -> string {
   return to_string(caught)
 }
 
-pipeline test_assert_eq(task) {
+pipeline test_assert_eq(harness: Harness, task) {
   // === importable from std/testing, not just as a bare global ===
   // The import at the top of this file is itself the assertion: before these
   // builtins were re-exported it resolved at `harn check` and died at runtime.
@@ -110,5 +110,5 @@ pipeline test_assert_eq(task) {
   const flood = failure_of({ -> assert_eq(range(0, 30).to_list(), range(100, 130).to_list()) })
   assert(contains(flood, "differ in 30 places"))
   assert(contains(flood, "… and 20 more differences."))
-  __io_println("ok")
+  harness.stdio.println("ok")
 }

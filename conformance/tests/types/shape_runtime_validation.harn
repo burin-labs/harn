@@ -12,7 +12,7 @@ type User = {name: string, age: int}
 
 type Nested = {user: {name: string}, count: int}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   fn show_user(u: User) -> string {
     return u["name"] + " is " + to_string(u["age"])
   }
@@ -20,17 +20,17 @@ pipeline default() {
     return d["user"]["name"] + ":" + to_string(d["count"])
   }
   // 1. Valid shape literal passes.
-  __io_println(show_user({name: "Alice", age: 30}))
+  harness.stdio.println(show_user({name: "Alice", age: 30}))
   // 2. Width subtyping: extra fields are allowed.
-  __io_println(show_user({name: "Bob", age: 25, role: "admin"}))
+  harness.stdio.println(show_user({name: "Bob", age: 25, role: "admin"}))
   // 3. Optional field missing is fine.
   fn show_config(c: {host: string, port?: int}) -> string {
     return c["host"]
   }
-  __io_println(show_config({host: "localhost"}))
-  __io_println(show_config({host: "example.com", port: 8080}))
+  harness.stdio.println(show_config({host: "localhost"}))
+  harness.stdio.println(show_config({host: "example.com", port: 8080}))
   // 4. Nested shape literal passes.
-  __io_println(show_nested({user: {name: "X"}, count: 5}))
+  harness.stdio.println(show_nested({user: {name: "X"}, count: 5}))
   // 5. Dynamic dict missing a required field: schema_is rejects it at run time.
   fn make_bad_user() -> dict {
     return {name: "NoAge"}
@@ -38,9 +38,9 @@ pipeline default() {
   const bad = make_bad_user()
   if schema_is(bad, User) {
     const u: User = bad
-    __io_println(show_user(u))
+    harness.stdio.println(show_user(u))
   } else {
-    __io_println("rejected: not a User")
+    harness.stdio.println("rejected: not a User")
   }
   // 6. Dynamic dict with a wrong field type: schema_is rejects.
   fn make_wrong_type() -> dict {
@@ -49,9 +49,9 @@ pipeline default() {
   const wrong = make_wrong_type()
   if schema_is(wrong, User) {
     const u: User = wrong
-    __io_println(show_user(u))
+    harness.stdio.println(show_user(u))
   } else {
-    __io_println("rejected: wrong field type")
+    harness.stdio.println("rejected: wrong field type")
   }
   // 7. Valid dynamic dict: schema_is accepts and narrows it to User.
   fn make_good_user() -> dict {
@@ -60,9 +60,9 @@ pipeline default() {
   const good = make_good_user()
   if schema_is(good, User) {
     const u: User = good
-    __io_println(show_user(u))
+    harness.stdio.println(show_user(u))
   } else {
-    __io_println("rejected")
+    harness.stdio.println("rejected")
   }
   // 8. Nested dynamic dict missing an inner field: schema_is rejects.
   fn make_bad_nested() -> dict {
@@ -71,8 +71,8 @@ pipeline default() {
   const badn = make_bad_nested()
   if schema_is(badn, Nested) {
     const n: Nested = badn
-    __io_println(show_nested(n))
+    harness.stdio.println(show_nested(n))
   } else {
-    __io_println("rejected: bad nested")
+    harness.stdio.println("rejected: bad nested")
   }
 }

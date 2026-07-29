@@ -43,11 +43,11 @@ fn tasks() {
   ]
 }
 
-pipeline default(_task) {
+pipeline default(harness: Harness, _task) {
   // Single routing policy reused across all three tasks. The chain
   // covers both failure-mode dimensions the v0.8.40 primitive handles:
   // status-based failover plus verifier-signal escalation.
-  const policy = routing_policy(
+  const policy = harness.llm.routing_policy(
     {
       chain: [
         {provider: "mock", model: "mock-cheap", label: "cheap"},
@@ -62,21 +62,21 @@ pipeline default(_task) {
   let total_attempts = 0
   let escalated = 0
   for task in tasks() {
-    __io_println("=== task ${task.id} ===")
-    __io_println("story: ${task.story}")
-    const envelope = llm_call(task.prompt, "Be concise.", {routing: policy})
+    harness.stdio.println("=== task ${task.id} ===")
+    harness.stdio.println("story: ${task.story}")
+    const envelope = harness.llm.call(task.prompt, "Be concise.", {routing: policy})
     const attempts = envelope.routing.attempts
     total_attempts = total_attempts + len(attempts)
     if len(attempts) > 1 {
       escalated = escalated + 1
     }
-    __io_println("answer:   ${envelope.text}")
-    __io_println("selected: ${envelope.routing.selected}")
-    __io_println("attempts: ${len(attempts)}")
+    harness.stdio.println("answer:   ${envelope.text}")
+    harness.stdio.println("selected: ${envelope.routing.selected}")
+    harness.stdio.println("attempts: ${len(attempts)}")
     for a in attempts {
-      __io_println("  - label=${a.label} status=${a.status} verifier=${a.verifier_outcome}")
+      harness.stdio.println("  - label=${a.label} status=${a.status} verifier=${a.verifier_outcome}")
     }
-    __io_println("")
+    harness.stdio.println("")
     const row = {
       attempts: len(attempts),
       escalated: len(attempts) > 1,
@@ -94,7 +94,7 @@ pipeline default(_task) {
     tasks: rows,
     total_attempts: total_attempts,
   }
-  __io_println("=== routing_policy receipt ===")
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== routing_policy receipt ===")
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

@@ -21,7 +21,7 @@ pub type RuntimePromptContentBlock = {
 /**
  * Harn-owned state directories rooted beneath a caller-selected directory.
  *
- * Unlike `runtime_paths()`, this explicit layout never consults ambient path
+ * Unlike `harness.fs.runtime_paths()`, this explicit layout never consults ambient path
  * overrides such as `HARN_STATE_DIR`.
  */
 pub type RuntimeStatePaths = {state_root: string, worktree_root: string}
@@ -29,7 +29,7 @@ pub type RuntimeStatePaths = {state_root: string, worktree_root: string}
 /**
  * Resolve Harn's conventional state layout beneath `root`.
  *
- * Use `runtime_paths()` for the active process and this function only when a
+ * Use `harness.fs.runtime_paths()` for the active process and this function only when a
  * caller has named a distinct project root.
  *
  * @effects: []
@@ -46,8 +46,8 @@ pub fn runtime_state_paths_under(root: string) -> RuntimeStatePaths {
  * @effects: [host]
  * @errors: []
  */
-pub fn runtime_task() -> string {
-  return host_call("runtime.task", {}) ?? ""
+pub fn runtime_task(runtime: HarnessRuntime) -> string {
+  return runtime.task()
 }
 
 /**
@@ -56,8 +56,8 @@ pub fn runtime_task() -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn runtime_pipeline_input() {
-  return host_call("runtime.pipeline_input", {})
+pub fn runtime_pipeline_input(runtime: HarnessRuntime) {
+  return runtime.pipeline_input()
 }
 
 /**
@@ -69,8 +69,8 @@ pub fn runtime_pipeline_input() {
  * @effects: [host]
  * @errors: []
  */
-pub fn runtime_prompt_content() -> list<RuntimePromptContentBlock> {
-  return host_call("runtime.prompt_content", {}) ?? []
+pub fn runtime_prompt_content(runtime: HarnessRuntime) -> list<RuntimePromptContentBlock> {
+  return runtime.prompt_content()
 }
 
 /**
@@ -79,8 +79,8 @@ pub fn runtime_prompt_content() -> list<RuntimePromptContentBlock> {
  * @effects: [host]
  * @errors: []
  */
-pub fn runtime_dry_run() -> bool {
-  return host_call("runtime.dry_run", {}) ?? false
+pub fn runtime_dry_run(runtime: HarnessRuntime) -> bool {
+  return runtime.dry_run()
 }
 
 /**
@@ -89,8 +89,8 @@ pub fn runtime_dry_run() -> bool {
  * @effects: [host]
  * @errors: []
  */
-pub fn runtime_approved_plan() -> string {
-  return host_call("runtime.approved_plan", {}) ?? ""
+pub fn runtime_approved_plan(runtime: HarnessRuntime) -> string {
+  return runtime.approved_plan()
 }
 
 /**
@@ -99,9 +99,9 @@ pub fn runtime_approved_plan() -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn process_run(argv: list<string>, options = nil) {
+pub fn process_run(process: HarnessProcess, argv: list<string>, options = nil) {
   const opts = options ?? {}
-  return host_call("process.exec", filter_nil(opts + {mode: "argv", argv: argv})) ?? {}
+  return process.run(filter_nil(opts + {mode: "argv", argv: argv}))
 }
 
 /**
@@ -110,9 +110,9 @@ pub fn process_run(argv: list<string>, options = nil) {
  * @effects: [host]
  * @errors: []
  */
-pub fn process_shell(command: string, options = nil) {
+pub fn process_shell(process: HarnessProcess, command: string, options = nil) {
   const opts = options ?? {}
-  return host_call("process.exec", filter_nil(opts + {mode: "shell", command: command})) ?? {}
+  return process.run(filter_nil(opts + {mode: "shell", command: command}))
 }
 
 /**
@@ -165,8 +165,8 @@ pub fn shell_quote(value) -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn interaction_ask(question) -> string {
-  return host_call("interaction.ask", {question: question}) ?? ""
+pub fn interaction_ask(interaction: HarnessInteraction, question) -> string {
+  return interaction.ask(question)
 }
 
 /**
@@ -175,8 +175,8 @@ pub fn interaction_ask(question) -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn interaction_ask_with_kind(question, kind) -> string {
-  return host_call("interaction.ask", {question: question, type: kind}) ?? ""
+pub fn interaction_ask_with_kind(interaction: HarnessInteraction, question, kind) -> string {
+  return interaction.ask(question, kind)
 }
 
 /**
@@ -185,23 +185,20 @@ pub fn interaction_ask_with_kind(question, kind) -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn record_run_metadata(run, workflow_name) {
+pub fn record_run_metadata(runtime: HarnessRuntime, run, workflow_name) {
   if run?.path {
-    host_call(
-      "runtime.record_run",
-      {
-        workflow: workflow_name,
-        path: run?.path,
-        status: run?.status ?? "",
-        fixture_type: run?.run?.replay_fixture?._type,
-        usage: run?.usage,
-        persisted_path: run?.persisted_path,
-        summary: transcript_summary(run?.transcript),
-        transcript_state: run?.transcript?.state ?? "",
-        message_count: len(transcript_messages(run?.transcript)),
-        event_count: len(transcript_events(run?.transcript)),
-        asset_count: len(transcript_assets(run?.transcript)),
-      },
-    )
+    runtime.record_run({
+      workflow: workflow_name,
+      path: run?.path,
+      status: run?.status ?? "",
+      fixture_type: run?.run?.replay_fixture?._type,
+      usage: run?.usage,
+      persisted_path: run?.persisted_path,
+      summary: transcript_summary(run?.transcript),
+      transcript_state: run?.transcript?.state ?? "",
+      message_count: len(transcript_messages(run?.transcript)),
+      event_count: len(transcript_events(run?.transcript)),
+      asset_count: len(transcript_assets(run?.transcript)),
+    })
   }
 }

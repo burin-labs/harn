@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // `if` / `else` is an expression: the block that runs produces a
   // value that can flow into `let`, a function call argument, or a
   // `return`. Friction logs kept reporting this as missing — it
@@ -8,15 +8,15 @@ pipeline default() {
   } else {
     2
   }
-  __io_println(x)
+  harness.stdio.println(x)
   const label = if 3 > 2 {
     "bigger"
   } else {
     "smaller"
   }
-  __io_println(label)
+  harness.stdio.println(label)
   // Nested in function call args.
-  __io_println(
+  harness.stdio.println(
     if false {
       "a"
     } else {
@@ -31,5 +31,5 @@ pipeline default() {
   } else {
     "C"
   }
-  __io_println(grade)
+  harness.stdio.println(grade)
 }

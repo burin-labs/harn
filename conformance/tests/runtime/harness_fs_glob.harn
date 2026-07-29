@@ -10,8 +10,8 @@ const free_matches = glob("*.toml", root)
 
 const method_matches = harness.fs.glob("*.toml", root)
 
-__io_println(len(method_matches))
+harness.stdio.println(len(method_matches))
 
-__io_println(method_matches == free_matches)
+harness.stdio.println(method_matches == free_matches)
 
 harness.fs.delete(root)

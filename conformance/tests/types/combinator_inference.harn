@@ -1,20 +1,20 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // filter preserves the element type; map transforms it via the closure.
   // The chain stays list<int>, so the int annotations below type-check.
   const xs = [1, 2, 3, 4]
   const ys = xs.filter({ n -> n > 1 }).map({ n -> n * 10 })
   for v in ys {
     const kept: int = v
-    __io_println(kept)
+    harness.stdio.println(kept)
   }
   // keys()/values() project the dict's key/value type parameters.
   const counts: dict<string, int> = {a: 1, b: 2}
   for value in counts.values() {
     const n: int = value
-    __io_println(n)
+    harness.stdio.println(n)
   }
   for key in counts.keys() {
     const s: string = key
-    __io_println(s)
+    harness.stdio.println(s)
   }
 }

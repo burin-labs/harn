@@ -1,23 +1,23 @@
 import "std/triggers"
 
 /**
- * CH-08 (#1879): a duplicate `emit_channel(name, payload, {id: ...})` with the
+ * CH-08 (#1879): a duplicate `harness.channels.append(name, payload, {id: ...})` with the
  * same explicit event id is a no-op for trigger fan-out. The first emit fires
  * the handler exactly once; the second emit returns `duplicate=true` and does
  * NOT re-invoke any matching trigger binding. This is the user-facing
  * idempotency contract for channels: producers can safely retry an emit
  * without double-dispatching downstream handlers.
  */
-fn handle_event(event) {
-  emit_channel("ch.idem.fired", {seq: event.provider_payload.payload.seq})
+fn handle_event(harness: Harness, event) {
+  harness.channels.append("ch.idem.fired", {seq: event.provider_payload.payload.seq})
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-idempotent-" + unique,
       kind: "channel.emit",
@@ -36,13 +36,13 @@ pipeline test(task) {
     },
   )
   const event_id = "fixed-emit-" + unique
-  const first = emit_channel("ch.idem.input", {seq: 1}, {id: event_id})
-  const second = emit_channel("ch.idem.input", {seq: 2}, {id: event_id})
-  __io_println(first.duplicate)
-  __io_println(second.duplicate)
-  __io_println(first.event_id == second.event_id)
+  const first = harness.channels.append("ch.idem.input", {seq: 1}, {id: event_id})
+  const second = harness.channels.append("ch.idem.input", {seq: 2}, {id: event_id})
+  harness.stdio.println(first.duplicate)
+  harness.stdio.println(second.duplicate)
+  harness.stdio.println(first.event_id == second.event_id)
   // Only one fired handler invocation despite two emits.
-  const fired = channel_events("ch.idem.fired")
-  __io_println(len(fired))
-  __io_println(fired[0].payload.seq)
+  const fired = harness.channels.events("ch.idem.fired")
+  harness.stdio.println(len(fired))
+  harness.stdio.println(fired[0].payload.seq)
 }

@@ -39,7 +39,7 @@ fn handler_call_names(report: &AnalysisReport) -> Vec<String> {
 }
 
 #[test]
-fn harness_fs_method_call_is_attributed_to_read_file() {
+fn harness_fs_method_call_keeps_capability_identity() {
     let report = analyze(
         r#"
 fn main(harness: Harness) {
@@ -52,21 +52,21 @@ fn main(harness: Harness) {
 
     let calls = handler_call_names(&report);
     assert!(
-        calls.iter().any(|name| name == "read_file"),
-        "expected harness.fs.read_text to lower to ambient read_file, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.fs.read_text"),
+        "expected harness.fs.read_text to keep its capability identity, got: {calls:?}"
     );
     assert!(
-        calls.iter().any(|name| name == "mkdtemp"),
-        "expected harness.fs.mkdtemp to lower to ambient mkdtemp, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.fs.mkdtemp"),
+        "expected harness.fs.mkdtemp to keep its capability identity, got: {calls:?}"
     );
     assert!(
-        calls.iter().any(|name| name == "println"),
-        "expected harness.stdio.println to lower to ambient println, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.stdio.println"),
+        "expected harness.stdio.println to keep its capability identity, got: {calls:?}"
     );
 }
 
 #[test]
-fn harness_net_method_call_is_attributed_to_http_get() {
+fn harness_net_method_call_keeps_capability_identity() {
     let report = analyze(
         r#"
 fn main(harness: Harness) {
@@ -77,13 +77,13 @@ fn main(harness: Harness) {
 
     let calls = handler_call_names(&report);
     assert!(
-        calls.iter().any(|name| name == "http_get"),
-        "expected harness.net.get to lower to ambient http_get, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.net.get"),
+        "expected harness.net.get to keep its capability identity, got: {calls:?}"
     );
 }
 
 #[test]
-fn harness_term_method_calls_are_attributed_to_terminal_builtins() {
+fn harness_term_method_calls_keep_capability_identity() {
     let report = analyze(
         r#"
 fn main(harness: Harness) {
@@ -96,21 +96,23 @@ fn main(harness: Harness) {
 
     let calls = handler_call_names(&report);
     assert!(
-        calls.iter().any(|name| name == "term_width"),
-        "expected harness.term.width to lower to ambient term_width, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.term.width"),
+        "expected harness.term.width to keep its capability identity, got: {calls:?}"
     );
     assert!(
-        calls.iter().any(|name| name == "term_height"),
-        "expected harness.term.height to lower to ambient term_height, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.term.height"),
+        "expected harness.term.height to keep its capability identity, got: {calls:?}"
     );
     assert!(
-        calls.iter().any(|name| name == "read_password"),
-        "expected harness.term.read_password to lower to read_password, got: {calls:?}"
+        calls
+            .iter()
+            .any(|name| name == "harness.term.read_password"),
+        "expected harness.term.read_password to keep its capability identity, got: {calls:?}"
     );
 }
 
 #[test]
-fn harness_process_method_call_is_attributed_to_spawn_captured() {
+fn harness_process_method_call_keeps_capability_identity() {
     let report = analyze(
         r#"
 fn main(harness: Harness) {
@@ -121,17 +123,19 @@ fn main(harness: Harness) {
 
     let calls = handler_call_names(&report);
     assert!(
-        calls.iter().any(|name| name == "spawn_captured"),
-        "expected harness.process.spawn_captured to lower to ambient spawn_captured, got: {calls:?}"
+        calls
+            .iter()
+            .any(|name| name == "harness.process.spawn_captured"),
+        "expected harness.process.spawn_captured to keep its capability identity, got: {calls:?}"
     );
 }
 
 #[test]
-fn harness_crypto_method_call_is_attributed_to_sha256_hex() {
+fn deterministic_crypto_is_a_pure_global() {
     let report = analyze(
         r#"
 fn main(harness: Harness) {
-  harness.crypto.sha256("hello")
+  sha256_hex("hello")
 }
 "#,
     );
@@ -139,12 +143,12 @@ fn main(harness: Harness) {
     let calls = handler_call_names(&report);
     assert!(
         calls.iter().any(|name| name == "sha256_hex"),
-        "expected harness.crypto.sha256 to lower to ambient sha256_hex, got: {calls:?}"
+        "expected the deterministic digest to remain a pure global, got: {calls:?}"
     );
 }
 
 #[test]
-fn harness_llm_method_calls_are_attributed_to_llm_catalog_builtins() {
+fn harness_llm_method_calls_keep_capability_identity() {
     let report = analyze(
         r"
 fn main(harness: Harness) {
@@ -156,12 +160,12 @@ fn main(harness: Harness) {
 
     let calls = handler_call_names(&report);
     assert!(
-        calls.iter().any(|name| name == "llm_catalog"),
-        "expected harness.llm.catalog to lower to llm_catalog, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.llm.catalog"),
+        "expected harness.llm.catalog to keep its capability identity, got: {calls:?}"
     );
     assert!(
-        calls.iter().any(|name| name == "llm_provider_status"),
-        "expected harness.llm.providers to lower to llm_provider_status, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.llm.providers"),
+        "expected harness.llm.providers to keep its capability identity, got: {calls:?}"
     );
 }
 

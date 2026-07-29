@@ -1,6 +1,6 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let a = [10, 20, 30]
   a[-1] = 99
   a[-3] = 11
-  log(a)
+  harness.stdio.println(a)
 }

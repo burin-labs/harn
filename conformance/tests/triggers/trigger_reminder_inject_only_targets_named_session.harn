@@ -6,16 +6,16 @@ import "std/triggers"
  * other sessions' transcripts remain untouched. Guards against
  * cross-session leakage of reminders fired from a single dispatch.
  */
-pipeline test(task) {
-  const target = agent_session_open("trigger-reminder-inject-router-target")
-  const bystander = agent_session_open("trigger-reminder-inject-router-bystander")
-  agent_session_reset(target)
-  agent_session_reset(bystander)
+pipeline test(harness: Harness, task) {
+  const target = harness.agent.open("trigger-reminder-inject-router-target")
+  const bystander = harness.agent.open("trigger-reminder-inject-router-bystander")
+  harness.agent.reset(target)
+  harness.agent.reset(bystander)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "trigger-reminder-inject-router-" + unique,
       kind: "issue.opened",
@@ -32,21 +32,21 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const dispatch = trigger_fire(
+  const dispatch = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  __io_println(dispatch.status == "dispatched")
-  __io_println(dispatch.result?.target_session_id == target)
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.target_session_id == target)
   const target_reminders = transcript_events_by_kind(
-    agent_session_snapshot(target),
+    harness.agent.snapshot(target),
     "system_reminder",
   )
   const bystander_reminders = transcript_events_by_kind(
-    agent_session_snapshot(bystander),
+    harness.agent.snapshot(bystander),
     "system_reminder",
   )
-  __io_println(len(target_reminders))
-  __io_println(len(bystander_reminders))
-  __io_println(target_reminders[0].reminder.body)
+  harness.stdio.println(len(target_reminders))
+  harness.stdio.println(len(bystander_reminders))
+  harness.stdio.println(target_reminders[0].reminder.body)
 }

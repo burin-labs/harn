@@ -1,7 +1,7 @@
 import "std/waitpoint"
 
-pipeline test(task) {
-  const wp: Waitpoint = create("fan-in-" + uuid())
+pipeline test(harness: Harness, task) {
+  const wp: Waitpoint = create("fan-in-" + harness.random.uuid())
   const first = spawn {
     wait(wp).value + "-1"
   }
@@ -18,9 +18,9 @@ pipeline test(task) {
     wait(wp).value + "-5"
   }
   complete(wp, "go")
-  __io_println(await(first))
-  __io_println(await(second))
-  __io_println(await(third))
-  __io_println(await(fourth))
-  __io_println(await(fifth))
+  harness.stdio.println(await(first))
+  harness.stdio.println(await(second))
+  harness.stdio.println(await(third))
+  harness.stdio.println(await(fourth))
+  harness.stdio.println(await(fifth))
 }

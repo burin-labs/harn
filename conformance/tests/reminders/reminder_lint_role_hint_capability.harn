@@ -1,10 +1,10 @@
-pipeline main(task) {
-  register_reminder_provider(
+pipeline main(harness: Harness, task) {
+  harness.agent.register_reminder_provider(
     {
       id: "custom",
       subscribes_to: ["session_idle"],
       evaluate: { _ctx -> return {reminder: {body: "heads up", role_hint: "user_block"}} },
     },
   )
-  llm_call("hi", nil, {provider: "mock", model: "mock"})
+  harness.llm.call("hi", nil, {provider: "mock", model: "mock"})
 }

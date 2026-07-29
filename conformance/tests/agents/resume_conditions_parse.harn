@@ -1,6 +1,6 @@
 import { parse_resume_conditions } from "std/agent/workers"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const trigger = parse_resume_conditions(
     {
       trigger: {
@@ -11,15 +11,15 @@ pipeline main() {
       },
     },
   )
-  __io_println(trigger?.trigger?.kind)
-  __io_println(trigger?.trigger?.match?.events[0])
+  harness.stdio.println(trigger?.trigger?.kind)
+  harness.stdio.println(trigger?.trigger?.match?.events[0])
   const timeout = parse_resume_conditions(
     {timeout: {duration_minutes: 15, on_timeout: "resume_with_input"}},
   )
-  __io_println(timeout?.timeout?.duration_minutes)
-  __io_println(timeout?.timeout?.on_timeout)
+  harness.stdio.println(timeout?.timeout?.duration_minutes)
+  harness.stdio.println(timeout?.timeout?.on_timeout)
   const event = parse_resume_conditions({on_event: "operator.resume"})
-  __io_println(event?.on_event)
+  harness.stdio.println(event?.on_event)
   const default_timeout = parse_resume_conditions({timeout: {duration_minutes: 5}})
-  __io_println(default_timeout?.timeout?.on_timeout)
+  harness.stdio.println(default_timeout?.timeout?.on_timeout)
 }

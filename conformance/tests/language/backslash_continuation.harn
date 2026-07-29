@@ -1,10 +1,10 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Backslash continuation works for any operator
   // After formatting, + already supports multiline natively
   const msg = "hello"
     + " world"
-  __io_println(msg)
+  harness.stdio.println(msg)
   // Verify basic arithmetic still works
   const x = 10 - 3
-  __io_println(x)
+  harness.stdio.println(x)
 }

@@ -1,6 +1,6 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const base = transcript_from_messages(
     [
       {role: "user", content: "Investigate parser drift."},
@@ -10,13 +10,13 @@ pipeline test(task) {
     ],
   )
   const truncated = transcript_compact(base, {strategy: "truncate", keep_last: 1, target_tokens: 1})
-  __io_println(transcript_summary(truncated)?.contains("auto-compacted"))
-  __io_println(
+  harness.stdio.println(transcript_summary(truncated)?.contains("auto-compacted"))
+  harness.stdio.println(
     transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate",
   )
   const truncate_assets = transcript_assets(truncated)
-  __io_println(len(truncate_assets) == 1)
-  __io_println(len(transcript_messages(truncate_assets[0].data)) == 4)
+  harness.stdio.println(len(truncate_assets) == 1)
+  harness.stdio.println(len(transcript_messages(truncate_assets[0].data)) == 4)
   let verbose_lines = ""
   for i in range(0, 40) {
     verbose_lines = verbose_lines + "verbose line " + to_string(i) + "\n"
@@ -33,12 +33,12 @@ pipeline test(task) {
     masked_base,
     {strategy: "observation_mask", keep_last: 1, target_tokens: 1},
   )
-  __io_println(transcript_summary(masked)?.contains("masked"))
-  __io_println(
+  harness.stdio.println(transcript_summary(masked)?.contains("masked"))
+  harness.stdio.println(
     transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask",
   )
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("LLM compact summary"),
       llm_text("policy extension summary"),
       llm_text("policy replacement summary"),
@@ -53,11 +53,11 @@ pipeline test(task) {
           summarize_prompt: "compact_transcript_summary.harn.prompt",
         },
       )
-      __io_println(transcript_summary(llm_compacted)?.contains("LLM compact summary"))
-      const llm_calls = llm_mock_calls()
+      harness.stdio.println(transcript_summary(llm_compacted)?.contains("LLM compact summary"))
+      const llm_calls = harness.llm.mock_calls()
       const prompt = llm_calls[0].messages[0].content
-      __io_println(prompt.contains("Compact prompt from asset."))
-      __io_println(prompt.contains("Archived count: 2"))
+      harness.stdio.println(prompt.contains("Compact prompt from asset."))
+      harness.stdio.println(prompt.contains("Archived count: 2"))
       const policy_extended = transcript_compact(
         base,
         {
@@ -68,12 +68,12 @@ pipeline test(task) {
           author: "host",
         },
       )
-      const extended_prompt = llm_mock_calls()[1].messages[0].content
+      const extended_prompt = harness.llm.mock_calls()[1].messages[0].content
       const extended_event = transcript_events_by_kind(policy_extended, "compaction")[0]
-      __io_println(extended_prompt.contains("Additional compaction instructions"))
-      __io_println(extended_event.metadata?.instruction_mode == "extend")
-      __io_println(extended_event.metadata?.instruction_source == "host")
-      __io_println(
+      harness.stdio.println(extended_prompt.contains("Additional compaction instructions"))
+      harness.stdio.println(extended_event.metadata?.instruction_mode == "extend")
+      harness.stdio.println(extended_event.metadata?.instruction_source == "host")
+      harness.stdio.println(
         extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.",
       )
       const policy_replaced = transcript_compact(
@@ -86,35 +86,35 @@ pipeline test(task) {
           extend_default_instructions: false,
         },
       )
-      const replacement_prompt = llm_mock_calls()[2].messages[0].content
-      __io_println(replacement_prompt.contains("according to these instructions"))
-      __io_println(!replacement_prompt.contains("Preserve goals, constraints"))
-      __io_println(
+      const replacement_prompt = harness.llm.mock_calls()[2].messages[0].content
+      harness.stdio.println(replacement_prompt.contains("according to these instructions"))
+      harness.stdio.println(!replacement_prompt.contains("Preserve goals, constraints"))
+      harness.stdio.println(
         transcript_events_by_kind(policy_replaced, "compaction")[0].metadata?.instruction_mode
           == "replace",
       )
-      const stream_session = agent_session_open("compact-stream-session")
-      agent_session_inject(stream_session, {role: "user", content: "one"})
-      agent_session_inject(stream_session, {role: "assistant", content: "two"})
-      agent_session_inject(stream_session, {role: "user", content: "three"})
-      agent_subscribe(
+      const stream_session = harness.agent.open("compact-stream-session")
+      harness.agent.inject(stream_session, {role: "user", content: "one"})
+      harness.agent.inject(stream_session, {role: "assistant", content: "two"})
+      harness.agent.inject(stream_session, {role: "user", content: "three"})
+      harness.agent.subscribe(
         stream_session,
         { ev ->
           if ev?.type == "transcript_compacted" {
-            agent_session_inject(
+            harness.agent.inject(
               stream_session,
               {role: "assistant", content: "LIVE_COMPACTION_EVENT"},
             )
           }
         },
       )
-      const session_snapshot = agent_session_snapshot(stream_session) ?? {}
+      const session_snapshot = harness.agent.snapshot(stream_session) ?? {}
       const _ = transcript_compact(
         session_snapshot,
         {strategy: "truncate", keep_last: 1, target_tokens: 1},
       )
-      __io_println(
-        json_stringify(transcript_messages(agent_session_snapshot(stream_session) ?? {})).contains(
+      harness.stdio.println(
+        json_stringify(transcript_messages(harness.agent.snapshot(stream_session) ?? {})).contains(
           "LIVE_COMPACTION_EVENT",
         ),
       )
@@ -131,8 +131,8 @@ pipeline test(task) {
           ],
         },
       )
-      __io_println(run.observability?.schema_version == 4)
-      __io_println(len(run.observability?.compaction_events) == 3)
+      harness.stdio.println(run.observability?.schema_version == 4)
+      harness.stdio.println(len(run.observability?.compaction_events) == 3)
       let saw_truncate = false
       let saw_mask = false
       let saw_llm = false
@@ -147,9 +147,9 @@ pipeline test(task) {
           saw_llm = true
         }
       }
-      __io_println(saw_truncate)
-      __io_println(saw_mask)
-      __io_println(saw_llm)
+      harness.stdio.println(saw_truncate)
+      harness.stdio.println(saw_mask)
+      harness.stdio.println(saw_llm)
     },
   )
 }

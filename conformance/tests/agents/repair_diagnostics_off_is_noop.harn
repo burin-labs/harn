@@ -41,20 +41,18 @@ fn repair_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
       {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
       llm_text("Done. ##DONE##"),
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      const session = "repair-off-noop-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Make the tests pass.",
+      const session = "repair-off-noop-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Make the tests pass.",
           nil,
           {
             provider: "mock",
@@ -73,10 +71,10 @@ pipeline default() {
         ) },
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
-      __io_println(count_where(stalls, { s -> s.warning.pattern == "stuck_same_diagnostic" }))
-      __io_println(captured.result?.current_failure == nil)
-      __io_println(captured.result.status)
-      __io_println(captured.result.llm.iterations)
+      harness.stdio.println(count_where(stalls, { s -> s.warning.pattern == "stuck_same_diagnostic" }))
+      harness.stdio.println(captured.result?.current_failure == nil)
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(captured.result.llm.iterations)
     },
   )
 }

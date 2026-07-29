@@ -10,12 +10,12 @@ import "std/triggers"
  * Deterministic time control via `mock_time(...)` so the test never
  * depends on wall-clock behavior to close the aggregation window.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   mock_time(1000000)
-  const target_session = agent_session_open("trigger-channel-reminder-batched")
-  agent_session_reset(target_session)
+  const target_session = harness.agent.open("trigger-channel-reminder-batched")
+  harness.agent.reset(target_session)
   const unique = to_string(harness.random.gen_range(100000, 999999))
-  const _handle: TriggerHandle = trigger_register(
+  const _handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "trigger-channel-reminder-batched-" + unique,
       kind: "channel.emit",
@@ -41,28 +41,28 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const _ = emit_channel("ch.reminder.batched.input", {seq: 1})
-  const _ = emit_channel("ch.reminder.batched.input", {seq: 2})
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 1})
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 2})
   const before = transcript_events_by_kind(
-    agent_session_snapshot(target_session),
+    harness.agent.snapshot(target_session),
     "system_reminder",
   )
-  __io_println("before-threshold:" + to_string(len(before)))
+  harness.stdio.println("before-threshold:" + to_string(len(before)))
   // Threshold-fire path: the third emit closes the batch and dispatches once.
-  const _ = emit_channel("ch.reminder.batched.input", {seq: 3})
-  const after = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
-  __io_println("after-threshold:" + to_string(len(after)))
-  __io_println(after[0].reminder.body)
-  __io_println(after[0].reminder.tags[0])
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 3})
+  const after = transcript_events_by_kind(harness.agent.snapshot(target_session), "system_reminder")
+  harness.stdio.println("after-threshold:" + to_string(len(after)))
+  harness.stdio.println(after[0].reminder.body)
+  harness.stdio.println(after[0].reminder.tags[0])
   // Subsequent emits in a fresh batch generate a new inject — proves
   // the batch counter resets cleanly after a fire.
-  const _ = emit_channel("ch.reminder.batched.input", {seq: 4})
-  const _ = emit_channel("ch.reminder.batched.input", {seq: 5})
-  const _ = emit_channel("ch.reminder.batched.input", {seq: 6})
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 4})
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 5})
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 6})
   const after_second = transcript_events_by_kind(
-    agent_session_snapshot(target_session),
+    harness.agent.snapshot(target_session),
     "system_reminder",
   )
-  __io_println("after-second-batch:" + to_string(len(after_second)))
+  harness.stdio.println("after-second-batch:" + to_string(len(after_second)))
   unmock_time()
 }

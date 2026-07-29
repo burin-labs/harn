@@ -1,30 +1,29 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Scripted LLM turns via with_llm_script: the scope auto-clears the
   // queue on entry and restores it on exit, replacing the imperative
-  // llm_mock_clear() + sequential llm_mock(...) form.
+  // harness.llm.mock_clear() + sequential harness.llm.mock_enqueue(...) form.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("<user_response>Agent turn complete.</user_response>\n<done>##DONE##</done>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"),
     ],
     { ->
-      const result = agent_turn(
-        "Do the task",
+      const result = agent_turn(harness, "Do the task",
         {provider: "mock", system: "You are helpful.", max_iterations: 3},
       )
-      __io_println(result.status)
-      __io_println(result.visible_text)
-      __io_println(len(result.judge_decisions))
-      __io_println(result.judge_decisions[0].verdict)
-      __io_println(result.judge_decisions[0].source)
-      __io_println(result.llm.iterations)
-      __io_println(len(result.iterations) >= 1)
-      const calls = llm_mock_calls()
-      __io_println(len(calls))
-      __io_println(contains(calls[0].system, "Before each group of tool calls"))
-      __io_println(contains(calls[0].system, "You are helpful."))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(len(result.judge_decisions))
+      harness.stdio.println(result.judge_decisions[0].verdict)
+      harness.stdio.println(result.judge_decisions[0].source)
+      harness.stdio.println(result.llm.iterations)
+      harness.stdio.println(len(result.iterations) >= 1)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls))
+      harness.stdio.println(contains(calls[0].system, "Before each group of tool calls"))
+      harness.stdio.println(contains(calls[0].system, "You are helpful."))
     },
   )
 }

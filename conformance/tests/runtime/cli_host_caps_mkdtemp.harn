@@ -2,12 +2,12 @@
 // surface is `harness.fs.mkdtemp`.
 const dir = mkdtemp("harn-cli-host-caps-")
 
-__io_println(harness.fs.exists(dir))
+harness.stdio.println(harness.fs.exists(dir))
 
-__io_println(dir.starts_with(harness.fs.temp_dir()))
+harness.stdio.println(dir.starts_with(harness.fs.temp_dir()))
 
-__io_println(dir.contains("harn-cli-host-caps-"))
+harness.stdio.println(dir.contains("harn-cli-host-caps-"))
 
 harness.fs.delete(dir)
 
-__io_println(!harness.fs.exists(dir))
+harness.stdio.println(!harness.fs.exists(dir))

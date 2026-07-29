@@ -3,32 +3,30 @@ import {
   agent_session_apply_reminder_post_turn,
 } from "std/agent/state"
 
-pipeline main() {
-  const session = agent_session_open("reminder-provider-token-pressure")
-  agent_session_reset(session)
+pipeline main(harness: Harness) {
+  const session = harness.agent.open("reminder-provider-token-pressure")
+  harness.agent.reset(session)
   const opts = {reminders: {config: {token_pressure: {context_window: 100}}}}
-  const first = agent_reminder_providers_fire(
-    session,
+  const first = agent_reminder_providers_fire(harness, session,
     "on_budget_threshold",
     {session: {id: session}, iteration: 4, tokens_used: 75, model: "test-model"},
     opts,
   )
-  const second = agent_reminder_providers_fire(
-    session,
+  const second = agent_reminder_providers_fire(harness, session,
     "on_budget_threshold",
     {session: {id: session}, iteration: 5, tokens_used: 96, model: "test-model"},
     opts,
   )
-  const before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  const ttl = agent_session_apply_reminder_post_turn(session, 6)
-  const after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  __io_println(first.fired_count)
-  __io_println(second.reports[0].deduped_count)
-  __io_println(len(before))
-  __io_println(before[0].reminder.tags[0])
-  __io_println(before[0].reminder.source)
-  __io_println(before[0].reminder.propagate)
-  __io_println(before[0].reminder.preserve_on_compact)
-  __io_println(ttl.decremented_count)
-  __io_println(after[0].reminder.ttl_turns)
+  const before = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  const ttl = agent_session_apply_reminder_post_turn(harness, session, 6)
+  const after = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  harness.stdio.println(first.fired_count)
+  harness.stdio.println(second.reports[0].deduped_count)
+  harness.stdio.println(len(before))
+  harness.stdio.println(before[0].reminder.tags[0])
+  harness.stdio.println(before[0].reminder.source)
+  harness.stdio.println(before[0].reminder.propagate)
+  harness.stdio.println(before[0].reminder.preserve_on_compact)
+  harness.stdio.println(ttl.decremented_count)
+  harness.stdio.println(after[0].reminder.ttl_turns)
 }

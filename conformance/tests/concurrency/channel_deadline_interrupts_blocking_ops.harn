@@ -1,19 +1,19 @@
-pipeline test(task) {
-  const recv_ch = channel("deadline-receive", 1)
+pipeline test(harness: Harness, task) {
+  const recv_ch = harness.runtime.channel("deadline-receive", 1)
   const recv_result = try {
     deadline 25ms {
-      receive(recv_ch)
+      harness.runtime.receive(recv_ch)
     }
   }
-  __io_println(is_err(recv_result))
-  __io_println(is_timeout(unwrap_err(recv_result)))
-  const send_ch = channel("deadline-send", 1)
-  send(send_ch, "buffered")
+  harness.stdio.println(is_err(recv_result))
+  harness.stdio.println(is_timeout(unwrap_err(recv_result)))
+  const send_ch = harness.runtime.channel("deadline-send", 1)
+  harness.runtime.send(send_ch, "buffered")
   const send_result = try {
     deadline 25ms {
-      send(send_ch, "blocked")
+      harness.runtime.send(send_ch, "blocked")
     }
   }
-  __io_println(is_err(send_result))
-  __io_println(is_timeout(unwrap_err(send_result)))
+  harness.stdio.println(is_err(send_result))
+  harness.stdio.println(is_timeout(unwrap_err(send_result)))
 }

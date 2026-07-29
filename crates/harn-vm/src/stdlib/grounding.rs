@@ -80,6 +80,8 @@ pub(crate) fn register_grounding_builtins(vm: &mut Vm) {
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&VERIFY_IMPORTS_IMPL_DEF];
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__verify_imports(paths: list|string, options?: dict) -> dict",
     category = "grounding"
 )]

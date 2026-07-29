@@ -299,14 +299,14 @@ pub fn success_message(version: string, effective_version: string) -> string {
  * only failure mode is a missing/empty `## v<version>` section, which
  * `extract_section` throws on — mirroring the non-zero subprocess exit.
  */
-fn verify_release_notes(version: string) {
+fn verify_release_notes(harness: Harness, version: string) {
   const changelog = harness.fs.read_text(CHANGELOG_PATH)
   const normalized = normalize_version(version)
   const section = try {
     extract_section(changelog, normalized)
   } catch (err) {
-    __io_eprintln("error: failed to render release notes for current version")
-    __io_eprintln("${err}")
+    harness.stdio.eprintln("error: failed to render release notes for current version")
+    harness.stdio.eprintln("${err}")
     throw "release-notes-failed"
   }
   // render_notes is total given a valid section; exercising it confirms the
@@ -320,7 +320,7 @@ fn verify_release_notes(version: string) {
  * Passes when the tag is absent, HEAD is at/descends from the tagged
  * commit, or HEAD carries an equivalent `Release vX.Y.Z` commit.
  */
-fn verify_tag_state(version: string) {
+fn verify_tag_state(harness: Harness, version: string) {
   const tag = "v" + version
   const tag_lookup = harness.process.spawn_captured(
     {cmd: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]},
@@ -370,7 +370,7 @@ fn verify_tag_state(version: string) {
     + "rebase onto the tagged commit before continuing"
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   try {
     const cargo_text = harness.fs.read_text(CARGO_PATH)
     const changelog_text = harness.fs.read_text(CHANGELOG_PATH)
@@ -390,15 +390,15 @@ pipeline main(task) {
     }
     const acp_manifest_text = harness.fs.read_text(ACP_AGENT_MANIFEST_PATH)
     check_acp_agent_manifest(acp_manifest_text, version)
-    verify_release_notes(effective_version)
-    verify_tag_state(effective_version)
-    __io_println(success_message(version, effective_version))
+    verify_release_notes(harness, effective_version)
+    verify_tag_state(harness, effective_version)
+    harness.stdio.println(success_message(version, effective_version))
     return 0
   } catch (e) {
     if e == "release-notes-failed" {
       return 1
     }
-    __io_eprintln("${e}")
+    harness.stdio.eprintln("${e}")
     return 1
   }
 }

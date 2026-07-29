@@ -43,6 +43,6 @@ type MonitorWaitResult = {
  * @effects: []
  * @errors: []
  */
-pub fn wait_for(options: MonitorWaitOptions) -> MonitorWaitResult {
-  return monitor_wait_for_native(options)
+pub fn wait_for(harness: Harness, options: MonitorWaitOptions) -> MonitorWaitResult {
+  return harness.runtime.monitor_wait_for_native(options)
 }

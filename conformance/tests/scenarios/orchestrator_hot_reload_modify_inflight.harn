@@ -1,7 +1,7 @@
 import "../_common"
 
-pipeline default() {
-  const unique = uuid()
+pipeline default(harness: Harness) {
+  const unique = harness.random.uuid()
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const base = path_join(harness.fs.temp_dir(), "harn-orchestrator-hot-reload-" + unique)
   const workspace = path_join(base, "workspace")
@@ -264,7 +264,7 @@ pipeline default() {
   assert(summary.versions[1] == 2, "new request switched to binding version 2")
   assert(summary.old_status == 404, "old path is retired after reload")
   assert(summary.state_version == 2, "state snapshot reflects reloaded binding version")
-  log(
+  harness.stdio.println(
     "orchestrator hot reload versions: " + to_string(summary.versions[0]) + ","
       + to_string(
       summary.versions[1],

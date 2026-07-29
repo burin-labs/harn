@@ -1,5 +1,5 @@
 /** Smoke test: minimal agent_loop call against local llama.cpp. */
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -7,9 +7,8 @@ pipeline main(task) {
     "Evaluate a math expression",
     {parameters: {expr: {type: "string"}}, handler: { _args -> "396" }},
   )
-  log("Smoke test: calling agent_loop against llamacpp provider")
-  const result = agent_loop(
-    "What is 17 * 23 + 5? Use the calc tool.",
+  harness.stdio.println("Smoke test: calling agent_loop against llamacpp provider")
+  const result = agent_loop(harness, "What is 17 * 23 + 5? Use the calc tool.",
     "/no_think You are a math assistant. Always use the calc tool for arithmetic.",
     {
       provider: "llamacpp",
@@ -21,5 +20,5 @@ pipeline main(task) {
       tools: registry,
     },
   )
-  log("status=${result.status} iters=${result.llm.iterations} text=${result.text}")
+  harness.stdio.println("status=${result.status} iters=${result.llm.iterations} text=${result.text}")
 }

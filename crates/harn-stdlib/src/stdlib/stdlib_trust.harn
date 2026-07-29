@@ -35,8 +35,8 @@ type TrustGraphQueryFilters = {
  * @effects: []
  * @errors: []
  */
-pub fn query(filters = {}) -> list<TrustGraphRecord> {
-  return trust.query(filters)
+pub fn query(harness: Harness, filters = {}) -> list<TrustGraphRecord> {
+  return harness.runtime.trust_query_alias(filters)
 }
 
 /**
@@ -45,8 +45,8 @@ pub fn query(filters = {}) -> list<TrustGraphRecord> {
  * @effects: []
  * @errors: []
  */
-pub fn record(decision) -> TrustEntryId {
-  return trust.record(decision)
+pub fn record(harness: Harness, decision) -> TrustEntryId {
+  return harness.runtime.trust_record_alias(decision)
 }
 
 /**
@@ -55,8 +55,8 @@ pub fn record(decision) -> TrustEntryId {
  * @effects: []
  * @errors: []
  */
-pub fn score(actor_id: string, action: string? = nil) -> TrustScore {
-  return trust.score(actor_id, action)
+pub fn score(harness: Harness, actor_id: string, action: string? = nil) -> TrustScore {
+  return harness.runtime.trust_score(actor_id, action)
 }
 
 /**
@@ -65,8 +65,8 @@ pub fn score(actor_id: string, action: string? = nil) -> TrustScore {
  * @effects: []
  * @errors: []
  */
-pub fn policy_for(actor_id: string) -> CapabilityPolicy {
-  return trust.policy_for(actor_id)
+pub fn policy_for(harness: Harness, actor_id: string) -> CapabilityPolicy {
+  return harness.runtime.trust_policy_for(actor_id)
 }
 
 /**
@@ -75,6 +75,6 @@ pub fn policy_for(actor_id: string) -> CapabilityPolicy {
  * @effects: []
  * @errors: []
  */
-pub fn verify_chain() -> TrustChainReport {
-  return trust.verify_chain()
+pub fn verify_chain(harness: Harness) -> TrustChainReport {
+  return harness.runtime.trust_verify_chain()
 }

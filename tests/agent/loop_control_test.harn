@@ -56,7 +56,7 @@ fn _state_with_advance(progress_changed, no_net_advance, remaining, vetoed, requ
   }
 }
 
-pipeline test_text_only_progress_extends(task) {
+pipeline test_text_only_progress_extends(harness: Harness, task) {
   // Visible-text progress, ZERO tool calls this turn, at the boundary → extend.
   // This is the bug the rule table fixed.
   const cmd = agent_loop_control_invoke({}, BUDGET, _state(true, 0, 0, false, true))
@@ -64,27 +64,27 @@ pipeline test_text_only_progress_extends(task) {
   assert_eq(cmd.reason, "recent turn made progress")
 }
 
-pipeline test_tool_progress_extends(task) {
+pipeline test_tool_progress_extends(harness: Harness, task) {
   // Tool-call progress at the boundary → extend (unchanged behavior).
   const cmd = agent_loop_control_invoke({}, BUDGET, _state(true, 2, 0, false, true))
   assert_eq(cmd.action, "extend")
   assert_eq(cmd.reason, "recent turn made progress")
 }
 
-pipeline test_no_progress_does_not_extend(task) {
+pipeline test_no_progress_does_not_extend(harness: Harness, task) {
   // No progress at the boundary → no extension; the loop stops at its cap.
   const cmd = agent_loop_control_invoke({}, BUDGET, _state(false, 0, 0, false, true))
   assert_eq(cmd.action, "none")
 }
 
-pipeline test_below_boundary_is_noop(task) {
+pipeline test_below_boundary_is_noop(harness: Harness, task) {
   // remaining > 0 → not at the boundary yet, the policy makes no decision even
   // when progress is being made.
   const cmd = agent_loop_control_invoke({}, BUDGET, _state(true, 1, 5, false, true))
   assert_eq(cmd.action, "none")
 }
 
-pipeline test_completion_veto_extends(task) {
+pipeline test_completion_veto_extends(harness: Harness, task) {
   // A vetoed completion gate extends regardless of per-turn progress, and is
   // ordered ahead of the progress rule.
   const cmd = agent_loop_control_invoke({}, BUDGET, _state(false, 0, 0, true, true))
@@ -92,14 +92,14 @@ pipeline test_completion_veto_extends(task) {
   assert_eq(cmd.reason, "completion gate vetoed")
 }
 
-pipeline test_required_tools_missing_extends(task) {
+pipeline test_required_tools_missing_extends(harness: Harness, task) {
   // Required tools not yet satisfied extends even with no fresh progress.
   const cmd = agent_loop_control_invoke({}, BUDGET, _state(false, 0, 0, false, false))
   assert_eq(cmd.action, "extend")
   assert_eq(cmd.reason, "required tools missing")
 }
 
-pipeline test_thrash_no_net_advance_does_not_extend(task) {
+pipeline test_thrash_no_net_advance_does_not_extend(harness: Harness, task) {
   // Activity present (progress.changed true, 3 tool calls) but the verification
   // OUTCOME is not advancing (no_net_advance set by the loop because the same
   // failing diagnostic recurred past threshold). At the boundary this must NOT
@@ -109,7 +109,7 @@ pipeline test_thrash_no_net_advance_does_not_extend(task) {
   assert_eq(cmd.action, "none")
 }
 
-pipeline test_real_progress_still_extends_with_advance_field(task) {
+pipeline test_real_progress_still_extends_with_advance_field(harness: Harness, task) {
   // A genuinely-advancing run (changed true, no_net_advance FALSE — error count
   // draining / signature changing) still reads as progress and keeps its budget.
   const cmd = agent_loop_control_invoke(
@@ -121,7 +121,7 @@ pipeline test_real_progress_still_extends_with_advance_field(task) {
   assert_eq(cmd.reason, "recent turn made progress")
 }
 
-pipeline test_no_net_advance_yields_to_completion_veto(task) {
+pipeline test_no_net_advance_yields_to_completion_veto(harness: Harness, task) {
   // The thrash override only suppresses the PROGRESS rule. A vetoed completion
   // gate is ordered ahead of progress and still extends even on a thrash turn,
   // so completion-driven repair is never starved by the budget guard.
@@ -130,7 +130,7 @@ pipeline test_no_net_advance_yields_to_completion_veto(task) {
   assert_eq(cmd.reason, "completion gate vetoed")
 }
 
-pipeline test_no_net_advance_yields_to_required_tools(task) {
+pipeline test_no_net_advance_yields_to_required_tools(harness: Harness, task) {
   // Likewise, required-tools-missing is ordered ahead of progress and still
   // extends on a thrash turn.
   const cmd = agent_loop_control_invoke(

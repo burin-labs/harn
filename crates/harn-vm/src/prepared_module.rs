@@ -15,7 +15,7 @@ use parking_lot::Mutex;
 use crate::chunk::{Chunk, CompiledFunction};
 use crate::module_artifact::{
     compile_module_artifact_from_source, compile_module_artifact_from_source_with_imported_enums,
-    ModuleArtifact, ModuleImportSpec,
+    ModuleArtifact, ModuleImportSpec, ModuleProvenance,
 };
 use crate::module_source::ModuleSource;
 use crate::{ModulePhaseRecorder, ModulePhaseStats, VmError};
@@ -23,6 +23,7 @@ const DEFAULT_MAX_ENTRIES: usize = 512;
 
 /// Immutable runtime form of one compiled module artifact.
 pub(crate) struct PreparedModuleArtifact {
+    pub(crate) provenance: ModuleProvenance,
     pub(crate) imports: Vec<ModuleImportSpec>,
     pub(crate) type_schema_init_chunk: Option<Arc<Chunk>>,
     pub(crate) init_chunk: Option<Arc<Chunk>>,
@@ -35,6 +36,7 @@ pub(crate) struct PreparedModuleArtifact {
 impl PreparedModuleArtifact {
     pub(crate) fn from_cached(artifact: ModuleArtifact) -> Self {
         let ModuleArtifact {
+            provenance,
             imports,
             type_schema_init_chunk,
             init_chunk,
@@ -51,6 +53,7 @@ impl PreparedModuleArtifact {
             .map(|(name, function)| (name, Arc::new(CompiledFunction::from_cached(function))))
             .collect();
         Self {
+            provenance,
             imports,
             type_schema_init_chunk,
             init_chunk,
@@ -66,6 +69,7 @@ impl PreparedModuleArtifact {
 struct PreparedModuleCacheKey {
     canonical_path: PathBuf,
     source_hash: [u8; 32],
+    provenance: ModuleProvenance,
     harn_version: &'static str,
     codegen_fingerprint: &'static str,
     optimizations_enabled: bool,
@@ -76,10 +80,11 @@ impl PreparedModuleCacheKey {
     /// artifact. Keying on it rather than a second digest of the same bytes
     /// means a warm module load hashes its source once, and lets a caller
     /// holding a recorded digest find a prepared artifact without the bytes.
-    fn new(canonical_path: PathBuf, source_hash: [u8; 32]) -> Self {
+    fn new(canonical_path: PathBuf, source_hash: [u8; 32], provenance: ModuleProvenance) -> Self {
         Self {
             canonical_path,
             source_hash,
+            provenance,
             harn_version: crate::bytecode_cache::HARN_VERSION,
             codegen_fingerprint: crate::bytecode_cache::CODEGEN_FINGERPRINT,
             optimizations_enabled: crate::compiler::CompilerOptions::from_env()
@@ -205,7 +210,11 @@ impl PreparedModuleCache {
         canonical_path: &Path,
         source_hash: [u8; 32],
     ) -> Option<Arc<PreparedModuleArtifact>> {
-        let key = PreparedModuleCacheKey::new(canonical_path.to_path_buf(), source_hash);
+        let key = PreparedModuleCacheKey::new(
+            canonical_path.to_path_buf(),
+            source_hash,
+            ModuleProvenance::User,
+        );
         let mut inner = self.inner.lock();
         let artifact = inner.entries.get(&key).cloned();
         if artifact.is_some() {
@@ -222,7 +231,7 @@ impl PreparedModuleCache {
         source_hash: [u8; 32],
         artifact: Arc<PreparedModuleArtifact>,
     ) -> Arc<PreparedModuleArtifact> {
-        let key = PreparedModuleCacheKey::new(canonical_path, source_hash);
+        let key = PreparedModuleCacheKey::new(canonical_path, source_hash, artifact.provenance);
         let mut inner = self.inner.lock();
         if let Some(existing) = inner.entries.get(&key) {
             return Arc::clone(existing);
@@ -315,8 +324,9 @@ mod tests {
         }
     }
 
-    fn empty_artifact() -> Arc<PreparedModuleArtifact> {
+    fn empty_artifact_with_provenance(provenance: ModuleProvenance) -> Arc<PreparedModuleArtifact> {
         Arc::new(PreparedModuleArtifact::from_cached(ModuleArtifact {
+            provenance,
             imports: Vec::new(),
             type_schema_init_chunk: None,
             init_chunk: None,
@@ -325,6 +335,25 @@ mod tests {
             public_value_names: Default::default(),
             public_type_names: Default::default(),
         }))
+    }
+
+    fn empty_artifact() -> Arc<PreparedModuleArtifact> {
+        empty_artifact_with_provenance(ModuleProvenance::User)
+    }
+
+    #[test]
+    fn ordinary_lookup_cannot_reuse_privileged_wire_bytecode() {
+        let cache = PreparedModuleCache::default();
+        let source = ModuleSource::from_text("const value = 1");
+        let _ = cache.insert(
+            PathBuf::from("same.harn"),
+            source.sha256(),
+            empty_artifact_with_provenance(ModuleProvenance::PrivilegedWire),
+        );
+        assert!(
+            cache.get(Path::new("same.harn"), source.sha256()).is_none(),
+            "user module lookup must be provenance-separated"
+        );
     }
 
     #[test]
@@ -356,6 +385,7 @@ mod tests {
         let key = PreparedModuleCacheKey::new(
             path,
             ModuleSource::from_text("pub fn value() { 1 }").sha256(),
+            ModuleProvenance::User,
         );
         let mut other_compiler = key.clone();
         other_compiler.optimizations_enabled = !key.optimizations_enabled;

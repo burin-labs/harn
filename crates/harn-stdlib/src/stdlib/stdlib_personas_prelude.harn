@@ -107,7 +107,7 @@ fn __prelude_receipt_id(opts, status, calls) -> string {
 
 fn __prelude_receipt(opts, status, result, error, calls, approvals, side_effects) {
   const options = opts ?? {}
-  const {started_at = date_iso(), completed_at = started_at, persona = "persona_prelude"} = options
+  const {started_at = harness.clock.date_iso(), completed_at = started_at, persona = "persona_prelude"} = options
     ?? {}
   const input_digest = options?.inputs_digest ?? __prelude_digest(options?.input)
   const output_digest = options?.outputs_digest ?? __prelude_digest(result)
@@ -154,7 +154,7 @@ fn __prelude_call_record(name, status, value, error) {
  */
 pub fn verify_then_act(verifier, actor, options = nil) {
   const opts = options ?? {}
-  const {started_at = date_iso(), verifier_name = "verifier", actor_name = "actor"} = opts ?? {}
+  const {started_at = harness.clock.date_iso(), verifier_name = "verifier", actor_name = "actor"} = opts ?? {}
   const verified_raw = try {
     verifier()
   }
@@ -263,9 +263,9 @@ pub fn verify_then_act(verifier, actor, options = nil) {
  * @effects: [time]
  * @errors: []
  */
-pub fn bounded_loop(state_init, step_fn, options = nil) {
+pub fn bounded_loop(harness: Harness, state_init, step_fn, options = nil) {
   const opts = options ?? {}
-  const started_at = opts?.started_at ?? date_iso()
+  const started_at = opts?.started_at ?? harness.clock.date_iso()
   const started_ms = harness.clock.timestamp() * 1000
   const {max_iterations = 10, max_duration_ms = opts?.max_duration, progress_required = false} =
     opts
@@ -397,7 +397,7 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
   }
 }
 
-fn __prelude_invoke_model(input, model_spec, options) {
+fn __prelude_invoke_model(harness: Harness, input, model_spec, options) {
   const opts = options ?? {}
   if __prelude_is_callable(model_spec) {
     return model_spec(input)
@@ -405,9 +405,9 @@ fn __prelude_invoke_model(input, model_spec, options) {
   if type_of(model_spec) == "dict" {
     const prompt = to_string(model_spec?.prompt ?? input)
     const system = model_spec?.system ?? opts?.system
-    return llm_call(prompt, system, opts + model_spec)
+    return harness.llm.call(prompt, system, opts + model_spec)
   }
-  return llm_call(to_string(input), opts?.system, opts + {model: model_spec})
+  return harness.llm.call(to_string(input), opts?.system, opts + {model: model_spec})
 }
 
 fn __prelude_confidence(value) {
@@ -424,7 +424,7 @@ fn __prelude_confidence(value) {
  * @effects: []
  * @errors: []
  */
-pub fn cheap_classify_then_escalate(
+pub fn cheap_classify_then_escalate(harness: Harness, 
   input,
   cheap_model,
   escalate_model,
@@ -432,16 +432,16 @@ pub fn cheap_classify_then_escalate(
   options = nil,
 ) {
   const opts = options ?? {}
-  const {started_at = date_iso(), min_confidence = 0.7} = opts ?? {}
+  const {started_at = harness.clock.date_iso(), min_confidence = 0.7} = opts ?? {}
   const cheap_result = try {
-    __prelude_invoke_model(input, cheap_model, opts?.cheap_options ?? {})
+    __prelude_invoke_model(harness, input, cheap_model, opts?.cheap_options ?? {})
   }
   let calls = []
   if is_err(cheap_result) {
     const cheap_error = unwrap_err(cheap_result)
     calls = calls + [__prelude_call_record("cheap_classify", "failure", nil, cheap_error)]
     const escalated_after_error = try {
-      __prelude_invoke_model(input, escalate_model, opts?.escalate_options ?? {})
+      __prelude_invoke_model(harness, input, escalate_model, opts?.escalate_options ?? {})
     }
     if is_err(escalated_after_error) {
       const error = unwrap_err(escalated_after_error)
@@ -520,7 +520,7 @@ pub fn cheap_classify_then_escalate(
     }
   }
   const escalated = try {
-    __prelude_invoke_model(input, escalate_model, opts?.escalate_options ?? {})
+    __prelude_invoke_model(harness, input, escalate_model, opts?.escalate_options ?? {})
   }
   if is_err(escalated) {
     const error = unwrap_err(escalated)
@@ -571,9 +571,9 @@ pub fn cheap_classify_then_escalate(
  * @effects: []
  * @errors: []
  */
-pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
+pub fn parallel_sweep_with_circuit_breaker(harness: Harness, items, step_fn, options = nil) {
   const opts = options ?? {}
-  const started_at = opts?.started_at ?? date_iso()
+  const started_at = opts?.started_at ?? harness.clock.date_iso()
   let max_concurrent = opts?.max_concurrent ?? 4
   if max_concurrent < 1 {
     max_concurrent = 1
@@ -585,8 +585,7 @@ pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
   // one slow item stalled its whole chunk, and a failure could not stop the
   // chunk it was in. `settle_with_abort` checks the threshold as each branch
   // settles, so items that have not started yet are dropped immediately.
-  const outcome = settle_with_abort(
-    items,
+  const outcome = settle_with_abort(harness, items,
     { item -> step_fn(item) },
     {max_concurrent: max_concurrent, max_failures: max_failures},
   )
@@ -663,10 +662,10 @@ pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn with_audit_receipt(step_fn, options = nil) {
+pub fn with_audit_receipt(harness: Harness, step_fn, options = nil) {
   const opts = options ?? {}
   return fn() {
-    const started_at = opts?.started_at ?? date_iso()
+    const started_at = opts?.started_at ?? harness.clock.date_iso()
     const outcome = try {
       step_fn()
     }
@@ -717,14 +716,14 @@ pub fn with_audit_receipt(step_fn, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
+pub fn with_approval_gate(harness: Harness, approval_kind, step_fn, options = nil) {
   const opts = options ?? {}
   return fn() {
-    const started_at = opts?.started_at ?? date_iso()
+    const started_at = opts?.started_at ?? harness.clock.date_iso()
     let approval = opts?.approval
     if approval == nil && (opts?.request_approval ?? false) {
       const requested = try {
-        request_approval(to_string(approval_kind), opts?.approval_options ?? {})
+        harness.interaction.request_approval(to_string(approval_kind), opts?.approval_options ?? {})
       }
       if is_err(requested) {
         const error = unwrap_err(requested)

@@ -1,3 +1,3 @@
-pipeline test(task) {
-  log(true + false)
+pipeline test(harness: Harness, task) {
+  harness.stdio.println(true + false)
 }

@@ -4,17 +4,17 @@ import "std/triggers"
  * CH-02 (#1872): tenant wildcard selector (`channel:tenant:*:foo`) matches
  * emits within the trigger's entitled tenant boundary.
  */
-fn handle_any_tenant(event) {
+fn handle_any_tenant(harness: Harness, event) {
   const payload = event.provider_payload
-  emit_channel("ch.wild.fired", {scope: payload.scope, scope_id: payload.scope_id})
+  harness.channels.append("ch.wild.fired", {scope: payload.scope, scope_id: payload.scope_id})
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-wild-" + unique,
       kind: "channel.emit",
@@ -32,10 +32,10 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const _ = emit_channel("wild.input", {n: 1})
-  const fired = channel_events("ch.wild.fired")
-  __io_println(len(fired))
-  __io_println(fired[0].payload.scope)
+  const _ = harness.channels.append("wild.input", {n: 1})
+  const fired = harness.channels.events("ch.wild.fired")
+  harness.stdio.println(len(fired))
+  harness.stdio.println(fired[0].payload.scope)
   // Default tenant id is `default` when no tenant is set on the runtime.
-  __io_println(fired[0].payload.scope_id)
+  harness.stdio.println(fired[0].payload.scope_id)
 }

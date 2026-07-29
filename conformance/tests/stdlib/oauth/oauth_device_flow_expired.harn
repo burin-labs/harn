@@ -7,7 +7,7 @@ import { device_flow } from "std/oauth/device_flow"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const _ = mock_time(1700000000000)
   const store = memory()
   const provider = custom(
@@ -41,8 +41,7 @@ pipeline test(task) {
   )
   let threw = false
   try {
-    const _ = device_flow(
-      provider,
+    const _ = device_flow(harness,  harness, provider,
       {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }},
     )
   } catch (err) {
@@ -54,5 +53,5 @@ pipeline test(task) {
   const stored = store.get("mockExpired")
   assert(stored == nil, "no token persisted on expired_token error")
   const _ = unmock_time()
-  log("oauth device flow expired ok")
+  harness.stdio.println("oauth device flow expired ok")
 }

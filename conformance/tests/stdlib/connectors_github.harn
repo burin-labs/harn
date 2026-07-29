@@ -5,7 +5,7 @@ import {
   github_slug_from_remote,
 } from "std/connectors/github"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   assert_eq(
     github_slug_from_remote("git@github.com:octo-org/octo-repo.git"),
     "octo-org/octo-repo",
@@ -49,5 +49,5 @@ pipeline test(task) {
   const writeback = forge_writeback_request(forge, "Preview ready")
   assert_eq(writeback.method, "issues.create_comment", "forge writeback method")
   assert_eq(writeback.params.issue_number, 24, "forge writeback issue number")
-  log("github stdlib ok")
+  harness.stdio.println("github stdlib ok")
 }

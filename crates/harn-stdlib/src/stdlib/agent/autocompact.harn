@@ -378,7 +378,7 @@ pub fn compact_retaining_current_plan(opts = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_autocompact_if_needed(session, opts) {
+pub fn agent_autocompact_if_needed(harness: Harness, session, opts) {
   if !__compaction_enabled(opts) {
     return nil
   }
@@ -396,7 +396,7 @@ pub fn agent_autocompact_if_needed(session, opts) {
   }
   const keep_last = __compaction_keep_last(opts)
   const compact_opts = __compact_options(opts, engine_strategy, keep_last)
-  const messages = __host_agent_session_messages(session.session_id)
+  const messages = harness.agent.session_messages(session.session_id)
   const policy = __compaction_policy_from_options(compact_opts)
   const policy_fields = __compaction_policy_event_fields(policy)
   const pre_payload = {
@@ -417,7 +417,7 @@ pub fn agent_autocompact_if_needed(session, opts) {
   if pre_control?.control == "block" {
     return nil
   }
-  const compact_result = transcript_auto_compact(messages, compact_opts)
+  const compact_result = harness.agent.transcript_auto_compact(messages, compact_opts)
   const compacted = compact_result.messages
   // Trust the engine's archived count, not a length delta: when exactly one
   // message is archived and one summary is inserted, len(before) == len(after),
@@ -428,7 +428,7 @@ pub fn agent_autocompact_if_needed(session, opts) {
   const archived = compact_result.archived
   const summary = compact_result.summary
   if archived > 0 {
-    __host_agent_session_replace_messages(session.session_id, compacted, summary)
+    harness.agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "auto",
       reason: "threshold",
@@ -445,7 +445,7 @@ pub fn agent_autocompact_if_needed(session, opts) {
       estimated_tokens_after: estimate_tokens(compacted),
     }
       + policy_fields
-    agent_record_compaction(session.session_id, metadata)
+    agent_record_compaction(harness, session.session_id, metadata)
     const post_payload = pre_payload
       + {
       archived_messages: archived,
@@ -456,7 +456,7 @@ pub fn agent_autocompact_if_needed(session, opts) {
     }
       + policy_fields
     __host_fire_session_hook("post_compact", post_payload)
-    agent_reminder_providers_fire(session.session_id, "post_compact", post_payload, opts)
+    agent_reminder_providers_fire(harness, session.session_id, "post_compact", post_payload, opts)
   }
   return nil
 }
@@ -480,8 +480,8 @@ pub fn agent_autocompact_if_needed(session, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_emergency_compact(session, opts, attempt) {
-  const messages = __host_agent_session_messages(session.session_id)
+pub fn agent_emergency_compact(harness: Harness, session, opts, attempt) {
+  const messages = harness.agent.session_messages(session.session_id)
   // Shrink the preserved tail as attempts escalate: a longer tail is tried
   // first (least lossy), collapsing toward keeping only the latest user turn so
   // a pathological recent observation can still be masked out.
@@ -525,7 +525,7 @@ pub fn agent_emergency_compact(session, opts, attempt) {
     estimated_tokens_before: estimate_tokens(messages),
   }
   __host_fire_session_hook("pre_compact", pre_payload)
-  const compact_result = transcript_auto_compact(messages, compact_opts)
+  const compact_result = harness.agent.transcript_auto_compact(messages, compact_opts)
   const compacted = compact_result.messages
   // Use the engine's true archived count. A length-delta heuristic reads an
   // archive-exactly-one emergency compaction as archived == 0, which the agent
@@ -534,7 +534,7 @@ pub fn agent_emergency_compact(session, opts, attempt) {
   const archived = compact_result.archived
   const summary = compact_result.summary
   if archived > 0 {
-    __host_agent_session_replace_messages(session.session_id, compacted, summary)
+    harness.agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "emergency",
       reason: "context_overflow",
@@ -547,7 +547,7 @@ pub fn agent_emergency_compact(session, opts, attempt) {
       estimated_tokens_before: estimate_tokens(messages),
       estimated_tokens_after: estimate_tokens(compacted),
     }
-    agent_record_compaction(session.session_id, metadata)
+    agent_record_compaction(harness, session.session_id, metadata)
     const post_payload = pre_payload
       + {
       archived_messages: archived,
@@ -557,7 +557,7 @@ pub fn agent_emergency_compact(session, opts, attempt) {
       estimated_tokens_after: estimate_tokens(compacted),
     }
     __host_fire_session_hook("post_compact", post_payload)
-    agent_reminder_providers_fire(session.session_id, "post_compact", post_payload, opts)
+    agent_reminder_providers_fire(harness, session.session_id, "post_compact", post_payload, opts)
   }
   return archived
 }

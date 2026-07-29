@@ -727,11 +727,11 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
  * @errors: []
  * @api_stability: experimental
  */
-pub fn dashboard_job_emit(input: DashboardJobEvent, options = nil) -> DashboardJobEmitReceipt {
+pub fn dashboard_job_emit(harness: Harness, input: DashboardJobEvent, options = nil) -> DashboardJobEmitReceipt {
   const opts = options ?? {}
   const event = dashboard_job_validate(input)
   const topic = opts.topic ?? DASHBOARD_JOB_EVENT_TOPIC
-  const event_log_id = event_log.emit(
+  const event_log_id = harness.obs.event_log_emit(
     topic,
     DASHBOARD_JOB_EVENT_KIND,
     event,
@@ -908,14 +908,14 @@ pub fn dashboard_jobs_snapshot(events: list, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn dashboard_jobs_view(events: list, options = nil) {
+pub fn dashboard_jobs_view(harness: Harness, events: list, options = nil) {
   const opts = options ?? {}
   const unique = dashboard_job_dedupe_events(events)
   let receipts = []
   if opts.emit ?? false {
     for event in unique {
       receipts = receipts.appending(
-        dashboard_job_emit(event, {topic: opts.topic ?? DASHBOARD_JOB_EVENT_TOPIC}),
+        dashboard_job_emit(harness, event, {topic: opts.topic ?? DASHBOARD_JOB_EVENT_TOPIC}),
       )
     }
   }

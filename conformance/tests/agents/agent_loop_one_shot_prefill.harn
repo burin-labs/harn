@@ -49,15 +49,14 @@ fn options(session, extra = nil) {
     + (extra ?? {})
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Nested LLM options override a top-level prefill, and the final wrap-up
   // receives neither persistent value after the first main request consumes it.
   with_llm_script(
-    [lookup_call(), llm_text("Final response.")],
+    harness.llm, [lookup_call(), llm_text("Final response.")],
     { ->
-      const session = "one-shot-prefill-wrapup-" + uuid()
-      const result = agent_loop(
-        "Inspect evidence.",
+      const session = "one-shot-prefill-wrapup-" + harness.random.uuid()
+      const result = agent_loop(harness, "Inspect evidence.",
         nil,
         options(
           session,
@@ -69,52 +68,51 @@ pipeline default() {
           },
         ),
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(calls[0].prefill)
-      __io_println(calls[1].prefill == nil)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(calls[0].prefill)
+      harness.stdio.println(calls[1].prefill == nil)
     },
   )
   // Truncation auto-continuation is a second physical request, and later
   // ordinary requests also stay clear.
   with_llm_script(
-    [truncated_turn(), lookup_call(), llm_text("Done. ##DONE##")],
+    harness.llm, [truncated_turn(), lookup_call(), llm_text("Done. ##DONE##")],
     { ->
-      const session = "one-shot-prefill-truncation-" + uuid()
-      const result = agent_loop(
-        "Inspect evidence.",
+      const session = "one-shot-prefill-truncation-" + harness.random.uuid()
+      const result = agent_loop(harness, "Inspect evidence.",
         nil,
         options(session, {prefill: "<tool_call>", tool_format: "text"}),
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(calls[0].prefill == "<tool_call>")
-      __io_println(calls[1].prefill == nil)
-      __io_println(calls[2].prefill == nil)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(calls[0].prefill == "<tool_call>")
+      harness.stdio.println(calls[1].prefill == nil)
+      harness.stdio.println(calls[2].prefill == nil)
     },
   )
   // The default transport retry wrapper clears only Harn's one-shot marker.
   with_llm_script(
-    [
+    harness.llm, [
       {error: {category: "rate_limit", message: "mock 429 transient"}},
       lookup_call(),
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      const session = "one-shot-prefill-retry-" + uuid()
-      const result = agent_loop("Inspect evidence.", nil, options(session, {prefill: "retry-once"}))
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(calls[0].prefill == "retry-once")
-      __io_println(calls[1].prefill == nil)
-      __io_println(calls[2].prefill == nil)
+      const session = "one-shot-prefill-retry-" + harness.random.uuid()
+      const result = agent_loop(harness, "Inspect evidence.", nil, options(session, {prefill: "retry-once"}))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(calls[0].prefill == "retry-once")
+      harness.stdio.println(calls[1].prefill == nil)
+      harness.stdio.println(calls[2].prefill == nil)
     },
   )
   // A callback arms the transport after enough observations exist for real
   // context recovery. The overflow retry must not replay the prefill.
-  const tool_turns = atomic(0)
+  const tool_turns = harness.runtime.atomic(0)
   with_llm_script(
-    [
+    harness.llm, [
       lookup_call("a"),
       lookup_call("b"),
       lookup_call("c"),
@@ -124,9 +122,8 @@ pipeline default() {
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      const session = "one-shot-prefill-overflow-" + uuid()
-      const result = agent_loop(
-        "Inspect evidence.",
+      const session = "one-shot-prefill-overflow-" + harness.random.uuid()
+      const result = agent_loop(harness, "Inspect evidence.",
         nil,
         options(
           session,
@@ -135,7 +132,7 @@ pipeline default() {
               if len(info?.successful_tool_names ?? []) == 0 {
                 return nil
               }
-              const count = atomic_add(tool_turns, 1)
+              const count = harness.runtime.atomic_add(tool_turns, 1)
               if count == 3 {
                 return {prefill: "overflow-once"}
               }
@@ -144,10 +141,10 @@ pipeline default() {
           },
         ),
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(calls[4].prefill == "overflow-once")
-      __io_println(calls[5].prefill == nil)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(calls[4].prefill == "overflow-once")
+      harness.stdio.println(calls[5].prefill == nil)
     },
   )
 }

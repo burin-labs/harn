@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://harnlang.com/schemas/hostlib/fs/read_text.request.json",
-  "title": "fs.read_text request",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/staged_read_text.request.json",
+  "title": "fs.staged_read_text request",
   "description": "Staged-fs-aware UTF-8 read. When a session is active and its mode is `staged`, the call observes the overlay (including the session's own pending writes). Falls back to disk otherwise.",
   "type": "object",
   "properties": {

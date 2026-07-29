@@ -5,7 +5,7 @@
  * strict subset (workspace only) so subset ⊆ holds and the existing
  * spawn_agent path runs normally.
  */
-fn parent() {
+fn parent(harness: Harness) {
   const _worker = spawn_agent(
     {
       name: "subset-child",
@@ -13,9 +13,9 @@ fn parent() {
       node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}},
     },
   )
-  __io_println("spawn ok")
+  harness.stdio.println("spawn ok")
 }
 
-pipeline main() {
-  parent()
+pipeline main(harness: Harness) {
+  parent(harness)
 }

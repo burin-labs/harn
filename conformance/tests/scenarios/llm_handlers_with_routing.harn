@@ -4,25 +4,25 @@
 // route_index / route_name and emits llm_routing_decision events.
 import { with_routing } from "std/llm/handlers"
 
-pipeline default() {
-  const cheap_calls = atomic(0)
-  const strong_calls = atomic(0)
+pipeline default(harness: Harness) {
+  const cheap_calls = harness.runtime.atomic(0)
+  const strong_calls = harness.runtime.atomic(0)
   const cheap = { _call ->
-    let _ = atomic_add(cheap_calls, 1)
+    let _ = harness.runtime.atomic_add(cheap_calls, 1)
     return {
       ok: true,
       value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
   const strong = { _call ->
-    let _ = atomic_add(strong_calls, 1)
+    let _ = harness.runtime.atomic_add(strong_calls, 1)
     return {
       ok: true,
       value: {text: "strong", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
   const router = with_routing(
-    {
+    harness, {
       default: cheap,
       routes: [{name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: strong}],
     },
@@ -31,10 +31,10 @@ pipeline default() {
   const default_env = router(
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )
-  __io_println(default_env.value.text)
-  __io_println(default_env.route_index)
-  __io_println(default_env.route_name)
-  __io_println(default_env.used_default ?? false)
+  harness.stdio.println(default_env.value.text)
+  harness.stdio.println(default_env.route_index)
+  harness.stdio.println(default_env.route_name)
+  harness.stdio.println(default_env.used_default ?? false)
   // Escalation predicate matches — frontier route wins.
   const escalated_env = router(
     {
@@ -44,9 +44,9 @@ pipeline default() {
       turn: {iteration: 0, session_id: "", attempt: 1},
     },
   )
-  __io_println(escalated_env.value.text)
-  __io_println(escalated_env.route_index)
-  __io_println(escalated_env.route_name)
-  __io_println(atomic_get(cheap_calls))
-  __io_println(atomic_get(strong_calls))
+  harness.stdio.println(escalated_env.value.text)
+  harness.stdio.println(escalated_env.route_index)
+  harness.stdio.println(escalated_env.route_name)
+  harness.stdio.println(harness.runtime.atomic_get(cheap_calls))
+  harness.stdio.println(harness.runtime.atomic_get(strong_calls))
 }

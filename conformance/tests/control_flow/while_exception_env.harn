@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let i = 0
   try {
     while i < 10 {
@@ -8,7 +8,7 @@ pipeline test(task) {
       }
     }
   } catch (e) {
-    log(i)
-    log(e)
+    harness.stdio.println(i)
+    harness.stdio.println(e)
   }
 }

@@ -2,35 +2,33 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_progress } from "std/agent/progress"
 import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
-pipeline default() {
-  const session_id = "agent-progress-entries-" + uuid()
-  const captured = agent_capture_events(
-    session_id,
+pipeline default(harness: Harness) {
+  const session_id = "agent-progress-entries-" + harness.random.uuid()
+  const captured = agent_capture_events(harness,  harness, session_id,
     fn() {
-      let session = agent_session_init("progress entries", nil, {session_id: session_id})
-      agent_progress(
-        {
+      let session = agent_session_init(harness, "progress entries", nil, {session_id: session_id})
+      agent_progress(harness,  harness, {
           entries: [
             {content: "Inspect code", status: "completed", priority: "high"},
             {content: "Run tests", status: "pending"},
           ],
         },
       )
-      agent_session_finalize(session.session_id, "done")
+      agent_session_finalize(harness, session.session_id, "done")
       return nil
     },
   )
   const events = captured.events.filter({ event -> event.type == "progress_reported" })
   require len(events) == 1, "entries-only progress emits one event"
   const event = events[0]
-  __io_println("message_is_nil=" + to_string(event.message == nil))
-  __io_println("entry_count=" + to_string(len(event.entries)))
-  __io_println(
+  harness.stdio.println("message_is_nil=" + to_string(event.message == nil))
+  harness.stdio.println("entry_count=" + to_string(len(event.entries)))
+  harness.stdio.println(
     "first=" + event.entries[0].content + ":" + event.entries[0].status + ":"
       + event.entries[0]
       .priority,
   )
-  __io_println(
+  harness.stdio.println(
     "second="
       + event.entries[1].content
       + ":"

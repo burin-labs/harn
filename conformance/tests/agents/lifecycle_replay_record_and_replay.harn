@@ -4,12 +4,12 @@
  * Round-trip: a suspend → resume → drain sequence captured to a journal
  * must produce a byte-identical receipt snapshot when the same script
  * runs a second time under `mock_time(...)`. The snapshot is the
- * primary deterministic surface — `lifecycle_receipts_snapshot()`
+ * primary deterministic surface — `harness.agent.lifecycle_receipts_snapshot()`
  * returns the seq-ordered entries that the replay oracle compares.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const _ = mock_time(1700000000000)
-  const suspension = lifecycle_receipt_record_suspension(
+  const suspension = harness.agent.lifecycle_receipt_record_suspension(
     {
       handle: "worker://triage/42",
       session_id: "session-a",
@@ -20,7 +20,7 @@ pipeline default() {
       span_id: "span-suspend-1",
     },
   )
-  const resumption = lifecycle_receipt_record_resumption(
+  const resumption = harness.agent.lifecycle_receipt_record_resumption(
     {
       handle: "worker://triage/42",
       session_id: "session-a",
@@ -31,7 +31,7 @@ pipeline default() {
       linked_suspension_span_id: "span-suspend-1",
     },
   )
-  const drain = lifecycle_receipt_record_drain_decision(
+  const drain = harness.agent.lifecycle_receipt_record_drain_decision(
     {
       pipeline_id: "pipeline-1",
       item: {category: "suspended_subagent", id: "worker://triage/42", summary: "paused"},
@@ -41,25 +41,25 @@ pipeline default() {
       prompt: "settle this drain item",
     },
   )
-  const snapshot = lifecycle_receipts_snapshot()
-  __io_println("snapshot_len=" + to_string(len(snapshot)))
-  __io_println("seq_1=" + to_string(snapshot[0].seq))
-  __io_println("seq_2=" + to_string(snapshot[1].seq))
-  __io_println("seq_3=" + to_string(snapshot[2].seq))
-  __io_println("kind_1=" + snapshot[0].kind)
-  __io_println("kind_2=" + snapshot[1].kind)
-  __io_println("kind_3=" + snapshot[2].kind)
-  __io_println(
+  const snapshot = harness.agent.lifecycle_receipts_snapshot()
+  harness.stdio.println("snapshot_len=" + to_string(len(snapshot)))
+  harness.stdio.println("seq_1=" + to_string(snapshot[0].seq))
+  harness.stdio.println("seq_2=" + to_string(snapshot[1].seq))
+  harness.stdio.println("seq_3=" + to_string(snapshot[2].seq))
+  harness.stdio.println("kind_1=" + snapshot[0].kind)
+  harness.stdio.println("kind_2=" + snapshot[1].kind)
+  harness.stdio.println("kind_3=" + snapshot[2].kind)
+  harness.stdio.println(
     "suspension_signed=" + to_string(snapshot[0].payload.suspended_at.at_ms == 1700000000000),
   )
-  __io_println(
+  harness.stdio.println(
     "resumption_signed=" + to_string(snapshot[1].payload.resumed_at.at_ms == 1700000000000),
   )
-  __io_println("drain_signed=" + to_string(snapshot[2].payload.decided_at.at_ms == 1700000000000))
-  __io_println("resumption_input_present=" + to_string(snapshot[1].payload.input?.approved))
-  __io_println("suspension_entry_seq=" + to_string(suspension.seq))
-  __io_println("resumption_entry_seq=" + to_string(resumption.seq))
-  __io_println("drain_entry_seq=" + to_string(drain.seq))
+  harness.stdio.println("drain_signed=" + to_string(snapshot[2].payload.decided_at.at_ms == 1700000000000))
+  harness.stdio.println("resumption_input_present=" + to_string(snapshot[1].payload.input?.approved))
+  harness.stdio.println("suspension_entry_seq=" + to_string(suspension.seq))
+  harness.stdio.println("resumption_entry_seq=" + to_string(resumption.seq))
+  harness.stdio.println("drain_entry_seq=" + to_string(drain.seq))
   const _ = unmock_time()
   return "ok"
 }

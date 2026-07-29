@@ -5,11 +5,11 @@
 // Run with: cargo run --quiet --bin harn -- run examples/llm_ensemble.harn
 import { best_of_n } from "std/llm/ensemble"
 
-pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "short"})
-  llm_mock({text: "this is the longest answer of the bunch"})
-  llm_mock({text: "medium length"})
+pipeline default(harness: Harness) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({text: "short"})
+  harness.llm.mock_enqueue({text: "this is the longest answer of the bunch"})
+  harness.llm.mock_enqueue({text: "medium length"})
   // Closure judge: pick the candidate with the longest text. The judge
   // receives the list of valid samples (each {ok, index, text, value}).
   const longest_judge = { samples ->
@@ -26,12 +26,11 @@ pipeline default() {
     }
     return {best_index: best_i, reasoning: "longest text wins"}
   }
-  const result = best_of_n(
-    "Tell me a story.",
+  const result = best_of_n(harness,  harness, "Tell me a story.",
     "",
     {n: 3, parallel: false, judge: longest_judge, call_opts: {provider: "mock"}},
   )
-  __io_println("winner index = " + to_string(result.best.index))
-  __io_println("winner text  = " + result.best.text)
-  __io_println("reasoning    = " + result.reasoning)
+  harness.stdio.println("winner index = " + to_string(result.best.index))
+  harness.stdio.println("winner text  = " + result.best.text)
+  harness.stdio.println("reasoning    = " + result.reasoning)
 }

@@ -19,14 +19,14 @@ fn smoke_tools() {
   )
 }
 
-pipeline default() {
-  const session = "smoke-tool-receipts-" + uuid()
-  const receipt_path = path_join(runtime_paths().state_root, "receipts", session + ".jsonl")
+pipeline default(harness: Harness) {
+  const session = "smoke-tool-receipts-" + harness.random.uuid()
+  const receipt_path = path_join(harness.fs.runtime_paths().state_root, "receipts", session + ".jsonl")
   if harness.fs.exists(receipt_path) {
     harness.fs.delete(receipt_path)
   }
-  llm_mock_clear()
-  llm_mock(
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {
       tool_calls: [
         {
@@ -37,11 +37,10 @@ pipeline default() {
       ],
     },
   )
-  llm_mock({text: "Done. ##DONE##"})
+  harness.llm.mock_enqueue({text: "Done. ##DONE##"})
   const reason = with_required_reason({schema_required: false})
   const tools = tools_use_middleware(smoke_tools(), reason.schema_transform)
-  const caller = compose_tool_callers(
-    [with_audit_log({sink: "local", redact: ["token"]}), reason.caller],
+  const caller = compose_tool_callers(harness,  harness, [with_audit_log(harness, {sink: "local", redact: ["token"]}), reason.caller],
   )
   const agent_options = {
     provider: "mock",
@@ -53,11 +52,11 @@ pipeline default() {
     max_iterations: 3,
     tool_caller: caller,
   }
-  const result = agent_loop("smoke tool receipts", nil, agent_options)
-  const records = read_jsonl(receipt_path, {strict: true})
-  __io_println("status=" + result.status)
-  __io_println("receipt_path=" + receipt_path)
-  __io_println("records=" + to_string(len(records)))
-  __io_println("reason=" + records[0].reason)
-  __io_println("receipt_uri=" + to_string(records[0]?.audit?.receipt_uri ?? ""))
+  const result = agent_loop(harness, "smoke tool receipts", nil, agent_options)
+  const records = read_jsonl(harness, receipt_path, {strict: true})
+  harness.stdio.println("status=" + result.status)
+  harness.stdio.println("receipt_path=" + receipt_path)
+  harness.stdio.println("records=" + to_string(len(records)))
+  harness.stdio.println("reason=" + records[0].reason)
+  harness.stdio.println("receipt_uri=" + to_string(records[0]?.audit?.receipt_uri ?? ""))
 }

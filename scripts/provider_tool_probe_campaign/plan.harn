@@ -3,7 +3,7 @@ import "./support"
 import "./types"
 
 pub fn __provider_catalog_claim(route: ProviderToolProbeRoute) -> dict {
-  const caps = provider_capabilities(route.provider, route.model)
+  const caps = harness.llm.provider_capabilities(route.provider, route.model)
   return {
     tools: caps?.tools,
     native_tools: caps?.native_tools,

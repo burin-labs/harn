@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const all_flow = workflow_graph(
     {
       entry: "map",
@@ -12,8 +12,8 @@ pipeline main() {
       edges: [],
     },
   )
-  const all_result = workflow_execute("map all", all_flow, [], {max_steps: 1})
-  __io_println(len(all_result?.artifacts))
+  const all_result = workflow_execute(harness, "map all", all_flow, [], {max_steps: 1})
+  harness.stdio.println(len(all_result?.artifacts))
   const first_flow = workflow_graph(
     {
       entry: "map",
@@ -27,8 +27,8 @@ pipeline main() {
       edges: [],
     },
   )
-  const first_result = workflow_execute("map first", first_flow, [], {max_steps: 1})
-  __io_println(len(first_result?.artifacts))
+  const first_result = workflow_execute(harness, "map first", first_flow, [], {max_steps: 1})
+  harness.stdio.println(len(first_result?.artifacts))
   const quorum_flow = workflow_graph(
     {
       entry: "map",
@@ -42,6 +42,6 @@ pipeline main() {
       edges: [],
     },
   )
-  const quorum_result = workflow_execute("map quorum", quorum_flow, [], {max_steps: 1})
-  __io_println(len(quorum_result?.artifacts))
+  const quorum_result = workflow_execute(harness, "map quorum", quorum_flow, [], {max_steps: 1})
+  harness.stdio.println(len(quorum_result?.artifacts))
 }

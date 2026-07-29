@@ -8,9 +8,9 @@
  */
 import { lifecycle_audit_log_take, on_finish_handoff_to } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const preset = on_finish_handoff_to("nightly-drain", {priority: "high"})
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("seed-pipeline", {note: "seed work"})
       const result = preset(harness, return_value)

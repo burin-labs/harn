@@ -121,12 +121,12 @@ fn _merge_with_defaults(provided) {
   }
 }
 
-fn _resolve_policy(request) {
+fn _resolve_policy(harness: Harness, request) {
   const path = request.policy_path
   if path == nil || path == "" {
     return default_policy()
   }
-  const raw = read_file(path)
+  const raw = harness.fs.read_text(path)
   const result = load_policy_json(raw)
   if result.ok {
     return result.policy
@@ -134,10 +134,10 @@ fn _resolve_policy(request) {
   return default_policy()
 }
 
-pub pipeline run(task) -> dict {
+pub pipeline run(harness: Harness, task) -> dict {
   const request = _resolve_request()
-  const policy = _resolve_policy(request)
+  const policy = _resolve_policy(harness, request)
   const receipt = review_pr(request, policy, nil)
-  __io_println(json_stringify(receipt))
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

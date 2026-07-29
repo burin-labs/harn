@@ -59,7 +59,7 @@ pub fn summary_row(summary: StartupSummary) -> string {
   return fixed(summary.min_ms, 3) + " " + fixed(summary.avg_ms, 3) + " " + fixed(summary.max_ms, 3)
 }
 
-fn run_once_ms(harn_bin: string, fixture: string, cache_dir: string) -> float {
+fn run_once_ms(harness: Harness, harn_bin: string, fixture: string, cache_dir: string) -> float {
   const started = harness.clock.monotonic_ms()
   const result = harness.process.spawn_captured(
     {cmd: harn_bin, args: ["run", fixture], env: {HARN_CACHE_DIR: cache_dir}},
@@ -69,15 +69,15 @@ fn run_once_ms(harn_bin: string, fixture: string, cache_dir: string) -> float {
     if result.stderr != "" {
       harness.stdio.eprint(result.stderr)
     }
-    exit(result.exit_code)
+    harness.runtime.exit(result.exit_code)
   }
   return to_float(elapsed) ?? 0.0
 }
 
-fn measure_runs(harn_bin: string, fixture: string, runs: int, cache_dir: string) -> StartupSummary {
+fn measure_runs(harness: Harness, harn_bin: string, fixture: string, runs: int, cache_dir: string) -> StartupSummary {
   let samples: list<float> = []
   for _ in range(0, runs) {
-    samples = samples + [run_once_ms(harn_bin, fixture, cache_dir)]
+    samples = samples + [run_once_ms(harness, harn_bin, fixture, cache_dir)]
   }
   return summarize_samples(samples)
 }
@@ -106,7 +106,7 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const harn_bin = to_string(parsed?.harn_bin ?? "")
@@ -114,21 +114,21 @@ fn main(harness: Harness) {
   const cache_dir = to_string(parsed?.cache_dir ?? "")
   if harn_bin == "" {
     harness.stdio.eprintln("error: --harn-bin is required")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if fixture == "" {
     harness.stdio.eprintln("error: --fixture is required")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if cache_dir == "" {
     harness.stdio.eprintln("error: --cache-dir is required")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const runs_result = parse_positive_int("--runs", to_string(parsed?.runs ?? ""))
   if !runs_result.ok {
     harness.stdio.eprintln("error: " + runs_result.error)
-    exit(2)
+    harness.runtime.exit(2)
   }
-  harness.stdio.println(summary_row(measure_runs(harn_bin, fixture, runs_result.value, cache_dir)))
+  harness.stdio.println(summary_row(measure_runs(harness, harn_bin, fixture, runs_result.value, cache_dir)))
   return nil
 }

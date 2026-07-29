@@ -41,12 +41,12 @@ fn transcript_has_event_kind(transcript, kind) {
   return len(transcript_events_by_kind(transcript, kind)) > 0
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // (a) Accrue several tool observations so the transcript has masking
   // headroom, hit context_overflow, then recover: emergency compaction archives
   // older observations and the retried turn succeeds and finishes.
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "a"}}]},
       {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "b"}}]},
       {tool_calls: [{id: "lookup_3", name: "lookup", arguments: {query: "c"}}]},
@@ -55,8 +55,7 @@ pipeline main() {
       llm_done(),
     ],
     { ->
-      const result = agent_loop(
-        "Inspect evidence and finish.",
+      const result = agent_loop(harness, "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",
@@ -67,17 +66,17 @@ pipeline main() {
           max_iterations: 12,
         },
       )
-      __io_println(result.status)
-      __io_println(transcript_has_event_kind(result.transcript, "context_overflow_recovery"))
-      __io_println(contains(json_stringify(result.transcript), "\"reason\":\"context_overflow\""))
-      __io_println(!transcript_has_event_kind(result.transcript, "agent_loop_terminal_error"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(transcript_has_event_kind(result.transcript, "context_overflow_recovery"))
+      harness.stdio.println(contains(json_stringify(result.transcript), "\"reason\":\"context_overflow\""))
+      harness.stdio.println(!transcript_has_event_kind(result.transcript, "agent_loop_terminal_error"))
     },
   )
   // (b) Bounded: when EVERY turn overflows (nothing left to shed once the
   // recovery budget is spent), the loop stops with a terminal context_overflow
   // error instead of spinning forever.
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "a"}}]},
       {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "b"}}]},
       overflow_turn(),
@@ -88,8 +87,7 @@ pipeline main() {
       overflow_turn(),
     ],
     { ->
-      const result = agent_loop(
-        "Inspect evidence and finish.",
+      const result = agent_loop(harness, "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",
@@ -100,17 +98,16 @@ pipeline main() {
           max_iterations: 12,
         },
       )
-      __io_println(result.status)
-      __io_println(result.error.reason)
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.error.reason)
     },
   )
   // (c) A genuinely-terminal error (auth) is NOT routed through overflow
   // recovery — it stops immediately with no recovery event.
   with_llm_script(
-    [{error: {category: "auth", message: "missing API key"}}, llm_done()],
+    harness.llm, [{error: {category: "auth", message: "missing API key"}}, llm_done()],
     { ->
-      const result = agent_loop(
-        "Inspect evidence and finish.",
+      const result = agent_loop(harness, "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",
@@ -121,8 +118,8 @@ pipeline main() {
           max_iterations: 12,
         },
       )
-      __io_println(result.status)
-      __io_println(!transcript_has_event_kind(result.transcript, "context_overflow_recovery"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(!transcript_has_event_kind(result.transcript, "context_overflow_recovery"))
     },
   )
 }

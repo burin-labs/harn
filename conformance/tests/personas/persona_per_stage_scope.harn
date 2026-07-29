@@ -35,42 +35,42 @@ fn stage_tools() {
 }
 
 @persona(name: "scoped_persona", stages: [{name: "research", allowed_tools: ["read"]}, {name: "edit_phase", allowed_tools: ["edit"]}])
-fn scoped_persona(ctx) {
-  const r = research_step(ctx)
-  const e = edit_phase_step(ctx)
+fn scoped_persona(harness: Harness, ctx) {
+  const r = research_step(harness, ctx)
+  const e = edit_phase_step(harness, ctx)
   return {research: r, edit: e}
 }
 
 @step(name: "research")
-fn research_step(ctx) {
+fn research_step(harness: Harness, ctx) {
   const tools = ctx.tools
-  const in_scope = agent_dispatch_tool_call({name: "read", arguments: {}}, tools)
-  const out_of_scope = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
+  const in_scope = agent_dispatch_tool_call(harness, {name: "read", arguments: {}}, tools)
+  const out_of_scope = agent_dispatch_tool_call(harness, {name: "edit", arguments: {}}, tools)
   return {in_scope: in_scope, out_of_scope: out_of_scope}
 }
 
 @step(name: "edit_phase")
-fn edit_phase_step(ctx) {
+fn edit_phase_step(harness: Harness, ctx) {
   const tools = ctx.tools
-  const in_scope = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
-  const out_of_scope = agent_dispatch_tool_call({name: "read", arguments: {}}, tools)
+  const in_scope = agent_dispatch_tool_call(harness, {name: "edit", arguments: {}}, tools)
+  const out_of_scope = agent_dispatch_tool_call(harness, {name: "read", arguments: {}}, tools)
   return {in_scope: in_scope, out_of_scope: out_of_scope}
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const tools = stage_tools()
-  const outcome = scoped_persona({tools: tools})
-  __io_println(outcome.research.in_scope.ok)
-  __io_println(outcome.research.in_scope.rendered_result)
-  __io_println(outcome.research.out_of_scope.ok)
-  __io_println(outcome.research.out_of_scope.error_category)
-  __io_println(outcome.edit.in_scope.ok)
-  __io_println(outcome.edit.in_scope.rendered_result)
-  __io_println(outcome.edit.out_of_scope.ok)
-  __io_println(outcome.edit.out_of_scope.error_category)
+  const outcome = scoped_persona(harness, {tools: tools})
+  harness.stdio.println(outcome.research.in_scope.ok)
+  harness.stdio.println(outcome.research.in_scope.rendered_result)
+  harness.stdio.println(outcome.research.out_of_scope.ok)
+  harness.stdio.println(outcome.research.out_of_scope.error_category)
+  harness.stdio.println(outcome.edit.in_scope.ok)
+  harness.stdio.println(outcome.edit.in_scope.rendered_result)
+  harness.stdio.println(outcome.edit.out_of_scope.ok)
+  harness.stdio.println(outcome.edit.out_of_scope.error_category)
   // After every stage unwinds the per-stage policy is gone, so an ambient
   // dispatch should pass.
-  const ambient = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
-  __io_println(ambient.ok)
-  __io_println(ambient.rendered_result)
+  const ambient = agent_dispatch_tool_call(harness, {name: "edit", arguments: {}}, tools)
+  harness.stdio.println(ambient.ok)
+  harness.stdio.println(ambient.rendered_result)
 }

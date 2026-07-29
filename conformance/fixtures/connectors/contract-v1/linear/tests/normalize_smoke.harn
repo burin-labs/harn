@@ -17,8 +17,8 @@ fn refresh_body(body, fresh_ts_ms) {
   return json_stringify(updated)
 }
 
-fn raw(body, secret, configured_secret = nil) {
-  const fresh_ts_ms = to_int(date_now().timestamp * 1000)
+fn raw(harness: Harness, body, secret, configured_secret = nil) {
+  const fresh_ts_ms = to_int(harness.clock.now().timestamp * 1000)
   const refreshed = refresh_body(body, fresh_ts_ms)
   return {
     kind: "webhook",
@@ -32,8 +32,8 @@ fn raw(body, secret, configured_secret = nil) {
   }
 }
 
-fn cloud_raw(body, secret) {
-  const fresh_ts_ms = to_int(date_now().timestamp * 1000)
+fn cloud_raw(harness: Harness, body, secret) {
+  const fresh_ts_ms = to_int(harness.clock.now().timestamp * 1000)
   const refreshed = refresh_body(body, fresh_ts_ms)
   return {
     kind: "webhook",
@@ -52,59 +52,58 @@ fn cloud_raw(body, secret) {
   }
 }
 
-fn fixture_text(path) {
+fn fixture_text(harness: Harness, path) {
   return trim(harness.fs.read_text(path))
 }
 
-fn fixture_json(path) {
+fn fixture_json(harness: Harness, path) {
   return json_parse(harness.fs.read_text(path))
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   activate([{id: "linear.test", kind: "webhook", config: {signing_secret: "test-secret"}}])
   assert_eq(provider_id(), "linear")
   assert_eq(kinds(), ["webhook"])
   assert_eq(payload_schema().harn_schema_name, "LinearEventPayload")
-  const issue_body = fixture_text("tests/fixtures/webhooks/issue_update.json")
-  const issue = normalize_inbound(raw(issue_body, "test-secret"))
-  const snapshot = fixture_json("tests/fixtures/normalized/issue_update.json")
+  const issue_body = fixture_text(harness, "tests/fixtures/webhooks/issue_update.json")
+  const issue = normalize_inbound(harness, raw(harness, issue_body, "test-secret"))
+  const snapshot = fixture_json(harness, "tests/fixtures/normalized/issue_update.json")
   assert_eq(issue.type, "event")
   assert_eq(issue.event.kind, snapshot.event.kind)
   assert_eq(issue.event.dedupe_key, snapshot.event.dedupe_key)
   assert_eq(issue.event.signature_status.state, snapshot.event.signature_status.state)
   assert_eq(issue.event.payload.data.id, snapshot.event.payload_data_id)
-  const slash_secret = normalize_inbound(raw(issue_body, "test/secret"))
+  const slash_secret = normalize_inbound(harness, raw(harness, issue_body, "test/secret"))
   assert_eq(slash_secret.type, "event")
-  const cloud = normalize_inbound(cloud_raw(issue_body, "test-secret"))
+  const cloud = normalize_inbound(harness, cloud_raw(harness, issue_body, "test-secret"))
   assert_eq(cloud.type, "event")
   assert_eq(cloud.event.kind, "linear.issue.update")
   // F3: dedupe key now comes from the signed body's webhookId rather than
   // the linear-delivery header.
   assert_eq(cloud.event.dedupe_key, "linear:wh_1")
   assert_eq(cloud.event.tenant_id, "tenant-acme")
-  const comment_body = fixture_text("tests/fixtures/webhooks/comment_create.json")
-  const comment = normalize_inbound(raw(comment_body, "test-secret"))
+  const comment_body = fixture_text(harness, "tests/fixtures/webhooks/comment_create.json")
+  const comment = normalize_inbound(harness, raw(harness, comment_body, "test-secret"))
   assert_eq(comment.event.kind, "linear.comment.create")
   assert_eq(comment.event.payload.data.id, "COM-1")
-  const variant_snapshot = fixture_json("tests/fixtures/normalized/linear_variants.json")
+  const variant_snapshot = fixture_json(harness, "tests/fixtures/normalized/linear_variants.json")
   const variants = variant_snapshot.variants
   for variant in variants {
-    const body = fixture_text("tests/fixtures/webhooks/" + variant.fixture + ".json")
-    const normalized = normalize_inbound(raw(body, "test-secret"))
+    const body = fixture_text(harness, "tests/fixtures/webhooks/" + variant.fixture + ".json")
+    const normalized = normalize_inbound(harness, raw(harness, body, "test-secret"))
     assert_eq(normalized.type, "event")
     assert_eq(normalized.event.kind, variant.kind)
     assert_eq(normalized.event.signature_status.state, "verified")
     assert_eq(normalized.event.payload.data.id, variant.data_id)
   }
   const edge_body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859140000,\"webhookId\":\"wh_edge\",\"data\":{\"id\":\"ISS-EDGE\"}}"
-  assert_eq(normalize_inbound(raw(edge_body, "test-secret")).type, "event")
-  // raw() does NOT refresh string webhookTimestamps; the connector returns
+  assert_eq(normalize_inbound(harness, raw(harness, edge_body, "test-secret")).type, "event")
+  // raw(harness) does NOT refresh string webhookTimestamps; the connector returns
   // invalid_webhook_timestamp before any clock check.
-  const now_ms = to_int(date_now().timestamp * 1000)
+  const now_ms = to_int(harness.clock.now().timestamp * 1000)
   const bad_timestamp_body_fresh = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":\"not-a-number\",\"webhookId\":\"wh_bad_ts\",\"data\":{\"id\":\"ISS-BAD-TS\"}}"
   const bad_signed = hmac_sha256("test-secret", bad_timestamp_body_fresh)
-  const bad_timestamp = normalize_inbound(
-    {
+  const bad_timestamp = normalize_inbound(harness, {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -123,8 +122,7 @@ pipeline test(task) {
   // must still reject as timestamp_out_of_window (F10 / F4 enforcement).
   const stale_body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1,\"webhookId\":\"wh_stale\",\"data\":{\"id\":\"ISS-STALE\"}}"
   const stale_signed = hmac_sha256("test-secret", stale_body)
-  const stale = normalize_inbound(
-    {
+  const stale = normalize_inbound(harness, {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -138,19 +136,18 @@ pipeline test(task) {
   assert_eq(stale.type, "reject")
   assert_eq(stale.status, 401)
   assert(contains(stale.body, "timestamp_out_of_window"))
-  const invalid = normalize_inbound(raw(issue_body, "wrong-secret", "test-secret"))
+  const invalid = normalize_inbound(harness, raw(harness, issue_body, "wrong-secret", "test-secret"))
   assert_eq(invalid.type, "reject")
   assert_eq(invalid.status, 401)
   assert(contains(invalid.body, "invalid_signature"))
-  const unsupported_body = fixture_text("tests/fixtures/webhooks/unsupported_action.json")
-  const unsupported = normalize_inbound(raw(unsupported_body, "test-secret"))
+  const unsupported_body = fixture_text(harness, "tests/fixtures/webhooks/unsupported_action.json")
+  const unsupported = normalize_inbound(harness, raw(harness, unsupported_body, "test-secret"))
   assert_eq(unsupported.type, "reject")
   assert_eq(unsupported.status, 400)
   assert(contains(unsupported.body, "unsupported_action"))
   // F1: hard-reject when raw.body_text is missing — we cannot HMAC-verify a
   // re-serialized body byte-for-byte against Linear's signed bytes.
-  const missing_body = normalize_inbound(
-    {
+  const missing_body = normalize_inbound(harness, {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -182,8 +179,7 @@ pipeline test(task) {
       data: {id: "ISS-NOSECRET"},
     },
   )
-  const no_secret = normalize_inbound(
-    {
+  const no_secret = normalize_inbound(harness, {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -210,8 +206,7 @@ pipeline test(task) {
     },
   )
   const f3_signed = hmac_sha256("test-secret", f3_body)
-  const f3_event = normalize_inbound(
-    {
+  const f3_event = normalize_inbound(harness, {
       kind: "webhook",
       headers: {
         "content-type": "application/json",

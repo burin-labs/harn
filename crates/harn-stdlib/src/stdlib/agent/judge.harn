@@ -134,8 +134,8 @@ fn __judge_recovery_feedback(next_step, specific_gaps, recovery_details, fallbac
   return join(parts, "\n\n")
 }
 
-fn __judge_payload(session, opts, stop_reason, text, iteration) {
-  const messages = agent_session_messages(session.session_id)
+fn __judge_payload(harness: Harness, session, opts, stop_reason, text, iteration) {
+  const messages = agent_session_messages(harness, session.session_id)
   const tool_names = __session_tool_names(messages)
   return {
     session_id: session.session_id,
@@ -234,7 +234,7 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     required: ["verdict"],
   }
   const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
-  const user = completion_judge_user_prompt(payload)
+  const user = completion_judge_user_prompt(harness, payload)
   const ran = __judge_run_checkpoint(
     harness,
     judge_cfg,
@@ -382,9 +382,8 @@ pub fn agent_done_judge_cap(judge_cfg) {
   return __done_judge_cap(judge_cfg)
 }
 
-fn __emit_judge_decision(session_id, iteration, verdict) {
-  agent_emit_event(
-    session_id,
+fn __emit_judge_decision(harness: Harness, session_id, iteration, verdict) {
+  agent_emit_event(harness, session_id,
     "judge_decision",
     {
       iteration: iteration,
@@ -449,7 +448,7 @@ fn __done_contract_judge_system(opts) {
  * hook. Compose it with base options:
  *
  * ```harn,ignore
- * agent_loop(task, nil, base_opts + agent_done_contract({max_invocations: 3}))
+ * agent_loop(harness, task, nil, base_opts + agent_done_contract({max_invocations: 3}))
  * ```
  *
  * @effects: []
@@ -500,12 +499,12 @@ pub fn agent_done_contract(options = {}) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0) {
-  const payload = __judge_payload(session, opts, stop_reason, text, iteration)
+pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, text, iteration = 0) {
+  const payload = __judge_payload(harness, session, opts, stop_reason, text, iteration)
   let verdict = {vetoed: false}
   if opts?.verify_completion != nil {
     verdict = __judge_invoke_closure(opts.verify_completion, payload)
-    __emit_judge_decision(session.session_id, iteration, verdict)
+    __emit_judge_decision(harness, session.session_id, iteration, verdict)
   }
   let completion_judge_invoked = false
   let completion_judge_cap_reached = false
@@ -523,7 +522,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
       verdict = __judge_invoke_structured(harness, opts.verify_completion_judge, opts, payload)
       verdict = verdict + {trigger: opts?._verify_completion_judge_trigger}
       completion_judge_invoked = true
-      __emit_judge_decision(session.session_id, iteration, verdict)
+      __emit_judge_decision(harness, session.session_id, iteration, verdict)
     }
   }
   const done_judge_due = opts?._done_judge_due ?? true
@@ -542,7 +541,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     } else {
       verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
       verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger}
-      __emit_judge_decision(session.session_id, iteration, verdict)
+      __emit_judge_decision(harness, session.session_id, iteration, verdict)
     }
   }
   let feedback_composition = nil
@@ -550,8 +549,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     && verdict?.feedback != nil
     && verdict.feedback != ""
     && !(opts?._defer_judge_feedback ?? false) {
-    feedback_composition = agent_feedback_emit(
-      session.session_id,
+    feedback_composition = agent_feedback_emit(harness, session.session_id,
       [
         {
           kind: "verify_completion",
@@ -972,7 +970,7 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
  * judge on the existing capped seam. Compose it with base options:
  *
  * ```harn,ignore
- * agent_loop(task, system, base_opts + agent_completion_gate({
+ * agent_loop(harness, task, system, base_opts + agent_completion_gate({
  *   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
  *   verify_command: fn() { return host_run_verify() },
  * }))

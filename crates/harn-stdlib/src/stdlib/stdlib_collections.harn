@@ -50,7 +50,7 @@ pub fn pick_keys<V>(
  * @errors: []
  */
 pub fn deep_merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
-  return __deep_merge(a ?? {}, b ?? {})
+  return deep_merge(a ?? {}, b ?? {})
 }
 
 /**
@@ -62,7 +62,7 @@ pub fn deep_merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
  * @errors: []
  */
 pub fn unique<T>(values: list<T>) -> list<T> {
-  return __list_unique(values ?? [])
+  return unique(values ?? [])
 }
 
 /**
@@ -76,7 +76,7 @@ pub fn unique<T>(values: list<T>) -> list<T> {
  * @example: dict_from_pairs([["a", 1], ["b", 2]])
  */
 pub fn dict_from_pairs<V>(pairs: list<list<V>>) -> dict<string, V> {
-  return __dict_from_pairs(pairs ?? [])
+  return dict_from_pairs(pairs ?? [])
 }
 
 /**
@@ -93,7 +93,7 @@ pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
   for item in items ?? [] {
     pairs = pairs + [[to_string(key_fn(item)), item]]
   }
-  return __dict_from_pairs(pairs)
+  return dict_from_pairs(pairs)
 }
 
 /**

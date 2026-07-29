@@ -1,4 +1,0 @@
-pipeline default(task) {
-  const result = host_call("get_system_prompt", {})
-  log(result)
-}

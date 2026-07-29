@@ -4,8 +4,8 @@ import { agent_loop } from "std/agent/loop"
 import { agent_loop_options } from "std/agent/options"
 import { agent_turn_preamble_prompt } from "std/agent/prompts"
 
-fn __agent_turn_system(user_system, opts = nil) {
-  const preamble = agent_turn_preamble_prompt(opts)
+fn __agent_turn_system(harness: Harness, user_system, opts = nil) {
+  const preamble = agent_turn_preamble_prompt(harness, opts)
   if user_system == nil || user_system == "" {
     return preamble
   }
@@ -23,10 +23,10 @@ fn __agent_turn_native_natural_completion(opts) {
   return opts?.tools != nil && opts?.tool_format == "native" && opts?.done_sentinel == nil
 }
 
-fn __agent_turn_options(options) {
+fn __agent_turn_options(harness: Harness, options) {
   let opts = options ?? {}
   if type_of(opts) != "dict" {
-    throw "agent_turn(prompt, opts?): opts must be a dict or nil"
+    throw "agent_turn(harness, prompt, opts?): opts must be a dict or nil"
   }
   if contains(opts.keys(), "judge") {
     opts = opts + {done_judge: opts.judge}
@@ -53,7 +53,7 @@ fn __agent_turn_options(options) {
   if contains(loop_opts.keys(), "session_id") {
     return loop_opts
   }
-  return loop_opts + {session_id: "agent_turn_session_" + uuid_v7()}
+  return loop_opts + {session_id: "agent_turn_session_" + harness.random.uuid_v7()}
 }
 
 fn __agent_turn_judge_decisions(events) {
@@ -127,12 +127,11 @@ fn __agent_turn_iteration_summaries(events) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_turn(prompt, options = nil) {
+pub fn agent_turn(harness: Harness, prompt, options = nil) {
   const opts = options ?? {}
-  const loop_opts = __agent_turn_options(opts)
-  const captured = agent_capture_events(
-    loop_opts.session_id,
-    fn() { return agent_loop(prompt, __agent_turn_system(opts?.system, loop_opts), loop_opts) },
+  const loop_opts = __agent_turn_options(harness, opts)
+  const captured = agent_capture_events(harness, loop_opts.session_id,
+    fn() { return agent_loop(harness, prompt, __agent_turn_system(harness, opts?.system, loop_opts), loop_opts) },
   )
   const result = captured.result
   if type_of(result) != "dict" {

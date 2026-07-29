@@ -46,16 +46,15 @@ fn injected_kind_in(calls, idx, marker) {
   return contains(json_stringify(calls[idx].messages), marker)
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("Let me edit the file now."),
       llm_tool_call("edit", {path: "main.py"}),
       llm_text("The edit is complete."),
     ],
     { ->
-      const result = agent_loop(
-        "Edit main.py.",
+      const result = agent_loop(harness, "Edit main.py.",
         nil,
         {
           provider: "mock",
@@ -67,13 +66,13 @@ pipeline default() {
           missing_tool_call_recovery: intended_edit_classifier(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("status=" + result.status)
-      __io_println("nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("status=" + result.status)
+      harness.stdio.println("nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
+      harness.stdio.println(
         "native_instruction=" + to_string(injected_kind_in(calls, 1, "native tool interface")),
       )
-      __io_println("successful=" + json_stringify(result.tools.successful))
+      harness.stdio.println("successful=" + json_stringify(result.tools.successful))
     },
   )
 }

@@ -16,63 +16,78 @@ harness.fs.write_text(path_join(root, "src/deep/nested.txt"), "nested")
 
 harness.fs.write_text(path_join(root, "src/deep/code.rs"), "fn " + "main() {}")
 
-metadata_set("", "classification", {language: "rust", structureHash: "stale"})
+harness.project.metadata_set(
+  {
+    dir: "",
+    namespace: "classification",
+    value: {language: "rust", structureHash: "stale"},
+  },
+)
 
-metadata_set("src", "classification", {owner: "vm"})
+harness.project.metadata_set(
+  {dir: "src", namespace: "classification", value: {owner: "vm"}},
+)
 
-metadata_set("src", "facts", {kind: "module"})
+harness.project.metadata_set({dir: "src", namespace: "facts", value: {kind: "module"}})
 
-const resolved = metadata_resolve("src", "classification")
+const resolved = harness.project.metadata_get({dir: "src", namespace: "classification"})
 
-__io_println(resolved.language == "rust")
+harness.stdio.println(resolved.language == "rust")
 
-__io_println(resolved.owner == "vm")
+harness.stdio.println(resolved.owner == "vm")
 
-const all_resolved = metadata_resolve("src")
+const all_resolved = harness.project.metadata_get({dir: "src"})
 
-__io_println(all_resolved.classification.language == "rust")
+harness.stdio.println(all_resolved.classification.language == "rust")
 
-__io_println(all_resolved.facts.kind == "module")
+harness.stdio.println(all_resolved.facts.kind == "module")
 
-const entries = metadata_entries("classification")
+const entries = harness.project.metadata_entries({namespace: "classification"})
 
-__io_println(entries[0].dir == ".")
+harness.stdio.println(entries[0].dir == ".")
 
-__io_println(entries[1].dir == "src")
+harness.stdio.println(entries[1].dir == "src")
 
-__io_println(entries[1].resolved.language == "rust")
+harness.stdio.println(entries[1].resolved.language == "rust")
 
-__io_println(entries[1].local.owner == "vm")
+harness.stdio.println(entries[1].local.owner == "vm")
 
-const status = metadata_status("classification")
+const status = harness.project.metadata_status({namespace: "classification"})
 
-__io_println(status.directory_count == 2)
+harness.stdio.println(status.directory_count == 2)
 
-__io_println(status.namespace_count == 2)
+harness.stdio.println(status.namespace_count == 2)
 
-__io_println(status.namespaces[0] == "classification")
+harness.stdio.println(status.namespaces[0] == "classification")
 
-__io_println(status.namespaces[1] == "facts")
+harness.stdio.println(status.namespaces[1] == "facts")
 
-__io_println(status.missing_content_hash[0] == ".")
+harness.stdio.println(status.missing_content_hash[0] == ".")
 
-__io_println(status.stale.any_stale)
+harness.stdio.println(status.stale.any_stale)
 
-__io_println(status.stale.tier1[0] == ".")
+harness.stdio.println(status.stale.tier1[0] == ".")
 
-const inventory = project_inventory("classification")
+const inventory = project_inventory(harness.project, "classification")
 
-__io_println(inventory.status.directory_count == 2)
+harness.stdio.println(inventory.status.directory_count == 2)
 
-__io_println(metadata_namespace("src", "classification").owner == "vm")
+harness.stdio.println(
+  metadata_namespace(harness.project, "src", "classification").owner == "vm",
+)
 
-__io_println(metadata_local_namespace("src", "classification").owner == "vm")
+harness.stdio.println(
+  metadata_local_namespace(harness.project, "src", "classification").owner == "vm",
+)
 
-__io_println(project_requires_refresh("classification"))
+harness.stdio.println(project_requires_refresh(harness.project, "classification"))
 
-const shallow = scan_directory(root, {pattern: ".txt", include_dirs: false, max_depth: 0})
+const shallow = harness.project.scan_directory(
+  root,
+  {pattern: ".txt", include_dirs: false, max_depth: 0},
+)
 
-__io_println(shallow[0].path == path_join(root, "root.txt"))
+harness.stdio.println(shallow[0].path == path_join(root, "root.txt"))
 
 let saw_hidden = false
 
@@ -82,9 +97,9 @@ for entry in shallow {
   }
 }
 
-__io_println(!saw_hidden)
+harness.stdio.println(!saw_hidden)
 
-const with_hidden = scan_directory(
+const with_hidden = harness.project.scan_directory(
   root,
   {pattern: ".txt", include_dirs: false, max_depth: 1, include_hidden: true},
 )
@@ -97,4 +112,4 @@ for entry in with_hidden {
   }
 }
 
-__io_println(found_hidden)
+harness.stdio.println(found_hidden)

@@ -969,8 +969,8 @@ pub fn edit_validate_changed_regions(before, after, expected_regions, options = 
  * @api_stability: experimental
  * @example: edit_apply_node({path: "src/lib.rs", query: query, replacement: "{ 42 }"})
  */
-pub fn edit_apply_node(params) {
-  const raw = hostlib_ast_apply_node(params ?? {})
+pub fn edit_apply_node(ast: HarnessAst, params) {
+  const raw = ast.apply_node(params ?? {})
   const payload = raw ?? {}
   const provenance = {
     module: "std/edit",
@@ -1041,8 +1041,8 @@ pub fn edit_apply_node(params) {
  * @api_stability: experimental
  * @example: edit_insert_at_anchor({path: "src/lib.rs", query: q, position: "after", content: "fn beta() {}"})
  */
-pub fn edit_insert_at_anchor(params) {
-  const raw = hostlib_ast_insert_at_anchor(params ?? {})
+pub fn edit_insert_at_anchor(ast: HarnessAst, params) {
+  const raw = ast.insert_at_anchor(params ?? {})
   const payload = raw ?? {}
   const provenance = {
     module: "std/edit",
@@ -1118,8 +1118,8 @@ pub fn edit_insert_at_anchor(params) {
  * @api_stability: experimental
  * @example: edit_batch_apply({paths: ["a.rs", "b.rs"], query: q, replacement: "{ 0 }"})
  */
-pub fn edit_batch_apply(params) {
-  const payload = hostlib_ast_batch_apply(params ?? {}) ?? {}
+pub fn edit_batch_apply(ast: HarnessAst, params) {
+  const payload = ast.batch_apply(params ?? {}) ?? {}
   return payload.merging(
     {
       ok: (payload?.summary?.files_failed ?? 1) == 0,

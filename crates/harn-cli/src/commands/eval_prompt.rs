@@ -785,18 +785,18 @@ async fn execute_judge(
     let model_lit = json_string_literal(&resolved_judge.id);
 
     let script = format!(
-        "pipeline main() {{\n\
+        "pipeline main(harness: Harness) {{\n\
     const entries = json_parse({entries_lit})\n\
-    const prompt = render_string({template_lit}, {{\n\
+    const prompt = harness.fs.render_template({template_lit}, {{\n\
         template_source: {source_lit},\n\
         entries: entries\n\
     }})\n\
-    const verdict = llm_call(prompt, nil, {{\n\
+    const verdict = harness.llm.call(prompt, nil, {{\n\
         provider: {provider_lit},\n\
         model: {model_lit},\n\
         max_tokens: {max_tokens}\n\
     }})\n\
-    __io_println(verdict)\n\
+    harness.stdio.println(verdict)\n\
 }}\n",
     );
 

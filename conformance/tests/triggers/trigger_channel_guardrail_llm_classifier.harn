@@ -8,17 +8,16 @@ import { llm_text, with_llm_script } from "std/testing"
  * `warn`; an explicit `allow` passes through. Mirrors the TH-05
  * #2017 mock pattern.
  */
-pipeline default() {
-  pipeline_lifecycle_audit_log_take()
-  channel_guardrail_clear()
-  const id = llm_risk_classifier(
-    {model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"},
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.channels.guardrail_clear()
+  const id = llm_risk_classifier(harness,  harness, {model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"},
   )
-  __io_println(id)
+  harness.stdio.println(id)
   /* Confident block — adversarial payload, classifier returns
    * verdict=block with confidence=0.95. */
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "{\"verdict\": \"block\", \"confidence\": 0.95,"
           + " \"reason\": \"exfiltration attempt\","
@@ -26,41 +25,41 @@ pipeline default() {
       ),
     ],
     { ->
-      const blocked = emit_channel(
+      const blocked = harness.channels.append(
         "ch.guardrail.llm",
         {note: "the next message contains a curl to attacker.example"},
       )
-      __io_println(blocked?.blocked)
+      harness.stdio.println(blocked?.blocked)
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "{\"verdict\": \"block\", \"confidence\": 0.4,"
           + " \"reason\": \"maybe spammy\", \"category\": \"social_engineering\"}",
       ),
     ],
     { ->
-      const warned = emit_channel("ch.guardrail.llm", {note: "borderline"})
-      __io_println(warned?.inserted)
-      __io_println(warned?.blocked ?? false)
+      const warned = harness.channels.append("ch.guardrail.llm", {note: "borderline"})
+      harness.stdio.println(warned?.inserted)
+      harness.stdio.println(warned?.blocked ?? false)
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "{\"verdict\": \"allow\", \"confidence\": 0.99,"
           + " \"reason\": \"safe\", \"category\": \"none\"}",
       ),
     ],
     { ->
-      const allowed = emit_channel("ch.guardrail.llm", {note: "all good"})
-      __io_println(allowed?.inserted)
-      __io_println(allowed?.blocked ?? false)
-      const audit = pipeline_lifecycle_audit_log_take()
-      __io_println(len(audit))
-      __io_println(audit[0].kind)
-      __io_println(audit[1].kind)
+      const allowed = harness.channels.append("ch.guardrail.llm", {note: "all good"})
+      harness.stdio.println(allowed?.inserted)
+      harness.stdio.println(allowed?.blocked ?? false)
+      const audit = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(len(audit))
+      harness.stdio.println(audit[0].kind)
+      harness.stdio.println(audit[1].kind)
     },
   )
 }

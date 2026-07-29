@@ -38,6 +38,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__agent_state_init(root_or_session: string, options_or_root?: any, options?: dict) -> dict",
     runtime_only = true,
     category = "agent_state"
@@ -50,6 +52,8 @@ fn agent_state_init_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__agent_state_resume(root: string, session_id: string, options?: dict) -> dict",
     runtime_only = true,
     category = "agent_state"
@@ -62,6 +66,8 @@ fn agent_state_resume_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__agent_state_write(handle: dict, key: string, content: string) -> nil",
     runtime_only = true,
     category = "agent_state"
@@ -79,6 +85,8 @@ fn agent_state_write_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__agent_state_read(handle: dict, key: string) -> string?",
     runtime_only = true,
     category = "agent_state"
@@ -95,6 +103,8 @@ fn agent_state_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__agent_state_list(handle: dict) -> list",
     runtime_only = true,
     category = "agent_state"
@@ -112,6 +122,8 @@ fn agent_state_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__agent_state_delete(handle: dict, key: string) -> nil",
     runtime_only = true,
     category = "agent_state"
@@ -126,6 +138,8 @@ fn agent_state_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__agent_state_handoff(handle: dict, summary: dict) -> nil",
     runtime_only = true,
     category = "agent_state"

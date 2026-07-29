@@ -62,8 +62,8 @@ review_captain, or block?
   - Diff size: {{ diff_lines }} lines
 """
 
-fn render_pr_prompt(pr) {
-  return render_string(
+fn render_pr_prompt(fs: HarnessFs, pr) {
+  return fs.render_template(
     PR_PROMPT,
     {
       number: pr.number,
@@ -76,15 +76,15 @@ fn render_pr_prompt(pr) {
   )
 }
 
-pipeline default(_task) {
+pipeline default(harness: Harness, _task) {
   const prs = pull_requests()
   let decisions = []
   let merged = 0
   let handed_off = 0
   let blocked = 0
   for pr in prs {
-    const prompt = render_pr_prompt(pr)
-    const llm_envelope = llm_call(prompt, "You are merge_captain, a senior release engineer.")
+    const prompt = render_pr_prompt(harness.fs, pr)
+    const llm_envelope = harness.llm.call(prompt, "You are merge_captain, a senior release engineer.")
     const llm_response = llm_envelope.text
     const decision = classify(pr)
     if decision == "merge" {
@@ -104,10 +104,10 @@ pipeline default(_task) {
       reasoning: llm_response,
     }
     decisions = decisions + [row]
-    __io_println("[#${pr.number}] ${pr.title}")
-    __io_println("    decision: ${decision}")
-    __io_println("    reasoning: ${llm_response}")
-    __io_println("")
+    harness.stdio.println("[#${pr.number}] ${pr.title}")
+    harness.stdio.println("    decision: ${decision}")
+    harness.stdio.println("    reasoning: ${llm_response}")
+    harness.stdio.println("")
   }
   const receipt = {
     persona: "merge_captain",
@@ -117,7 +117,7 @@ pipeline default(_task) {
     decisions: decisions,
     receipt_kind: "merge_supervision_receipt",
   }
-  __io_println("=== merge_captain receipt ===")
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== merge_captain receipt ===")
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

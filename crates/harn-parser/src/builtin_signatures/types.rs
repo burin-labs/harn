@@ -26,6 +26,24 @@ pub fn ty_to_type_expr(ty: &Ty) -> TypeExpr {
         Ty::Optional(inner) => {
             TypeExpr::Union(vec![ty_to_type_expr(inner), TypeExpr::Named("nil".into())])
         }
+        // Keep the metadata IR compact, but project Harn's built-in container
+        // constructors onto their dedicated AST variants. Leaving (for
+        // example) `Ty::Apply("list", ...)` as a generic `Applied` node makes
+        // a generated builtin contract print exactly like `list<T>` while
+        // remaining incompatible with the same type parsed from Harn source.
+        Ty::Apply("list", [inner]) => TypeExpr::List(Box::new(ty_to_type_expr(inner))),
+        Ty::Apply("dict", [key, value]) => TypeExpr::DictType(
+            Box::new(ty_to_type_expr(key)),
+            Box::new(ty_to_type_expr(value)),
+        ),
+        Ty::Apply("iter", [inner]) => TypeExpr::Iter(Box::new(ty_to_type_expr(inner))),
+        Ty::Apply("generator" | "Generator", [inner]) => {
+            TypeExpr::Generator(Box::new(ty_to_type_expr(inner)))
+        }
+        Ty::Apply("stream" | "Stream", [inner]) => {
+            TypeExpr::Stream(Box::new(ty_to_type_expr(inner)))
+        }
+        Ty::Apply("owned", [inner]) => TypeExpr::Owned(Box::new(ty_to_type_expr(inner))),
         Ty::Apply(name, args) => TypeExpr::Applied {
             name: (*name).into(),
             args: args.iter().map(ty_to_type_expr).collect(),
@@ -62,6 +80,22 @@ pub trait TyExt {
 impl TyExt for Ty {
     fn to_type_expr(&self) -> TypeExpr {
         ty_to_type_expr(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const STRING: Ty = Ty::Named("string");
+    const LIST_ARGS: &[Ty] = &[STRING];
+
+    #[test]
+    fn builtin_container_metadata_uses_language_ast_variants() {
+        assert_eq!(
+            ty_to_type_expr(&Ty::Apply("list", LIST_ARGS)),
+            TypeExpr::List(Box::new(TypeExpr::Named("string".into())))
+        );
     }
 }
 

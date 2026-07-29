@@ -253,7 +253,7 @@ fn workflows() {
   }
 }
 
-pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(task) {
+pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Harness, task) {
   assert(ci_cache_policy_parse(policy()) != nil)
   const declared = workflows()
   assert_eq(
@@ -266,12 +266,12 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(task) {
   )
 }
 
-pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_owner(task) {
+pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_owner(harness: Harness, task) {
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
 }
 
-pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_target_mapping(task) {
+pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_target_mapping(harness: Harness, task) {
   const declared = workflows()
   const producer = declared["windows-nightly.yml"].jobs.nextest
   const producer_cache = producer.steps[3]
@@ -308,7 +308,7 @@ pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_targe
   assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
 }
 
-pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(task) {
+pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(harness: Harness, task) {
   const invalid = {
     ...workflows(),
     "build-release-binaries.yml": {
@@ -375,12 +375,12 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
 }
 
 @test
-pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_restore(task) {
+pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_restore(harness: Harness, task) {
   assert_eq(setup_harn_cache_action_errors(setup_harn_action()), [])
 }
 
 @test
-pipeline test_setup_harn_cache_rejects_ephemeral_writer_or_incompatible_key(task) {
+pipeline test_setup_harn_cache_rejects_ephemeral_writer_or_incompatible_key(harness: Harness, task) {
   const invalid = {
     runs: {
       steps: [
@@ -420,7 +420,7 @@ pipeline test_setup_harn_cache_rejects_ephemeral_writer_or_incompatible_key(task
   )
 }
 
-pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(task) {
+pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(harness: Harness, task) {
   const invalid_action = {
     runs: {
       steps: [
@@ -441,7 +441,7 @@ pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(task) {
   )
 }
 
-pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(task) {
+pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(harness: Harness, task) {
   const valid_action = action()
   const invalid_action = {
     ...valid_action,
@@ -468,13 +468,13 @@ pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(task
   )
 }
 
-pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(task) {
+pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(harness: Harness, task) {
   assert_eq(ci_cache_policy_parse({...policy(), unexpected: true}), nil)
   assert_eq(ci_cache_policy_parse({...policy(), writers: policy().writers + policy().writers}), nil)
   assert_eq(ci_cache_policy_parse({...policy(), writers: []}), nil)
 }
 
-pipeline test_ci_cache_policy_rejects_writer_key_drift(task) {
+pipeline test_ci_cache_policy_rejects_writer_key_drift(harness: Harness, task) {
   const invalid = {
     ...workflows(),
     "windows-nightly.yml": {
@@ -503,7 +503,7 @@ pipeline test_ci_cache_policy_rejects_writer_key_drift(task) {
   )
 }
 
-pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(task) {
+pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(harness: Harness, task) {
   const invalid = {
     ...workflows(),
     "ci.yml": {
@@ -564,7 +564,7 @@ pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(task
   )
 }
 
-pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(task) {
+pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(harness: Harness, task) {
   const invalid = {
     ...workflows(),
     "build-release-binaries.yml": {
@@ -583,7 +583,7 @@ pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(task) {
   )
 }
 
-pipeline test_ci_cache_policy_rejects_unbounded_release_writer(task) {
+pipeline test_ci_cache_policy_rejects_unbounded_release_writer(harness: Harness, task) {
   const bounded = workflows()["build-release-binaries.yml"].jobs.build
   const release_cache = bounded.steps[0]
   const invalid = {
@@ -613,7 +613,7 @@ pipeline test_ci_cache_policy_rejects_unbounded_release_writer(task) {
   )
 }
 
-pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(task) {
+pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness, task) {
   const invalid = {
     ...workflows(),
     "cli-cold-start-budget.yml": {

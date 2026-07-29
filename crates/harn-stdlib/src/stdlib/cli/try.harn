@@ -24,7 +24,7 @@ fn __trimmed_env(harness: Harness, key: string) {
 fn main(harness: Harness) {
   if len(argv) < 1 {
     harness.stdio.eprintln("try: prompt is required")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const prompt = argv[0]
   const max_iters = to_int(harness.env.get_or("HARN_TRY_MAX_ITERS", "5")) ?? 5
@@ -51,7 +51,7 @@ fn main(harness: Harness) {
     transcript_events(result?.transcript),
   )
   if warning != nil {
-    __io_eprintln(warning)
+    harness.stdio.eprintln(warning)
   }
   harness.stdio.println(result.text)
 }

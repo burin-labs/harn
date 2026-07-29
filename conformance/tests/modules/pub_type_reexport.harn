@@ -5,6 +5,6 @@ fn show(w: Wide) -> string {
   return w.label
 }
 
-pipeline default() {
-  __io_println(show(widen("via-facade")))
+pipeline default(harness: Harness) {
+  harness.stdio.println(show(widen("via-facade")))
 }

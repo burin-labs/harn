@@ -6,33 +6,33 @@
  * platform selection, this fixture flips before any of the
  * behavior-level fixtures notice.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const backend = sandbox_active_backend()
-  // Harn `platform()` returns the underlying OS slug (`darwin`,
+  // Harn `harness.system.platform().os` returns the underlying OS slug (`darwin`,
   // `linux`, `windows`, `openbsd`); the sandbox backend names map
   // 1:1 to those except `darwin` → `macos` to keep the docs and
   // marketing material aligned with how Apple brands the OS.
-  const expected = if platform() == "linux" {
+  const expected = if harness.system.platform().os == "linux" {
     "linux"
-  } else if platform() == "darwin" {
+  } else if harness.system.platform().os == "darwin" {
     "macos"
-  } else if platform() == "windows" {
+  } else if harness.system.platform().os == "windows" {
     "windows"
-  } else if platform() == "openbsd" {
+  } else if harness.system.platform().os == "openbsd" {
     "openbsd"
   } else {
     "noop"
   }
-  __io_println(backend == expected)
+  harness.stdio.println(backend == expected)
   // The conformance runner confines each case to the directories it owns,
   // which is the path axis only: cases are first-party code and several
   // legitimately shell out. `harn run` installs the stricter `worktree`
   // default, covered in CLI-specific coverage.
-  __io_println(sandbox_active_profile())
+  harness.stdio.println(sandbox_active_profile())
   // Each shipped backend reports availability as `true` on its host.
   // (Linux Landlock/seccomp are runtime-detected by the per-mechanism
   // setup, so the backend reports `true` even on kernels missing one
   // or both — the per-mechanism unavailability surfaces as a
   // structured warning rather than a backend-availability flip.)
-  __io_println(sandbox_backend_available())
+  harness.stdio.println(sandbox_backend_available())
 }

@@ -514,6 +514,38 @@ fn test_compile_function_call() {
 }
 
 #[test]
+fn source_callable_shadows_same_named_runtime_builtin() {
+    harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+    let result = try_compile(
+        "fn read_lines_page_result(value) { value }\n\
+         pipeline default(harness: Harness) { read_lines_page_result(42) }",
+    );
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn selectively_imported_callable_shadows_same_named_runtime_builtin() {
+    harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+    let result = try_compile(
+        "import { read_lines_page_result } from \"std/fs\"\n\
+         pipeline default(harness: Harness) { read_lines_page_result(harness.fs, \"data\") }",
+    );
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn runtime_builtin_name_is_not_source_callable_without_a_binding() {
+    harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+    let error =
+        try_compile("pipeline default(harness: Harness) { read_lines_page_result(\"data\") }")
+            .expect_err("runtime-only builtin should not be callable from source");
+    assert!(
+        error.message.contains("not callable source API"),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn test_compile_if_else() {
     let chunk =
         compile_source(r#"pipeline test(task) { if true { log("yes") } else { log("no") } }"#);

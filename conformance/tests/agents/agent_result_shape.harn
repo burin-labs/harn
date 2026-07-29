@@ -6,12 +6,11 @@ import { llm_text, with_llm_script } from "std/testing"
  * `tools_used`, `successful_tools`, `rejected_tools`, `tool_calling_mode`)
  * were removed; callers read them via `result.llm.*` and `result.tools.*`.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [llm_text("still working")],
+    harness.llm, [llm_text("still working")],
     { ->
-      const result = agent_loop(
-        "Just keep replying",
+      const result = agent_loop(harness, "Just keep replying",
         "You are helpful",
         {
           provider: "mock",
@@ -21,23 +20,23 @@ pipeline test(task) {
           max_nudges: 1,
         },
       )
-      __io_println(result.status == "budget_exhausted")
-      __io_println(type_of(result.llm) == "dict")
-      __io_println(type_of(result.tools) == "dict")
-      __io_println(result.llm.iterations >= 1)
-      __io_println(result.llm.duration_ms >= 0)
-      __io_println(result.llm.input_tokens >= 0)
-      __io_println(result.llm.output_tokens >= 0)
-      __io_println(type_of(result.tools.calls) == "list")
-      __io_println(type_of(result.tools.successful) == "list")
-      __io_println(type_of(result.tools.rejected) == "list")
-      __io_println(type_of(result.tools.mode) == "string")
-      __io_println(result.iterations == nil)
-      __io_println(result.duration_ms == nil)
-      __io_println(result.tools_used == nil)
-      __io_println(result.successful_tools == nil)
-      __io_println(result.rejected_tools == nil)
-      __io_println(result.tool_calling_mode == nil)
+      harness.stdio.println(result.status == "budget_exhausted")
+      harness.stdio.println(type_of(result.llm) == "dict")
+      harness.stdio.println(type_of(result.tools) == "dict")
+      harness.stdio.println(result.llm.iterations >= 1)
+      harness.stdio.println(result.llm.duration_ms >= 0)
+      harness.stdio.println(result.llm.input_tokens >= 0)
+      harness.stdio.println(result.llm.output_tokens >= 0)
+      harness.stdio.println(type_of(result.tools.calls) == "list")
+      harness.stdio.println(type_of(result.tools.successful) == "list")
+      harness.stdio.println(type_of(result.tools.rejected) == "list")
+      harness.stdio.println(type_of(result.tools.mode) == "string")
+      harness.stdio.println(result.iterations == nil)
+      harness.stdio.println(result.duration_ms == nil)
+      harness.stdio.println(result.tools_used == nil)
+      harness.stdio.println(result.successful_tools == nil)
+      harness.stdio.println(result.rejected_tools == nil)
+      harness.stdio.println(result.tool_calling_mode == nil)
     },
   )
 }

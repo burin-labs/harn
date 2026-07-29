@@ -217,6 +217,17 @@ pub fn platform_snapshot() -> Value {
     })
 }
 
+/// Minimal identity exposed to explicitly authorized scripts.
+pub fn identity_snapshot() -> Value {
+    json!({
+        "username": std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_default(),
+        "hostname": System::host_name(),
+        "pid": std::process::id(),
+    })
+}
+
 /// Snapshot of currently visible processes. The current Harn process is
 /// always included. Other processes are listed but with limited
 /// metadata — name, pid, cpu%, memory bytes, and an `is_harn_owned`

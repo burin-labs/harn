@@ -15,11 +15,11 @@ fn main(_harness: Harness) {
     },
   )
   const projected = llm_call_options(opts)
-  __io_println(projected.output.validation)
-  __io_println(projected.system[0].position)
-  __io_println(projected.timeout_ms)
-  __io_println(projected.idle_timeout_ms)
-  __io_println(projected.speed)
-  __io_println(projected.effort)
-  __io_println(projected.provider_options.mock.trace_label)
+  harness.stdio.println(projected.output.validation)
+  harness.stdio.println(projected.system[0].position)
+  harness.stdio.println(projected.timeout_ms)
+  harness.stdio.println(projected.idle_timeout_ms)
+  harness.stdio.println(projected.speed)
+  harness.stdio.println(projected.effort)
+  harness.stdio.println(projected.provider_options.mock.trace_label)
 }

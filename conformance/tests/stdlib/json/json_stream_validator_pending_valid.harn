@@ -1,6 +1,6 @@
 import { stream_validator } from "std/json"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const validator = stream_validator(
     {
       type: "dict",
@@ -8,10 +8,10 @@ pipeline default(task) {
       properties: {name: {type: "string"}, age: {type: "int"}},
     },
   )
-  __io_println(validator.feed("{\"name\"").variant)
-  __io_println(validator.value() == nil)
-  __io_println(validator.feed(":\"Ada\",\"age\":").variant)
-  __io_println(validator.feed("42}").variant)
-  __io_println(validator.value().name)
-  __io_println(validator.value().age)
+  harness.stdio.println(validator.feed("{\"name\"").variant)
+  harness.stdio.println(validator.value() == nil)
+  harness.stdio.println(validator.feed(":\"Ada\",\"age\":").variant)
+  harness.stdio.println(validator.feed("42}").variant)
+  harness.stdio.println(validator.value().name)
+  harness.stdio.println(validator.value().age)
 }

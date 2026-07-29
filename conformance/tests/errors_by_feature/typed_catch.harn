@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   enum AppError {
     NotFound(msg)
     Forbidden(msg)
@@ -10,7 +10,7 @@ pipeline test(task) {
   try {
     may_fail()
   } catch (e: AppError) {
-    log("caught: ${e.variant}")
-    log(e.fields[0])
+    harness.stdio.println("caught: ${e.variant}")
+    harness.stdio.println(e.fields[0])
   }
 }

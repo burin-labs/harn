@@ -2,19 +2,19 @@ import { llm_text, with_llm_script } from "std/testing"
 
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
+    harness.llm, [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
     { ->
-      const r = llm_call(
+      const r = harness.llm.call(
         "Grade this",
         nil,
         {provider: "mock", output: {schema: GraderOut, strict: true, validation: "error"}},
       )
       const v: "pass" | "fail" = r.data.verdict
       const s: string = r.data.summary
-      __io_println(v)
-      __io_println(s)
+      harness.stdio.println(v)
+      harness.stdio.println(s)
     },
   )
 }

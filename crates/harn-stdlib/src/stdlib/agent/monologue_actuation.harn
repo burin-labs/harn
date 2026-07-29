@@ -140,7 +140,7 @@ pub fn agent_monologue_actuation_observe_completed_dispatch(
   return next + {pending: true, pending_trigger: "read_only_streak"}
 }
 
-fn __agent_monologue_actuation_route_suppression(options) -> string {
+fn __agent_monologue_actuation_route_suppression(harness: Harness, options) -> string {
   if options?._llm_caller != nil
     && !(options?._llm_caller_transport?.forwards_assistant_prefill
     ?? false) {
@@ -150,7 +150,7 @@ fn __agent_monologue_actuation_route_suppression(options) -> string {
     return "multi_route_prefill_unsupported"
   }
   const capabilities = try {
-    provider_capabilities(options?.provider ?? "auto", options?.model ?? "")
+    harness.llm.provider_capabilities(options?.provider ?? "auto", options?.model ?? "")
   }
   if is_err(capabilities) || type_of(unwrap(capabilities)) != "dict" {
     return "assistant_prefill_unsupported"
@@ -161,14 +161,13 @@ fn __agent_monologue_actuation_route_suppression(options) -> string {
   return ""
 }
 
-fn __agent_monologue_actuation_receipt(
+fn __agent_monologue_actuation_receipt(harness: Harness, 
   session_id: string,
   iteration: int,
   decision: MonologueActuationDecision,
   tool_format: string,
 ) {
-  agent_emit_event(
-    session_id,
+  agent_emit_event(harness,  harness, session_id,
     "typed_checkpoint",
     {
       schema: "harn.agent_loop_monologue_actuation.v1",
@@ -199,7 +198,7 @@ fn __agent_monologue_actuation_receipt(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_monologue_actuation_take(
+pub fn agent_monologue_actuation_take(harness: Harness, 
   session_id: string,
   iteration: int,
   state: MonologueActuationState,
@@ -231,7 +230,7 @@ pub fn agent_monologue_actuation_take(
   } else {
     call_open
   }
-  const route_suppression = __agent_monologue_actuation_route_suppression(llm_options)
+  const route_suppression = __agent_monologue_actuation_route_suppression(harness, llm_options)
   const decision = if !config.enabled {
     {
       state: cleared,
@@ -317,7 +316,7 @@ pub fn agent_monologue_actuation_take(
     }
   }
   const attributed_decision: MonologueActuationDecision = decision + {write_tool: commit_tool_name}
-  __agent_monologue_actuation_receipt(session_id, iteration, attributed_decision, tool_format)
+  __agent_monologue_actuation_receipt(harness, session_id, iteration, attributed_decision, tool_format)
   return attributed_decision
 }
 
@@ -330,7 +329,7 @@ pub fn agent_monologue_actuation_take(
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_monologue_actuation_take_for_turn(
+pub fn agent_monologue_actuation_take_for_turn(harness: Harness, 
   session_id: string,
   iteration: int,
   state: MonologueActuationState,
@@ -342,7 +341,7 @@ pub fn agent_monologue_actuation_take_for_turn(
   const config = agent_monologue_actuation_config(
     turn_options?.stall_diagnostics?.monologue_actuation,
   )
-  return agent_monologue_actuation_take(
+  return agent_monologue_actuation_take(harness, 
     session_id,
     iteration,
     state,

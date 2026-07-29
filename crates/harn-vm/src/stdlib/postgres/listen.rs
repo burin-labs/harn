@@ -78,7 +78,10 @@ pub(super) fn reset_state() {
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_listen", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_listen", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "postgres"
 )]
@@ -135,9 +138,12 @@ async fn pg_listen_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.read@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_listener_recv",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_DICT_OR_NIL,
     ),
     kind = "async",
@@ -201,9 +207,12 @@ async fn pg_listener_recv_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_listener_close",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_BOOL,
     ),
     kind = "async",
@@ -230,7 +239,10 @@ async fn pg_listener_close_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_notify", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_notify", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "postgres"
 )]

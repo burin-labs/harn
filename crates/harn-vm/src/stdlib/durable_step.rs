@@ -62,6 +62,8 @@ pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.step_run",
+    effects = ["state.mutate@dynamic", "clock.read@const=wall"],
     sig = "step.run(...args: any) -> any",
     kind = "async",
     category = "durable_step"
@@ -74,6 +76,8 @@ async fn step_run_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.step_inspect",
+    effects = ["state.read@arg0"],
     sig = "step.inspect(namespace_or_options?: string | dict | nil) -> list",
     kind = "async",
     category = "durable_step"

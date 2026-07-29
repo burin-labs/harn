@@ -65,16 +65,16 @@ fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
 }
 
-pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
+pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, task) {
   with_llm_script(
-    [
+    harness.llm, [
       run_call("r1"),
       run_call("r2"),
       look_call("look_recovery"),
       llm_text("Read the Entry model. ##DONE##"),
     ],
     { ->
-      let session = "thrash-recovery-" + uuid()
+      let session = "thrash-recovery-" + harness.random.uuid()
       let opts: AgentLoopOptions = {
         provider: "mock",
         tools: toolset(),
@@ -93,9 +93,8 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
           max_feedback: 2,
         },
       }
-      let captured = agent_capture_events(
-        session,
-        fn() { return agent_loop("Write tests after inspecting the target model.", nil, opts) },
+      let captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Write tests after inspecting the target model.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
       assert(contains(captured.result.tools.successful, "look"), "recovery look should dispatch")
@@ -117,7 +116,7 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
       assert_eq(receipts[0].checkpoint.reason, "thrash_recovery_continue")
       assert_eq(receipts[0].checkpoint.warning.pattern, "repeated_same_observation")
       assert(contains(receipts[0].checkpoint.tool_names, "run"))
-      let calls = llm_mock_calls()
+      let calls = harness.llm.mock_calls()
       let recovery_prompt = json_stringify(calls[2].messages)
       assert(contains(recovery_prompt, "thrash_recovery"))
       assert(contains(recovery_prompt, "Do not issue that same call again"))
@@ -125,16 +124,16 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
   )
 }
 
-pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(task) {
+pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Harness, task) {
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("I should edit the target file after reading the Entry model."),
       llm_text("I still need to inspect app/Models/Entry.php before editing."),
       look_call("look_after_monologue"),
       llm_text("Read the Entry model. ##DONE##"),
     ],
     { ->
-      const session = "monologue-recovery-" + uuid()
+      const session = "monologue-recovery-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
         provider: "mock",
         tools: toolset(),
@@ -153,9 +152,8 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(task) {
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop("Edit the target file after inspecting it.", nil, opts) },
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Edit the target file after inspecting it.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
       assert(contains(captured.result.tools.successful, "look"), "recovery look should dispatch")
@@ -181,7 +179,7 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(task) {
       assert_eq(receipt.warning.pattern, "no_progress_monologue")
       assert_eq(receipt.tool_count, 0)
       assert_eq(len(receipt.tool_names), 0)
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const recovery_prompt = json_stringify(calls[2].messages)
       assert(contains(recovery_prompt, "monologue_recovery"))
       assert(contains(recovery_prompt, "emit exactly one concrete tool call"))
@@ -190,11 +188,11 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(task) {
   )
 }
 
-pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(task) {
+pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(harness: Harness, task) {
   with_llm_script(
-    [fail_call("f1"), fail_call("f2"), fail_call("f3")],
+    harness.llm, [fail_call("f1"), fail_call("f2"), fail_call("f3")],
     { ->
-      const session = "thrash-no-rung-" + uuid()
+      const session = "thrash-no-rung-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
         provider: "mock",
         tools: toolset(),
@@ -213,9 +211,8 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(task) {
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop("Edit the target file.", nil, opts) },
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Edit the target file.", nil, opts) },
       )
       assert_eq(captured.result.status, "stuck")
       const decisions = events_of(captured.events, "loop_control_decision").filter(
@@ -239,15 +236,15 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(task) {
   )
 }
 
-pipeline test_final_wrapup_tool_call_skip_is_observable(task) {
-  let session = "wrapup-tool-skip-" + uuid()
-  let wrapup_counter = shared_cell(
+pipeline test_final_wrapup_tool_call_skip_is_observable(harness: Harness, task) {
+  let session = "wrapup-tool-skip-" + harness.random.uuid()
+  let wrapup_counter = harness.runtime.shared_cell(
     {scope: "task_group", key: "wrapup-tool-skip-" + session, initial: 0},
   )
   let mock_llm = { call ->
     if call?.opts?._final_wrapup == true {
-      let snap = shared_snapshot(wrapup_counter)
-      shared_cas(wrapup_counter, snap, snap.value + 1)
+      let snap = harness.runtime.shared_snapshot(wrapup_counter)
+      harness.runtime.shared_cas(wrapup_counter, snap, snap.value + 1)
       return {ok: true, value: look_call("wrapup_look") + {provider: "mock", model: "mock"}}
     }
     return {ok: true, value: run_call("r1") + {provider: "mock", model: "mock"}}
@@ -263,12 +260,11 @@ pipeline test_final_wrapup_tool_call_skip_is_observable(task) {
     session_id: session,
     llm_caller: mock_llm,
   }
-  let captured = agent_capture_events(
-    session,
-    fn() { return agent_loop("Run out of budget while still trying tools.", nil, opts) },
+  let captured = agent_capture_events(harness,  harness, session,
+    fn() { return agent_loop(harness, "Run out of budget while still trying tools.", nil, opts) },
   )
   assert_eq(captured.result.status, "budget_exhausted")
-  assert_eq(shared_get(wrapup_counter), 1)
+  assert_eq(harness.runtime.shared_get(wrapup_counter), 1)
   let skipped = events_of(captured.events, "typed_checkpoint").filter(
     { event -> event.checkpoint?.kind == "final_wrapup_tool_calls_skipped" },
   )

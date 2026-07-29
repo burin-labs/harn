@@ -4,5 +4,5 @@ fn main(harness: Harness) {
     llm_caller: { _call -> return {text: "custom caller must not mask removed keys"} },
   }
   opts["output_schema"] = {type: "object"}
-  agent_loop("Validate options before invoking the custom caller.", nil, opts)
+  agent_loop(harness, "Validate options before invoking the custom caller.", nil, opts)
 }

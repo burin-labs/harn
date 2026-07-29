@@ -1,12 +1,12 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const template = """
     pub fn {{ fn_name }}({{ for p in params }}{{ p.name }}{{ if p.optional }} = nil{{ end }}{{ if !loop.last }}, {{ end }}{{ end }}) {
       {{ if show_note }}// optional arg present{{ else }}// no params{{ end }}
       return "{{ greeting | upper }}"
     }
     """
-  __io_println(
-    render_string(
+  harness.stdio.println(
+    harness.fs.render_template(
       template,
       {
         fn_name: "greet",
@@ -16,7 +16,7 @@ pipeline default() {
       },
     ),
   )
-  __io_println(
-    render_string(template, {fn_name: "greet", params: [], greeting: "hi", show_note: false}),
+  harness.stdio.println(
+    harness.fs.render_template(template, {fn_name: "greet", params: [], greeting: "hi", show_note: false}),
   )
 }

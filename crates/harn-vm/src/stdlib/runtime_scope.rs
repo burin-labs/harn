@@ -47,7 +47,11 @@ pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "current_policy() -> any", category = "runtime_scope")]
+#[harn_builtin(
+    exposure = "harness.runtime.current_policy",
+    effects = ["state.read@const=runtime-policy"],
+    sig = "current_policy() -> any", category = "runtime_scope"
+)]
 fn current_policy_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(policy) = crate::orchestration::current_execution_policy() else {
         return Ok(VmValue::Nil);
@@ -59,6 +63,8 @@ fn current_policy_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.with_autonomy_policy",
+    effects = ["state.mutate@const=runtime-policy"],
     sig = "with_autonomy_policy(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope"
@@ -80,6 +86,8 @@ async fn with_autonomy_policy_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.with_execution_policy",
+    effects = ["state.mutate@const=runtime-policy"],
     sig = "with_execution_policy(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope"
@@ -106,6 +114,8 @@ async fn with_execution_policy_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__harn_with_execution_policy_override(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope",
@@ -133,6 +143,8 @@ async fn harn_with_execution_policy_override_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.with_approval_policy",
+    effects = ["state.mutate@const=runtime-policy"],
     sig = "with_approval_policy(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope"
@@ -155,6 +167,8 @@ async fn with_approval_policy_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.with_command_policy",
+    effects = ["state.mutate@const=runtime-policy"],
     sig = "with_command_policy(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope"
@@ -173,6 +187,8 @@ async fn with_command_policy_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.with_dynamic_permissions",
+    effects = ["state.mutate@const=runtime-policy"],
     sig = "with_dynamic_permissions(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope"

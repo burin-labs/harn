@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Test that return inside try-finally runs the finally block
   // and correctly returns the value.
   fn get_value() {
@@ -9,9 +9,9 @@ pipeline test(task) {
     } finally {
       // This should run before the return completes.
       // We can verify by logging from within finally.
-      log("finally ran")
+      harness.stdio.println("finally ran")
     }
   }
   const v = get_value()
-  log("result: ${v}")
+  harness.stdio.println("result: ${v}")
 }

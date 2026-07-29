@@ -26,7 +26,7 @@ components:
 """
 
 @test
-pipeline test_collect_surface_paths_and_methods(task) {
+pipeline test_collect_surface_paths_and_methods(harness: Harness, task) {
   const out = collect_surface(MINI_SPEC)
   assert(out.contains("GET /v1/widgets"))
   assert(out.contains("POST /v1/widgets"))
@@ -35,14 +35,14 @@ pipeline test_collect_surface_paths_and_methods(task) {
 }
 
 @test
-pipeline test_collect_surface_schemas(task) {
+pipeline test_collect_surface_schemas(harness: Harness, task) {
   const out = collect_surface(MINI_SPEC)
   assert(out.contains("Widget"))
   assert(out.contains("WidgetList"))
 }
 
 @test
-pipeline test_collect_surface_section_order(task) {
+pipeline test_collect_surface_section_order(harness: Harness, task) {
   const out = collect_surface(MINI_SPEC)
   const paths_idx = out.index_of("## Paths")
   const schemas_idx = out.index_of("## Schemas")
@@ -51,7 +51,7 @@ pipeline test_collect_surface_section_order(task) {
 }
 
 @test
-pipeline test_collect_surface_ignores_nested_path_methods(task) {
+pipeline test_collect_surface_ignores_nested_path_methods(harness: Harness, task) {
   // Methods nested under a path/parameters block shouldn't get picked up
   // — the regex matches only on a four-space indent under a path key.
   const nested = """
@@ -68,7 +68,7 @@ paths:
 }
 
 @test
-pipeline test_collect_surface_empty_spec(task) {
+pipeline test_collect_surface_empty_spec(harness: Harness, task) {
   const out = collect_surface("")
   assert(out.contains("## Paths"))
   assert(out.contains("## Schemas"))

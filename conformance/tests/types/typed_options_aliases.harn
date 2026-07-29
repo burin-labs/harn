@@ -13,7 +13,7 @@ import {
 import { LlmBudget, LlmCallOptions, ModelLadder, llm_options, model_ladder } from "std/llm/options"
 import { StageSpec, WorkflowRetryPolicy, workflow_stage_spec } from "std/workflow/options"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const budget: LlmBudget = {max_cost_usd: 0.25, max_output_tokens: 512}
   const call_opts: LlmCallOptions = {
     provider: "mock",
@@ -22,7 +22,7 @@ pipeline test(task) {
     budget: budget,
   }
   const projected = llm_options(call_opts)
-  log(
+  harness.stdio.println(
     "llm provider=" + to_string(projected.provider) + " budget="
       + to_string(
       projected.budget?.max_cost_usd,
@@ -38,7 +38,7 @@ pipeline test(task) {
       capabilities: ["tools"],
     },
   ]
-  log("ladder len=" + to_string(len(model_ladder(ladder))))
+  harness.stdio.println("ladder len=" + to_string(len(model_ladder(ladder))))
   const loop_opts: AgentLoopOptions = {
     provider: "mock",
     loop_until_done: true,
@@ -47,7 +47,7 @@ pipeline test(task) {
     turn_policy: {require_action_or_yield: true, max_prose_chars: 800},
   }
   const typed_loop = agent_options(loop_opts)
-  log(
+  harness.stdio.println(
     "loop until_done=" + to_string(typed_loop.loop_until_done) + " prose_cap="
       + to_string(
       typed_loop.turn_policy?.max_prose_chars,
@@ -58,7 +58,7 @@ pipeline test(task) {
     rate_limit: {max_calls: 5},
     reasoning_task: "verify",
   }
-  log("preset reasoning_task=" + to_string(agent_preset_options(preset_overrides).reasoning_task))
+  harness.stdio.println("preset reasoning_task=" + to_string(agent_preset_options(preset_overrides).reasoning_task))
   const stage_retry: WorkflowRetryPolicy = {max_attempts: 3, verify: true, backoff_ms: 100}
   const stage: StageSpec = {
     id: "repair",
@@ -69,7 +69,7 @@ pipeline test(task) {
     output_contract: {output_kinds: ["patch"], min_inputs: 1},
   }
   const typed_stage = workflow_stage_spec(stage)
-  log(
+  harness.stdio.println(
     "stage id=" + to_string(typed_stage.id) + " retries="
       + to_string(
       typed_stage.retry_policy?.max_attempts,

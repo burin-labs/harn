@@ -5,7 +5,11 @@ pub(super) const OPTION_REGISTRY_DEFS: &[&VmBuiltinDef] = &[&LLM_CALL_OPTION_REG
 
 /// Expose the canonical `llm_call` option registry to Harn so stdlib
 /// projection and removed-key diagnostics cannot drift from the runtime.
-#[harn_builtin(sig = "__llm_call_option_registry() -> dict", category = "llm.config")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__llm_call_option_registry() -> dict", category = "llm.config"
+)]
 fn llm_call_option_registry_builtin(
     _args: &[VmValue],
     _out: &mut String,

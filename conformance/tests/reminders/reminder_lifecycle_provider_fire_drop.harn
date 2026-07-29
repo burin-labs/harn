@@ -1,9 +1,9 @@
 import { agent_reminder_providers_fire, agent_session_messages } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
-  clear_reminder_providers()
-  register_reminder_provider(
+pipeline main(harness: Harness) {
+  harness.agent.clear_reminder_providers()
+  harness.agent.register_reminder_provider(
     {
       id: "lifecycle_provider",
       subscribes_to: ["session_idle"],
@@ -21,12 +21,11 @@ pipeline main() {
     },
   )
   const topic = "transcript.reminder.lifecycle"
-  const session = agent_session_open("reminder-lifecycle-provider-fire-drop")
-  agent_session_reset(session)
-  agent_session_inject(session, {role: "user", content: "hello"})
-  const cursor = event_log.latest(topic)
-  const report = agent_reminder_providers_fire(
-    session,
+  const session = harness.agent.open("reminder-lifecycle-provider-fire-drop")
+  harness.agent.reset(session)
+  harness.agent.inject(session, {role: "user", content: "hello"})
+  const cursor = harness.obs.event_log_latest(topic)
+  const report = agent_reminder_providers_fire(harness, session,
     "session_idle",
     {session: {id: session}, iteration: 4},
     {
@@ -42,18 +41,18 @@ pipeline main() {
     },
   )
   with_llm_script(
-    [llm_text("ok"), llm_text("ok"), llm_text("ok")],
+    harness.llm, [llm_text("ok"), llm_text("ok"), llm_text("ok")],
     { ->
       let lifecycle_opts = {
         provider: "mock",
         model: "o3",
-        messages: agent_session_messages(session),
+        messages: agent_session_messages(harness, session),
         session_id: session,
       }
       lifecycle_opts["_ite" + "ration"] = 4
-      llm_call("ignored", nil, lifecycle_opts)
-      agent_session_reset(session)
-      agent_session_inject(
+      harness.llm.call("ignored", nil, lifecycle_opts)
+      harness.agent.reset(session)
+      harness.agent.inject(
         session,
         {
           id: "bad-reminder-event",
@@ -64,24 +63,24 @@ pipeline main() {
           reminder: {id: "bad-reminder"},
         },
       )
-      llm_call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
-      const after_first_drop = event_log.latest(topic)
-      llm_call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
-      const drop_was_one_shot = event_log.latest(topic) == after_first_drop
-      const validation_session = agent_session_open("reminder-lifecycle-validation-no-fire")
-      agent_session_reset(validation_session)
-      agent_session_inject(validation_session, transcript_reminder_event({body: "do not fire"}))
-      const validation_cursor = event_log.latest(topic)
+      harness.llm.call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
+      const after_first_drop = harness.obs.event_log_latest(topic)
+      harness.llm.call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
+      const drop_was_one_shot = harness.obs.event_log_latest(topic) == after_first_drop
+      const validation_session = harness.agent.open("reminder-lifecycle-validation-no-fire")
+      harness.agent.reset(validation_session)
+      harness.agent.inject(validation_session, transcript_reminder_event({body: "do not fire"}))
+      const validation_cursor = harness.obs.event_log_latest(topic)
       let invalid_opts = {provider: "mock", model: "o3", session_id: validation_session}
       invalid_opts["trans" + "cript"] = {}
       const rejected = try {
-        llm_call("ignored", nil, invalid_opts)
+        harness.llm.call("ignored", nil, invalid_opts)
         false
       } catch (e) {
         contains(json_stringify(e), "transcript")
       }
-      const validation_did_not_fire = event_log.latest(topic) == validation_cursor
-      const stream = event_log.subscribe(
+      const validation_did_not_fire = harness.obs.event_log_latest(topic) == validation_cursor
+      const stream = harness.obs.event_log_subscribe(
         {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."},
       )
       const evaluated = stream.next().value
@@ -89,31 +88,31 @@ pipeline main() {
       const fired = stream.next().value
       const summary = stream.next().value
       const dropped = stream.next().value
-      __io_println(report.fired_count)
-      __io_println(evaluated.kind)
-      __io_println(evaluated.payload.provider_id)
-      __io_println(evaluated.payload.event)
-      __io_println(evaluated.payload.fired)
-      __io_println(injected.kind)
-      __io_println(injected.payload.source)
-      __io_println(fired.kind)
-      __io_println(fired.payload.session_id == session)
-      __io_println(fired.payload.turn_number)
-      __io_println(fired.payload.rendered_role)
-      __io_println(summary.kind)
-      __io_println(summary.payload.session_id == session)
-      __io_println(summary.payload.turn_number)
-      __io_println(summary.payload.count)
-      __io_println(summary.payload.by_source[0].source)
-      __io_println(summary.payload.by_rendered_role[0].rendered_role)
-      __io_println(dropped.kind)
-      __io_println(dropped.payload.session_id == session)
-      __io_println(dropped.payload.reminder_id)
-      __io_println(dropped.payload.reason)
-      __io_println(drop_was_one_shot)
-      __io_println(rejected)
-      __io_println(validation_did_not_fire)
-      clear_reminder_providers()
+      harness.stdio.println(report.fired_count)
+      harness.stdio.println(evaluated.kind)
+      harness.stdio.println(evaluated.payload.provider_id)
+      harness.stdio.println(evaluated.payload.event)
+      harness.stdio.println(evaluated.payload.fired)
+      harness.stdio.println(injected.kind)
+      harness.stdio.println(injected.payload.source)
+      harness.stdio.println(fired.kind)
+      harness.stdio.println(fired.payload.session_id == session)
+      harness.stdio.println(fired.payload.turn_number)
+      harness.stdio.println(fired.payload.rendered_role)
+      harness.stdio.println(summary.kind)
+      harness.stdio.println(summary.payload.session_id == session)
+      harness.stdio.println(summary.payload.turn_number)
+      harness.stdio.println(summary.payload.count)
+      harness.stdio.println(summary.payload.by_source[0].source)
+      harness.stdio.println(summary.payload.by_rendered_role[0].rendered_role)
+      harness.stdio.println(dropped.kind)
+      harness.stdio.println(dropped.payload.session_id == session)
+      harness.stdio.println(dropped.payload.reminder_id)
+      harness.stdio.println(dropped.payload.reason)
+      harness.stdio.println(drop_was_one_shot)
+      harness.stdio.println(rejected)
+      harness.stdio.println(validation_did_not_fire)
+      harness.agent.clear_reminder_providers()
     },
   )
 }

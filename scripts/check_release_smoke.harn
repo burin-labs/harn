@@ -61,7 +61,7 @@ pub fn select_release_smoke_run(runs: list, tag: string, log_loader) {
   return matches.sort_by({ run -> to_string(run?.createdAt ?? "") }).reverse()[0]
 }
 
-fn gh(args: list<string>) -> string {
+fn gh(harness: Harness, args: list<string>) -> string {
   const result = harness.process.spawn_captured({cmd: "gh", args: args})
   if result.exit_code != 0 {
     throw "gh " + args.join(" ") + " failed: " + result.stderr.trim()
@@ -106,14 +106,14 @@ fn main(harness: Harness) -> int {
   try {
     let repo = to_string(harness.env.get("GITHUB_REPOSITORY") ?? "")
     if repo == "" {
-      const repo_doc = json_parse(gh(["repo", "view", "--json", "nameWithOwner"]))
+      const repo_doc = json_parse(gh(harness, ["repo", "view", "--json", "nameWithOwner"]))
       repo = to_string(repo_doc?.nameWithOwner ?? "")
       if repo == "" {
         throw "gh repo view returned no nameWithOwner"
       }
     }
     const runs = json_parse(
-      gh(
+      gh(harness, 
         [
           "run",
           "list",

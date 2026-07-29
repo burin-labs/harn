@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   http_mock("GET", "https://api.example.com/users", {status: 200, body: "alice", headers: {}})
   http_mock("POST", "https://api.example.com/users", {status: 201, body: "created", headers: {}})
   http_mock(
@@ -19,14 +19,14 @@ pipeline test(task) {
   const closed: bool = http_stream_close(stream)
   const dst = harness.fs.temp_dir() + "/http-signature-download.txt"
   const download_resp: dict = harness.net.download("https://api.example.com/download", dst)
-  log(get_resp.status)
-  log(get_resp.body)
-  log(post_resp.status)
-  log(post_resp.body)
-  log(info.status)
+  harness.stdio.println(get_resp.status)
+  harness.stdio.println(get_resp.body)
+  harness.stdio.println(post_resp.status)
+  harness.stdio.println(post_resp.body)
+  harness.stdio.println(info.status)
   if chunk != nil {
-    log(bytes_to_string(chunk))
+    harness.stdio.println(bytes_to_string(chunk))
   }
-  log(closed)
-  log(download_resp.bytes_written)
+  harness.stdio.println(closed)
+  harness.stdio.println(download_resp.bytes_written)
 }

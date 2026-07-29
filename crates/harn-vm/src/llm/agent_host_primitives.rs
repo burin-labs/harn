@@ -358,6 +358,8 @@ fn agent_primitive_undispatched_tool(
 /// block without an adjacent `tool_result` on the next call (HTTP 400),
 /// which otherwise breaks interrupted or resumed sessions.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_undispatched_tool_results(tool_calls: list, status: string, reason: string) -> list",
     category = "agent.host",
     runtime_only = true
@@ -449,6 +451,8 @@ fn attach_hook_reminder_audit(
 /// fenced-JSON parser; everything else — `"text"`, `"auto"`, nil, and the
 /// never-text `"native"` (defensively) — uses the canonical tagged grammar.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_parse_tool_calls(text: string, tools?: {_type: \"tool_registry\", tools: list}?, tool_format?: string?) -> dict",
     kind = "async",
     category = "agent.host",
@@ -578,6 +582,8 @@ async fn host_agent_dispatch_tool_batch_capped(
 
 /// Dispatch a batch of normalized agent tool calls through the host tool runtime.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_dispatch_tool_batch(calls: list, tools?: {_type: \"tool_registry\", tools: list}?, options?: dict?) -> list",
     kind = "async",
     category = "agent.host",
@@ -766,6 +772,8 @@ fn upgrade_to_trifecta_ask(
 
 /// Dispatch one normalized agent tool call through the host tool runtime.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_dispatch_tool_call(call: dict, tools?: {_type: \"tool_registry\", tools: list}?, options?: dict?) -> dict",
     kind = "async",
     category = "agent.host",
@@ -1766,6 +1774,8 @@ fn tag_mcp_tool(
 
 /// {tools_added, errors}.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_mcp_bootstrap(session_id: string, specs?: list|nil) -> dict",
     kind = "async",
     category = "agent.host",
@@ -1905,6 +1915,8 @@ async fn host_mcp_bootstrap_impl(
 /// Disconnect all MCP clients installed for session_id and remove them
 /// from the session registry.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_mcp_disconnect(session_id: string) -> bool",
     kind = "async",
     category = "agent.host",
@@ -1938,6 +1950,8 @@ async fn host_mcp_disconnect_impl(
 
 /// Evaluate registered reminder providers for an agent lifecycle event.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_reminder_providers_fire(session_id: string, event: string, payload?: dict|nil, options?: dict|nil) -> dict",
     kind = "async",
     category = "agent.host",

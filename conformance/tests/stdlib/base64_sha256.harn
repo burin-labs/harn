@@ -1,19 +1,19 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // base64 encode/decode
   const encoded = base64_encode("hello world")
-  log(encoded)
+  harness.stdio.println(encoded)
   const decoded = base64_decode(encoded)
-  log(decoded)
+  harness.stdio.println(decoded)
   const bytes = bytes_from_string("hello world")
-  log(type_of(bytes))
-  log(bytes_to_string(bytes))
-  log(bytes_to_hex(bytes_from_hex("0001ff")))
-  log(bytes_to_base64(bytes_from_string("hi")))
-  log(bytes_to_string(bytes_from_base64("aGk=")))
+  harness.stdio.println(type_of(bytes))
+  harness.stdio.println(bytes_to_string(bytes))
+  harness.stdio.println(bytes_to_hex(bytes_from_hex("0001ff")))
+  harness.stdio.println(bytes_to_base64(bytes_from_string("hi")))
+  harness.stdio.println(bytes_to_string(bytes_from_base64("aGk=")))
   // sha256
   const hash = sha256("hello")
-  log(hash)
+  harness.stdio.println(hash)
   // md5
   const md = md5("hello")
-  log(md)
+  harness.stdio.println(md)
 }

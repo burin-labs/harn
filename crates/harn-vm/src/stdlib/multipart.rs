@@ -418,6 +418,8 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "multipart_parse(body: bytes | string, content_type: string, options?: dict) -> dict",
     category = "multipart"
 )]
@@ -462,6 +464,8 @@ fn field_dict<'a>(
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "multipart_field_bytes(field: dict) -> bytes",
     category = "multipart"
 )]
@@ -481,6 +485,8 @@ fn multipart_field_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "multipart_field_text(field: dict) -> string",
     category = "multipart"
 )]
@@ -672,6 +678,8 @@ fn field_content_contains_boundary(field: &VmValue, boundary: &str) -> bool {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "multipart_form_data(fields: list, options?: dict) -> dict",
     category = "multipart"
 )]

@@ -1,10 +1,10 @@
 // pack_for(gpt-5, reasoning_policy="high") translates to effort: "high".
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(task) {
-  const r = pack_for({model: "gpt-5", reasoning_policy: "high"})
+pipeline test(harness: Harness, task) {
+  const r = pack_for(harness, {model: "gpt-5", reasoning_policy: "high"})
   assert_eq(r.provider, "openai")
   // The policy patch overrides medium scale calibration.
   assert_eq(r.effort, "high")
-  log("llm_defaults_pack_gpt5 passed")
+  harness.stdio.println("llm_defaults_pack_gpt5 passed")
 }

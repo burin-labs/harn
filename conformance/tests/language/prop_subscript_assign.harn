@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Dict property assignment
   let config = {retries: 3, timeout: 30}
   config.retries = 5
@@ -19,5 +19,5 @@ pipeline test(task) {
   let nums = [10, 20, 30]
   nums[1] += 5
   assert_eq(nums[1], 25, "compound subscript assignment")
-  log("property/subscript assignment: all tests passed")
+  harness.stdio.println("property/subscript assignment: all tests passed")
 }

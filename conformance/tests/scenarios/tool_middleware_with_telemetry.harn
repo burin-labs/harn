@@ -67,59 +67,56 @@ fn envelope(name, call_id, session_id) {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // (1) Callable sink receives the standardized span shape.
-  const mw = with_telemetry(
-    { s ->
-      __io_println(s.name)
-      __io_println(s.kind)
-      __io_println(s.span_id)
-      __io_println(s.trace_id)
-      __io_println(s.attributes.tool_name)
-      __io_println(s.attributes.tool_call_id)
-      __io_println(s.attributes.iteration)
-      __io_println(s.attributes.session_id)
-      __io_println(s.attributes.executor)
-      __io_println(s.attributes.status)
-      __io_println(s.attributes.ok)
-      __io_println(s.attributes["gen_ai.tool.name"])
-      __io_println(s.attributes["gen_ai.tool.call.id"])
-      __io_println(s.attributes["gen_ai.tool.executor"])
-      __io_println(s.events[0].name)
-      __io_println(s.events[1].name)
-      __io_println(len(s.child_spans))
-      __io_println(s.child_spans[0].name)
-      __io_println(s.child_spans[1].name)
-      __io_println(s.child_spans[1].attributes.count)
-      __io_println(s.child_spans[1].attributes.cap)
+  const mw = with_telemetry(harness, { s ->
+      harness.stdio.println(s.name)
+      harness.stdio.println(s.kind)
+      harness.stdio.println(s.span_id)
+      harness.stdio.println(s.trace_id)
+      harness.stdio.println(s.attributes.tool_name)
+      harness.stdio.println(s.attributes.tool_call_id)
+      harness.stdio.println(s.attributes.iteration)
+      harness.stdio.println(s.attributes.session_id)
+      harness.stdio.println(s.attributes.executor)
+      harness.stdio.println(s.attributes.status)
+      harness.stdio.println(s.attributes.ok)
+      harness.stdio.println(s.attributes["gen_ai.tool.name"])
+      harness.stdio.println(s.attributes["gen_ai.tool.call.id"])
+      harness.stdio.println(s.attributes["gen_ai.tool.executor"])
+      harness.stdio.println(s.events[0].name)
+      harness.stdio.println(s.events[1].name)
+      harness.stdio.println(len(s.child_spans))
+      harness.stdio.println(s.child_spans[0].name)
+      harness.stdio.println(s.child_spans[1].name)
+      harness.stdio.println(s.child_spans[1].attributes.count)
+      harness.stdio.println(s.child_spans[1].attributes.cap)
     },
   )
   const ok = mw(envelope("read", "call_1", "sess_alpha"), ok_next())
-  __io_println(ok.ok)
-  __io_println(ok.status)
+  harness.stdio.println(ok.ok)
+  harness.stdio.println(ok.status)
   // (2) Scope-violation errors raise a tool_call.scope_violation event.
-  const scope_mw = with_telemetry(
-    { s ->
-      __io_println(s.status)
-      __io_println(s.attributes.error_category)
-      __io_println(len(s.events))
-      __io_println(s.events[2].name)
-      __io_println(s.events[2].attributes.category)
+  const scope_mw = with_telemetry(harness, { s ->
+      harness.stdio.println(s.status)
+      harness.stdio.println(s.attributes.error_category)
+      harness.stdio.println(len(s.events))
+      harness.stdio.println(s.events[2].name)
+      harness.stdio.println(s.events[2].attributes.category)
     },
   )
   const denied = scope_mw(envelope("shell.exec", "call_2", "sess_beta"), scope_violation_next())
-  __io_println(denied.ok)
+  harness.stdio.println(denied.ok)
   // (3) When the envelope has no session_id, the trace_id falls back
   // to "tool_call:<call_id>".
-  const traceless_mw = with_telemetry({ s -> __io_println(s.trace_id) })
+  const traceless_mw = with_telemetry(harness, { s -> harness.stdio.println(s.trace_id) })
   const _ = traceless_mw(envelope("read", "call_3", ""), ok_next())
   // (4) Dict config: persona + mode + extra_attributes ride along.
-  const attr_mw = with_telemetry(
-    {
+  const attr_mw = with_telemetry(harness, {
       sink: { s ->
-        __io_println(s.attributes.persona)
-        __io_println(s.attributes.mode)
-        __io_println(s.attributes.env)
+        harness.stdio.println(s.attributes.persona)
+        harness.stdio.println(s.attributes.mode)
+        harness.stdio.println(s.attributes.env)
       },
       persona: "merge_captain",
       mode: "preview",
@@ -128,28 +125,27 @@ pipeline default() {
   )
   const _ = attr_mw(envelope("read", "call_4", "sess_gamma"), ok_next())
   // (5) Fan-out: `sinks: [..]` invokes every sink.
-  const left = atomic(0)
-  const right = atomic(0)
-  const fanout = with_telemetry(
-    {
+  const left = harness.runtime.atomic(0)
+  const right = harness.runtime.atomic(0)
+  const fanout = with_telemetry(harness, {
       sinks: [
         { _s ->
-          let _ = atomic_add(left, 1)
+          let _ = harness.runtime.atomic_add(left, 1)
         },
         { _s ->
-          let _ = atomic_add(right, 1)
+          let _ = harness.runtime.atomic_add(right, 1)
         },
       ],
     },
   )
   const _ = fanout(envelope("read", "call_5", "sess_delta"), ok_next())
-  __io_println(atomic_get(left))
-  __io_println(atomic_get(right))
+  harness.stdio.println(harness.runtime.atomic_get(left))
+  harness.stdio.println(harness.runtime.atomic_get(right))
   // (6) Unknown built-in name raises a clear error.
   const bad = try {
-    resolve_telemetry_sink("kaboom")
+    resolve_telemetry_sink(harness, "kaboom")
   }
-  __io_println(is_err(bad))
+  harness.stdio.println(is_err(bad))
   // (7) tool_call_span(...) is callable directly for ad-hoc reporting.
   const direct = tool_call_span(
     envelope("read", "call_6", "sess_epsilon"),
@@ -158,6 +154,6 @@ pipeline default() {
     1042,
     {persona: "review_captain"},
   )
-  __io_println(direct.duration_ms)
-  __io_println(direct.attributes.persona)
+  harness.stdio.println(direct.duration_ms)
+  harness.stdio.println(direct.attributes.persona)
 }

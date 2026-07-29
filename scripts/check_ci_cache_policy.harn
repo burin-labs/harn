@@ -920,7 +920,7 @@ fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<s
     || !contains(test_command, "harn-tests.tar.zst")
     || !contains(test_command, "--workspace-remap")
     || regex_match(
-    "(^|[ ])--workspace([ ]|$)",
+    "(^|[ ])--workspace(harness, [ ]|$)",
     test_command,
   )
     != nil {
@@ -1232,21 +1232,21 @@ fn sccache_install_action_errors(install_action) -> list<string> {
 }
 
 fn main(harness: Harness) {
-  const loaded = read_json_result(POLICY_PATH)
+  const loaded = read_json_result(harness.fs, POLICY_PATH)
   guard is_ok(loaded) else {
     harness.stdio.eprintln(json_stringify(unwrap_err(loaded)))
-    exit(1)
+    harness.runtime.exit(1)
   }
   const policy = ci_cache_policy_parse(unwrap(loaded))
   guard policy != nil else {
     harness.stdio.eprintln("invalid CI cache policy: " + POLICY_PATH)
-    exit(1)
+    harness.runtime.exit(1)
   }
-  const action = read_yaml(ACTION_PATH, nil)
-  const node_action = read_yaml(NODE_ACTION_PATH, nil)
-  const setup_harn_action = read_yaml(SETUP_HARN_ACTION_PATH, nil)
-  const sccache_action = read_yaml(SCCACHE_ACTION_PATH, nil)
-  const sccache_install_action = read_yaml(SCCACHE_INSTALL_ACTION_PATH, nil)
+  const action = read_yaml(harness.fs, ACTION_PATH, nil)
+  const node_action = read_yaml(harness.fs, NODE_ACTION_PATH, nil)
+  const setup_harn_action = read_yaml(harness.fs, SETUP_HARN_ACTION_PATH, nil)
+  const sccache_action = read_yaml(harness.fs, SCCACHE_ACTION_PATH, nil)
+  const sccache_install_action = read_yaml(harness.fs, SCCACHE_INSTALL_ACTION_PATH, nil)
   let workflows = {}
   for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
     workflows[workflow_name(path)] = read_yaml(path, nil)
@@ -1270,7 +1270,7 @@ fn main(harness: Harness) {
     for error in errors {
       harness.stdio.eprintln("  - " + error)
     }
-    exit(1)
+    harness.runtime.exit(1)
   }
   harness.stdio.println(
     "CI cache policy: OK (${len(workflows.keys())} workflows, ${len(policy.writers)} Rust writer)",

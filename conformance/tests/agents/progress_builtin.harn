@@ -1,4 +1,4 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Basic progress
   progress("phase1", "Starting work")
   // Progress with numeric percentage

@@ -1,4 +1,4 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   let sum = 0
   for i in 1 to 6 exclusive {
     if i == 3 {
@@ -6,5 +6,5 @@ pipeline default(task) {
     }
     sum = sum + i
   }
-  log(sum)
+  harness.stdio.println(sum)
 }

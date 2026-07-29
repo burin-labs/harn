@@ -311,6 +311,8 @@ const AGENT_SESSION_DETACH_OPT_KEYS: &[&str] = &["reason", "metadata"];
 const AGENT_SESSION_METADATA_OPT_KEYS: &[&str] = &["metadata"];
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_open(id?: string, opts?: dict) -> any",
     category = "agent.session",
     doc = "Open or create a first-class agent session. opts may carry workspace_anchor and workspace_policy."
@@ -365,6 +367,8 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_workspace_anchor(id: string) -> any",
     category = "agent.session",
     doc = "Return the typed workspace anchor for an agent session, or nil when none is pinned."
@@ -386,6 +390,8 @@ fn agent_session_workspace_anchor_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_set_workspace_anchor(id: string, anchor: any) -> bool",
     category = "agent.session",
     doc = "Set or clear the typed workspace anchor for an agent session."
@@ -418,6 +424,8 @@ fn agent_session_set_workspace_anchor_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_workspace_policy(id: string) -> dict",
     category = "agent.session",
     doc = "Return the session workspace policy defaults."
@@ -437,6 +445,8 @@ fn agent_session_workspace_policy_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_set_workspace_policy(id: string, policy: dict) -> bool",
     category = "agent.session",
     doc = "Set the session workspace policy defaults. Returns true when changed."
@@ -462,6 +472,8 @@ fn agent_session_set_workspace_policy_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_add_root(id: string, root: string, opts?: dict) -> dict",
     category = "agent.session",
     doc = "Mount an additional workspace root on an anchored session."
@@ -492,6 +504,8 @@ fn agent_session_add_root_builtin(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_remove_root(id: string, root: string) -> dict",
     category = "agent.session",
     doc = "Remove one additional workspace root from an anchored session."
@@ -509,6 +523,8 @@ fn agent_session_remove_root_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_list_roots(id: string) -> dict",
     category = "agent.session",
     doc = "Return {primary, additional} for the session mounted roots."
@@ -527,6 +543,8 @@ fn agent_session_list_roots_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_exists(id: string) -> bool",
     category = "agent.session",
     doc = "Return whether an agent session exists."
@@ -537,6 +555,8 @@ fn agent_session_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_length(id: string) -> int",
     category = "agent.session",
     doc = "Return the number of messages in an agent session."
@@ -552,6 +572,8 @@ fn agent_session_length_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_snapshot(id: string) -> any",
     category = "agent.session",
     doc = "Return the current transcript snapshot for an agent session."
@@ -562,6 +584,8 @@ fn agent_session_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_ancestry(id: string) -> dict",
     category = "agent.session",
     doc = "Return parent, child, and root lineage for an agent session."
@@ -597,6 +621,8 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_current_id() -> string?",
     category = "agent.session",
     doc = "Return the innermost active agent session id."
@@ -611,6 +637,8 @@ fn agent_session_current_id_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_record_changed_path(path: string, session_id?: string) -> bool",
     category = "agent.session",
     doc = "Record `path` as mutated by an agent session so the sub-agent receipt's \
@@ -639,6 +667,8 @@ fn agent_session_record_changed_path_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_actor_chain(id?: string) -> dict?",
     category = "agent.session",
     doc = "Return the RFC 8693 actor chain for an agent session. Defaults to the current session."
@@ -666,6 +696,8 @@ const ACTOR_CHAIN_VALIDATE_SCOPE_ATTENUATION_OPT_KEYS: &[&str] =
     &["policy", "raise", "alert", "trace_id"];
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "actor_chain_validate_scope_attenuation(chain: dict, opts?: dict) -> dict",
     kind = "async",
     category = "agent.session",
@@ -757,6 +789,8 @@ fn attenuation_policy_from_opts(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_tool_format(id: string) -> string?",
     category = "agent.session",
     doc = "Return the claimed tool format for an agent session."
@@ -777,6 +811,8 @@ fn agent_session_tool_format_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_system_prompt(id: string) -> string?",
     category = "agent.session",
     doc = "Return the session-level system prompt recorded for an agent session."
@@ -819,6 +855,8 @@ fn scratchpad_result(version: u64, scratchpad: VmValue) -> VmValue {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_scratchpad(id: string) -> dict?",
     category = "agent.session",
     doc = "Return the session-local agent scratchpad, or nil when none is set."
@@ -837,6 +875,8 @@ fn agent_session_scratchpad_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_set_scratchpad(id: string, scratchpad: dict, opts?: dict) -> dict",
     category = "agent.session",
     doc = "Set the small session-local agent scratchpad and return {ok, version, scratchpad}. opts may carry source, reason, and metadata."
@@ -872,6 +912,8 @@ fn agent_session_set_scratchpad_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_clear_scratchpad(id: string, opts?: dict) -> dict",
     category = "agent.session",
     doc = "Clear the session-local agent scratchpad and return {ok, version, scratchpad:nil}."
@@ -898,6 +940,8 @@ fn agent_session_clear_scratchpad_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_claim_tool_format(id: string, tool_format: string) -> nil",
     category = "agent.session",
     doc = "Claim the tool format for an agent session."
@@ -915,6 +959,8 @@ fn agent_session_claim_tool_format_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_reset(id: string) -> nil",
     category = "agent.session",
     doc = "Reset an agent session transcript."
@@ -930,6 +976,8 @@ fn agent_session_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_fork(src: string, dst?: string) -> string",
     category = "agent.session",
     doc = "Fork an agent session transcript."
@@ -951,6 +999,8 @@ fn agent_session_fork_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_fork_at(src: string, keep_first: int, dst?: string) -> string",
     category = "agent.session",
     doc = "Fork an agent session at a message boundary."
@@ -987,6 +1037,8 @@ fn checkpoint_outcome_value(outcome: agent_sessions::SessionCheckpointOutcome) -
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_rollback(id: string) -> dict",
     category = "agent.session",
     doc = "Roll back the most recent completed session turn transcript checkpoint."
@@ -1004,6 +1056,8 @@ fn agent_session_rollback_builtin(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_redo(id: string) -> dict",
     category = "agent.session",
     doc = "Redo the immediately preceding session rollback when still valid."
@@ -1020,6 +1074,8 @@ fn agent_session_redo_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_close(id: string, status?: any) -> nil",
     category = "agent.session",
     doc = "Close an agent session and optionally record a close reason."
@@ -1037,6 +1093,8 @@ fn agent_session_close_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_trim(id: string, keep_last: int) -> nil",
     category = "agent.session",
     doc = "Trim an agent session to the last N messages."
@@ -1059,6 +1117,8 @@ fn agent_session_trim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_attach(id: string, client_id: string, opts?: dict) -> dict",
     category = "agent.session",
     doc = "Attach a live client to a session as an observer or controller."
@@ -1095,6 +1155,8 @@ fn agent_session_attach_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_takeover(id: string, client_id: string, opts?: dict) -> dict",
     category = "agent.session",
     doc = "Attach a client as the controlling live client, demoting any prior controller."
@@ -1116,6 +1178,8 @@ fn agent_session_takeover_builtin(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_detach(id: string, client_id: string, opts?: dict) -> dict",
     category = "agent.session",
     doc = "Detach a live client and release controller ownership when it owns control."
@@ -1138,6 +1202,8 @@ fn agent_session_detach_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_heartbeat(id: string, client_id: string, opts?: dict) -> dict",
     category = "agent.session",
     doc = "Refresh a live client's last-seen marker and optionally replace its metadata."
@@ -1162,6 +1228,8 @@ fn agent_session_heartbeat_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_live_clients(id: string) -> list",
     category = "agent.session",
     doc = "Return live clients currently attached to an agent session."
@@ -1185,6 +1253,8 @@ fn agent_session_live_clients_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_client_inject_prompt(id: string, client_id: string, content: any, opts?: dict) -> nil",
     category = "agent.session",
     doc = "Inject a user prompt from the active live-session controller."
@@ -1217,6 +1287,8 @@ fn agent_session_client_inject_prompt_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_route_permission(id: string, client_id: string, request: any, opts?: dict) -> dict",
     category = "agent.session",
     doc = "Record that the active live-session controller owns a permission request route."
@@ -1264,6 +1336,8 @@ fn live_client_mode(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_inject(id: string, message: any) -> nil",
     category = "agent.session",
     doc = "Inject one message into an agent session."
@@ -1284,6 +1358,8 @@ fn agent_session_inject_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_post_event(id: string, kind: string, content: any, source?: any) -> nil",
     category = "agent.session",
     doc = "Post an event into a running session agent_inbox."
@@ -1312,6 +1388,8 @@ fn agent_session_post_event_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_drain_inbox(id: string) -> list",
     category = "agent.session",
     doc = "Drain every pending agent_inbox entry for a session."
@@ -1355,6 +1433,8 @@ const SEED_FROM_JSONL_OPT_KEYS: &[&str] = &[
 ];
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_seed_from_jsonl(jsonl_path: string, opts?: dict) -> string",
     category = "agent.session",
     doc = "Seed a new agent session from an LLM transcript JSONL sidecar."
@@ -1494,6 +1574,8 @@ fn seed_source_metadata(
 const REANCHOR_OPT_KEYS: &[&str] = &["carry_transcript", "compact", "reason"];
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_reanchor(id: string, new_anchor: any, opts?: dict) -> dict",
     kind = "async",
     category = "agent.session",
@@ -1588,6 +1670,8 @@ async fn agent_session_reanchor_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "agent_session_compact(id: string, opts?: dict) -> dict",
     kind = "async",
     category = "agent.session",
@@ -1758,6 +1842,8 @@ const CANCEL_TOOL_CALL_OPT_KEYS: &[&str] = &["reason", "inject_reminder", "timeo
 const CANCEL_TOOL_CALL_DEFAULT_TIMEOUT_MS: i64 = 5_000;
 
 #[harn_builtin(
+    exposure = "harness.agent.cancel_in_flight_tool_call",
+    effects = ["state.mutate@arg0"],
     sig = "cancel_in_flight_tool_call(session_id: string, call_id: string, opts?: dict) -> dict",
     kind = "async",
     category = "agent.session",

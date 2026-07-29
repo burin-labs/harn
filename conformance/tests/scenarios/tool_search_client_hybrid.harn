@@ -1,6 +1,6 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -21,7 +21,7 @@ pipeline test(task) {
     {parameters: {command_id: {type: "string"}}, defer_loading: true, handler: { _ -> "output" }},
   )
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "searching",
         tool_calls: [{id: "s1", name: "__harn_tool_search", arguments: {query: "run command"}}],
@@ -29,8 +29,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "run a command",
+      const result = agent_loop(harness, "run a command",
         nil,
         {
           provider: "mock",
@@ -55,7 +54,7 @@ pipeline test(task) {
       }
       assert(saw_hybrid, "query event records hybrid strategy")
       assert(promoted_run, "hybrid promotes the intended command runner first")
-      log("tool_search_client_hybrid tests passed")
+      harness.stdio.println("tool_search_client_hybrid tests passed")
     },
   )
 }

@@ -282,7 +282,7 @@ pub fn load_platform_baseline(text: string, platform: string) -> dict {
   return {ok: true, error: "", baseline: baseline}
 }
 
-fn platform_name() -> string {
+fn platform_name(harness: Harness) -> string {
   const uname = harness.process.spawn_captured({cmd: "uname", args: ["-s"]})
   if !uname.success {
     return "unknown"
@@ -297,7 +297,7 @@ fn platform_name() -> string {
   }
 }
 
-fn harn_argv() -> list<string> {
+fn harn_argv(harness: Harness) -> list<string> {
   const bin_override = harness.env.get("HARN_CHECK_BIN")
   if bin_override != nil && bin_override != "" {
     return [bin_override ?? ""]
@@ -320,23 +320,23 @@ fn harn_argv() -> list<string> {
   return [target_dir + "/debug/harn"]
 }
 
-fn mkdir(path: string) -> nil {
+fn mkdir(harness: Harness, path: string) -> nil {
   harness.fs.mkdir(path)
   return nil
 }
 
-fn materialize_suite(root: string, index: int) -> string {
+fn materialize_suite(harness: Harness, root: string, index: int) -> string {
   const suite = path_join(root, "suite-${index}")
   const state = path_join(suite, ".harn")
   const generation = "perf-v1"
   const generation_root = path_join(path_join(state, "package-generations"), generation)
   const packages = path_join(generation_root, "packages")
   const tests = path_join(suite, "tests")
-  mkdir(suite)
-  mkdir(state)
-  mkdir(generation_root)
-  mkdir(packages)
-  mkdir(tests)
+  mkdir(harness, suite)
+  mkdir(harness, state)
+  mkdir(harness, generation_root)
+  mkdir(harness, packages)
+  mkdir(harness, tests)
   let lock_body =
     "# Generated performance fixture.\nversion = 4\ngenerator_version = \"performance-check\"\nprotocol_artifact_version = \"performance-check\"\n"
   for item in range(0, 128) {
@@ -383,16 +383,16 @@ fn invocation(argv: list<string>) -> string {
   return argv.map({ part -> shell_quote(part) }).to_list().join(" ")
 }
 
-fn run_parallel(root: string, platform: string, test_files: list<string>) -> dict {
-  const prefix = harn_argv()
+fn run_parallel(harness: Harness, root: string, platform: string, test_files: list<string>) -> dict {
+  const prefix = harn_argv(harness)
   let script = "set -u\npids=\"\"\n"
   for index in range(0, test_files.count) {
     const run_root = path_join(root, "run-${index}")
     const home = path_join(run_root, "home")
     const cache = path_join(run_root, "cache")
-    mkdir(run_root)
-    mkdir(home)
-    mkdir(cache)
+    mkdir(harness, run_root)
+    mkdir(harness, home)
+    mkdir(harness, cache)
     const stdout_path = path_join(run_root, "stdout.txt")
     const stderr_path = path_join(run_root, "stderr.txt")
     const status_path = path_join(run_root, "status.txt")
@@ -470,14 +470,14 @@ fn run_parallel(root: string, platform: string, test_files: list<string>) -> dic
  * them in parallel, and aggregate. Cleans up on success; preserves the root
  * for forensics when a child run failed.
  */
-fn measure_round(platform: string) -> dict {
-  const root = path_join(".harn-runs/test-case-performance", uuid_v7())
-  mkdir(root)
+fn measure_round(harness: Harness, platform: string) -> dict {
+  const root = path_join(".harn-runs/test-case-performance", harness.random.uuid_v7())
+  mkdir(harness, root)
   let test_files = []
   for index in range(0, SUITE_COUNT) {
-    test_files = test_files + [materialize_suite(root, index)]
+    test_files = test_files + [materialize_suite(harness, root, index)]
   }
-  const execution = run_parallel(root, platform, test_files)
+  const execution = run_parallel(harness, root, platform, test_files)
   const metrics = aggregate_runs(execution.runs)
   if execution.errors.count == 0 {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", root]})
@@ -494,8 +494,8 @@ fn measure_round(platform: string) -> dict {
 // spike clears on re-measure, while a real regression breaches every round.
 const MAX_MEASUREMENT_ROUNDS = 3
 
-pipeline main(task) {
-  const platform = platform_name()
+pipeline main(harness: Harness, task) {
+  const platform = platform_name(harness)
   if platform != "macos" && platform != "linux" {
     harness.stdio.eprintln("error: unsupported performance-check platform `${platform}`")
     return 1
@@ -505,7 +505,7 @@ pipeline main(task) {
   let best = {}
   let verdict: dict = {ok: false, failures: [], warnings: [], limits: {}}
   for round in range(0, MAX_MEASUREMENT_ROUNDS) {
-    const measured = measure_round(platform)
+    const measured = measure_round(harness, platform)
     if round == 0 {
       const report = {
         schema_version: 1,
@@ -516,7 +516,7 @@ pipeline main(task) {
         metrics: measured.metrics,
         sample_errors: measured.errors,
       }
-      __io_println(json_stringify_pretty(report))
+      harness.stdio.println(json_stringify_pretty(report))
     }
     if measured.errors.count > 0 {
       for error in measured.errors {
@@ -555,7 +555,7 @@ pipeline main(task) {
     }
     return 1
   }
-  __io_println(
+  harness.stdio.println(
     "parallel test-case performance: OK platform=${platform} rounds=${round_metrics.count} tests=${best.test_count}",
   )
   return 0

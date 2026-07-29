@@ -8,14 +8,14 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  */
 import { when } from "std/lifecycle/combinators"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const cb = { harness, return_value ->
     harness.emit_audit("ran", {value: return_value})
     return return_value + "_handled"
   }
   const is_truthy_seed = { _harness, return_value -> return return_value == "seed" }
   const always_false = { _harness, _return_value -> return false }
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const truthy_guard = when(is_truthy_seed, cb)
       const truthy_result = truthy_guard(harness, return_value)

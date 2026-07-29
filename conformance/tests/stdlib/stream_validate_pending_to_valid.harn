@@ -1,6 +1,6 @@
 import { stream_validate_chunk, stream_validate_create, stream_validate_finalize } from "std/json"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const validator = stream_validate_create(
     {
       type: "dict",
@@ -9,11 +9,11 @@ pipeline default(task) {
     },
   )
   const r1 = stream_validate_chunk(validator, "{\"name\":")
-  __io_println(r1.verdict)
+  harness.stdio.println(r1.verdict)
   const r2 = stream_validate_chunk(validator, "\"Alice\",\"age\":")
-  __io_println(r2.verdict)
+  harness.stdio.println(r2.verdict)
   const r3 = stream_validate_chunk(validator, "30}")
-  __io_println(r3.verdict)
+  harness.stdio.println(r3.verdict)
   const r4 = stream_validate_finalize(validator)
-  __io_println(r4.verdict)
+  harness.stdio.println(r4.verdict)
 }

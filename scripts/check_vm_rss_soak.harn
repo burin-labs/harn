@@ -126,7 +126,7 @@ pub fn soak_outcome(samples: list<int>, max_tail_growth: int) -> dict {
  * its `debug/harn`, else fall back to `cargo run --bin harn` which builds
  * on demand. Mirrors the Python `harn_binary()` build-on-demand intent.
  */
-fn harn_bench_argv() -> list<string> {
+fn harn_bench_argv(harness: Harness) -> list<string> {
   const bin_override = harness.env.get("HARN_CHECK_BIN")
   if bin_override != nil && bin_override != "" {
     return [bin_override ?? "", "bench"]
@@ -152,14 +152,14 @@ fn harn_bench_argv() -> list<string> {
   return ["cargo", "run", "--quiet", "--bin", "harn", "--", "bench"]
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const iter_res = parse_env_int(
     "HARN_VM_RSS_SOAK_ITERATIONS",
     harness.env.get("HARN_VM_RSS_SOAK_ITERATIONS") ?? "",
     DEFAULT_ITERATIONS,
   )
   if !iter_res.ok {
-    __io_eprintln("error: ${iter_res.error}")
+    harness.stdio.eprintln("error: ${iter_res.error}")
     return 1
   }
   const iterations = iter_res.value
@@ -169,7 +169,7 @@ pipeline main(task) {
     DEFAULT_MAX_TAIL_GROWTH_BYTES,
   )
   if !growth_res.ok {
-    __io_eprintln("error: ${growth_res.error}")
+    harness.stdio.eprintln("error: ${growth_res.error}")
     return 1
   }
   const max_tail_growth = growth_res.value
@@ -180,12 +180,12 @@ pipeline main(task) {
     {cmd: "mktemp", args: ["-d", "harn-vm-rss-soak-XXXXXX"]},
   )
   if !mk.success {
-    __io_eprintln("error: could not create temp directory")
+    harness.stdio.eprintln("error: could not create temp directory")
     return 1
   }
   const tmpbase = mk.stdout.trim()
   const report_path = tmpbase + "/profile.json"
-  const argv_prefix = harn_bench_argv()
+  const argv_prefix = harn_bench_argv(harness)
   const bin = argv_prefix[0]
   const bench_args = argv_prefix.slice(1, argv_prefix.count)
     + [
@@ -200,10 +200,10 @@ pipeline main(task) {
    * nondeterministic) output streams through. Re-emit the captured streams
    * to preserve that behavior and ordering before the verdict line. */
   if bench.stdout != "" {
-    __io_println(bench.stdout.trim())
+    harness.stdio.println(bench.stdout.trim())
   }
   if bench.stderr != "" {
-    __io_eprintln(bench.stderr.trim())
+    harness.stdio.eprintln(bench.stderr.trim())
   }
   if bench.exit_code != 0 {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
@@ -211,7 +211,7 @@ pipeline main(task) {
   }
   if !harness.fs.exists(report_path) {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
-    __io_eprintln("error: benchmark profile did not contain enough rss_bytes samples")
+    harness.stdio.eprintln("error: benchmark profile did not contain enough rss_bytes samples")
     return 1
   }
   const report = try {
@@ -223,16 +223,16 @@ pipeline main(task) {
   const samples = extract_rss_samples(report)
   const outcome = soak_outcome(samples, max_tail_growth)
   if outcome.too_few {
-    __io_eprintln("error: benchmark profile did not contain enough rss_bytes samples")
+    harness.stdio.eprintln("error: benchmark profile did not contain enough rss_bytes samples")
     return 1
   }
   if outcome.regressed {
-    __io_eprintln(
+    harness.stdio.eprintln(
       "error: VM RSS soak grew by ${outcome.tail_growth} bytes after warmup, above ${max_tail_growth} bytes",
     )
     return 1
   }
-  __io_println(
+  harness.stdio.println(
     "vm rss soak: OK iterations=${outcome.sample_count} tail_growth_bytes=${outcome.tail_growth} limit_bytes=${max_tail_growth}",
   )
   return 0

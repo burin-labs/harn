@@ -9,8 +9,8 @@
 import { lifecycle_audit_log_take } from "std/lifecycle"
 import { graceful_exit } from "std/lifecycle/on_budget"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const state = {
         kind: "cost",

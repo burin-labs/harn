@@ -6,9 +6,9 @@ import { with_llm_script } from "std/testing"
  * escalates and the frontier rung serves the answer. The result envelope
  * reflects the step-2 model and both attempts show on the routing trace.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         error: {category: "rate_limit", message: "HTTP 429 rate limit", retry_after_ms: 10},
         model: "mock",
@@ -17,7 +17,7 @@ pipeline test(task) {
       {text: "served by frontier", model: "mock-strong", provider: "mock"},
     ],
     { ->
-      const result = llm_call(
+      const result = harness.llm.call(
         "hi",
         nil,
         {
@@ -27,16 +27,16 @@ pipeline test(task) {
           ],
         },
       )
-      __io_println(result.text)
-      __io_println(result.model)
+      harness.stdio.println(result.text)
+      harness.stdio.println(result.model)
       const attempts = result.routing.attempts
-      __io_println(len(attempts))
-      __io_println(attempts[0].label)
-      __io_println(attempts[0].status)
-      __io_println(attempts[0].error.category)
-      __io_println(attempts[1].label)
-      __io_println(attempts[1].status)
-      __io_println(result.routing.selected)
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].label)
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(attempts[0].error.category)
+      harness.stdio.println(attempts[1].label)
+      harness.stdio.println(attempts[1].status)
+      harness.stdio.println(result.routing.selected)
     },
   )
 }

@@ -1,6 +1,6 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-fn tools() {
+fn tools(harness: Harness) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -16,16 +16,16 @@ fn tools() {
             reason: "Verifying propagate=none is dropped at handoff",
           },
         )
-        __io_println(len(record.reminder_propagation))
-        __io_println(record.reminder_propagation[0].body)
-        __io_println(record.reminder_propagation[0].source)
+        harness.stdio.println(len(record.reminder_propagation))
+        harness.stdio.println(record.reminder_propagation[0].body)
+        harness.stdio.println(record.reminder_propagation[0].source)
         let saw_none = false
         for entry in record.reminder_propagation {
           if entry.body == "dropped at handoff" {
             saw_none = true
           }
         }
-        __io_println(saw_none)
+        harness.stdio.println(saw_none)
         record
       },
       parameters: {},
@@ -35,28 +35,27 @@ fn tools() {
   return registry
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // The handoff envelope must omit propagate=none reminders, keeping
   // only the propagate=all entry.
-  const parent = agent_session_open("reminder-propagate-none-dropped-at-handoff")
-  agent_session_reset(parent)
-  agent_session_inject(
+  const parent = harness.agent.open("reminder-propagate-none-dropped-at-handoff")
+  harness.agent.reset(parent)
+  harness.agent.inject(
     parent,
     transcript_reminder_event(
       {body: "carried into handoff", tags: ["all"], dedupe_key: "all-key", propagate: "all"},
     ),
   )
-  agent_session_inject(
+  harness.agent.inject(
     parent,
     transcript_reminder_event(
       {body: "dropped at handoff", tags: ["none"], dedupe_key: "none-key", propagate: "none"},
     ),
   )
   with_llm_script(
-    [{tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]}, llm_text("done")],
+    harness.llm, [{tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]}, llm_text("done")],
     { ->
-      agent_loop(
-        "Emit a handoff.",
+      agent_loop(harness, "Emit a handoff.",
         nil,
         {
           provider: "mock",

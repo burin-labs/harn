@@ -8,7 +8,7 @@ fn codes_of(report) {
   return out
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // Wrong schema version triggers a structured error rather than a throw.
   const bad_version = task_plan_validate(
     {
@@ -18,8 +18,8 @@ pipeline main() {
       nodes: {a: {kind: "agent_loop", prompt: "go"}},
     },
   )
-  __io_println(bad_version.valid)
-  __io_println(contains(codes_of(bad_version), "schema_version_mismatch"))
+  harness.stdio.println(bad_version.valid)
+  harness.stdio.println(contains(codes_of(bad_version), "schema_version_mismatch"))
   // Missing entry and dangling edge surface together; no throws.
   const dangling = task_plan_validate(
     {
@@ -29,10 +29,10 @@ pipeline main() {
       edges: [{from: "a", to: "nowhere"}],
     },
   )
-  __io_println(dangling.valid)
+  harness.stdio.println(dangling.valid)
   const dangling_codes = codes_of(dangling)
-  __io_println(contains(dangling_codes, "entry_missing"))
-  __io_println(contains(dangling_codes, "edge_to_unknown"))
+  harness.stdio.println(contains(dangling_codes, "entry_missing"))
+  harness.stdio.println(contains(dangling_codes, "edge_to_unknown"))
   // Kind-specific contracts: agent_loop without prompt, sub_agent without
   // worker_name, deterministic_command without tool, human_gate without
   // approval_id, workflow_map without map.items, verify without contract.
@@ -51,13 +51,13 @@ pipeline main() {
       },
     },
   )
-  __io_println(kinds.valid)
+  harness.stdio.println(kinds.valid)
   const kind_codes = codes_of(kinds)
-  __io_println(contains(kind_codes, "agent_loop_missing_prompt"))
-  __io_println(contains(kind_codes, "sub_agent_missing_worker"))
-  __io_println(contains(kind_codes, "command_missing_tool"))
-  __io_println(contains(kind_codes, "human_gate_missing_approval"))
-  __io_println(contains(kind_codes, "map_missing_inputs"))
+  harness.stdio.println(contains(kind_codes, "agent_loop_missing_prompt"))
+  harness.stdio.println(contains(kind_codes, "sub_agent_missing_worker"))
+  harness.stdio.println(contains(kind_codes, "command_missing_tool"))
+  harness.stdio.println(contains(kind_codes, "human_gate_missing_approval"))
+  harness.stdio.println(contains(kind_codes, "map_missing_inputs"))
   // verify-without-contract is a warning, not an error.
   let saw_verify_warning = false
   for warn in kinds.warnings {
@@ -65,7 +65,7 @@ pipeline main() {
       saw_verify_warning = true
     }
   }
-  __io_println(saw_verify_warning)
+  harness.stdio.println(saw_verify_warning)
   // Budget overflow and promotion policy out of range.
   const bad_policy = task_plan_validate(
     {
@@ -78,9 +78,9 @@ pipeline main() {
     },
   )
   const bad_codes = codes_of(bad_policy)
-  __io_println(contains(bad_codes, "budget_max_nodes"))
-  __io_println(contains(bad_codes, "promotion_invalid_pass_rate"))
-  __io_println(contains(bad_codes, "promotion_negative_shadow_runs"))
+  harness.stdio.println(contains(bad_codes, "budget_max_nodes"))
+  harness.stdio.println(contains(bad_codes, "promotion_invalid_pass_rate"))
+  harness.stdio.println(contains(bad_codes, "promotion_negative_shadow_runs"))
   // Unreachable nodes are warnings, not errors.
   const unreached = task_plan_validate(
     {
@@ -90,16 +90,16 @@ pipeline main() {
       nodes: {a: {kind: "agent_loop", prompt: "go"}, orphan: {kind: "agent_loop", prompt: "noop"}},
     },
   )
-  __io_println(unreached.valid)
+  harness.stdio.println(unreached.valid)
   let orphan_warned = false
   for warn in unreached.warnings {
     if warn.code == "node_unreachable" && warn.path == "nodes.orphan" {
       orphan_warned = true
     }
   }
-  __io_println(orphan_warned)
+  harness.stdio.println(orphan_warned)
   // Non-dict input never throws.
   const weird = task_plan_validate("oops")
-  __io_println(weird.valid)
-  __io_println(codes_of(weird)[0])
+  harness.stdio.println(weird.valid)
+  harness.stdio.println(codes_of(weird)[0])
 }

@@ -1,6 +1,6 @@
-pipeline test(task) {
-  log(2 + 3)
-  log(10 - 4)
-  log(3 * 5)
-  log(10 / 3)
+pipeline test(harness: Harness, task) {
+  harness.stdio.println(2 + 3)
+  harness.stdio.println(10 - 4)
+  harness.stdio.println(3 * 5)
+  harness.stdio.println(10 / 3)
 }

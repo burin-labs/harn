@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Defaults drive the inferred binding type even when the source dict carries
   // no field type — identical to `opts?.count ?? 0` / `opts?.label ?? "x"`. The
   // annotations below type-check only because `count` infers `int` and `label`
@@ -7,13 +7,13 @@ pipeline default() {
   const {count = 0, label = "x"} = opts
   const n: int = count
   const s: string = label
-  __io_println(n)
-  __io_println(s)
+  harness.stdio.println(n)
+  harness.stdio.println(s)
   // Inference from a typed (shape) source: `port` is `int`, `host` is `string`.
   const cfg = {host: "localhost", port: 8080}
   const {host = "0.0.0.0", port = 80} = cfg
   const h: string = host
   const p: int = port
-  __io_println(h)
-  __io_println(p)
+  harness.stdio.println(h)
+  harness.stdio.println(p)
 }

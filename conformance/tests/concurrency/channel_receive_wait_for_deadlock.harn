@@ -1,11 +1,11 @@
-pipeline test(task) {
-  const left = channel("left", 1)
-  const right = channel("right", 1)
+pipeline test(harness: Harness, task) {
+  const left = harness.runtime.channel("left", 1)
+  const right = harness.runtime.channel("right", 1)
   parallel 2 { i ->
     if i == 0 {
-      receive(left)
+      harness.runtime.receive(left)
     } else {
-      receive(right)
+      harness.runtime.receive(right)
     }
   }
 }

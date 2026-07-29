@@ -2,7 +2,7 @@ import "std/schema"
 
 type User = {name: string, role?: string}
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const user_schema = schema_object(
     {
       name: schema_field(schema_string() + {min_length: 2}),
@@ -11,19 +11,19 @@ pipeline test(task) {
     {additional_properties: false},
   )
   const validator = schema_validator(user_schema, {apply_defaults: true})
-  __io_println(validator.is({name: "Ada"}))
-  __io_println(is_ok(validator.check({name: "Ada"})))
-  __io_println(unwrap(validator.parse({name: "Ada"})).role)
-  __io_println(validator.report({name: "Ada"}).value.role)
-  __io_println(validator.expect({name: "Ada"}).role)
+  harness.stdio.println(validator.is({name: "Ada"}))
+  harness.stdio.println(is_ok(validator.check({name: "Ada"})))
+  harness.stdio.println(unwrap(validator.parse({name: "Ada"})).role)
+  harness.stdio.println(validator.report({name: "Ada"}).value.role)
+  harness.stdio.println(validator.expect({name: "Ada"}).role)
   const bad_report = validator.report({name: "A"})
-  __io_println(!bad_report.ok)
-  __io_println(len(bad_report.issues))
-  __io_println(contains(join(validator.errors({name: "A"}), "\n"), "is shorter than 2 characters"))
-  __io_println(json_stringify(validator.issues({name: "A"})).contains("\"path\":\"name\""))
-  __io_println(validator.json_schema().type)
-  __io_println(validator.openapi_schema().type)
+  harness.stdio.println(!bad_report.ok)
+  harness.stdio.println(len(bad_report.issues))
+  harness.stdio.println(contains(join(validator.errors({name: "A"}), "\n"), "is shorter than 2 characters"))
+  harness.stdio.println(json_stringify(validator.issues({name: "A"})).contains("\"path\":\"name\""))
+  harness.stdio.println(validator.json_schema().type)
+  harness.stdio.println(validator.openapi_schema().type)
   const alias_validator = schema_validator(User)
-  __io_println(alias_validator.is({name: "Kai"}))
-  __io_println(!alias_validator.is({name: 12}))
+  harness.stdio.println(alias_validator.is({name: "Kai"}))
+  harness.stdio.println(!alias_validator.is({name: 12}))
 }

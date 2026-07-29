@@ -194,12 +194,12 @@ fn windows_cache_pair() {
 }
 
 @test
-pipeline test_accepts_pinned_lane_local_sticky_cache_with_hosted_fallback(task) {
+pipeline test_accepts_pinned_lane_local_sticky_cache_with_hosted_fallback(harness: Harness, task) {
   assert_eq(ci_sccache_policy_errors(sccache_action(), workflow()), [])
 }
 
 @test
-pipeline test_rejects_recompiling_workspace_test_consumer(task) {
+pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task) {
   const valid = workflow()
   const invalid = {
     ...valid,
@@ -228,7 +228,7 @@ pipeline test_rejects_recompiling_workspace_test_consumer(task) {
 }
 
 @test
-pipeline test_rejects_co_location_without_fail_closed_fallback(task) {
+pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness, task) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
   const invalid = {
@@ -277,7 +277,7 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(task) {
 }
 
 @test
-pipeline test_rejects_strict_clippy_cache_safety_bypass(task) {
+pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
   const invalid = {
@@ -307,7 +307,7 @@ pipeline test_rejects_strict_clippy_cache_safety_bypass(task) {
 }
 
 @test
-pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(task) {
+pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(harness: Harness, task) {
   const invalid_action = {
     runs: {steps: [{uses: "useblacksmith/stickydisk@v1", with: {key: "shared", path: "target"}}]},
   }
@@ -335,7 +335,7 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
 }
 
 @test
-pipeline test_rejects_remote_cache_backend_and_hosted_sccache(task) {
+pipeline test_rejects_remote_cache_backend_and_hosted_sccache(harness: Harness, task) {
   const valid = workflow()
   const package_job = valid.jobs["package-audit"]
   const invalid_action = {
@@ -393,7 +393,7 @@ pipeline test_rejects_remote_cache_backend_and_hosted_sccache(task) {
 }
 
 @test
-pipeline test_rejects_unguarded_selfhosted_routing(task) {
+pipeline test_rejects_unguarded_selfhosted_routing(harness: Harness, task) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
   const matrix = rust_job.strategy.matrix.include
@@ -422,13 +422,13 @@ pipeline test_rejects_unguarded_selfhosted_routing(task) {
 }
 
 @test
-pipeline test_accepts_plain_rustc_windows_cache_pair(task) {
+pipeline test_accepts_plain_rustc_windows_cache_pair(harness: Harness, task) {
   const pair = windows_cache_pair()
   assert_eq(windows_shared_cache_errors(pair.consumer, pair.producer), [])
 }
 
 @test
-pipeline test_rejects_windows_cache_wrapper_drift(task) {
+pipeline test_rejects_windows_cache_wrapper_drift(harness: Harness, task) {
   const pair = windows_cache_pair()
   const producer = {
     ...pair.producer,
@@ -457,7 +457,7 @@ pipeline test_rejects_windows_cache_wrapper_drift(task) {
 }
 
 @test
-pipeline test_rejects_windows_cache_environment_drift(task) {
+pipeline test_rejects_windows_cache_environment_drift(harness: Harness, task) {
   const pair = windows_cache_pair()
   const producer = {
     ...pair.producer,
@@ -471,7 +471,7 @@ pipeline test_rejects_windows_cache_environment_drift(task) {
 }
 
 @test
-pipeline test_rejects_windows_cache_source_partitioning(task) {
+pipeline test_rejects_windows_cache_source_partitioning(harness: Harness, task) {
   const pair = windows_cache_pair()
   const producer_cache = pair.producer.jobs.nextest.steps[2]
   const producer = {
@@ -505,7 +505,7 @@ pipeline test_rejects_windows_cache_source_partitioning(task) {
 }
 
 @test
-pipeline test_rejects_paired_windows_cache_source_partitioning(task) {
+pipeline test_rejects_paired_windows_cache_source_partitioning(harness: Harness, task) {
   const pair = windows_cache_pair()
   const drifted_source_key = gha_expression("hashFiles('Cargo.lock')")
   const consumer_cache = pair.consumer.jobs.windows.steps[2]

@@ -7,7 +7,7 @@
 //! that a routed `Unimplemented` becomes a real return value — never a
 //! removed builtin.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -1216,6 +1216,32 @@ fn every_registered_builtin_has_request_and_response_schemas() {
             entry.method
         );
     }
+}
+
+#[test]
+fn schemas_and_typed_capability_contracts_cannot_drift() {
+    let schema_methods: BTreeSet<_> = schemas::SCHEMAS
+        .iter()
+        .filter(|(_, _, kind, _)| *kind == schemas::SchemaKind::Request)
+        .map(|(module, method, _, _)| (*module, *method))
+        .collect();
+    let contract_methods: BTreeSet<_> =
+        harn_builtin_meta::host_capabilities::HOST_CAPABILITY_GROUPS
+            .iter()
+            .filter(|group| group.capability != harn_builtin_meta::CapabilityId::Computer)
+            .flat_map(|group| {
+                let module = match group.capability {
+                    harn_builtin_meta::CapabilityId::TerminalSession => "terminal_session",
+                    capability => capability.field_name(),
+                };
+                group.methods.iter().map(move |method| (module, *method))
+            })
+            .collect();
+
+    assert_eq!(
+        schema_methods, contract_methods,
+        "every host schema method must have exactly one typed capability/effect contract"
+    );
 }
 
 #[test]

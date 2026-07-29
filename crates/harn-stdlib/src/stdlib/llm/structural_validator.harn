@@ -2,7 +2,7 @@
 //
 // std/llm/structural_validator - deterministic pre-dispatch turn checks.
 //
-// Opt in via `agent_loop(..., {structural_validator: with_structural_validator({...})})`.
+// Opt in via `agent_loop(harness, ..., {structural_validator: with_structural_validator({...})})`.
 // The validator intercepts the agent loop's internal
 // `__structural_validator_turn__` pre-dispatch probe, emits a
 // `structural_validator_decision` event, and either regenerates with
@@ -648,7 +648,7 @@ fn __sv_feedback_payload(verdict) {
   )
 }
 
-fn __sv_emit_decision(
+fn __sv_emit_decision(harness: Harness, 
   session_id,
   iteration,
   cfg,
@@ -658,8 +658,7 @@ fn __sv_emit_decision(
   skipped = false,
   reason = nil,
 ) {
-  agent_emit_event(
-    session_id,
+  agent_emit_event(harness, session_id,
     "structural_validator_decision",
     {
       iteration: iteration,
@@ -740,13 +739,13 @@ fn __sv_rule_verdict(payload, cfg, rule_cfg) {
   return nil
 }
 
-fn __sv_handle_turn(call, cfg) {
+fn __sv_handle_turn(harness: Harness, call, cfg) {
   const payload = __sv_dict(call?.tool_args)
   const session_id = __sv_string(payload?.session_id ?? call?.turn?.session_id)
   const iteration = to_int(payload?.iteration ?? call?.turn?.iteration) ?? 0
   const attempts = to_int(payload?.attempts) ?? 0
   if attempts >= cfg.max_attempts {
-    __sv_emit_decision(
+    __sv_emit_decision(harness, 
       session_id,
       iteration,
       cfg,
@@ -762,7 +761,7 @@ fn __sv_handle_turn(call, cfg) {
     const verdict = __sv_rule_verdict(payload, cfg, rule_cfg)
     if verdict != nil {
       if rule_cfg?.warn_only ?? false {
-        __sv_emit_decision(session_id, iteration, cfg, verdict, attempts, false, false, "warn_only")
+        __sv_emit_decision(harness, session_id, iteration, cfg, verdict, attempts, false, false, "warn_only")
         return __sv_pass_result(
           call,
           true,
@@ -776,7 +775,7 @@ fn __sv_handle_turn(call, cfg) {
           },
         )
       }
-      __sv_emit_decision(session_id, iteration, cfg, verdict, attempts)
+      __sv_emit_decision(harness, session_id, iteration, cfg, verdict, attempts)
       return __sv_veto_result(call, cfg, verdict)
     }
   }
@@ -800,16 +799,16 @@ fn __sv_handle_turn(call, cfg) {
  * @effects: [host]
  * @errors: [runtime]
  * @api_stability: experimental
- * Pass the returned closure via `agent_loop({structural_validator: ...})`.
+ * Pass the returned closure via `agent_loop(harness, {structural_validator: ...})`.
  *
  * @example: with_structural_validator({on_failure: "regenerate_with_feedback"})
  */
-pub fn with_structural_validator(opts = nil) {
+pub fn with_structural_validator(harness: Harness, opts = nil) {
   const cfg = __sv_validate_opts(opts)
   return { call, next ->
     if call?.tool_name != __sv_tool_name() {
       return next(call)
     }
-    return __sv_handle_turn(call, cfg)
+    return __sv_handle_turn(harness, call, cfg)
   }
 }

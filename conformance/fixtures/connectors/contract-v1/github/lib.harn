@@ -23,17 +23,17 @@ pub fn init(ctx) {
 
 pub fn activate(bindings) {
   active_bindings = bindings
-  metrics_inc("github_contract_activations", len(bindings))
+  harness.obs.metrics_inc("github_contract_activations", len(bindings))
 }
 
 pub fn shutdown() {
-  metrics_inc("github_contract_shutdown")
+  harness.obs.metrics_inc("github_contract_shutdown")
 }
 
 pub fn normalize_inbound(raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
-  const token = secret_get("github/contract-token")
-  event_log_emit(
+  const token = harness.secrets.read("github/contract-token")
+  harness.obs.event_log_emit(
     "connectors.github.contract",
     "normalize",
     {event: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"], token: token},

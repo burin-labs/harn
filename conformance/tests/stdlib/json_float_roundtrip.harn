@@ -3,9 +3,9 @@
  * it round-trips back as a float (not an int), and the compact and pretty
  * serializers must agree.
  */
-pipeline test(task) {
-  log(json_stringify(2.0))
-  log(json_stringify_pretty(2.0))
-  log(type_of(json_parse(json_stringify(2.0))))
-  log(json_stringify({ratio: 2.0, n: 3}))
+pipeline test(harness: Harness, task) {
+  harness.stdio.println(json_stringify(2.0))
+  harness.stdio.println(json_stringify_pretty(2.0))
+  harness.stdio.println(type_of(json_parse(json_stringify(2.0))))
+  harness.stdio.println(json_stringify({ratio: 2.0, n: 3}))
 }

@@ -50,30 +50,30 @@ fn assert_local_only(harness: Harness) {
 // Task state directory layout.
 // -------------------------------------------------------------------------------------------------
 
-fn task_dir(task_id) {
-  return path_join(source_dir(), ".qmode", task_id)
+fn task_dir(harness: Harness, task_id) {
+  return path_join(harness.fs.source_dir(), ".qmode", task_id)
 }
 
 fn ensure_task_dir(harness: Harness, task_id) {
-  const dir = task_dir(task_id)
+  const dir = task_dir(harness, task_id)
   harness.fs.mkdir(dir)
   return dir
 }
 
-fn qa_path(task_id) {
-  return path_join(task_dir(task_id), "qa.jsonl")
+fn qa_path(harness: Harness, task_id) {
+  return path_join(task_dir(harness, task_id), "qa.jsonl")
 }
 
-fn pending_path(task_id) {
-  return path_join(task_dir(task_id), "pending.json")
+fn pending_path(harness: Harness, task_id) {
+  return path_join(task_dir(harness, task_id), "pending.json")
 }
 
-fn plan_path(task_id) {
-  return path_join(task_dir(task_id), "plan.json")
+fn plan_path(harness: Harness, task_id) {
+  return path_join(task_dir(harness, task_id), "plan.json")
 }
 
-fn task_meta_path(task_id) {
-  return path_join(task_dir(task_id), "task.json")
+fn task_meta_path(harness: Harness, task_id) {
+  return path_join(task_dir(harness, task_id), "task.json")
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -121,10 +121,10 @@ fn read_profile_file(harness: Harness, path, scope) {
 }
 
 fn load_profile_layers(harness: Harness) {
-  const home = home_dir()
+  const home = harness.fs.home_dir()
   const user_global = path_join(home, ".harn", "USER_PROFILE.md")
-  const project = path_join(workspace_root(), ".harn", "USER_PROFILE.md")
-  const cwd_local = path_join(source_dir(), ".harn", "USER_PROFILE.md")
+  const project = path_join(workspace_root(harness), ".harn", "USER_PROFILE.md")
+  const cwd_local = path_join(harness.fs.source_dir(), ".harn", "USER_PROFILE.md")
   let blocks = []
   const user_block = read_profile_file(harness, user_global, "user")
   if user_block != "" {
@@ -144,21 +144,21 @@ fn load_profile_layers(harness: Harness) {
   return join(blocks, "\n\n")
 }
 
-fn profile_path_for_scope(scope) {
+fn profile_path_for_scope(harness: Harness, scope) {
   if scope == "user" {
-    return path_join(home_dir(), ".harn", "USER_PROFILE.md")
+    return path_join(harness.fs.home_dir(), ".harn", "USER_PROFILE.md")
   }
   if scope == "project" {
-    return path_join(workspace_root(), ".harn", "USER_PROFILE.md")
+    return path_join(workspace_root(harness), ".harn", "USER_PROFILE.md")
   }
-  return path_join(source_dir(), ".harn", "USER_PROFILE.md")
+  return path_join(harness.fs.source_dir(), ".harn", "USER_PROFILE.md")
 }
 
 fn append_profile_writes(harness: Harness, profile_writes) {
   if type_of(profile_writes) != "list" || len(profile_writes) == 0 {
     return
   }
-  const today = date_iso().substring(0, 10)
+  const today = harness.clock.date_iso().substring(0, 10)
   for entry in profile_writes {
     if type_of(entry) != "dict" {
       continue
@@ -168,7 +168,7 @@ fn append_profile_writes(harness: Harness, profile_writes) {
     if bullet == "" {
       continue
     }
-    const target = profile_path_for_scope(scope)
+    const target = profile_path_for_scope(harness, scope)
     harness.fs.mkdir(path_parent(target))
     const prior = if harness.fs.exists(target) {
       harness.fs.read_text(target)
@@ -223,8 +223,8 @@ fn _first_nonempty_line(harness: Harness, path) {
 }
 
 fn repo_map_text(harness: Harness) {
-  const files = list_workspace_files()
-  const root = workspace_root()
+  const files = list_workspace_files(harness)
+  const root = workspace_root(harness)
   if len(files) == 0 {
     return "(workspace is empty)"
   }
@@ -273,7 +273,7 @@ fn build_tools(harness: Harness, dir) {
         },
       },
       returns: {type: "string"},
-      handler: { args -> find_workspace(args?.query ?? "") },
+      handler: { args -> find_workspace(harness, args?.query ?? "") },
     },
   )
   registry = tool_define(
@@ -283,7 +283,7 @@ fn build_tools(harness: Harness, dir) {
     {
       parameters: {path: {type: "string", description: "Workspace-relative file path."}},
       returns: {type: "string"},
-      handler: { args -> read_workspace(args.path) },
+      handler: { args -> read_workspace(harness, args.path) },
     },
   )
   registry = tool_define(
@@ -319,7 +319,7 @@ fn build_tools(harness: Harness, dir) {
         if !ok {
           return "Error: scope must be one of 'user', 'project', 'cwd'. Got '${scope}'."
         }
-        const target = profile_path_for_scope(scope)
+        const target = profile_path_for_scope(harness, scope)
         const prior = if harness.fs.exists(target) {
           harness.fs.read_text(target)
         } else {
@@ -352,7 +352,7 @@ fn build_tools(harness: Harness, dir) {
           return "Error: question text was empty. Try again with a concrete question."
         }
         if !harness.fs.exists(pending_p) {
-          harness.fs.write_text(pending_p, json_stringify({question: q, asked_at: date_iso()}))
+          harness.fs.write_text(pending_p, json_stringify({question: q, asked_at: harness.clock.date_iso()}))
         }
         "Question recorded. The harness will pause and resume after the user answers."
       },
@@ -499,11 +499,11 @@ fn session_snapshot_path(dir) {
 }
 
 fn restore_session(harness: Harness, session_id, snap_path, fresh_system_prompt) {
-  agent_session_open(session_id)
+  harness.agent.open(session_id)
   // Always start with the fresh system prompt — profile may have changed
   // (e.g. save_user_pref ran in a prior turn), and we want the latest
   // <profile> block visible.
-  agent_session_inject(session_id, {role: "system", content: fresh_system_prompt})
+  harness.agent.inject(session_id, {role: "system", content: fresh_system_prompt})
   if !harness.fs.exists(snap_path) {
     return false
   }
@@ -527,7 +527,7 @@ fn restore_session(harness: Harness, session_id, snap_path, fresh_system_prompt)
     if msg?.role == "system" {
       continue
     }
-    agent_session_inject(session_id, msg)
+    harness.agent.inject(session_id, msg)
   }
   return true
 }
@@ -539,7 +539,7 @@ fn restore_session(harness: Harness, session_id, snap_path, fresh_system_prompt)
  * memory of the prior turns — degraded from "full prior tool history" to
  * "skeleton conversation", which is still better than starting over.
  */
-fn replay_qa_history_into_session(session_id, qa_history) {
+fn replay_qa_history_into_session(harness: Harness, session_id, qa_history) {
   for entry in qa_history {
     const q = if type_of(entry?.question) == "string" {
       entry.question
@@ -554,13 +554,13 @@ fn replay_qa_history_into_session(session_id, qa_history) {
     if q == "" || a == "" {
       continue
     }
-    agent_session_inject(session_id, {role: "assistant", content: q})
-    agent_session_inject(session_id, {role: "user", content: a})
+    harness.agent.inject(session_id, {role: "assistant", content: q})
+    harness.agent.inject(session_id, {role: "user", content: a})
   }
 }
 
 fn save_session(harness: Harness, session_id, snap_path) {
-  const snap = agent_session_snapshot(session_id)
+  const snap = harness.agent.snapshot(session_id)
   const messages = if type_of(snap) == "dict" {
     snap.messages ?? []
   } else {
@@ -573,7 +573,7 @@ fn save_session(harness: Harness, session_id, snap_path) {
 // Main.
 // -------------------------------------------------------------------------------------------------
 
-pipeline default() {
+pipeline default(harness: Harness) {
   assert_local_only(harness)
   const task_id = harness.env.get_or("QMODE_TASK_ID", "default")
   const task_text = runtime_task()
@@ -583,26 +583,26 @@ pipeline default() {
   if harness.fs.exists(step_marker) {
     harness.fs.delete(step_marker)
   }
-  if harness.fs.exists(plan_path(task_id)) {
+  if harness.fs.exists(plan_path(harness, task_id)) {
     harness.fs.write_text(step_marker, "plan_already_exists")
     return
   }
-  if harness.fs.exists(pending_path(task_id)) {
-    throw "[qmode] pending.json exists at ${pending_path(task_id)}. The driver should have cleared it after recording the answer."
+  if harness.fs.exists(pending_path(harness, task_id)) {
+    throw "[qmode] pending.json exists at ${pending_path(harness, task_id)}. The driver should have cleared it after recording the answer."
   }
   // Persist task metadata on first run.
-  if !harness.fs.exists(task_meta_path(task_id)) {
+  if !harness.fs.exists(task_meta_path(harness, task_id)) {
     if task_text.trim() == "" {
       throw "[qmode] no task text supplied. Pass --task '...' on first invocation."
     }
     harness.fs.write_text(
-      task_meta_path(task_id),
-      json_stringify({task: task_text, workspace_root: workspace_root(), started_at: date_iso()}),
+      task_meta_path(harness, task_id),
+      json_stringify({task: task_text, workspace_root: workspace_root(harness), started_at: harness.clock.date_iso()}),
     )
   }
-  const task_meta = json_parse(harness.fs.read_text(task_meta_path(task_id))) ?? {}
+  const task_meta = json_parse(harness.fs.read_text(task_meta_path(harness, task_id))) ?? {}
   const effective_task = task_meta?.task ?? task_text
-  const qa_history = read_jsonl(harness, qa_path(task_id))
+  const qa_history = read_jsonl(harness, qa_path(harness, task_id))
   const profile_block = load_profile_layers(harness)
   const sys_prompt = system_prompt(profile_block)
   // Restore prior session messages from disk (if any). On turn 1 this is a
@@ -619,8 +619,8 @@ pipeline default() {
   const resumed = if len(qa_history) > 0 {
     restore_session(harness, session_id, snap_path, sys_prompt)
   } else {
-    agent_session_open(session_id)
-    agent_session_inject(session_id, {role: "system", content: sys_prompt})
+    harness.agent.open(session_id)
+    harness.agent.inject(session_id, {role: "system", content: sys_prompt})
     false
   }
   // Three resume modes:
@@ -645,7 +645,7 @@ pipeline default() {
     }
     build_resume_turn_prompt(answer, len(qa_history))
   } else if resume_mode == "textual_fallback" {
-    replay_qa_history_into_session(session_id, qa_history)
+    replay_qa_history_into_session(harness, session_id, qa_history)
     "(Continue from the prior conversation. End this step with one TERMINAL call: ask_question or exit_plan_mode.)"
   } else {
     build_first_turn_prompt(harness, effective_task)
@@ -660,8 +660,7 @@ pipeline default() {
   // `stopWhen: hasToolCall(...)` / OpenAI Agents SDK's `StopAtTools(...)`).
   // session_id makes the conversation persistent: prior tool calls and
   // tool results from earlier turns stay in the model's context.
-  const result = agent_loop(
-    user_prompt,
+  const result = agent_loop(harness, user_prompt,
     sys_prompt,
     {
       provider: provider_name(harness),
@@ -699,9 +698,9 @@ pipeline default() {
     path_join(dir, "step-transcript.json"),
     json_stringify({transcript: result?.transcript, task_ledger: result?.task_ledger}),
   )
-  __io_println("[qmode] step=${outcome} status=${diag?.status} iterations=${diag?.iterations}")
+  harness.stdio.println("[qmode] step=${outcome} status=${diag?.status} iterations=${diag?.iterations}")
   if outcome == "no_terminal" {
-    __io_println("[qmode] WARN: model never called a terminal tool. visible_text:")
-    __io_println(diag.visible_text)
+    harness.stdio.println("[qmode] WARN: model never called a terminal tool. visible_text:")
+    harness.stdio.println(diag.visible_text)
   }
 }

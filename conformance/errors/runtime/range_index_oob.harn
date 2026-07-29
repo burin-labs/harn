@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const r = 1 to 5
-  log(r[100])
+  harness.stdio.println(r[100])
 }

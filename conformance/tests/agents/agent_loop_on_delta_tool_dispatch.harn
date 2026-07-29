@@ -16,9 +16,9 @@ fn on_delta_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [llm_tool_call("note", {text: "remember"}), llm_text("All done.")],
+    harness.llm, [llm_tool_call("note", {text: "remember"}), llm_text("All done.")],
     { ->
       const opts: AgentLoopOptions = {
         provider: "mock",
@@ -26,13 +26,13 @@ pipeline default() {
         tool_format: "native",
         loop_until_done: true,
         max_iterations: 3,
-        on_delta: { delta -> __io_println("delta=[" + delta + "]") },
+        on_delta: { delta -> harness.stdio.println("delta=[" + delta + "]") },
       }
-      const result = agent_loop("take a note then finish", nil, opts)
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(len(calls))
-      __io_println(contains(json_stringify(calls[1].messages), "noted"))
+      const result = agent_loop(harness, "take a note then finish", nil, opts)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(contains(json_stringify(calls[1].messages), "noted"))
     },
   )
 }

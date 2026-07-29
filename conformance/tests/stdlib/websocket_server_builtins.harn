@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   transport_mock_clear()
   const server = websocket_server("127.0.0.1:0", {})
   // 10s instead of 2s gives the WebSocket handshake enough headroom when the
@@ -70,5 +70,5 @@ pipeline test(task) {
   assert(websocket_close(backpressure_client))
   assert(websocket_close(backpressure_conn))
   assert(websocket_server_close(server))
-  __io_println("websocket_server_builtins_ok")
+  harness.stdio.println("websocket_server_builtins_ok")
 }

@@ -22,7 +22,7 @@ import {
   sample_report_core,
 } from "context_eval_contracts_lib"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Typed builders return concrete contracts, not `dict`.
   const mode = context_eval_mode("pack", "hud_pack", {budget_tokens: 1600})
   const t = context_eval_task(
@@ -61,5 +61,5 @@ pipeline test(task) {
     schema_report(with_extension, ContextEvalReport).ok,
     "unknown compatible extension is accepted",
   )
-  log("context_eval_contracts ok")
+  harness.stdio.println("context_eval_contracts ok")
 }

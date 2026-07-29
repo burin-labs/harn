@@ -9,8 +9,8 @@
 import { lifecycle_audit_log_take } from "std/lifecycle"
 import { warn_and_continue } from "std/lifecycle/on_budget"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const state = {
         kind: "tokens",
@@ -41,4 +41,4 @@ pipeline default() {
 // Passthrough is the original budget_state, dict-equal to `state`.
 // Two audit entries: the strategy's own audit + the
 // tool_hooks.reminder_injected book-keeping entry from
-// tool_hooks_inject_reminder (headless session path).
+// harness.tools.hooks_inject_reminder(headless session path).

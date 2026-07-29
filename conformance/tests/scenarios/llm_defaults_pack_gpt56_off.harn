@@ -2,8 +2,8 @@
 // `reasoning_policy: "off"` must lower to the supported `none` value.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(task) {
-  const result = pack_for({model: "gpt-5.6-sol", reasoning_policy: "off"})
+pipeline test(harness: Harness, task) {
+  const result = pack_for(harness, {model: "gpt-5.6-sol", reasoning_policy: "off"})
   assert_eq(result.effort, "none")
-  log("llm_defaults_pack_gpt56_off passed")
+  harness.stdio.println("llm_defaults_pack_gpt56_off passed")
 }

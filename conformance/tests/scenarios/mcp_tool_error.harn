@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = harness.env.get("HARN_BIN") ?? "harn"
   let server_path = path_join(root, "conformance/helpers/mcp_echo_server.harn")
@@ -7,7 +7,7 @@ pipeline default() {
   try {
     mcp_call(client, "fail")
   } catch (e) {
-    __io_println(e)
+    harness.stdio.println(e)
   }
   mcp_disconnect(client)
 }

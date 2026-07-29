@@ -6,9 +6,9 @@ fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "Implemented two page-cache tests.\n\nDone claim:\n- requested work: add five page-cache tests\n- evidence: fetch and cached-fetch tests pass\n- files changed: tests/unit/page_cache_extra_test.cpp\n- not done: none\n##DONE##",
       ),
@@ -23,11 +23,9 @@ pipeline default() {
       ),
     ],
     { ->
-      const session_id = "done-contract-" + uuid()
-      const captured = agent_capture_events(
-        session_id,
-        fn() { return agent_loop(
-          "Add page-cache tests for fetch, cached fetch, LRU eviction, dirty flush, and pinned-page prevention.",
+      const session_id = "done-contract-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session_id,
+        fn() { return agent_loop(harness, "Add page-cache tests for fetch, cached fetch, LRU eviction, dirty flush, and pinned-page prevention.",
           nil,
           {
             provider: "mock",
@@ -41,16 +39,16 @@ pipeline default() {
       )
       const result = captured.result
       const judges = events_of(captured.events, "judge_decision")
-      __io_println(result.status)
-      __io_println(result.llm.iterations)
-      __io_println(len(llm_mock_calls()))
-      __io_println(len(judges))
-      __io_println(join(judges[0].specific_gaps, " | "))
-      __io_println(join(judges[1].accepted_evidence, " | "))
-      __io_println(result.visible_text.contains("Added the LRU eviction"))
-      __io_println(to_string(llm_mock_calls()[0].system).contains("Done claim"))
-      __io_println(
-        json_stringify(llm_mock_calls()[2].messages).contains(
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.llm.iterations)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+      harness.stdio.println(len(judges))
+      harness.stdio.println(join(judges[0].specific_gaps, " | "))
+      harness.stdio.println(join(judges[1].accepted_evidence, " | "))
+      harness.stdio.println(result.visible_text.contains("Added the LRU eviction"))
+      harness.stdio.println(to_string(harness.llm.mock_calls()[0].system).contains("Done claim"))
+      harness.stdio.println(
+        json_stringify(harness.llm.mock_calls()[2].messages).contains(
           "keep working until all requested tests exist",
         ),
       )

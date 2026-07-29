@@ -30,7 +30,7 @@ pub fn count_lines(text: string) -> int {
  * is missing — callers decide whether that's a hard error (a budgeted
  * file should always exist) or a soft skip.
  */
-pub fn loc_for(path: string) -> int? {
+pub fn loc_for(harness: Harness, path: string) -> int? {
   if !harness.fs.exists(path) {
     return nil
   }
@@ -68,7 +68,7 @@ pub fn evaluate_handler(path, max_loc, actual) {
  * files are surfaced as violations so a typo in the config fails the
  * gate instead of silently passing.
  */
-pub fn collect_violations(handlers) -> list {
+pub fn collect_violations(harness: Harness, handlers) -> list {
   let violations = []
   for handler in handlers {
     const path = handler?.path
@@ -76,7 +76,7 @@ pub fn collect_violations(handlers) -> list {
     const actual = if path == nil || path == "" {
       nil
     } else {
-      loc_for(path)
+      loc_for(harness, path)
     }
     const v = evaluate_handler(path, max_loc, actual)
     if v != nil {
@@ -86,38 +86,38 @@ pub fn collect_violations(handlers) -> list {
   return violations
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   if !harness.fs.exists(CONFIG_PATH) {
-    __io_eprintln("error: missing ${CONFIG_PATH}")
+    harness.stdio.eprintln("error: missing ${CONFIG_PATH}")
     return 1
   }
   const parsed = try {
     toml_parse(harness.fs.read_text(CONFIG_PATH))
   } catch (err) {
-    __io_eprintln("error: failed to parse ${CONFIG_PATH}: ${err}")
+    harness.stdio.eprintln("error: failed to parse ${CONFIG_PATH}: ${err}")
     return 1
   }
   const handlers = parsed?.handler ?? []
   if handlers.count == 0 {
-    __io_eprintln("error: ${CONFIG_PATH} has no [[handler]] entries")
+    harness.stdio.eprintln("error: ${CONFIG_PATH} has no [[handler]] entries")
     return 1
   }
-  const violations = collect_violations(handlers)
+  const violations = collect_violations(harness, handlers)
   if violations.count == 0 {
-    __io_println("ported-handler LOC ratchet OK (${handlers.count} handler(s) within budget)")
+    harness.stdio.println("ported-handler LOC ratchet OK (${handlers.count} handler(s) within budget)")
     return 0
   }
-  __io_eprintln("::error::ported-handler LOC ratchet failed (${violations.count} violation(s)):")
+  harness.stdio.eprintln("::error::ported-handler LOC ratchet failed (${violations.count} violation(s)):")
   for v in violations {
     if v.reason == "missing file" {
-      __io_eprintln("  ${v.path}: missing (budget was ${v.max_loc})")
+      harness.stdio.eprintln("  ${v.path}: missing (budget was ${v.max_loc})")
     } else if v.reason == "invalid entry: path and max_loc are required" {
-      __io_eprintln("  <invalid entry>: ${v.reason}")
+      harness.stdio.eprintln("  <invalid entry>: ${v.reason}")
     } else {
-      __io_eprintln("  ${v.path}: ${v.actual} > ${v.max_loc}")
+      harness.stdio.eprintln("  ${v.path}: ${v.actual} > ${v.max_loc}")
     }
   }
-  __io_eprintln(
+  harness.stdio.eprintln(
     "hint: a ported handler grew. Either shrink it back (preferred — the ratchet exists to keep the Rust dispatch path from regrowing) or, if the growth is intentional, bump the budget in ${CONFIG_PATH} with rationale in the commit message.",
   )
   return 1

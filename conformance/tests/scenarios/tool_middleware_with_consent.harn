@@ -34,7 +34,7 @@ fn envelope(name) {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const next = synthetic_next()
   // Decide based on tool name; `delete_files` always denied.
   const prompt = { call ->
@@ -43,24 +43,24 @@ pipeline default() {
     }
     return {decision: "approved", decided_by: "test"}
   }
-  const mw = with_consent(prompt)
+  const mw = with_consent(harness, prompt)
   // approved
   const r1 = mw(envelope("read"), next)
-  __io_println(r1.ok)
-  __io_println(r1.audit.consent.decision)
-  __io_println(r1.audit.consent.decided_by)
+  harness.stdio.println(r1.ok)
+  harness.stdio.println(r1.audit.consent.decision)
+  harness.stdio.println(r1.audit.consent.decided_by)
   // denied
   const r2 = mw(envelope("delete_files"), next)
-  __io_println(r2.ok)
-  __io_println(r2.error_category)
-  __io_println(r2.error)
-  __io_println(r2.audit.consent.decision)
+  harness.stdio.println(r2.ok)
+  harness.stdio.println(r2.error_category)
+  harness.stdio.println(r2.error)
+  harness.stdio.println(r2.audit.consent.decision)
   // bool-shorthand: returning bool is also accepted
-  const approve_all = with_consent({ _call -> true })
-  const deny_all = with_consent({ _call -> false })
+  const approve_all = with_consent(harness, { _call -> true })
+  const deny_all = with_consent(harness, { _call -> false })
   const r3 = approve_all(envelope("any"), next)
   const r4 = deny_all(envelope("any"), next)
-  __io_println(r3.ok)
-  __io_println(r4.ok)
-  __io_println(r4.error_category)
+  harness.stdio.println(r3.ok)
+  harness.stdio.println(r4.ok)
+  harness.stdio.println(r4.error_category)
 }

@@ -552,7 +552,7 @@ pub fn weighted_mean(items, weights) -> float {
  * @effects: []
  * @errors: []
  */
-pub fn weighted_choice(items, weights = nil) {
+pub fn weighted_choice(harness: Harness, items, weights = nil) {
   require type_of(items) == "list", "items must be a list"
   require len(items) > 0, "items must not be empty"
   const ws = if weights == nil {

@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const flow = workflow_graph(
     {
       name: "demo",
@@ -11,22 +11,22 @@ pipeline main() {
     },
   )
   const report = workflow_validate(flow)
-  __io_println(report?.valid)
+  harness.stdio.println(report?.valid)
   const base = artifact({kind: "summary", text: "short note", relevance: 0.9})
   const derived = artifact_derive(base, "analysis_note", {text: "derived note"})
   const ctx = artifact_context([base, derived], {max_artifacts: 2})
-  __io_println(len(ctx) > 0)
-  const result = workflow_execute("Write a note", flow, [base], {max_steps: 4})
-  __io_println(result?.status)
-  __io_println(result?.run?._type)
+  harness.stdio.println(len(ctx) > 0)
+  const result = workflow_execute(harness, "Write a note", flow, [base], {max_steps: 4})
+  harness.stdio.println(result?.status)
+  harness.stdio.println(result?.run?._type)
   // Transcript lives in stages, not at the top level
   const stage_transcript = result?.run?.stages[0]?.transcript
-  __io_println(len(transcript_messages(stage_transcript)) >= 2)
-  __io_println(contains(transcript_render_visible(stage_transcript), "Mock response"))
-  const saved = run_record_save(result?.run, "/tmp/harn-workflow-runtime.json")
-  const loaded = run_record_load(saved?.path)
-  __io_println(loaded?._type)
+  harness.stdio.println(len(transcript_messages(stage_transcript)) >= 2)
+  harness.stdio.println(contains(transcript_render_visible(stage_transcript), "Mock response"))
+  const saved = harness.fs.run_record_save(result?.run, "/tmp/harn-workflow-runtime.json")
+  const loaded = harness.fs.run_record_load(saved?.path)
+  harness.stdio.println(loaded?._type)
   const loaded_transcript = loaded?.stages[0]?.transcript
-  __io_println(len(transcript_messages(loaded_transcript)) >= 2)
-  __io_println(contains(transcript_render_visible(loaded_transcript), "Mock response"))
+  harness.stdio.println(len(transcript_messages(loaded_transcript)) >= 2)
+  harness.stdio.println(contains(transcript_render_visible(loaded_transcript), "Mock response"))
 }

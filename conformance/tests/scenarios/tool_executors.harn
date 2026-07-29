@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // harn#743: every tool declares its execution backend explicitly.
   // tool_define stamps the resolved executor onto the registry entry
   // so dispatch and ACP events have a single source of truth.
@@ -53,5 +53,5 @@ pipeline test(task) {
   )
   const alias_tool = tool_find(r2, "alias_check")
   assert(alias_tool.executor == "harn", "harn_builtin alias canonicalizes to harn")
-  log("tool_executors tests passed")
+  harness.stdio.println("tool_executors tests passed")
 }

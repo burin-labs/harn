@@ -233,11 +233,11 @@ fn test_policy_workspace_roots_catch_template_render_escapes() {
 
     let escaped_path = outside_template.display();
     let escapes = [
-        format!(r#"pipeline t(task) {{ render("{escaped_path}") }}"#),
-        format!(r#"pipeline t(task) {{ render_prompt("{escaped_path}") }}"#),
-        format!(r#"pipeline t(task) {{ render_with_provenance("{escaped_path}") }}"#),
         format!(
-            r#"pipeline t(task) {{ host_call("template.render", {{path: "{escaped_path}"}}) }}"#
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.render_prompt("{escaped_path}") }}"#
+        ),
+        format!(
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.render_prompt_with_provenance("{escaped_path}") }}"#
         ),
     ];
 

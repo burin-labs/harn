@@ -1,9 +1,9 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // A `retry` expression evaluates to its body's success value, like if/match/try.
   const r = retry 3 {
     42
   }
-  log(r)
+  harness.stdio.println(r)
   let attempts = 0
   const r2 = retry 3 {
     attempts = attempts + 1
@@ -12,5 +12,5 @@ pipeline test(task) {
     }
     "ok at ${attempts}"
   }
-  log(r2)
+  harness.stdio.println(r2)
 }

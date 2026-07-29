@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const flow = workflow_graph(
     {
       name: "replay_demo",
@@ -15,14 +15,12 @@ pipeline main() {
       edges: [{from: "act", to: "verify"}],
     },
   )
-  const first = workflow_execute(
-    "Write a note",
+  const first = workflow_execute(harness, "Write a note",
     flow,
     [],
     {max_steps: 4, persist_path: "/tmp/harn-workflow-replay-source.json"},
   )
-  const replayed = workflow_execute(
-    "Write a note",
+  const replayed = workflow_execute(harness, "Write a note",
     flow,
     [],
     {
@@ -32,9 +30,9 @@ pipeline main() {
       persist_path: "/tmp/harn-workflow-replay-replayed.json",
     },
   )
-  __io_println(first?.status)
-  __io_println(replayed?.status)
-  __io_println(replayed?.run?.metadata?.replay_mode)
-  __io_println(replayed?.run?.metadata?.replayed_from == first?.run?.id)
-  __io_println(len(replayed?.run?.stages) == len(first?.run?.stages))
+  harness.stdio.println(first?.status)
+  harness.stdio.println(replayed?.status)
+  harness.stdio.println(replayed?.run?.metadata?.replay_mode)
+  harness.stdio.println(replayed?.run?.metadata?.replayed_from == first?.run?.id)
+  harness.stdio.println(len(replayed?.run?.stages) == len(first?.run?.stages))
 }

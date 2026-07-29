@@ -30,7 +30,7 @@ fn adapters() -> GitAdapters {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const configured: GitAdapters = adapters()
-  __io_println(configured.prior_lookup == nil && configured.prior_sync == nil)
+  harness.stdio.println(configured.prior_lookup == nil && configured.prior_sync == nil)
 }

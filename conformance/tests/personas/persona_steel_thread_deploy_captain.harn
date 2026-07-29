@@ -9,34 +9,33 @@ import {
   step_assertions_end,
 } from "std/testing"
 
-fn deploy_receipt(step, result) {
-  const wrapped = with_audit_receipt(
-    fn() { return result },
+fn deploy_receipt(harness: Harness, step, result) {
+  const wrapped = with_audit_receipt(harness,  harness, fn() { return result },
     {persona: "deploy_captain", step: step, started_at: "2026-01-01T00:00:00Z"},
   )
   return wrapped()
 }
 
 @persona(name: "deploy_captain")
-fn deploy_captain(ctx) {
-  const merged = wait_for_pr_merged(ctx)
-  const staging = deploy_to_staging(merged.result)
-  const smoke = smoke_test(staging.result)
-  const promoted = promote_production(smoke.result)
+fn deploy_captain(harness: Harness, ctx) {
+  const merged = wait_for_pr_merged(harness, ctx)
+  const staging = deploy_to_staging(harness, merged.result)
+  const smoke = smoke_test(harness, staging.result)
+  const promoted = promote_production(harness, smoke.result)
   return {merged: merged, staging: staging, smoke: smoke, promoted: promoted}
 }
 
 @step(name: "wait_for_pr_merged")
-fn wait_for_pr_merged(ctx) {
-  return deploy_receipt(
+fn wait_for_pr_merged(harness: Harness, ctx) {
+  return deploy_receipt(harness, 
     "wait_for_pr_merged",
     {repo: ctx.repo, pr: ctx.pr, wait_source: "github.pull_request_merged", polls: 2, merged: true},
   )
 }
 
 @step(name: "deploy_to_staging")
-fn deploy_to_staging(pr_state) {
-  return deploy_receipt(
+fn deploy_to_staging(harness: Harness, pr_state) {
+  return deploy_receipt(harness, 
     "deploy_to_staging",
     {
       environment: "staging",
@@ -48,8 +47,8 @@ fn deploy_to_staging(pr_state) {
 }
 
 @step(name: "smoke_test")
-fn smoke_test(deployment) {
-  return deploy_receipt(
+fn smoke_test(harness: Harness, deployment) {
+  return deploy_receipt(harness, 
     "smoke_test",
     {
       deployment_id: deployment.deployment_id,
@@ -60,8 +59,8 @@ fn smoke_test(deployment) {
 }
 
 @step(name: "promote_production")
-fn promote_production(smoke) {
-  return deploy_receipt(
+fn promote_production(harness: Harness, smoke) {
+  return deploy_receipt(harness, 
     "promote_production",
     {
       deployment_id: smoke.deployment_id,
@@ -72,9 +71,9 @@ fn promote_production(smoke) {
   )
 }
 
-pipeline test() {
+pipeline test(harness: Harness) {
   step_assertions_begin("deploy_captain")
-  const result = deploy_captain({repo: "burin-labs/harn", pr: 1078})
+  const result = deploy_captain(harness, {repo: "burin-labs/harn", pr: 1078})
   assert_steps_ran(["wait_for_pr_merged", "deploy_to_staging", "smoke_test", "promote_production"])
   assert_step_received("wait_for_pr_merged", { event -> event.args[0].pr == 1078 })
   assert_step_emitted(
@@ -105,6 +104,6 @@ pipeline test() {
     },
   )
   step_assertions_end()
-  __io_println("persona_steel_thread deploy")
-  __io_println(result.promoted.result.promoted)
+  harness.stdio.println("persona_steel_thread deploy")
+  harness.stdio.println(result.promoted.result.promoted)
 }

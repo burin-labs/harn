@@ -7,17 +7,17 @@
  * the catch body also threw. All three variants are verified here with
  * an explicit counter so any regression is immediately visible.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // --- try/catch/finally on caught-throw path: one run ---
   let counter_a = 0
   try {
     throw "x"
   } catch (e) {
-    log("caught: ${e}")
+    harness.stdio.println("caught: ${e}")
   } finally {
     counter_a = counter_a + 1
   }
-  log("catch_finally_count: ${counter_a}")
+  harness.stdio.println("catch_finally_count: ${counter_a}")
   // --- try/finally on throw-escape path (caught by outer): one run ---
   let counter_b = 0
   try {
@@ -27,9 +27,9 @@ pipeline test(task) {
       counter_b = counter_b + 1
     }
   } catch (e) {
-    log("outer-caught: ${e}")
+    harness.stdio.println("outer-caught: ${e}")
   }
-  log("finally_only_count: ${counter_b}")
+  harness.stdio.println("finally_only_count: ${counter_b}")
   // --- try/catch/finally where catch body re-throws: one run ---
   let counter_c = 0
   try {
@@ -41,17 +41,17 @@ pipeline test(task) {
       counter_c = counter_c + 1
     }
   } catch (e) {
-    log("outer-rethrown: ${e}")
+    harness.stdio.println("outer-rethrown: ${e}")
   }
-  log("catch_rethrow_count: ${counter_c}")
+  harness.stdio.println("catch_rethrow_count: ${counter_c}")
   // --- try/finally on body-success path: one run ---
   let counter_d = 0
   try {
-    log("body-ok")
+    harness.stdio.println("body-ok")
   } finally {
     counter_d = counter_d + 1
   }
-  log("finally_success_count: ${counter_d}")
+  harness.stdio.println("finally_success_count: ${counter_d}")
   // --- Nested: outer try/finally wraps inner try/catch (no finally).
   // Inner catch handles the throw locally; outer finally must run
   // exactly once on the body-success exit of the outer try. A prior
@@ -63,12 +63,12 @@ pipeline test(task) {
     try {
       throw "inner-throw"
     } catch (e) {
-      log("inner-caught")
+      harness.stdio.println("inner-caught")
     }
   } finally {
     counter_e = counter_e + 1
   }
-  log("nested_bare_catch_count: ${counter_e}")
+  harness.stdio.println("nested_bare_catch_count: ${counter_e}")
   // --- Nested: outer try/finally wraps inner try/catch/finally where
   // the inner catch performs a return from an enclosing function. The
   // outer finally must fire exactly once as the return unwinds, not
@@ -84,12 +84,12 @@ pipeline test(task) {
       } catch (e) {
         return "resolved"
       } finally {
-        log("inner-finally")
+        harness.stdio.println("inner-finally")
       }
     } finally {
-      log("outer-finally")
+      harness.stdio.println("outer-finally")
     }
   }
   const resolved = helper()
-  log("resolved: ${resolved}")
+  harness.stdio.println("resolved: ${resolved}")
 }

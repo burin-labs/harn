@@ -55,7 +55,7 @@ fn __dispatch_provider_error(err, llm_opts) {
   }
 }
 
-fn __dispatch_emit_call_start(llm_opts) {
+fn __dispatch_emit_call_start(harness: Harness, llm_opts) {
   const session_id = to_string(llm_opts?.session_id ?? "")
   if session_id == "" {
     return nil
@@ -71,7 +71,7 @@ fn __dispatch_emit_call_start(llm_opts) {
     tool_format: to_string(llm_opts?.tool_format ?? ""),
     final_wrapup: llm_opts?._final_wrapup ?? false,
   }
-  agent_emit_event(session_id, "typed_checkpoint", checkpoint)
+  agent_emit_event(harness, session_id, "typed_checkpoint", checkpoint)
   return nil
 }
 
@@ -90,7 +90,7 @@ fn __dispatch_validate_caller_result(result) {
   }
 }
 
-fn __dispatch_default(message, turn_system, llm_opts) {
+fn __dispatch_default(harness: Harness, message, turn_system, llm_opts) {
   // Streaming and non-streaming paths intentionally return the same normalized
   // result so downstream tool dispatch does not depend on rendering mode.
   const on_delta = llm_opts?._on_delta
@@ -98,7 +98,7 @@ fn __dispatch_default(message, turn_system, llm_opts) {
     if type_of(on_delta) == "closure" {
       __host_llm_stream_collect(message, turn_system, llm_call_options(llm_opts), on_delta)
     } else {
-      llm_call(message, turn_system, llm_call_options(llm_opts))
+      harness.llm.call(message, turn_system, llm_call_options(llm_opts))
     }
   }
   if !is_err(result) {
@@ -130,16 +130,15 @@ fn __dispatch_default(message, turn_system, llm_opts) {
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_invoke_llm(message, turn_system, llm_opts) -> dict {
+pub fn agent_invoke_llm(harness: Harness, message, turn_system, llm_opts) -> dict {
   __dispatch_reject_removed_options(llm_opts)
-  __dispatch_emit_call_start(llm_opts)
+  __dispatch_emit_call_start(harness, llm_opts)
   const call_opts = llm_call_options(llm_opts)
   const caller = llm_opts?._llm_caller
   if caller == nil {
     const retry_cfg = llm_opts?._llm_retry
     if retry_cfg != nil {
-      const retrying_default = with_retry(
-        { call -> __dispatch_default(call.prompt, call.system, call.opts) },
+      const retrying_default = with_retry(harness,  harness, { call -> __dispatch_default(harness, call.prompt, call.system, call.opts) },
         retry_cfg + {predicate: retry_cfg?.predicate ?? agent_loop_default_retry_predicate},
       )
       return retrying_default(
@@ -155,7 +154,7 @@ pub fn agent_invoke_llm(message, turn_system, llm_opts) -> dict {
         },
       )
     }
-    return __dispatch_default(message, turn_system, call_opts)
+    return __dispatch_default(harness, message, turn_system, call_opts)
   }
   const call = {
     prompt: message,

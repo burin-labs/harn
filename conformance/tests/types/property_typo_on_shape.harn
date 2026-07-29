@@ -4,7 +4,7 @@
 // from an actionable static error.
 type User = {name: string, email: string, age: int}
 
-pipeline default(_) {
+pipeline default(harness: Harness, _) {
   const u: User = {name: "Ada", email: "ada@x", age: 36}
-  __io_println(u.emial)
+  harness.stdio.println(u.emial)
 }

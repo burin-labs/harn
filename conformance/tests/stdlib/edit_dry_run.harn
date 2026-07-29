@@ -11,13 +11,13 @@ import "std/edit"
  * - Sequential ops within one plan see each other's pending writes
  *   (via the shared transient staged-fs session).
  */
-fn write_fixture(dir: string, name: string, body: string) -> string {
+fn write_fixture(harness: Harness, dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
   harness.fs.write_text(path, body)
   return path
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const root = path_join(
     harness.fs.temp_dir(),
     "harn_edit_dry_run_" + to_string(harness.random.gen_range(100000, 999999)),
@@ -26,14 +26,14 @@ pipeline default() {
   // 1) Multi-op plan: AST-precise body rewrite + safe text patch on the
   //    rename. Both ops touch the same file so the response yields one
   //    per-file diff that carries both edits.
-  const rs_path = write_fixture(
+  const rs_path = write_fixture(harness, 
     root,
     "lib.rs",
     "fn greet(name: &str) -> String {\n    format!(\"hi {name}\")\n}\n",
   )
   const before = harness.fs.read_text(rs_path)
   const bundle = edit_dry_run(
-    {
+    harness.ast, {
       plan: [
         {
           op: "apply_node",
@@ -46,39 +46,39 @@ pipeline default() {
       ],
     },
   )
-  __io_println(bundle.result == "ok")
-  __io_println(bundle.summary.ops_applied == 2)
-  __io_println(bundle.summary.ops_rejected == 0)
-  __io_println(bundle.summary.files_touched == 1)
+  harness.stdio.println(bundle.result == "ok")
+  harness.stdio.println(bundle.summary.ops_applied == 2)
+  harness.stdio.println(bundle.summary.ops_rejected == 0)
+  harness.stdio.println(bundle.summary.files_touched == 1)
   const diff = bundle.per_file_unified_diff[0].diff
-  __io_println(contains(diff, "--- a/") && contains(diff, "+++ b/"))
-  __io_println(contains(diff, "@@ -"))
-  __io_println(contains(diff, "fn greeter"))
-  __io_println(harness.fs.read_text(rs_path) == before)
+  harness.stdio.println(contains(diff, "--- a/") && contains(diff, "+++ b/"))
+  harness.stdio.println(contains(diff, "@@ -"))
+  harness.stdio.println(contains(diff, "fn greeter"))
+  harness.stdio.println(harness.fs.read_text(rs_path) == before)
   // 2) Rejected ops (ambiguous safe_text_patch + unknown op) surface as
   //    structured rejections without aborting the plan.
-  const multi_path = write_fixture(root, "multi.txt", "todo\ntodo\n")
+  const multi_path = write_fixture(harness, root, "multi.txt", "todo\ntodo\n")
   const mixed = edit_dry_run(
-    {
+    harness.ast, {
       plan: [
         {op: "safe_text_patch", path: multi_path, old_text: "todo", new_text: "done"},
         {op: "blow_up_the_world", path: multi_path},
       ],
     },
   )
-  __io_println(mixed.result == "no_ops_applied")
-  __io_println(mixed.summary.ops_applied == 0)
-  __io_println(mixed.summary.ops_rejected == 2)
-  __io_println(mixed.ops[0].result == "rejected" && mixed.ops[0].reason == "ambiguous")
-  __io_println(mixed.ops[1].result == "rejected" && mixed.ops[1].reason == "unknown_op")
+  harness.stdio.println(mixed.result == "no_ops_applied")
+  harness.stdio.println(mixed.summary.ops_applied == 0)
+  harness.stdio.println(mixed.summary.ops_rejected == 2)
+  harness.stdio.println(mixed.ops[0].result == "rejected" && mixed.ops[0].reason == "ambiguous")
+  harness.stdio.println(mixed.ops[1].result == "rejected" && mixed.ops[1].reason == "unknown_op")
   // 3) Empty plan is a no-op: zero ops applied, zero rejected, no diffs.
-  const empty = edit_dry_run({plan: []})
-  __io_println(empty.result == "no_ops_applied")
-  __io_println(empty.summary.files_touched == 0 && len(empty.per_file_unified_diff) == 0)
+  const empty = edit_dry_run(harness.ast, {plan: []})
+  harness.stdio.println(empty.result == "no_ops_applied")
+  harness.stdio.println(empty.summary.files_touched == 0 && len(empty.per_file_unified_diff) == 0)
   // 4) Partial: one applied + one rejected → `result == "partial"`.
-  const part_path = write_fixture(root, "part.rs", "fn alpha() { 1 }\n")
+  const part_path = write_fixture(harness, root, "part.rs", "fn alpha() { 1 }\n")
   const partial = edit_dry_run(
-    {
+    harness.ast, {
       plan: [
         {
           op: "apply_node",
@@ -90,6 +90,6 @@ pipeline default() {
       ],
     },
   )
-  __io_println(partial.result == "partial")
-  __io_println(partial.summary.ops_applied == 1 && partial.summary.ops_rejected == 1)
+  harness.stdio.println(partial.result == "partial")
+  harness.stdio.println(partial.summary.ops_applied == 1 && partial.summary.ops_rejected == 1)
 }

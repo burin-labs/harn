@@ -14,6 +14,8 @@ pub(crate) fn register_external_agent_builtins(vm: &mut Vm) {
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&EXTERNAL_AGENT_DELEGATE_IMPL_DEF];
 
 #[harn_builtin(
+    exposure = "harness.agent.external_agent_delegate",
+    effects = ["worker.mutate@dynamic"],
     sig = "__external_agent_delegate(task: string, options: dict) -> dict",
     kind = "async",
     category = "agents"

@@ -75,7 +75,7 @@ import { post_message } from "std/connectors/slack"
 
 pub fn on_review(event: TriggerEvent) -> dict {
   const body = read_file("README.md")
-  const prompt = render_prompt("prompts/review.harn.prompt", {body: body})
+  const prompt = harness.fs.render_prompt("prompts/review.harn.prompt", {body: body})
   http_post("https://example.test/hook", prompt)
   return {ok: true}
 }

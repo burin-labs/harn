@@ -152,14 +152,14 @@ pub fn slug_dictionary() {
  * @effects: ["random"]
  * @errors: []
  */
-pub fn random_slug(options = nil) {
+pub fn random_slug(harness: Harness, options = nil) {
   const opts = __slug_options(options)
   let words = []
   let index = 0
   while index < opts.segments {
     const kind = __slug_segment_kind(opts.pattern, index, opts.segments)
     const bucket = __slug_bucket(kind, opts.dictionary)
-    words = words + [__slug_random_word(bucket, opts.rng)]
+    words = words + [__slug_random_word(harness, bucket, opts.rng)]
     index = index + 1
   }
   return __slug_join_with_affixes(words, opts)
@@ -203,9 +203,9 @@ pub fn deterministic_slug(value, options = nil) {
  * @effects: ["random"]
  * @errors: []
  */
-pub fn slug(value = nil, options = nil) {
+pub fn slug(harness: Harness, value = nil, options = nil) {
   if value == nil {
-    return random_slug(options)
+    return random_slug(harness, options)
   }
   return slug_from(value, options)
 }
@@ -293,10 +293,10 @@ fn __slug_bucket(kind, dictionary) {
   return dictionary.nouns
 }
 
-fn __slug_random_word(bucket, rng) {
+fn __slug_random_word(harness: Harness, bucket, rng) {
   let word = nil
   if rng != nil {
-    word = random_choice(rng, bucket)
+    word = harness.random.choice(rng, bucket)
   } else {
     word = harness.random.choice(bucket)
   }

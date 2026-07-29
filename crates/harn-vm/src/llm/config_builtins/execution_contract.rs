@@ -7,6 +7,8 @@ use crate::value::{VmDictExt, VmError, VmValue};
 /// Return the Harn-resolved model-route facts that are safe to persist in
 /// replay, eval, and audit receipts.
 #[harn_builtin(
+    exposure = "harness.llm.execution_contract",
+    effects = ["state.read@dynamic"],
     sig = "llm_execution_contract(selector: string) -> dict",
     category = "llm.config"
 )]

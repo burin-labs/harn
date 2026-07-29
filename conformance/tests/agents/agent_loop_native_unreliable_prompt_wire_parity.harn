@@ -35,8 +35,8 @@ fn judge_tools() {
   )
 }
 
-pipeline main() {
-  provider_capabilities_install(
+pipeline main(harness: Harness) {
+  harness.llm.provider_capabilities_install(
     """
 [[provider.testcatalog]]
 model_match = "native-unreliable-*"
@@ -46,16 +46,15 @@ tool_mode_parity = "native_unreliable"
 """,
   )
   defer {
-    provider_capabilities_clear()
+    harness.llm.provider_capabilities_clear()
   }
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("<tool_call>\nemit_judgment({ verdict: \"complete\" })\n</tool_call>"),
       llm_text("<user_response>graded</user_response>"),
     ],
     { ->
-      const result = agent_loop(
-        "Judge the candidate and call emit_judgment.",
+      const result = agent_loop(harness, "Judge the candidate and call emit_judgment.",
         "You are a judge.",
         {
           provider: "testcatalog",
@@ -64,18 +63,18 @@ tool_mode_parity = "native_unreliable"
           tool_format: "native",
           allowed_tools: ["emit_judgment"],
           max_iterations: 3,
-          session_id: "native-unreliable-parity-" + uuid(),
+          session_id: "native-unreliable-parity-" + harness.random.uuid(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(contains(calls[0].system, "<tool_call>"))
-      __io_println(!contains(calls[0].system, "native tool-calling channel"))
-      __io_println(len(calls[0].tools ?? []))
-      __io_println(result.status)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(contains(calls[0].system, "<tool_call>"))
+      harness.stdio.println(!contains(calls[0].system, "native tool-calling channel"))
+      harness.stdio.println(len(calls[0].tools ?? []))
+      harness.stdio.println(result.status)
     },
   )
 }
-// Asserts, in order: the prompt rides the steered TEXT channel (carries
+// Asserts, in order: the prompt rides the steered TEXT harness.runtime.channel(carries
 // the `<tool_call>` contract, never advertises the forbidden native
 // channel); no native tool schemas ship on the wire (consistent with the
 // steered text channel, not a silent native drop); the text-format tool

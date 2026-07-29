@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn add1(x) {
     return x + 1
   }
@@ -6,5 +6,5 @@ pipeline test(task) {
     return x * 2
   }
   const result = 3 |> add1 |> double
-  log(result)
+  harness.stdio.println(result)
 }

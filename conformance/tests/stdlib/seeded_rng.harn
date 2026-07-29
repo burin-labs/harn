@@ -1,13 +1,13 @@
-pipeline test(task) {
-  const rng_a = rng_seed(42)
-  const rng_b = rng_seed(42)
+pipeline test(harness: Harness, task) {
+  const rng_a = harness.random.seed(42)
+  const rng_b = harness.random.seed(42)
   assert_eq(random(rng_a), random(rng_b))
-  assert_eq(random_int(rng_a, 10, 99), random_int(rng_b, 10, 99))
+  assert_eq(harness.random.range(rng_a, 10, 99), harness.random.range(rng_b, 10, 99))
   assert_eq(
-    random_choice(rng_a, ["alpha", "beta", "gamma"]),
-    random_choice(rng_b, ["alpha", "beta", "gamma"]),
+    harness.random.choice(rng_a, ["alpha", "beta", "gamma"]),
+    harness.random.choice(rng_b, ["alpha", "beta", "gamma"]),
   )
-  assert_eq(random_shuffle(rng_a, [1, 2, 3, 4, 5]), random_shuffle(rng_b, [1, 2, 3, 4, 5]))
+  assert_eq(harness.random.shuffle(rng_a, [1, 2, 3, 4, 5]), harness.random.shuffle(rng_b, [1, 2, 3, 4, 5]))
   assert_eq(harness.random.choice(["only"]), "only")
-  log("seeded rng ok")
+  harness.stdio.println("seeded rng ok")
 }

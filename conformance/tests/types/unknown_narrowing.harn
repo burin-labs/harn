@@ -3,7 +3,7 @@
  * union types: `type_of(x) == "T"` in an if-condition narrows the truthy
  * branch to `T`.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn describe(v: unknown) -> string {
     if type_of(v) == "string" {
       // v: string here — concrete methods available.
@@ -17,10 +17,10 @@ pipeline test(task) {
     }
     return "other"
   }
-  log(describe("hi"))
-  log(describe(41))
-  log(describe(nil))
-  log(describe([1, 2]))
+  harness.stdio.println(describe("hi"))
+  harness.stdio.println(describe(41))
+  harness.stdio.println(describe(nil))
+  harness.stdio.println(describe([1, 2]))
   // Guard-based narrowing applies too.
   fn must_be_string(v: unknown) -> string {
     guard type_of(v) == "string" else {
@@ -28,6 +28,6 @@ pipeline test(task) {
     }
     return "ok:${v}"
   }
-  log(must_be_string("x"))
-  log(must_be_string(7))
+  harness.stdio.println(must_be_string("x"))
+  harness.stdio.println(must_be_string(7))
 }

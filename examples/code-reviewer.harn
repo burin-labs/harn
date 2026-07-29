@@ -7,8 +7,8 @@
  * This is a compact review agent that reviews a pasted patch or a task
  * description with optional context files.
  */
-pipeline default(task) {
-  log("Starting code review agent")
+pipeline default(harness: Harness, task) {
+  harness.stdio.println("Starting code review agent")
   const system = """
 You are a senior code reviewer.
 Review the change for correctness, security, maintainability, and tests.
@@ -18,7 +18,7 @@ Return:
 - missing tests
 End with a short verdict.
 """
-  const review = llm_call(task, system, {temperature: 0.2, max_tokens: 1200})
+  const review = harness.llm.call(task, system, {temperature: 0.2, max_tokens: 1200})
   eval_metric("review_chars", review.text.count)
-  __io_println(review.text)
+  harness.stdio.println(review.text)
 }

@@ -16,12 +16,12 @@
  * Backends:
  *   - memory()                              ephemeral, per-session
  *   - file(path, encryption_key)            local disk, AES-256-GCM
- *   - secrets({provider})                   `harness.secrets` host store
+ *   - secrets(harness, {provider})                   `harness.secrets` host store
  *   - harn_cloud_session()                  cloud-managed, per-session
  *   - harn_cloud_org()                      cloud-managed, org-scoped
  *   - custom({get, set, delete, with_refresh_lock?}) user-supplied (vault, KMS)
  *
- * `storage()` returns the namespace dict matching the `OAuth.Storage.*`
+ * `storage(harness)` returns the namespace dict matching the `OAuth.Storage.*`
  * shape from the OAuth epic: `memory` / `harn_cloud_*` as ready
  * handles, `file` / `secrets` / `custom` as factory closures.
  *
@@ -30,7 +30,7 @@
  * - `memory()` — tests and one-shot scripts; nothing survives the VM.
  * - `file(path, key)` — a single local process that owns its own
  *   encrypted token file (you manage the encryption key).
- * - `secrets({provider})` — a local harness that already authenticates
+ * - `secrets(harness, {provider})` — a local harness that already authenticates
  *   through `harness.secrets` (OS keyring / env chain, or the same store
  *   `harn connect` writes). This is the drop-in for "I already have a
  *   secret host; stop hand-rolling a cache adapter per provider." It
@@ -87,16 +87,16 @@ pub type TokenSet = {
  */
 type Storage = dict
 
-fn __wrap_host_handle(inner) {
+fn __wrap_host_handle(auth: HarnessAuth, inner) {
   return inner
     + {
     _namespace: "oauth_storage",
-    get: { key -> __oauth_storage_get(inner, key) },
+    get: { key -> auth.oauth_storage_get(inner, key) },
     set: { key, token_set, ttl_seconds = nil ->
-      __oauth_storage_set(inner, key, token_set, ttl_seconds)
+      auth.oauth_storage_set(inner, key, token_set, ttl_seconds)
     },
-    delete: { key -> __oauth_storage_delete(inner, key) },
-    with_refresh_lock: { key, body -> __oauth_storage_with_refresh_lock(inner, key, body) },
+    delete: { key -> auth.oauth_storage_delete(inner, key) },
+    with_refresh_lock: { key, body -> auth.oauth_storage_with_refresh_lock(inner, key, body) },
   }
 }
 
@@ -108,8 +108,8 @@ fn __wrap_host_handle(inner) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn memory() -> Storage {
-  return __wrap_host_handle(__oauth_storage_memory_handle())
+pub fn memory(auth: HarnessAuth) -> Storage {
+  return __wrap_host_handle(auth, auth.oauth_storage_memory())
 }
 
 /**
@@ -124,11 +124,11 @@ pub fn memory() -> Storage {
  * @api_stability: experimental
  * @example: file("/var/lib/harn/tokens.bin", env("HARN_OAUTH_KEY"))
  */
-pub fn file(path, encryption_key) -> Storage {
+pub fn file(auth: HarnessAuth, path, encryption_key) -> Storage {
   if type_of(path) != "string" || path == "" {
     throw "std/oauth/storage: file path must be a non-empty string"
   }
-  return __wrap_host_handle(__oauth_storage_file_handle(path, encryption_key))
+  return __wrap_host_handle(auth, auth.oauth_storage_file(path, encryption_key))
 }
 
 /**
@@ -141,8 +141,8 @@ pub fn file(path, encryption_key) -> Storage {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn harn_cloud_session() -> Storage {
-  return __wrap_host_handle(__oauth_storage_cloud_handle("session"))
+pub fn harn_cloud_session(auth: HarnessAuth) -> Storage {
+  return __wrap_host_handle(auth, auth.oauth_storage_cloud("session"))
 }
 
 /**
@@ -156,8 +156,8 @@ pub fn harn_cloud_session() -> Storage {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn harn_cloud_org() -> Storage {
-  return __wrap_host_handle(__oauth_storage_cloud_handle("org"))
+pub fn harn_cloud_org(auth: HarnessAuth) -> Storage {
+  return __wrap_host_handle(auth, auth.oauth_storage_cloud("org"))
 }
 
 /**
@@ -180,7 +180,7 @@ pub fn harn_cloud_org() -> Storage {
  * @api_stability: experimental
  * @example: custom({get: my_get, set: my_set, delete: my_delete})
  */
-pub fn custom(handlers) -> Storage {
+pub fn custom(auth: HarnessAuth, handlers) -> Storage {
   if type_of(handlers) != "dict" {
     throw "std/oauth/storage: custom handlers must be a dict"
   }
@@ -210,9 +210,9 @@ pub fn custom(handlers) -> Storage {
     delete: delete_fn,
   }
   const with_lock = if lock_fn == nil {
-    { key, body -> __oauth_storage_with_refresh_lock(base, key, body) }
+    { key, body -> auth.oauth_storage_with_refresh_lock(base, key, body) }
   } else {
-    { key, body -> __oauth_storage_with_refresh_lock(base, key, { -> lock_fn(key, body) }) }
+    { key, body -> auth.oauth_storage_with_refresh_lock(base, key, { -> lock_fn(key, body) }) }
   }
   return base + {with_refresh_lock: with_lock}
 }
@@ -263,7 +263,7 @@ fn __secrets_secret_name(cfg, key) {
   return cfg.provider + "/" + leaf
 }
 
-fn __secrets_read_raw(cfg, name) {
+fn __secrets_read_raw(harness: Harness, cfg, name) {
   return try {
     harness.secrets.read(name, cfg.scope)
   } catch (err) {
@@ -287,9 +287,9 @@ fn __secrets_parse(cfg, name, raw) {
   }
 }
 
-fn __secrets_get(cfg, key) {
+fn __secrets_get(harness: Harness, cfg, key) {
   const name = __secrets_secret_name(cfg, key)
-  const raw = __secrets_read_raw(cfg, name)
+  const raw = __secrets_read_raw(harness, cfg, name)
   if raw == nil || trim(to_string(raw)) == "" {
     return nil
   }
@@ -326,12 +326,12 @@ fn __secrets_merge(prev, incoming) {
   return out
 }
 
-fn __secrets_set(cfg, key, token_set) {
+fn __secrets_set(harness: Harness, cfg, key, token_set) {
   if type_of(token_set) != "dict" {
     throw "std/oauth/storage: secrets backend set expects a TokenSet dict"
   }
   const name = __secrets_secret_name(cfg, key)
-  const prev = __secrets_get_stored(cfg, name)
+  const prev = __secrets_get_stored(harness, cfg, name)
   const merged = __secrets_merge(prev, token_set)
   // Deterministic serialization: `json_stringify` emits keys in sorted
   // order (dicts are ordered maps), so equal TokenSets encode identically.
@@ -342,15 +342,15 @@ fn __secrets_set(cfg, key, token_set) {
   return nil
 }
 
-fn __secrets_get_stored(cfg, name) {
-  const raw = __secrets_read_raw(cfg, name)
+fn __secrets_get_stored(harness: Harness, cfg, name) {
+  const raw = __secrets_read_raw(harness, cfg, name)
   if raw == nil || trim(to_string(raw)) == "" {
     return nil
   }
   return __secrets_parse(cfg, name, raw)
 }
 
-fn __secrets_delete(cfg, key) {
+fn __secrets_delete(harness: Harness, cfg, key) {
   const name = __secrets_secret_name(cfg, key)
   try {
     const _ = harness.secrets.delete(name, cfg.scope)
@@ -402,9 +402,9 @@ fn __secrets_delete(cfg, key) {
  * @effects: [host_call]
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: secrets({provider: "github"})
+ * @example: secrets(harness, {provider: "github"})
  */
-pub fn secrets(opts) -> Storage {
+pub fn secrets(harness: Harness, opts) -> Storage {
   if type_of(opts) != "dict" {
     throw "std/oauth/storage: secrets opts must be a dict"
   }
@@ -429,11 +429,11 @@ pub fn secrets(opts) -> Storage {
     _namespace: "oauth_storage",
     kind: "secrets",
     provider: provider,
-    get: { key -> __secrets_get(cfg, key) },
-    set: { key, token_set, ttl_seconds = nil -> __secrets_set(cfg, key, token_set) },
-    delete: { key -> __secrets_delete(cfg, key) },
+    get: { key -> __secrets_get(harness, cfg, key) },
+    set: { key, token_set, ttl_seconds = nil -> __secrets_set(harness, cfg, key, token_set) },
+    delete: { key -> __secrets_delete(harness, cfg, key) },
     with_refresh_lock: { key, body ->
-      __oauth_storage_with_refresh_lock(cfg.lock_handle, key, body)
+      harness.auth.oauth_storage_with_refresh_lock(cfg.lock_handle, key, body)
     },
   }
 }
@@ -447,15 +447,15 @@ pub fn secrets(opts) -> Storage {
  * @effects: [host_call]
  * @errors: []
  * @api_stability: experimental
- * @example: storage().file("/var/lib/harn/tokens.bin", key)
+ * @example: storage(harness).file("/var/lib/harn/tokens.bin", key)
  */
-pub fn storage() {
+pub fn storage(harness: Harness) {
   return {
-    memory: memory(),
-    file: { path, encryption_key -> file(path, encryption_key) },
-    secrets: { opts -> secrets(opts) },
-    harn_cloud_session: harn_cloud_session(),
-    harn_cloud_org: harn_cloud_org(),
-    custom: { handlers -> custom(handlers) },
+    memory: memory(harness.auth),
+    file: { path, encryption_key -> file(harness.auth, path, encryption_key) },
+    secrets: { opts -> secrets(harness, opts) },
+    harn_cloud_session: harn_cloud_session(harness.auth),
+    harn_cloud_org: harn_cloud_org(harness.auth),
+    custom: { handlers -> custom(harness.auth, handlers) },
   }
 }

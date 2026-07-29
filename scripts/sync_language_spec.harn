@@ -53,7 +53,7 @@ const SUMMARY_END = "<!-- END generated: language-spec chapters -->"
  * in `NN-` order. Chapter files should not need to preserve double-newline EOF
  * separators, so the assembler owns the blank line between top-level sections.
  */
-pub fn assemble_spec() -> string {
+pub fn assemble_spec(harness: Harness) -> string {
   const chapters = harness.fs.glob(CHAPTERS_GLOB).sorted()
   let out = ""
   let index = 0
@@ -73,15 +73,15 @@ pub fn render_mirror_from(spec_text: string) -> string {
 }
 
 /** All chapter source paths in `NN-` order. */
-pub fn chapter_paths() -> list<string> {
+pub fn chapter_paths(harness: Harness) -> list<string> {
   return harness.fs.glob(CHAPTERS_GLOB).sorted()
 }
 
 /** Chapter paths after the overview — each becomes its own docs page. */
-pub fn page_paths() -> list<string> {
+pub fn page_paths(harness: Harness) -> list<string> {
   let out: list<string> = []
   let i = 0
-  for path in chapter_paths() {
+  for path in chapter_paths(harness) {
     if i > 0 {
       out = out + [path]
     }
@@ -113,8 +113,8 @@ pub fn page_path(path: string) -> string {
  * contents linking to every per-chapter page. The overview is the first
  * chapter (the only one with a top-level `#` heading).
  */
-pub fn render_index() -> string {
-  const chapters = chapter_paths()
+pub fn render_index(harness: Harness) -> string {
+  const chapters = chapter_paths(harness)
   const overview_path = chapters[0] ?? ""
   if overview_path == "" {
     return HEADER
@@ -136,9 +136,9 @@ pub fn render_index() -> string {
 }
 
 /** The SUMMARY.md chapter list (between the generated-block markers). */
-pub fn render_summary_block() -> string {
+pub fn render_summary_block(harness: Harness) -> string {
   let out = "  " + SUMMARY_BEGIN
-  for path in page_paths() {
+  for path in page_paths(harness) {
     const title = chapter_title(harness.fs.read_text(path))
     out = out + "\n  - [" + title + "](./spec/language/" + page_slug(path) + ".md)"
   }
@@ -164,29 +164,29 @@ pub fn splice_summary(current: string, block: string) -> string {
   return out.join("\n")
 }
 
-fn stale(generated: string, path: string) -> bool {
+fn stale(harness: Harness, generated: string, path: string) -> bool {
   const disk = if harness.fs.exists(path) {
     harness.fs.read_text(path)
   } else {
     ""
   }
   if normalize(generated) != normalize(disk) {
-    __io_eprintln("error: ${path} is stale relative to ${CHAPTERS_GLOB}")
-    __io_eprintln("hint: run 'make sync-language-spec' and commit the result")
+    harness.stdio.eprintln("error: ${path} is stale relative to ${CHAPTERS_GLOB}")
+    harness.stdio.eprintln("hint: run 'make sync-language-spec' and commit the result")
     return true
   }
   return false
 }
 
-pipeline main(task) {
-  const chapters = chapter_paths()
+pipeline main(harness: Harness, task) {
+  const chapters = chapter_paths(harness)
   if chapters.count == 0 {
-    __io_eprintln("error: no chapter files found at ${CHAPTERS_GLOB}")
+    harness.stdio.eprintln("error: no chapter files found at ${CHAPTERS_GLOB}")
     return 1
   }
-  const spec_text = assemble_spec()
-  const index_text = render_index()
-  const summary_block = render_summary_block()
+  const spec_text = assemble_spec(harness)
+  const index_text = render_index(harness)
+  const summary_block = render_summary_block(harness)
   const summary_text = splice_summary(harness.fs.read_text(SUMMARY), summary_block)
   const mode = if argv.count == 0 {
     "write"
@@ -197,7 +197,7 @@ pipeline main(task) {
     harness.fs.write_text(SPEC, spec_text)
     harness.fs.write_text(MIRROR, index_text)
     harness.fs.mkdir(PAGES_DIR)
-    for path in page_paths() {
+    for path in page_paths(harness) {
       harness.fs.write_text(page_path(path), render_mirror_from(harness.fs.read_text(path)))
     }
     harness.fs.write_text(SUMMARY, summary_text)
@@ -205,17 +205,17 @@ pipeline main(task) {
   }
   if mode == "--check" {
     let bad = false
-    if stale(spec_text, SPEC) {
+    if stale(harness, spec_text, SPEC) {
       bad = true
     }
-    if stale(index_text, MIRROR) {
+    if stale(harness, index_text, MIRROR) {
       bad = true
     }
-    if stale(summary_text, SUMMARY) {
+    if stale(harness, summary_text, SUMMARY) {
       bad = true
     }
-    for path in page_paths() {
-      if stale(render_mirror_from(harness.fs.read_text(path)), page_path(path)) {
+    for path in page_paths(harness) {
+      if stale(harness, render_mirror_from(harness.fs.read_text(path)), page_path(path)) {
         bad = true
       }
     }
@@ -225,6 +225,6 @@ pipeline main(task) {
       0
     }
   }
-  __io_eprintln("usage: sync_language_spec.harn [--check]")
+  harness.stdio.eprintln("usage: sync_language_spec.harn [--check]")
   return 2
 }

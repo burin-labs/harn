@@ -1,14 +1,14 @@
 import "../_common"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn_pack_json_" + uuid_v7())
+  const root = path_join(harness.fs.temp_dir(), "harn_pack_json_" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
-  harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"json\")\n")
+  harness.fs.write_text(path_join(root, "hello.harn"), "harness.stdio.println(\"json\")\n")
   const pack = exec_at(
     root,
     harn_bin,
@@ -19,14 +19,14 @@ pipeline default() {
     path_join(root, "hello.harnpack"),
     "--json",
   )
-  __io_println(pack.success)
+  harness.stdio.println(pack.success)
   const pack_data = json_parse(pack.stdout)
-  __io_println(pack_data.ok)
+  harness.stdio.println(pack_data.ok)
   // schemaVersion is monotonically bumped; assert it's at least the
   // baseline that shipped with #1781.
-  __io_println(pack_data.schemaVersion >= 2)
-  __io_println(starts_with(pack_data.data.bundle_hash, "blake3:"))
-  __io_println(pack_data.data.signature.algorithm)
+  harness.stdio.println(pack_data.schemaVersion >= 2)
+  harness.stdio.println(starts_with(pack_data.data.bundle_hash, "blake3:"))
+  harness.stdio.println(pack_data.data.signature.algorithm)
   const verify = exec_at(
     root,
     harn_bin,
@@ -36,9 +36,9 @@ pipeline default() {
     "--allow-unsigned",
     "--json",
   )
-  __io_println(verify.success)
+  harness.stdio.println(verify.success)
   const verify_data = json_parse(verify.stdout)
-  __io_println(verify_data.ok)
-  __io_println(verify_data.schemaVersion >= 1)
-  __io_println(verify_data.data.bundle_hash == pack_data.data.bundle_hash)
+  harness.stdio.println(verify_data.ok)
+  harness.stdio.println(verify_data.schemaVersion >= 1)
+  harness.stdio.println(verify_data.data.bundle_hash == pack_data.data.bundle_hash)
 }

@@ -11,13 +11,13 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  */
 import { with_timeout } from "std/lifecycle/combinators"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const fast = { _harness, return_value -> return return_value + "_fast" }
   const slow = { _harness, return_value ->
     let _ = advance_time(2000)
     return return_value + "_slow"
   }
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const _ = mock_time(0)
       const fast_wrap = with_timeout(fast, 500)

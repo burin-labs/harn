@@ -53,7 +53,7 @@ fn __host_attachment_description_route(
     return {provider: options.provider, model: options.model}
   }
   const candidates = models_with(
-    {strengths: ["vision"], available_only: true, exclude_deprecated: true},
+    harness, {strengths: ["vision"], available_only: true, exclude_deprecated: true},
   )
   if len(candidates) == 0 {
     return nil
@@ -69,7 +69,7 @@ fn __host_attachment_description_route(
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn describe_host_attachment(
+pub fn describe_host_attachment(harness: Harness, 
   source: any,
   options: HostAttachmentDescriptionOptions = {},
 ) -> {description: string, description_model: string}? {
@@ -80,13 +80,13 @@ pub fn describe_host_attachment(
   const prompt = options.prompt
     ?? "Describe this image precisely for a coding agent. Preserve visible text, state, errors, and spatial relationships."
   const messages = [
-    {role: "user", content: [text_content(prompt), image_content(source, options.image ?? {})]},
+    {role: "user", content: [text_content(prompt), image_content(harness, source, options.image ?? {})]},
   ]
   const result = try {
     if route.provider == nil {
-      llm_call("", options.system, {model: route.model, vision: true, messages: messages})
+      harness.llm.call("", options.system, {model: route.model, vision: true, messages: messages})
     } else {
-      llm_call(
+      harness.llm.call(
         "",
         options.system,
         {provider: route.provider, model: route.model, vision: true, messages: messages},
@@ -109,7 +109,7 @@ pub fn describe_host_attachment(
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn prepare_host_attachment(
+pub fn prepare_host_attachment(harness: Harness, 
   payload: HostAttachmentPayload,
   source: any,
   options: HostAttachmentDescriptionOptions = {},
@@ -117,7 +117,7 @@ pub fn prepare_host_attachment(
   if payload.description != nil && payload.description != "" {
     return payload
   }
-  const described = describe_host_attachment(source, options)
+  const described = describe_host_attachment(harness, source, options)
   if described == nil {
     return payload
   }
@@ -130,13 +130,13 @@ pub fn prepare_host_attachment(
  * @effects: [host]
  * @errors: [runtime]
  */
-pub fn inject_host_tool_result(
+pub fn inject_host_tool_result(harness: Harness, 
   session_id: string,
   payload: HostToolResultPayload,
   provenance: HostInjectionProvenance,
   delivery: HostInjectionDelivery = "immediate",
 ) -> dict {
-  return agent_inject_host_event(
+  return harness.agent.inject_host_event(
     session_id,
     {kind: "host_tool_result", delivery: delivery, payload: payload, provenance: provenance},
   )
@@ -153,13 +153,13 @@ pub fn inject_host_tool_result(
  * @effects: [host]
  * @errors: [runtime]
  */
-pub fn inject_host_attachment(
+pub fn inject_host_attachment(harness: Harness, 
   session_id: string,
   payload: HostAttachmentPayload,
   provenance: HostInjectionProvenance,
   delivery: HostInjectionDelivery = "immediate",
 ) -> dict {
-  return agent_inject_host_event(
+  return harness.agent.inject_host_event(
     session_id,
     {kind: "host_attachment", delivery: delivery, payload: payload, provenance: provenance},
   )

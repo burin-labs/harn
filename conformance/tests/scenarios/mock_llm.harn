@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Mock provider returns deterministic responses without API keys.
   // llm_call returns the canonical envelope: .text (the public answer,
   // unwrapped from <assistant_prose>...</assistant_prose> when the tagged
@@ -6,12 +6,12 @@ pipeline default() {
   // .canonical_text (canonical reconstruction preserving tags), plus
   // .model and .usage (single owner of token accounting). Scripts that
   // want the user-visible answer should read .text.
-  const response = llm_call("Hello world", nil, {provider: "mock"})
-  __io_println(response.text)
+  const response = harness.llm.call("Hello world", nil, {provider: "mock"})
+  harness.stdio.println(response.text)
   // Mock with agent_loop terminates immediately via ##DONE##.
   // agent_loop exposes `.visible_text` which is the prose from the final
   // iteration (tool call expressions stripped, `<done>` sentinel wrapped
   // as a tag downstream viewers can strip).
-  const result = agent_loop("Do the task", "You are helpful", {provider: "mock"})
-  __io_println(result?.visible_text)
+  const result = agent_loop(harness, "Do the task", "You are helpful", {provider: "mock"})
+  harness.stdio.println(result?.visible_text)
 }

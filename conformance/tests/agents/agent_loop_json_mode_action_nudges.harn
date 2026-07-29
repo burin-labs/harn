@@ -75,18 +75,17 @@ fn json_read_call(path) {
   return "```tool\n{ \"name\": \"inspect\", \"args\": { \"path\": \"" + path + "\" } }\n```"
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // 1. Fenced ```python attempt on a json lane → fenced_call_attempt nudge,
   //    rendered in fenced-JSON vocabulary.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("Here is the change:\n```python\nedit(path=\"a.txt\")\n```"),
       llm_text(json_call("a.txt")),
       llm_text("All set."),
     ],
     { ->
-      const r = agent_loop(
-        "Edit a.txt.",
+      const r = agent_loop(harness, "Edit a.txt.",
         nil,
         {
           provider: "mock",
@@ -97,29 +96,28 @@ pipeline default() {
           tools: edit_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("fenced.status=" + r.status)
-      __io_println("fenced.nudge=" + to_string(injected_in(calls, 1, "fenced_call_attempt")))
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("fenced.status=" + r.status)
+      harness.stdio.println("fenced.nudge=" + to_string(injected_in(calls, 1, "fenced_call_attempt")))
+      harness.stdio.println(
         "fenced.vocab_json="
           + to_string(
           injected_in(calls, 1, "Emit the call as a ```tool JSON block"),
         ),
       )
-      __io_println("fenced.no_tag=" + to_string(!injected_in(calls, 1, "bare inside <tool_call>")))
+      harness.stdio.println("fenced.no_tag=" + to_string(!injected_in(calls, 1, "bare inside <tool_call>")))
     },
   )
   // 2. Classifier-backed missing tool call on a json lane → missing_tool_call
   //    nudge whose exemplar is a ```tool block, not a <tool_call> block.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("Voy a editar el archivo ahora, un momento."),
       llm_text(json_call("b.txt")),
       llm_text("Done."),
     ],
     { ->
-      const r = agent_loop(
-        "Edit b.txt.",
+      const r = agent_loop(harness, "Edit b.txt.",
         nil,
         {
           provider: "mock",
@@ -131,23 +129,22 @@ pipeline default() {
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("missing.status=" + r.status)
-      __io_println("missing.nudge=" + to_string(injected_in(calls, 1, "missing_tool_call")))
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("missing.status=" + r.status)
+      harness.stdio.println("missing.nudge=" + to_string(injected_in(calls, 1, "missing_tool_call")))
+      harness.stdio.println(
         "missing.vocab_json=" + to_string(injected_in(calls, 1, "Emit the call now: ```tool")),
       )
-      __io_println(
+      harness.stdio.println(
         "missing.no_tag=" + to_string(!injected_in(calls, 1, "Emit the call now: <tool_call>")),
       )
     },
   )
   // 3. A real ```tool call does NOT trip either content nudge.
   with_llm_script(
-    [llm_text(json_call("c.txt")), llm_text("Done.")],
+    harness.llm, [llm_text(json_call("c.txt")), llm_text("Done.")],
     { ->
-      const r = agent_loop(
-        "Edit c.txt.",
+      const r = agent_loop(harness, "Edit c.txt.",
         nil,
         {
           provider: "mock",
@@ -158,22 +155,21 @@ pipeline default() {
           tools: edit_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("realcall.successful=" + json_stringify(r.tools.successful))
-      __io_println("realcall.no_fenced=" + to_string(!injected_in(calls, 1, "fenced_call_attempt")))
-      __io_println("realcall.no_missing=" + to_string(!injected_in(calls, 1, "missing_tool_call")))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("realcall.successful=" + json_stringify(r.tools.successful))
+      harness.stdio.println("realcall.no_fenced=" + to_string(!injected_in(calls, 1, "fenced_call_attempt")))
+      harness.stdio.println("realcall.no_missing=" + to_string(!injected_in(calls, 1, "missing_tool_call")))
     },
   )
   // 4. A valid call and sentinel in one turn must dispatch and continue so
   //    the model can consume the tool observation before completing.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(json_call("d.txt") + "\n<done>##DONE##</done>"),
       llm_text("<user_response>Done after observation.</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      const r = agent_loop(
-        "Edit d.txt.",
+      const r = agent_loop(harness, "Edit d.txt.",
         nil,
         {
           provider: "mock",
@@ -185,22 +181,21 @@ pipeline default() {
           tools: edit_tools(),
         },
       )
-      __io_println("same_turn.status=" + r.status)
-      __io_println("same_turn.successful=" + json_stringify(r.tools.successful))
-      __io_println("same_turn.iterations=" + to_string(r.llm.iterations))
-      __io_println("same_turn.final=" + r.visible_text)
+      harness.stdio.println("same_turn.status=" + r.status)
+      harness.stdio.println("same_turn.successful=" + json_stringify(r.tools.successful))
+      harness.stdio.println("same_turn.iterations=" + to_string(r.llm.iterations))
+      harness.stdio.println("same_turn.final=" + r.visible_text)
     },
   )
   // 5. Exact duplicate read-only calls in one text-channel turn collapse to
   //    one dispatch; mutating/native calls retain their original semantics.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(json_read_call("settings") + "\n" + json_read_call("settings")),
       llm_text("<user_response>Observed once.</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      const r = agent_loop(
-        "Inspect settings.",
+      const r = agent_loop(harness, "Inspect settings.",
         nil,
         {
           provider: "mock",
@@ -212,17 +207,17 @@ pipeline default() {
           tools: read_tools(),
         },
       )
-      __io_println("duplicate.status=" + r.status)
-      __io_println("duplicate.successful=" + json_stringify(r.tools.successful))
-      __io_println("duplicate.calls=" + to_string(len(r.tools.calls)))
-      __io_println("duplicate.iterations=" + to_string(r.llm.iterations))
-      __io_println("duplicate.final=" + r.visible_text)
+      harness.stdio.println("duplicate.status=" + r.status)
+      harness.stdio.println("duplicate.successful=" + json_stringify(r.tools.successful))
+      harness.stdio.println("duplicate.calls=" + to_string(len(r.tools.calls)))
+      harness.stdio.println("duplicate.iterations=" + to_string(r.llm.iterations))
+      harness.stdio.println("duplicate.final=" + r.visible_text)
     },
   )
   // 6. Native calls retain both provider call IDs and both dispatches. The
   //    duplicate-read collapse is only a text-channel recovery policy.
   with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "inspect-1", name: "inspect", arguments: {path: "settings"}},
@@ -232,8 +227,7 @@ pipeline default() {
       llm_text("<user_response>Observed twice.</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      const r = agent_loop(
-        "Inspect settings twice.",
+      const r = agent_loop(harness, "Inspect settings twice.",
         nil,
         {
           provider: "mock",
@@ -245,11 +239,11 @@ pipeline default() {
           tools: read_tools(),
         },
       )
-      __io_println("native_duplicate.status=" + r.status)
-      __io_println("native_duplicate.successful=" + json_stringify(r.tools.successful))
-      __io_println("native_duplicate.calls=" + to_string(len(r.tools.calls)))
-      __io_println("native_duplicate.iterations=" + to_string(r.llm.iterations))
-      __io_println("native_duplicate.final=" + r.visible_text)
+      harness.stdio.println("native_duplicate.status=" + r.status)
+      harness.stdio.println("native_duplicate.successful=" + json_stringify(r.tools.successful))
+      harness.stdio.println("native_duplicate.calls=" + to_string(len(r.tools.calls)))
+      harness.stdio.println("native_duplicate.iterations=" + to_string(r.llm.iterations))
+      harness.stdio.println("native_duplicate.final=" + r.visible_text)
     },
   )
 }

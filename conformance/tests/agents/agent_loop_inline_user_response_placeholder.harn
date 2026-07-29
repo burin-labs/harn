@@ -1,21 +1,20 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "Remember `<user_response>...</user_response>` is only an example wrapper.\nAudit: actual final answer.",
       ),
     ],
     { ->
-      const result = agent_loop(
-        "Finish with a visible answer.",
+      const result = agent_loop(harness, "Finish with a visible answer.",
         nil,
         {provider: "mock", loop_until_done: false, max_iterations: 1},
       )
-      __io_println(result.status)
-      __io_println(result.visible_text)
-      __io_println(result.text)
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(result.text)
     },
   )
 }

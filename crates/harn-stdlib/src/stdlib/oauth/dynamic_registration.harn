@@ -24,12 +24,12 @@
  *     the RFC 7591 §2 conformance rules. Returns
  *     `{ok: bool, errors: list<string>}`. Each error is prefixed
  *     `HARN-OAU-005:` so callers can pattern-match.
- *   - `dynamic_registration_store()` — opens an in-process store handle
+ *   - `dynamic_registration_store(harness)` — opens an in-process store handle
  *     for issuing client_ids. Backed by a thread-safe `BTreeMap` keyed
  *     by handle id. Suitable for harn-serve and conformance fixtures;
  *     production deployments should layer a durable backend on top via
  *     the embedder host capabilities.
- *   - `register_client(store, metadata)` — validate + register a
+ *   - `register_client(harness, store, metadata)` — validate + register a
  *     client. Returns the RFC 7591 §3.2.1 success body including the
  *     freshly minted `client_id` and `client_secret`. Emits
  *     `oauth.dynreg.audit` `client_registered` with no credential
@@ -107,7 +107,7 @@ fn __safe_get(dict, key) {
  * @example: validate_metadata({redirect_uris: ["https://app.example/cb"]})
  */
 pub fn validate_metadata(metadata) -> dict {
-  return __oauth_dynreg_validate_metadata(__require_dict(metadata, "metadata"))
+  return oauth_dynreg_validate_metadata(__require_dict(metadata, "metadata"))
 }
 
 /**
@@ -123,7 +123,7 @@ pub fn validate_metadata(metadata) -> dict {
  * @example: client_metadata({redirect_uris: ["https://app.example/cb"], client_name: "Harn"})
  */
 pub fn client_metadata(opts) -> dict {
-  return __oauth_dynreg_build_client_metadata(__require_dict(opts, "opts"))
+  return oauth_dynreg_build_client_metadata(__require_dict(opts, "opts"))
 }
 
 /**
@@ -141,9 +141,9 @@ pub fn client_metadata(opts) -> dict {
 pub fn authorization_server_metadata(provider, overrides = nil) -> dict {
   const provider_dict = __require_dict(provider, "provider")
   if overrides == nil {
-    return __oauth_dynreg_build_authorization_server_metadata(provider_dict, nil)
+    return oauth_dynreg_build_authorization_server_metadata(provider_dict, nil)
   }
-  return __oauth_dynreg_build_authorization_server_metadata(
+  return oauth_dynreg_build_authorization_server_metadata(
     provider_dict,
     __require_dict(overrides, "overrides"),
   )
@@ -159,14 +159,14 @@ pub fn authorization_server_metadata(provider, overrides = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn dynamic_registration_store() -> dict {
-  const inner = __oauth_dynreg_store_handle()
+pub fn dynamic_registration_store(harness: Harness) -> dict {
+  const inner = harness.auth.oauth_registration_store()
   return inner
     + {
     _namespace: "oauth_dynreg",
-    register: { metadata -> register_client(inner, metadata) },
-    get: { client_id -> get_client(inner, client_id) },
-    list: { -> list_clients(inner) },
+    register: { metadata -> register_client(harness, inner, metadata) },
+    get: { client_id -> get_client(harness.auth, inner, client_id) },
+    list: { -> list_clients(harness.auth, inner) },
   }
 }
 
@@ -194,18 +194,21 @@ fn __redact_shape(metadata, response) {
  * @effects: []
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: register_client(store, {redirect_uris: ["https://app.example/cb"]})
+ * @example: register_client(harness, store, {redirect_uris: ["https://app.example/cb"]})
  */
-pub fn register_client(store, metadata) -> dict {
+pub fn register_client(harness: Harness, store, metadata) -> dict {
   const store_dict = __require_dict(store, "store")
   const metadata_dict = __require_dict(metadata, "metadata")
-  const response = __oauth_dynreg_register(store_dict, metadata_dict)
+  const response = harness.auth.oauth_register_client(store_dict, metadata_dict)
   const payload = {
     client_id: __safe_get(response, "client_id"),
     issued_at: __safe_get(response, "client_id_issued_at"),
     redacted: __redact_shape(metadata_dict, response),
   }
-  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REGISTERED, payload, {dynreg: "true"})
+  const _ = harness.channels.append(
+    __AUDIT_TOPIC,
+    {kind: __AUDIT_KIND_REGISTERED, payload: payload, tags: {dynreg: "true"}},
+  )
   return response
 }
 
@@ -219,8 +222,8 @@ pub fn register_client(store, metadata) -> dict {
  * @api_stability: experimental
  * @example: get_client(store, "abc123")
  */
-pub fn get_client(store, client_id) -> dict {
-  return __oauth_dynreg_get(__require_dict(store, "store"), client_id)
+pub fn get_client(auth: HarnessAuth, store, client_id) -> dict {
+  return auth.oauth_registered_client(__require_dict(store, "store"), client_id)
 }
 
 /**
@@ -230,8 +233,8 @@ pub fn get_client(store, client_id) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn list_clients(store) -> list<string> {
-  return __oauth_dynreg_list(__require_dict(store, "store"))
+pub fn list_clients(auth: HarnessAuth, store) -> list<string> {
+  return auth.oauth_registered_clients(__require_dict(store, "store"))
 }
 
 /**

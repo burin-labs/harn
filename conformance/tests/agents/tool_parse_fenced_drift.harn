@@ -14,52 +14,44 @@
 // fail loudly — never partially — when an envelope is truncated or ambiguous.
 import { probe_json } from "_tool_parse_probe"
 
-pipeline main() {
-  probe_json(
-    "json fence accepts with a violation",
+pipeline main(harness: Harness) {
+  probe_json(harness,  harness, "json fence accepts with a violation",
     """```json
 {"name": "a", "args": {}}
 ```""",
   )
-  probe_json(
-    "tool_code fence drift",
+  probe_json(harness,  harness, "tool_code fence drift",
     """```tool_code
 {"name": "a", "args": {"k": 1}}
 ```""",
   )
-  probe_json(
-    "tool-with-language fence drift",
+  probe_json(harness,  harness, "tool-with-language fence drift",
     """```tool python
 {"name": "a", "args": {"k": 1}}
 ```""",
   )
-  probe_json(
-    "function_call fence drift",
+  probe_json(harness,  harness, "function_call fence drift",
     """```function_call
 {"name": "a", "args": {"k": 1}}
 ```""",
   )
-  probe_json(
-    "tilde tool fence drift",
+  probe_json(harness,  harness, "tilde tool fence drift",
     """~~~tool
 {"name": "a", "args": {"k": 1}}
 ~~~""",
   )
-  probe_json(
-    "invalid body in a drifted fence",
+  probe_json(harness,  harness, "invalid body in a drifted fence",
     """```tool_code
 not json
 ```""",
   )
-  probe_json("bare json object", "{\"name\": \"a\", \"args\": {\"k\": 1}}")
-  probe_json(
-    "legacy tagged markup under the json protocol",
+  probe_json(harness, "bare json object", "{\"name\": \"a\", \"args\": {\"k\": 1}}")
+  probe_json(harness,  harness, "legacy tagged markup under the json protocol",
     """<tool_call>
 a({})
 </tool_call>""",
   )
-  probe_json(
-    "prose before a canonical tool fence",
+  probe_json(harness,  harness, "prose before a canonical tool fence",
     """Here is the call:
 ```tool
 {"name": "a", "args": {"k": 1}}
@@ -67,59 +59,49 @@ a({})
   )
   // The Qwen chat template: one `<tool>` marker introducing consecutive
   // objects, arguments left inline beside `name` instead of nested under `args`.
-  probe_json(
-    "chat template envelope with inline argument calls",
+  probe_json(harness,  harness, "chat template envelope with inline argument calls",
     """<tool_calls>
 <tool>
 {"name":"look","file":"src/writer.zig"}
 {"name":"look","file":"src/parser.zig"}
 </tool_calls>""",
   )
-  probe_json(
-    "chat template envelope with per-call close markers",
+  probe_json(harness,  harness, "chat template envelope with per-call close markers",
     "<tool_calls><tool>{\"name\":\"a\",\"args\":{\"k\":1}}</tool><tool>{\"tool\":\"b\",\"arguments\":{\"v\":2}}</tool></tool_calls>",
   )
-  probe_json(
-    "malformed chat template envelope dispatches nothing",
+  probe_json(harness,  harness, "malformed chat template envelope dispatches nothing",
     "<tool_calls>\n<tool>\n{\"name\":\"look\",\"file\":\"src/writer.zig\"",
   )
-  probe_json(
-    "truncated second marker drops the first call too",
+  probe_json(harness,  harness, "truncated second marker drops the first call too",
     "<tool_calls><tool>{\"name\":\"look\",\"file\":\"src/lib.rs\"}<tool></tool_calls>",
   )
-  probe_json("unmatched tool close marker", "<tool_calls></tool></tool_calls>")
-  probe_json(
-    "envelope without a tool marker",
+  probe_json(harness, "unmatched tool close marker", "<tool_calls></tool></tool_calls>")
+  probe_json(harness,  harness, "envelope without a tool marker",
     "<tool_calls>{\"name\":\"look\",\"file\":\"src/writer.zig\"}</tool_calls>",
   )
   // `<tool_code>` wrapping JSON, with and without a close tag.
-  probe_json(
-    "tool_code tag with inline json args",
+  probe_json(harness,  harness, "tool_code tag with inline json args",
     """<tool_code>
 { "name": "look", "file": "src/writer.zig", "intent": "read" }""",
   )
-  probe_json(
-    "tool_code tag with multiple json objects",
+  probe_json(harness,  harness, "tool_code tag with multiple json objects",
     """<tool_code>
 {"name":"a","args":{"k":1}}
 {"name":"b","args":{"v":2}}
 </tool_code>""",
   )
-  probe_json(
-    "bare tool_call tag wrapping json",
+  probe_json(harness,  harness, "bare tool_call tag wrapping json",
     """<tool_call>
 {"name":"look","args":{"file":"a.rs"}}
 </tool_call>""",
   )
-  probe_json(
-    "envelope with a garbage body",
+  probe_json(harness,  harness, "envelope with a garbage body",
     """<tool_code>
 lol this is not json at all
 </tool_code>""",
   )
   // The nested-XML spelling: each argument is its own tag inside a call tag.
-  probe_json(
-    "xml envelope, three calls, no close",
+  probe_json(harness,  harness, "xml envelope, three calls, no close",
     """<tool_calls>
 <look>
 <file>
@@ -137,8 +119,7 @@ src/root.zig
 </file>
 </look>""",
   )
-  probe_json(
-    "xml envelope, one call with two args",
+  probe_json(harness,  harness, "xml envelope, one call with two args",
     """<tool_calls>
 <look>
 <file>
@@ -149,8 +130,7 @@ read
 </intent>
 </look>""",
   )
-  probe_json(
-    "xml envelope, multiline arg value kept verbatim",
+  probe_json(harness,  harness, "xml envelope, multiline arg value kept verbatim",
     """<tool_calls>
 <write>
 <content>
@@ -160,8 +140,7 @@ line two
 </write>
 </tool_calls>""",
   )
-  probe_json(
-    "truncated inner xml tag dispatches nothing",
+  probe_json(harness,  harness, "truncated inner xml tag dispatches nothing",
     """<tool_calls>
 <look>
 <file>
@@ -169,8 +148,7 @@ src/writer.zig""",
   )
   // A repeated argument tag makes the call ambiguous: fail loud rather than
   // take the last write and dispatch a guessed value.
-  probe_json(
-    "duplicate xml argument tag is ambiguous",
+  probe_json(harness,  harness, "duplicate xml argument tag is ambiguous",
     """<tool_calls>
 <look>
 <file>
@@ -184,21 +162,18 @@ b.rs
   )
   // A literal envelope-close string inside a JSON or XML VALUE is content: the
   // close is recognized only at a structural boundary.
-  probe_json(
-    "literal tool_code close inside a json string",
+  probe_json(harness,  harness, "literal tool_code close inside a json string",
     """<tool_code>
 { "name": "write", "args": { "content": "</tool_code>" } }
 </tool_code>""",
   )
-  probe_json(
-    "literal envelope close inside a tool-marker json string",
+  probe_json(harness,  harness, "literal envelope close inside a tool-marker json string",
     """<tool_calls>
 <tool>
 { "name": "write", "content": "</tool_calls>" }
 </tool_calls>""",
   )
-  probe_json(
-    "literal envelope close inside an xml arg value",
+  probe_json(harness,  harness, "literal envelope close inside an xml arg value",
     """<tool_calls>
 <write>
 <content>
@@ -208,16 +183,14 @@ b.rs
 </tool_calls>""",
   )
   // Prose on either side of an envelope survives as prose.
-  probe_json(
-    "prose before an envelope",
+  probe_json(harness,  harness, "prose before an envelope",
     """I will read the writer next.
 <tool_calls>
 <tool>
 {"name":"look","file":"src/writer.zig"}
 </tool_calls>""",
   )
-  probe_json(
-    "prose after an envelope close",
+  probe_json(harness,  harness, "prose after an envelope close",
     """<tool_calls>
 <tool>
 {"name":"look","file":"a.rs"}

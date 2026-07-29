@@ -1,23 +1,23 @@
-pipeline default() {
-  const finished = atomic(0)
+pipeline default(harness: Harness) {
+  const finished = harness.runtime.atomic(0)
   fn racer(n: int) {
     if n == 5 {
       return Ok("fast")
     }
-    sleep(n)
-    atomic_set(finished, 1)
+    harness.clock.sleep_ms(n)
+    harness.runtime.atomic_set(finished, 1)
     return Ok("slow")
   }
-  const winner = parallel_race([50, 5], racer)
-  __io_println(winner)
-  sleep(80)
-  __io_println(atomic_get(finished))
+  const winner = harness.runtime.parallel_race([50, 5], racer)
+  harness.stdio.println(winner)
+  harness.clock.sleep_ms(80)
+  harness.stdio.println(harness.runtime.atomic_get(finished))
   fn failer(n: int) {
     return Err(n)
   }
   try {
-    parallel_race([1, 2], failer)
+    harness.runtime.parallel_race([1, 2], failer)
   } catch (e) {
-    __io_println("all failed")
+    harness.stdio.println("all failed")
   }
 }

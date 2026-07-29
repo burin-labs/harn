@@ -101,11 +101,15 @@ pub type HostLeaseScopeResult<T> = {
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
 pub fn host_lease_status(
+  host_lease: HarnessHostLease,
   host: string,
   resource_class: HostLeaseResourceClass = "whole-machine",
   domain: string = "default",
 ) -> HostLeaseStatus {
-  return hostlib_host_lease_status({host: host, resource_class: resource_class, domain: domain})
+  return schema_expect(
+    host_lease.status({host: host, resource_class: resource_class, domain: domain}),
+    schema_of(HostLeaseStatus),
+  )
 }
 
 fn __host_lease_is_callable(value) -> bool {
@@ -136,10 +140,14 @@ fn __host_lease_request(options: HostLeaseOptions, wait_slice_ms: int) -> dict {
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
 pub fn host_lease_acquire(
+  host_lease: HarnessHostLease,
   options: HostLeaseOptions,
   wait_slice_ms: int = 0,
 ) -> HostLeaseAcquireReceipt {
-  return hostlib_host_lease_acquire(__host_lease_request(options, wait_slice_ms))
+  return schema_expect(
+    host_lease.acquire(__host_lease_request(options, wait_slice_ms)),
+    schema_of(HostLeaseAcquireReceipt),
+  )
 }
 
 /**
@@ -151,17 +159,21 @@ pub fn host_lease_acquire(
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
 pub fn host_lease_update_metadata(
+  host_lease: HarnessHostLease,
   handle: HostLeaseHandle,
   metadata: dict<string, string>,
 ) -> HostLeaseMetadataUpdateReceipt {
-  return hostlib_host_lease_update_metadata(
-    {
-      host: handle.host,
-      resource_class: handle.resource_class,
-      domain: handle.domain,
-      lease_id: handle.lease_id,
-      metadata: metadata,
-    },
+  return schema_expect(
+    host_lease.update_metadata(
+      {
+        host: handle.host,
+        resource_class: handle.resource_class,
+        domain: handle.domain,
+        lease_id: handle.lease_id,
+        metadata: metadata,
+      },
+    ),
+    schema_of(HostLeaseMetadataUpdateReceipt),
   )
 }
 
@@ -171,11 +183,17 @@ pub fn host_lease_update_metadata(
  * @effects: [host]
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
-pub fn host_lease_release(acquire: HostLeaseAcquireReceipt) -> HostLeaseReleaseReceipt {
+pub fn host_lease_release(
+  host_lease: HarnessHostLease,
+  acquire: HostLeaseAcquireReceipt,
+) -> HostLeaseReleaseReceipt {
   if acquire.guard == nil {
     throw "std/host_lease: acquire receipt has no live resource guard"
   }
-  return hostlib_host_lease_release({guard: acquire.guard})
+  return schema_expect(
+    host_lease.release({guard: acquire.guard}),
+    schema_of(HostLeaseReleaseReceipt),
+  )
 }
 
 /**
@@ -188,7 +206,12 @@ pub fn host_lease_release(acquire: HostLeaseAcquireReceipt) -> HostLeaseReleaseR
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  * @example: with_host_lease({owner: "release", resource_class: "rust-heavy"}, { _ -> build() })
  */
-pub fn with_host_lease<T>(options: HostLeaseOptions, body) -> HostLeaseScopeResult<T> {
+pub fn with_host_lease<T>(
+  host_lease: HarnessHostLease,
+  clock: HarnessClock,
+  options: HostLeaseOptions,
+  body,
+) -> HostLeaseScopeResult<T> {
   if !__host_lease_is_callable(body) {
     throw "std/host_lease: body must be callable; got " + type_of(body)
   }
@@ -200,10 +223,10 @@ pub fn with_host_lease<T>(options: HostLeaseOptions, body) -> HostLeaseScopeResu
   if configured_slice_ms <= 0 || configured_slice_ms > 5000 {
     throw "std/host_lease: wait_slice_ms must be between 1 and 5000"
   }
-  const started_ms = __timing_now_monotonic_ms()
-  let acquire = host_lease_acquire(options, 0)
+  const started_ms = clock.monotonic_ms()
+  let acquire = host_lease_acquire(host_lease, options, 0)
   while acquire.status == "deferred" {
-    const elapsed_ms = __timing_now_monotonic_ms() - started_ms
+    const elapsed_ms = clock.monotonic_ms() - started_ms
     const remaining_ms = timeout_ms - elapsed_ms
     if remaining_ms <= 0 {
       return {status: "deferred", acquire: acquire}
@@ -213,7 +236,7 @@ pub fn with_host_lease<T>(options: HostLeaseOptions, body) -> HostLeaseScopeResu
     } else {
       configured_slice_ms
     }
-    acquire = host_lease_acquire(options, slice_ms)
+    acquire = host_lease_acquire(host_lease, options, slice_ms)
   }
   const handle = acquire.handle
   if handle == nil || acquire.guard == nil {
@@ -221,11 +244,11 @@ pub fn with_host_lease<T>(options: HostLeaseOptions, body) -> HostLeaseScopeResu
   }
   try {
     const value = body(handle)
-    const release = host_lease_release(acquire)
+    const release = host_lease_release(host_lease, acquire)
     return {status: "completed", value: value, acquire: acquire, release: release}
   } catch (error) {
     const _ = try {
-      host_lease_release(acquire)
+      host_lease_release(host_lease, acquire)
     } catch (_release_error) {
       nil
     }

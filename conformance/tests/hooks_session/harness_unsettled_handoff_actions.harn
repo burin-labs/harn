@@ -2,8 +2,8 @@
  * P-04 action surface: a custom on_finish callback can create, inspect,
  * acknowledge, and finalize partial handoff state through the Harness API.
  */
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const queued = harness.handoff_to("nightly-drain", {work: "finish"})
       harness.stdio.println("handoff=" + queued.status)

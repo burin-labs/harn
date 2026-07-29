@@ -1,11 +1,10 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [llm_text("still working")],
+    harness.llm, [llm_text("still working")],
     { ->
-      const result = agent_loop(
-        "Just keep replying",
+      const result = agent_loop(harness, "Just keep replying",
         "You are helpful",
         {
           provider: "mock",
@@ -15,7 +14,7 @@ pipeline test(task) {
           max_nudges: 5,
         },
       )
-      __io_println(result.status)
+      harness.stdio.println(result.status)
       assert(result.status == "budget_exhausted", "status should be budget_exhausted")
       assert(result.llm.iterations >= 1, "should have run at least one iteration")
     },

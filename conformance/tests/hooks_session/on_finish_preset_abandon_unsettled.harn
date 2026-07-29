@@ -8,8 +8,8 @@
  */
 import { lifecycle_audit_log_take, on_finish_abandon } from "std/lifecycle"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("staging-pipeline", {note: "abandon test"})
       const result = on_finish_abandon(harness, return_value)

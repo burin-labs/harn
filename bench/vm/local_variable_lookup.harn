@@ -1,4 +1,4 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const a = 1
   const b = 2
   const c = 3
@@ -14,6 +14,6 @@ pipeline default(task) {
     i = i + 1
   }
   if total < 0 {
-    log("unreachable")
+    harness.stdio.println("unreachable")
   }
 }

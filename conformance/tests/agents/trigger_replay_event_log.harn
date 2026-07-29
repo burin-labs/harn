@@ -1,6 +1,6 @@
 import "std/triggers"
 
-fn replay_marker_path(event: TriggerEvent) -> string {
+fn replay_marker_path(harness: Harness, event: TriggerEvent) -> string {
   return path_join(
     harness.fs.temp_dir(),
     "harn-trigger-replay-event-log-" + to_string(event.headers?.x_delivery ?? "unknown")
@@ -8,8 +8,8 @@ fn replay_marker_path(event: TriggerEvent) -> string {
   )
 }
 
-fn flaky_handler(event: TriggerEvent) -> dict {
-  const marker_path = replay_marker_path(event)
+fn flaky_handler(harness: Harness, event: TriggerEvent) -> dict {
+  const marker_path = replay_marker_path(harness, event)
   if !harness.fs.exists(marker_path) {
     harness.fs.write_text(marker_path, "seen")
     throw "replay-fail:" + event.kind
@@ -17,14 +17,14 @@ fn flaky_handler(event: TriggerEvent) -> dict {
   return {kind: event.kind, provider: event.provider, replayed: event.id}
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
   const delivery = "evt-replay-" + unique
   const trigger_id = "replay-trigger-" + unique
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -42,29 +42,29 @@ pipeline test(task) {
       package_name: nil,
     },
   )
-  const fired: DispatchHandle = trigger_fire(
+  const fired: DispatchHandle = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: delivery}},
   )
-  __io_println(fired.status == "dlq" && contains(fired.error ?? "", "replay-fail:issue.opened"))
-  const before: list<DlqEntry> = trigger_inspect_dlq()
+  harness.stdio.println(fired.status == "dlq" && contains(fired.error ?? "", "replay-fail:issue.opened"))
+  const before: list<DlqEntry> = harness.runtime.trigger_inspect_dlq()
   const pending_before = before.filter({ entry -> entry.binding_id == handle.id })
-  __io_println(len(pending_before) == 1 && pending_before[0]?.event_id == fired.event_id)
-  __io_println(
+  harness.stdio.println(len(pending_before) == 1 && pending_before[0]?.event_id == fired.event_id)
+  harness.stdio.println(
     len(pending_before[0]?.retry_history) == 1
       && pending_before[0]?.retry_history?.[0]?.status
       == "dlq",
   )
-  const replay: DispatchHandle = trigger_replay(fired.event_id)
-  __io_println(replay.status == "dispatched" && replay.replay_of_event_id == fired.event_id)
-  __io_println(contains(json_stringify(replay.result ?? {}), "\"kind\":\"issue.opened\""))
-  const after: list<DlqEntry> = trigger_inspect_dlq()
+  const replay: DispatchHandle = harness.runtime.trigger_replay(fired.event_id)
+  harness.stdio.println(replay.status == "dispatched" && replay.replay_of_event_id == fired.event_id)
+  harness.stdio.println(contains(json_stringify(replay.result ?? {}), "\"kind\":\"issue.opened\""))
+  const after: list<DlqEntry> = harness.runtime.trigger_inspect_dlq()
   const pending_after = after.filter({ entry -> entry.binding_id == handle.id })
-  __io_println(len(pending_after) == 0)
-  const bindings_after: list<TriggerBinding> = trigger_list()
+  harness.stdio.println(len(pending_after) == 0)
+  const bindings_after: list<TriggerBinding> = harness.runtime.trigger_list()
   const live = bindings_after.find({ binding -> binding.id == handle.id })
-  __io_println(live?.metrics?.dlq == 1)
-  __io_println(live?.metrics?.dispatched == 1)
+  harness.stdio.println(live?.metrics?.dlq == 1)
+  harness.stdio.println(live?.metrics?.dispatched == 1)
   const marker_path = path_join(
     harness.fs.temp_dir(),
     "harn-trigger-replay-event-log-" + delivery + ".marker",

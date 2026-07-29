@@ -1,30 +1,30 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
- * `clear_session_hooks()` removes all session-level hooks but leaves
+ * `harness.agent.clear_session_hooks()` removes all session-level hooks but leaves
  * tool/persona hooks alone. Unknown event names raise.
  */
-const observed = atomic(0)
+const observed = harness.runtime.atomic(0)
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "session_start",
     { _ev ->
-      atomic_add(observed, 1)
+      harness.runtime.atomic_add(observed, 1)
       return nil
     },
   )
-  clear_session_hooks()
+  harness.agent.clear_session_hooks()
   with_llm_script(
-    [llm_text("ok")],
+    harness.llm, [llm_text("ok")],
     { ->
-      agent_loop("hi", nil, {provider: "mock"})
-      __io_println(atomic_get(observed))
+      agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(harness.runtime.atomic_get(observed))
       const err = try {
-        register_session_hook("PreToolUse", { _ev -> return nil })
+        harness.agent.register_session_hook("PreToolUse", { _ev -> return nil })
       }
-      __io_println(is_err(err))
+      harness.stdio.println(is_err(err))
     },
   )
 }

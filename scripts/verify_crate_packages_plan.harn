@@ -114,14 +114,14 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const metadata_path = to_string(parsed?.metadata ?? "")
   const root = to_string(parsed?.root ?? "")
   if metadata_path == "" || root == "" {
     harness.stdio.eprintln("error: --metadata and --root are required")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const meta = json_parse(harness.fs.read_text(metadata_path))
   harness.stdio.println(join(verify_crate_packages_plan_rows(meta, path_normalize(root)), "\n"))

@@ -38,6 +38,7 @@ import "std/verification_types"
  * @api_stability: experimental
  */
 pub fn verification_affected_targets(
+  harness: Harness,
   changed_paths: list<string>,
   adapters = nil,
   options = nil,
@@ -51,7 +52,7 @@ pub fn verification_affected_targets(
   for row in rows {
     const adapter_id = __verification_adapter_id(row, index)
     const parser_id = __verification_parser_id(row)
-    const spec = __verification_adapter_spec(row, paths, opts)
+    const spec = __verification_adapter_spec(harness.fs, row, paths, opts)
     if spec == nil {
       adapter_facts = adapter_facts
         + [
@@ -66,7 +67,11 @@ pub fn verification_affected_targets(
       index = index + 1
       continue
     }
-    const result = command_run(spec, __verification_adapter_command_options(row, opts))
+    const result = command_run(
+      harness.tools,
+      spec,
+      __verification_adapter_command_options(row, opts),
+    )
     const parsed = try {
       __verification_parse_adapter_targets(row, adapter_id, parser_id, result, paths)
     } catch (e) {
@@ -106,7 +111,7 @@ pub fn verification_affected_targets(
     index = index + 1
   }
   const fallback = if len(targets) == 0 || opts?.include_fallback == true {
-    __verification_code_index_fallback(paths, opts)
+    __verification_code_index_fallback(harness.code_index, paths, opts)
   } else {
     {enabled: false, available: false, targets: []}
   }
@@ -137,9 +142,9 @@ pub fn verification_affected_targets(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_ladder_plan(query: dict, options = nil) -> VerificationLadderPlan {
+pub fn verification_ladder_plan(harness: Harness, query: dict, options = nil) -> VerificationLadderPlan {
   const opts = __verification_opts(options)
-  const matches = verification_profile_matches(query, opts?.dir)
+  const matches = harness.runtime.verification_profile_matches(query, opts?.dir)
   let selected = []
   let skipped = []
   for profile_match in matches {
@@ -195,7 +200,7 @@ pub fn verification_ladder_plan(query: dict, options = nil) -> VerificationLadde
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_hud_model(state: dict, options = nil) -> dict {
+pub fn verification_hud_model(harness: Harness, state: dict, options = nil) -> dict {
   const opts = __verification_opts(options)
   if type_of(state) != "dict" {
     return {
@@ -211,7 +216,7 @@ pub fn verification_hud_model(state: dict, options = nil) -> dict {
   const dir = trim(to_string(opts?.dir ?? state?.dir ?? "."))
   const query = __verification_hud_query(state, opts)
   const plan_options = __verification_hud_plan_options(dir, opts)
-  const next_plan = verification_ladder_plan(
+  const next_plan = verification_ladder_plan(harness, 
     query,
     plan_options + {limit: to_int(opts?.next_limit ?? 1) ?? 1},
   )
@@ -224,7 +229,7 @@ pub fn verification_hud_model(state: dict, options = nil) -> dict {
     limit: 1,
   }
     + (opts?.full_plan_options ?? {})
-  const full_plan = verification_ladder_plan(query, full_options)
+  const full_plan = verification_ladder_plan(harness, query, full_options)
   const full_check =
     len(full_plan.selected) > 0 ? __verification_hud_entry(full_plan.selected[0]) : nil
   const current_hashes = __verification_snapshot_map(
@@ -262,11 +267,11 @@ pub fn verification_hud_model(state: dict, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_hud_text(model_or_state: dict, options = nil) -> string {
+pub fn verification_hud_text(harness: Harness, model_or_state: dict, options = nil) -> string {
   const model = if model_or_state?.schema == "harn.verification.hud_model.v1" {
     model_or_state
   } else {
-    verification_hud_model(model_or_state, options)
+    verification_hud_model(harness, model_or_state, options)
   }
   if !(model?.visible ?? false) {
     return ""
@@ -308,14 +313,14 @@ pub fn verification_hud_text(model_or_state: dict, options = nil) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_diagnostic_delta(
+pub fn verification_diagnostic_delta(harness: Harness, 
   previous,
   current,
   options = nil,
 ) -> VerificationDiagnosticDelta {
   const normalization = __verification_delta_normalization(options)
-  const previous_info = __verification_delta_info(previous, normalization)
-  const current_info = __verification_delta_info(current, normalization)
+  const previous_info = __verification_delta_info(harness, previous, normalization)
+  const current_info = __verification_delta_info(harness, current, normalization)
   const previous_gate_signatures = __verification_delta_gate_signatures(previous_info)
   const current_gate_signatures = __verification_delta_gate_signatures(current_info)
   const removed = __verification_delta_set_minus(previous_gate_signatures, current_gate_signatures)
@@ -473,7 +478,7 @@ pub fn verification_diagnostic_delta(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_gate_input(
+pub fn verification_gate_input(harness: Harness, 
   previous,
   current,
   current_hashes = nil,
@@ -494,7 +499,7 @@ pub fn verification_gate_input(
   )
   const previous_delta = __verification_gate_delta_value(previous, previous_classification)
   const current_delta = __verification_gate_delta_value(current, current_classification)
-  const delta = verification_diagnostic_delta(previous_delta, current_delta, opts)
+  const delta = verification_diagnostic_delta(harness, previous_delta, current_delta, opts)
   const status = __verification_gate_status(delta, current_classification)
   const feeds_gates = current_classification?.feedsGates ? true : false
   const gate_bearing_failure = feeds_gates && len(delta?.current?.signatures ?? []) > 0
@@ -537,7 +542,7 @@ pub fn verification_gate_input(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_observation_from_command_result(
+pub fn verification_observation_from_command_result(harness: Harness, 
   result: dict,
   options = nil,
 ) -> VerificationCheckObservation {
@@ -555,7 +560,7 @@ pub fn verification_observation_from_command_result(
   if snapshot != nil {
     observation = observation + {snapshot: snapshot}
   }
-  const failure_signature = __verification_failure_signature(result, opts)
+  const failure_signature = __verification_failure_signature(harness, result, opts)
   if failure_signature != nil {
     observation = observation + {failureSignature: failure_signature}
   }
@@ -574,14 +579,14 @@ pub fn verification_observation_from_command_result(
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_record_check_result(
+pub fn verification_record_check_result(harness: Harness, 
   row_id: string,
   result: dict,
   options = nil,
 ) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
-  const observation = verification_observation_from_command_result(result, opts)
-  const row = verification_profile_record_run(row_id, observation, opts?.dir)
+  const observation = verification_observation_from_command_result(harness, result, opts)
+  const row = harness.runtime.verification_profile_record_run(row_id, observation, opts?.dir)
   return {result: result, observation: observation, row: row, snapshot: nil}
 }
 
@@ -601,20 +606,20 @@ pub fn verification_record_check_result(
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_run_check(row_id: string, spec, options = nil) -> VerificationRecordedCheck {
+pub fn verification_run_check(harness: Harness, row_id: string, spec, options = nil) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
   if opts?.command_options?.background == true {
     throw "verification_run_check: background command_options are not supported; use verification_start_check"
   }
-  const captured = __verification_capture_snapshot(opts)
+  const captured = __verification_capture_snapshot(harness.code_index, opts)
   const result = command_run(spec, opts?.command_options)
-  const observation = verification_observation_from_command_result(
+  const observation = verification_observation_from_command_result(harness, 
     result,
     opts + {snapshot: captured.snapshot},
   )
   let row = nil
   if opts?.record != false {
-    row = verification_profile_record_run(row_id, observation, opts?.dir)
+    row = harness.runtime.verification_profile_record_run(row_id, observation, opts?.dir)
   }
   return {result: result, observation: observation, row: row, snapshot: captured.fact}
 }
@@ -629,9 +634,9 @@ pub fn verification_run_check(row_id: string, spec, options = nil) -> Verificati
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_start_check(row_id: string, spec, options = nil) -> VerificationStartedCheck {
+pub fn verification_start_check(harness: Harness, row_id: string, spec, options = nil) -> VerificationStartedCheck {
   const opts = __verification_opts(options)
-  const captured = __verification_capture_snapshot(opts)
+  const captured = __verification_capture_snapshot(harness.code_index, opts)
   const command_options = (opts?.command_options ?? {}) + {background: true}
   const started = command_run(spec, command_options)
   return {
@@ -658,7 +663,7 @@ pub fn verification_start_check(row_id: string, spec, options = nil) -> Verifica
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_finish_check(started_check: dict, options = nil) -> VerificationRecordedCheck {
+pub fn verification_finish_check(harness: Harness, started_check: dict, options = nil) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
   const row_id = opts?.row_id ?? started_check?.row_id
   if row_id == nil || trim(to_string(row_id)) == "" {
@@ -666,10 +671,10 @@ pub fn verification_finish_check(started_check: dict, options = nil) -> Verifica
   }
   const result = command_wait(started_check.started, opts?.wait_options ?? {timeout_ms: 60000})
   const observation_options = (started_check?.observation_options ?? {}) + opts
-  const observation = verification_observation_from_command_result(result, observation_options)
+  const observation = verification_observation_from_command_result(harness, result, observation_options)
   let row = nil
   if opts?.record != false && started_check?.observation_options?.record != false {
-    row = verification_profile_record_run(to_string(row_id), observation, observation_options?.dir)
+    row = harness.runtime.verification_profile_record_run(to_string(row_id), observation, observation_options?.dir)
   }
   return {result: result, observation: observation, row: row, snapshot: started_check?.snapshot}
 }

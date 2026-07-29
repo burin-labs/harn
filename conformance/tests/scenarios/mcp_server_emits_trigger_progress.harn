@@ -1,7 +1,7 @@
 import "../_common"
 
-pipeline default() {
-  const root = path_join(harness.fs.temp_dir(), "harn-mcp-progress-" + uuid())
+pipeline default(harness: Harness) {
+  const root = path_join(harness.fs.temp_dir(), "harn-mcp-progress-" + harness.random.uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -34,6 +34,6 @@ pipeline default() {
   )
   require result.success, "mcp call failed"
   const payload = json_parse(result.stdout.trim())
-  __io_println(payload.result.status == "dispatched")
-  __io_println(payload.progress_count >= 1)
+  harness.stdio.println(payload.result.status == "dispatched")
+  harness.stdio.println(payload.progress_count >= 1)
 }

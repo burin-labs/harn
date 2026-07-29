@@ -1,19 +1,19 @@
 import "std/sqlite"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const path = ".harn/events.sqlite"
   if !harness.fs.exists(path) {
-    __io_println("missing " + path)
+    harness.stdio.println("missing " + path)
     return
   }
-  const db = sqlite_open(path, {read_only: true, busy_timeout_ms: 5000})
+  const db = harness.sqlite.open(path, {read_only: true, busy_timeout_ms: 5000})
   const rows = sqlite_query(
     db,
     "select topic, kind, event_id from events order by event_id desc limit ?",
     [10],
   )
   for row in rows {
-    __io_println(row.topic + " #" + to_string(row.event_id) + " " + row.kind)
+    harness.stdio.println(row.topic + " #" + to_string(row.event_id) + " " + row.kind)
   }
   sqlite_close(db)
 }

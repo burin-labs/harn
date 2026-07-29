@@ -106,12 +106,12 @@ fn __session_store_verify_report(raw: dict) -> SessionStoreVerifyReport {
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_append(
+pub fn session_store_append(harness: Harness, 
   session_id: string,
   payload,
   options: SessionStoreOptions? = nil,
 ) -> SessionStoreEvent {
-  return __session_store_event(__session_store_append(session_id, payload, options))
+  return __session_store_event(harness.agent.session_store_append(session_id, payload, options))
 }
 
 /**
@@ -120,11 +120,11 @@ pub fn session_store_append(
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_events(
+pub fn session_store_events(harness: Harness, 
   session_id: string,
   options: SessionStoreOptions? = nil,
 ) -> list<SessionStoreEvent> {
-  return __session_store_events(session_id, options).map({ event -> __session_store_event(event) })
+  return harness.agent.session_store_events(session_id, options).map({ event -> __session_store_event(event) })
     .to_list()
 }
 
@@ -134,12 +134,12 @@ pub fn session_store_events(
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_payloads(
+pub fn session_store_payloads(harness: Harness, 
   session_id: string,
   options: SessionStoreOptions? = nil,
 ) -> list<any> {
   let payloads = []
-  for event in session_store_events(session_id, options) {
+  for event in session_store_events(harness, session_id, options) {
     if event.payload != nil {
       payloads = payloads.appending(event.payload)
     }
@@ -154,10 +154,10 @@ pub fn session_store_payloads(
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_project(session_id: string, options: SessionStoreOptions? = nil) -> list<any> {
+pub fn session_store_project(harness: Harness, session_id: string, options: SessionStoreOptions? = nil) -> list<any> {
   let records = {}
   let order = []
-  for mutation in session_store_payloads(session_id, options) {
+  for mutation in session_store_payloads(harness, session_id, options) {
     const operation = to_string(mutation?.operation ?? "")
     if operation == "upsert" {
       const record = mutation?.record
@@ -199,13 +199,13 @@ pub fn session_store_project(session_id: string, options: SessionStoreOptions? =
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_project_value(
+pub fn session_store_project_value(harness: Harness, 
   session_id: string,
   default_value = nil,
   options: SessionStoreOptions? = nil,
 ) -> any {
   let value = default_value
-  for mutation in session_store_payloads(session_id, options) {
+  for mutation in session_store_payloads(harness, session_id, options) {
     const operation = to_string(mutation?.operation ?? "")
     if operation == "replace" && mutation?.value != nil {
       value = mutation.value
@@ -223,11 +223,11 @@ pub fn session_store_project_value(
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_verify(
+pub fn session_store_verify(harness: Harness, 
   session_id: string,
   options: SessionStoreOptions? = nil,
 ) -> SessionStoreVerifyReport {
-  return __session_store_verify_report(__session_store_verify(session_id, options))
+  return __session_store_verify_report(harness.agent.session_store_verify(session_id, options))
 }
 
 /**
@@ -239,8 +239,8 @@ pub fn session_store_verify(
  * @effects: [env.read]
  * @errors: [runtime]
  */
-pub fn session_store_path(session_id: string, options: SessionStoreOptions? = nil) -> string {
-  return __session_store_path(session_id, options)
+pub fn session_store_path(harness: Harness, session_id: string, options: SessionStoreOptions? = nil) -> string {
+  return harness.agent.session_store_path(session_id, options)
 }
 
 /**
@@ -252,6 +252,6 @@ pub fn session_store_path(session_id: string, options: SessionStoreOptions? = ni
  * @effects: [env.read]
  * @errors: [runtime]
  */
-pub fn session_store_database_path(options: SessionStoreOptions? = nil) -> string {
-  return __session_store_database_path(options)
+pub fn session_store_database_path(harness: Harness, options: SessionStoreOptions? = nil) -> string {
+  return harness.agent.session_store_database_path(options)
 }

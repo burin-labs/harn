@@ -8,7 +8,7 @@ type Ping = {kind: "ping", ttl: int}
 
 type Msg = Ping | {kind: "pong", latency_ms: int} | {kind: "close", reason: string}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   fn summarise(m: Msg) -> string {
     return match m.kind {
       "ping" -> { "ping:" + to_string(m.ttl) }
@@ -17,9 +17,9 @@ pipeline default() {
     }
   }
   // Narrowed to the Ping shape — `ttl` is reachable.
-  __io_println(summarise({kind: "ping", ttl: 30}))
-  __io_println(summarise({kind: "pong", latency_ms: 42}))
-  __io_println(summarise({kind: "close", reason: "bye"}))
+  harness.stdio.println(summarise({kind: "ping", ttl: 30}))
+  harness.stdio.println(summarise({kind: "pong", latency_ms: 42}))
+  harness.stdio.println(summarise({kind: "close", reason: "bye"}))
   fn via_if(m: Msg) -> string {
     if m.kind == "ping" {
       return "p:" + to_string(m.ttl)
@@ -29,6 +29,6 @@ pipeline default() {
     }
     return "c"
   }
-  __io_println(via_if({kind: "ping", ttl: 9}))
-  __io_println(via_if({kind: "pong", latency_ms: 7}))
+  harness.stdio.println(via_if({kind: "ping", ttl: 9}))
+  harness.stdio.println(via_if({kind: "pong", latency_ms: 7}))
 }

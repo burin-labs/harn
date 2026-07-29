@@ -34,12 +34,11 @@ fn one_tool() {
   )
 }
 
-fn run_loop_with_empty_name() {
+fn run_loop_with_empty_name(harness: Harness) {
   return with_llm_script(
-    [{tool_calls: [{id: "bad-1", name: "", arguments: {}}]}, llm_text("##DONE##")],
+    harness.llm, [{tool_calls: [{id: "bad-1", name: "", arguments: {}}]}, llm_text("##DONE##")],
     { ->
-      const result = agent_loop(
-        "do something",
+      const result = agent_loop(harness, "do something",
         nil,
         {
           provider: "mock",
@@ -59,21 +58,21 @@ fn run_loop_with_empty_name() {
  * Turn 1: a malformed call with an empty name — the loop must NOT abort.
  * Turn 2: the model recovers and finishes.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   // Part A: the whole run survives a nameless tool call and reaches `done`.
-  __io_println("loop.status=" + run_loop_with_empty_name())
+  harness.stdio.println("loop.status=" + run_loop_with_empty_name(harness))
   // Part B: the dispatch primitive returns a recoverable envelope, not a throw.
-  const empty = agent_dispatch_tool_call({name: "", arguments: {}}, one_tool(), {})
-  __io_println("empty.ok=" + to_string(empty?.ok))
-  __io_println("empty.status=" + to_string(empty?.status))
-  __io_println("empty.error_category=" + to_string(empty?.error_category))
-  const missing = agent_dispatch_tool_call({arguments: {}}, one_tool(), {})
-  __io_println("missing.ok=" + to_string(missing?.ok))
-  __io_println("missing.status=" + to_string(missing?.status))
-  __io_println("missing.error_category=" + to_string(missing?.error_category))
+  const empty = agent_dispatch_tool_call(harness, {name: "", arguments: {}}, one_tool(), {})
+  harness.stdio.println("empty.ok=" + to_string(empty?.ok))
+  harness.stdio.println("empty.status=" + to_string(empty?.status))
+  harness.stdio.println("empty.error_category=" + to_string(empty?.error_category))
+  const missing = agent_dispatch_tool_call(harness, {arguments: {}}, one_tool(), {})
+  harness.stdio.println("missing.ok=" + to_string(missing?.ok))
+  harness.stdio.println("missing.status=" + to_string(missing?.status))
+  harness.stdio.println("missing.error_category=" + to_string(missing?.error_category))
   // A well-formed call against the same registry still executes normally:
   // the recovery path must not have broken the happy path.
-  const good = agent_dispatch_tool_call({name: "echo", arguments: {msg: "hi"}}, one_tool(), {})
-  __io_println("good.ok=" + to_string(good?.ok))
-  __io_println("good.status=" + to_string(good?.status))
+  const good = agent_dispatch_tool_call(harness, {name: "echo", arguments: {msg: "hi"}}, one_tool(), {})
+  harness.stdio.println("good.ok=" + to_string(good?.ok))
+  harness.stdio.println("good.status=" + to_string(good?.status))
 }

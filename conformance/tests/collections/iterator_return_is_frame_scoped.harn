@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn first_match() {
     for pattern in ["a", "b"] {
       return pattern
@@ -9,5 +9,5 @@ pipeline test(task) {
   for path in ["outer"] {
     seen = seen + [path + ":" + first_match()]
   }
-  log(join(seen, ","))
+  harness.stdio.println(join(seen, ","))
 }

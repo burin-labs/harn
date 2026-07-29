@@ -6,7 +6,7 @@
  *
  * `harness.clock` aliases `monotonic_ms` and `elapsed` to the same
  * monotonic counter, and `timestamp` returns the wall-clock as seconds.
- * `sleep_ms(...)` advances the active mock instead of suspending the
+ * `harness.clock.sleep_ms(...)` advances the active mock instead of suspending the
  * runtime (the existing parallel-mock-clock fixture pins this for the
  * ambient builtin; the harness path must behave identically).
  */

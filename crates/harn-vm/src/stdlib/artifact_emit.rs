@@ -94,6 +94,8 @@ struct ValidatedArtifactSpec {
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.artifact_emit",
+    effects = ["state.write@dynamic", "observability.write@dynamic"],
     sig = "artifact_emit(kind: string, spec: any, options?: dict) -> dict",
     kind = "async",
     category = "agent.artifact",

@@ -9,7 +9,7 @@ fn checkpoints(events, schema: string) -> list {
     .to_list()
 }
 
-pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(task) {
+pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(harness: Harness, task) {
   const continue_verdict = {
     text:
       "{\"verdict\":\"continue\",\"reasoning\":\"tests are still missing\",\"next_step\":\"run the focused test\"}",
@@ -20,7 +20,7 @@ pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(task) {
   const cached_continue_verdict = continue_verdict
     + {cache_write_tokens: 0, cache_read_tokens: 80}
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("The work is complete. ##DONE##"),
       continue_verdict,
       llm_text("The work is complete. ##DONE##"),
@@ -34,7 +34,7 @@ pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(task) {
       },
     ],
     { ->
-      const session = "judge-cache-feedback-" + uuid()
+      const session = "judge-cache-feedback-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
         provider: "mock",
         session_id: session,
@@ -43,12 +43,11 @@ pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(task) {
         max_iterations: 5,
         verify_completion_judge: {provider: "mock", max_invocations: 3},
       }
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop("Finish the task and run its focused test.", nil, opts) },
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Finish the task and run its focused test.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert_eq(calls[1].system, calls[3].system)
       assert_eq(calls[3].system, calls[5].system)
       assert(calls[1].messages[0].content != calls[3].messages[0].content)

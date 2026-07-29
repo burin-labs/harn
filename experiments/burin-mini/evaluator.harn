@@ -64,7 +64,7 @@ fn semantic_eval_prompt(report, run, reference, heuristic, task_root) {
     + "Ideal reference:\n${render_ideal_reference(reference)}\n\n"
     + "Actual run trace:\n${render_actual_trace(report, run)}\n\n"
     + "Objective heuristic pre-check:\n${json_stringify(heuristic)}\n\n"
-    + "${render_inference_transcripts(task_root)}\n\n"
+    + "${render_inference_transcripts(harness, task_root)}\n\n"
     + "Return strict JSON with keys:\n"
     + "- overall_verdict\n"
     + "- overall_score\n"
@@ -77,13 +77,13 @@ fn semantic_eval_prompt(report, run, reference, heuristic, task_root) {
     + "- recommended_harness_fixes\n"
 }
 
-fn semantic_eval_with_llm(report, run, reference, heuristic, task_root) {
-  const response = llm_call(
+fn semantic_eval_with_llm(harness: Harness, report, run, reference, heuristic, task_root) {
+  const response = harness.llm.call(
     semantic_eval_prompt(report, run, reference, heuristic, task_root),
     semantic_eval_system(),
     {
-      provider: semantic_eval_provider(),
-      model: semantic_eval_model(),
+      provider: semantic_eval_provider(harness),
+      model: semantic_eval_model(harness),
       output: {schema: semantic_eval_schema(), validation: "error"},
       schema_retries: 2,
       temperature: 0,
@@ -104,11 +104,11 @@ fn semantic_eval_with_llm(report, run, reference, heuristic, task_root) {
   }
 }
 
-fn load_run_record(report, task_root) {
+fn load_run_record(harness: Harness, report, task_root) {
   const reported = report?.run_path ?? ""
   if reported != "" {
     const loaded = try {
-      load_json_file(reported)
+      load_json_file(harness, reported)
     } catch (e) {
       nil
     }
@@ -119,7 +119,7 @@ fn load_run_record(report, task_root) {
   if task_root != "" {
     const fallback = path_join(task_root, "run_record.json")
     const loaded = try {
-      load_json_file(fallback)
+      load_json_file(harness, fallback)
     } catch (e) {
       nil
     }
@@ -137,34 +137,34 @@ fn output_path(default_report_path) {
   return default_report_path.replace(".json", ".semantic.json")
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   guard len(argv) > 0 else {
     throw "Usage: harn run experiments/burin-mini/evaluator.harn -- <report.json> [output.json] [task-root]"
   }
   const report_path = argv[0]
-  const report = load_json_file(report_path)
+  const report = load_json_file(harness, report_path)
   const task_root = if len(argv) > 2 {
     argv[2]
   } else {
     ""
   }
-  const run = load_run_record(report, task_root)
+  const run = load_run_record(harness, report, task_root)
   const reference = task_reference(report?.task_id ?? "")
   const heuristic = heuristic_semantic_eval(report, run, reference)
-  const result = if semantic_eval_mode() == "heuristic" {
+  const result = if semantic_eval_mode(harness) == "heuristic" {
     heuristic
   } else {
-    semantic_eval_with_llm(report, run, reference, heuristic, task_root)
+    semantic_eval_with_llm(harness, report, run, reference, heuristic, task_root)
   }
   const destination = output_path(report_path)
   harness.fs.write_text(destination, json_stringify(result))
-  __io_println("task_id=${report?.task_id ?? ""}")
-  __io_println("semantic_eval_mode=${semantic_eval_mode()}")
-  __io_println("semantic_eval_provider=${semantic_eval_provider()}")
-  __io_println("semantic_eval_model=${semantic_eval_model()}")
-  __io_println("overall_verdict=${result?.overall_verdict ?? "unknown"}")
-  __io_println("overall_score=${result?.overall_score ?? 0}")
-  __io_println("output=${destination}")
-  __io_println("")
-  __io_println(result?.summary ?? "")
+  harness.stdio.println("task_id=${report?.task_id ?? ""}")
+  harness.stdio.println("semantic_eval_mode=${semantic_eval_mode(harness)}")
+  harness.stdio.println("semantic_eval_provider=${semantic_eval_provider(harness)}")
+  harness.stdio.println("semantic_eval_model=${semantic_eval_model(harness)}")
+  harness.stdio.println("overall_verdict=${result?.overall_verdict ?? "unknown"}")
+  harness.stdio.println("overall_score=${result?.overall_score ?? 0}")
+  harness.stdio.println("output=${destination}")
+  harness.stdio.println("")
+  harness.stdio.println(result?.summary ?? "")
 }

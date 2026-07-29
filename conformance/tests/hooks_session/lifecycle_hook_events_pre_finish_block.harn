@@ -4,8 +4,8 @@
  * PreFinish hook with a runtime error pointing the user at
  * `OnFinish.block_until_settled` (the supported delay mechanism).
  */
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook("pre_finish", { _event -> return {block: true, reason: "not allowed"} })
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook("pre_finish", { _event -> return {block: true, reason: "not allowed"} })
   return 1
 }

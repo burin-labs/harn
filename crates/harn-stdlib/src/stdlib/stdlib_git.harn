@@ -430,10 +430,10 @@ fn __git_result(result, argv, cwd) -> GitCommandResult {
  * @effects: [process]
  * @errors: []
  */
-pub fn git_run(args: list<string>, options: GitRunOptions = {}) -> GitCommandResult {
+pub fn git_run(process: HarnessProcess, args: list<string>, options: GitRunOptions = {}) -> GitCommandResult {
   const argv = __git_argv(args)
   const run_options = __git_run_options(options.repo ?? ".", options)
-  return __git_result(process_run(argv, run_options), argv, run_options.cwd)
+  return __git_result(process_run(process, argv, run_options), argv, run_options.cwd)
 }
 
 /**
@@ -597,8 +597,8 @@ pub fn git_worktree_remove(path: string, options: dict = {}) -> GitWorktreeRemov
  * @effects: [process]
  * @errors: []
  */
-pub fn git_current_branch(repo = ".", options: GitRunOptions = {}) -> GitBranchResult {
-  const result = git_run(["branch", "--show-current"], __git_with_repo(repo, options))
+pub fn git_current_branch(process: HarnessProcess, repo = ".", options: GitRunOptions = {}) -> GitBranchResult {
+  const result = git_run(process, ["branch", "--show-current"], __git_with_repo(repo, options))
   const branch = trim(result.stdout)
   return result + {branch: branch, detached: result.success && branch == ""}
 }
@@ -609,7 +609,7 @@ pub fn git_current_branch(repo = ".", options: GitRunOptions = {}) -> GitBranchR
  * @effects: [process]
  * @errors: []
  */
-pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
+pub fn git_log(process: HarnessProcess, repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
   const opts = options
   if opts.rev != nil && opts.rev_range != nil {
     throw "std/git: git_log accepts rev or rev_range, not both"
@@ -643,7 +643,7 @@ pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
   if len(paths) > 0 {
     args = args + ["--"] + paths
   }
-  return git_run(args, __git_with_repo(repo, opts))
+  return git_run(process, args, __git_with_repo(repo, opts))
 }
 
 /**
@@ -652,7 +652,7 @@ pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
  * @effects: [process]
  * @errors: []
  */
-pub fn git_show(rev: string, repo = ".", options: GitShowOptions = {}) -> GitCommandResult {
+pub fn git_show(process: HarnessProcess, rev: string, repo = ".", options: GitShowOptions = {}) -> GitCommandResult {
   const opts = options
   let args = ["show"]
   if opts.stat ?? true {
@@ -662,7 +662,7 @@ pub fn git_show(rev: string, repo = ".", options: GitShowOptions = {}) -> GitCom
     args = args + ["--patch"]
   }
   args = args + [__git_ref_arg(rev, "rev")]
-  return git_run(args, __git_with_repo(repo, opts))
+  return git_run(process, args, __git_with_repo(repo, opts))
 }
 
 /**
@@ -671,8 +671,8 @@ pub fn git_show(rev: string, repo = ".", options: GitShowOptions = {}) -> GitCom
  * @effects: [process]
  * @errors: []
  */
-pub fn git_branch_list(repo = ".", options: GitRunOptions = {}) -> GitCommandResult {
-  return git_run(["branch", "--list"], __git_with_repo(repo, options))
+pub fn git_branch_list(process: HarnessProcess, repo = ".", options: GitRunOptions = {}) -> GitCommandResult {
+  return git_run(process, ["branch", "--list"], __git_with_repo(repo, options))
 }
 
 /**
@@ -681,8 +681,8 @@ pub fn git_branch_list(repo = ".", options: GitRunOptions = {}) -> GitCommandRes
  * @effects: [process]
  * @errors: []
  */
-pub fn git_remote_list(repo = ".", options: GitRunOptions = {}) -> GitCommandResult {
-  return git_run(["remote", "-v"], __git_with_repo(repo, options))
+pub fn git_remote_list(process: HarnessProcess, repo = ".", options: GitRunOptions = {}) -> GitCommandResult {
+  return git_run(process, ["remote", "-v"], __git_with_repo(repo, options))
 }
 
 /**
@@ -691,7 +691,7 @@ pub fn git_remote_list(repo = ".", options: GitRunOptions = {}) -> GitCommandRes
  * @effects: [process]
  * @errors: []
  */
-pub fn git_switch(branch: string, repo = ".", options: GitSwitchOptions = {}) -> GitCommandResult {
+pub fn git_switch(process: HarnessProcess, branch: string, repo = ".", options: GitSwitchOptions = {}) -> GitCommandResult {
   const opts = options
   if (opts.create ?? false) && (opts.force_create ?? false) {
     throw "std/git: git_switch accepts create or force_create, not both"
@@ -710,7 +710,7 @@ pub fn git_switch(branch: string, repo = ".", options: GitSwitchOptions = {}) ->
     args = args + ["--discard-changes"]
   }
   args = args + [__git_ref_arg(branch, "branch")]
-  return git_run(args, __git_with_repo(repo, opts))
+  return git_run(process, args, __git_with_repo(repo, opts))
 }
 
 /**
@@ -720,6 +720,7 @@ pub fn git_switch(branch: string, repo = ".", options: GitSwitchOptions = {}) ->
  * @errors: []
  */
 pub fn git_pull_ff_only(
+  process: HarnessProcess,
   repo = ".",
   remote = "origin",
   branch: string? = nil,
@@ -737,7 +738,7 @@ pub fn git_pull_ff_only(
   if branch != nil {
     args = args + [__git_ref_arg(branch, "branch")]
   }
-  return git_run(args, __git_with_repo(repo, opts))
+  return git_run(process, args, __git_with_repo(repo, opts))
 }
 
 /**
@@ -759,9 +760,11 @@ pub fn git_fetch(remote = "origin", repo = ".", refspecs: list<string> = []) -> 
  * @effects: [process]
  * @errors: [ValueError]
  */
-pub fn git_checkout_sync(options: GitCheckoutOptions) -> GitCheckoutReceipt {
+pub fn git_checkout_sync(process: HarnessProcess, options: GitCheckoutOptions) -> GitCheckoutReceipt {
   const repo = git_repo_path(options.repo ?? ".")
-  const runner = options.runner ?? fn(step) { return git_run(step.argv.slice(1), {repo: repo}) }
+  const runner = options.runner ?? fn(step) {
+    return git_run(process, step.argv.slice(1), {repo: repo})
+  }
   return git_checkout_run(options + {repo: repo, runner: runner})
 }
 
@@ -1070,7 +1073,7 @@ pub fn git_find_tool(query: string, options: GitToolCatalogOptions = {}) -> GitT
  * @effects: []
  * @errors: []
  */
-pub fn git_run_tool(
+pub fn git_run_tool(harness: Harness, 
   operation: GitToolOperation,
   args: GitToolRunArgs = {},
   options: GitToolCatalogOptions = {},
@@ -1112,7 +1115,7 @@ pub fn git_run_tool(
     return git_remote_list(repo, request)
   }
   if op == "show" {
-    return git_show(__git_non_empty_string(request.rev, "rev"), repo, request)
+    return git_show(harness.process, __git_non_empty_string(request.rev, "rev"), repo, request)
   }
   if op == "discover" {
     return git_discover(request.path ?? repo)
@@ -1131,7 +1134,7 @@ pub fn git_run_tool(
     return git_fetch(request.remote ?? "origin", repo, request.refspecs ?? [])
   }
   if op == "switch" {
-    return git_switch(__git_non_empty_string(request.branch, "branch"), repo, request)
+    return git_switch(harness.process, __git_non_empty_string(request.branch, "branch"), repo, request)
   }
   if op == "pull_ff_only" {
     return git_pull_ff_only(repo, request.remote ?? "origin", request.branch, request)
@@ -1219,7 +1222,7 @@ fn __git_catalog_tool_run_options(entry, opts) {
   return opts
 }
 
-fn __git_define_catalog_tool(tools, entry, opts) {
+fn __git_define_catalog_tool(harness: Harness, tools, entry, opts) {
   const key = __git_catalog_tool_key(entry)
   if !__git_tool_enabled(opts, key, entry.group) {
     return tools
@@ -1236,7 +1239,7 @@ fn __git_define_catalog_tool(tools, entry, opts) {
         parameters: entry.parameters,
         returns: {type: "object"},
         annotations: __git_catalog_tool_annotations(entry, opts, key),
-        handler: { args -> git_run_tool(entry.operation, args, run_opts) },
+        handler: { args -> git_run_tool(harness, entry.operation, args, run_opts) },
       },
     ),
   )
@@ -1248,14 +1251,14 @@ fn __git_define_catalog_tool(tools, entry, opts) {
  * @effects: []
  * @errors: []
  */
-pub fn git_tools(
+pub fn git_tools(harness: Harness, 
   registry: {_type: "tool_registry", tools: list}? = nil,
   options: GitToolRegistryOptions = {},
 ) -> {_type: "tool_registry", tools: list} {
   const opts = options
   let tools = registry ?? tool_registry()
   for entry in __git_catalog_all() {
-    tools = __git_define_catalog_tool(tools, entry, opts)
+    tools = __git_define_catalog_tool(harness, tools, entry, opts)
   }
   return tools
 }
@@ -1299,7 +1302,7 @@ fn __git_toolbox_run_annotations(opts, key) {
  * @effects: []
  * @errors: []
  */
-pub fn git_toolbox_tools(
+pub fn git_toolbox_tools(harness: Harness, 
   registry: {_type: "tool_registry", tools: list}? = nil,
   options: GitToolRegistryOptions = {},
 ) -> {_type: "tool_registry", tools: list} {
@@ -1375,7 +1378,7 @@ pub fn git_toolbox_tools(
           },
           returns: {type: "object"},
           annotations: __git_toolbox_run_annotations(opts, key),
-          handler: { args -> git_run_tool(args.operation, args, opts) },
+          handler: { args -> git_run_tool(harness, args.operation, args, opts) },
         },
       ),
     )

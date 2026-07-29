@@ -19,7 +19,7 @@ import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 
 @complexity(allow)
-pub fn __agent_loop_run(message, session, initial_opts) {
+pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
   let opts = initial_opts
   let iteration = 0
   let session_finalized = false
@@ -71,7 +71,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
     let consecutive_failure_count = 0
     let budget_exhausted_emitted = false
     let last_tool_count = 0
-    const loop_start_ms = __agent_loop_clock_now_ms()
+    const loop_start_ms = __agent_loop_clock_now_ms(harness)
     const __reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
     let terminal_write_unverified = false
     let made_source_write = false
@@ -95,7 +95,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
     let command_hold_cap_tokens = nil
     while true {
       while iteration < current_max {
-        const boundary_exhaustion = __agent_loop_budget_exhaustion(
+        const boundary_exhaustion = __agent_loop_budget_exhaustion(harness, 
           session.session_id,
           budget,
           iteration,
@@ -104,7 +104,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           current_max,
         )
         if boundary_exhaustion.exhausted {
-          __agent_loop_emit_budget_exhausted(session.session_id, boundary_exhaustion)
+          __agent_loop_emit_budget_exhausted(harness, session.session_id, boundary_exhaustion)
           budget_exhausted_emitted = true
           budget_decisions = __agent_loop_record_budget_stop(
             budget_decisions,
@@ -116,7 +116,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           stop_reason = boundary_exhaustion.kind
           break
         }
-        let checkpoint = __agent_loop_suspend_checkpoint(session, iteration)
+        let checkpoint = __agent_loop_suspend_checkpoint(harness, session, iteration)
         if checkpoint != nil {
           __drain_audit_flushes(audit_background_tasks)
           audit_background_tasks = []
@@ -125,7 +125,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           stop_reason = "suspended"
           break
         }
-        if agent_budget_pre_call_blocked(session, opts) {
+        if agent_budget_pre_call_blocked(harness, session, opts) {
           final_status = "budget_exhausted"
           break
         }
@@ -139,8 +139,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         const pending_prefill = agent_take_one_shot_prefill(opts)
         opts = pending_prefill.options
         const iteration_opts = __agent_loop_effective_llm_options(opts)
-        agent_emit_event(
-          session.session_id,
+        agent_emit_event(harness, session.session_id,
           "iteration_start",
           {
             iteration: iteration_index + 1,
@@ -153,12 +152,11 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         } catch (e) {
           nil
         }
-        __agent_loop_checkpoint(
-          session.session_id,
+        __agent_loop_checkpoint(harness, session.session_id,
           "iteration_start",
           {iteration: iteration_index + 1},
         )
-        let turn_opts = agent_skills_match(session, iteration_opts, iteration_index)
+        let turn_opts = agent_skills_match(harness, session, iteration_opts, iteration_index)
         if turn_opts?._skill_activated_this_turn ?? false {
           opts = agent_reset_tool_surface_narrowing(opts)
           turn_opts = agent_reset_tool_surface_narrowing(turn_opts)
@@ -173,7 +171,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             }
           }
         }
-        turn_opts = agent_tool_search_inject_if_needed(turn_opts)
+        turn_opts = agent_tool_search_inject_if_needed(harness, turn_opts)
         turn_opts = agent_apply_tool_surface_narrowing(turn_opts)
         turn_opts = agent_stance_apply(turn_opts)
         if command_hold_cap_tokens != nil {
@@ -181,14 +179,13 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           command_hold_cap_tokens = nil
         }
         const turn_llm_opts = __agent_loop_effective_llm_options(turn_opts)
-        __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
-        agent_autocompact_if_needed(session, turn_llm_opts)
-        __agent_loop_checkpoint(
-          session.session_id,
+        __agent_loop_checkpoint(harness, session.session_id, "pre_compact", {iteration: iteration_index + 1})
+        agent_autocompact_if_needed(harness, session, turn_llm_opts)
+        __agent_loop_checkpoint(harness, session.session_id,
           "post_compact",
           {iteration: iteration_index + 1},
         )
-        const input_guardrail_verdict = __run_input_guardrail(
+        const input_guardrail_verdict = __run_input_guardrail(harness, 
           turn_llm_opts?._input_guardrail ?? opts?._input_guardrail,
           session,
           message,
@@ -196,27 +193,26 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           iteration_index,
         )
         if input_guardrail_verdict != nil && (input_guardrail_verdict.tripwire ?? false) {
-          __input_guardrail_record_skip_turn(session, input_guardrail_verdict, iteration_index)
+          __input_guardrail_record_skip_turn(harness, session, input_guardrail_verdict, iteration_index)
           iteration = iteration + 1
           final_status = "input_guardrail"
           stop_reason = "input_guardrail_tripwire"
           break
         }
-        const scope_verdict = __run_pre_turn_scope_classifier(
-          turn_llm_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,
+        const scope_verdict = __run_pre_turn_scope_classifier(harness, turn_llm_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,
           session,
           message,
           turn_llm_opts,
           iteration_index,
         )
         if __scope_classifier_skip_main(scope_verdict) {
-          __scope_classifier_record_skip_turn(session, scope_verdict, iteration_index)
+          __scope_classifier_record_skip_turn(harness, session, scope_verdict, iteration_index)
           iteration = iteration + 1
           final_status = "scope_alert"
           stop_reason = "out_of_scope"
           break
         }
-        const turn_prompt = __agent_loop_build_turn_prompt(session, turn_llm_opts, iteration_index)
+        const turn_prompt = __agent_loop_build_turn_prompt(harness, session, turn_llm_opts, iteration_index)
         const direct_llm_opts = turn_llm_opts
           + {
           messages: turn_prompt.messages,
@@ -225,8 +221,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           _iteration: iteration_index + 1,
           _system_fragments: turn_prompt.fragments,
         }
-        const monologue_actuation = agent_monologue_actuation_take_for_turn(
-          session.session_id,
+        const monologue_actuation = agent_monologue_actuation_take_for_turn(harness, session.session_id,
           iteration_index + 1,
           stall_state.monologue_actuation,
           turn_opts,
@@ -255,7 +250,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         } else {
           base_llm_opts
         }
-        let call = __invoke_llm_with_autocontinue(
+        let call = __invoke_llm_with_autocontinue(harness, 
           message,
           turn_prompt.system,
           llm_opts,
@@ -265,6 +260,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         )
         if !call.ok && __agent_loop_is_context_overflow(call?.error) {
           call = __agent_loop_recover_context_overflow(
+            harness,
             call,
             message,
             turn_prompt.system,
@@ -288,7 +284,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             call?.error,
           ) {
             iteration = iteration + 1
-            __agent_loop_emit_provider_error(
+            __agent_loop_emit_provider_error(harness, 
               session.session_id,
               iteration_index,
               call,
@@ -305,13 +301,12 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           if __agent_loop_tracks_failure(call?.error, failure_config) {
             iteration = iteration + 1
             consecutive_failure_count = consecutive_failure_count + 1
-            const failure_aggregates = __agent_loop_budget_aggregates(
+            const failure_aggregates = __agent_loop_budget_aggregates(harness, 
               session.session_id,
               nil,
               loop_start_ms,
             )
-            agent_emit_event(
-              session.session_id,
+            agent_emit_event(harness, session.session_id,
               "iteration_end",
               {
                 iteration: iteration_index + 1,
@@ -326,8 +321,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             )
             if consecutive_failure_count >= failure_config.max {
               const paused_for_ms = failure_config?.paused_for_ms ?? 0
-              agent_emit_event(
-                session.session_id,
+              agent_emit_event(harness, session.session_id,
                 "budget_circuit_breaker",
                 {
                   kind: "consecutive_failures",
@@ -336,9 +330,9 @@ pub fn __agent_loop_run(message, session, initial_opts) {
                 },
               )
               if paused_for_ms > 0 {
-                __agent_loop_clock_sleep_ms(paused_for_ms)
+                __agent_loop_clock_sleep_ms(harness, paused_for_ms)
               }
-              const exhaustion = __agent_loop_budget_aggregates(
+              const exhaustion = __agent_loop_budget_aggregates(harness, 
                 session.session_id,
                 nil,
                 loop_start_ms,
@@ -349,7 +343,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
                 iteration: iteration,
                 max_iterations: current_max,
               }
-              __agent_loop_emit_budget_exhausted(session.session_id, exhaustion)
+              __agent_loop_emit_budget_exhausted(harness, session.session_id, exhaustion)
               budget_exhausted_emitted = true
               budget_decisions = __agent_loop_record_budget_stop(
                 budget_decisions,
@@ -365,7 +359,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             continue
           }
           const can_retry_primary = was_escalated && !escalation_retry_pending
-          __agent_loop_emit_provider_error(
+          __agent_loop_emit_provider_error(harness, 
             session.session_id,
             iteration_index,
             call,
@@ -406,6 +400,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           _agent_tool_format: turn_opts?.tool_format ?? "",
         }
         const fallback_outcome = __detect_native_fallback(
+          harness,
           llm_result,
           parsed,
           turn_opts,
@@ -430,6 +425,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           turn_opts,
         )
         const parse_feedback = __agent_loop_record_parse_feedback(
+          harness,
           session.session_id,
           normalized,
           fallback_outcome,
@@ -448,7 +444,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             __agent_await_resumption_args(await_call)
           }
           if !is_err(await_parsed) {
-            __agent_loop_record_await_tool_results(
+            __agent_loop_record_await_tool_results(harness, 
               session,
               await_call,
               tool_calls,
@@ -459,8 +455,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             await_parsed
           } else {
             try {
-              __agent_loop_await_resumption(
-                session,
+              __agent_loop_await_resumption(harness, session,
                 iteration,
                 await_call,
                 unwrap(await_parsed),
@@ -471,30 +466,27 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           if is_err(await_result) {
             const await_error = unwrap_err(await_result)
             if is_err(await_parsed) {
-              agent_session_record_undispatched_tool_results(
-                session.session_id,
+              agent_session_record_undispatched_tool_results(harness, session.session_id,
                 tool_calls,
                 "skipped",
                 "not dispatched: the agent_await_resumption call in this turn was invalid",
               )
             }
-            __inject_feedback_with_tool_repair(
+            __inject_feedback_with_tool_repair(harness, 
               session.session_id,
               "agent_await_resumption",
               __agent_loop_invalid_await_resumption_feedback(await_error),
             )
-            const await_totals = agent_session_record_usage(
-              session.session_id,
+            const await_totals = agent_session_record_usage(harness, session.session_id,
               llm_result,
               turn_llm_opts,
               iteration_index + 1,
             )
-            agent_emit_event(
-              session.session_id,
+            agent_emit_event(harness, session.session_id,
               "iteration_end",
               {
                 iteration: iteration_index + 1,
-                iteration_info: __agent_loop_iteration_info(
+                iteration_info: __agent_loop_iteration_info(harness, 
                   session.session_id,
                   llm_result,
                   len(tool_calls),
@@ -505,7 +497,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
                   + {dispatch_skipped: true, skip_reason: "invalid_agent_await_resumption"},
               },
             )
-            const await_exhaustion = __agent_loop_budget_exhaustion(
+            const await_exhaustion = __agent_loop_budget_exhaustion(harness, 
               session.session_id,
               budget,
               iteration,
@@ -514,7 +506,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               current_max,
             )
             if await_exhaustion.exhausted {
-              __agent_loop_emit_budget_exhausted(session.session_id, await_exhaustion)
+              __agent_loop_emit_budget_exhausted(harness, session.session_id, await_exhaustion)
               budget_exhausted_emitted = true
               budget_decisions = __agent_loop_record_budget_stop(
                 budget_decisions,
@@ -529,18 +521,16 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             continue
           }
           suspend_result = unwrap(await_result)
-          const _totals = agent_session_record_usage(
-            session.session_id,
+          const _totals = agent_session_record_usage(harness, session.session_id,
             llm_result,
             turn_llm_opts,
             iteration_index + 1,
           )
-          agent_emit_event(
-            session.session_id,
+          agent_emit_event(harness, session.session_id,
             "iteration_end",
             {
               iteration: iteration_index + 1,
-              iteration_info: __agent_loop_iteration_info(
+              iteration_info: __agent_loop_iteration_info(harness, 
                 session.session_id,
                 llm_result,
                 len(tool_calls),
@@ -560,8 +550,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           iteration_index + 1,
         )
         const stall_prev_turn_made_edit = __turn_made_edit(stall_prev_dispatch, opts?.tools)
-        const stall_observation = agent_stall_observe_tool_calls(
-          session.session_id,
+        const stall_observation = agent_stall_observe_tool_calls(harness, session.session_id,
           tool_calls,
           iteration_index + 1,
           turn_opts?.stall_diagnostics,
@@ -603,23 +592,21 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               ?? "structural validator rejected assistant turn"
           }
           structural_validator_attempts = structural_validator_attempts + 1
-          __agent_loop_pop_structural_veto_turn(session.session_id)
+          __agent_loop_pop_structural_veto_turn(harness, session.session_id)
           const feedback = to_string(structural_verdict?.feedback ?? "")
           if feedback != "" {
-            agent_session_inject_feedback(session.session_id, "structural_validator", feedback)
+            agent_session_inject_feedback(harness, session.session_id, "structural_validator", feedback)
           }
-          const structural_totals = agent_session_record_usage(
-            session.session_id,
+          const structural_totals = agent_session_record_usage(harness, session.session_id,
             llm_result,
             turn_llm_opts,
             iteration_index + 1,
           )
-          agent_emit_event(
-            session.session_id,
+          agent_emit_event(harness, session.session_id,
             "iteration_end",
             {
               iteration: iteration_index + 1,
-              iteration_info: __agent_loop_iteration_info(
+              iteration_info: __agent_loop_iteration_info(harness, 
                 session.session_id,
                 llm_result,
                 0,
@@ -635,7 +622,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               },
             },
           )
-          const structural_exhaustion = __agent_loop_budget_exhaustion(
+          const structural_exhaustion = __agent_loop_budget_exhaustion(harness, 
             session.session_id,
             budget,
             iteration,
@@ -644,7 +631,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             current_max,
           )
           if structural_exhaustion.exhausted {
-            __agent_loop_emit_budget_exhausted(session.session_id, structural_exhaustion)
+            __agent_loop_emit_budget_exhausted(harness, session.session_id, structural_exhaustion)
             budget_exhausted_emitted = true
             budget_decisions = __agent_loop_record_budget_stop(
               budget_decisions,
@@ -667,8 +654,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             done_judge_invocations,
           )
             + {_feedback_history: feedback_history}
-          const stall_verdict = agent_verify_or_continue(
-            session,
+          const stall_verdict = agent_verify_or_continue(harness, session,
             stall_verify_opts,
             "stalled",
             visible_text,
@@ -680,7 +666,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           if stall_verdict.vetoed {
             done_judge_vetoes += __done_judge_hit(stall_verdict)
             verify_completion_judge_vetoes += __completion_judge_hit(stall_verdict)
-            stall_state = __agent_loop_apply_stall_judge_veto(
+            stall_state = __agent_loop_apply_stall_judge_veto(harness, 
               session.session_id,
               tool_calls,
               stall_verdict,
@@ -695,24 +681,22 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             )
             continue
           } else if __judge_cap_reason(stall_verdict) != "" {
-            __close_stall_calls(session.session_id, tool_calls, "reached its invocation cap")
+            __close_stall_calls(harness, session.session_id, tool_calls, "reached its invocation cap")
             final_status = "verify_capped"
             stop_reason = __judge_cap_reason(stall_verdict)
             break
           } else {
-            __close_stall_calls(session.session_id, tool_calls, "accepted completion")
-            const stall_totals = agent_session_record_usage(
-              session.session_id,
+            __close_stall_calls(harness, session.session_id, tool_calls, "accepted completion")
+            const stall_totals = agent_session_record_usage(harness, session.session_id,
               llm_result,
               turn_llm_opts,
               iteration_index + 1,
             )
-            agent_emit_event(
-              session.session_id,
+            agent_emit_event(harness, session.session_id,
               "iteration_end",
               {
                 iteration: iteration_index + 1,
-                iteration_info: __agent_loop_iteration_info(
+                iteration_info: __agent_loop_iteration_info(harness, 
                   session.session_id,
                   llm_result,
                   len(tool_calls),
@@ -722,7 +706,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
                 ),
               },
             )
-            const stall_exhaustion = __agent_loop_budget_exhaustion(
+            const stall_exhaustion = __agent_loop_budget_exhaustion(harness, 
               session.session_id,
               budget,
               iteration,
@@ -731,7 +715,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               current_max,
             )
             if stall_exhaustion.exhausted {
-              __agent_loop_emit_budget_exhausted(session.session_id, stall_exhaustion)
+              __agent_loop_emit_budget_exhausted(harness, session.session_id, stall_exhaustion)
               budget_exhausted_emitted = true
               budget_decisions = __agent_loop_record_budget_stop(
                 budget_decisions,
@@ -743,8 +727,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               stop_reason = stall_exhaustion.kind
               break
             }
-            const stalled_done_checkpoint = __agent_loop_checkpoint(
-              session.session_id,
+            const stalled_done_checkpoint = __agent_loop_checkpoint(harness, session.session_id,
               "iteration_end",
               {iteration: iteration_index + 1},
             )
@@ -766,30 +749,27 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             const old_limit = current_max
             current_max = max(current_max, iteration + 1)
             if len(tool_calls) > 0 {
-              agent_session_record_undispatched_tool_results(
-                session.session_id,
+              agent_session_record_undispatched_tool_results(harness, session.session_id,
                 tool_calls,
                 "skipped",
                 "not dispatched: repeated identical tool call entered bounded thrash recovery",
               )
             }
-            __inject_feedback_with_tool_repair(
+            __inject_feedback_with_tool_repair(harness, 
               session.session_id,
               __agent_loop_thrash_recovery_key(stall_warning),
               __agent_loop_thrash_recovery_feedback(stall_warning, visible_text),
             )
-            const thrash_totals = agent_session_record_usage(
-              session.session_id,
+            const thrash_totals = agent_session_record_usage(harness, session.session_id,
               llm_result,
               turn_llm_opts,
               iteration_index + 1,
             )
-            agent_emit_event(
-              session.session_id,
+            agent_emit_event(harness, session.session_id,
               "iteration_end",
               {
                 iteration: iteration_index + 1,
-                iteration_info: __agent_loop_iteration_info(
+                iteration_info: __agent_loop_iteration_info(harness, 
                   session.session_id,
                   llm_result,
                   len(tool_calls),
@@ -804,8 +784,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               },
             )
             const recovery_reason = __agent_loop_thrash_recovery_reason(stall_warning)
-            agent_emit_event(
-              session.session_id,
+            agent_emit_event(harness, session.session_id,
               "loop_control_decision",
               {
                 iteration: iteration_index + 1,
@@ -846,8 +825,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             recovery_skip_outcome,
             recovery_skip_outcome,
           )
-          agent_emit_event(
-            session.session_id,
+          agent_emit_event(harness, session.session_id,
             "loop_control_decision",
             {
               iteration: iteration_index + 1,
@@ -864,8 +842,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         }
         if turn_opts?.step_judge != nil {
           const remaining_iterations = current_max - iteration_index
-          const step_verdict = agent_step_judge(
-            session,
+          const step_verdict = agent_step_judge(harness, session,
             llm_result,
             turn_opts,
             iteration_index + 1,
@@ -877,28 +854,26 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             step_judge_attempts = step_judge_attempts + 1
             const on_veto = step_verdict?.on_veto ?? "replace"
             if on_veto == "replace" {
-              agent_session_pop_last_assistant(session.session_id)
+              agent_session_pop_last_assistant(harness, session.session_id)
             }
             const critique = step_verdict?.feedback ?? step_verdict?.critique ?? ""
             if critique != "" {
               if on_veto == "replace" {
-                agent_session_inject_feedback(session.session_id, "step_judge", critique)
+                agent_session_inject_feedback(harness, session.session_id, "step_judge", critique)
               } else {
-                __inject_feedback_with_tool_repair(session.session_id, "step_judge", critique)
+                __inject_feedback_with_tool_repair(harness, session.session_id, "step_judge", critique)
               }
             }
-            const step_totals = agent_session_record_usage(
-              session.session_id,
+            const step_totals = agent_session_record_usage(harness, session.session_id,
               llm_result,
               turn_llm_opts,
               iteration_index + 1,
             )
-            agent_emit_event(
-              session.session_id,
+            agent_emit_event(harness, session.session_id,
               "iteration_end",
               {
                 iteration: iteration_index + 1,
-                iteration_info: __agent_loop_iteration_info(
+                iteration_info: __agent_loop_iteration_info(harness, 
                   session.session_id,
                   llm_result,
                   0,
@@ -914,7 +889,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
                 },
               },
             )
-            const step_exhaustion = __agent_loop_budget_exhaustion(
+            const step_exhaustion = __agent_loop_budget_exhaustion(harness, 
               session.session_id,
               budget,
               iteration,
@@ -923,7 +898,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               current_max,
             )
             if step_exhaustion.exhausted {
-              __agent_loop_emit_budget_exhausted(session.session_id, step_exhaustion)
+              __agent_loop_emit_budget_exhausted(harness, session.session_id, step_exhaustion)
               budget_exhausted_emitted = true
               budget_decisions = __agent_loop_record_budget_stop(
                 budget_decisions,
@@ -940,31 +915,27 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             step_judge_attempts = 0
           }
         }
-        const pre_dispatch_checkpoint = __agent_loop_checkpoint(
-          session.session_id,
+        const pre_dispatch_checkpoint = __agent_loop_checkpoint(harness, session.session_id,
           "pre_tool_dispatch",
           {iteration: iteration_index + 1},
         )
         if pre_dispatch_checkpoint.dispatch_skipped {
-          agent_session_record_undispatched_tool_results(
-            session.session_id,
+          agent_session_record_undispatched_tool_results(harness, session.session_id,
             tool_calls,
             "interrupted",
             "a user interrupt arrived before this tool call was dispatched",
           )
           const tool_count_skipped = len(tool_calls)
-          const totals_skipped = agent_session_record_usage(
-            session.session_id,
+          const totals_skipped = agent_session_record_usage(harness, session.session_id,
             llm_result,
             turn_llm_opts,
             iteration_index + 1,
           )
-          agent_emit_event(
-            session.session_id,
+          agent_emit_event(harness, session.session_id,
             "iteration_end",
             {
               iteration: iteration_index + 1,
-              iteration_info: __agent_loop_iteration_info(
+              iteration_info: __agent_loop_iteration_info(harness, 
                 session.session_id,
                 llm_result,
                 tool_count_skipped,
@@ -975,7 +946,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
                 + {dispatch_skipped: true, skip_reason: "interrupt_immediate"},
             },
           )
-          const skipped_exhaustion = __agent_loop_budget_exhaustion(
+          const skipped_exhaustion = __agent_loop_budget_exhaustion(harness, 
             session.session_id,
             budget,
             iteration,
@@ -984,7 +955,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             current_max,
           )
           if skipped_exhaustion.exhausted {
-            __agent_loop_emit_budget_exhausted(session.session_id, skipped_exhaustion)
+            __agent_loop_emit_budget_exhausted(harness, session.session_id, skipped_exhaustion)
             budget_exhausted_emitted = true
             budget_decisions = __agent_loop_record_budget_stop(
               budget_decisions,
@@ -1005,8 +976,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           last_tool_count = 0
           continue
         }
-        const dispatched = __dispatch_tool_calls(
-          session.session_id,
+        const dispatched = __dispatch_tool_calls(harness, session.session_id,
           tool_calls,
           turn_opts
             + {
@@ -1024,7 +994,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         command_ledger = command_ledger_ingest(
           command_ledger,
           actuation_dispatch_results,
-          __agent_loop_clock_now_ms(),
+          __agent_loop_clock_now_ms(harness),
           command_wait,
         )
         stall_state = stall_state
@@ -1055,19 +1025,17 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           rejected_tools_seen,
           __tool_names_by_status(dispatch, false),
         )
-        const totals = agent_session_record_usage(
-          session.session_id,
+        const totals = agent_session_record_usage(harness, session.session_id,
           llm_result,
           turn_llm_opts,
           iteration_index + 1,
         )
         const tool_count = len(tool_calls)
-        agent_emit_event(
-          session.session_id,
+        agent_emit_event(harness, session.session_id,
           "iteration_end",
           {
             iteration: iteration_index + 1,
-            iteration_info: __agent_loop_iteration_info(
+            iteration_info: __agent_loop_iteration_info(harness, 
               session.session_id,
               llm_result,
               tool_count,
@@ -1077,13 +1045,12 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             ),
           },
         )
-        const post_dispatch_checkpoint = __agent_loop_checkpoint(
-          session.session_id,
+        const post_dispatch_checkpoint = __agent_loop_checkpoint(harness, session.session_id,
           "post_tool_dispatch",
           {iteration: iteration_index + 1},
         )
         const bridge_step_delivered = post_dispatch_checkpoint.delivered
-        const exhaustion = __agent_loop_budget_exhaustion(
+        const exhaustion = __agent_loop_budget_exhaustion(harness, 
           session.session_id,
           budget,
           iteration,
@@ -1092,7 +1059,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           current_max,
         )
         if exhaustion.exhausted {
-          __agent_loop_emit_budget_exhausted(session.session_id, exhaustion)
+          __agent_loop_emit_budget_exhausted(harness, session.session_id, exhaustion)
           budget_exhausted_emitted = true
           budget_decisions = __agent_loop_record_budget_stop(
             budget_decisions,
@@ -1116,21 +1083,18 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         // (`tool_count == 0`), so it cannot silently finish over a running
         // build — it gets a forced-resolution re-entry.
         if tool_count == 0 && command_ledger_should_hold(command_ledger, tool_count) {
-          const hold = command_ledger_hold(
-            session.session_id,
+          const hold = command_ledger_hold(harness, session.session_id,
             command_ledger,
             command_wait,
             command_hold_state,
           )
           command_ledger = hold.ledger
           command_hold_state = hold.hold_state
-          __agent_loop_checkpoint(
-            session.session_id,
+          __agent_loop_checkpoint(harness, session.session_id,
             "command_hold",
             {iteration: iteration_index + 1},
           )
-          agent_emit_event(
-            session.session_id,
+          agent_emit_event(harness, session.session_id,
             "typed_checkpoint",
             {
               schema: "harn.command_hold.v1",
@@ -1142,7 +1106,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             },
           )
           if hold.outcome == "digest" {
-            agent_session_inject_feedback(session.session_id, "command_status", hold.digest)
+            agent_session_inject_feedback(harness, session.session_id, "command_status", hold.digest)
             command_hold_cap_tokens = hold?.reentry_cap
             // A hold turn is the model correctly WAITING, not stalling:
             // exempt it from the stuck/nudge streaks so a long build never
@@ -1167,8 +1131,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
                 command_ledger = command_ledger_release(command_ledger, row.handle_id)
               }
             }
-            agent_session_inject_feedback(
-              session.session_id,
+            agent_session_inject_feedback(harness, session.session_id,
               "await_exhausted",
               "Background commands are still running after repeated waits. Take a different action now: "
                 + "act on what you have, kill_command to abort, or release_command to leave them running.",
@@ -1213,7 +1176,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             completion_proposed: false,
             verdict: nil,
           }
-            + __agent_loop_state_budget_fields(
+            + __agent_loop_state_budget_fields(harness, 
             session.session_id,
             totals,
             loop_start_ms,
@@ -1231,10 +1194,10 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           _turn_tool_call_feedback: (fallback_outcome.triggered && !fallback_outcome.accepted)
             || had_parse_errors,
         }
-        const outcome = __agent_loop_with_llm_render_context(
+        const outcome = __agent_loop_with_llm_render_context(harness, 
           turn_llm_opts,
           { _effective ->
-            agent_compute_post_turn(
+            agent_compute_post_turn(harness, 
               session,
               normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
               dispatch,
@@ -1244,7 +1207,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           },
         )
         opts = __apply_post_turn_options(opts, outcome)
-        opts = agent_stance_post_turn(session, opts)
+        opts = agent_stance_post_turn(harness, session, opts)
         const repair_cfg = agent_stall_repair_config(turn_opts?.stall_diagnostics)
         const reverify_mandated = __agent_loop_post_edit_reverify_mandated(
           repair_cfg,
@@ -1268,8 +1231,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             _verify_completion_judge_invocations: verify_completion_judge_invocations,
             _feedback_history: feedback_history,
           }
-          const reverdict = agent_verify_or_continue(
-            session,
+          const reverdict = agent_verify_or_continue(harness, session,
             reverify_opts,
             "post_edit_reverify",
             llm_result.text,
@@ -1289,7 +1251,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         }
         if should_continue {
           if opts?.daemon && len(tool_calls) == 0 {
-            agent_daemon_step(session, opts, iteration)
+            agent_daemon_step(harness, session, opts, iteration)
           }
         } else {
           if outcome.needs_verify || reverify_mandated {
@@ -1305,8 +1267,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               _verify_completion_judge_invocations: verify_completion_judge_invocations,
               _feedback_history: feedback_history,
             }
-            const verdict = agent_verify_or_continue(
-              session,
+            const verdict = agent_verify_or_continue(harness, session,
               verify_opts,
               outcome.stop_reason,
               llm_result.text,
@@ -1335,7 +1296,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           }
           const missing_now = agent_required_tools_missing_from_session(opts, successful_tools_seen)
           if !should_continue && len(missing_now) > 0 {
-            agent_required_tools_inject_feedback(session.session_id, missing_now)
+            agent_required_tools_inject_feedback(harness, session.session_id, missing_now)
             should_continue = true
           }
           if !should_continue {
@@ -1375,8 +1336,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             stop_reason = "max_nudges"
             break
           }
-          agent_scratchpad_reorganize_if_due(
-            session,
+          agent_scratchpad_reorganize_if_due(harness, session,
             opts,
             iteration_index,
             {
@@ -1399,9 +1359,8 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               paradigm,
               made_tool_calls,
             )
-            __inject_feedback_with_tool_repair(session.session_id, "no_progress_streak", nudge_text)
-            agent_emit_event(
-              session.session_id,
+            __inject_feedback_with_tool_repair(harness, session.session_id, "no_progress_streak", nudge_text)
+            agent_emit_event(harness, session.session_id,
               "no_progress_streak_nudge",
               {
                 iteration: iteration_index,
@@ -1437,7 +1396,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             verdict: verdict_record,
             progress_no_net_advance: loop_no_net_progress,
           }
-            + __agent_loop_state_budget_fields(
+            + __agent_loop_state_budget_fields(harness, 
             session.session_id,
             totals,
             loop_start_ms,
@@ -1447,7 +1406,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         )
         const command = agent_loop_control_invoke(opts, budget, loop_state)
         const applied = agent_loop_apply_command(
-          {
+          harness, {
             command: command,
             session_id: session.session_id,
             iteration: iteration,
@@ -1466,7 +1425,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           break
         }
       }
-      const terminal_boundary = __agent_loop_terminal_boundary(
+      const terminal_boundary = __agent_loop_terminal_boundary(harness, 
         session,
         {
           opts: opts,
@@ -1516,7 +1475,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
       }
       break
     }
-    const finalized = __agent_loop_finalize_session(
+    const finalized = __agent_loop_finalize_session(harness,  harness,
       message,
       session,
       {
@@ -1543,8 +1502,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
       },
     )
     session_finalized = true
-    const final_result = __agent_loop_project_final_result(
-      finalized.result,
+    const final_result = __agent_loop_project_final_result(harness, finalized.result,
       message,
       session,
       {
@@ -1571,7 +1529,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
   if is_err(run) {
     __drain_audit_flushes(audit_background_tasks)
     if !session_finalized {
-      __agent_loop_finalize_failed(session, iteration)
+      __agent_loop_finalize_failed(harness, session, iteration)
     }
     throw unwrap_err(run)
   }

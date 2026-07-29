@@ -1,3 +1,3 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const x = "unterminated
 }

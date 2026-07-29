@@ -9,13 +9,13 @@ import "std/triggers"
  * org-scoped "panic into an empty registry" path — the trigger fired but
  * the registry was empty, which is success rather than failure.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const _ = lifecycle_audit_log_take()
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "trigger-interrupt-all-empty-" + unique,
       kind: "issue.opened",
@@ -32,17 +32,17 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const dispatch = trigger_fire(
+  const dispatch = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  __io_println(dispatch.status == "dispatched")
-  __io_println(dispatch.result?.status == "broadcast")
-  __io_println(dispatch.result?.scope_kind == "all")
-  __io_println(dispatch.result?.target_count)
-  __io_println(dispatch.result?.suspended_count)
-  __io_println(dispatch.result?.skipped_count)
-  __io_println(dispatch.result?.reason == "build_storm")
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.status == "broadcast")
+  harness.stdio.println(dispatch.result?.scope_kind == "all")
+  harness.stdio.println(dispatch.result?.target_count)
+  harness.stdio.println(dispatch.result?.suspended_count)
+  harness.stdio.println(dispatch.result?.skipped_count)
+  harness.stdio.println(dispatch.result?.reason == "build_storm")
   const audits = lifecycle_audit_log_take()
   let audit_count = 0
   let outcome = ""
@@ -56,8 +56,8 @@ pipeline test(task) {
       reason = audit.payload.reason
     }
   }
-  __io_println(audit_count)
-  __io_println(outcome)
-  __io_println(scope_kind)
-  __io_println(reason)
+  harness.stdio.println(audit_count)
+  harness.stdio.println(outcome)
+  harness.stdio.println(scope_kind)
+  harness.stdio.println(reason)
 }

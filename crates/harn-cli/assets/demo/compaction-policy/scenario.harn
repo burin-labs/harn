@@ -10,10 +10,10 @@
  *   1. Open an agent session and seed three short messages.
  *   2. Declare a per-session policy with a turn-count threshold and a
  *      custom summarize closure so the demo runs fully offline.
- *   3. Call `compaction.check(session_id)` — the threshold's been
+ *   3. Call `harness.agent.compaction_check(session_id)` — the threshold's been
  *      crossed (3 messages > max_turns=2), so the decision returns
  *      `compact_now` with the trigger and engine strategy filled in.
- *   4. Call `compaction.run(session_id)` to drive the existing #2323
+ *   4. Call `harness.agent.compaction_run(session_id)` to drive the existing #2323
  *      lifecycle. The custom strategy folds the archived messages into
  *      a single summary string and the result carries the latency and
  *      archived count for telemetry.
@@ -25,33 +25,33 @@
  *
  * Fully offline — the custom strategy short-circuits any LLM call.
  */
-pipeline default(_task) {
-  const session = agent_session_open("compaction-policy-demo")
-  agent_session_inject(
+pipeline default(harness: Harness, _task) {
+  const session = harness.agent.open("compaction-policy-demo")
+  harness.agent.inject(
     session,
     {role: "user", content: "Investigate the parser regression in stdlib."},
   )
-  agent_session_inject(
+  harness.agent.inject(
     session,
     {role: "assistant", content: "The root cause is in diagnostic recovery."},
   )
-  agent_session_inject(
+  harness.agent.inject(
     session,
     {role: "user", content: "Capture the next command and the failing test names."},
   )
   // 1. Declare the policy. `summarize-then-prune` is the default
   //    strategy choice for IDE-style hosts; we override at run time to
   //    a `custom` strategy so the demo can finish without an LLM call.
-  const policy = compaction.policy(
+  const policy = harness.agent.compaction_policy(
     {session_id: session, strategy: "summarize-then-prune", max_turns: 2, keep_last: 1},
   )
   // 2. Cheap per-turn check. No mutation; safe to call before every
   //    LLM round-trip.
-  const pre_decision = compaction.check(session)
+  const pre_decision = harness.agent.compaction_check(session)
   // 3. Run the compaction through the canonical lifecycle. The plan
   //    overrides the policy's strategy because the demo has no LLM in
   //    its tape; production callers usually pass `nil` here.
-  const outcome = compaction.run(
+  const outcome = harness.agent.compaction_run(
     session,
     {
       strategy: "custom",
@@ -61,13 +61,13 @@ pipeline default(_task) {
     },
   )
   // 4. Re-check post-run.
-  const post_decision = compaction.check(session)
-  __io_println("=== compaction-policy demo ===")
-  __io_println("pre.action  = " + pre_decision["action"])
-  __io_println("pre.trigger = " + pre_decision["trigger"])
-  __io_println("run.engine  = " + outcome["engine_strategy"])
-  __io_println("run.kept    = " + to_string(outcome["messages_after"]))
-  __io_println("post.action = " + post_decision["action"])
+  const post_decision = harness.agent.compaction_check(session)
+  harness.stdio.println("=== compaction-policy demo ===")
+  harness.stdio.println("pre.action  = " + pre_decision["action"])
+  harness.stdio.println("pre.trigger = " + pre_decision["trigger"])
+  harness.stdio.println("run.engine  = " + outcome["engine_strategy"])
+  harness.stdio.println("run.kept    = " + to_string(outcome["messages_after"]))
+  harness.stdio.println("post.action = " + post_decision["action"])
   const receipt = {
     receipt_kind: "compaction_policy_demo",
     policy_strategy: policy["strategy"],
@@ -79,6 +79,6 @@ pipeline default(_task) {
     latency_ms_is_int: type_of(outcome["latency_ms"]) == "int",
     post_decision_action: post_decision["action"],
   }
-  __io_println(json_stringify(receipt))
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

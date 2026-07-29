@@ -2,49 +2,49 @@ import { cache_clear } from "std/cache"
 import { llm_cache_key, with_cache } from "std/llm/handlers"
 import { with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const store = {
     backend: "sqlite",
-    namespace: "with-cache-" + uuid(),
-    path: path_join(harness.fs.temp_dir(), "harn-with-cache-sqlite-" + uuid() + ".sqlite"),
+    namespace: "with-cache-" + harness.random.uuid(),
+    path: path_join(harness.fs.temp_dir(), "harn-with-cache-sqlite-" + harness.random.uuid() + ".sqlite"),
   }
   cache_clear({store: store})
   with_llm_script(
-    [
+    harness.llm, [
       {text: "cached answer", model: "mock-model", provider: "mock"},
       {text: "fresh answer", model: "mock-model", provider: "mock"},
     ],
     { ->
       const opts = {provider: "mock", model: "mock-model", store: store, stream: false}
-      __io_println(llm_cache_key("same prompt", "same system", opts).starts_with("sha256:"))
-      const first = with_cache("same prompt", "same system", opts)
-      const second = with_cache("same prompt", "same system", opts)
-      __io_println(first.text)
-      __io_println(second.text)
-      __io_println(json_stringify(first) == json_stringify(second))
-      __io_println(len(llm_mock_calls()) == 1)
-      const skipped = with_cache("same prompt", "same system", opts + {tools: []})
-      __io_println(skipped.text)
-      __io_println(len(llm_mock_calls()) == 2)
+      harness.stdio.println(llm_cache_key("same prompt", "same system", opts).starts_with("sha256:"))
+      const first = with_cache(harness, "same prompt", "same system", opts)
+      const second = with_cache(harness, "same prompt", "same system", opts)
+      harness.stdio.println(first.text)
+      harness.stdio.println(second.text)
+      harness.stdio.println(json_stringify(first) == json_stringify(second))
+      harness.stdio.println(len(harness.llm.mock_calls()) == 1)
+      const skipped = with_cache(harness, "same prompt", "same system", opts + {tools: []})
+      harness.stdio.println(skipped.text)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 2)
     },
   )
   const fs_store = {
     backend: "fs",
-    namespace: "with-cache-fs-" + uuid(),
-    path: path_join(harness.fs.temp_dir(), "harn-with-cache-fs-" + uuid()),
+    namespace: "with-cache-fs-" + harness.random.uuid(),
+    path: path_join(harness.fs.temp_dir(), "harn-with-cache-fs-" + harness.random.uuid()),
   }
   with_llm_script(
-    [
+    harness.llm, [
       {text: "fs cached", model: "mock-model", provider: "mock"},
       {text: "fs fresh", model: "mock-model", provider: "mock"},
     ],
     { ->
       const fs_opts = {provider: "mock", model: "mock-model", store: fs_store, stream: false}
-      const fs_first = with_cache("fs prompt", nil, fs_opts)
-      const fs_second = with_cache("fs prompt", nil, fs_opts)
-      __io_println(fs_first.text)
-      __io_println(fs_second.text)
-      __io_println(len(llm_mock_calls()) == 1)
+      const fs_first = with_cache(harness, "fs prompt", nil, fs_opts)
+      const fs_second = with_cache(harness, "fs prompt", nil, fs_opts)
+      harness.stdio.println(fs_first.text)
+      harness.stdio.println(fs_second.text)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 1)
     },
   )
 }

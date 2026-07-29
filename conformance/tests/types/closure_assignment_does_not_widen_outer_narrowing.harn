@@ -7,7 +7,7 @@ fn upper_if_present(input: string?) -> string {
   return "missing"
 }
 
-pipeline default() {
-  __io_println(upper_if_present("ok"))
-  __io_println(upper_if_present(nil))
+pipeline default(harness: Harness) {
+  harness.stdio.println(upper_if_present("ok"))
+  harness.stdio.println(upper_if_present(nil))
 }

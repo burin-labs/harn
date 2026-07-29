@@ -1,52 +1,52 @@
 import { wait_agent } from "std/agent/workers"
 import { pool_create, pool_get, pool_list, pool_wait } from "std/lifecycle/pool"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Create a named pool with a single worker slot.
   const pool = pool_create({name: "demo", max_concurrent: 1})
-  log(pool._type)
-  log(pool.name)
-  log(pool.max_concurrent)
-  log(pool.active)
-  log(pool.queued)
+  harness.stdio.println(pool._type)
+  harness.stdio.println(pool.name)
+  harness.stdio.println(pool.max_concurrent)
+  harness.stdio.println(pool.active)
+  harness.stdio.println(pool.queued)
   // Submit three closures. With max_concurrent=1 the second and third
   // should land in the queue when checked immediately after submit.
   const h1 = pool.submit({ -> 100 })
   const h2 = pool.submit({ -> 200 })
   const h3 = pool.submit({ -> 300 })
-  log(h1._type)
-  log(h1.pool)
+  harness.stdio.println(h1._type)
+  harness.stdio.println(h1.pool)
   // Wait for completion via the pool-native API and via wait_agent —
   // both must return the same shape (pool_task snapshot dict).
   const r1 = pool_wait(h1)
   const r2 = wait_agent(h2)
   const r3 = wait_agent(h3)
-  log(r1.status)
-  log(r1.result)
-  log(r2.status)
-  log(r2.result)
-  log(r3.status)
-  log(r3.result)
+  harness.stdio.println(r1.status)
+  harness.stdio.println(r1.result)
+  harness.stdio.println(r2.status)
+  harness.stdio.println(r2.result)
+  harness.stdio.println(r3.status)
+  harness.stdio.println(r3.result)
   // After draining, size() reports zero and snapshot tallies the
   // terminal-state counts.
-  log(pool.size())
+  harness.stdio.println(pool.size())
   const snap = pool.snapshot()
-  log(snap.completed)
-  log(snap.failed)
-  log(snap.total)
+  harness.stdio.println(snap.completed)
+  harness.stdio.println(snap.failed)
+  harness.stdio.println(snap.total)
   // Registry lookups round-trip by name.
   const again = pool_get("demo")
-  log(again.name)
-  log(again.id == pool.id)
+  harness.stdio.println(again.name)
+  harness.stdio.println(again.id == pool.id)
   const pools = pool_list()
   const listed = pools.find({ entry -> entry.name == "demo" })
-  log(listed.id == pool.id)
+  harness.stdio.println(listed.id == pool.id)
   // Failures surface as "failed" status with the error message.
   const boom = { ->
     throw "boom"
   }
   const failed = pool.submit(boom)
   const f = wait_agent(failed)
-  log(f.status)
-  log(f.error)
+  harness.stdio.println(f.status)
+  harness.stdio.println(f.error)
 }

@@ -1,29 +1,29 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Basic shape annotation
   const user: {name: string, age: int} = {name: "Alice", age: 30}
-  __io_println(user["name"])
-  __io_println(user["age"])
+  harness.stdio.println(user["name"])
+  harness.stdio.println(user["age"])
   // Optional fields — missing optional is fine
   const config: {host: string, port?: int} = {host: "localhost"}
-  __io_println(config["host"])
+  harness.stdio.println(config["host"])
   // Width subtyping — extra fields allowed
   fn greet(u: {name: string}) -> string {
     return "hi " + u["name"]
   }
-  __io_println(greet({name: "Bob", age: 25, role: "admin"}))
+  harness.stdio.println(greet({name: "Bob", age: 25, role: "admin"}))
   // Nested shapes
   const data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: [1, 2]}
-  __io_println(data["user"]["name"])
+  harness.stdio.println(data["user"]["name"])
   // Shape as return type
   fn make_point() -> {x: int, y: int} {
     return {x: 10, y: 20}
   }
   const p = make_point()
-  __io_println(p["x"] + p["y"])
+  harness.stdio.println(p["x"] + p["y"])
   // Shape assigned to generic dict
   const d: dict = {a: 1, b: 2}
-  __io_println(d["a"])
+  harness.stdio.println(d["a"])
   // Shape compatible with dict<string, int>
   const typed: dict<string, int> = {x: 1, y: 2}
-  __io_println(typed["x"])
+  harness.stdio.println(typed["x"])
 }

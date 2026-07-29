@@ -4,6 +4,6 @@ fn wrong_receipt(remote: string) -> GitStatusReceipt {
   return git_ls_remote(remote)
 }
 
-pipeline default() {
-  __io_println(wrong_receipt("origin").success)
+pipeline default(harness: Harness) {
+  harness.stdio.println(wrong_receipt("origin").success)
 }

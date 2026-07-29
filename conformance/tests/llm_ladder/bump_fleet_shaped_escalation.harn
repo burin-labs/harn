@@ -7,9 +7,9 @@ import { with_llm_script } from "std/testing"
  * an overloaded (503) transport failure the ladder escalates to the frontier
  * rung (which raises max_tokens) and the call round-trips.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         // This fixture owns route escalation, not production cooldown timing.
         error: {category: "overloaded", message: "HTTP 503", status: 503, retry_after_ms: 0},
@@ -19,7 +19,7 @@ pipeline test(task) {
       {text: "frontier completed the release", model: "mock-frontier", provider: "mock"},
     ],
     { ->
-      const result = llm_call(
+      const result = harness.llm.call(
         "cut the release",
         nil,
         {
@@ -39,12 +39,12 @@ pipeline test(task) {
           ],
         },
       )
-      __io_println(result.text)
-      __io_println(result.model)
-      __io_println(len(result.routing.attempts))
-      __io_println(result.routing.attempts[0].status)
-      __io_println(result.routing.attempts[1].status)
-      __io_println(result.routing.selected)
+      harness.stdio.println(result.text)
+      harness.stdio.println(result.model)
+      harness.stdio.println(len(result.routing.attempts))
+      harness.stdio.println(result.routing.attempts[0].status)
+      harness.stdio.println(result.routing.attempts[1].status)
+      harness.stdio.println(result.routing.selected)
     },
   )
 }

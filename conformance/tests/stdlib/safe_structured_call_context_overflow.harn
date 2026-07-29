@@ -10,13 +10,13 @@
 import { is_context_overflow_error, safe_structured_call } from "std/llm/safe"
 import { with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   // (a) A provider 400 [context_overflow] on a single-shot structured call is
   // surfaced with a distinct, machine-readable status (not "ok", not a generic
   // "error"/"missing_json"), so a harness author can SEE the window was blown.
   with_llm_script(
-    [
+    harness.llm, [
       {
         error: {
           status: 400,
@@ -27,19 +27,18 @@ pipeline main() {
       },
     ],
     { ->
-      const envelope = safe_structured_call(
-        "Grade this output.",
+      const envelope = safe_structured_call(harness,  harness, "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )
-      __io_println(envelope.ok)
-      __io_println(envelope.status)
+      harness.stdio.println(envelope.ok)
+      harness.stdio.println(envelope.status)
     },
   )
   // (b) A different provider's phrasing (Gemini, no "context" word) is detected
   // the same way — provider-agnostic.
   with_llm_script(
-    [
+    harness.llm, [
       {
         error: {
           status: 400,
@@ -49,19 +48,18 @@ pipeline main() {
       },
     ],
     { ->
-      const envelope = safe_structured_call(
-        "Grade this output.",
+      const envelope = safe_structured_call(harness,  harness, "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )
-      __io_println(envelope.status)
+      harness.stdio.println(envelope.status)
     },
   )
   // (c) An UNRELATED provider error (rate limit) is NOT mislabeled as overflow —
   // it keeps its own category so callers can still back off rather than
   // (futilely) trying to shrink the prompt.
   with_llm_script(
-    [
+    harness.llm, [
       {
         error: {
           status: 429,
@@ -71,17 +69,16 @@ pipeline main() {
       },
     ],
     { ->
-      const envelope = safe_structured_call(
-        "Grade this output.",
+      const envelope = safe_structured_call(harness,  harness, "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )
-      __io_println(envelope.status != "context_overflow")
+      harness.stdio.println(envelope.status != "context_overflow")
     },
   )
   // (d) The exported detector works on both a dict error and a bare string.
-  __io_println(is_context_overflow_error({reason: "context_overflow"}))
-  __io_println(is_context_overflow_error({error_category: "context_overflow"}))
-  __io_println(is_context_overflow_error("x HTTP 400 [context_overflow]: too long"))
-  __io_println(is_context_overflow_error("x HTTP 429 [rate_limited]: slow down"))
+  harness.stdio.println(is_context_overflow_error({reason: "context_overflow"}))
+  harness.stdio.println(is_context_overflow_error({error_category: "context_overflow"}))
+  harness.stdio.println(is_context_overflow_error("x HTTP 400 [context_overflow]: too long"))
+  harness.stdio.println(is_context_overflow_error("x HTTP 429 [rate_limited]: slow down"))
 }

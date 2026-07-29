@@ -41,9 +41,9 @@ fn run_test_call(id) {
   return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {}}]}
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       run_test_call("r1"),
       run_test_call("r2"),
       run_test_call("r3"),
@@ -52,11 +52,9 @@ pipeline default() {
       llm_text("Giving up. ##DONE##"),
     ],
     { ->
-      const session = "repair-strategy-shift-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Make the failing test pass.",
+      const session = "repair-strategy-shift-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Make the failing test pass.",
           nil,
           {
             provider: "mock",
@@ -78,13 +76,13 @@ pipeline default() {
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
       const repair_stalls = stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
-      __io_println(len(repair_stalls))
-      __io_println(repair_stalls[0].warning.pattern)
-      __io_println(repair_stalls[0].warning.count)
-      __io_println(count_where(stalls, { s -> s.warning.pattern == "repeated_error" }))
-      const messages = json_stringify(agent_session_messages(session))
-      __io_println(contains(messages, "AssertionError: expected 5 got 4"))
-      __io_println(contains(messages, "Repair diagnostic"))
+      harness.stdio.println(len(repair_stalls))
+      harness.stdio.println(repair_stalls[0].warning.pattern)
+      harness.stdio.println(repair_stalls[0].warning.count)
+      harness.stdio.println(count_where(stalls, { s -> s.warning.pattern == "repeated_error" }))
+      const messages = json_stringify(agent_session_messages(harness, session))
+      harness.stdio.println(contains(messages, "AssertionError: expected 5 got 4"))
+      harness.stdio.println(contains(messages, "Repair diagnostic"))
     },
   )
 }

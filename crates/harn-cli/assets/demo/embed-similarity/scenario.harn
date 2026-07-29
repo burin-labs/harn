@@ -6,8 +6,8 @@
  * model asset, no network, and no provider config; it still gives the rest of
  * the stack one cross-platform `similarity` / `top_k` contract to call.
  */
-pipeline default(_task) {
-  const info = hostlib_embed_info({})
+pipeline default(harness: Harness, _task) {
+  const info = harness.embed.info({})
   const query = "authentication token validation"
   const corpus = [
     "markdown table of contents renderer",
@@ -16,10 +16,10 @@ pipeline default(_task) {
     "auth token refresh and validation flow",
     "SwiftUI sidebar selection state",
   ]
-  const ranked = hostlib_embed_top_k({query: query, corpus: corpus, k: 3, min_score: 0.0})
-  const related = hostlib_embed_similarity({a: query, b: corpus[1]})
-  const unrelated = hostlib_embed_similarity({a: query, b: corpus[0]})
-  const vector = hostlib_embed_vector({text: "SymbolRelevance token validator"})
+  const ranked = harness.embed.top_k({query: query, corpus: corpus, k: 3, min_score: 0.0})
+  const related = harness.embed.similarity({a: query, b: corpus[1]})
+  const unrelated = harness.embed.similarity({a: query, b: corpus[0]})
+  const vector = harness.embed.vector({text: "SymbolRelevance token validator"})
   let top_indices = []
   let top_texts = []
   for result in ranked.results {
@@ -38,10 +38,10 @@ pipeline default(_task) {
     relatedness: related.relatedness,
     unrelatedness: unrelated.relatedness,
   }
-  __io_println("=== embed-similarity demo ===")
-  __io_println("backend=" + to_string(info.backend) + " dim=" + to_string(info.dim))
-  __io_println("query=" + query)
-  __io_println("top_k=" + json_stringify(top_texts))
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== embed-similarity demo ===")
+  harness.stdio.println("backend=" + to_string(info.backend) + " dim=" + to_string(info.dim))
+  harness.stdio.println("query=" + query)
+  harness.stdio.println("top_k=" + json_stringify(top_texts))
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

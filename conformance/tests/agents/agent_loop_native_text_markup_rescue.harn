@@ -27,19 +27,18 @@ fn lookup_tools() {
 const MARKUP_TURN =
   "<tool_call>\n<function=lookup>\n<parameter=query>\nfollow-up evidence\n</parameter>\n</function>\n</tool_call>"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // Default policy (reject): the markup turn must continue the loop with
   // native-contract feedback instead of completing — the live failure was a
   // natural completion on exactly this turn shape, losing the call.
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
       llm_text(MARKUP_TURN),
       llm_text("Final answer: release evidence verified."),
     ],
     { ->
-      const result = agent_loop(
-        "Inspect evidence and finish.",
+      const result = agent_loop(harness, "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",
@@ -50,21 +49,20 @@ pipeline main() {
           max_iterations: 6,
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(len(calls))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
       const feedback_messages = json_stringify(calls[2].messages)
-      __io_println(contains(feedback_messages, "emitted text-mode tool calls"))
-      __io_println(contains(feedback_messages, "native tool channel"))
-      __io_println(len(result.tools.successful))
+      harness.stdio.println(contains(feedback_messages, "emitted text-mode tool calls"))
+      harness.stdio.println(contains(feedback_messages, "native tool channel"))
+      harness.stdio.println(len(result.tools.successful))
     },
   )
   // `allow` policy: the rescued markup call dispatches this turn.
   with_llm_script(
-    [llm_text(MARKUP_TURN), llm_text("All set.")],
+    harness.llm, [llm_text(MARKUP_TURN), llm_text("All set.")],
     { ->
-      const result = agent_loop(
-        "Look up the evidence.",
+      const result = agent_loop(harness, "Look up the evidence.",
         nil,
         {
           provider: "mock",
@@ -76,9 +74,9 @@ pipeline main() {
           native_tool_fallback: "allow",
         },
       )
-      __io_println(result.status)
-      __io_println(contains(result.tools.successful, "lookup"))
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(result.status)
+      harness.stdio.println(contains(result.tools.successful, "lookup"))
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
   // Truncated markup (output cut off mid-parameter): the parser refuses to
@@ -87,14 +85,13 @@ pipeline main() {
   // feedback reaches the model — without it this zero-call turn reads as a
   // natural completion and the feedback is lost.
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
       llm_text("<tool_call>\n<function=lookup>\n<parameter=query>\nfollow-up evi"),
       llm_text("Final answer: release evidence verified."),
     ],
     { ->
-      const result = agent_loop(
-        "Inspect evidence and finish.",
+      const result = agent_loop(harness, "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",
@@ -105,14 +102,14 @@ pipeline main() {
           max_iterations: 6,
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(len(calls))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
       const feedback_messages = json_stringify(calls[2].messages)
-      __io_println(contains(feedback_messages, "parse_guidance"))
-      __io_println(contains(feedback_messages, "TRUNCATED"))
-      __io_println(contains(feedback_messages, "native tool channel"))
-      __io_println(!contains(feedback_messages, "<<EOF"))
+      harness.stdio.println(contains(feedback_messages, "parse_guidance"))
+      harness.stdio.println(contains(feedback_messages, "TRUNCATED"))
+      harness.stdio.println(contains(feedback_messages, "native tool channel"))
+      harness.stdio.println(!contains(feedback_messages, "<<EOF"))
     },
   )
 }

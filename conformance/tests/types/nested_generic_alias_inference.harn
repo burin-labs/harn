@@ -42,13 +42,13 @@ fn artifact_groups<T>(_contracts: list<SchemaContract<T>>) -> list<T> {
   return []
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const ints: list<int> = values([int_step()])
   const nullable_ints: list<int> = maybe_values([{value: 1}])
   const receipts: list<Receipt> = artifacts(receipt_contract())
   const grouped_receipts: list<Receipt> = artifact_groups([receipt_contract()])
   const explicit_empty: list<int> = values<int>([])
-  __io_println(
+  harness.stdio.println(
     "nested aliases inferred: ${ints.count + nullable_ints.count + receipts.count + grouped_receipts.count + explicit_empty.count}",
   )
 }

@@ -5,14 +5,14 @@
  * Validates the core testbench property: script-perceived time advances
  * without consuming real wall-clock time.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const start_ms = 1767225600000
   mock_time(start_ms)
   const before = harness.clock.now_ms()
   harness.clock.sleep_ms(86400000)
   const after = harness.clock.now_ms()
-  __io_println(before == start_ms)
-  __io_println(after == start_ms + 86400000)
-  __io_println(after - before == 86400000)
+  harness.stdio.println(before == start_ms)
+  harness.stdio.println(after == start_ms + 86400000)
+  harness.stdio.println(after - before == 86400000)
   unmock_time()
 }

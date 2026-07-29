@@ -47,21 +47,21 @@ fn count_events(events, event_type) {
 // Case 1: failed escalation degrades to the primary provider.
 // -------------------------------------------------------------------------------------------------
 
-fn escalation_fallback_case() {
+fn escalation_fallback_case(harness: Harness) {
   // Records the provider/tool_format route seen on every LLM call, in order,
   // so we can prove the escalated call fired then the loop retried the PRIMARY
   // route. The tool_format clause prevents native escalations from leaking
   // back into text-only primaries after an escalation provider error.
-  const seen = shared_cell({scope: "task_group", key: "esc-providers", initial: ""})
-  const formats = shared_cell({scope: "task_group", key: "esc-formats", initial: ""})
-  const turn = shared_cell({scope: "task_group", key: "esc-turn", initial: 0})
+  const seen = harness.runtime.shared_cell({scope: "task_group", key: "esc-providers", initial: ""})
+  const formats = harness.runtime.shared_cell({scope: "task_group", key: "esc-formats", initial: ""})
+  const turn = harness.runtime.shared_cell({scope: "task_group", key: "esc-turn", initial: 0})
   const caller = { call ->
     let provider = to_string(call?.opts?.provider ?? "")
     let tool_format = to_string(call?.opts?.tool_format ?? "")
-    let snap = shared_snapshot(seen)
-    shared_set(seen, snap.value + provider + ",")
-    let format_snap = shared_snapshot(formats)
-    shared_set(formats, format_snap.value + tool_format + ",")
+    let snap = harness.runtime.shared_snapshot(seen)
+    harness.runtime.shared_set(seen, snap.value + provider + ",")
+    let format_snap = harness.runtime.shared_snapshot(formats)
+    harness.runtime.shared_set(formats, format_snap.value + tool_format + ",")
     if provider == "escalated" {
       return {
         ok: false,
@@ -75,7 +75,7 @@ fn escalation_fallback_case() {
         },
       }
     }
-    let count = shared_snapshot(turn)
+    let count = harness.runtime.shared_snapshot(turn)
     if count.value >= 2 {
       return {
         ok: true,
@@ -91,18 +91,16 @@ fn escalation_fallback_case() {
   // escalation target. Subsequent turns leave the provider as-is, so the
   // primary-retry fallback is not re-escalated.
   const post_turn = { _payload ->
-    let count = shared_snapshot(turn)
-    shared_set(turn, count.value + 1)
+    let count = harness.runtime.shared_snapshot(turn)
+    harness.runtime.shared_set(turn, count.value + 1)
     if count.value == 0 {
       return {next_options: {provider: "escalated", model: "frontier", tool_format: "native"}}
     }
     return nil
   }
-  const session = "esc-fallback-" + uuid()
-  const captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "do the task",
+  const session = "esc-fallback-" + harness.random.uuid()
+  const captured = agent_capture_events(harness,  harness, session,
+    fn() { return agent_loop(harness, "do the task",
       nil,
       {
         session_id: session,
@@ -120,22 +118,22 @@ fn escalation_fallback_case() {
   // (a) An observable provider_error iteration_end event was emitted carrying
   //     the failed escalated provider/model/status — not a silent break.
   const perr = first_provider_error_event(captured.events)
-  __io_println("esc_event_present=" + to_string(perr != nil))
-  __io_println("esc_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
-  __io_println("esc_event_provider=" + to_string(perr?.iteration_info?.provider ?? ""))
-  __io_println("esc_event_model=" + to_string(perr?.iteration_info?.model ?? ""))
-  __io_println("esc_event_status=" + to_string(perr?.iteration_info?.provider_status ?? ""))
-  __io_println(
+  harness.stdio.println("esc_event_present=" + to_string(perr != nil))
+  harness.stdio.println("esc_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  harness.stdio.println("esc_event_provider=" + to_string(perr?.iteration_info?.provider ?? ""))
+  harness.stdio.println("esc_event_model=" + to_string(perr?.iteration_info?.model ?? ""))
+  harness.stdio.println("esc_event_status=" + to_string(perr?.iteration_info?.provider_status ?? ""))
+  harness.stdio.println(
     "esc_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false),
   )
   // (c) The provider/tool_format call sequence proves:
   //     primary:text -> escalated:native (failed) -> primary:text again
   //     (the fallback retry) -> primary:text (completion).
-  __io_println("esc_providers=" + shared_get(seen))
-  __io_println("esc_tool_formats=" + shared_get(formats))
+  harness.stdio.println("esc_providers=" + harness.runtime.shared_get(seen))
+  harness.stdio.println("esc_tool_formats=" + harness.runtime.shared_get(formats))
   // (b) The run did NOT terminate as a fake success on the failed escalation:
   //     it converged via the primary fallback to a real "done".
-  __io_println("esc_status=" + captured.result.status)
+  harness.stdio.println("esc_status=" + captured.result.status)
 }
 
 // Fast pre-dispatch escalation failure — the C13 trigger.
@@ -150,7 +148,7 @@ fn escalation_fallback_case() {
 
 // -------------------------------------------------------------------------------------------------
 
-fn primary_provider_error_case() {
+fn primary_provider_error_case(harness: Harness) {
   const caller = { _call ->
     return {
       ok: false,
@@ -159,11 +157,9 @@ fn primary_provider_error_case() {
       error: {status: 500, message: "primary down", provider: "mock", model: "cheap"},
     }
   }
-  const session = "esc-primary-err-" + uuid()
-  const captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "do the task",
+  const session = "esc-primary-err-" + harness.random.uuid()
+  const captured = agent_capture_events(harness,  harness, session,
+    fn() { return agent_loop(harness, "do the task",
       nil,
       {
         session_id: session,
@@ -177,27 +173,27 @@ fn primary_provider_error_case() {
     ) },
   )
   const perr = first_provider_error_event(captured.events)
-  __io_println("primary_event_present=" + to_string(perr != nil))
-  __io_println("primary_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
-  __io_println(
+  harness.stdio.println("primary_event_present=" + to_string(perr != nil))
+  harness.stdio.println("primary_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  harness.stdio.println(
     "primary_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false),
   )
   // Exactly one failing turn — no escalation fallback means no spurious retry.
-  __io_println("primary_event_count=" + to_string(count_events(captured.events, "iteration_end")))
-  __io_println("primary_status=" + captured.result.status)
+  harness.stdio.println("primary_event_count=" + to_string(count_events(captured.events, "iteration_end")))
+  harness.stdio.println("primary_status=" + captured.result.status)
 }
 
 // -------------------------------------------------------------------------------------------------
 // Case 3: tracked transient transport failures during escalation are infra, not model failures.
 // -------------------------------------------------------------------------------------------------
 
-fn escalation_transient_transport_abort_case() {
-  const seen = shared_cell({scope: "task_group", key: "esc-transport-providers", initial: ""})
-  const turn = shared_cell({scope: "task_group", key: "esc-transport-turn", initial: 0})
+fn escalation_transient_transport_abort_case(harness: Harness) {
+  const seen = harness.runtime.shared_cell({scope: "task_group", key: "esc-transport-providers", initial: ""})
+  const turn = harness.runtime.shared_cell({scope: "task_group", key: "esc-transport-turn", initial: 0})
   const caller = { call ->
     let provider = to_string(call?.opts?.provider ?? "")
-    let snap = shared_snapshot(seen)
-    shared_set(seen, snap.value + provider + ",")
+    let snap = harness.runtime.shared_snapshot(seen)
+    harness.runtime.shared_set(seen, snap.value + provider + ",")
     if provider == "escalated" {
       return {
         ok: false,
@@ -219,18 +215,16 @@ fn escalation_transient_transport_abort_case() {
     }
   }
   const post_turn = { _payload ->
-    let count = shared_snapshot(turn)
-    shared_set(turn, count.value + 1)
+    let count = harness.runtime.shared_snapshot(turn)
+    harness.runtime.shared_set(turn, count.value + 1)
     if count.value == 0 {
       return {next_options: {provider: "escalated", model: "frontier"}}
     }
     return nil
   }
-  const session = "esc-transport-" + uuid()
-  const captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "do the task",
+  const session = "esc-transport-" + harness.random.uuid()
+  const captured = agent_capture_events(harness,  harness, session,
+    fn() { return agent_loop(harness, "do the task",
       nil,
       {
         session_id: session,
@@ -246,18 +240,18 @@ fn escalation_transient_transport_abort_case() {
     ) },
   )
   const perr = first_provider_error_event(captured.events)
-  __io_println("transport_event_present=" + to_string(perr != nil))
-  __io_println("transport_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
-  __io_println("transport_status=" + captured.result.status)
-  __io_println("transport_stop_reason=" + captured.result.stop_reason)
-  __io_println(
+  harness.stdio.println("transport_event_present=" + to_string(perr != nil))
+  harness.stdio.println("transport_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  harness.stdio.println("transport_status=" + captured.result.status)
+  harness.stdio.println("transport_stop_reason=" + captured.result.stop_reason)
+  harness.stdio.println(
     "transport_breaker_count=" + to_string(count_events(captured.events, "budget_circuit_breaker")),
   )
-  __io_println("transport_providers=" + shared_get(seen))
+  harness.stdio.println("transport_providers=" + harness.runtime.shared_get(seen))
 }
 
-pipeline default() {
-  escalation_fallback_case()
-  primary_provider_error_case()
-  escalation_transient_transport_abort_case()
+pipeline default(harness: Harness) {
+  escalation_fallback_case(harness)
+  primary_provider_error_case(harness)
+  escalation_transient_transport_abort_case(harness)
 }

@@ -44,7 +44,7 @@ fn pr_variants() {
 }
 
 @persona(name: "merge_captain")
-fn merge_captain(ctx) {
+fn merge_captain(harness: Harness, ctx) {
   const prs = fetch_open_prs(ctx)
   let merged = []
   let handoffs = []
@@ -54,7 +54,7 @@ fn merge_captain(ctx) {
       const receipt = admin_merge(pr)
       merged = merged.appending(receipt.result.number)
     } else if decision.action == "handoff" {
-      handoffs = handoffs.appending(semantic_conflict_ticket(pr))
+      handoffs = handoffs.appending(semantic_conflict_ticket(harness, pr))
     }
   }
   const run = finalize_merge_sweep(handoffs)
@@ -78,18 +78,16 @@ fn classify_pr(pr) {
 }
 
 @step(name: "admin_merge")
-fn admin_merge(pr) {
-  const wrapped = with_audit_receipt(
-    fn() { return {number: pr.number, method: "admin", side_effect: "planned"} },
+fn admin_merge(harness: Harness, pr) {
+  const wrapped = with_audit_receipt(harness,  harness, fn() { return {number: pr.number, method: "admin", side_effect: "planned"} },
     {persona: "merge_captain", step: "admin_merge", started_at: "2026-01-01T00:00:00Z"},
   )
   return wrapped()
 }
 
 @step(name: "semantic_conflict_ticket")
-fn semantic_conflict_ticket(pr) {
-  return handoff_routed(
-    {
+fn semantic_conflict_ticket(harness: Harness, pr) {
+  return handoff_routed(harness,  harness, {
       id: "semantic-conflict-" + to_string(pr.number),
       kind: "semantic_conflict_ticket",
       source_persona: "merge_captain",
@@ -114,31 +112,30 @@ fn finalize_merge_sweep(handoffs) {
   )
 }
 
-pipeline test() {
+pipeline test(harness: Harness) {
   const green = {number: 42, draft: false, checks: "green", conflict: false}
   step_assertions_begin("merge_captain")
-  const happy = merge_captain({prs: [green]})
+  const happy = merge_captain(harness, {prs: [green]})
   assert_steps_ran(["fetch_open_prs", "classify_pr", "admin_merge", "finalize_merge_sweep"])
   assert_step_received("classify_pr", { event -> event.args[0].number == 42 })
   assert_step_emitted("admin_merge", { event -> event.output.receipt.status == "success" })
   assert_receipt_field(assert_step_emitted("admin_merge").output.receipt, "/status", "success")
   assert_eq(happy.merged, [42])
   step_assertions_begin("merge_captain")
-  const conflicted = merge_captain(
-    {prs: [{number: 43, draft: false, checks: "green", conflict: true}]},
+  const conflicted = merge_captain(harness, {prs: [{number: 43, draft: false, checks: "green", conflict: true}]},
   )
   assert_steps_ran(
     ["fetch_open_prs", "classify_pr", "semantic_conflict_ticket", "finalize_merge_sweep"],
   )
   assert_handoff_emitted(conflicted.run, "semantic_conflict_ticket", "review_captain")
   step_assertions_begin("merge_captain")
-  const variants = merge_captain({prs: pr_variants()})
+  const variants = merge_captain(harness, {prs: pr_variants()})
   for pr in pr_variants() {
     if pr.draft {
       assert(!contains(variants.merged, pr.number), "draft PR was admin-merged")
     }
   }
   step_assertions_end()
-  __io_println("persona_steel_thread merge")
-  __io_println(len(variants.merged) > 0)
+  harness.stdio.println("persona_steel_thread merge")
+  harness.stdio.println(len(variants.merged) > 0)
 }

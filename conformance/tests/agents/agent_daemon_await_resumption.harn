@@ -1,15 +1,13 @@
 import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
-  const session_id = "daemon-await-resumption-" + uuid()
+pipeline test(harness: Harness, task) {
+  const session_id = "daemon-await-resumption-" + harness.random.uuid()
   with_llm_script(
-    [llm_text("daemon idle")],
+    harness.llm, [llm_text("daemon idle")],
     { ->
-      const captured = agent_capture_events(
-        session_id,
-        fn() { return agent_loop(
-          "Poll for background work",
+      const captured = agent_capture_events(harness,  harness, session_id,
+        fn() { return agent_loop(harness, "Poll for background work",
           nil,
           {
             provider: "mock",
@@ -23,13 +21,13 @@ pipeline test(task) {
       const audit = captured.events.filter(
         { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
       )
-      __io_println(captured.result.status)
-      __io_println(len(audit) == 1)
-      __io_println(audit[0]?.audit?.status)
-      __io_println(audit[0]?.audit?.reason)
-      __io_println(audit[0]?.audit?.initiator)
-      __io_println(audit[0]?.audit?.conditions?.timeout?.duration_minutes)
-      __io_println(audit[0]?.audit?.conditions?.timeout?.on_timeout)
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(len(audit) == 1)
+      harness.stdio.println(audit[0]?.audit?.status)
+      harness.stdio.println(audit[0]?.audit?.reason)
+      harness.stdio.println(audit[0]?.audit?.initiator)
+      harness.stdio.println(audit[0]?.audit?.conditions?.timeout?.duration_minutes)
+      harness.stdio.println(audit[0]?.audit?.conditions?.timeout?.on_timeout)
     },
   )
 }

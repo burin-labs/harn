@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use crate::ast::*;
 use crate::builtin_signatures;
-use crate::builtin_signatures::BuiltinSignatureExt;
+use crate::builtin_signatures::{BuiltinSignatureExt, TyExt};
 use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
@@ -1210,25 +1210,11 @@ impl TypeChecker {
                 Self::string_property_type(property, optional)
             }
             TypeExpr::Named(name) if name == "dict" => None,
-            TypeExpr::Named(name) if name == "Harness" => match property {
-                "stdio" => Some(TypeExpr::Named("HarnessStdio".into())),
-                "term" => Some(TypeExpr::Named("HarnessTerm".into())),
-                "clock" => Some(TypeExpr::Named("HarnessClock".into())),
-                "fs" => Some(TypeExpr::Named("HarnessFs".into())),
-                "env" => Some(TypeExpr::Named("HarnessEnv".into())),
-                "random" => Some(TypeExpr::Named("HarnessRandom".into())),
-                "net" => Some(TypeExpr::Named("HarnessNet".into())),
-                "process" => Some(TypeExpr::Named("HarnessProcess".into())),
-                "crypto" => Some(TypeExpr::Named("HarnessCrypto".into())),
-                "system" => Some(TypeExpr::Named("HarnessSystem".into())),
-                "secrets" => Some(TypeExpr::Named("HarnessSecrets".into())),
-                "llm" => Some(TypeExpr::Named("HarnessLlm".into())),
-                "tenant" => Some(TypeExpr::Named("HarnessTenant".into())),
-                "auth" => Some(TypeExpr::Named("HarnessAuth".into())),
-                "obs" => Some(TypeExpr::Named("HarnessObs".into())),
-                _ if optional => Some(TypeExpr::Named("nil".into())),
-                _ => None,
-            },
+            TypeExpr::Named(name) if name == "Harness" => {
+                harn_builtin_meta::CapabilityId::from_field_name(property)
+                    .map(|capability| TypeExpr::Named(capability.type_name().into()))
+                    .or_else(|| optional.then(|| TypeExpr::Named("nil".into())))
+            }
             TypeExpr::Named(name) if scope.get_struct(name).is_some() => {
                 self.struct_property_type(name, &[], property, scope, optional)
             }
@@ -1759,12 +1745,9 @@ impl TypeChecker {
         let receiver = self.resolve_alias(receiver, scope);
         match receiver {
             TypeExpr::Named(name) => {
-                let sub_handle = crate::harness_methods::harness_type_sub_handle(name.as_str())?;
-                if sub_handle == "term" && method == "read_password" {
-                    return Some(TypeExpr::Named("string".into()));
-                }
-                crate::harness_methods::harness_sub_handle_ambient(sub_handle, method)
-                    .and_then(builtin_return_type)
+                let capability = harn_builtin_meta::CapabilityId::from_type_name(name.as_str())?;
+                builtin_signatures::lookup_capability_method(capability, method)
+                    .and_then(|sig| (!sig.returns.is_any()).then(|| sig.returns.to_type_expr()))
             }
             _ => None,
         }

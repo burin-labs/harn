@@ -5,7 +5,7 @@
  *
  * The two model prompts live in sibling `.harn.prompt` template files
  * (review.harn.prompt, clarification.harn.prompt) and are filled with
- * `render_prompt(path, bindings)`. The demo runner materializes the whole
+ * `harness.fs.render_prompt(path, bindings)`. The demo runner materializes the whole
  * scenario directory, so file-backed prompts (and imported modules) work
  * fully offline, the same way a real Harn project is laid out.
  *
@@ -35,8 +35,8 @@ fn total_added(files) {
   return total
 }
 
-fn render_review_prompt(diff) {
-  return render_prompt(
+fn render_review_prompt(harness: Harness, diff) {
+  return harness.fs.render_prompt(
     "review.harn.prompt",
     {
       pr: diff.pr_number,
@@ -47,22 +47,22 @@ fn render_review_prompt(diff) {
   )
 }
 
-fn render_clarification_prompt(pr, answer) {
-  return render_prompt("clarification.harn.prompt", {pr: pr, answer: answer})
+fn render_clarification_prompt(harness: Harness, pr, answer) {
+  return harness.fs.render_prompt("clarification.harn.prompt", {pr: pr, answer: answer})
 }
 
-pipeline default(_task) {
+pipeline default(harness: Harness, _task) {
   const diff = diff_summary()
   const system = "You are review_captain, a thorough code reviewer."
-  const review_prompt = render_review_prompt(diff)
-  const initial_envelope = llm_call(review_prompt, system)
-  __io_println("=== review_captain · stage 1 (initial scan) ===")
-  __io_println(initial_envelope.text)
-  __io_println("")
+  const review_prompt = render_review_prompt(harness, diff)
+  const initial_envelope = harness.llm.call(review_prompt, system)
+  harness.stdio.println("=== review_captain · stage 1 (initial scan) ===")
+  harness.stdio.println(initial_envelope.text)
+  harness.stdio.println("")
   const author_answer =
     "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
-  const clarification_prompt = render_clarification_prompt(diff.pr_number, author_answer)
-  const final_envelope = llm_call(clarification_prompt, system)
+  const clarification_prompt = render_clarification_prompt(harness, diff.pr_number, author_answer)
+  const final_envelope = harness.llm.call(clarification_prompt, system)
   const receipt = {
     persona: "review_captain",
     execution_mode: "advisory",
@@ -75,7 +75,7 @@ pipeline default(_task) {
     final_verdict: final_envelope.text,
     receipt_kind: "review_receipt",
   }
-  __io_println("=== review_captain · stage 2 (final verdict) ===")
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== review_captain · stage 2 (final verdict) ===")
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

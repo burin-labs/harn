@@ -7,16 +7,16 @@ import "std/triggers"
  * a single trigger registration route different events to different
  * sessions based on payload contents.
  */
-pipeline test(task) {
-  const acme_session = agent_session_open("trigger-reminder-inject-closure-acme")
-  const widget_session = agent_session_open("trigger-reminder-inject-closure-widget")
-  agent_session_reset(acme_session)
-  agent_session_reset(widget_session)
+pipeline test(harness: Harness, task) {
+  const acme_session = harness.agent.open("trigger-reminder-inject-closure-acme")
+  const widget_session = harness.agent.open("trigger-reminder-inject-closure-widget")
+  harness.agent.reset(acme_session)
+  harness.agent.reset(widget_session)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "trigger-reminder-inject-closure-" + unique,
       kind: "issue.opened",
@@ -43,7 +43,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const to_acme = trigger_fire(
+  const to_acme = harness.runtime.trigger_fire(
     handle,
     {
       provider: "webhook",
@@ -52,7 +52,7 @@ pipeline test(task) {
       headers: {x_delivery: "evt-acme-" + unique},
     },
   )
-  const to_widget = trigger_fire(
+  const to_widget = harness.runtime.trigger_fire(
     handle,
     {
       provider: "webhook",
@@ -61,18 +61,18 @@ pipeline test(task) {
       headers: {x_delivery: "evt-widget-" + unique},
     },
   )
-  __io_println(to_acme.result?.target_session_id == acme_session)
-  __io_println(to_widget.result?.target_session_id == widget_session)
+  harness.stdio.println(to_acme.result?.target_session_id == acme_session)
+  harness.stdio.println(to_widget.result?.target_session_id == widget_session)
   const acme_reminders = transcript_events_by_kind(
-    agent_session_snapshot(acme_session),
+    harness.agent.snapshot(acme_session),
     "system_reminder",
   )
   const widget_reminders = transcript_events_by_kind(
-    agent_session_snapshot(widget_session),
+    harness.agent.snapshot(widget_session),
     "system_reminder",
   )
-  __io_println(len(acme_reminders))
-  __io_println(len(widget_reminders))
-  __io_println(acme_reminders[0].reminder.body)
-  __io_println(widget_reminders[0].reminder.body)
+  harness.stdio.println(len(acme_reminders))
+  harness.stdio.println(len(widget_reminders))
+  harness.stdio.println(acme_reminders[0].reminder.body)
+  harness.stdio.println(widget_reminders[0].reminder.body)
 }

@@ -1,18 +1,18 @@
 /**
- * Calls `date_iso()` — a stdlib builtin that reads the OS wall clock
+ * Calls `harness.clock.date_iso()` — a stdlib builtin that reads the OS wall clock
  * directly because it predates the unified `clock_mock`. Under a paused
  * testbench mock the `clock_mock::leak_audit` shim records the read as
- * a fidelity hazard, and `testbench_clock_leaks()` surfaces the
+ * a fidelity hazard, and `harness.testing.clock_leaks()` surfaces the
  * recorded set so a script (or operator) can assert which capabilities
  * bypassed the mock.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   mock_time(1767225600000)
-  const _stamp = date_iso()
-  const _stamp_again = date_iso()
-  const leaks = testbench_clock_leaks()
-  __io_println(len(leaks) == 1)
-  __io_println(leaks[0].capability == "stdlib/date_iso")
-  __io_println(leaks[0].count == 2)
+  const _stamp = harness.clock.date_iso()
+  const _stamp_again = harness.clock.date_iso()
+  const leaks = harness.testing.clock_leaks()
+  harness.stdio.println(len(leaks) == 1)
+  harness.stdio.println(leaks[0].capability == "stdlib/date_iso")
+  harness.stdio.println(leaks[0].count == 2)
   unmock_time()
 }

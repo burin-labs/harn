@@ -10,7 +10,7 @@ fn __ci_is_green(facts) {
   return facts?.ci_green == true
 }
 
-pipeline test() {
+pipeline test(harness: Harness) {
   const g = goal(
     {
       budget: {max_cost_usd: 5.0},
@@ -56,7 +56,7 @@ pipeline test() {
   assert(judge.max_invocations == 3, "bounded done-judge veto cap")
   // Rendering + pin bridge.
   assert(goal_text(g).contains("## Goal"), "renders the goal block")
-  assert(goal_pin(g).kind == "goal", "goal lowers to a goal pin")
+  assert(goal_pin(harness, g).kind == "goal", "goal lowers to a goal pin")
   // Bounded re-loop returns agent_loop options that gate completion on the goal
   // via verify_completion, bounded by max_iterations (the live convergence proof
   // is in agent_goal_reloop.harn).
@@ -73,5 +73,5 @@ pipeline test() {
   const veto = reloop.verify_completion({visible_text: "", session_id: "x", transcript: "[]"})
   assert(!veto.confirm, "unmet goal vetoes the completion")
   assert(veto.feedback.contains("CI is green"), "veto feedback carries the unmet criterion")
-  log("agent goal tests passed")
+  harness.stdio.println("agent goal tests passed")
 }

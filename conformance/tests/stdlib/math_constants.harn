@@ -1,11 +1,11 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // pi and e are now values, not functions
-  __io_println(pi > 3.14)
-  __io_println(pi < 3.15)
-  __io_println(e > 2.71)
-  __io_println(e < 2.72)
+  harness.stdio.println(pi > 3.14)
+  harness.stdio.println(pi < 3.15)
+  harness.stdio.println(e > 2.71)
+  harness.stdio.println(e < 2.72)
   // Use in expressions
   const area = pi * pow(5, 2)
-  __io_println(area > 78)
-  __io_println(area < 79)
+  harness.stdio.println(area > 78)
+  harness.stdio.println(area < 79)
 }

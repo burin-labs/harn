@@ -8,12 +8,12 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  */
 import { if_unsettled } from "std/lifecycle/combinators"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const cb = { harness, return_value ->
     harness.emit_audit("ran", {})
     return "handled"
   }
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const guarded = if_unsettled(cb)
       const initial = guarded(harness, return_value)

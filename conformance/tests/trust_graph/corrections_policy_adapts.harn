@@ -1,7 +1,7 @@
 import "std/corrections"
 
-pipeline test(task) {
-  const unique = uuid_v7()
+pipeline test(harness: Harness, task) {
+  const unique = harness.random.uuid_v7()
   const actor_id = "correction-policy-" + unique
   const action = "github.issue.opened"
   const evidence: CorrectionEvidenceRef = {kind: "trigger_replay", event_id: "evt-" + unique}
@@ -19,12 +19,12 @@ pipeline test(task) {
   }
   const correction_id: CorrectionId = record(correction)
   const records: list<CorrectionRecord> = query({actor_id: actor_id, action: action})
-  const policy: CapabilityPolicy = trust.policy_for(actor_id)
-  __io_println(correction_id != "")
-  __io_println(len(records) == 1)
-  __io_println(
+  const policy: CapabilityPolicy = harness.runtime.trust_policy_for(actor_id)
+  harness.stdio.println(correction_id != "")
+  harness.stdio.println(len(records) == 1)
+  harness.stdio.println(
     records[0]?.scope == "this_persona" && records[0]?.from_decision?.outcome == "success",
   )
-  __io_println(policy.side_effect_level == "read_only")
-  __io_println(event_log.latest("corrections.records") != nil)
+  harness.stdio.println(policy.side_effect_level == "read_only")
+  harness.stdio.println(harness.obs.event_log_latest("corrections.records") != nil)
 }

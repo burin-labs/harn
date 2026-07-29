@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const plain = http_server_tls_plain()
   assert_eq(plain.mode, "plain")
   assert_eq(plain.scheme, "http")
@@ -18,7 +18,7 @@ pipeline test(task) {
   assert(contains(dev.cert_pem, "BEGIN CERTIFICATE"))
   assert(contains(dev.key_pem, "BEGIN PRIVATE KEY"))
   assert_eq(http_server_security_headers(dev), {})
-  const dir = path_join(harness.fs.temp_dir(), "harn-http-server-tls-" + uuid())
+  const dir = path_join(harness.fs.temp_dir(), "harn-http-server-tls-" + harness.random.uuid())
   harness.fs.mkdir(dir)
   const cert_path = path_join(dir, "cert.pem")
   const key_path = path_join(dir, "key.pem")
@@ -32,5 +32,5 @@ pipeline test(task) {
     http_server_tls_pem(path_join(dir, "missing.pem"), key_path)
   }
   assert(is_err(missing))
-  __io_println("http_server_tls_ok")
+  harness.stdio.println("http_server_tls_ok")
 }

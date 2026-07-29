@@ -1,3 +1,3 @@
-pipeline main(task) {
-  agent_loop(task, nil, {loop_until_done: true, max_iterations: 2, provider: "mock"})
+pipeline main(harness: Harness, task) {
+  agent_loop(harness, task, nil, {loop_until_done: true, max_iterations: 2, provider: "mock"})
 }

@@ -35,8 +35,8 @@ fn __serialize_response(llm_result) {
   return join(parts, "\n")
 }
 
-fn __payload(session, llm_result, iteration) {
-  const messages = agent_session_messages(session.session_id)
+fn __payload(harness: Harness, session, llm_result, iteration) {
+  const messages = agent_session_messages(harness, session.session_id)
   return {
     session_id: session.session_id,
     iteration: iteration,
@@ -69,8 +69,8 @@ fn __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_itera
 }
 
 fn __invoke(harness: Harness, judge_cfg, opts, payload) {
-  const system = step_judge_system_prompt({rubric: judge_cfg?.rubric ?? "default"})
-  const user = step_judge_user_prompt(payload)
+  const system = step_judge_system_prompt(harness, {rubric: judge_cfg?.rubric ?? "default"})
+  const user = step_judge_user_prompt(harness, payload)
   const schema = __step_judge_schema()
   const ran = __judge_run_checkpoint(
     harness,
@@ -138,7 +138,7 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
   }
 }
 
-fn __emit_decision(session_id, iteration, on_veto, verdict) {
+fn __emit_decision(harness: Harness, session_id, iteration, on_veto, verdict) {
   const {usage = {}, provider = "", model = ""} = verdict?.typed_checkpoint ?? {}
   const cost_est = if provider != "" && model != "" {
     estimate_call_cost(
@@ -155,8 +155,7 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
   } else {
     {cost_usd: 0}
   }
-  agent_emit_event(
-    session_id,
+  agent_emit_event(harness, session_id,
     "step_judge_decision",
     {
       iteration: iteration,
@@ -210,7 +209,7 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_step_judge(
+pub fn agent_step_judge(harness: Harness, 
   session,
   llm_result,
   opts,
@@ -236,11 +235,11 @@ pub fn agent_step_judge(
       confidence: 1.0,
       judge_duration_ms: 0,
     }
-    __emit_decision(session.session_id, iteration, on_veto, verdict)
+    __emit_decision(harness, session.session_id, iteration, on_veto, verdict)
     return verdict + {on_veto: on_veto, attempts: attempts}
   }
-  const payload = __payload(session, llm_result, iteration)
+  const payload = __payload(harness, session, llm_result, iteration)
   const verdict = __invoke(harness, judge_cfg, opts, payload)
-  __emit_decision(session.session_id, iteration, on_veto, verdict)
+  __emit_decision(harness, session.session_id, iteration, on_veto, verdict)
   return verdict + {on_veto: on_veto, attempts: attempts + 1}
 }

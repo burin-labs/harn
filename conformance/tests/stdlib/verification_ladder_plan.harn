@@ -1,7 +1,7 @@
 import { verification_ladder_plan } from "std/verification"
 
-pipeline test(task) {
-  verification_profiles_set(
+pipeline test(harness: Harness, task) {
+  harness.runtime.verification_profiles_set(
     {
       rows: [
         {
@@ -91,7 +91,7 @@ pipeline test(task) {
     },
   )
   const query = {path: "src/a.tx", language: "toolchainx", task: "post_edit"}
-  const matches = verification_profile_matches(query)
+  const matches = harness.runtime.verification_profile_matches(query)
   assert_eq(matches[0].row.id, "tx/parse")
   assert_eq(matches[1].row.id, "tx/unit")
   assert_eq(matches[2].row.id, "tx/full-stale")
@@ -149,9 +149,9 @@ pipeline test(task) {
   )
   assert_eq(len(limited.selected), 3)
   assert_eq(limited.selected[2].row_id, "tx/r0-fast-moderate")
-  verification_profiles_set({rows: []})
+  harness.runtime.verification_profiles_set({rows: []})
   const empty = verification_ladder_plan(query)
   assert_eq(empty.fallback, true)
   assert_eq(empty.reason, "no_profile_rows")
-  __io_println("verification ladder plan ok")
+  harness.stdio.println("verification ladder plan ok")
 }

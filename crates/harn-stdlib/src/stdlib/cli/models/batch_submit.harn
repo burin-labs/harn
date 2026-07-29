@@ -53,9 +53,7 @@ fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(base, "/v1/messages/batches"),
     {
       headers: {
@@ -141,9 +139,7 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
     inputDatasetId: __fireworks_dataset_resource(account_id, input_dataset_id),
     outputDatasetId: __fireworks_dataset_resource(account_id, output_dataset_id),
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(
       __provider_base_url(harness, "fireworks"),
       "/accounts/" + account_id + "/batchInferenceJobs?batchInferenceJobId=" + batch_job_id,
@@ -328,9 +324,7 @@ fn __submit_openai_compatible(
     upload,
     safe_string(job["endpoint"], "/v1/chat/completions"),
   )
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(base, "/batches"),
     {
       headers: __provider_auth_headers(
@@ -405,9 +399,7 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
     model: safe_string(job["model"], ""),
     timeout_hours: 24,
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(base, "/batch/jobs"),
     {
       headers: {
@@ -457,9 +449,7 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  const upload = __upload_xai_jsonl_file(
-    harness,
-    safe_string(payload["path"], ""),
+  const upload = __upload_xai_jsonl_file(harness,  safe_string(payload["path"], ""),
     safe_string(auth["value"], ""),
   )
   if !safe_bool(upload["ok"], false) {
@@ -473,9 +463,7 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
     name: safe_string(job["id"], "harn-batch"),
     input_file_id: safe_string(upload["file_id"], ""),
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(__provider_base_url(harness, "xai"), "/batches"),
     {
       headers: {
@@ -545,9 +533,7 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
       inputConfig: {fileName: safe_string(upload["file_name"], "")},
     },
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(
       base,
       "/v1beta/" + __gemini_model_path(safe_string(job["model"], "")) + ":batchGenerateContent",

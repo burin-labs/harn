@@ -23,6 +23,8 @@ pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "harness.obs.event_log_describe",
+    effects = ["state.read@dynamic"],
     sig = "event_log.describe() -> dict",
     kind = "async",
     category = "event_log"
@@ -48,6 +50,8 @@ async fn event_log_describe_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.obs.event_log_emit",
+    effects = ["state.write@arg0", "observability.write@arg0"],
     sig = "event_log.emit(topic: string, kind: string, payload?: any, headers?: dict) -> int",
     kind = "async",
     category = "event_log"
@@ -71,6 +75,8 @@ async fn event_log_emit_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.obs.event_log_latest",
+    effects = ["state.read@arg0"],
     sig = "event_log.latest(topic: string) -> int | nil",
     kind = "async",
     category = "event_log"
@@ -87,6 +93,8 @@ async fn event_log_latest_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.obs.event_log_read",
+    effects = ["state.read@arg0"],
     sig = "event_log.read(topic_or_options: string | dict, from_cursor?: int | nil, limit?: int) -> list",
     kind = "async",
     category = "event_log"
@@ -116,6 +124,8 @@ async fn event_log_read_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.obs.event_log_subscribe",
+    effects = ["state.observe@arg0"],
     sig = "event_log.subscribe(topic_or_options: string | dict, from_cursor?: int | nil) -> stream",
     kind = "async",
     category = "event_log"
@@ -163,6 +173,8 @@ async fn event_log_subscribe_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.obs.event_log_topics",
+    effects = ["state.read@const=event-log"],
     sig = "event_log.topics() -> list<string>",
     kind = "async",
     category = "event_log"
@@ -281,6 +293,9 @@ fn parse_subscribe_options(args: &[VmValue]) -> Result<SubscribeOptions, VmError
 }
 
 fn ensure_event_log() -> std::sync::Arc<crate::event_log::AnyEventLog> {
+    if let Some(ctx) = crate::connectors::harn_module::active_harn_connector_ctx() {
+        return ctx.event_log;
+    }
     active_event_log().unwrap_or_else(|| install_memory_for_current_thread(EVENT_LOG_QUEUE_DEPTH))
 }
 

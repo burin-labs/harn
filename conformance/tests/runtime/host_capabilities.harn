@@ -1,13 +1,12 @@
-pipeline default() {
-  const caps = host_capabilities()
-  __io_println(host_has("process", "exec"))
-  __io_println(host_has("process", "list_shells"))
-  __io_println(caps?.process?.description != nil)
-  const default_shell = host_call("process.get_default_shell", {})
-  const result = host_call(
-    "process.exec",
+pipeline default(harness: Harness) {
+  const caps = harness.runtime.host_capabilities()
+  harness.stdio.println(harness.runtime.host_has("process", "exec"))
+  harness.stdio.println(harness.runtime.host_has("process", "list_shells"))
+  harness.stdio.println(caps?.process?.description != nil)
+  const default_shell = harness.process.default_shell()
+  const result = harness.process.run(
     {mode: "shell", command: "printf hi", shell_id: default_shell?.id},
   )
-  __io_println(result?.success)
-  __io_println(result?.combined)
+  harness.stdio.println(result?.success)
+  harness.stdio.println(result?.combined)
 }

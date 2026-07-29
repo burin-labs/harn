@@ -58,14 +58,14 @@ fn __eval_excerpt(text, limit) {
   return substring(cleaned, 0, limit - 3) + "..."
 }
 
-fn __eval_append_callback(arm) {
+fn __eval_append_callback(harness: Harness, arm) {
   return { info ->
     const text = info?.text ?? ""
     const fact = __eval_fact_for_text(text)
     if fact == "" {
       return nil
     }
-    const pad = agent_session_scratchpad(info.session_id)
+    const pad = harness.agent.scratchpad(info.session_id)
     if pad == nil {
       return nil
     }
@@ -76,7 +76,7 @@ fn __eval_append_callback(arm) {
       {id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)},
     )
     const facts = (pad?.facts ?? []).appending({text: fact, source_ref: ref_id})
-    agent_session_set_scratchpad(
+    harness.agent.set_scratchpad(
       info.session_id,
       pad + {facts: facts, refs: refs},
       {source: "scratchpad_eval", reason: "append_turn_fact", metadata: {arm: arm, turn: turn}},
@@ -114,18 +114,18 @@ fn __eval_require(condition, message) {
   }
 }
 
-fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
-  llm_mock_clear()
+fn __eval_run_arm(harness: Harness, name, arm_id, scratchpad, reorg_mocks, append_facts) {
+  harness.llm.mock_clear()
   for mock in reorg_mocks {
-    llm_mock(mock)
+    harness.llm.mock_enqueue(mock)
   }
-  const call_count = atomic(0)
-  const prompt_chars = atomic(0)
+  const call_count = harness.runtime.atomic(0)
+  const prompt_chars = harness.runtime.atomic(0)
   const caller = { call ->
     let turn = call?.turn?.iteration ?? 1
     let system = call?.system ?? ""
-    atomic_add(call_count, 1)
-    atomic_add(prompt_chars, len(system))
+    harness.runtime.atomic_add(call_count, 1)
+    harness.runtime.atomic_add(prompt_chars, len(system))
     return {
       ok: true,
       value: __eval_llm_value(
@@ -145,17 +145,16 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
     opts = opts + {scratchpad: scratchpad}
   }
   if append_facts {
-    opts = opts + {post_turn_callback: __eval_append_callback(arm_id)}
+    opts = opts + {post_turn_callback: __eval_append_callback(harness, arm_id)}
   }
-  const result = agent_loop(
-    "Complete five subtasks and use the subtask-1 account key in the final handoff.",
+  const result = agent_loop(harness, "Complete five subtasks and use the subtask-1 account key in the final handoff.",
     "You are a cheap deterministic worker model in a retention eval.",
     opts,
   )
   const final_scratchpad = result?.transcript?.metadata?.agent_scratchpad ?? {}
   const retained = contains(json_stringify(final_scratchpad), "fact: account key AURORA-17")
   const success = contains(result?.visible_text ?? "", "AURORA-17")
-  const reorg_calls = len(llm_mock_calls())
+  const reorg_calls = len(harness.llm.mock_calls())
   const reorg_error_rate = if reorg_calls == 0 {
     "n/a"
   } else if retained {
@@ -167,24 +166,24 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
     arm: name,
     success: success,
     fact_retention: retained,
-    prompt_chars: atomic_get(prompt_chars),
-    estimated_prompt_tokens: __eval_estimated_tokens(atomic_get(prompt_chars)),
-    worker_calls: atomic_get(call_count),
+    prompt_chars: harness.runtime.atomic_get(prompt_chars),
+    estimated_prompt_tokens: __eval_estimated_tokens(harness.runtime.atomic_get(prompt_chars)),
+    worker_calls: harness.runtime.atomic_get(call_count),
     reorg_calls: reorg_calls,
     reorg_induced_errors: reorg_error_rate,
   }
 }
 
-pipeline default() {
-  const none = __eval_run_arm("none", "none", nil, [], false)
-  const append = __eval_run_arm(
+pipeline default(harness: Harness) {
+  const none = __eval_run_arm(harness, "none", "none", nil, [], false)
+  const append = __eval_run_arm(harness, 
     "append_only_recitation",
     "append",
     {enabled: true, reorganize_every: 0},
     [],
     true,
   )
-  const strong = __eval_run_arm(
+  const strong = __eval_run_arm(harness, 
     "periodic_reorg_strong",
     "strong",
     {
@@ -198,7 +197,7 @@ pipeline default() {
     ],
     true,
   )
-  const weak = __eval_run_arm(
+  const weak = __eval_run_arm(harness, 
     "periodic_reorg_weak_ablation",
     "weak",
     {
@@ -213,11 +212,11 @@ pipeline default() {
     true,
   )
   const rows = [none, append, strong, weak]
-  __io_println(
+  harness.stdio.println(
     "arm,success,fact_retention,prompt_chars,estimated_prompt_tokens,worker_calls,reorg_calls,reorg_induced_errors",
   )
   for row in rows {
-    __io_println(
+    harness.stdio.println(
       row.arm
         + ","
         + to_string(row.success)

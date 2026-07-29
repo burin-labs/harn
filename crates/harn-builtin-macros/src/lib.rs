@@ -19,7 +19,7 @@ use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{parse_macro_input, Expr, ItemFn, LitBool, LitStr, Meta, Token};
+use syn::{parse_macro_input, Expr, ExprLit, Ident, ItemFn, Lit, LitBool, LitStr, Meta, Token};
 
 mod sig_parser;
 
@@ -34,6 +34,11 @@ mod sig_parser;
 /// - `sig_expr = <Rust expr returning BuiltinSignature>` — full struct
 ///   literal used verbatim. Escape hatch for shapes, complex generics, etc.
 /// - `aliases = ["__foo"]` — additional names sharing this impl + signature.
+/// - `exposure = "pure" | "runtime_internal" | "privileged_wire" |
+///   "harness.<capability>.<method>"` — closed source-visibility contract.
+/// - `effects = ["fs.read@arg0", "fs.write@arg0+arg1", ...]` — typed effect
+///   rows. Selectors are `argN`, `argN.field.path`, `eachN`, `const=VALUE`,
+///   or `dynamic`. `effects = []` is an explicit purity declaration.
 /// - `category = "collections"` — observability label (optional).
 /// - `kind = "sync" | "async"` — defaults to `sync`. `async` wraps the user
 ///   fn into `Pin<Box<dyn Future<...>>>`.
@@ -50,11 +55,111 @@ pub fn harn_builtin(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+/// Declare one method-dispatched capability surface without manufacturing a
+/// runtime handler. The declaration contributes the same `BuiltinDef` shape
+/// as `#[harn_builtin]`, so every consumer reads one manifest.
+#[proc_macro]
+pub fn harn_capability_method(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as CapabilityMethodInput);
+    match expand_capability_method(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+struct CapabilityMethodInput {
+    rust_name: Ident,
+    exposure: LitStr,
+    effects: Vec<LitStr>,
+    signature: Expr,
+    doc: LitStr,
+}
+
+impl Parse for CapabilityMethodInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let rust_name = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let exposure = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let effects_expr: Expr = input.parse()?;
+        let effects = parse_str_array(&effects_expr)?;
+        input.parse::<Token![,]>()?;
+        let signature = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let doc = input.parse()?;
+        if !input.is_empty() {
+            return Err(input.error("unexpected capability method tokens"));
+        }
+        Ok(Self {
+            rust_name,
+            exposure,
+            effects,
+            signature,
+            doc,
+        })
+    }
+}
+
+fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenStream2> {
+    let support = quote!(crate::stdlib::macros);
+    let (sig_expr, signature_text, signature_attr) = match &input.signature {
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(signature),
+            ..
+        }) => (
+            sig_parser::parse_sig(&signature.value(), signature.span(), &support)?,
+            Some(signature.value()),
+            Some(signature.clone()),
+        ),
+        expression => (quote!(#expression), None, None),
+    };
+    let attrs = BuiltinAttrs {
+        sig: signature_attr,
+        exposure: Some(input.exposure),
+        effects: input.effects,
+        effects_declared: true,
+        parser_only: true,
+        ..BuiltinAttrs::default()
+    };
+    let contract = contract_expr(&attrs, &support)?;
+    let upper = input.rust_name.to_string().to_uppercase();
+    let def_ident = format_ident!("{upper}_DEF");
+    let link_ident = format_ident!("__{upper}_LINKME");
+    let doc = input.doc.value();
+    let signature_text_expr = match signature_text {
+        Some(signature) => quote!(::core::option::Option::Some(#signature)),
+        None => quote!(::core::option::Option::None),
+    };
+    Ok(quote! {
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        pub static #def_ident: #support::VmBuiltinDef = #support::VmBuiltinDef {
+            sig: #sig_expr,
+            contract: #contract,
+            aliases: &[],
+            handler: #support::VmBuiltinHandler::None,
+            category: ::core::option::Option::Some("capability"),
+            doc: ::core::option::Option::Some(#doc),
+            signature_text: #signature_text_expr,
+            parser_only: true,
+            runtime_only: false,
+        };
+
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
+        static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
+    })
+}
+
 #[derive(Debug, Default)]
 struct BuiltinAttrs {
     sig: Option<LitStr>,
     sig_expr: Option<Expr>,
     aliases: Vec<LitStr>,
+    exposure: Option<LitStr>,
+    effects: Vec<LitStr>,
+    effects_declared: bool,
     category: Option<LitStr>,
     kind: BuiltinKind,
     parser_only: bool,
@@ -104,6 +209,11 @@ impl Parse for BuiltinAttrs {
                         "parser_only" => out.parser_only = parse_lit_bool(&nv.value)?,
                         "runtime_only" => out.runtime_only = parse_lit_bool(&nv.value)?,
                         "aliases" => out.aliases = parse_str_array(&nv.value)?,
+                        "exposure" => out.exposure = Some(parse_lit_str(&nv.value)?),
+                        "effects" => {
+                            out.effects = parse_str_array(&nv.value)?;
+                            out.effects_declared = true;
+                        }
                         other => {
                             return Err(syn::Error::new(
                                 nv.path.span(),
@@ -130,6 +240,12 @@ impl Parse for BuiltinAttrs {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
                 "#[harn_builtin] requires `sig = \"...\"`, `sig_expr = ...`, or `runtime_only = true`",
+            ));
+        }
+        if out.exposure.is_some() != out.effects_declared {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "`exposure` and `effects` must be declared together",
             ));
         }
         Ok(out)
@@ -201,6 +317,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
 
     let aliases = attrs.aliases.iter().map(|s| quote!(#s));
     let aliases_arr = quote!(&[#(#aliases),*]);
+    let contract_expr = contract_expr(&attrs, &support)?;
 
     let category = match &attrs.category {
         Some(c) => {
@@ -299,6 +416,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         #[allow(non_upper_case_globals)]
         pub static #def_ident: #support::VmBuiltinDef = #support::VmBuiltinDef {
             sig: #sig_expr,
+            contract: #contract_expr,
             aliases: #aliases_arr,
             handler: #handler_expr,
             category: #category,
@@ -314,4 +432,209 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
     };
     Ok(out)
+}
+
+fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<TokenStream2> {
+    let Some(exposure) = attrs.exposure.as_ref() else {
+        return Ok(quote!(#support::BuiltinContract::UNDECLARED));
+    };
+
+    let effects = attrs
+        .effects
+        .iter()
+        .map(|effect| parse_effect_spec(&effect.value(), effect.span(), support))
+        .collect::<syn::Result<Vec<_>>>()?;
+    let effects = quote!(&[#(#effects),*]);
+    let raw = exposure.value();
+    match raw.as_str() {
+        "pure" => {
+            if !attrs.effects.is_empty() {
+                return Err(syn::Error::new(
+                    exposure.span(),
+                    "pure builtins must declare `effects = []`",
+                ));
+            }
+            Ok(quote!(#support::BuiltinContract::PURE))
+        }
+        "runtime_internal" => {
+            if !attrs.effects.is_empty() {
+                return Err(syn::Error::new(
+                    exposure.span(),
+                    "runtime-internal builtins cannot declare script effects",
+                ));
+            }
+            Ok(quote!(#support::BuiltinContract::RUNTIME_INTERNAL))
+        }
+        "privileged_wire" => Ok(quote!(#support::BuiltinContract::privileged_wire(#effects))),
+        _ => {
+            if let Some(index) = raw.strip_prefix("capability_arg:") {
+                let authority_argument = index.parse::<u16>().map_err(|_| {
+                    syn::Error::new(
+                        exposure.span(),
+                        "capability argument exposure must be `capability_arg:<index>`",
+                    )
+                })?;
+                if attrs.effects.is_empty() {
+                    return Err(syn::Error::new(
+                        exposure.span(),
+                        "capability argument builtins must declare at least one effect",
+                    ));
+                }
+                return Ok(quote!(
+                    #support::BuiltinContract::capability_function(
+                        #authority_argument,
+                        #effects,
+                    )
+                ));
+            }
+            let Some(rest) = raw.strip_prefix("harness.") else {
+                return Err(syn::Error::new(
+                    exposure.span(),
+                    "unknown exposure; expected `pure`, `runtime_internal`, \
+                     `privileged_wire`, `capability_arg:<index>`, or \
+                     `harness.<capability>.<method>`",
+                ));
+            };
+            let Some((capability, method)) = rest.split_once('.') else {
+                return Err(syn::Error::new(
+                    exposure.span(),
+                    "harness exposure must be `harness.<capability>.<method>`",
+                ));
+            };
+            if method.is_empty() || method.contains('.') {
+                return Err(syn::Error::new(
+                    exposure.span(),
+                    "harness method must be one non-empty identifier",
+                ));
+            }
+            let capability = capability_expr(capability, exposure.span(), support)?;
+            Ok(quote!(#support::BuiltinContract::harness(
+                #capability,
+                #method,
+                #effects,
+            )))
+        }
+    }
+}
+
+fn capability_expr(
+    name: &str,
+    span: proc_macro2::Span,
+    support: &TokenStream2,
+) -> syn::Result<TokenStream2> {
+    let variant = harn_builtin_meta::CapabilityId::from_field_name(name)
+        .map(harn_builtin_meta::CapabilityId::variant_name)
+        .ok_or_else(|| syn::Error::new(span, format!("unknown harness capability `{name}`")))?;
+    let ident = format_ident!("{variant}");
+    Ok(quote!(#support::CapabilityId::#ident))
+}
+
+fn parse_effect_spec(
+    raw: &str,
+    span: proc_macro2::Span,
+    support: &TokenStream2,
+) -> syn::Result<TokenStream2> {
+    let (head, selectors) = raw
+        .split_once('@')
+        .map_or((raw, None), |(head, selectors)| (head, Some(selectors)));
+    let Some((kind, access)) = head.split_once('.') else {
+        return Err(syn::Error::new(
+            span,
+            "effect must be `<kind>.<access>` with optional `@selectors`",
+        ));
+    };
+    let kind = match kind {
+        "stdio" => quote!(#support::EffectKind::Stdio),
+        "fs" => quote!(#support::EffectKind::Fs),
+        "env" => quote!(#support::EffectKind::Env),
+        "clock" => quote!(#support::EffectKind::Clock),
+        "random" => quote!(#support::EffectKind::Random),
+        "network" => quote!(#support::EffectKind::Network),
+        "process" => quote!(#support::EffectKind::Process),
+        "llm" => quote!(#support::EffectKind::Llm),
+        "tool" => quote!(#support::EffectKind::Tool),
+        "host" => quote!(#support::EffectKind::Host),
+        "worker" => quote!(#support::EffectKind::Worker),
+        "secret" => quote!(#support::EffectKind::Secret),
+        "observability" => quote!(#support::EffectKind::Observability),
+        "channel" => quote!(#support::EffectKind::Channel),
+        "state" => quote!(#support::EffectKind::State),
+        _ => {
+            return Err(syn::Error::new(
+                span,
+                format!("unknown effect kind `{kind}`"),
+            ))
+        }
+    };
+    let access = match access {
+        "read" => quote!(#support::EffectAccess::Read),
+        "write" => quote!(#support::EffectAccess::Write),
+        "mutate" => quote!(#support::EffectAccess::Mutate),
+        "observe" => quote!(#support::EffectAccess::Observe),
+        _ => {
+            return Err(syn::Error::new(
+                span,
+                format!("unknown effect access `{access}`"),
+            ))
+        }
+    };
+    let selectors = selectors
+        .filter(|selectors| !selectors.is_empty())
+        .map(|selectors| {
+            selectors
+                .split('+')
+                .map(|selector| parse_resource_selector(selector, span, support))
+                .collect::<syn::Result<Vec<_>>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok(quote!(#support::EffectSpec::new(
+        #kind,
+        #access,
+        &[#(#selectors),*],
+    )))
+}
+
+fn parse_resource_selector(
+    raw: &str,
+    span: proc_macro2::Span,
+    support: &TokenStream2,
+) -> syn::Result<TokenStream2> {
+    if raw == "dynamic" {
+        return Ok(quote!(#support::ResourceSelector::Dynamic));
+    }
+    if let Some(value) = raw.strip_prefix("const=") {
+        if value.is_empty() {
+            return Err(syn::Error::new(span, "constant selector cannot be empty"));
+        }
+        return Ok(quote!(#support::ResourceSelector::Constant(#value)));
+    }
+    if let Some(index) = raw.strip_prefix("each") {
+        let index = parse_selector_index(index, span)?;
+        return Ok(quote!(#support::ResourceSelector::EachArgument(#index)));
+    }
+    let Some(rest) = raw.strip_prefix("arg") else {
+        return Err(syn::Error::new(
+            span,
+            format!("unknown resource selector `{raw}`"),
+        ));
+    };
+    let mut parts = rest.split('.');
+    let index = parse_selector_index(parts.next().unwrap_or_default(), span)?;
+    let path = parts.collect::<Vec<_>>();
+    if path.is_empty() {
+        Ok(quote!(#support::ResourceSelector::Argument(#index)))
+    } else if path.iter().any(|part| part.is_empty()) {
+        Err(syn::Error::new(span, "resource field path cannot be empty"))
+    } else {
+        Ok(quote!(#support::ResourceSelector::Field {
+            argument: #index,
+            path: &[#(#path),*],
+        }))
+    }
+}
+
+fn parse_selector_index(raw: &str, span: proc_macro2::Span) -> syn::Result<u16> {
+    raw.parse::<u16>()
+        .map_err(|_| syn::Error::new(span, format!("invalid argument index `{raw}`")))
 }

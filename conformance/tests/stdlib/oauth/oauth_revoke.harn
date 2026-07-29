@@ -16,9 +16,9 @@ import { client, revoke, token } from "std/oauth/client"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const topic = "oauth.client.audit"
-  const cursor = event_log.latest(topic) ?? 0
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
   const _ = mock_time(1700000000000)
   const store = memory()
   const provider = custom(
@@ -39,8 +39,7 @@ pipeline test(task) {
     token_type: "Bearer",
   }
   store.set("mockRevoke", stored)
-  const cli = client(
-    provider,
+  const cli = client(harness,  harness, provider,
     {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
   )
   http_mock_clear()
@@ -54,7 +53,7 @@ pipeline test(task) {
   assert(contains(calls[0].body, "client_id=cli-id"), "client_id included in revoke body")
   const after = store.get("mockRevoke")
   assert(after == nil, "storage cleared after revoke")
-  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const logged = stream.next().value
   assert_eq(logged.kind, "token_revoked", "audit event kind")
   assert_eq(logged.payload.provider, "mockRevoke", "audit provider id")
@@ -82,5 +81,5 @@ pipeline test(task) {
   assert(threw, "post-revoke token() should have thrown")
   assert(contains(msg, "HARN-OAU-002"), "post-revoke error must carry HARN-OAU-002, got: " + msg)
   const _ = unmock_time()
-  log("oauth revoke ok")
+  harness.stdio.println("oauth revoke ok")
 }

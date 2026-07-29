@@ -19,27 +19,26 @@
  */
 import { edit_add_parameter, edit_change_return_type, edit_extract_function } from "std/edit"
 
-pipeline default(_task) {
+pipeline default(harness: Harness, _task) {
   // The AST edit primitives read and (would) write host files, so they
   // share the deterministic-tools gate.
-  hostlib_enable("tools:deterministic")
-  const assets = asset_root()
+  const assets = harness.fs.runtime_paths().asset_root
   const rs = assets + "/seed/lib.rs"
   const py = assets + "/seed/calc.py"
   const extract = edit_extract_function(
-    {path: py, range: {start_line: 1, end_line: 2}, new_name: "compute_subtotal", dry_run: true},
+    harness.fs, {path: py, range: {start_line: 1, end_line: 2}, new_name: "compute_subtotal", dry_run: true},
   )
   const add_param = edit_add_parameter(
-    {path: rs, symbol: {name: "scale"}, param: "offset: i64", default: "0", dry_run: true},
+    harness.fs, {path: rs, symbol: {name: "scale"}, param: "offset: i64", default: "0", dry_run: true},
   )
   const ret = edit_change_return_type(
-    {path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true},
+    harness.fs, {path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true},
   )
-  __io_println("=== edit-refactor demo ===")
-  __io_println("extract_function   -> " + extract.result)
-  __io_println("add_parameter      -> " + add_param.result)
-  __io_println("change_return_type -> " + ret.result)
-  __io_println("")
+  harness.stdio.println("=== edit-refactor demo ===")
+  harness.stdio.println("extract_function   -> " + extract.result)
+  harness.stdio.println("add_parameter      -> " + add_param.result)
+  harness.stdio.println("change_return_type -> " + ret.result)
+  harness.stdio.println("")
   const receipt = {
     receipt_kind: "edit_refactor_receipt",
     extract_result: extract.result,
@@ -56,6 +55,6 @@ pipeline default(_task) {
     ),
     return_type_result: ret.result,
   }
-  __io_println(json_stringify(receipt))
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

@@ -13,9 +13,9 @@ fn ids(artifacts) {
   return out
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const stage_policy = workflow_stage_context_policy({}, {input_kinds: ["summary"]})
-  __io_println(stage_policy.include_kinds[0])
+  harness.stdio.println(stage_policy.include_kinds[0])
   const selected = workflow_select_stage_artifacts(
     {
       context_policy: {},
@@ -26,7 +26,7 @@ pipeline default() {
       ],
     },
   )
-  __io_println(json_stringify(ids(selected.artifacts)))
+  harness.stdio.println(json_stringify(ids(selected.artifacts)))
   const ordered = workflow_select_artifacts(
     [
       {id: "low", kind: "summary", priority: 1, relevance: 1.0, estimated_tokens: 10},
@@ -41,7 +41,7 @@ pipeline default() {
     ],
     {pinned_ids: ["pin"], prioritize_kinds: ["verification_result"], max_artifacts: 2},
   )
-  __io_println(json_stringify(ids(ordered)))
+  harness.stdio.println(json_stringify(ids(ordered)))
   const adaptive = workflow_select_artifacts_adaptive(
     [
       {
@@ -65,10 +65,10 @@ pipeline default() {
     ],
     {},
   )
-  __io_println(json_stringify(ids(adaptive)))
-  __io_println(!contains(ids(adaptive), "old-index"))
-  __io_println(contains(ids(adaptive), "dup-high"))
-  __io_println(!contains(ids(adaptive), "dup-low"))
+  harness.stdio.println(json_stringify(ids(adaptive)))
+  harness.stdio.println(!contains(ids(adaptive), "old-index"))
+  harness.stdio.println(contains(ids(adaptive), "dup-high"))
+  harness.stdio.println(!contains(ids(adaptive), "dup-low"))
   const oversized = workflow_select_artifacts_adaptive(
     [
       {
@@ -81,6 +81,6 @@ pipeline default() {
     ],
     {max_tokens: 400},
   )
-  __io_println(oversized[0].estimated_tokens == 400)
-  __io_println(len(oversized[0].text) < 3000)
+  harness.stdio.println(oversized[0].estimated_tokens == 400)
+  harness.stdio.println(len(oversized[0].text) < 3000)
 }

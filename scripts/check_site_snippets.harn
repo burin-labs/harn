@@ -34,7 +34,7 @@ pub fn summary_line(checked: int, failures: int) -> string {
  * else the workspace target dir's debug build (building it quietly when
  * missing) — the same ladder as the bash original.
  */
-fn resolve_harn_bin() -> string {
+fn resolve_harn_bin(harness: Harness) -> string {
   const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin
@@ -59,20 +59,20 @@ fn resolve_harn_bin() -> string {
   }
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
-    __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
+    harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
     const build = harness.process.spawn_captured(
       {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
     )
     if !build.success {
-      __io_eprint(build.stderr)
+      harness.stdio.eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
     }
   }
   return bin
 }
 
-pipeline main(task) {
-  const harn_bin = resolve_harn_bin()
+pipeline main(harness: Harness, task) {
+  const harn_bin = resolve_harn_bin(harness)
   let site_snippets: list<string> = []
   for g in harness.fs.glob(SITE_SNIPPET_GLOB) {
     site_snippets = site_snippets + [rel_path(g)]
@@ -83,16 +83,16 @@ pipeline main(task) {
   for snippet in site_snippets + GALLERY_SCENARIOS {
     checked = checked + 1
     const res = harness.process.spawn_captured({cmd: harn_bin, args: ["check", snippet]})
-    __io_print(res.stdout)
-    __io_eprint(res.stderr)
+    harness.stdio.print(res.stdout)
+    harness.stdio.eprint(res.stderr)
     if !res.success {
       failures = failures + 1
     }
   }
-  __io_println("")
-  __io_println(summary_line(checked, failures))
+  harness.stdio.println("")
+  harness.stdio.println(summary_line(checked, failures))
   if site_snippets.count == 0 {
-    __io_println("FAIL: no ${SITE_SNIPPET_GLOB} snippets found")
+    harness.stdio.println("FAIL: no ${SITE_SNIPPET_GLOB} snippets found")
     return 1
   }
   if failures > 0 {

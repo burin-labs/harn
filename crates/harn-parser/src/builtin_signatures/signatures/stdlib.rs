@@ -11,8 +11,8 @@ use super::{
 const TY_DURATION_OR_INT: Ty = Ty::Union(&[TY_DURATION, TY_INT]);
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
-    // `__deep_merge`, `__dict_filter_nil`, `__dict_from_pairs`,
-    // `__dict_merge`, `__list_unique`, `__dict_omit`, `__dict_pick`,
+    // `deep_merge`, `__dict_filter_nil`, `dict_from_pairs`,
+    // `__dict_merge`, `unique`, `__dict_omit`, `__dict_pick`,
     BuiltinSignature::simple(
         "__files_upload",
         &[
@@ -431,10 +431,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("timer_start", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("try_receive", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("vision_ocr", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("waitpoint_cancel", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("waitpoint_complete", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("waitpoint_create", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("waitpoint_wait", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("window", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::simple("yield_now", &[], TY_NIL),
     // Clone / merge / dedupe helpers — see crates/harn-vm/src/stdlib/collections.rs.
@@ -522,7 +518,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("to_int", &[Param::new("args", TY_ANY)], TY_INT),
     BuiltinSignature::variadic("type_of", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("unreachable", &[Param::new("args", TY_ANY)], TY_NEVER),
-    // Harness method targets — typechecker resolves `harness.crypto.sha256`
+    // Deterministic cryptography remains pure global computation.
     // / `harness.term.width` / `harness.term.height` via
     // `harness_methods::harness_*_ambient` to these builtin names. Pure-
     // parser tests need them in the registry to type-check the namespace

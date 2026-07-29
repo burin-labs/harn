@@ -1,5 +1,5 @@
 import "std/math"
 
-pipeline test(task) {
-  weighted_choice(["a", "b"], [0, 0])
+pipeline test(harness: Harness, task) {
+  weighted_choice(harness, ["a", "b"], [0, 0])
 }

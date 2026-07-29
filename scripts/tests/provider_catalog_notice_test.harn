@@ -22,7 +22,7 @@ fn fixture(harness: Harness, name: string) -> dict {
 }
 
 @test
-pipeline test_carried_update_prepares_patch(task) {
+pipeline test_carried_update_prepares_patch(harness: Harness, task) {
   const input = fixture(harness, "carried-update")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "patch")
@@ -31,7 +31,7 @@ pipeline test_carried_update_prepares_patch(task) {
 }
 
 @test
-pipeline test_irrelevant_notice_records_no_op(task) {
+pipeline test_irrelevant_notice_records_no_op(harness: Harness, task) {
   const input = fixture(harness, "irrelevant")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "no_op")
@@ -39,7 +39,7 @@ pipeline test_irrelevant_notice_records_no_op(task) {
 }
 
 @test
-pipeline test_new_model_on_supported_provider_is_incomplete_add(task) {
+pipeline test_new_model_on_supported_provider_is_incomplete_add(harness: Harness, task) {
   const input = fixture(harness, "new-model")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "incomplete_add")
@@ -47,7 +47,7 @@ pipeline test_new_model_on_supported_provider_is_incomplete_add(task) {
 }
 
 @test
-pipeline test_ambiguous_current_identity_fails_closed(task) {
+pipeline test_ambiguous_current_identity_fails_closed(harness: Harness, task) {
   const input = fixture(harness, "ambiguous")
   const catalog = BASE_CATALOG
     + {
@@ -62,7 +62,7 @@ pipeline test_ambiguous_current_identity_fails_closed(task) {
 }
 
 @test
-pipeline test_malformed_notice_fails_closed(task) {
+pipeline test_malformed_notice_fails_closed(harness: Harness, task) {
   const input = fixture(harness, "malformed")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "rejected")
@@ -70,7 +70,7 @@ pipeline test_malformed_notice_fails_closed(task) {
 }
 
 @test
-pipeline test_conflicting_current_row_fails_closed(task) {
+pipeline test_conflicting_current_row_fails_closed(harness: Harness, task) {
   const input = fixture(harness, "conflicting-current-row")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "rejected")
@@ -78,7 +78,7 @@ pipeline test_conflicting_current_row_fails_closed(task) {
 }
 
 @test
-pipeline test_notice_id_and_classification_are_idempotent(task) {
+pipeline test_notice_id_and_classification_are_idempotent(harness: Harness, task) {
   const input = fixture(harness, "carried-update")
   const first = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   const second = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
@@ -87,7 +87,7 @@ pipeline test_notice_id_and_classification_are_idempotent(task) {
 }
 
 @test
-pipeline test_all_typed_mutations_are_narrow(task) {
+pipeline test_all_typed_mutations_are_narrow(harness: Harness, task) {
   const source = """
 [providers.anthropic]
 base_url = "https://api.anthropic.com/v1"
@@ -139,7 +139,7 @@ vision = false
 }
 
 @test
-pipeline test_source_mutation_refuses_ambiguous_owner(task) {
+pipeline test_source_mutation_refuses_ambiguous_owner(harness: Harness, task) {
   const candidate = fixture(harness, "carried-update").extraction.candidate
   const duplicate = """
 [models."claude-haiku-4-5-20251001"]
@@ -153,7 +153,7 @@ pricing = { input_per_mtok = 1.0 }
 }
 
 @test
-pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(task) {
+pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(harness: Harness, task) {
   const input = fixture(harness, "carried-update")
   const canonical = {
     providers: [

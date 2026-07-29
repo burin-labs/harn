@@ -729,20 +729,20 @@ pub fn __run_rejoin(harness: Harness) -> int {
       },
     }
   } else {
-    ensure_parent_dir(path_join(out_dir, "normalized.jsonl"))
+    ensure_parent_dir(harness.fs, path_join(out_dir, "normalized.jsonl"))
     const normalized = safe_dict(receipt["normalized"])
     let normalized_text = ""
     for row in run.normalized_rows {
       normalized_text = normalized_text + json_stringify(row) + "\n"
     }
     replace_text(
-      safe_string(normalized["path"], ""),
+      harness.fs, safe_string(normalized["path"], ""),
       normalized_text,
       {create: true, overwrite: true, create_parents: true, durability: "namespace"},
     )
     const receipt_text = json_stringify_pretty(receipt) + "\n"
     replace_text(
-      path_join(out_dir, "receipt.json"),
+      harness.fs, path_join(out_dir, "receipt.json"),
       receipt_text,
       {create: true, overwrite: true, create_parents: true, durability: "namespace"},
     )

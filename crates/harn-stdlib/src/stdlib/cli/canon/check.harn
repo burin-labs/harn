@@ -21,13 +21,13 @@ fn __load_plan(harness: Harness) -> dict {
   const raw = harness.env.get_or("HARN_CANON_CHECK_PLAN_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("canon: internal error - HARN_CANON_CHECK_PLAN_JSON not set")
-    exit(70)
+    harness.runtime.exit(70)
   }
   return try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("canon: internal error - failed to parse check plan: " + e.message)
-    exit(70)
+    harness.runtime.exit(70)
   }
 }
 
@@ -159,15 +159,14 @@ fn __render_human(harness: Harness, report: dict) {
 
 fn main(harness: Harness) -> int {
   const plan = __load_plan(harness)
-  const slice = canon_slice_from_paths(
-    safe_list(plan["paths"]),
+  const slice = canon_slice_from_paths(harness,  harness, safe_list(plan["paths"]),
     {
       root: safe_string(plan["workspace_root"], ""),
       workspace_root: safe_string(plan["workspace_root"], ""),
       include_missing: safe_bool(plan["include_missing"], false),
     },
   )
-  const result = canon_evaluate_slice(slice, __options(plan, slice))
+  const result = canon_evaluate_slice(harness, slice, __options(plan, slice))
   const feedback = canon_feedback_text(
     result,
     {header: safe_string(plan["feedback_header"], "harn-canon feedback")},

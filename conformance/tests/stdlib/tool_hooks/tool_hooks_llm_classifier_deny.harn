@@ -9,11 +9,11 @@ import { preset_run_command } from "std/tool_hooks"
  * without ever calling `inner`, and records the verdict + the `tool_denied`
  * lifecycle audit.
  */
-pipeline default() {
-  pipeline_lifecycle_audit_log_take()
-  __tool_hooks_classifier_cache_clear()
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.tools.classifier_cache_clear()
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "{\"kind\": \"deny\", \"confidence\": 0.95,"
           + " \"explanation\": \"rm against /etc is dangerous\"}",
@@ -21,23 +21,22 @@ pipeline default() {
     ],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(
-        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+      const wrapper = preset_run_command(harness,  harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
       )
       const result = wrapper({command: "rm -rf /etc/foo"})
-      __io_println(result.action)
-      __io_println(result.catalogue_id)
-      __io_println(result.severity)
-      __io_println(result.explanation)
-      __io_println(result.original_command)
-      __io_println(result.command)
-      __io_println(result?.result == nil)
-      const log = pipeline_lifecycle_audit_log_take()
-      __io_println(len(log))
-      __io_println(log[0].kind)
-      __io_println(log[0].payload.kind)
-      __io_println(log[0].payload.action)
-      __io_println(log[1].kind)
+      harness.stdio.println(result.action)
+      harness.stdio.println(result.catalogue_id)
+      harness.stdio.println(result.severity)
+      harness.stdio.println(result.explanation)
+      harness.stdio.println(result.original_command)
+      harness.stdio.println(result.command)
+      harness.stdio.println(result?.result == nil)
+      const log = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(len(log))
+      harness.stdio.println(log[0].kind)
+      harness.stdio.println(log[0].payload.kind)
+      harness.stdio.println(log[0].payload.action)
+      harness.stdio.println(log[1].kind)
     },
   )
 }

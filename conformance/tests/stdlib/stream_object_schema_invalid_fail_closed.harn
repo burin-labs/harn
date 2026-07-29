@@ -1,6 +1,6 @@
 import { stream_object } from "std/json"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {
     type: "dict",
     required: ["name", "age"],
@@ -10,5 +10,5 @@ pipeline default() {
   for obj in stream_object(["{\"name\":\"Ada\",\"age\":\"not-an-int\"}"], schema) {
     emitted = emitted.appending(obj)
   }
-  __io_println(len(emitted))
+  harness.stdio.println(len(emitted))
 }

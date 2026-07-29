@@ -9,10 +9,9 @@
 // spending a turn teaching the model a shape it already got right enough.
 import { probe, sample_registry } from "_tool_parse_probe"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // The full canonical response: prose, answer, call, done marker.
-  probe(
-    "well formed canonical response",
+  probe(harness,  harness, "well formed canonical response",
     """<assistant_prose>Creating the file.</assistant_prose>
 <user_response>Created the file.</user_response>
 <tool_call>
@@ -22,8 +21,7 @@ edit({ action: "create", path: "a.rs", content: "fn a() {}" })
     sample_registry(),
   )
   // A properly wrapped call: no violation, no wrapper leak into prose.
-  probe(
-    "wrapped call parses cleanly",
+  probe(harness,  harness, "wrapped call parses cleanly",
     """<tool_call>
 run({ command: "cargo test" })
 </tool_call>""",
@@ -31,14 +29,12 @@ run({ command: "cargo test" })
   )
   // The qwen3-coder shape: the wrapper opens and closes on the same line as the
   // call. This used to hide the call entirely.
-  probe(
-    "same-line tool_call wrapper",
+  probe(harness,  harness, "same-line tool_call wrapper",
     "<tool_call>run({ command: \"cargo test\" })</tool_call>",
     sample_registry(),
   )
   // Wrapper on its own lines with leading prose.
-  probe(
-    "multiline wrapper with leading prose",
+  probe(harness,  harness, "multiline wrapper with leading prose",
     """I'll find the file.
 <tool_call>
 run({ command: "cargo test" })
@@ -47,15 +43,13 @@ run({ command: "cargo test" })
   )
   // The model forgot the OPEN tag and left only a trailing close fragment. The
   // fragment must not survive into visible prose as a `_call>` shard.
-  probe(
-    "trailing close-tag fragment only",
+  probe(harness,  harness, "trailing close-tag fragment only",
     """run({ command: "cargo test" })
 </tool_call>""",
     sample_registry(),
   )
   // Compact aliases without underscores.
-  probe(
-    "compact protocol tag aliases",
+  probe(harness,  harness, "compact protocol tag aliases",
     """<assistantprose>Checking status.</assistantprose>
 <userresponse>Done.</userresponse>
 <toolcall>
@@ -67,20 +61,17 @@ run({ command: "git status" })
   // A single bare call with no wrapper at all is pure salvage: it executes, it
   // counts as a stray recovery, and it raises no violation, because burning a
   // paid turn after exactly one useful call landed is worse than the drift.
-  probe(
-    "single bare call, no wrapper",
+  probe(harness,  harness, "single bare call, no wrapper",
     "edit({ action: \"create\", path: \"a.rs\", content: \"x\" })",
     sample_registry(),
   )
-  probe(
-    "two bare calls, no wrapper",
+  probe(harness,  harness, "two bare calls, no wrapper",
     """edit({ action: "create", path: "a.rs", content: "a" })
 edit({ action: "create", path: "b.rs", content: "b" })""",
     sample_registry(),
   )
   // Stray prose before a well-formed block is canonicalized rather than flagged.
-  probe(
-    "stray prose alongside a tool call",
+  probe(harness,  harness, "stray prose alongside a tool call",
     """def foo():
     pass
 
@@ -90,16 +81,15 @@ edit({ action: "create", path: "a.rs", content: "x" })
     sample_registry(),
   )
   // `<user_response>` alone is a complete, valid response.
-  probe("user_response only", "<user_response>Visible answer.</user_response>", sample_registry())
+  probe(harness, "user_response only", "<user_response>Visible answer.</user_response>", sample_registry())
   // A non-default done sentinel round-trips verbatim; the agent, not the
   // grammar, decides whether the body matches its configured sentinel.
-  probe("configured done body", "<done>PLAN_READY</done>", sample_registry())
+  probe(harness, "configured done body", "<done>PLAN_READY</done>", sample_registry())
   // Empty input is not a violation, and plain prose is salvageable narration.
-  probe("empty response", "", sample_registry())
-  probe("plain prose response", "just prose with no tags at all", sample_registry())
+  probe(harness, "empty response", "", sample_registry())
+  probe(harness, "plain prose response", "just prose with no tags at all", sample_registry())
   // Two blocks in one turn, adjacent with no separator and with a space.
-  probe(
-    "two tool_call blocks",
+  probe(harness,  harness, "two tool_call blocks",
     """<tool_call>run({ command: "echo a" })</tool_call>
 <tool_call>run({ command: "echo b" })</tool_call>""",
     sample_registry(),

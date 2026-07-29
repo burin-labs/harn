@@ -17,10 +17,10 @@ fn find_match(name) {
   return "not found"
 }
 
-pipeline test(task) {
-  log(find_match("ts"))
-  log(find_match("python"))
-  log(find_match("go"))
-  log(find_match("rust"))
-  log(find_match("missing"))
+pipeline test(harness: Harness, task) {
+  harness.stdio.println(find_match("ts"))
+  harness.stdio.println(find_match("python"))
+  harness.stdio.println(find_match("go"))
+  harness.stdio.println(find_match("rust"))
+  harness.stdio.println(find_match("missing"))
 }

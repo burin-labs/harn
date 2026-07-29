@@ -5,13 +5,13 @@ import "std/triggers"
  * the `opentrustgraph/v0.1` discriminator end-to-end, and the chain still
  * verifies cleanly.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
   const agent_id = "trust-graph-v0-1-roundtrip-" + unique
-  trust_graph_record(
+  harness.runtime.trust_graph_record(
     {
       agent: agent_id,
       action: "deploy.preview",
@@ -22,10 +22,10 @@ pipeline test(task) {
       metadata: {ticket: "INC-1"},
     },
   )
-  const records: list<TrustRecord> = trust_query({agent: agent_id})
-  const report: TrustChainReport = trust_graph_verify_chain()
-  __io_println(len(records) == 1)
-  __io_println(records[0]?.schema == "opentrustgraph/v0.1")
-  __io_println(records[0]?.entry_hash != "")
-  __io_println(report.verified)
+  const records: list<TrustRecord> = harness.runtime.trust_query({agent: agent_id})
+  const report: TrustChainReport = harness.runtime.trust_graph_verify_chain()
+  harness.stdio.println(len(records) == 1)
+  harness.stdio.println(records[0]?.schema == "opentrustgraph/v0.1")
+  harness.stdio.println(records[0]?.entry_hash != "")
+  harness.stdio.println(report.verified)
 }

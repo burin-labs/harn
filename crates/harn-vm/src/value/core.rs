@@ -9,7 +9,8 @@ use crate::BuiltinId;
 
 use super::{
     VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange,
-    VmResourceGuardHandle, VmRngHandle, VmSet, VmStream, VmSyncPermitHandle, VmVerdictReceipt,
+    VmResourceGuardHandle, VmResourceHandle, VmRngHandle, VmSet, VmStream, VmSyncPermitHandle,
+    VmVerdictReceipt,
 };
 
 /// An async builtin function for the VM.
@@ -336,6 +337,10 @@ pub enum VmValue {
     Atomic(Shared<VmAtomicHandle>),
     Rng(Shared<VmRngHandle>),
     SyncPermit(Shared<VmSyncPermitHandle>),
+    /// Host-owned typed state. Harn can pass this value but cannot construct
+    /// it or inspect the payload, so it replaces forgeable `{kind, id}`
+    /// dictionaries and ambient registries.
+    Resource(Shared<VmResourceHandle>),
     ResourceGuard(Shared<VmResourceGuardHandle>),
     McpClient(Shared<VmMcpClientHandle>),
     /// A host-minted proof-of-execution receipt — the payload of a positive
@@ -492,6 +497,10 @@ impl VmValue {
         VmValue::SyncPermit(Shared::new(handle))
     }
 
+    pub fn resource(handle: VmResourceHandle) -> Self {
+        VmValue::Resource(Shared::new(handle))
+    }
+
     pub fn resource_guard(handle: VmResourceGuardHandle) -> Self {
         VmValue::ResourceGuard(Shared::new(handle))
     }
@@ -548,6 +557,7 @@ impl VmValue {
             VmValue::Atomic(_) => true,
             VmValue::Rng(_) => true,
             VmValue::SyncPermit(_) => true,
+            VmValue::Resource(_) => true,
             VmValue::ResourceGuard(_) => true,
             VmValue::McpClient(_) => true,
             VmValue::VerdictReceipt(_) => true,
@@ -588,6 +598,7 @@ impl VmValue {
         "atomic",
         "rng",
         "sync_permit",
+        "resource",
         "resource_guard",
         "mcp_client",
         "verdict_receipt",
@@ -621,6 +632,7 @@ impl VmValue {
             VmValue::Atomic(_) => "atomic",
             VmValue::Rng(_) => "rng",
             VmValue::SyncPermit(_) => "sync_permit",
+            VmValue::Resource(_) => "resource",
             VmValue::ResourceGuard(_) => "resource_guard",
             VmValue::McpClient(_) => "mcp_client",
             VmValue::VerdictReceipt(_) => "verdict_receipt",
@@ -884,6 +896,9 @@ impl VmValue {
             }
             VmValue::SyncPermit(p) => {
                 let _ = write!(out, "<sync_permit:{}:{}>", p.kind(), p.key());
+            }
+            VmValue::Resource(resource) => {
+                let _ = write!(out, "<resource:{}>", resource.label());
             }
             VmValue::ResourceGuard(guard) => {
                 let _ = write!(out, "<resource_guard:{}>", guard.label());

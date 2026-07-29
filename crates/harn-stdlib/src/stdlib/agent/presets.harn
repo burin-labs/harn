@@ -648,26 +648,26 @@ fn __captain_layer_value(opts, key, default_value) {
   return supplied
 }
 
-fn __captain_tool_layers(kind, opts) {
+fn __captain_tool_layers(harness: Harness, kind, opts) {
   let layers = []
   const audit_sink = __captain_layer_value(opts, "audit_sink", nil)
   if audit_sink != nil {
-    layers = layers.appending(with_audit_log(audit_sink))
+    layers = layers.appending(with_audit_log(harness, audit_sink))
   }
   const telemetry = __captain_layer_value(opts, "telemetry", nil)
   if telemetry != nil {
-    layers = layers.appending(with_telemetry(telemetry))
+    layers = layers.appending(with_telemetry(harness, telemetry))
   }
   if kind == "merge_captain" {
     const consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
     if consent_fn != nil {
-      layers = layers.appending(with_consent(consent_fn))
+      layers = layers.appending(with_consent(harness, consent_fn))
     }
   }
   if kind == "oncall_captain" {
     const rate_limit = __captain_layer_value(opts, "rate_limit", __captain_rate_limit_default(kind))
     if rate_limit != nil {
-      layers = layers.appending(with_rate_limit(rate_limit))
+      layers = layers.appending(with_rate_limit(harness, rate_limit))
     }
   }
   if kind == "release_captain" {
@@ -690,21 +690,21 @@ fn __captain_tool_layers(kind, opts) {
   return layers
 }
 
-fn __apply_captain_tool_caller(opts, kind) {
+fn __apply_captain_tool_caller(harness: Harness, opts, kind) {
   if !__is_captain(kind) {
     return opts
   }
   if __has_key(opts, "tool_caller") {
     return opts
   }
-  const layers = __captain_tool_layers(kind, opts)
+  const layers = __captain_tool_layers(harness, kind, opts)
   if len(layers) == 0 {
     return opts
   }
-  return opts + {tool_caller: compose_tool_callers(layers)}
+  return opts + {tool_caller: compose_tool_callers(harness, layers)}
 }
 
-fn __captain_handler_layers(opts) {
+fn __captain_handler_layers(harness: Harness, opts) {
   let layers = []
   const logging_sink = opts?.logging_sink
   if logging_sink != nil {
@@ -713,12 +713,12 @@ fn __captain_handler_layers(opts) {
     } else {
       {sink: logging_sink}
     }
-    layers = layers.appending(with_logging(logging_opts))
+    layers = layers.appending(with_logging(harness, logging_opts))
   }
   return layers
 }
 
-fn __apply_captain_llm_caller(opts, kind) {
+fn __apply_captain_llm_caller(harness: Harness, opts, kind) {
   if !__is_captain(kind) {
     return opts
   }
@@ -728,7 +728,7 @@ fn __apply_captain_llm_caller(opts, kind) {
   const cheap = opts?.cheap_caller
   const frontier = opts?.frontier_caller
   const escalate = opts?.escalate_predicate
-  const logging_layers = __captain_handler_layers(opts)
+  const logging_layers = __captain_handler_layers(harness, opts)
   if cheap == nil && len(logging_layers) == 0 {
     return opts
   }
@@ -738,9 +738,9 @@ fn __apply_captain_llm_caller(opts, kind) {
     } else {
       []
     }
-    with_routing({default: cheap, routes: routes})
+    with_routing(harness, {default: cheap, routes: routes})
   } else {
-    default_llm_caller()
+    default_llm_caller(harness)
   }
   const composed = if len(logging_layers) > 0 {
     const wrap = compose(logging_layers)
@@ -839,7 +839,7 @@ fn __apply_preset_pack(opts, kind) {
 /**
  * agent_preset is THE way to build `agent_loop` options: it returns a
  * normalized `agent_loop` options dict for a generic role or a captain-shaped
- * persona template. Pass the result straight to `agent_loop(...)`, or merge
+ * persona template. Pass the result straight to `agent_loop(harness, ...)`, or merge
  * further overrides on top — caller input always wins over the preset's
  * defaults.
  *
@@ -857,7 +857,7 @@ fn __apply_preset_pack(opts, kind) {
  * with `agent_preset_register(kind, spec)`.
  *
  * The returned dict is a plain `agent_loop` options dict. Callers can
- * spread it into `agent_loop(...)` directly, or merge further overrides
+ * spread it into `agent_loop(harness, ...)` directly, or merge further overrides
  * on top. Every kind additionally fills its pack rows (provider, transport
  * timeout, cost budget, model ladder, completion_gate, lane_policy,
  * overlay_policy, pin policy) into nil/absent keys, and runs the shared
@@ -882,7 +882,7 @@ fn __apply_preset_pack(opts, kind) {
  * @effects: []
  * @errors: []
  */
-pub fn agent_preset(kind, options = nil) {
+pub fn agent_preset(harness: Harness, kind, options = nil) {
   const resolved_kind = __preset_kind(kind)
   let opts = __dict_or_empty(options)
   const caller_supplied_llm_caller = __has_key(opts, "llm_caller")
@@ -890,8 +890,8 @@ pub fn agent_preset(kind, options = nil) {
   opts = __apply_iteration_budget(opts, resolved_kind)
   opts = __apply_turn_policy(opts, resolved_kind)
   opts = __apply_reasoning_defaults(opts, resolved_kind)
-  opts = __apply_captain_tool_caller(opts, resolved_kind)
-  opts = __apply_captain_llm_caller(opts, resolved_kind)
+  opts = __apply_captain_tool_caller(harness, opts, resolved_kind)
+  opts = __apply_captain_llm_caller(harness, opts, resolved_kind)
   opts = __apply_preset_pack(opts, resolved_kind)
   opts = agent_apply_default_retry(opts, {wrap_existing: !caller_supplied_llm_caller})
   opts = __apply_tool_format(opts, resolved_kind)

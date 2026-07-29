@@ -4,35 +4,35 @@ import "std/memory"
  * memory_reminders returns the active records flagged auto_surface (default
  * flag), newest first, and honors a custom flag name.
  */
-pipeline default() {
-  const root = path_join(harness.fs.temp_dir(), "harn-memrem-" + uuid())
+pipeline default(harness: Harness) {
+  const root = path_join(harness.fs.temp_dir(), "harn-memrem-" + harness.random.uuid())
   const ns = "agent/notes"
   memory_store(
-    ns,
+    harness.memory, ns,
     "n1",
     {text: "surface me"},
     nil,
     {root: root, id: "a1", now: "2026-04-29T00:00:00Z", flags: {auto_surface: true}},
   )
-  memory_store(ns, "n2", {text: "quiet"}, nil, {root: root, id: "b1", now: "2026-04-29T00:00:01Z"})
+  memory_store(harness.memory, ns, "n2", {text: "quiet"}, nil, {root: root, id: "b1", now: "2026-04-29T00:00:01Z"})
   memory_store(
-    ns,
+    harness.memory, ns,
     "n3",
     {text: "also surface"},
     nil,
     {root: root, id: "c1", now: "2026-04-29T00:00:02Z", flags: {auto_surface: true}},
   )
-  const rem = memory_reminders(ns, {root: root})
-  __io_println(len(rem))
-  __io_println(rem[0].id)
-  __io_println(rem[1].id)
+  const rem = memory_reminders(harness.memory, ns, {root: root})
+  harness.stdio.println(len(rem))
+  harness.stdio.println(rem[0].id)
+  harness.stdio.println(rem[1].id)
   memory_store(
-    ns,
+    harness.memory, ns,
     "n4",
     {text: "pinned"},
     nil,
     {root: root, id: "d1", now: "2026-04-29T00:00:03Z", flags: {pin: true}},
   )
-  __io_println(len(memory_reminders(ns, {root: root, flag: "pin"})))
+  harness.stdio.println(len(memory_reminders(harness.memory, ns, {root: root, flag: "pin"})))
   harness.fs.delete(root)
 }

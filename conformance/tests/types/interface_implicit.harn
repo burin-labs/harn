@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface Displayable {
     fn display(self) -> string
   }
@@ -19,7 +19,7 @@ pipeline test(task) {
     }
   }
   fn show(item: Displayable) {
-    log(item.display())
+    harness.stdio.println(item.display())
   }
   show(Dog({name: "Rex"}))
   show(Cat({name: "Whiskers"}))

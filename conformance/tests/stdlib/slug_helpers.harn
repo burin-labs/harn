@@ -1,10 +1,10 @@
 import "std/slug"
 
-pipeline test(task) {
-  const random_name = random_slug({segments: 3, separator: "_"})
+pipeline test(harness: Harness, task) {
+  const random_name = random_slug(harness, {segments: 3, separator: "_"})
   const random_parts = split(random_name, "_")
-  __io_println(len(random_parts) == 3)
-  __io_println(random_parts[0] != "" && random_parts[1] != "" && random_parts[2] != "")
+  harness.stdio.println(len(random_parts) == 3)
+  harness.stdio.println(random_parts[0] != "" && random_parts[1] != "" && random_parts[2] != "")
   const a = slug_from(
     "agent",
     {segments: 4, separator: ".", pattern: ["adjective", "noun", "verb", "noun"]},
@@ -13,8 +13,8 @@ pipeline test(task) {
     "agent",
     {segments: 4, separator: ".", pattern: ["adjective", "noun", "verb", "noun"]},
   )
-  __io_println(a == b)
-  __io_println(len(split(a, ".")) == 4)
+  harness.stdio.println(a == b)
+  harness.stdio.println(len(split(a, ".")) == 4)
   const custom = slug_from(
     "x",
     {
@@ -23,9 +23,9 @@ pipeline test(task) {
       pattern: ["adjective", "noun", "verb"],
     },
   )
-  __io_println(custom)
-  __io_println(slugify("Hello, Harn Agents!"))
-  __io_println(slugify("Hello, Harn Agents!", {separator: "_"}))
-  const prefixed = random_slug({segments: 2, prefix: "Agent 007"})
-  __io_println(substring(prefixed, 0, len("agent-007-")) == "agent-007-")
+  harness.stdio.println(custom)
+  harness.stdio.println(slugify("Hello, Harn Agents!"))
+  harness.stdio.println(slugify("Hello, Harn Agents!", {separator: "_"}))
+  const prefixed = random_slug(harness, {segments: 2, prefix: "Agent 007"})
+  harness.stdio.println(substring(prefixed, 0, len("agent-007-")) == "agent-007-")
 }

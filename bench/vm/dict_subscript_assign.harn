@@ -3,7 +3,7 @@
  * `pick_keys`, std/agents alias maps, and command-step assemblers. Each
  * iteration grows a dict by setting a single key.
  */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const keys = [
     "alpha",
     "beta",
@@ -29,6 +29,6 @@ pipeline default(task) {
     iteration = iteration + 1
   }
   if total < 0 {
-    log("unreachable")
+    harness.stdio.println("unreachable")
   }
 }

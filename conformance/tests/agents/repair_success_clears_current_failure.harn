@@ -50,18 +50,17 @@ fn apply_fix_call(id) {
   return {text: "", tool_calls: [{id: id, name: "apply_fix", arguments: {}}]}
 }
 
-fn scenario_success() {
+fn scenario_success(harness: Harness) {
   return with_llm_script(
-    [
+    harness.llm, [
       run_test_call("r1"),
       apply_fix_call("e1"),
       llm_text("All set. ##DONE##"),
       llm_text("All set. ##DONE##"),
     ],
     { ->
-      const session = "repair-success-clear-" + uuid()
-      const result = agent_loop(
-        "Make the failing test pass, then finish.",
+      const session = "repair-success-clear-" + harness.random.uuid()
+      const result = agent_loop(harness, "Make the failing test pass, then finish.",
         nil,
         {
           provider: "mock",
@@ -79,9 +78,9 @@ fn scenario_success() {
   )
 }
 
-fn scenario_stuck() {
+fn scenario_stuck(harness: Harness) {
   return with_llm_script(
-    [
+    harness.llm, [
       run_test_call("r1"),
       run_test_call("r2"),
       run_test_call("r3"),
@@ -92,9 +91,8 @@ fn scenario_stuck() {
       run_test_call("r8"),
     ],
     { ->
-      const session = "repair-stuck-keeps-" + uuid()
-      const result = agent_loop(
-        "Make the failing test pass.",
+      const session = "repair-stuck-keeps-" + harness.random.uuid()
+      const result = agent_loop(harness, "Make the failing test pass.",
         nil,
         {
           provider: "mock",
@@ -118,9 +116,9 @@ fn scenario_stuck() {
   )
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Success: no stale failure on the hand-back.
-  __io_println(scenario_success())
+  harness.stdio.println(scenario_success(harness))
   // Stuck: the failure-carrying hand-back is preserved.
-  __io_println(scenario_stuck())
+  harness.stdio.println(scenario_stuck(harness))
 }

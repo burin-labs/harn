@@ -10,13 +10,13 @@ import "std/agent/loop_turn_scope"
  * assembled by loop_run: it keeps this boundary explicit without making the
  * Harn module depend on a second, parallel result schema.
  */
-pub fn __agent_loop_finalize_session(message, session, state) -> dict {
+pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) -> dict {
   let final_status = state.final_status
   let stop_reason = state.stop_reason
   let budget_exhausted_emitted = state.budget_exhausted_emitted
   let budget_decisions = state.budget_decisions
   if final_status == "budget_exhausted" && !budget_exhausted_emitted {
-    const terminal_exhaustion = __agent_loop_budget_aggregates(
+    const terminal_exhaustion = __agent_loop_budget_aggregates(harness, 
       session.session_id,
       nil,
       state.loop_start_ms,
@@ -27,7 +27,7 @@ pub fn __agent_loop_finalize_session(message, session, state) -> dict {
       iteration: state.iteration,
       max_iterations: state.current_max,
     }
-    __agent_loop_emit_budget_exhausted(session.session_id, terminal_exhaustion)
+    __agent_loop_emit_budget_exhausted(harness, session.session_id, terminal_exhaustion)
     budget_exhausted_emitted = true
     budget_decisions = __agent_loop_record_budget_stop(
       budget_decisions,
@@ -52,21 +52,27 @@ pub fn __agent_loop_finalize_session(message, session, state) -> dict {
     && wrapup_tools_ok
     && __agent_loop_wrapup_eligible_status(final_status) {
     let _ = try {
-      __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, state.iteration)
+      __agent_loop_final_wrapup(harness,  harness,
+        message,
+        session,
+        opts,
+        final_status,
+        stop_reason,
+        state.iteration,
+      )
     }
   }
   if opts?.daemon && final_status != "" {
-    agent_daemon_snapshot(session, opts, final_status, state.iteration)
+    agent_daemon_snapshot(harness, session, opts, final_status, state.iteration)
   }
   try {
     __host_drain_file_edits(session.session_id)
   } catch (e) {
     nil
   }
-  __agent_loop_checkpoint(session.session_id, "loop_exit", {iteration: state.iteration})
+  __agent_loop_checkpoint(harness, session.session_id, "loop_exit", {iteration: state.iteration})
   __drain_audit_flushes(state.audit_background_tasks)
-  const result = agent_session_finalize(
-    session.session_id,
+  const result = agent_session_finalize(harness, session.session_id,
     {
       final_status: final_status,
       stop_reason: __agent_loop_sealed_stop_reason(stop_reason, final_status),
@@ -77,7 +83,7 @@ pub fn __agent_loop_finalize_session(message, session, state) -> dict {
   return {result: result, budget_decisions: budget_decisions}
 }
 
-pub fn __agent_loop_project_final_result(result, message, session, state) -> dict {
+pub fn __agent_loop_project_final_result(harness: Harness, result, message, session, state) -> dict {
   const opts = state.opts
   const final_status = state.final_status
   const stop_reason = state.stop_reason
@@ -99,7 +105,7 @@ pub fn __agent_loop_project_final_result(result, message, session, state) -> dic
   const enforced = if suspend_result != nil {
     result_with_stalls
   } else {
-    agent_required_tools_enforce(result_with_stalls, opts)
+    agent_required_tools_enforce(harness, result_with_stalls, opts)
   }
   let final_result = enforced
   if opts?.verify_completion_judge != nil {
@@ -143,8 +149,7 @@ pub fn __agent_loop_project_final_result(result, message, session, state) -> dic
     final_result = final_result + suspend_result
   }
   if terminated_ok && __agent_loop_has_terminal_output_contract(opts) {
-    final_result = __agent_loop_apply_output_contract(
-      final_result,
+    final_result = __agent_loop_apply_output_contract(harness,  harness, final_result,
       opts,
       session,
       message,

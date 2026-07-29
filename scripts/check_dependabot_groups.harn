@@ -153,15 +153,15 @@ pub fn cargo_group_error_message(error: CargoGroupError) -> string {
   return "${error.dependency} must match only '${error.group}', matched ${json_stringify(error.matches)}"
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const groups = cargo_groups_from_text(harness.fs.read_text(".github/dependabot.yml"))
   const errors = cargo_group_errors(groups)
   if errors.count > 0 {
     for error in errors {
-      __io_eprintln("error: ${cargo_group_error_message(error)}")
+      harness.stdio.eprintln("error: ${cargo_group_error_message(error)}")
     }
     return 1
   }
-  __io_println("Dependabot Cargo compatibility groups OK")
+  harness.stdio.println("Dependabot Cargo compatibility groups OK")
   return 0
 }

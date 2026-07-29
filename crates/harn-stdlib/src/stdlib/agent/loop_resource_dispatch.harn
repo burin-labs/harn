@@ -163,7 +163,7 @@ fn __tool_batch_previous_deferred_signatures(state) {
   return []
 }
 
-fn __tool_batch_plan(tool_calls, tools, options = {}) {
+fn __tool_batch_plan(harness: Harness, tool_calls, tools, options = {}) {
   const previous = options?._tool_batch_dependency_state
   const previous_deferred = __tool_batch_previous_deferred_signatures(previous)
   const planned_at_ms = harness.clock.monotonic_ms()
@@ -254,14 +254,14 @@ fn __tool_batch_receipt(plan, entry, disposition, reason, timing = nil, blocking
   }
 }
 
-fn __tool_batch_emit_receipt(options, receipt) {
+fn __tool_batch_emit_receipt(harness: Harness, options, receipt) {
   const session_id = to_string(options?.session_id ?? "")
   if session_id != "" {
-    agent_emit_event(session_id, "tool_batch_disposition", {receipt: receipt})
+    agent_emit_event(harness, session_id, "tool_batch_disposition", {receipt: receipt})
   }
 }
 
-fn __tool_batch_deferred_result(plan, entry, tools, options) {
+fn __tool_batch_deferred_result(harness: Harness, plan, entry, tools, options) {
   const receipt = __tool_batch_receipt(plan, entry, "deferred", "effect_phase_boundary")
   const name = receipt.tool_name
   const observation = "[deferred `" + name + "` tool call]\n"
@@ -288,12 +288,12 @@ fn __tool_batch_deferred_result(plan, entry, tools, options) {
     error_category: "tool_batch_deferred",
     executor: nil,
   }
-  __emit_synthetic_tool_lifecycle_finish(entry.call, result, tools, options)
-  __tool_batch_emit_receipt(options, receipt)
+  __emit_synthetic_tool_lifecycle_finish(harness, entry.call, result, tools, options)
+  __tool_batch_emit_receipt(harness, options, receipt)
   return result
 }
 
-fn __tool_batch_blocked_result(plan, entry, tools, options, blocking_result) {
+fn __tool_batch_blocked_result(harness: Harness, plan, entry, tools, options, blocking_result) {
   const receipt = __tool_batch_receipt(
     plan,
     entry,
@@ -325,8 +325,8 @@ fn __tool_batch_blocked_result(plan, entry, tools, options, blocking_result) {
     error_category: "tool_batch_blocked",
     executor: nil,
   }
-  __emit_synthetic_tool_lifecycle_finish(entry.call, result, tools, options)
-  __tool_batch_emit_receipt(options, receipt)
+  __emit_synthetic_tool_lifecycle_finish(harness, entry.call, result, tools, options)
+  __tool_batch_emit_receipt(harness, options, receipt)
   return result
 }
 
@@ -350,15 +350,15 @@ fn __tool_batch_deferred_signatures(entries) {
   return entries.map({ entry -> entry.signature })
 }
 
-fn __tool_batch_dispatch(tool_calls, tools, options, cap) {
-  const plan = __tool_batch_plan(tool_calls, tools, options)
+fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
+  const plan = __tool_batch_plan(harness, tool_calls, tools, options)
   const selected = __tool_batch_selected_entries(plan)
   const deferred = __tool_batch_deferred_entries(plan)
   if __tool_batch_blocking_barrier_applies(plan) {
     let blocked_results = []
     for entry in plan.entries {
       blocked_results = blocked_results.appending(
-        __tool_batch_blocked_result(plan, entry, tools, options, plan.previous.blocking_result),
+        __tool_batch_blocked_result(harness, plan, entry, tools, options, plan.previous.blocking_result),
       )
     }
     return {
@@ -371,7 +371,7 @@ fn __tool_batch_dispatch(tool_calls, tools, options, cap) {
     }
   }
   const selected_calls = selected.map({ entry -> entry.call })
-  const raw_selected = __dispatch_tool_calls_with_middleware(selected_calls, tools, options, cap)
+  const raw_selected = __dispatch_tool_calls_with_middleware(harness, selected_calls, tools, options, cap)
   let results = []
   let blocking_result = plan.previous?.blocking_result
   if plan.selected_phase == "mutation" {
@@ -399,13 +399,13 @@ fn __tool_batch_dispatch(tool_calls, tools, options, cap) {
       raw_result?.partial_apply,
     )
     results = results.appending(raw_result + {dispatch_receipt: receipt})
-    __tool_batch_emit_receipt(options, receipt)
+    __tool_batch_emit_receipt(harness, options, receipt)
     if __tool_batch_result_blocks_later_phase(entry, raw_result) {
       blocking_result = __tool_batch_blocking_result(entry, raw_result)
     }
   }
   for entry in deferred {
-    results = results.appending(__tool_batch_deferred_result(plan, entry, tools, options))
+    results = results.appending(__tool_batch_deferred_result(harness, plan, entry, tools, options))
   }
   return {
     results: results,
@@ -1210,11 +1210,11 @@ pub fn __drain_audit_flushes(tasks) {
   }
 }
 
-pub fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
+pub fn __dispatch_tool_calls(harness: Harness, session_id, tool_calls, turn_opts) {
   if len(tool_calls) == 0 {
     return {dispatch: nil, turn_opts: turn_opts, audit_flushes: []}
   }
-  agent_tool_search_emit_queries(session_id, tool_calls, turn_opts)
+  agent_tool_search_emit_queries(harness, session_id, tool_calls, turn_opts)
   const tools = turn_opts?.tools
   const cap = __resolve_max_concurrent_tools(turn_opts)
   // `_stop_reason` is the turn's provider stop reason
@@ -1240,14 +1240,14 @@ pub fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _stop_after_successful_tools: turn_opts?.stop_after_successful_tools ?? [],
     _tool_batch_dependency_state: turn_opts?._tool_batch_dependency_state,
   }
-  const phased = __tool_batch_dispatch(tool_calls, tools, dispatch_options, cap)
+  const phased = __tool_batch_dispatch(harness, tool_calls, tools, dispatch_options, cap)
   const raw_dispatch = phased.results
   const audit_flushes = __collect_audit_flushes(raw_dispatch)
   const dispatch = __strip_internal_dispatch(raw_dispatch)
-  agent_session_record_tool_results(session_id, dispatch)
+  agent_session_record_tool_results(harness, session_id, dispatch)
   return {
     dispatch: dispatch,
-    turn_opts: agent_tool_search_record_results(session_id, tool_calls, dispatch, turn_opts)
+    turn_opts: agent_tool_search_record_results(harness, session_id, tool_calls, dispatch, turn_opts)
       + {
       _tool_batch_dependency_state: phased.state,
     },
@@ -1255,9 +1255,9 @@ pub fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
   }
 }
 
-pub fn __invoke_tool_with_index(call, index, tools, options) {
+pub fn __invoke_tool_with_index(harness: Harness, call, index, tools, options) {
   const started_at_ms = harness.clock.monotonic_ms()
-  const result = __invoke_tool(call, tools, options + {_tool_call_index: index})
+  const result = __invoke_tool(harness, call, tools, options + {_tool_call_index: index})
   const finished_at_ms = harness.clock.monotonic_ms()
   return result
     + {
@@ -1269,7 +1269,7 @@ pub fn __invoke_tool_with_index(call, index, tools, options) {
   }
 }
 
-pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
+pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools, options, cap) {
   // Middleware-enabled path. Each call invokes its own caller chain
   // inside a fresh closure scope, so `audit.layers` histories stay
   // independent across siblings. When `max_concurrent_tools > 1`,
@@ -1328,7 +1328,7 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
           index,
           skipped_suffix_count,
         )
-        __emit_synthetic_tool_lifecycle_finish(call, blocked, tools, options)
+        __emit_synthetic_tool_lifecycle_finish(harness, call, blocked, tools, options)
         results = results.appending(blocked)
         continue
       }
@@ -1338,13 +1338,13 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
         // Same failing call as the one that tripped the cap — skip dispatch.
         if !collapsed_emitted {
           const collapsed = __intra_turn_collapsed_result(call, capped_sample)
-          __emit_synthetic_tool_lifecycle_finish(call, collapsed, tools, options)
+          __emit_synthetic_tool_lifecycle_finish(harness, call, collapsed, tools, options)
           results = results.appending(collapsed)
           collapsed_emitted = true
         }
         continue
       }
-      const result = __invoke_tool_with_index(call, index, tools, options)
+      const result = __invoke_tool_with_index(harness, call, index, tools, options)
       results = results.appending(result)
       // Poison this resource for later same-resource siblings only when the
       // execution boundary cannot prove the failure was a no-op. A structured
@@ -1393,7 +1393,7 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
     indexed = indexed.appending({index: index, call: call})
   }
   const settled = parallel settle indexed with { max_concurrent: cap } { entry ->
-    __invoke_tool_with_index(entry.call, entry.index, tools, options)
+    __invoke_tool_with_index(harness, entry.call, entry.index, tools, options)
   }
   let results = []
   for r in settled.results {

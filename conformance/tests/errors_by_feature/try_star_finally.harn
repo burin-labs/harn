@@ -4,7 +4,7 @@
  * mirrors the exactly-once guarantee documented in
  * `finally_runs_once.harn` for plain `throw`.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn boom() {
     throw "x"
   }
@@ -22,7 +22,7 @@ pipeline test(task) {
   } catch (e) {
     "caught:${e}"
   }
-  log("finally_only: ${r_a} counter=${counter_a}")
+  harness.stdio.println("finally_only: ${r_a} counter=${counter_a}")
   // --- try* inside try/catch/finally where the catch handles the
   //     rethrown error: finally must fire exactly once. ---
   let counter_b = 0
@@ -34,7 +34,7 @@ pipeline test(task) {
   } finally {
     counter_b = counter_b + 1
   }
-  log("catch_finally: ${r_b} counter=${counter_b}")
+  harness.stdio.println("catch_finally: ${r_b} counter=${counter_b}")
   // --- Nested: outer try/finally wraps inner try/catch where the
   //     catch catches the try* rethrow. Outer finally must NOT fire
   //     (no throw escapes the inner catch); inner has no finally. ---
@@ -50,5 +50,5 @@ pipeline test(task) {
   } finally {
     counter_c = counter_c + 1
   }
-  log("nested_outer_finally: ${r_c} counter=${counter_c}")
+  harness.stdio.println("nested_outer_finally: ${r_c} counter=${counter_c}")
 }

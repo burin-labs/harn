@@ -1,11 +1,11 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   enum Color {
     Red
     Green
     Blue
   }
   const c = Color.Red
-  log(c)
-  log(c == Color.Red)
-  log(c == Color.Blue)
+  harness.stdio.println(c)
+  harness.stdio.println(c == Color.Red)
+  harness.stdio.println(c == Color.Blue)
 }

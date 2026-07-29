@@ -10,19 +10,31 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "type_of(...args: any) -> string", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "type_of(...args: any) -> string", category = "types"
+)]
 fn type_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     Ok(VmValue::String(arcstr::ArcStr::from(val.type_name())))
 }
 
-#[harn_builtin(sig = "to_string(...args: any) -> string", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "to_string(...args: any) -> string", category = "types"
+)]
 fn to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     Ok(VmValue::String(arcstr::ArcStr::from(val.display())))
 }
 
-#[harn_builtin(sig = "to_int(...args: any) -> int", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "to_int(...args: any) -> int", category = "types"
+)]
 fn to_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     match val {
@@ -54,7 +66,11 @@ fn float_to_int(value: f64) -> Option<i64> {
     Some(value as i64)
 }
 
-#[harn_builtin(sig = "to_float(...args: any) -> float", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "to_float(...args: any) -> float", category = "types"
+)]
 fn to_float_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     match val {
@@ -80,6 +96,8 @@ fn to_float_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 /// parse), an int (exact), a float (explicit opt-in to the lossy binary→decimal
 /// conversion), or a decimal (identity).
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "decimal(value: string | int | float | decimal) -> decimal",
     category = "types"
 )]
@@ -107,6 +125,8 @@ fn decimal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "Ok(value?: any) -> any",
     runtime_only = true,
     category = "types"
@@ -117,6 +137,8 @@ fn ok_ctor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "Err(value?: any) -> any",
     runtime_only = true,
     category = "types"
@@ -126,7 +148,11 @@ fn err_ctor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     Ok(VmValue::enum_variant("Result", "Err", vec![val]))
 }
 
-#[harn_builtin(sig = "is_ok(value: any) -> bool", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "is_ok(value: any) -> bool", category = "types"
+)]
 fn is_ok_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     Ok(VmValue::Bool(matches!(
@@ -136,7 +162,11 @@ fn is_ok_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     )))
 }
 
-#[harn_builtin(sig = "is_err(value: any) -> bool", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "is_err(value: any) -> bool", category = "types"
+)]
 fn is_err_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     Ok(VmValue::Bool(matches!(
@@ -146,7 +176,11 @@ fn is_err_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     )))
 }
 
-#[harn_builtin(sig = "unwrap(...args: any) -> any", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "unwrap(...args: any) -> any", category = "types"
+)]
 fn unwrap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     match val {
@@ -165,7 +199,11 @@ fn unwrap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     }
 }
 
-#[harn_builtin(sig = "unwrap_or(...args: any) -> any", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "unwrap_or(...args: any) -> any", category = "types"
+)]
 fn unwrap_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
@@ -180,7 +218,11 @@ fn unwrap_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     }
 }
 
-#[harn_builtin(sig = "unwrap_err(...args: any) -> any", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "unwrap_err(...args: any) -> any", category = "types"
+)]
 fn unwrap_err_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     match val {
@@ -191,7 +233,11 @@ fn unwrap_err_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     }
 }
 
-#[harn_builtin(sig = "unreachable(...args: any) -> never", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "unreachable(...args: any) -> never", category = "types"
+)]
 fn unreachable_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let msg = match args.first() {
         Some(val) => format!("unreachable code was reached: {}", val.display()),
@@ -200,7 +246,11 @@ fn unreachable_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Err(VmError::Runtime(msg))
 }
 
-#[harn_builtin(sig = "to_list(...args: any) -> list", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "to_list(...args: any) -> list", category = "types"
+)]
 fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Set(s) => Ok(VmValue::List(s.shared_items())),
@@ -220,6 +270,8 @@ fn tuple_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "len(value: string | bytes | list | dict | set | range | nil) -> int",
     category = "types"
 )]
@@ -237,7 +289,11 @@ fn len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 // `==` is structural. `is_same` is identity (Arc::ptr_eq for heap values);
 // for primitive scalars it reduces to structural equality.
-#[harn_builtin(sig = "is_same(a: any, b: any) -> bool", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "is_same(a: any, b: any) -> bool", category = "types"
+)]
 fn is_same_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let a = args.first().unwrap_or(&VmValue::Nil);
     let b = args.get(1).unwrap_or(&VmValue::Nil);
@@ -247,7 +303,11 @@ fn is_same_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 // Stable identity key — differs iff two values live at different heap
 // allocations. For hashing by identity rather than structure; primitives
 // return their display() text.
-#[harn_builtin(sig = "addr_of(value: any) -> string", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "addr_of(value: any) -> string", category = "types"
+)]
 fn addr_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let v = args.first().unwrap_or(&VmValue::Nil);
     Ok(VmValue::String(arcstr::ArcStr::from(
@@ -261,7 +321,11 @@ fn addr_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 // silent no-op so callers can hand `drop` any value without guarding.
 // `owned<T>` bindings call this implicitly at scope exit via a synthetic
 // `defer { drop(<binding>) }`.
-#[harn_builtin(sig = "drop(handle: any) -> nil", category = "types")]
+#[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
+    sig = "drop(handle: any) -> nil", category = "types"
+)]
 fn drop_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let v = args.first().unwrap_or(&VmValue::Nil);
     match v {

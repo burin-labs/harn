@@ -89,6 +89,8 @@ struct ActionGraphEventRecord {
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trigger_inspect_dlq",
+    effects = ["state.read@dynamic"],
     sig = "trigger_inspect_dlq(...args: any) -> list",
     kind = "async",
     category = "triggers"
@@ -107,6 +109,8 @@ async fn trigger_inspect_dlq_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trigger_inspect_lifecycle",
+    effects = ["state.read@dynamic"],
     sig = "trigger_inspect_lifecycle(...args: any) -> list",
     kind = "async",
     category = "triggers"
@@ -130,6 +134,8 @@ async fn trigger_inspect_lifecycle_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trigger_inspect_action_graph",
+    effects = ["state.read@dynamic"],
     sig = "trigger_inspect_action_graph(...args: any) -> list",
     kind = "async",
     category = "triggers"

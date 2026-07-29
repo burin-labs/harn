@@ -3,7 +3,7 @@ import {
   agent_tool_mutation_status,
 } from "std/agent/tool_lifecycle"
 
-pipeline test() {
+pipeline test(harness: Harness) {
   for category in [
     "schema_validation",
     "tool_error",
@@ -36,5 +36,5 @@ pipeline test() {
   assert_eq(agent_tool_mutation_status("unknown"), "unknown")
   assert_eq(agent_tool_mutation_status(nil), "unknown")
   assert_eq(agent_tool_mutation_status("future_status"), "unknown")
-  log("agent tool lifecycle taxonomy ok")
+  harness.stdio.println("agent tool lifecycle taxonomy ok")
 }

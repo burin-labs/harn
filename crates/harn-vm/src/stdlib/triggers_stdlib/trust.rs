@@ -24,6 +24,8 @@ use super::args::{
 use super::journal::ensure_trigger_event_log;
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_record",
+    effects = ["state.write@dynamic"],
     sig = "trust_record(...args: any) -> TrustRecord",
     kind = "async",
     category = "triggers"
@@ -38,6 +40,8 @@ async fn trust_record_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_graph_record",
+    effects = ["state.write@dynamic"],
     sig = "trust_graph_record(...args: any) -> string",
     kind = "async",
     category = "triggers"
@@ -54,6 +58,8 @@ async fn trust_graph_record_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_query",
+    effects = ["state.read@dynamic"],
     sig = "trust_query(...args: any) -> list",
     kind = "async",
     category = "triggers"
@@ -83,6 +89,8 @@ async fn trust_query_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_graph_query",
+    effects = ["state.read@dynamic"],
     sig = "trust_graph_query(...args: any) -> TrustScore",
     kind = "async",
     category = "triggers"
@@ -101,6 +109,8 @@ async fn trust_graph_query_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_graph_policy_for",
+    effects = ["state.read@dynamic"],
     sig = "trust_graph_policy_for(...args: any) -> CapabilityPolicy",
     kind = "async",
     category = "triggers"
@@ -118,6 +128,8 @@ async fn trust_graph_policy_for_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_graph_verify_chain",
+    effects = ["state.read@dynamic"],
     sig = "trust_graph_verify_chain(...args: any) -> TrustChainReport",
     kind = "async",
     category = "triggers"
@@ -134,6 +146,8 @@ async fn trust_graph_verify_chain_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_query_alias",
+    effects = ["state.read@dynamic"],
     sig = "trust.query(...args: any) -> list",
     kind = "async",
     category = "triggers"
@@ -160,6 +174,8 @@ async fn trust_query_ns_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_record_alias",
+    effects = ["state.write@dynamic"],
     sig = "trust.record(...args: any) -> string",
     kind = "async",
     category = "triggers"
@@ -176,6 +192,8 @@ async fn trust_record_ns_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_score",
+    effects = ["state.read@dynamic"],
     sig = "trust.score(...args: any) -> dict",
     kind = "async",
     category = "triggers"
@@ -194,6 +212,8 @@ async fn trust_score_ns_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_policy_for",
+    effects = ["state.read@dynamic"],
     sig = "trust.policy_for(...args: any) -> dict",
     kind = "async",
     category = "triggers"
@@ -211,6 +231,8 @@ async fn trust_policy_for_ns_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trust_verify_chain",
+    effects = ["state.read@dynamic"],
     sig = "trust.verify_chain(...args: any) -> dict",
     kind = "async",
     category = "triggers"

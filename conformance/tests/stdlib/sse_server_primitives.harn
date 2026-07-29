@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const frame = sse_event({event: "progress", data: "one\ntwo", id: "evt-1", retry_ms: 2500})
   assert(contains(frame, "id: evt-1"))
   assert(contains(frame, "event: progress"))
@@ -48,5 +48,5 @@ pipeline test(task) {
   assert_eq(cancelled_close.type, "close")
   assert(sse_server_close(response))
   assert_eq(sse_server_flush(response), false)
-  __io_println("sse_server_primitives_ok")
+  harness.stdio.println("sse_server_primitives_ok")
 }

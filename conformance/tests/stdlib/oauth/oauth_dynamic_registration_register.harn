@@ -12,10 +12,10 @@ import {
   register_client,
 } from "std/oauth/dynamic_registration"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const topic = "oauth.dynreg.audit"
-  const cursor = event_log.latest(topic) ?? 0
-  const store = dynamic_registration_store()
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
+  const store = dynamic_registration_store(harness)
   assert_eq(store.kind, "oauth_dynreg_store", "store handle kind")
   const metadata = {
     redirect_uris: ["https://app.example/callback"],
@@ -23,7 +23,7 @@ pipeline test(task) {
     client_name: "Harn Conformance App",
     scope: "read write",
   }
-  const response = register_client(store, metadata)
+  const response = register_client(harness, store, metadata)
   const client_id = response.client_id
   assert(len(client_id) >= 32, "client_id length >= 32 (256-bit base64url)")
   const client_secret = response.client_secret
@@ -32,7 +32,7 @@ pipeline test(task) {
   assert(response.client_id_issued_at >= 0, "client_id_issued_at present")
   assert_eq(response.redirect_uris, ["https://app.example/callback"], "metadata round-tripped")
   assert_eq(response.client_name, "Harn Conformance App", "client_name preserved")
-  const fetched = get_client(store, client_id)
+  const fetched = get_client(harness.auth, store, client_id)
   assert(fetched != nil, "get_client returns the registration")
   assert_eq(fetched.client_id, client_id, "get returns same client_id")
   assert(
@@ -41,7 +41,7 @@ pipeline test(task) {
   )
   assert_eq(fetched.redirect_uris, ["https://app.example/callback"], "metadata preserved on get")
   assert_eq(fetched.client_name, "Harn Conformance App", "client_name preserved on get")
-  const listed = list_clients(store)
+  const listed = list_clients(harness.auth, store)
   assert(listed.contains(client_id), "list_clients reports registered id")
   // Convenience closures on the store dict.
   const response2 = store.register({redirect_uris: ["https://app.example/cb-2"]})
@@ -53,8 +53,7 @@ pipeline test(task) {
   // Native clients register the effective OS-selected loopback port. The
   // server-side validator must accept any secure loopback port so a new
   // authorization can deliberately re-register after that port changes.
-  const loopback = register_client(
-    store,
+  const loopback = register_client(harness,  harness, store,
     {redirect_uris: ["http://127.0.0.1:54321/oauth/callback"], token_endpoint_auth_method: "none"},
   )
   assert_eq(
@@ -63,7 +62,7 @@ pipeline test(task) {
     "arbitrary secure loopback port round-tripped",
   )
   // Defaults are applied on registration.
-  const defaulted = register_client(store, {redirect_uris: ["https://app.example/cb-3"]})
+  const defaulted = register_client(harness, store, {redirect_uris: ["https://app.example/cb-3"]})
   assert(defaulted.grant_types.contains("authorization_code"), "default grant_types applied")
   assert(defaulted.response_types.contains("code"), "default response_types applied")
   assert_eq(
@@ -72,7 +71,7 @@ pipeline test(task) {
     "default auth method applied",
   )
   // Audit event records the shape, NOT the secret.
-  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const first = stream.next().value
   assert_eq(first.kind, "client_registered", "audit kind")
   assert_eq(first.payload.client_id, client_id, "audit records client_id")
@@ -94,5 +93,5 @@ pipeline test(task) {
     first.payload?.redacted?.client_secret == nil,
     "audit redacted shape must NOT carry client_secret",
   )
-  log("oauth dynamic registration register ok")
+  harness.stdio.println("oauth dynamic registration register ok")
 }

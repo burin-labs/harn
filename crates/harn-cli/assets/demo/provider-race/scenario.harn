@@ -28,19 +28,19 @@ fn prompt_for(name: string, model: string) -> string {
   return "[provider_race][provider=${name}][model=${model}] One sentence: what's the strategic moat of replay-deterministic agent runtimes vs. ad-hoc LLM scripts?"
 }
 
-pipeline default(_task) {
+pipeline default(harness: Harness, _task) {
   const prompt = "Race 3 providers on a one-sentence question and pick the lowest-latency winner."
-  __io_println("=== provider-race · prompt ===")
-  __io_println(prompt)
-  __io_println("")
+  harness.stdio.println("=== provider-race · prompt ===")
+  harness.stdio.println(prompt)
+  harness.stdio.println("")
   const prov = provider_meta()
   // `parallel each` races the LLM calls; the returned strings are
   // zipped back to the provider metadata serially below. Splitting the
   // race result into a single typed string avoids the type checker
   // widening every per-row dict field to `_`.
   const responses: list<string> = parallel each prov { p ->
-    __io_println("[start ${p.name}]")
-    const envelope = llm_call(prompt_for(p.name, p.model), "Be concise. Answer in one sentence.")
+    harness.stdio.println("[start ${p.name}]")
+    const envelope = harness.llm.call(prompt_for(p.name, p.model), "Be concise. Answer in one sentence.")
     envelope.text
   }
   // Zip provider metadata + LLM response into a typed result list.
@@ -76,9 +76,9 @@ pipeline default(_task) {
     total_cost = total_cost + r.est_cost_usd
   }
   for r in results {
-    __io_println("[${r.provider}] latency=${r.latency_ms}ms cost=$${r.est_cost_usd}")
-    __io_println("    ${r.response}")
-    __io_println("")
+    harness.stdio.println("[${r.provider}] latency=${r.latency_ms}ms cost=$${r.est_cost_usd}")
+    harness.stdio.println("    ${r.response}")
+    harness.stdio.println("")
   }
   const attribution = {
     persona: "routing_policy",
@@ -90,7 +90,7 @@ pipeline default(_task) {
     races_completed: len(results),
     per_provider: results,
   }
-  __io_println("=== routing_policy receipt ===")
-  __io_println(json_stringify(attribution))
+  harness.stdio.println("=== routing_policy receipt ===")
+  harness.stdio.println(json_stringify(attribution))
   return attribution
 }

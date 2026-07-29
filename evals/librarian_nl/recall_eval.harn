@@ -1,6 +1,6 @@
 // Recall + p95 latency eval for std/code_librarian::code_librarian_query_nl (#2439).
 //
-// Public surface: `code_librarian_query_nl(text, options?) -> dict`.
+// Public surface: `code_librarian_query_nl(harness, text, options?) -> dict`.
 //
 // Drives the 30-question NL fixture under the same canonical-Cypher
 // mock the unit test uses (so the eval is deterministic and adds zero
@@ -65,8 +65,8 @@ fn _percentile(sorted_ms, p) {
   return sorted_ms[idx]
 }
 
-pipeline run(task) {
-  const _ = hostlib_code_index_rebuild({root: CORPUS_ROOT})
+pipeline run(harness: Harness, task) {
+  const _ = harness.code_index.rebuild({root: CORPUS_ROOT})
   const fixture = json_parse(harness.fs.read_text(FIXTURE_PATH))
   const questions = fixture.questions
   let per_question = []
@@ -76,14 +76,14 @@ pipeline run(task) {
   let fallback_count = 0
   let cache_hit_count = 0
   for q in questions {
-    llm_mock_push_scope()
+    harness.llm.mock_push_scope()
     const mock_text = "{\"cypher\": \"" + q.cypher + "\"}"
-    llm_mock({data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text})
-    const r1 = code_librarian_query_nl(q.nl)
+    harness.llm.mock_enqueue({data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text})
+    const r1 = code_librarian_query_nl(harness, q.nl)
     // Second invocation tests cache; the cache key is the NL text and
     // the namespace TTL is 5m so this hits.
-    const r2 = code_librarian_query_nl(q.nl)
-    llm_mock_pop_scope()
+    const r2 = code_librarian_query_nl(harness, q.nl)
+    harness.llm.mock_pop_scope()
     const hits = _hits(r1.rows, q.expected, q.match_key)
     total_expected = total_expected + len(q.expected)
     total_found = total_found + hits
@@ -130,6 +130,6 @@ pipeline run(task) {
       recall: recall,
     },
   }
-  __io_println(json_stringify(report))
+  harness.stdio.println(json_stringify(report))
   return report
 }

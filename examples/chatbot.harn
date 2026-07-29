@@ -7,12 +7,12 @@
  * A tiny conversational assistant with a narrow prompt and a simple response
  * path. Useful as a baseline before wiring in tools or memory.
  */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const system = """
 You are a helpful, concise chatbot for Harn users.
 Answer directly, ask one clarifying question if the request is ambiguous,
 and do not invent APIs or commands.
 """
-  const response = llm_call(task, system, {temperature: 0.4, max_tokens: 800})
-  __io_println(response.text)
+  const response = harness.llm.call(task, system, {temperature: 0.4, max_tokens: 800})
+  harness.stdio.println(response.text)
 }

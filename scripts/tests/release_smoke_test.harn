@@ -41,7 +41,7 @@ fn ready_adapters(command_runner = nil) {
 }
 
 @test
-pipeline test_success_runs_every_capability_and_cancels_watch(task) {
+pipeline test_success_runs_every_capability_and_cancels_watch(harness: Harness, task) {
   const report = run_release_smoke(config(), ready_adapters())
   assert_eq(report.success, true)
   assert_eq(report.steps.count, 12)
@@ -50,7 +50,7 @@ pipeline test_success_runs_every_capability_and_cancels_watch(task) {
 }
 
 @test
-pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(task) {
+pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(harness: Harness, task) {
   let calls = 0
   const adapters = ready_adapters(
     { _spec, _options ->
@@ -69,7 +69,7 @@ pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(task
 }
 
 @test
-pipeline test_multiple_failures_are_aggregated_in_source_order(task) {
+pipeline test_multiple_failures_are_aggregated_in_source_order(harness: Harness, task) {
   let calls = 0
   const adapters = ready_adapters(
     { _spec, _options ->
@@ -87,7 +87,7 @@ pipeline test_multiple_failures_are_aggregated_in_source_order(task) {
 }
 
 @test
-pipeline test_timeout_is_preserved_without_wall_clock_waiting(task) {
+pipeline test_timeout_is_preserved_without_wall_clock_waiting(harness: Harness, task) {
   const adapters = ready_adapters(
     { _spec, _options ->
       {
@@ -108,7 +108,7 @@ pipeline test_timeout_is_preserved_without_wall_clock_waiting(task) {
 }
 
 @test
-pipeline test_watch_deadline_without_readiness_fails_after_cancellation(task) {
+pipeline test_watch_deadline_without_readiness_fails_after_cancellation(harness: Harness, task) {
   const adapters = ready_adapters()
     + {
     wait: { _started, _options ->
@@ -125,7 +125,7 @@ pipeline test_watch_deadline_without_readiness_fails_after_cancellation(task) {
 }
 
 @test
-pipeline test_watch_early_exit_and_cleanup_failure_are_distinct_failures(task) {
+pipeline test_watch_early_exit_and_cleanup_failure_are_distinct_failures(harness: Harness, task) {
   const early_exit = ready_adapters()
     + {
     wait: { _started, _options -> command_result_fail(9, "watch crashed") },

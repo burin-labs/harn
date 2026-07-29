@@ -1,13 +1,13 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const nums = [3, 1, 4, 1, 5, 9]
-  log(nums.sorted())
-  log(nums.reversed())
-  log([1, 2, 3].join(", "))
-  log([1, 2, 3].contains(2))
-  log([1, 2, 3].index_of(2))
-  log([1, 2, 3, 2, 1].unique())
-  log([1, 2, 3, 4, 5].take(3))
-  log([1, 2, 3, 4, 5].skip(2))
-  log([1, 2, 3, 4, 5].slice(1, 3))
-  log([1, 2, 3].sum())
+  harness.stdio.println(nums.sorted())
+  harness.stdio.println(nums.reversed())
+  harness.stdio.println([1, 2, 3].join(", "))
+  harness.stdio.println([1, 2, 3].contains(2))
+  harness.stdio.println([1, 2, 3].index_of(2))
+  harness.stdio.println([1, 2, 3, 2, 1].unique())
+  harness.stdio.println([1, 2, 3, 4, 5].take(3))
+  harness.stdio.println([1, 2, 3, 4, 5].skip(2))
+  harness.stdio.println([1, 2, 3, 4, 5].slice(1, 3))
+  harness.stdio.println([1, 2, 3].sum())
 }

@@ -4,11 +4,11 @@
 // "dead-since-inception converter" class (harness-techniques-ledger #3381).
 import { governors_selftest } from "std/agent/governors"
 
-pipeline default() {
-  const report = governors_selftest()
-  __io_println(report.ok)
-  __io_println(report.decision.action)
-  __io_println(report.decision.reason)
+pipeline default(harness: Harness) {
+  const report = governors_selftest(harness)
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.decision.action)
+  harness.stdio.println(report.decision.reason)
   // The keys the governor depends on, proven present on the live shape.
-  __io_println(join(report.required_keys, ","))
+  harness.stdio.println(join(report.required_keys, ","))
 }

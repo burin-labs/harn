@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   http_mock(
     "GET",
     "https://api.example.com/stream",
@@ -13,18 +13,18 @@ pipeline default() {
     bytes_concat(first ?? bytes_from_string(""), second ?? bytes_from_string("")),
   )
   const closed = http_stream_close(stream)
-  const dst = path_join(harness.fs.temp_dir(), "harn-http-download-" + uuid() + ".txt")
+  const dst = path_join(harness.fs.temp_dir(), "harn-http-download-" + harness.random.uuid() + ".txt")
   http_mock(
     "GET",
     "https://api.example.com/download",
     {status: 200, body: "downloaded", headers: {etag: "abc"}},
   )
   const download = harness.net.download("https://api.example.com/download", dst)
-  __io_println(info.status)
-  __io_println(info.headers["x-test"])
-  __io_println(text)
-  __io_println(type_of(end))
-  __io_println(closed)
-  __io_println(download.bytes_written)
-  __io_println(harness.fs.read_text(dst))
+  harness.stdio.println(info.status)
+  harness.stdio.println(info.headers["x-test"])
+  harness.stdio.println(text)
+  harness.stdio.println(type_of(end))
+  harness.stdio.println(closed)
+  harness.stdio.println(download.bytes_written)
+  harness.stdio.println(harness.fs.read_text(dst))
 }

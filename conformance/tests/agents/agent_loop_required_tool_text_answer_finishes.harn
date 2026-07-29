@@ -16,15 +16,14 @@ fn tools() {
   return registry
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("```tool\n{\"name\":\"lookup\",\"args\":{\"query\":\"x\"}}\n```"),
       llm_text("evidence"),
     ],
     { ->
-      const result = agent_loop(
-        "Use lookup.",
+      const result = agent_loop(harness, "Use lookup.",
         nil,
         {
           provider: "mock",
@@ -36,10 +35,10 @@ pipeline default() {
           require_successful_tools: ["lookup"],
         },
       )
-      __io_println(result.status)
-      __io_println(result.stop_reason)
-      __io_println(result.visible_text)
-      __io_println(result.llm.iterations)
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.stop_reason)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(result.llm.iterations)
     },
   )
 }

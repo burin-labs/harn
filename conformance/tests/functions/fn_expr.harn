@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Anonymous function expression: fn(params) { body }
   const double = fn(x) { return x * 2 }
   assert(double(5) == 10, "fn expr basic")
@@ -16,5 +16,5 @@ pipeline test(task) {
   // Implicit return (last expression)
   const square = fn(x) { x * x }
   assert(square(4) == 16, "fn expr implicit return")
-  log("fn_expr tests passed")
+  harness.stdio.println("fn_expr tests passed")
 }

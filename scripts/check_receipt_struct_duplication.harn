@@ -35,8 +35,8 @@ pub fn is_skipped(rel: string) -> bool {
  * Python `re.sub` pair (the block form uses the `s` flag for DOTALL).
  */
 pub fn strip_comments(text: string) -> string {
-  const no_line = regex_replace_all(r"//.*", "", text)
-  return regex_replace_all(r"/\*.*?\*/", "", no_line, "s")
+  const no_line = regex_replace(r"//.*", "", text)
+  return regex_replace(r"/\*.*?\*/", "", no_line, "s")
 }
 
 /**
@@ -126,7 +126,7 @@ pub fn rel_path(path: string) -> string {
   return path
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   let violations: list<string> = []
   for path in harness.fs.glob("**/*.rs") {
     const rel = rel_path(path)
@@ -142,11 +142,11 @@ pipeline main(task) {
   if violations.count == 0 {
     return 0
   }
-  __io_eprintln(
+  harness.stdio.eprintln(
     "Receipt envelope duplication detected. Use `harn_vm::receipts::Receipt` or a projection derived from it instead.",
   )
   for v in violations {
-    __io_eprintln("  ${v}")
+    harness.stdio.eprintln("  ${v}")
   }
   return 1
 }

@@ -1,16 +1,15 @@
 import { agentic_user, simulated_user_respond, simulated_user_status } from "std/agent/user"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       llm_text(
         "{\"action\":\"reply\",\"message\":\"Use node:test.\",\"reason\":\"no extra deps\"}",
       ),
     ],
     { ->
-      const answerer = agentic_user(
-        {
+      const answerer = agentic_user(harness,  harness, {
           task: "Help a coding agent create a focused test file.",
           behavior: "Answer clarification questions with plausible project preferences.",
           provider: "mock",
@@ -26,13 +25,13 @@ pipeline main() {
         },
       )
       const status = simulated_user_status(answerer)
-      const calls = llm_mock_calls()
-      __io_println(decision.action)
-      __io_println(decision.message)
-      __io_println(status.state.replies)
-      __io_println(status.state.llm_calls)
-      __io_println(contains(calls[0].system, "simulating the user"))
-      __io_println(contains(json_stringify(calls[0].messages), "Which test runner"))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(decision.action)
+      harness.stdio.println(decision.message)
+      harness.stdio.println(status.state.replies)
+      harness.stdio.println(status.state.llm_calls)
+      harness.stdio.println(contains(calls[0].system, "simulating the user"))
+      harness.stdio.println(contains(json_stringify(calls[0].messages), "Which test runner"))
     },
   )
 }

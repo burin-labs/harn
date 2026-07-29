@@ -87,9 +87,9 @@ fn __run_artifacts_clean_segment(value, label) -> string {
   return clean
 }
 
-fn __run_artifacts_root(options) -> string {
+fn __run_artifacts_root(harness: Harness, options) -> string {
   const opts = options ?? {}
-  const root = to_string(opts?.root ?? runtime_paths().run_root)
+  const root = to_string(opts?.root ?? harness.fs.runtime_paths().run_root)
   if root == "" {
     throw "std/run_artifacts: root is required"
   }
@@ -111,8 +111,8 @@ fn __run_artifacts_kind_dir(root, kind, namespace) -> string {
   return path_join(root, namespace, kind)
 }
 
-fn __run_artifacts_default_run_id() -> string {
-  return to_string(to_int(harness.clock.timestamp())) + "-" + uuid_v7()
+fn __run_artifacts_default_run_id(harness: Harness) -> string {
+  return to_string(to_int(harness.clock.timestamp())) + "-" + harness.random.uuid_v7()
 }
 
 fn __run_artifacts_run_dir(run: {dir: string, ...rest}) -> string {
@@ -179,15 +179,15 @@ fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) 
  *
  * @effects: [fs.write]
  * @errors: [validation, fs]
- * @example: run_artifacts_open("release", {root: root, run_id: "run-1"})
+ * @example: run_artifacts_open(harness, "release", {root: root, run_id: "run-1"})
  */
-pub fn run_artifacts_open(kind: string, options: RunArtifactsOpenOptions = {}) -> RunArtifactsRun {
+pub fn run_artifacts_open(harness: Harness, kind: string, options: RunArtifactsOpenOptions = {}) -> RunArtifactsRun {
   const opts = options ?? {}
   const clean_kind = __run_artifacts_clean_segment(kind, "kind")
   const namespace = __run_artifacts_namespace(opts)
-  const root = __run_artifacts_root(opts)
+  const root = __run_artifacts_root(harness, opts)
   const run_id = if opts.run_id == nil {
-    __run_artifacts_default_run_id()
+    __run_artifacts_default_run_id(harness)
   } else {
     __run_artifacts_clean_segment(opts.run_id, "run_id")
   }
@@ -224,13 +224,13 @@ pub fn artifact_descriptor<T>(name: string, contract: SchemaContract<T>) -> Arti
  * @effects: [fs.write]
  * @errors: [ArtifactWriteFailure]
  */
-pub fn run_artifact_write_json<T>(
+pub fn run_artifact_write_json<T>(harness: Harness, 
   run: RunArtifactsRun,
   descriptor: ArtifactDescriptor<T>,
   value: T,
   options: ArtifactWriteOptions = {},
 ) -> FileReplaceReceipt {
-  return unwrap(run_artifact_write_json_result(run, descriptor, value, options))
+  return unwrap(run_artifact_write_json_result(harness, run, descriptor, value, options))
 }
 
 /**
@@ -242,7 +242,7 @@ pub fn run_artifact_write_json<T>(
  * @effects: [fs.write]
  * @errors: []
  */
-pub fn run_artifact_write_json_result<T>(
+pub fn run_artifact_write_json_result<T>(harness: Harness, 
   run: RunArtifactsRun,
   descriptor: ArtifactDescriptor<T>,
   value: T,
@@ -253,7 +253,7 @@ pub fn run_artifact_write_json_result<T>(
     return Err(unwrap_err(validated))
   }
   const written = replace_text_result(
-    run_artifact_path(run, descriptor.name),
+    harness.fs, run_artifact_path(run, descriptor.name),
     __run_artifact_json_text(unwrap(validated), options),
     __run_artifact_replace_options(options),
   )
@@ -270,13 +270,13 @@ pub fn run_artifact_write_json_result<T>(
  * @effects: [fs.write]
  * @errors: [validation, FsFailure]
  */
-pub fn run_artifact_write_json_raw(
+pub fn run_artifact_write_json_raw(harness: Harness, 
   run: RunArtifactsRun,
   name: string,
   value,
   options: ArtifactWriteOptions = {},
 ) -> FileReplaceReceipt {
-  return unwrap(run_artifact_write_json_raw_result(run, name, value, options))
+  return unwrap(run_artifact_write_json_raw_result(harness, run, name, value, options))
 }
 
 /**
@@ -285,14 +285,14 @@ pub fn run_artifact_write_json_raw(
  * @effects: [fs.write]
  * @errors: [validation]
  */
-pub fn run_artifact_write_json_raw_result(
+pub fn run_artifact_write_json_raw_result(harness: Harness, 
   run: RunArtifactsRun,
   name: string,
   value,
   options: ArtifactWriteOptions = {},
 ) -> Result<FileReplaceReceipt, FsFailure> {
   return replace_text_result(
-    run_artifact_path(run, name),
+    harness.fs, run_artifact_path(run, name),
     __run_artifact_json_text(value, options),
     __run_artifact_replace_options(options),
   )
@@ -304,8 +304,8 @@ pub fn run_artifact_write_json_raw_result(
  * @effects: [fs.read]
  * @errors: [validation, TypedReadFailure]
  */
-pub fn run_artifact_read_json<T>(run: RunArtifactsRun, descriptor: ArtifactDescriptor<T>) -> T {
-  return read_json_contract(run_artifact_path(run, descriptor.name), descriptor.contract)
+pub fn run_artifact_read_json<T>(harness: Harness, run: RunArtifactsRun, descriptor: ArtifactDescriptor<T>) -> T {
+  return read_json_contract(harness.fs, run_artifact_path(run, descriptor.name), descriptor.contract)
 }
 
 /**
@@ -314,11 +314,11 @@ pub fn run_artifact_read_json<T>(run: RunArtifactsRun, descriptor: ArtifactDescr
  * @effects: [fs.read]
  * @errors: [validation]
  */
-pub fn run_artifact_read_json_result<T>(
+pub fn run_artifact_read_json_result<T>(harness: Harness, 
   run: RunArtifactsRun,
   descriptor: ArtifactDescriptor<T>,
 ) -> TypedReadResult<T> {
-  return read_json_contract_result(run_artifact_path(run, descriptor.name), descriptor.contract)
+  return read_json_contract_result(harness.fs, run_artifact_path(run, descriptor.name), descriptor.contract)
 }
 
 /**
@@ -328,8 +328,8 @@ pub fn run_artifact_read_json_result<T>(
  * @effects: [fs.read]
  * @errors: [validation, StructuredReadFailure]
  */
-pub fn run_artifact_read_json_raw(run: RunArtifactsRun, name: string) -> unknown {
-  return unwrap(run_artifact_read_json_raw_result(run, name))
+pub fn run_artifact_read_json_raw(harness: Harness, run: RunArtifactsRun, name: string) -> unknown {
+  return unwrap(run_artifact_read_json_raw_result(harness, run, name))
 }
 
 /**
@@ -338,11 +338,11 @@ pub fn run_artifact_read_json_raw(run: RunArtifactsRun, name: string) -> unknown
  * @effects: [fs.read]
  * @errors: [validation]
  */
-pub fn run_artifact_read_json_raw_result(
+pub fn run_artifact_read_json_raw_result(harness: Harness, 
   run: RunArtifactsRun,
   name: string,
 ) -> Result<unknown, StructuredReadFailure> {
-  return read_json_result(run_artifact_path(run, name))
+  return read_json_result(harness.fs, run_artifact_path(run, name))
 }
 
 /**
@@ -350,15 +350,15 @@ pub fn run_artifact_read_json_raw_result(
  *
  * @effects: [fs.read, fs.write]
  * @errors: [validation, fs]
- * @example: run_artifact_write_text(run, "review.md", body)
+ * @example: run_artifact_write_text(harness, run, "review.md", body)
  */
-pub fn run_artifact_write_text(
+pub fn run_artifact_write_text(harness: Harness, 
   run: RunArtifactsRun,
   name: string,
   text: string,
   options: RunArtifactTextWriteOptions = {},
 ) -> nil {
-  write_lines(run_artifact_path(run, name), [text ?? ""], options ?? {})
+  write_lines(harness.fs, run_artifact_path(run, name), [text ?? ""], options ?? {})
   return nil
 }
 
@@ -367,9 +367,9 @@ pub fn run_artifact_write_text(
  *
  * @effects: [fs.read]
  * @errors: [validation]
- * @example: run_artifact_read_text(run, "review.md", "")
+ * @example: run_artifact_read_text(harness, run, "review.md", "")
  */
-pub fn run_artifact_read_text(
+pub fn run_artifact_read_text(harness: Harness, 
   run: RunArtifactsRun,
   name: string,
   fallback: string? = nil,
@@ -420,22 +420,22 @@ pub fn run_artifact_transcript_path(run: RunArtifactsRun, name: string = "agent-
  *
  * @effects: [fs.read]
  * @errors: [validation]
- * @example: run_artifacts_list("release", {limit: 5})
+ * @example: run_artifacts_list(harness, "release", {limit: 5})
  */
-pub fn run_artifacts_list(
+pub fn run_artifacts_list(harness: Harness, 
   kind: string,
   options: RunArtifactsListOptions = {},
 ) -> list<RunArtifactsRun> {
   const opts = options ?? {}
   const clean_kind = __run_artifacts_clean_segment(kind, "kind")
   const namespace = __run_artifacts_namespace(opts)
-  const root = __run_artifacts_root(opts)
+  const root = __run_artifacts_root(harness, opts)
   const limit = to_int(opts.limit ?? 20) ?? 20
   if limit <= 0 {
     return []
   }
   const kind_dir = __run_artifacts_kind_dir(root, clean_kind, namespace)
-  if !is_dir(kind_dir) {
+  if !is_dir(harness.fs, kind_dir) {
     return []
   }
   const names_result = try {

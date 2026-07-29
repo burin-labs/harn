@@ -18,15 +18,15 @@ type Action = "create" | "edit"
 
 type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
 
-fn process_create(a: "create") {
-  __io_println("create " + a)
+fn process_create(harness: Harness, a: "create") {
+  harness.stdio.println("create " + a)
 }
 
-fn process_edit(a: "edit") {
-  __io_println("edit " + a)
+fn process_edit(harness: Harness, a: "edit") {
+  harness.stdio.println("edit " + a)
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Scalar case: each annotation distributes `ActionContainer<Action>`
   // into `ActionContainer<"create"> | ActionContainer<"edit">`; the
   // literal-tagged shape on the RHS then fits one specific branch.

@@ -1,12 +1,12 @@
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
-fn __composition_registry(value) {
+fn __composition_registry(harness: Harness, value) {
   if value == nil {
-    const current = __host_current_tool_registry()
+    const current = harness.tools.current_registry()
     if current == nil {
       return tool_registry()
     }
-    return __composition_registry(current)
+    return __composition_registry(harness, current)
   }
   if type_of(value) == "dict" && type_of(value?.tools) == "list" {
     return value
@@ -37,8 +37,8 @@ fn __composition_mcp_tool(entry) {
   return false
 }
 
-fn __composition_mcp_registry(value) {
-  const registry = __composition_registry(value)
+fn __composition_mcp_registry(harness: Harness, value) {
+  const registry = __composition_registry(harness, value)
   let tools = []
   for entry in registry?.tools ?? [] {
     if __composition_mcp_tool(entry) {
@@ -136,9 +136,9 @@ fn __composition_mcp_reduced_result(report, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn composition_mcp_manifest(tools = nil, options = nil) {
+pub fn composition_mcp_manifest(harness: Harness, tools = nil, options = nil) {
   const opts = options ?? {}
-  const registry = __composition_mcp_registry(tools)
+  const registry = __composition_mcp_registry(harness, tools)
   return composition_binding_manifest(registry, opts?.manifest_options ?? opts)
 }
 
@@ -150,9 +150,9 @@ pub fn composition_mcp_manifest(tools = nil, options = nil) {
  * @api_stability: experimental
  * @example: composition_mcp_api(tool_registry, {query: "issues"})
  */
-pub fn composition_mcp_api(tools = nil, options = nil) {
+pub fn composition_mcp_api(harness: Harness, tools = nil, options = nil) {
   const opts = options ?? {}
-  const registry = __composition_mcp_registry(tools)
+  const registry = __composition_mcp_registry(harness, tools)
   const names = __composition_mcp_ranked_names(registry, opts?.query, opts)
   const selected = if names == nil {
     registry
@@ -176,9 +176,9 @@ pub fn composition_mcp_api(tools = nil, options = nil) {
  * @api_stability: experimental
  * @example: composition_mcp_search(tool_registry, "issues", {limit: 5})
  */
-pub fn composition_mcp_search(tools = nil, query = "", options = nil) {
+pub fn composition_mcp_search(harness: Harness, tools = nil, query = "", options = nil) {
   const opts = options ?? {}
-  return composition_mcp_api(tools, opts + {query: query})
+  return composition_mcp_api(harness, tools, opts + {query: query})
 }
 
 /**
@@ -187,12 +187,12 @@ pub fn composition_mcp_search(tools = nil, query = "", options = nil) {
  * @effects: [host, mcp]
  * @errors: []
  * @api_stability: experimental
- * @example: composition_mcp_execute("return github_search({query: \"bug\"})", tools)
+ * @example: composition_mcp_execute(harness, "return github_search({query: \"bug\"})", tools)
  */
-pub fn composition_mcp_execute(snippet, tools = nil, options = nil) {
+pub fn composition_mcp_execute(harness: Harness, snippet, tools = nil, options = nil) {
   const opts = options ?? {}
   const source_tools = opts?.tools ?? tools
-  const registry = __composition_mcp_registry(source_tools)
+  const registry = __composition_mcp_registry(harness, source_tools)
   const manifest = opts?.manifest
     ?? composition_binding_manifest(
     registry,
@@ -200,7 +200,7 @@ pub fn composition_mcp_execute(snippet, tools = nil, options = nil) {
   )
   const dispatch_opts = opts?.dispatch_options ?? opts
   const dispatch = { name, input ->
-    let result = agent_dispatch_tool_call({name: name, arguments: input}, registry, dispatch_opts)
+    let result = agent_dispatch_tool_call(harness, {name: name, arguments: input}, registry, dispatch_opts)
     return __composition_dispatch_value(result, name)
   }
   const report = composition_execute(
@@ -217,7 +217,7 @@ pub fn composition_mcp_execute(snippet, tools = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn composition_mcp_tools(registry = nil, options = nil) {
+pub fn composition_mcp_tools(harness: Harness, registry = nil, options = nil) {
   const opts = options ?? {}
   let tools = registry ?? tool_registry()
   tools = tool_define(
@@ -260,7 +260,7 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
             servers: __composition_mcp_servers(manifest),
           }
         }
-        return composition_mcp_api(call_args?.tools ?? opts?.tools, opts + call_args)
+        return composition_mcp_api(harness, call_args?.tools ?? opts?.tools, opts + call_args)
       },
     },
   )
@@ -292,7 +292,7 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
       handler: { args ->
         const call_args = args ?? {}
         if call_args?.tools != nil || opts?.tools != nil {
-          return composition_mcp_execute(
+          return composition_mcp_execute(harness, 
             call_args.snippet,
             call_args?.tools ?? opts?.tools,
             opts + call_args,

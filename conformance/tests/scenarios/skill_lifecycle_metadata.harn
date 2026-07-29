@@ -16,7 +16,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *   4. `paths:` auto-trigger still matches when the user prompt
  *      carries no keyword overlap.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -47,10 +47,9 @@ pipeline test(task) {
   // Single-turn mock so the loop completes naturally; we're only
   // observing the system prompt + tool schema filtering on that turn.
   with_llm_script(
-    [llm_text("On it.")],
+    harness.llm, [llm_text("On it.")],
     { ->
-      const result = agent_loop(
-        "Ship the new release to production",
+      const result = agent_loop(harness, "Ship the new release to production",
         "You are a staff deploy engineer.",
         {
           provider: "mock",
@@ -62,7 +61,7 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "agent loop completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
       const first_system = calls[0].system
       assert(
@@ -110,7 +109,7 @@ pipeline test(task) {
       assert(matched >= 1, "at least one skill_matched event fired")
       assert(activated == 1, "one skill activated")
       assert(scoped == 1, "tool-scope event fired for the active skill")
-      log("skill_lifecycle_metadata tests passed")
+      harness.stdio.println("skill_lifecycle_metadata tests passed")
     },
   )
 }

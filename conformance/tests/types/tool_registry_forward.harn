@@ -7,7 +7,7 @@ import { AgentLoopOptions, agent_options } from "std/agent/options"
 import { ToolDefinitionSpec, ToolRegistry, tool_define_many } from "std/tools"
 import { with_ping_tool } from "tool_registry_forward_lib"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const base: ToolRegistry = tool_registry()
   const pinged: ToolRegistry = with_ping_tool(base)
   const specs: list<ToolDefinitionSpec> = [
@@ -25,5 +25,5 @@ pipeline test(task) {
   assert(tool_count(tools) == 2, "forwarded registry keeps both tools")
   assert(tool_find(tools, "ping") != nil, "package boundary preserved ping")
   assert(tool_find(tools, "echo") != nil, "stdlib binding preserved echo")
-  log("tool_registry_forward ok count=" + to_string(tool_count(tools)))
+  harness.stdio.println("tool_registry_forward ok count=" + to_string(tool_count(tools)))
 }

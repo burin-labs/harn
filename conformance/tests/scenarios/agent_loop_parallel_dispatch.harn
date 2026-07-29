@@ -15,11 +15,11 @@
 import { compose_tool_callers, with_audit_log, with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
-const in_flight = atomic(0)
+const in_flight = harness.runtime.atomic(0)
 
-const peak = atomic(0)
+const peak = harness.runtime.atomic(0)
 
-const observed = atomic(0)
+const observed = harness.runtime.atomic(0)
 
 fn fanout_tools() {
   const r = tool_registry()
@@ -29,16 +29,16 @@ fn fanout_tools() {
     "Echo, but track concurrent in-flight handlers",
     {
       handler: { args ->
-        const now = atomic_add(in_flight, 1) + 1
-        if now > atomic_get(peak) {
-          atomic_set(peak, now)
+        const now = harness.runtime.atomic_add(in_flight, 1) + 1
+        if now > harness.runtime.atomic_get(peak) {
+          harness.runtime.atomic_set(peak, now)
         }
         let spins = 0
         while spins < 20 {
-          yield_now()
+          harness.runtime.yield_now()
           spins = spins + 1
         }
-        atomic_add(in_flight, -1)
+        harness.runtime.atomic_add(in_flight, -1)
         return "echoed:" + to_string(args?.msg ?? "")
       },
       parameters: {msg: {type: "string"}},
@@ -47,12 +47,12 @@ fn fanout_tools() {
   )
 }
 
-fn run(cap) {
-  atomic_set(in_flight, 0)
-  atomic_set(peak, 0)
-  atomic_set(observed, 0)
+fn run(harness: Harness, cap) {
+  harness.runtime.atomic_set(in_flight, 0)
+  harness.runtime.atomic_set(peak, 0)
+  harness.runtime.atomic_set(observed, 0)
   return with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "c1", name: "fanout_echo", arguments: {msg: "alpha", reason: "first"}},
@@ -66,11 +66,10 @@ fn run(cap) {
     { ->
       const mw = with_required_reason()
       const counting_caller = { call, next ->
-        let _ = atomic_add(observed, 1)
+        let _ = harness.runtime.atomic_add(observed, 1)
         return mw.caller(call, next)
       }
-      const result = agent_loop(
-        "fan out",
+      const result = agent_loop(harness, "fan out",
         nil,
         {
           provider: "mock",
@@ -83,16 +82,16 @@ fn run(cap) {
           tool_caller: counting_caller,
         },
       )
-      return {status: result.status, observed: atomic_get(observed), peak: atomic_get(peak)}
+      return {status: result.status, observed: harness.runtime.atomic_get(observed), peak: harness.runtime.atomic_get(peak)}
     },
   )
 }
 
-fn run_without_middleware(cap) {
-  atomic_set(in_flight, 0)
-  atomic_set(peak, 0)
+fn run_without_middleware(harness: Harness, cap) {
+  harness.runtime.atomic_set(in_flight, 0)
+  harness.runtime.atomic_set(peak, 0)
   return with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "n1", name: "fanout_echo", arguments: {msg: "one"}},
@@ -104,8 +103,7 @@ fn run_without_middleware(cap) {
       llm_text("##DONE##"),
     ],
     { ->
-      const result = agent_loop(
-        "fan out without middleware",
+      const result = agent_loop(harness, "fan out without middleware",
         nil,
         {
           provider: "mock",
@@ -117,23 +115,23 @@ fn run_without_middleware(cap) {
           max_concurrent_tools: cap,
         },
       )
-      return {status: result.status, peak: atomic_get(peak)}
+      return {status: result.status, peak: harness.runtime.atomic_get(peak)}
     },
   )
 }
 
-const audit_receipt_count = atomic(0)
+const audit_receipt_count = harness.runtime.atomic(0)
 
-const audit_emit_order_bitmask = atomic(0)
+const audit_emit_order_bitmask = harness.runtime.atomic(0)
 
-fn run_with_audit(cap) {
-  atomic_set(in_flight, 0)
-  atomic_set(peak, 0)
-  atomic_set(observed, 0)
-  atomic_set(audit_receipt_count, 0)
-  atomic_set(audit_emit_order_bitmask, 0)
+fn run_with_audit(harness: Harness, cap) {
+  harness.runtime.atomic_set(in_flight, 0)
+  harness.runtime.atomic_set(peak, 0)
+  harness.runtime.atomic_set(observed, 0)
+  harness.runtime.atomic_set(audit_receipt_count, 0)
+  harness.runtime.atomic_set(audit_emit_order_bitmask, 0)
   return with_llm_script(
-    [
+    harness.llm, [
       {
         tool_calls: [
           {id: "a1", name: "fanout_echo", arguments: {msg: "first", reason: "r1"}},
@@ -146,18 +144,17 @@ fn run_with_audit(cap) {
     { ->
       const reason = with_required_reason()
       const audit_sink = { receipt ->
-        atomic_add(audit_receipt_count, 1)
+        harness.runtime.atomic_add(audit_receipt_count, 1)
         let shifted = 1
         let n = receipt.emit_order
         while n > 0 {
           shifted = shifted * 2
           n = n - 1
         }
-        atomic_add(audit_emit_order_bitmask, shifted)
+        harness.runtime.atomic_add(audit_emit_order_bitmask, shifted)
       }
-      const caller = compose_tool_callers([with_audit_log({sink: audit_sink}), reason.caller])
-      const result = agent_loop(
-        "audit fan-out",
+      const caller = compose_tool_callers(harness, [with_audit_log(harness, {sink: audit_sink}), reason.caller])
+      const result = agent_loop(harness, "audit fan-out",
         nil,
         {
           provider: "mock",
@@ -172,8 +169,8 @@ fn run_with_audit(cap) {
       )
       return {
         status: result.status,
-        receipt_count: atomic_get(audit_receipt_count),
-        emit_bitmask: atomic_get(audit_emit_order_bitmask),
+        receipt_count: harness.runtime.atomic_get(audit_receipt_count),
+        emit_bitmask: harness.runtime.atomic_get(audit_emit_order_bitmask),
       }
     },
   )
@@ -182,20 +179,20 @@ fn run_with_audit(cap) {
 // Add each receipt's bit (1 << emit_order) to the bitmask atomic.
 // For 3 unique calls the bits are disjoint, so atomic_add == OR. The
 // expected mask for emit_orders {0, 1, 2} is 1+2+4 = 7.
-const prefetch_audit_finished = atomic(0)
+const prefetch_audit_finished = harness.runtime.atomic(0)
 
-const prefetch_second_turn_before_audit = atomic(0)
+const prefetch_second_turn_before_audit = harness.runtime.atomic(0)
 
-const prefetch_llm_turns = atomic(0)
+const prefetch_llm_turns = harness.runtime.atomic(0)
 
-fn run_prefetch(prefetch) {
-  atomic_set(in_flight, 0)
-  atomic_set(peak, 0)
-  atomic_set(prefetch_audit_finished, 0)
-  atomic_set(prefetch_second_turn_before_audit, 0)
-  atomic_set(prefetch_llm_turns, 0)
+fn run_prefetch(harness: Harness, prefetch) {
+  harness.runtime.atomic_set(in_flight, 0)
+  harness.runtime.atomic_set(peak, 0)
+  harness.runtime.atomic_set(prefetch_audit_finished, 0)
+  harness.runtime.atomic_set(prefetch_second_turn_before_audit, 0)
+  harness.runtime.atomic_set(prefetch_llm_turns, 0)
   const llm_caller = { _call ->
-    let turn = atomic_add(prefetch_llm_turns, 1) + 1
+    let turn = harness.runtime.atomic_add(prefetch_llm_turns, 1) + 1
     if turn == 1 {
       return {
         ok: true,
@@ -207,21 +204,20 @@ fn run_prefetch(prefetch) {
         },
       }
     }
-    if atomic_get(prefetch_audit_finished) < 2 {
-      atomic_set(prefetch_second_turn_before_audit, 1)
+    if harness.runtime.atomic_get(prefetch_audit_finished) < 2 {
+      harness.runtime.atomic_set(prefetch_second_turn_before_audit, 1)
     }
     return {ok: true, value: {text: "##DONE##"}}
   }
   const audit_sink = { _receipt ->
     let spins = 0
     while spins < 50 {
-      yield_now()
+      harness.runtime.yield_now()
       spins = spins + 1
     }
-    atomic_add(prefetch_audit_finished, 1)
+    harness.runtime.atomic_add(prefetch_audit_finished, 1)
   }
-  const result = agent_loop(
-    "prefetch audit flush",
+  const result = agent_loop(harness, "prefetch audit flush",
     nil,
     {
       provider: "mock",
@@ -232,54 +228,54 @@ fn run_prefetch(prefetch) {
       done_sentinel: "##DONE##",
       max_concurrent_tools: 2,
       prefetch_next_turn: prefetch,
-      tool_caller: compose_tool_callers([with_audit_log({sink: audit_sink})]),
+      tool_caller: compose_tool_callers(harness, [with_audit_log(harness, {sink: audit_sink})]),
       llm_caller: llm_caller,
     },
   )
   return {
     status: result.status,
-    llm_turns: atomic_get(prefetch_llm_turns),
-    second_before_audit: atomic_get(prefetch_second_turn_before_audit),
-    audit_finished: atomic_get(prefetch_audit_finished),
+    llm_turns: harness.runtime.atomic_get(prefetch_llm_turns),
+    second_before_audit: harness.runtime.atomic_get(prefetch_second_turn_before_audit),
+    audit_finished: harness.runtime.atomic_get(prefetch_audit_finished),
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Default (cap=1, sequential): peak in-flight is exactly 1.
-  const serial = run(1)
-  __io_println("serial.status=" + serial.status)
-  __io_println("serial.observed=" + to_string(serial.observed))
-  __io_println("serial.peak=" + to_string(serial.peak))
+  const serial = run(harness, 1)
+  harness.stdio.println("serial.status=" + serial.status)
+  harness.stdio.println("serial.observed=" + to_string(serial.observed))
+  harness.stdio.println("serial.peak=" + to_string(serial.peak))
   // cap=4: all four handlers reach in_flight simultaneously.
-  const concurrent = run(4)
-  __io_println("parallel.status=" + concurrent.status)
-  __io_println("parallel.observed=" + to_string(concurrent.observed))
-  __io_println("parallel.peak=" + to_string(concurrent.peak))
+  const concurrent = run(harness, 4)
+  harness.stdio.println("parallel.status=" + concurrent.status)
+  harness.stdio.println("parallel.observed=" + to_string(concurrent.observed))
+  harness.stdio.println("parallel.peak=" + to_string(concurrent.peak))
   // Intermediate cap=2: peak in-flight is exactly 2.
-  const capped = run(2)
-  __io_println("capped.status=" + capped.status)
-  __io_println("capped.observed=" + to_string(capped.observed))
-  __io_println("capped.peak=" + to_string(capped.peak))
+  const capped = run(harness, 2)
+  harness.stdio.println("capped.status=" + capped.status)
+  harness.stdio.println("capped.observed=" + to_string(capped.observed))
+  harness.stdio.println("capped.peak=" + to_string(capped.peak))
   // The host batch path honors the same cap even without tool middleware.
-  const no_middleware = run_without_middleware(4)
-  __io_println("no_middleware.status=" + no_middleware.status)
-  __io_println("no_middleware.peak=" + to_string(no_middleware.peak))
+  const no_middleware = run_without_middleware(harness, 4)
+  harness.stdio.println("no_middleware.status=" + no_middleware.status)
+  harness.stdio.println("no_middleware.peak=" + to_string(no_middleware.peak))
   // `with_audit_log` receipts carry each call's source-batch position
   // as `emit_order`. With 3 parallel calls we should see all three
   // distinct positions (bits 0, 1, 2 -> bitmask 7), regardless of
   // completion order.
-  const audited = run_with_audit(3)
-  __io_println("audit.status=" + audited.status)
-  __io_println("audit.receipt_count=" + to_string(audited.receipt_count))
-  __io_println("audit.emit_bitmask=" + to_string(audited.emit_bitmask))
-  const prefetch_off = run_prefetch(false)
-  __io_println("prefetch_off.status=" + prefetch_off.status)
-  __io_println("prefetch_off.llm_turns=" + to_string(prefetch_off.llm_turns))
-  __io_println("prefetch_off.second_before_audit=" + to_string(prefetch_off.second_before_audit))
-  __io_println("prefetch_off.audit_finished=" + to_string(prefetch_off.audit_finished))
-  const prefetch_on = run_prefetch(true)
-  __io_println("prefetch_on.status=" + prefetch_on.status)
-  __io_println("prefetch_on.llm_turns=" + to_string(prefetch_on.llm_turns))
-  __io_println("prefetch_on.second_before_audit=" + to_string(prefetch_on.second_before_audit))
-  __io_println("prefetch_on.audit_finished=" + to_string(prefetch_on.audit_finished))
+  const audited = run_with_audit(harness, 3)
+  harness.stdio.println("audit.status=" + audited.status)
+  harness.stdio.println("audit.receipt_count=" + to_string(audited.receipt_count))
+  harness.stdio.println("audit.emit_bitmask=" + to_string(audited.emit_bitmask))
+  const prefetch_off = run_prefetch(harness, false)
+  harness.stdio.println("prefetch_off.status=" + prefetch_off.status)
+  harness.stdio.println("prefetch_off.llm_turns=" + to_string(prefetch_off.llm_turns))
+  harness.stdio.println("prefetch_off.second_before_audit=" + to_string(prefetch_off.second_before_audit))
+  harness.stdio.println("prefetch_off.audit_finished=" + to_string(prefetch_off.audit_finished))
+  const prefetch_on = run_prefetch(harness, true)
+  harness.stdio.println("prefetch_on.status=" + prefetch_on.status)
+  harness.stdio.println("prefetch_on.llm_turns=" + to_string(prefetch_on.llm_turns))
+  harness.stdio.println("prefetch_on.second_before_audit=" + to_string(prefetch_on.second_before_audit))
+  harness.stdio.println("prefetch_on.audit_finished=" + to_string(prefetch_on.audit_finished))
 }

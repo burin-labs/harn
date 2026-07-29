@@ -5,22 +5,22 @@ import { llm_text, with_llm_script } from "std/testing"
  * so callers can distinguish "tried and failed" from a baseline
  * schema_validation failure.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
-    [llm_text("{\"note\": \"nope\"}"), llm_text("{\"note\": \"still nope\"}")],
+    harness.llm, [llm_text("{\"note\": \"nope\"}"), llm_text("{\"note\": \"still nope\"}")],
     { ->
-      const r = llm_call_structured_result(
+      const r = harness.llm.call_structured_result(
         "Grade",
         schema,
         {provider: "mock", retries: 0, repair: {enabled: true}},
       )
-      __io_println(r.ok)
-      __io_println(r.data == nil)
-      __io_println(r.error_category)
-      __io_println(r.repaired)
-      __io_println(contains(r.raw_text, "nope"))
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.data == nil)
+      harness.stdio.println(r.error_category)
+      harness.stdio.println(r.repaired)
+      harness.stdio.println(contains(r.raw_text, "nope"))
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
 }

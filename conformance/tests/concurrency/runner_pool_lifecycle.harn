@@ -1,9 +1,8 @@
 import { runner_pool_scale, runner_pool_start, runner_pool_state } from "std/runner_pool"
 
-pipeline default() {
-  const starts = atomic(0)
-  const pool = runner_pool_start(
-    {
+pipeline default(harness: Harness) {
+  const starts = harness.runtime.atomic(0)
+  const pool = runner_pool_start(harness,  harness, {
       name: "fixture-runners",
       min_size: 1,
       max_size: 2,
@@ -11,26 +10,26 @@ pipeline default() {
       restart: "never",
       run: { ctx ->
         ctx.mark_busy(true)
-        atomic_add(starts, 1)
+        harness.runtime.atomic_add(starts, 1)
         ctx.mark_busy(false)
         {status: "single-use-complete"}
       },
     },
   )
-  supervisor_wait(pool.supervisor)
+  harness.runtime.supervisor_wait(pool.supervisor)
   const first = runner_pool_state(pool)
   const scaled = runner_pool_scale(pool, 2)
-  supervisor_wait(scaled.supervisor)
+  harness.runtime.supervisor_wait(scaled.supervisor)
   const second = runner_pool_state(scaled)
-  __io_println(first.generation)
-  __io_println(first.desired_size)
-  __io_println(first.online)
-  __io_println(first.busy)
-  __io_println(second.generation)
-  __io_println(second.desired_size)
-  __io_println(second.online)
-  __io_println(second.busy)
-  __io_println(unwrap(second.slots[0]).lifecycle)
-  __io_println(unwrap(second.slots[1]).lifecycle)
-  __io_println(atomic_get(starts))
+  harness.stdio.println(first.generation)
+  harness.stdio.println(first.desired_size)
+  harness.stdio.println(first.online)
+  harness.stdio.println(first.busy)
+  harness.stdio.println(second.generation)
+  harness.stdio.println(second.desired_size)
+  harness.stdio.println(second.online)
+  harness.stdio.println(second.busy)
+  harness.stdio.println(unwrap(second.slots[0]).lifecycle)
+  harness.stdio.println(unwrap(second.slots[1]).lifecycle)
+  harness.stdio.println(harness.runtime.atomic_get(starts))
 }

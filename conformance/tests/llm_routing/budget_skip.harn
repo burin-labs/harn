@@ -6,12 +6,12 @@ import { with_llm_script } from "std/testing"
  * cheaper link that fits inside the cap. The trace shows both the
  * skipped link and the winning attempt.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Only the cheap link should actually call the mock.
   with_llm_script(
-    [{text: "cheap won", model: "gpt-4o-mini", provider: "openai"}],
+    harness.llm, [{text: "cheap won", model: "gpt-4o-mini", provider: "openai"}],
     { ->
-      const policy = routing_policy(
+      const policy = harness.llm.routing_policy(
         {
           chain: [
             {provider: "anthropic", model: "claude-opus-4-20250514", label: "expensive"},
@@ -21,14 +21,14 @@ pipeline test(task) {
           label: "skip-expensive",
         },
       )
-      const result = llm_call("hi", nil, {routing: policy, max_tokens: 2000})
-      __io_println(result.text)
+      const result = harness.llm.call("hi", nil, {routing: policy, max_tokens: 2000})
+      harness.stdio.println(result.text)
       const attempts = result.routing.attempts
-      __io_println(len(attempts))
-      __io_println(attempts[0].label)
-      __io_println(attempts[0].status)
-      __io_println(attempts[1].label)
-      __io_println(attempts[1].status)
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].label)
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(attempts[1].label)
+      harness.stdio.println(attempts[1].status)
     },
   )
 }

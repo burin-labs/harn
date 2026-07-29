@@ -4,6 +4,6 @@
 // function from a module that has opted into explicit exports.
 import { helper } from "selective_import_from_zero_pub_rejected_lib"
 
-pipeline default() {
-  __io_println(helper())
+pipeline default(harness: Harness) {
+  harness.stdio.println(helper())
 }

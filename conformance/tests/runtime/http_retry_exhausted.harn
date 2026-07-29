@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   http_mock(
     "GET",
     "https://api.example.com/retry-exhausted",
@@ -11,6 +11,6 @@ pipeline test(task) {
   const calls = http_mock_calls()
   assert_eq(resp.status, 503)
   assert_eq(len(calls), 3)
-  log("exhausted status: " + to_string(resp.status))
-  log("exhausted calls: " + to_string(len(calls)))
+  harness.stdio.println("exhausted status: " + to_string(resp.status))
+  harness.stdio.println("exhausted calls: " + to_string(len(calls)))
 }

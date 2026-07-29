@@ -59,20 +59,19 @@ fn edit_missing_tool_call_recovery() {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // 1. Fenced-call attempt → fenced_call_attempt nudge on the next turn.
   //    The fenced body uses the Python-kwarg shape `edit(path=...)`, which the
   //    parser does NOT lift from inside a fence, so the turn is genuinely
   //    toolless and the fenced nudge fires.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("Here is the change:\n```tool_code\nedit(path=\"a.txt\")\n```"),
       llm_text("<tool_call>\nedit({ path: \"a.txt\" })\n</tool_call>"),
       llm_text("All set."),
     ],
     { ->
-      const r = agent_loop(
-        "Edit a.txt.",
+      const r = agent_loop(harness, "Edit a.txt.",
         nil,
         {
           provider: "mock",
@@ -83,24 +82,23 @@ pipeline default() {
           tools: edit_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("fenced.status=" + r.status)
-      __io_println("fenced.nudge=" + to_string(injected_kind_in(calls, 1, "fenced_call_attempt")))
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("fenced.status=" + r.status)
+      harness.stdio.println("fenced.nudge=" + to_string(injected_kind_in(calls, 1, "fenced_call_attempt")))
+      harness.stdio.println(
         "fenced.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
       )
     },
   )
   // 2. Missing tool call → missing_tool_call nudge on the next turn.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("Voy a edittar el archivo ahora, un momento."),
       llm_text("<tool_call>\nedit({ path: \"b.txt\" })\n</tool_call>"),
       llm_text("Done."),
     ],
     { ->
-      const r = agent_loop(
-        "Edit b.txt.",
+      const r = agent_loop(harness, "Edit b.txt.",
         nil,
         {
           provider: "mock",
@@ -112,10 +110,10 @@ pipeline default() {
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("missing.status=" + r.status)
-      __io_println("missing.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("missing.status=" + r.status)
+      harness.stdio.println("missing.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
+      harness.stdio.println(
         "missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
       )
     },
@@ -123,14 +121,13 @@ pipeline default() {
   // 2b. Another typoed/non-English phrase depends on the classifier, not exact
   //     tool-name substrings in the assistant text.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("Je vais corriger le fichier maintenant."),
       llm_text("<tool_call>\nedit({ path: \"b2.txt\" })\n</tool_call>"),
       llm_text("Listo."),
     ],
     { ->
-      const r = agent_loop(
-        "Edit b2.txt.",
+      const r = agent_loop(harness, "Edit b2.txt.",
         nil,
         {
           provider: "mock",
@@ -142,22 +139,21 @@ pipeline default() {
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("multilingual.status=" + r.status)
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("multilingual.status=" + r.status)
+      harness.stdio.println(
         "multilingual.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")),
       )
-      __io_println(
+      harness.stdio.println(
         "multilingual.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
       )
     },
   )
   // 3a. A real bare object-literal call does NOT trip either content nudge.
   with_llm_script(
-    [llm_text("<tool_call>\nedit({ path: \"c.txt\" })\n</tool_call>"), llm_text("Done.")],
+    harness.llm, [llm_text("<tool_call>\nedit({ path: \"c.txt\" })\n</tool_call>"), llm_text("Done.")],
     { ->
-      const r = agent_loop(
-        "Edit c.txt.",
+      const r = agent_loop(harness, "Edit c.txt.",
         nil,
         {
           provider: "mock",
@@ -168,12 +164,12 @@ pipeline default() {
           tools: edit_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("realcall.successful=" + json_stringify(r.tools.successful))
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("realcall.successful=" + json_stringify(r.tools.successful))
+      harness.stdio.println(
         "realcall.no_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
       )
-      __io_println(
+      harness.stdio.println(
         "realcall.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
       )
     },
@@ -181,14 +177,13 @@ pipeline default() {
   // 3b. A braceless `name(key=...)` call shape also does NOT false-fire the
   //     missing-tool-call recovery path (it carries real call shape).
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("edit(path=\"d.txt\")"),
       llm_text("<tool_call>\nedit({ path: \"d.txt\" })\n</tool_call>"),
       llm_text("Done."),
     ],
     { ->
-      const r = agent_loop(
-        "Edit d.txt.",
+      const r = agent_loop(harness, "Edit d.txt.",
         nil,
         {
           provider: "mock",
@@ -199,9 +194,9 @@ pipeline default() {
           tools: edit_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println("kwargshape.status=" + r.status)
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("kwargshape.status=" + r.status)
+      harness.stdio.println(
         "kwargshape.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
       )
     },
@@ -212,7 +207,7 @@ pipeline default() {
   //    nudge. The prose avoids intent verbs / fences / bound-tool names so the
   //    content nudges do NOT match and the fallback streak nudge is exercised.
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("<tool_call>\nedit({ path: \"e.txt\" })\n</tool_call>"),
       llm_text("The file was updated and the content looks consistent."),
       llm_text("The surrounding context appears coherent on a second pass."),
@@ -220,8 +215,7 @@ pipeline default() {
       llm_text("Final summary of the result."),
     ],
     { ->
-      const r = agent_loop(
-        "Edit e.txt and review.",
+      const r = agent_loop(harness, "Edit e.txt and review.",
         nil,
         {
           provider: "mock",
@@ -232,8 +226,8 @@ pipeline default() {
           tools: edit_tools(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
         "streak.none_after_progress="
           + to_string(!injected_kind_in(calls, 1, "no_progress_streak")),
       )
@@ -243,41 +237,41 @@ pipeline default() {
           streak_fired = true
         }
       }
-      __io_println("streak.escalates=" + to_string(streak_fired))
+      harness.stdio.println("streak.escalates=" + to_string(streak_fired))
     },
   )
   const invalid_classifier = try {
-    agent_loop_options({missing_tool_call_recovery: {classifier: "yes"}})
+    agent_loop_options(harness, {missing_tool_call_recovery: {classifier: "yes"}})
   }
-  __io_println("invalid_classifier=" + to_string(is_err(invalid_classifier)))
-  __io_println(contains(to_string(unwrap_err(invalid_classifier)), "missing_tool_call_recovery"))
+  harness.stdio.println("invalid_classifier=" + to_string(is_err(invalid_classifier)))
+  harness.stdio.println(contains(to_string(unwrap_err(invalid_classifier)), "missing_tool_call_recovery"))
   const invalid_enabled = try {
-    agent_loop_options({missing_tool_call_recovery: {enabled: "yes"}})
+    agent_loop_options(harness, {missing_tool_call_recovery: {enabled: "yes"}})
   }
-  __io_println("invalid_enabled=" + to_string(is_err(invalid_enabled)))
-  __io_println(
+  harness.stdio.println("invalid_enabled=" + to_string(is_err(invalid_enabled)))
+  harness.stdio.println(
     contains(to_string(unwrap_err(invalid_enabled)), "missing_tool_call_recovery.enabled"),
   )
   const invalid_options = try {
-    agent_loop_options({missing_tool_call_recovery: "yes"})
+    agent_loop_options(harness, {missing_tool_call_recovery: "yes"})
   }
-  __io_println("invalid_options=" + to_string(is_err(invalid_options)))
-  __io_println(contains(to_string(unwrap_err(invalid_options)), "missing_tool_call_recovery"))
+  harness.stdio.println("invalid_options=" + to_string(is_err(invalid_options)))
+  harness.stdio.println(contains(to_string(unwrap_err(invalid_options)), "missing_tool_call_recovery"))
   const invalid_threshold = try {
-    missing_tool_call_classifier({confidence_threshold: 2.0})
+    missing_tool_call_classifier(harness, {confidence_threshold: 2.0})
   }
-  __io_println("invalid_threshold=" + to_string(is_err(invalid_threshold)))
+  harness.stdio.println("invalid_threshold=" + to_string(is_err(invalid_threshold)))
   const threshold_error = unwrap_err(invalid_threshold)
-  __io_println(
+  harness.stdio.println(
     "invalid_threshold.code="
       + to_string(
       threshold_error.error == "missing_tool_call.invalid_confidence_threshold",
     ),
   )
-  __io_println(
+  harness.stdio.println(
     "invalid_threshold.field=" + to_string(threshold_error.field == "confidence_threshold"),
   )
-  __io_println(
+  harness.stdio.println(
     "invalid_threshold.bounds="
       + to_string(threshold_error.min == 0.0 && threshold_error.max == 1.0),
   )

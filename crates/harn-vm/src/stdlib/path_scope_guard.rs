@@ -53,6 +53,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
 /// Pairs with the `<scope-alert>` reminder body for the model-facing
 /// handoff hint (#2222).
 #[harn_builtin(
+    exposure = "harness.runtime.register_path_scope_guard",
+    effects = ["state.mutate@const=path-scope-guard"],
     sig = "register_path_scope_guard(opts?: dict|nil) -> nil",
     category = "agent.path_scope_guard"
 )]
@@ -119,6 +121,8 @@ fn register_path_scope_guard(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 /// Remove the active path_scope_guard registration.
 #[harn_builtin(
+    exposure = "harness.runtime.clear_path_scope_guard",
+    effects = ["state.mutate@const=path-scope-guard"],
     sig = "clear_path_scope_guard() -> nil",
     category = "agent.path_scope_guard"
 )]

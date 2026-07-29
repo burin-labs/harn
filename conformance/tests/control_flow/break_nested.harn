@@ -1,4 +1,4 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   let result = ""
   for i in [1, 2, 3] {
     for j in ["a", "b", "c"] {
@@ -8,5 +8,5 @@ pipeline default(task) {
       result = result + to_string(i) + j + " "
     }
   }
-  log(result)
+  harness.stdio.println(result)
 }

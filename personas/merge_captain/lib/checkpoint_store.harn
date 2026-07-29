@@ -31,7 +31,7 @@ fn _key(repo, number) {
 }
 
 /** Save the latest observation + classification for a PR. */
-pub fn save_checkpoint(handle, sweep_id, observation, classification) {
+pub fn save_checkpoint(harness: Harness, handle, sweep_id, observation, classification) {
   const envelope = {
     _type: "merge_captain_pr_checkpoint",
     version: 1,
@@ -41,7 +41,7 @@ pub fn save_checkpoint(handle, sweep_id, observation, classification) {
     last_sweep_id: sweep_id,
     last_state: classification.state,
     last_action: classification.action,
-    last_observed_at: now_ms(),
+    last_observed_at: harness.clock.now_ms(),
     snapshot: {
       title: observation.title,
       base_ref: observation.base_ref,
@@ -92,7 +92,7 @@ pub fn list_all_checkpoints(handle) {
     .filter({ env -> env != nil })
 }
 
-/** Drop a checkpoint (e.g. for a merged or closed PR we no longer track). */
+/** Drop a harness.runtime.checkpoint(e.g. for a merged or closed PR we no longer track). */
 pub fn forget_checkpoint(handle, repo, number) {
   agent_state_delete(handle, _key(repo, number))
 }

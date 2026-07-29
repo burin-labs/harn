@@ -1,12 +1,12 @@
 import "../_common"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn-eval-ledger-" + uuid_v7())
+  const root = path_join(harness.fs.temp_dir(), "harn-eval-ledger-" + harness.random.uuid_v7())
   const state = path_join(root, "state")
   const script = path_join(root, "eval_ledger_child.harn")
   harness.fs.mkdir(root)
@@ -48,28 +48,28 @@ pipeline default() {
       + "    skips: 0,\n" + "    timeouts: 0,\n" + "    total: 1,\n" + "  }\n" + "}\n" + "\n"
       + "fn run_preseed() {\n" + "  let manifest = eval_pack_manifest(resume_pack())\n"
       + "  let opts = options(manifest)\n"
-      + "  let plan = eval_ledger_resolve_resume_plan(manifest, opts)\n"
-      + "  let append = eval_ledger_append_unique_case_rows([row_for_case(manifest, 1, plan.harness_config_fingerprint)], opts)\n"
-      + "  let report = eval_pack_run(manifest)\n"
-      + "  __io_println(\"inserted=\" + to_string(append.inserted))\n"
-      + "  __io_println(\"pass=\" + to_string(report.pass))\n"
-      + "  __io_println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
-      + "  __io_println(\"executed=\" + to_string(report.run_state.executed_cells))\n"
-      + "  __io_println(\"duplicates=\" + to_string(report.run_state.ledger_rows_duplicate))\n"
+      + "  let plan = harness.runtime.eval_ledger_resolve_resume_plan(manifest, opts)\n"
+      + "  let append = harness.runtime.eval_ledger_append_unique_case_rows([row_for_case(manifest, 1, plan.harness_config_fingerprint)], opts)\n"
+      + "  let report = harness.runtime.eval_pack_run(manifest)\n"
+      + "  harness.stdio.println(\"inserted=\" + to_string(append.inserted))\n"
+      + "  harness.stdio.println(\"pass=\" + to_string(report.pass))\n"
+      + "  harness.stdio.println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
+      + "  harness.stdio.println(\"executed=\" + to_string(report.run_state.executed_cells))\n"
+      + "  harness.stdio.println(\"duplicates=\" + to_string(report.run_state.ledger_rows_duplicate))\n"
       + "}\n" + "\n" + "fn run_rerun() {\n"
-      + "  let report = eval_pack_run(eval_pack_manifest(resume_pack()))\n"
-      + "  __io_println(\"pass=\" + to_string(report.pass))\n"
-      + "  __io_println(\"all_skipped=\" + to_string(report.run_state.all_skipped))\n"
-      + "  __io_println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
-      + "  __io_println(\"executed=\" + to_string(report.run_state.executed_cells))\n" + "}\n"
+      + "  let report = harness.runtime.eval_pack_run(eval_pack_manifest(resume_pack()))\n"
+      + "  harness.stdio.println(\"pass=\" + to_string(report.pass))\n"
+      + "  harness.stdio.println(\"all_skipped=\" + to_string(report.run_state.all_skipped))\n"
+      + "  harness.stdio.println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
+      + "  harness.stdio.println(\"executed=\" + to_string(report.run_state.executed_cells))\n" + "}\n"
       + "\n" + "fn run_mismatch() {\n" + "  let manifest = eval_pack_manifest(mismatch_pack())\n"
       + "  let opts = options(manifest)\n"
-      + "  let _append = eval_ledger_append_unique_case_rows([row_for_case(manifest, 0, \"wrong-harness\")], opts)\n"
-      + "  let report = eval_pack_run(manifest)\n"
-      + "  __io_println(\"pass=\" + to_string(report.pass))\n"
-      + "  __io_println(\"refusals=\" + to_string(report.run_state.fingerprint_refusals))\n"
-      + "  __io_println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
-      + "  __io_println(\"executed=\" + to_string(report.run_state.executed_cells))\n" + "}\n"
+      + "  let _append = harness.runtime.eval_ledger_append_unique_case_rows([row_for_case(manifest, 0, \"wrong-harness\")], opts)\n"
+      + "  let report = harness.runtime.eval_pack_run(manifest)\n"
+      + "  harness.stdio.println(\"pass=\" + to_string(report.pass))\n"
+      + "  harness.stdio.println(\"refusals=\" + to_string(report.run_state.fingerprint_refusals))\n"
+      + "  harness.stdio.println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
+      + "  harness.stdio.println(\"executed=\" + to_string(report.run_state.executed_cells))\n" + "}\n"
       + "\n" + "fn main(harness: Harness) {\n" + "  let mode = argv[0]\n"
       + "  if mode == \"preseed\" {\n" + "    run_preseed()\n" + "  } else if mode == \"rerun\" {\n"
       + "    run_rerun()\n" + "  } else if mode == \"mismatch\" {\n" + "    run_mismatch()\n"
@@ -105,20 +105,20 @@ pipeline default() {
     "--",
     "mismatch",
   )
-  __io_println(first.success)
-  __io_println(contains(first.stdout, "inserted=1"))
-  __io_println(contains(first.stdout, "pass=true"))
-  __io_println(contains(first.stdout, "skipped=1"))
-  __io_println(contains(first.stdout, "executed=1"))
-  __io_println(contains(first.stdout, "duplicates=0"))
-  __io_println(second.success)
-  __io_println(contains(second.stdout, "pass=true"))
-  __io_println(contains(second.stdout, "all_skipped=true"))
-  __io_println(contains(second.stdout, "skipped=2"))
-  __io_println(contains(second.stdout, "executed=0"))
-  __io_println(mismatch.success)
-  __io_println(contains(mismatch.stdout, "pass=false"))
-  __io_println(contains(mismatch.stdout, "refusals=1"))
-  __io_println(contains(mismatch.stdout, "skipped=0"))
-  __io_println(contains(mismatch.stdout, "executed=1"))
+  harness.stdio.println(first.success)
+  harness.stdio.println(contains(first.stdout, "inserted=1"))
+  harness.stdio.println(contains(first.stdout, "pass=true"))
+  harness.stdio.println(contains(first.stdout, "skipped=1"))
+  harness.stdio.println(contains(first.stdout, "executed=1"))
+  harness.stdio.println(contains(first.stdout, "duplicates=0"))
+  harness.stdio.println(second.success)
+  harness.stdio.println(contains(second.stdout, "pass=true"))
+  harness.stdio.println(contains(second.stdout, "all_skipped=true"))
+  harness.stdio.println(contains(second.stdout, "skipped=2"))
+  harness.stdio.println(contains(second.stdout, "executed=0"))
+  harness.stdio.println(mismatch.success)
+  harness.stdio.println(contains(mismatch.stdout, "pass=false"))
+  harness.stdio.println(contains(mismatch.stdout, "refusals=1"))
+  harness.stdio.println(contains(mismatch.stdout, "skipped=0"))
+  harness.stdio.println(contains(mismatch.stdout, "executed=1"))
 }

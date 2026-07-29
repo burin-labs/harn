@@ -304,7 +304,7 @@ fn __safe_resolved_options(opts) {
   return unwrap(r)
 }
 
-fn __maybe_emit_strip(opts, requested) {
+fn __maybe_emit_strip(harness: Harness, opts, requested) {
   // Best-effort warn when manual thinking is stripped on adaptive Opus. If no
   // session_id is in opts (the usual case for pack_for), skip silently.
   // This mirrors the "emit when bound; punt otherwise" pattern from
@@ -314,8 +314,7 @@ fn __maybe_emit_strip(opts, requested) {
     return
   }
   try {
-    agent_emit_event(
-      sid,
+    agent_emit_event(harness, sid,
       "pack_thinking_stripped",
       {model: opts?.model, requested: requested, reason: "claude_opus_adaptive"},
     )
@@ -360,7 +359,7 @@ fn __fill_unset(result, overlay) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_for(opts) {
+pub fn pack_for(harness: Harness, opts) {
   if type_of(opts) != "dict" {
     throw "pack_for: opts must be a dict"
   }
@@ -393,7 +392,7 @@ pub fn pack_for(opts) {
   if !caller_pinned_reasoning {
     const policy = opts?.reasoning_policy ?? "auto"
     if lineage == "claude-opus-adaptive" && policy != "auto" && policy != nil {
-      __maybe_emit_strip(opts, policy)
+      __maybe_emit_strip(harness, opts, policy)
     }
     result = result + __reasoning_policy_patch(lineage, model, policy)
   }
@@ -406,7 +405,7 @@ pub fn pack_for(opts) {
   if opts?.prompt != nil && opts?.max_tokens == nil && !__has_key(result, "max_tokens") {
     const recommended = try {
       recommend_max_output_tokens(
-        {
+        harness, {
           prompt: opts.prompt,
           system: opts?.system ?? "",
           model: model,
@@ -435,9 +434,9 @@ pub fn pack_for(opts) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_chat(model, opts = nil) {
+pub fn pack_chat(harness: Harness, model, opts = nil) {
   const base = opts ?? {}
-  return pack_for(base + {model: model, reasoning_task: "chat"})
+  return pack_for(harness, base + {model: model, reasoning_task: "chat"})
 }
 
 /**
@@ -446,9 +445,9 @@ pub fn pack_chat(model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_agent(model, opts = nil) {
+pub fn pack_agent(harness: Harness, model, opts = nil) {
   const base = opts ?? {}
-  return pack_for(base + {model: model, reasoning_task: "agent"})
+  return pack_for(harness, base + {model: model, reasoning_task: "agent"})
 }
 
 /**
@@ -457,9 +456,9 @@ pub fn pack_agent(model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_refine(model, opts = nil) {
+pub fn pack_refine(harness: Harness, model, opts = nil) {
   const base = opts ?? {}
-  return pack_for(base + {model: model, reasoning_task: "refine"})
+  return pack_for(harness, base + {model: model, reasoning_task: "refine"})
 }
 
 /**
@@ -468,9 +467,9 @@ pub fn pack_refine(model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_judge(model, opts = nil) {
+pub fn pack_judge(harness: Harness, model, opts = nil) {
   const base = opts ?? {}
-  return pack_for(base + {model: model, reasoning_task: "judge"})
+  return pack_for(harness, base + {model: model, reasoning_task: "judge"})
 }
 
 /**
@@ -479,9 +478,9 @@ pub fn pack_judge(model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_summarize(model, opts = nil) {
+pub fn pack_summarize(harness: Harness, model, opts = nil) {
   const base = opts ?? {}
-  return pack_for(base + {model: model, reasoning_task: "summarize"})
+  return pack_for(harness, base + {model: model, reasoning_task: "summarize"})
 }
 
 /**
@@ -490,9 +489,9 @@ pub fn pack_summarize(model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_code(model, opts = nil) {
+pub fn pack_code(harness: Harness, model, opts = nil) {
   const base = opts ?? {}
-  return pack_for(base + {model: model, reasoning_task: "code"})
+  return pack_for(harness, base + {model: model, reasoning_task: "code"})
 }
 
 /**
@@ -501,7 +500,7 @@ pub fn pack_code(model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_json(model, opts = nil) {
+pub fn pack_json(harness: Harness, model, opts = nil) {
   const base = opts ?? {}
-  return pack_for(base + {model: model, reasoning_task: "json"})
+  return pack_for(harness, base + {model: model, reasoning_task: "json"})
 }

@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface Sink<in T> {
     fn accept(self, value: T) -> nil
   }

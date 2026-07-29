@@ -222,7 +222,10 @@ mod shared;
 pub use shared::install_shared_pool_registry;
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_pool", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "runtime_internal",
+    effects = [],
+    sig_expr = BuiltinSignature::variadic("pg_pool", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "postgres"
 )]
@@ -238,7 +241,10 @@ async fn pg_pool_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_connect", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "runtime_internal",
+    effects = [],
+    sig_expr = BuiltinSignature::variadic("pg_connect", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "postgres"
 )]
@@ -254,7 +260,10 @@ async fn pg_connect_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_close", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_close", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "postgres"
 )]
@@ -276,7 +285,10 @@ async fn pg_close_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_stmt_cache_clear", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@const=postgres-statement-cache"],
+    sig_expr = BuiltinSignature::variadic("pg_stmt_cache_clear", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "postgres"
 )]
@@ -394,7 +406,10 @@ pub(super) async fn recycle_pool_after_ddl(pool: &PgPool, max: u32) {
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_query", &[Param::new("args", TY_ANY)], TY_LIST),
+    exposure = "capability_arg:0",
+    effects = ["network.read@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_query", &[Param::new("args", TY_ANY
+)], TY_LIST),
     kind = "async",
     category = "postgres"
 )]
@@ -413,7 +428,10 @@ async fn pg_query_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_query_one", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["network.read@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_query_one", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "postgres"
 )]
@@ -433,7 +451,10 @@ async fn pg_query_one_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_execute", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_execute", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "postgres"
 )]
@@ -450,7 +471,10 @@ async fn pg_execute_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_transaction", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_transaction", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "postgres"
 )]
@@ -545,7 +569,10 @@ pub(super) async fn run_managed_transaction(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_savepoint", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_savepoint", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "postgres"
 )]
@@ -557,7 +584,10 @@ async fn pg_savepoint_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_release_savepoint", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_release_savepoint", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "postgres"
 )]
@@ -569,7 +599,10 @@ async fn pg_release_savepoint_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_rollback_to_savepoint", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_rollback_to_savepoint", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "postgres"
 )]
@@ -581,7 +614,10 @@ async fn pg_rollback_to_savepoint_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_migrate", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_migrate", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "postgres"
 )]
@@ -593,7 +629,10 @@ async fn pg_migrate_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_mock_pool", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "capability_arg:0",
+    effects = ["state.read@const=postgres-mock"],
+    sig_expr = BuiltinSignature::variadic("pg_mock_pool", &[Param::new("args", TY_ANY
+)], TY_DICT),
     category = "postgres"
 )]
 fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -621,7 +660,10 @@ fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_mock_calls", &[Param::new("args", TY_ANY)], TY_LIST),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("pg_mock_calls", &[Param::new("args", TY_ANY
+)], TY_LIST),
     category = "postgres"
 )]
 fn pg_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

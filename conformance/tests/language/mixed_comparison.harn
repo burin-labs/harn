@@ -1,11 +1,11 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // int vs float comparison
-  log(3 < 3.5)
-  log(3.5 > 3)
-  log(3 <= 3.0)
-  log(3.0 >= 3)
-  log(3 == 3.0)
-  log(3 != 3.1)
-  log(2.0 < 3)
-  log(5 > 4.9)
+  harness.stdio.println(3 < 3.5)
+  harness.stdio.println(3.5 > 3)
+  harness.stdio.println(3 <= 3.0)
+  harness.stdio.println(3.0 >= 3)
+  harness.stdio.println(3 == 3.0)
+  harness.stdio.println(3 != 3.1)
+  harness.stdio.println(2.0 < 3)
+  harness.stdio.println(5 > 4.9)
 }

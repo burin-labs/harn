@@ -1,10 +1,10 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn process(x) {
     guard x > 0 else {
       return "invalid"
     }
     return "valid: ${x}"
   }
-  log(process(5))
-  log(process(-1))
+  harness.stdio.println(process(5))
+  harness.stdio.println(process(-1))
 }

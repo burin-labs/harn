@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   fn map<T, U>(xs: list<T>, f: fn(T) -> U) -> list<U> {
     let out: list<U> = []
     for x in xs {
@@ -56,10 +56,10 @@ pipeline default() {
   const labeled: Result<string, string> = result_map<int, string, string>(Result.Ok(total), label)
   const fallback: string = result_unwrap_or<string, string>(Result.Err("missing"), "fallback")
   const pair: Pair<int, string> = Pair {first: total, second: result_unwrap_or(labeled, "none")}
-  __io_println(mapped[2])
-  __io_println(filtered[1])
-  __io_println(total)
-  __io_println(fallback)
-  __io_println(pair.first)
-  __io_println(pair.second)
+  harness.stdio.println(mapped[2])
+  harness.stdio.println(filtered[1])
+  harness.stdio.println(total)
+  harness.stdio.println(fallback)
+  harness.stdio.println(pair.first)
+  harness.stdio.println(pair.second)
 }

@@ -37,6 +37,22 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
+        if let Some(capability) = handle.kind().capability_id() {
+            let declared = crate::stdlib::all_builtin_manifest().iter().any(|entry| {
+                matches!(
+                    entry.contract.exposure,
+                    harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                        capability: candidate,
+                        method: candidate_method,
+                    } if candidate == capability && candidate_method == method
+                )
+            });
+            if !declared {
+                return Err(method_unsupported(handle, method));
+            }
+            crate::orchestration::enforce_current_policy_for_capability(capability, method, args)?;
+            self.record_capability_effects(capability, method, args);
+        }
         // Capability-handle methods that adjust the harness itself
         // (`with_net_policy`, `is_quarantined`) run independent of the
         // backing mode so scripts can reshape the handle even under
@@ -58,9 +74,35 @@ impl crate::vm::Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
+        if let Some(capability) = handle.kind().capability_id() {
+            if capability != harn_builtin_meta::CapabilityId::Testing {
+                if let Some(response) = handle.inner().fixtures().dispatch(capability, method, args)
+                {
+                    return response;
+                }
+            }
+        }
+        if let Some(capability) = handle.kind().capability_id() {
+            if let Some(dispatch) = self
+                .capability_methods
+                .get(&(capability, method.to_string()))
+                .cloned()
+            {
+                let qualified_name = format!("harness.{}.{method}", capability.field_name());
+                return self
+                    .call_builtin_entry(&qualified_name, dispatch, args.to_vec())
+                    .await;
+            }
+        }
         let sync_result = {
             let _interrupt = self.sync_builtin_interrupt_guard();
-            Self::call_harness_method_sync_fast(&mut self.output, handle, method, args)
+            Self::call_harness_method_sync_fast(
+                &mut self.output,
+                &self.executed_effects,
+                handle,
+                method,
+                args,
+            )
         };
         if let Some(result) = sync_result {
             return result;
@@ -79,7 +121,9 @@ impl crate::vm::Vm {
                 }
             }
         }
-        if matches!(handle.inner().mode(), HarnessMode::Mock(_)) {
+        if matches!(handle.inner().mode(), HarnessMode::Mock(_))
+            && !matches!(handle.kind(), HarnessKind::Runtime | HarnessKind::Testing)
+        {
             return self.call_mock_harness_method(handle, method, args).await;
         }
         match handle.kind() {
@@ -92,25 +136,112 @@ impl crate::vm::Vm {
             HarnessKind::Env => self.call_harness_env_method(handle, method, args),
             HarnessKind::Random => self.call_harness_random_method(handle, method, args),
             HarnessKind::Net => self.call_harness_net_method(handle, method, args).await,
-            HarnessKind::Process => self.call_harness_process_method(handle, method, args),
-            HarnessKind::Crypto => self.call_harness_crypto_method(handle, method, args),
+            HarnessKind::Process => self.call_harness_process_method(handle, method, args).await,
+            HarnessKind::Channels => {
+                self.call_harness_channels_method(handle, method, args)
+                    .await
+            }
             HarnessKind::Secrets => self.call_harness_secrets_method(handle, method, args).await,
             HarnessKind::Llm => self.call_harness_llm_method(handle, method, args).await,
             HarnessKind::Tenant => self.call_harness_tenant_method(handle, method, args),
-            HarnessKind::Auth => self.call_harness_auth_method(handle, method, args),
+            HarnessKind::Auth => self.call_harness_auth_method(handle, method, args).await,
             HarnessKind::Obs => self.call_harness_obs_method(handle, method, args).await,
             HarnessKind::Verdict => self.call_harness_verdict_method(handle, method, args).await,
+            HarnessKind::Tools => {
+                self.call_tools_capability_method(handle, method, args)
+                    .await
+            }
+            HarnessKind::Runtime => {
+                self.call_runtime_capability_method(handle, method, args)
+                    .await
+            }
+            HarnessKind::Interaction => {
+                self.call_interaction_capability_method(handle, method, args)
+                    .await
+            }
+            HarnessKind::Project => {
+                self.call_project_capability_method(handle, method, args)
+                    .await
+            }
+            HarnessKind::Testing => self.call_testing_capability_method(handle, method, args),
+            HarnessKind::Embed if method == "text" => {
+                self.call_named_builtin("__embed", args.to_vec()).await
+            }
+            HarnessKind::Memory => {
+                let builtin = match method {
+                    "open" => "__memory_open",
+                    "store" => "__memory_store",
+                    "recall" => "__memory_recall",
+                    "summarize" => "__memory_summarize",
+                    "forget" => "__memory_forget",
+                    "update" => "__memory_update",
+                    "list" => "__memory_list",
+                    _ => return Err(method_unsupported(handle, method)),
+                };
+                self.call_named_builtin(builtin, args.to_vec()).await
+            }
+            HarnessKind::Sqlite if method == "open" => {
+                self.call_named_builtin("sqlite_open", args.to_vec()).await
+            }
+            HarnessKind::Postgres => {
+                let builtin = match method {
+                    "connect" => "pg_connect",
+                    "pool" => "pg_pool",
+                    _ => return Err(method_unsupported(handle, method)),
+                };
+                self.call_named_builtin(builtin, args.to_vec()).await
+            }
+            HarnessKind::Agent => {
+                let host_primitive = method.starts_with("session_")
+                    || matches!(
+                        method,
+                        "emit_event"
+                            | "reminder_providers_fire"
+                            | "capture_events"
+                            | "budget_pre_call_blocked"
+                            | "record_native_tool_fallback"
+                            | "record_compaction"
+                            | "daemon_snapshot"
+                            | "daemon_wait"
+                    );
+                let builtin = if host_primitive {
+                    format!("__host_agent_{method}")
+                } else {
+                    format!("agent_session_{method}")
+                };
+                self.call_named_builtin(&builtin, args.to_vec()).await
+            }
+            _ => Err(method_unsupported(handle, method)),
         }
     }
 
     pub(in crate::vm) fn call_harness_method_sync_fast(
         output: &mut String,
+        executed_effects: &std::sync::Arc<
+            std::sync::Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>,
+        >,
         handle: &VmHarness,
         method: &str,
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
         if handle.kind() == HarnessKind::Root {
             return None;
+        }
+        let capability = handle
+            .kind()
+            .capability_id()
+            .expect("non-root harness kind has a capability id");
+        Self::record_capability_effects_into(executed_effects, capability, method, args);
+        if !crate::stdlib::all_builtin_manifest().iter().any(|entry| {
+            matches!(
+                entry.contract.exposure,
+                harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                    capability: candidate,
+                    method: candidate_method,
+                } if candidate == capability && candidate_method == method
+            )
+        }) {
+            return Some(Err(method_unsupported(handle, method)));
         }
         if let HarnessMode::Null(state) = handle.inner().mode() {
             state.record_deny(handle.kind(), method, args);
@@ -128,7 +259,6 @@ impl crate::vm::Vm {
             HarnessKind::Clock => Self::call_harness_clock_method_sync_fast(handle, method),
             HarnessKind::Env => Self::call_harness_env_method_sync_fast(method, args),
             HarnessKind::Random => Self::call_harness_random_method_sync_fast(method, args),
-            HarnessKind::Crypto => Self::call_harness_crypto_method_sync_fast(method, args),
             HarnessKind::Tenant => Self::call_harness_tenant_method_sync_fast(method, args),
             HarnessKind::Auth => Self::call_harness_auth_method_sync_fast(method, args),
             HarnessKind::Root
@@ -140,6 +270,7 @@ impl crate::vm::Vm {
             | HarnessKind::Llm
             | HarnessKind::Obs
             | HarnessKind::Verdict => None,
+            _ => None,
         }
     }
 
@@ -154,6 +285,17 @@ impl crate::vm::Vm {
                 crate::clock::now_wall_ms(clock.as_ref()) as f64 / 1_000.0,
             ))),
             "monotonic_ms" | "elapsed" => Some(Ok(VmValue::Int(clock.monotonic_ms()))),
+            "date_iso" => {
+                let millis = crate::clock::now_wall_ms(clock.as_ref());
+                let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(millis)
+                    .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+                    .unwrap_or_default();
+                Some(Ok(VmValue::String(arcstr::ArcStr::from(timestamp))))
+            }
+            "now" => {
+                let millis = crate::clock::now_wall_ms(clock.as_ref());
+                Some(crate::stdlib::date_dict_from_millis(millis))
+            }
             "sleep_ms" => None,
             _ => None,
         }
@@ -204,6 +346,13 @@ impl crate::vm::Vm {
         match method {
             "width" => Some(Ok(VmValue::Int(crate::term::width() as i64))),
             "height" => Some(Ok(VmValue::Int(crate::term::height() as i64))),
+            "is_tty" => {
+                let stream = match string_arg(args, 0, "HarnessTerm.is_tty") {
+                    Ok(stream) => stream,
+                    Err(err) => return Some(Err(err)),
+                };
+                Some(Ok(VmValue::Bool(crate::stdlib::io::is_tty_for(stream))))
+            }
             "read_password" => {
                 let prompt = match optional_string_arg(args, 0, "HarnessTerm.read_password") {
                     Ok(prompt) => prompt,
@@ -253,7 +402,7 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
         use rand::seq::SliceRandom;
-        use rand::RngExt;
+        use rand::{Rng, RngExt};
         match method {
             "gen_f64" | "f64" | "random" => Some(Ok(VmValue::Float(rand::rng().random()))),
             "gen_u64" | "u64" => {
@@ -300,16 +449,25 @@ impl crate::vm::Vm {
                 shuffled.shuffle(&mut rand::rng());
                 Some(Ok(VmValue::List(std::sync::Arc::new(shuffled))))
             }
-            _ => None,
-        }
-    }
-
-    fn call_harness_crypto_method_sync_fast(
-        method: &str,
-        args: &[VmValue],
-    ) -> Option<Result<VmValue, VmError>> {
-        match method {
-            "sha256" => Some(Ok(crate::harness_crypto::sha256_hex_value(args))),
+            "uuid" => Some(Ok(VmValue::String(arcstr::ArcStr::from(
+                uuid::Uuid::new_v4().to_string(),
+            )))),
+            "uuid_v7" => Some(Ok(VmValue::String(arcstr::ArcStr::from(
+                uuid::Uuid::now_v7().to_string(),
+            )))),
+            "bytes" => {
+                let length = match args.first().and_then(VmValue::as_int) {
+                    Some(length) if (1..=1024).contains(&length) => length as usize,
+                    _ => {
+                        return Some(Err(VmError::TypeError(
+                            "HarnessRandom.bytes expects a length from 1 through 1024".to_string(),
+                        )))
+                    }
+                };
+                let mut bytes = vec![0u8; length];
+                rand::rng().fill_bytes(&mut bytes);
+                Some(Ok(VmValue::Bytes(std::sync::Arc::new(bytes))))
+            }
             _ => None,
         }
     }
@@ -383,6 +541,7 @@ impl crate::vm::Vm {
                 "height" => Some(Ok(VmValue::Int(
                     mock_term_dimension(state.env_get("LINES"), 24) as i64,
                 ))),
+                "is_tty" => Some(Ok(VmValue::Bool(false))),
                 "read_password" => {
                     let prompt = match optional_string_arg(args, 0, "HarnessTerm.read_password") {
                         Ok(prompt) => prompt,
@@ -411,6 +570,16 @@ impl crate::vm::Vm {
                         crate::clock::now_wall_ms(clock.as_ref()) as f64 / 1_000.0,
                     ))),
                     "monotonic_ms" | "elapsed" => Some(Ok(VmValue::Int(clock.monotonic_ms()))),
+                    "date_iso" => {
+                        let millis = crate::clock::now_wall_ms(clock.as_ref());
+                        let timestamp =
+                            chrono::DateTime::<chrono::Utc>::from_timestamp_millis(millis)
+                                .map(|value| {
+                                    value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                                })
+                                .unwrap_or_default();
+                        Some(Ok(VmValue::String(arcstr::ArcStr::from(timestamp))))
+                    }
                     "sleep_ms" => {
                         let ms = match sleep_ms_arg(args) {
                             Ok(ms) => ms,
@@ -455,10 +624,45 @@ impl crate::vm::Vm {
                             category: ErrorCategory::NotFound,
                         }),
                 ),
-                _ => None,
-            },
-            HarnessKind::Crypto => match method {
-                "sha256" => Some(Ok(crate::harness_crypto::sha256_hex_value(args))),
+                "uuid" | "uuid_v7" => Some(
+                    state
+                        .next_random_u64()
+                        .map(|value| {
+                            let value = (u128::from(value) << 64) | u128::from(value);
+                            VmValue::String(arcstr::ArcStr::from(
+                                uuid::Uuid::from_u128(value).to_string(),
+                            ))
+                        })
+                        .ok_or_else(|| VmError::CategorizedError {
+                            message: format!("MockHarness has no {method} response"),
+                            category: ErrorCategory::NotFound,
+                        }),
+                ),
+                "bytes" => {
+                    let length = match args.first().and_then(VmValue::as_int) {
+                        Some(length) if (1..=1024).contains(&length) => length as usize,
+                        _ => {
+                            return Some(Err(VmError::TypeError(
+                                "HarnessRandom.bytes expects a length from 1 through 1024"
+                                    .to_string(),
+                            )))
+                        }
+                    };
+                    Some(
+                        state
+                            .next_random_u64()
+                            .map(|value| {
+                                let seed = value.to_le_bytes();
+                                let bytes =
+                                    (0..length).map(|index| seed[index % seed.len()]).collect();
+                                VmValue::Bytes(std::sync::Arc::new(bytes))
+                            })
+                            .ok_or_else(|| VmError::CategorizedError {
+                                message: "MockHarness has no random_u64 response".to_string(),
+                                category: ErrorCategory::NotFound,
+                            }),
+                    )
+                }
                 _ => None,
             },
             HarnessKind::System => {
@@ -489,6 +693,11 @@ impl crate::vm::Vm {
                         "long_os_version": "mock",
                         "hostname": "mock",
                     }),
+                    "identity" => serde_json::json!({
+                        "username": "mock",
+                        "hostname": "mock",
+                        "pid": 1,
+                    }),
                     "processes" => serde_json::Value::Array(vec![serde_json::json!({
                         "pid": 1,
                         "parent_pid": serde_json::Value::Null,
@@ -512,6 +721,7 @@ impl crate::vm::Vm {
             | HarnessKind::Llm
             | HarnessKind::Obs
             | HarnessKind::Verdict => None,
+            _ => None,
         };
         if result.is_some() {
             state.record_call(handle.kind(), method, args);
@@ -678,6 +888,7 @@ impl crate::vm::Vm {
             "gpus" | "gpu" => sys::gpus_snapshot(),
             "temperature" => sys::temperature_snapshot(),
             "platform" => sys::platform_snapshot(),
+            "identity" => sys::identity_snapshot(),
             "processes" => sys::processes_snapshot(),
             _ => return Err(method_unsupported(handle, method)),
         };
@@ -690,15 +901,13 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        let provider =
-            handle
-                .inner()
-                .secret_provider()
-                .cloned()
-                .ok_or_else(|| VmError::CategorizedError {
-                    message: "HarnessSecrets: no secret provider bound to this harness".to_string(),
-                    category: ErrorCategory::NotFound,
-                })?;
+        let provider = crate::connectors::harn_module::active_harn_connector_ctx()
+            .map(|ctx| ctx.secrets)
+            .or_else(|| handle.inner().secret_provider().cloned())
+            .ok_or_else(|| VmError::CategorizedError {
+                message: "HarnessSecrets: no secret provider bound to this harness".to_string(),
+                category: ErrorCategory::NotFound,
+            })?;
         match method {
             "read" | "read_bytes" => {
                 if args.len() > 2 {
@@ -856,6 +1065,65 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         match method {
+            "call" => self.call_named_builtin("llm_call", args.to_vec()).await,
+            "call_safe" => {
+                self.call_named_builtin("llm_call_safe", args.to_vec())
+                    .await
+            }
+            "call_structured" => {
+                self.call_named_builtin("llm_call_structured", args.to_vec())
+                    .await
+            }
+            "call_structured_safe" => {
+                self.call_named_builtin("llm_call_structured_safe", args.to_vec())
+                    .await
+            }
+            "call_structured_result" => {
+                self.call_named_builtin("llm_call_structured_result", args.to_vec())
+                    .await
+            }
+            "recover_schema" => {
+                self.call_named_builtin("schema_recover", args.to_vec())
+                    .await
+            }
+            "completion" => {
+                self.call_named_builtin("llm_completion", args.to_vec())
+                    .await
+            }
+            "stream" => self.call_named_builtin("llm_stream", args.to_vec()).await,
+            "with_rate_limit" => {
+                self.call_named_builtin("with_rate_limit", args.to_vec())
+                    .await
+            }
+            "stream_call" => {
+                self.call_named_builtin("llm_stream_call", args.to_vec())
+                    .await
+            }
+            "mock_clear" => {
+                self.call_named_builtin("llm_mock_clear", args.to_vec())
+                    .await
+            }
+            "mock_enqueue" => self.call_named_builtin("llm_mock", args.to_vec()).await,
+            "mock_calls" => {
+                self.call_named_builtin("llm_mock_calls", args.to_vec())
+                    .await
+            }
+            "mock_snapshot" => {
+                self.call_named_builtin("llm_mock_snapshot", args.to_vec())
+                    .await
+            }
+            "mock_push_scope" => {
+                self.call_named_builtin("llm_mock_push_scope", args.to_vec())
+                    .await
+            }
+            "mock_pop_scope" => {
+                self.call_named_builtin("llm_mock_pop_scope", args.to_vec())
+                    .await
+            }
+            "upload_file" => {
+                self.call_named_builtin("__files_upload", args.to_vec())
+                    .await
+            }
             "catalog" => Ok(crate::llm::config_builtins::llm_catalog_value()),
             "catalog_refresh" => {
                 if args.len() > 1 {
@@ -890,12 +1158,29 @@ impl crate::vm::Vm {
             .unwrap_or_else(|| Err(method_unsupported(handle, method)))
     }
 
-    fn call_harness_auth_method(
+    async fn call_harness_auth_method(
         &mut self,
         handle: &VmHarness,
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
+        let oauth_builtin = match method {
+            "oauth_storage_memory" => Some("__oauth_storage_memory_handle"),
+            "oauth_storage_file" => Some("__oauth_storage_file_handle"),
+            "oauth_storage_cloud" => Some("__oauth_storage_cloud_handle"),
+            "oauth_storage_get" => Some("__oauth_storage_get"),
+            "oauth_storage_set" => Some("__oauth_storage_set"),
+            "oauth_storage_delete" => Some("__oauth_storage_delete"),
+            "oauth_storage_with_refresh_lock" => Some("__oauth_storage_with_refresh_lock"),
+            "oauth_registration_store" => Some("__oauth_dynreg_store_handle"),
+            "oauth_register_client" => Some("__oauth_dynreg_register"),
+            "oauth_registered_client" => Some("__oauth_dynreg_get"),
+            "oauth_registered_clients" => Some("__oauth_dynreg_list"),
+            _ => None,
+        };
+        if let Some(builtin) = oauth_builtin {
+            return self.call_named_builtin(builtin, args.to_vec()).await;
+        }
         Self::call_harness_auth_method_sync_fast(method, args)
             .unwrap_or_else(|| Err(method_unsupported(handle, method)))
     }
@@ -999,6 +1284,21 @@ impl crate::vm::Vm {
         };
 
         match method {
+            "configure" => {
+                self.call_named_builtin("__obs_configure", args.to_vec())
+                    .await
+            }
+            "auto_backend" => {
+                self.call_named_builtin("__obs_auto_backend", args.to_vec())
+                    .await
+            }
+            "emit" => self.call_named_builtin("__obs_emit", args.to_vec()).await,
+            "events" => self.call_named_builtin("__obs_events", args.to_vec()).await,
+            "events_take" => {
+                self.call_named_builtin("__obs_events_take", args.to_vec())
+                    .await
+            }
+            "reset" => self.call_named_builtin("__obs_reset", args.to_vec()).await,
             "request_id" => {
                 require_no_args(handle, method, args)?;
                 Ok(crate::observability::request_id::current_request_id()
@@ -1210,7 +1510,21 @@ impl crate::vm::Vm {
             "sleep_ms" => {
                 let ms = sleep_ms_arg(args)?;
                 if ms > 0 {
-                    clock.sleep(Duration::from_millis(ms as u64)).await;
+                    let sleep = clock.sleep(Duration::from_millis(ms as u64));
+                    tokio::pin!(sleep);
+                    let mut poll = tokio::time::interval(Duration::from_millis(10));
+                    loop {
+                        tokio::select! {
+                            _ = &mut sleep => break,
+                            _ = poll.tick() => {
+                                if self.is_cancel_requested() {
+                                    return Err(
+                                        crate::stdlib::cancelled_vm_error(),
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 Ok(VmValue::Nil)
             }
@@ -1231,8 +1545,73 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        let Some(builtin) = harn_parser::harness_methods::harness_fs_ambient(method) else {
-            return Err(method_unsupported(handle, method));
+        let path_value = |path: &std::path::Path| {
+            VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().into_owned()))
+        };
+        match method {
+            "cwd" => {
+                let path = crate::stdlib::process::current_execution_context()
+                    .and_then(|context| context.cwd.map(std::path::PathBuf::from))
+                    .or_else(|| std::env::current_dir().ok())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                return Ok(path_value(&path));
+            }
+            "source_dir" => {
+                let path = self
+                    .source_dir
+                    .clone()
+                    .or_else(|| std::env::current_dir().ok())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                return Ok(path_value(&path));
+            }
+            "project_root" => {
+                return Ok(self.project_root().map(&path_value).unwrap_or(VmValue::Nil));
+            }
+            "home_dir" => {
+                let path = crate::user_dirs::home_dir().unwrap_or_default();
+                return Ok(path_value(&path));
+            }
+            "runtime_paths" => {
+                return self.call_named_builtin("runtime_paths", vec![]).await;
+            }
+            _ => {}
+        }
+        let builtin = match method {
+            "read_text" => "read_file",
+            "read_text_result" => "read_file_result",
+            "read_bytes" => "read_file_bytes",
+            "write_text" => "write_file",
+            "write_bytes" => "write_file_bytes",
+            "replace_text" => "replace_file",
+            "replace_text_result" => "replace_file_result",
+            "replace_bytes" => "replace_file_bytes",
+            "replace_bytes_result" => "replace_file_bytes_result",
+            "exists" => "file_exists",
+            "status" => "path_status",
+            "delete" => "delete_file",
+            "append" => "append_file",
+            "append_locked" => "append_file_locked",
+            "list_dir" => "list_dir",
+            "mkdir" => "mkdir",
+            "copy" => "copy_file",
+            "temp_dir" => "temp_dir",
+            "workspace_temp_dir" => "workspace_temp_dir",
+            "mkdtemp" => "mkdtemp",
+            "mkdtemp_in_workspace" => "mkdtemp_in_workspace",
+            "stat" => "stat",
+            "rename" => "move_file",
+            "read_lines" => "read_lines",
+            "read_lines_page_result" => "read_lines_page_result",
+            "walk" => "walk_dir",
+            "glob" => "glob",
+            "find_text" => "find_text",
+            "find_evidence" => "find_evidence",
+            "package_snapshot_open" => "package_snapshot_open",
+            "package_snapshot_close" => "package_snapshot_close",
+            "render_prompt" => "render",
+            "render_prompt_with_provenance" => "render_with_provenance",
+            "render_template" => "render_string",
+            _ => return Err(method_unsupported(handle, method)),
         };
         self.call_named_builtin(builtin, args.to_vec())
             .await
@@ -1321,30 +1700,348 @@ impl crate::vm::Vm {
                 .call_named_builtin("http_download", args.to_vec())
                 .await
                 .map_err(tag_sandbox_denied),
+            "unix_socket_json_request" => self
+                .call_named_builtin("__net_unix_socket_json_request", args.to_vec())
+                .await
+                .map_err(tag_sandbox_denied),
             _ => Err(method_unsupported(handle, method)),
         }
     }
 
-    fn call_harness_process_method(
+    async fn call_harness_process_method(
         &mut self,
         handle: &VmHarness,
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         match method {
-            "spawn_captured" => crate::stdlib::process::spawn_captured_value(args),
+            "run" => {
+                let params = required_dict_arg(args, 0, "HarnessProcess.run")?;
+                let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.child_vm());
+                crate::stdlib::host::dispatch_host_operation_with_ctx(
+                    Some(&ctx),
+                    "process",
+                    "exec",
+                    params,
+                )
+                .await
+            }
+            "default_shell" => {
+                crate::stdlib::host::dispatch_host_operation(
+                    "process",
+                    "get_default_shell",
+                    &crate::value::DictMap::new(),
+                )
+                .await
+            }
+            "list_shells" => {
+                crate::stdlib::host::dispatch_host_operation(
+                    "process",
+                    "list_shells",
+                    &crate::value::DictMap::new(),
+                )
+                .await
+            }
+            "shell_invocation" => {
+                let params = required_dict_arg(args, 0, "HarnessProcess.shell_invocation")?;
+                crate::stdlib::host::dispatch_host_operation("process", "shell_invocation", params)
+                    .await
+            }
             _ => Err(method_unsupported(handle, method)),
         }
     }
 
-    fn call_harness_crypto_method(
+    async fn call_runtime_capability_method(
         &mut self,
         handle: &VmHarness,
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        Self::call_harness_crypto_method_sync_fast(method, args)
-            .unwrap_or_else(|| Err(method_unsupported(handle, method)))
+        if method == "exit" {
+            if args.len() > 1 {
+                return Err(VmError::TypeError(
+                    "HarnessRuntime.exit expects at most one integer argument".to_string(),
+                ));
+            }
+            let code = args.first().and_then(VmValue::as_int).unwrap_or(0);
+            return Err(VmError::ProcessExit(code as i32));
+        }
+        if method == "host_capabilities" {
+            return self.call_named_builtin("host_capabilities", vec![]).await;
+        }
+        if method == "host_has" {
+            return self.call_named_builtin("host_has", args.to_vec()).await;
+        }
+        if method == "sync_mutex_acquire" {
+            return self
+                .call_named_builtin("sync_mutex_acquire", args.to_vec())
+                .await;
+        }
+        if method == "introspection" {
+            return self
+                .call_named_builtin("runtime_introspection", args.to_vec())
+                .await;
+        }
+        let params = if method == "record_run" {
+            required_dict_arg(args, 0, "HarnessRuntime.record_run")?.clone()
+        } else {
+            if !args.is_empty() {
+                return Err(VmError::TypeError(format!(
+                    "{}.{method} takes no arguments",
+                    handle.type_name()
+                )));
+            }
+            crate::value::DictMap::new()
+        };
+        crate::stdlib::host::dispatch_host_operation("runtime", method, &params).await
+    }
+
+    async fn call_interaction_capability_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let builtin = match method {
+            "ask_user" => Some("ask_user"),
+            "request_approval" => Some("request_approval"),
+            "dual_control" => Some("dual_control"),
+            "escalate_to" => Some("escalate_to"),
+            _ => None,
+        };
+        if let Some(builtin) = builtin {
+            return self.call_named_builtin(builtin, args.to_vec()).await;
+        }
+        if method != "ask" {
+            return Err(method_unsupported(handle, method));
+        }
+        let question = args
+            .first()
+            .ok_or_else(|| VmError::TypeError("HarnessInteraction.ask expects a question".into()))?
+            .clone();
+        let mut params = crate::value::DictMap::new();
+        params.insert(crate::value::intern_key("question"), question);
+        if let Some(kind) = args.get(1) {
+            params.insert(crate::value::intern_key("type"), kind.clone());
+        }
+        crate::stdlib::host::dispatch_host_operation("interaction", "ask", &params).await
+    }
+
+    async fn call_tools_capability_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let builtin = match method {
+            "list_registered" => "host_tool_list",
+            "invoke" => "host_tool_call",
+            "dispatch_agent_call" => "__host_agent_dispatch_tool_call",
+            "dispatch_agent_batch" => "__host_agent_dispatch_tool_batch",
+            _ => return Err(method_unsupported(handle, method)),
+        };
+        self.call_named_builtin(builtin, args.to_vec()).await
+    }
+
+    async fn call_dict_host_capability_method(
+        &mut self,
+        handle: &VmHarness,
+        capability: &str,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let params = required_dict_arg(args, 0, handle.type_name())?;
+        crate::stdlib::host::dispatch_host_operation(capability, method, params).await
+    }
+
+    async fn call_project_capability_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let optional_request = || -> Result<crate::value::DictMap, VmError> {
+            match args.first() {
+                None | Some(VmValue::Nil) => Ok(crate::value::DictMap::new()),
+                Some(value) => value.as_dict().cloned().ok_or_else(|| {
+                    VmError::TypeError(format!(
+                        "{}.{method} expects a request record",
+                        handle.type_name()
+                    ))
+                }),
+            }
+        };
+        let request_value = |request: &crate::value::DictMap, key: &str| {
+            request.get(key).cloned().unwrap_or(VmValue::Nil)
+        };
+        let builtin_args = match method {
+            "metadata_entries" => {
+                let request = optional_request()?;
+                Some((
+                    "metadata_entries",
+                    vec![request_value(&request, "namespace")],
+                ))
+            }
+            "metadata_status" => {
+                let request = optional_request()?;
+                Some((
+                    "metadata_status",
+                    vec![request_value(&request, "namespace")],
+                ))
+            }
+            "content_hash" => Some(("compute_content_hash", args.to_vec())),
+            "path_metadata_get" => {
+                let request = required_dict_arg(args, 0, "HarnessProject.path_metadata_get")?;
+                Some((
+                    "path_metadata_get",
+                    vec![
+                        request_value(request, "path"),
+                        request_value(request, "namespace"),
+                        request_value(request, "options"),
+                    ],
+                ))
+            }
+            "path_metadata_set" => {
+                let request = required_dict_arg(args, 0, "HarnessProject.path_metadata_set")?;
+                Some((
+                    "path_metadata_set",
+                    vec![
+                        request_value(request, "path"),
+                        request_value(request, "namespace"),
+                        request
+                            .get("value")
+                            .or_else(|| request.get("data"))
+                            .cloned()
+                            .unwrap_or(VmValue::Nil),
+                        request_value(request, "options"),
+                    ],
+                ))
+            }
+            "path_metadata_entries" => {
+                let request = optional_request()?;
+                Some((
+                    "path_metadata_entries",
+                    vec![
+                        request_value(&request, "namespace"),
+                        request_value(&request, "options"),
+                    ],
+                ))
+            }
+            "scan_directory" => Some(("scan_directory", args.to_vec())),
+            _ => None,
+        };
+        if let Some((builtin, builtin_args)) = builtin_args {
+            return self.call_named_builtin(builtin, builtin_args).await;
+        }
+        let builtin = match method {
+            "scan" => Some("project_scan_native"),
+            "context_profile" => Some("project_context_profile_native"),
+            "scan_tree" => Some("project_scan_tree_native"),
+            "walk_tree" => Some("project_walk_tree_native"),
+            "catalog" => Some("project_catalog_native"),
+            "enrich" => Some("project_enrich_native"),
+            _ => None,
+        };
+        if let Some(builtin) = builtin {
+            return self.call_named_builtin(builtin, args.to_vec()).await;
+        }
+        self.call_dict_host_capability_method(handle, "project", method, args)
+            .await
+    }
+
+    fn call_testing_capability_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let fixtures = handle.inner().fixtures();
+        match method {
+            "clear" | "push_scope" | "pop_scope" => {
+                require_no_args(handle, method, args)?;
+                match method {
+                    "clear" => fixtures.clear(),
+                    "push_scope" => fixtures.push_scope(),
+                    "pop_scope" => fixtures.pop_scope()?,
+                    _ => unreachable!(),
+                }
+                Ok(VmValue::Nil)
+            }
+            "respond" | "respond_error" => {
+                let capability_name = string_arg(args, 0, &format!("HarnessTesting.{method}"))?;
+                let capability = harn_builtin_meta::CapabilityId::from_field_name(capability_name)
+                    .ok_or_else(|| {
+                        VmError::TypeError(format!(
+                            "HarnessTesting.{method}: unknown capability `{capability_name}`"
+                        ))
+                    })?;
+                if capability == harn_builtin_meta::CapabilityId::Testing {
+                    return Err(VmError::TypeError(
+                        "HarnessTesting cannot fixture its own control methods".to_string(),
+                    ));
+                }
+                let target_method = string_arg(args, 1, &format!("HarnessTesting.{method}"))?;
+                let declared = crate::stdlib::all_builtin_manifest().iter().any(|entry| {
+                    matches!(
+                        entry.contract.exposure,
+                        harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                            capability: candidate,
+                            method: candidate_method,
+                        } if candidate == capability && candidate_method == target_method
+                    )
+                });
+                if !declared {
+                    return Err(VmError::TypeError(format!(
+                        "HarnessTesting.{method}: undeclared method `harness.{}.{target_method}`",
+                        capability.field_name()
+                    )));
+                }
+                let response = if method == "respond" {
+                    Ok(args.get(2).cloned().unwrap_or(VmValue::Nil))
+                } else {
+                    Err(string_arg(args, 2, "HarnessTesting.respond_error")?.to_string())
+                };
+                fixtures.respond(capability, target_method, response);
+                Ok(VmValue::Nil)
+            }
+            "calls" => {
+                require_no_args(handle, method, args)?;
+                let calls = fixtures
+                    .calls()
+                    .into_iter()
+                    .map(|call| {
+                        let mut record = crate::value::DictMap::new();
+                        record.put_str("capability", call.capability.field_name());
+                        record.put_str("method", call.method);
+                        record.insert(
+                            crate::value::intern_key("args"),
+                            VmValue::List(std::sync::Arc::new(call.args)),
+                        );
+                        VmValue::dict(record)
+                    })
+                    .collect();
+                Ok(VmValue::List(std::sync::Arc::new(calls)))
+            }
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
+    async fn call_harness_channels_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let builtin = match method {
+            "append" => "emit_channel",
+            "events" => "channel_events",
+            "subscribe" => "channel_subscribe",
+            "consumer_cursor" => "channel_consumer_cursor",
+            "ack" => "channel_ack",
+            "flush_aggregations" => "flush_trigger_aggregations",
+            _ => return Err(method_unsupported(handle, method)),
+        };
+        self.call_named_builtin(builtin, args.to_vec()).await
     }
 
     async fn call_mock_harness_method(
@@ -1360,6 +2057,11 @@ impl crate::vm::Vm {
             return result;
         }
         state.record_call(handle.kind(), method, args);
+        if let Some(capability) = handle.kind().capability_id() {
+            if let Some(response) = state.capability_response(capability, method) {
+                return Ok(response);
+            }
+        }
         match handle.kind() {
             HarnessKind::Root
             | HarnessKind::Stdio
@@ -1367,7 +2069,7 @@ impl crate::vm::Vm {
             | HarnessKind::Clock
             | HarnessKind::Env
             | HarnessKind::Random
-            | HarnessKind::Crypto
+            | HarnessKind::Channels
             | HarnessKind::System
             | HarnessKind::Secrets
             | HarnessKind::Tenant
@@ -1415,8 +2117,8 @@ impl crate::vm::Vm {
                 _ => Err(method_unsupported(handle, method)),
             },
             HarnessKind::Process => match method {
-                "spawn_captured" => Err(VmError::CategorizedError {
-                    message: "MockHarness has no process spawn response".to_string(),
+                "run" => Err(VmError::CategorizedError {
+                    message: "MockHarness has no process response".to_string(),
                     category: ErrorCategory::NotFound,
                 }),
                 _ => Err(method_unsupported(handle, method)),
@@ -1430,6 +2132,7 @@ impl crate::vm::Vm {
                 self.call_harness_obs_method(handle, method, args).await
             }
             HarnessKind::Verdict => self.call_harness_verdict_method(handle, method, args).await,
+            _ => Err(method_unsupported(handle, method)),
         }
     }
 }
@@ -2201,6 +2904,16 @@ fn string_arg<'a>(args: &'a [VmValue], index: usize, callee: &str) -> Result<&'a
             index + 1
         ))),
     }
+}
+
+fn required_dict_arg<'a>(
+    args: &'a [VmValue],
+    index: usize,
+    callee: &str,
+) -> Result<&'a crate::value::DictMap, VmError> {
+    args.get(index)
+        .and_then(VmValue::as_dict)
+        .ok_or_else(|| VmError::TypeError(format!("{callee} expects a dict argument")))
 }
 
 fn optional_string_arg<'a>(

@@ -2,11 +2,11 @@
 // model + provider even when catalog-side capability data is absent.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(task) {
-  const r = pack_for({model: "totally-fake-model-id"})
+pipeline test(harness: Harness, task) {
+  const r = pack_for(harness, {model: "totally-fake-model-id"})
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, "totally-fake-model-id")
   assert_eq(type_of(r.provider), "string")
   assert(r.provider != "", "provider must be a non-empty string")
-  log("llm_defaults_pack_unknown_model_minimal passed")
+  harness.stdio.println("llm_defaults_pack_unknown_model_minimal passed")
 }

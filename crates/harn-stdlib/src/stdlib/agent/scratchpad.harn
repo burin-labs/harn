@@ -54,7 +54,7 @@ fn __scratchpad_dict(label, value, fallback) {
 }
 
 /**
- * Normalize the public `agent_loop(..., {scratchpad})` option.
+ * Normalize the public `agent_loop(harness, ..., {scratchpad})` option.
  *
  * @effects: []
  * @errors: [runtime]
@@ -178,12 +178,12 @@ fn __scratchpad_empty(task) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_scratchpad_init(session, opts) {
+pub fn agent_scratchpad_init(harness: Harness, session, opts) {
   const cfg = agent_scratchpad_options(opts)
   if !cfg.enabled {
     return {ok: true, status: "disabled"}
   }
-  const current = agent_session_scratchpad(session.session_id)
+  const current = harness.agent.scratchpad(session.session_id)
   if current != nil {
     return {ok: true, status: "existing", scratchpad: current}
   }
@@ -192,7 +192,7 @@ pub fn agent_scratchpad_init(session, opts) {
   } else {
     __scratchpad_empty(session?.task ?? "")
   }
-  const result = agent_session_set_scratchpad(
+  const result = harness.agent.set_scratchpad(
     session.session_id,
     pad,
     {source: "agent_loop", reason: "init", metadata: {task_ref: "user:initial"}},
@@ -296,12 +296,12 @@ fn __scratchpad_render(pad) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_scratchpad_recitation_fragment(session, opts) {
+pub fn agent_scratchpad_recitation_fragment(harness: Harness, session, opts) {
   const cfg = agent_scratchpad_options(opts)
   if !cfg.enabled || !cfg.recite {
     return nil
   }
-  const pad = agent_session_scratchpad(session.session_id)
+  const pad = harness.agent.scratchpad(session.session_id)
   if pad == nil {
     return nil
   }
@@ -519,10 +519,9 @@ fn __scratchpad_counts(pad) {
   }
 }
 
-fn __scratchpad_emit_reorganization(session_id, iteration, status, payload = nil) {
+fn __scratchpad_emit_reorganization(harness: Harness, session_id, iteration, status, payload = nil) {
   const details = payload ?? {}
-  agent_emit_event(
-    session_id,
+  agent_emit_event(harness, session_id,
     "agent_scratchpad_reorganization",
     {iteration: iteration, status: status} + details,
   )
@@ -534,34 +533,34 @@ fn __scratchpad_emit_reorganization(session_id, iteration, status, payload = nil
  * @effects: [agent, llm]
  * @errors: []
  * @api_stability: experimental
- * @example: agent_scratchpad_reorganize(session, opts, 1, {reason: "iteration_end"})
+ * @example: agent_scratchpad_reorganize(harness, session, opts, 1, {reason: "iteration_end"})
  */
-pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
+pub fn agent_scratchpad_reorganize(harness: Harness, session, opts, iteration, context = nil) {
   const cfg = agent_scratchpad_options(opts)
   if !cfg.enabled {
     return {ok: true, status: "disabled"}
   }
-  let current = agent_session_scratchpad(session.session_id)
+  let current = harness.agent.scratchpad(session.session_id)
   if current == nil {
-    const initialized = agent_scratchpad_init(session, opts)
+    const initialized = agent_scratchpad_init(harness, session, opts)
     current = initialized?.scratchpad
   }
   if current == nil {
-    __scratchpad_emit_reorganization(session.session_id, iteration, "missing_scratchpad")
+    __scratchpad_emit_reorganization(harness, session.session_id, iteration, "missing_scratchpad")
     return {ok: false, status: "missing_scratchpad"}
   }
   const message_refs = __scratchpad_message_refs(
-    agent_session_messages(session.session_id),
+    agent_session_messages(harness, session.session_id),
     cfg.max_recent_messages,
   )
   const allowed_refs = __scratchpad_merge_refs(current?.refs, message_refs)
-  const envelope = llm_call_structured_result(
+  const envelope = harness.llm.call_structured_result(
     __scratchpad_reorganize_prompt(current, allowed_refs, context),
     __scratchpad_schema(),
     __scratchpad_reorganizer_options(opts, cfg),
   )
   if !envelope.ok {
-    __scratchpad_emit_reorganization(
+    __scratchpad_emit_reorganization(harness, 
       session.session_id,
       iteration,
       "llm_error",
@@ -572,7 +571,7 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
   const next = __scratchpad_normalize(envelope.data, session?.task ?? "")
   const validation = __scratchpad_validate_refs(next, allowed_refs)
   if !validation.ok {
-    __scratchpad_emit_reorganization(
+    __scratchpad_emit_reorganization(harness, 
       session.session_id,
       iteration,
       "invalid_sources",
@@ -591,7 +590,7 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
     }
   }
   const set_result = try {
-    agent_session_set_scratchpad(
+    harness.agent.set_scratchpad(
       session.session_id,
       next,
       {
@@ -607,7 +606,7 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
   }
   if is_err(set_result) {
     const store_error = to_string(unwrap_err(set_result))
-    __scratchpad_emit_reorganization(
+    __scratchpad_emit_reorganization(harness, 
       session.session_id,
       iteration,
       "store_error",
@@ -616,7 +615,7 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
     return {ok: false, status: "store_error", error: store_error}
   }
   const stored = unwrap(set_result)
-  __scratchpad_emit_reorganization(
+  __scratchpad_emit_reorganization(harness, 
     session.session_id,
     iteration,
     "reorganized",
@@ -642,9 +641,9 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
  * @effects: [agent, llm]
  * @errors: []
  * @api_stability: experimental
- * @example: agent_scratchpad_reorganize_if_due(session, opts, 0)
+ * @example: agent_scratchpad_reorganize_if_due(harness, session, opts, 0)
  */
-pub fn agent_scratchpad_reorganize_if_due(session, opts, iteration_index, context = nil) {
+pub fn agent_scratchpad_reorganize_if_due(harness: Harness, session, opts, iteration_index, context = nil) {
   const cfg = agent_scratchpad_options(opts)
   if !cfg.enabled {
     return {ok: true, status: "disabled"}
@@ -662,5 +661,5 @@ pub fn agent_scratchpad_reorganize_if_due(session, opts, iteration_index, contex
       next_due: turn + (cadence - turn % cadence),
     }
   }
-  return agent_scratchpad_reorganize(session, opts, turn, context ?? {reason: "iteration_end"})
+  return agent_scratchpad_reorganize(harness, session, opts, turn, context ?? {reason: "iteration_end"})
 }

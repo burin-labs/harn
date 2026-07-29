@@ -1,9 +1,9 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const d = {a: 1, b: 2}
   for entry in d {
-    log(entry.key)
+    harness.stdio.println(entry.key)
   }
   for {key: k, value: v} in d {
-    log("${k}=${v}")
+    harness.stdio.println("${k}=${v}")
   }
 }

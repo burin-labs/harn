@@ -51,9 +51,9 @@ fn __circuit_name_for(call) -> string {
   return "llm:" + provider + ":" + model
 }
 
-fn __ensure_llm_handler_circuit(name, threshold, reset_ms) {
+fn __ensure_llm_handler_circuit(harness: Harness, name, threshold, reset_ms) {
   if !contains(__llm_handler_circuits, name) {
-    circuit_breaker(name, threshold, reset_ms)
+    harness.runtime.circuit_breaker(name, threshold, reset_ms)
     __llm_handler_circuits = __llm_handler_circuits + [name]
   }
 }
@@ -131,19 +131,19 @@ fn __safe_invoke(next, call) {
  *   with_X(next, opts)   // direct: returns a caller
  *   with_X(opts)         // curried: returns fn(next) -> caller, drops into compose
  *
- * Without this, `compose([with_logging({...})])` silently treats the
+ * Without this, `compose([with_logging(harness, {...})])` silently treats the
  * opts dict as `next` and fails at the first invocation.
  */
 fn __partial(handler_impl, opts) {
   return { next -> handler_impl(next, opts) }
 }
 
-fn __emit_event(session_id, name, payload) {
+fn __emit_event(harness: Harness, session_id, name, payload) {
   if to_string(session_id) == "" {
     return
   }
   const _ = try {
-    agent_emit_event(session_id, name, payload)
+    agent_emit_event(harness, session_id, name, payload)
   }
 }
 
@@ -257,7 +257,7 @@ fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) 
 // -------------------------------------------------------------------------------------------------
 
 /**
- * with_retry(next, opts) -> caller
+ * with_retry(harness, next, opts) -> caller
  *
  * Wraps `next` with bounded retry. Default opts:
  *   {max_attempts: 3, base_ms: 250, max_ms: 8000,
@@ -282,7 +282,7 @@ fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) 
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_retry(next, opts = nil) {
+pub fn with_retry(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_retry, next)
   }
@@ -354,7 +354,7 @@ pub fn with_retry(next, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn with_fallback(callers) {
+pub fn with_fallback(harness: Harness, callers) {
   const total = if type_of(callers) == "list" {
     len(callers)
   } else {
@@ -371,7 +371,7 @@ pub fn with_fallback(callers) {
       const inner = callers[idx]
       const envelope = __safe_invoke(inner, call)
       last_envelope = envelope
-      __emit_event(
+      __emit_event(harness, 
         session_id,
         "llm_fallback_attempt",
         {
@@ -416,7 +416,7 @@ fn __envelope_text(env) {
  * @effects: []
  * @errors: []
  */
-pub fn with_shadow(primary, shadow, opts = nil) {
+pub fn with_shadow(harness: Harness, primary, shadow, opts = nil) {
   const cfg = __opts_dict(opts)
   const sampler = cfg?.sampler
   const on_diff = cfg?.on_diff
@@ -458,7 +458,7 @@ pub fn with_shadow(primary, shadow, opts = nil) {
       differs
     }
     if should_compare {
-      __emit_event(
+      __emit_event(harness, 
         to_string(call?.turn?.session_id ?? ""),
         "llm_shadow_diff",
         {
@@ -548,7 +548,7 @@ pub fn with_prompt_rewrite(next, rewriter) {
 // -------------------------------------------------------------------------------------------------
 
 /**
- * with_logging(next, opts) -> caller
+ * with_logging(harness, next, opts) -> caller
  *
  * Wraps `next` with structured logging per call. Options:
  *   - level: "debug" | "info" | "warn" (default "info")
@@ -560,7 +560,7 @@ pub fn with_prompt_rewrite(next, rewriter) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_logging(next, opts = nil) {
+pub fn with_logging(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_logging, next)
   }
@@ -590,7 +590,7 @@ pub fn with_logging(next, opts = nil) {
       record = record
         + {prompt: to_string(call?.prompt ?? ""), system: to_string(call?.system ?? "")}
     }
-    __emit_event(to_string(call?.turn?.session_id ?? ""), "llm_call_log", record)
+    __emit_event(harness, to_string(call?.turn?.session_id ?? ""), "llm_call_log", record)
     if sink != nil {
       const _ = try {
         sink(record)
@@ -647,7 +647,7 @@ fn __budget_check(limit_name, max_value, observed, on_exceed) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_budget(next, opts = nil) {
+pub fn with_budget(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_budget, next)
   }
@@ -657,13 +657,13 @@ pub fn with_budget(next, opts = nil) {
   const max_output_tokens = cfg?.max_output_tokens
   const max_calls = cfg?.max_calls
   const on_exceed = cfg?.on_exceed ?? "short_circuit"
-  const total_in = atomic(0)
-  const total_out = atomic(0)
-  const total_calls = atomic(0)
+  const total_in = harness.runtime.atomic(0)
+  const total_out = harness.runtime.atomic(0)
+  const total_calls = harness.runtime.atomic(0)
   return { call ->
-    const calls_so_far = atomic_get(total_calls)
-    const in_so_far = atomic_get(total_in)
-    const out_so_far = atomic_get(total_out)
+    const calls_so_far = harness.runtime.atomic_get(total_calls)
+    const in_so_far = harness.runtime.atomic_get(total_in)
+    const out_so_far = harness.runtime.atomic_get(total_out)
     const exhaustion = __budget_check("max_calls", max_calls, calls_so_far, on_exceed)
       ?? __budget_check(
       "max_input_tokens",
@@ -682,13 +682,13 @@ pub fn with_budget(next, opts = nil) {
       return exhaustion
     }
     const envelope = __safe_invoke(next, call)
-    const _ = atomic_add(total_calls, 1)
+    const _ = harness.runtime.atomic_add(total_calls, 1)
     if (envelope?.ok ?? false) && type_of(envelope?.value) == "dict" {
       const usage = __opts_dict(envelope.value?.usage)
       const in_tokens = to_int(usage?.input_tokens ?? envelope.value?.input_tokens ?? 0)
       const out_tokens = to_int(usage?.output_tokens ?? envelope.value?.output_tokens ?? 0)
-      const _ = atomic_add(total_in, in_tokens)
-      const _ = atomic_add(total_out, out_tokens)
+      const _ = harness.runtime.atomic_add(total_in, in_tokens)
+      const _ = harness.runtime.atomic_add(total_out, out_tokens)
     }
     return envelope
   }
@@ -728,7 +728,7 @@ pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_cache(first, second = nil, third = nil) {
+pub fn with_cache(harness: Harness, first, second = nil, third = nil) {
   if __llm_handler_is_callable(first) {
     const next = first
     const cfg = __opts_dict(second)
@@ -739,8 +739,7 @@ pub fn with_cache(first, second = nil, third = nil) {
       }
       const merged_opts = opts + cfg
       const session_id = to_string(call?.turn?.session_id ?? merged_opts?.session_id ?? "")
-      return __with_cache_run(
-        harness,
+      return __with_cache_run(harness,  harness,
         call?.prompt,
         call?.system,
         merged_opts,
@@ -754,13 +753,12 @@ pub fn with_cache(first, second = nil, third = nil) {
   const system = second
   const opts = third ?? {}
   const session_id = to_string(opts?.session_id ?? "")
-  return __with_cache_run(
-    harness,
+  return __with_cache_run(harness,  harness,
     prompt,
     system,
     opts,
     session_id,
-    fn() { return llm_call(prompt, system, llm_call_options(opts)) },
+    fn() { return harness.llm.call(prompt, system, llm_call_options(opts)) },
     fn(result) { return __llm_handler_should_store_direct_result(result) },
   )
 }
@@ -771,17 +769,17 @@ fn __with_cache_run(harness: Harness, prompt, system, opts, session_id, compute,
   }
   const key = llm_cache_key(prompt, system, opts)
   const cache_options = __llm_handler_cache_options(opts)
-  const cached = cache_get(key, cache_options)
+  const cached = cache_get(harness, key, cache_options)
   if cached.hit {
-    __with_cache_emit_hit(session_id, key, cached, opts)
+    __with_cache_emit_hit(harness, session_id, key, cached, opts)
     return cached.value
   }
   const started_ms = harness.clock.monotonic_ms()
   const result = compute()
   const compute_ms = harness.clock.monotonic_ms() - started_ms
   if should_store(result) {
-    cache_put(key, result, cache_options)
-    __with_cache_emit_miss(session_id, key, cached, compute_ms)
+    cache_put(harness, key, result, cache_options)
+    __with_cache_emit_miss(harness, session_id, key, cached, compute_ms)
   }
   return result
 }
@@ -837,11 +835,11 @@ fn __with_cache_hit_metrics_from_envelope(cached_value) -> dict {
   return metrics
 }
 
-fn __with_cache_emit_hit(session_id, key, cached, opts) {
+fn __with_cache_emit_hit(harness: Harness, session_id, key, cached, opts) {
   if session_id == "" {
     return
   }
-  __emit_event(
+  __emit_event(harness, 
     session_id,
     "cache_hit",
     {
@@ -855,11 +853,11 @@ fn __with_cache_emit_hit(session_id, key, cached, opts) {
   )
 }
 
-fn __with_cache_emit_miss(session_id, key, cached, compute_ms) {
+fn __with_cache_emit_miss(harness: Harness, session_id, key, cached, compute_ms) {
   if session_id == "" {
     return
   }
-  __emit_event(
+  __emit_event(harness, 
     session_id,
     "cache_miss",
     {
@@ -907,8 +905,8 @@ fn __semantic_embed_options(opts) -> dict {
   return embed_opts
 }
 
-fn __semantic_index_load(cache_opts) -> list {
-  const cached = cache_get(__SEMANTIC_CACHE_INDEX_KEY, cache_opts)
+fn __semantic_index_load(harness: Harness, cache_opts) -> list {
+  const cached = cache_get(harness, __SEMANTIC_CACHE_INDEX_KEY, cache_opts)
   if (cached?.hit ?? false) && type_of(cached?.value) == "list" {
     return cached.value
   }
@@ -945,21 +943,29 @@ fn __semantic_nearest(index, query_vector) -> dict {
   return {index: best_index, similarity: best_similarity}
 }
 
-fn __semantic_index_store(cache_opts, index, query_vector, response, query_text, opts) {
+fn __semantic_index_store(
+  harness: Harness,
+  cache_opts,
+  index,
+  query_vector,
+  response,
+  query_text,
+  opts,
+) {
   const entry = {embedding: query_vector, response: response, prompt: query_text}
   let appended = index.appending(entry)
   const max_entries = to_int(opts?.max_entries ?? __SEMANTIC_CACHE_DEFAULT_MAX_ENTRIES)
   if max_entries > 0 && len(appended) > max_entries {
     appended = appended.slice(len(appended) - max_entries, len(appended))
   }
-  cache_put(__SEMANTIC_CACHE_INDEX_KEY, appended, cache_opts)
+  cache_put(harness, __SEMANTIC_CACHE_INDEX_KEY, appended, cache_opts)
 }
 
-fn __semantic_emit_hit(session_id, entry, similarity, opts) {
+fn __semantic_emit_hit(harness: Harness, session_id, entry, similarity, opts) {
   if session_id == "" {
     return
   }
-  __emit_event(
+  __emit_event(harness, 
     session_id,
     "semantic_cache_hit",
     {
@@ -971,11 +977,11 @@ fn __semantic_emit_hit(session_id, entry, similarity, opts) {
   )
 }
 
-fn __semantic_emit_miss(session_id, similarity, compute_ms) {
+fn __semantic_emit_miss(harness: Harness, session_id, similarity, compute_ms) {
   if session_id == "" {
     return
   }
-  __emit_event(
+  __emit_event(harness, 
     session_id,
     "semantic_cache_miss",
     {nearest_similarity: similarity, metrics: {compute_ms: compute_ms}},
@@ -983,7 +989,7 @@ fn __semantic_emit_miss(session_id, similarity, compute_ms) {
 }
 
 /**
- * with_semantic_cache(next, opts?) -> caller
+ * with_semantic_cache(harness, next, opts?) -> caller
  *
  * Embedding-similarity response cache (GPTCache-style). Wraps an llm caller:
  * each call embeds its prompt (via the host `memory.embed` capability, reused
@@ -1021,7 +1027,7 @@ fn __semantic_emit_miss(session_id, similarity, compute_ms) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_semantic_cache(next, opts = nil) {
+pub fn with_semantic_cache(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_semantic_cache, next)
   }
@@ -1036,26 +1042,26 @@ pub fn with_semantic_cache(next, opts = nil) {
     const threshold = to_float(merged?.threshold ?? __SEMANTIC_CACHE_DEFAULT_THRESHOLD)
     const query_text = __semantic_cache_text(call?.prompt, call?.system)
     const embedded = try {
-      embed(query_text, __semantic_embed_options(merged))
+      embed(harness.embed, query_text, __semantic_embed_options(merged))
     }
     if is_err(embedded) {
       return __safe_invoke(next, call)
     }
     const query_vector = unwrap(embedded)?.vector ?? []
     const cache_opts = __llm_handler_cache_options(merged, "llm.semantic_cache")
-    const index = __semantic_index_load(cache_opts)
+    const index = __semantic_index_load(harness, cache_opts)
     const nearest = __semantic_nearest(index, query_vector)
     if nearest.index >= 0 && nearest.similarity >= threshold {
       const entry = index[nearest.index]
-      __semantic_emit_hit(session_id, entry, nearest.similarity, merged)
+      __semantic_emit_hit(harness, session_id, entry, nearest.similarity, merged)
       return entry.response + {semantic_cache: {hit: true, similarity: nearest.similarity}}
     }
     const started_ms = harness.clock.monotonic_ms()
     const result = __safe_invoke(next, call)
     const compute_ms = harness.clock.monotonic_ms() - started_ms
     if __llm_handler_should_store_result(result) {
-      __semantic_index_store(cache_opts, index, query_vector, result, query_text, merged)
-      __semantic_emit_miss(session_id, nearest.similarity, compute_ms)
+      __semantic_index_store(harness, cache_opts, index, query_vector, result, query_text, merged)
+      __semantic_emit_miss(harness, session_id, nearest.similarity, compute_ms)
     }
     return result + {semantic_cache: {hit: false, similarity: nearest.similarity}}
   }
@@ -1230,7 +1236,7 @@ pub fn with_result_schema(next, schema = nil, opts = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_circuit_breaker(handler, options = nil) {
+pub fn with_circuit_breaker(harness: Harness, handler, options = nil) {
   if !__llm_handler_is_callable(handler) {
     return __partial(with_circuit_breaker, handler)
   }
@@ -1238,8 +1244,8 @@ pub fn with_circuit_breaker(handler, options = nil) {
   const {threshold = 5, reset_ms = 30000} = opts ?? {}
   return { call ->
     const name = opts?.name ?? __circuit_name_for(call)
-    __ensure_llm_handler_circuit(name, threshold, reset_ms)
-    const state = circuit_check(name)
+    __ensure_llm_handler_circuit(harness, name, threshold, reset_ms)
+    const state = harness.runtime.circuit_check(name)
     if state == "open" {
       throw __circuit_open_error(call, name)
     }
@@ -1247,14 +1253,14 @@ pub fn with_circuit_breaker(handler, options = nil) {
       handler(call)
     }
     if is_err(outcome) {
-      circuit_record_failure(name)
+      harness.runtime.circuit_record_failure(name)
       throw unwrap_err(outcome)
     }
     const result = unwrap(outcome)
     if type_of(result) == "dict" && contains(result.keys(), "ok") && !(result?.ok ?? false) {
-      circuit_record_failure(name)
+      harness.runtime.circuit_record_failure(name)
     } else {
-      circuit_record_success(name)
+      harness.runtime.circuit_record_success(name)
     }
     return result
   }
@@ -1493,14 +1499,14 @@ fn __timeout_resolve_ms(opts) {
  *   1. The deadline is forwarded to `call.opts.timeout_ms` so providers
  *      that respect it (HTTP clients, Ollama keep-alive, Anthropic
  *      `request_timeout`) can cancel mid-flight.
- *   2. `now_ms()` measures elapsed time; success envelopes that overran
+ *   2. `harness.clock.now_ms()` measures elapsed time; success envelopes that overran
  *      the deadline are converted to
  *      `{ok: false, status: "timeout", error: {timeout_ms, elapsed_ms}}`.
  *   3. Failure envelopes whose elapsed time exceeded the budget are
  *      relabeled `status: "timeout"` so retry / fallback policies treat
  *      them uniformly.
  *
- * Honors the unified clock — `now_ms()` is mockable in tests via
+ * Honors the unified clock — `harness.clock.now_ms()` is mockable in tests via
  * `mock_time` / `advance_time`.
  *
  * Options:
@@ -1512,7 +1518,7 @@ fn __timeout_resolve_ms(opts) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_timeout(next, opts = nil) {
+pub fn with_timeout(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_timeout, next)
   }
@@ -1607,8 +1613,8 @@ fn __routing_resolve(routes, call) {
  * The canonical use case is **cheap-model-by-default with frontier
  * escalation on ambiguity**:
  *
- *     let cheap   = with_retry(default_llm_caller(), {max_attempts: 2})
- *     let strong  = with_retry(default_llm_caller(), {max_attempts: 3})
+ *     let cheap   = with_retry(harness, default_llm_caller(harness), {max_attempts: 2})
+ *     let strong  = with_retry(harness, default_llm_caller(harness), {max_attempts: 3})
  *     let router  = with_routing({
  *       default: cheap,
  *       routes: [
@@ -1627,7 +1633,7 @@ fn __routing_resolve(routes, call) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_routing(opts) {
+pub fn with_routing(harness: Harness, opts) {
   const cfg = __opts_dict(opts)
   const default_caller = cfg?.default
   const routes = if type_of(cfg?.routes) == "list" {
@@ -1650,7 +1656,7 @@ pub fn with_routing(opts) {
     } else {
       to_string(cfg?.default_name ?? "default")
     }
-    __emit_event(
+    __emit_event(harness, 
       to_string(call?.turn?.session_id ?? ""),
       "llm_routing_decision",
       {route_index: pick.index, route_name: route_name, used_default: pick.index < 0},

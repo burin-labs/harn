@@ -7,7 +7,7 @@
  * `gh`.
  */
 fn _gh(method, params) {
-  return connector_call("github", method, params)
+  return harness.net.connector_call("github", method, params)
 }
 
 /** Construct a live adapter that dispatches to the github connector. */

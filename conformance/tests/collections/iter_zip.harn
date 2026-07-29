@@ -1,11 +1,11 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const pairs = iter([1, 2, 3]).zip([10, 20, 30]).to_list()
   for p in pairs {
-    log("${p.first}=${p.second}")
+    harness.stdio.println("${p.first}=${p.second}")
   }
   const short = iter([1, 2, 3, 4]).zip([10, 20]).to_list()
-  log(len(short))
+  harness.stdio.println(len(short))
   for (a, b) in iter([1, 2, 3, 4]).zip([10, 20]) {
-    log("${a}|${b}")
+    harness.stdio.println("${a}|${b}")
   }
 }

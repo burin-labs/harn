@@ -154,18 +154,15 @@ mod fix_edit_tests {
 /// `test_keywords_const_covers_lexer`). External tooling should consume this
 /// rather than duplicate it.
 pub const KEYWORDS: &[&str] = &[
-    "ask_user",
     "break",
     "catch",
     "const",
     "continue",
     "deadline",
     "defer",
-    "dual_control",
     "else",
     "emit",
     "enum",
-    "escalate_to",
     "eval_pack",
     "exclusive",
     "extends",
@@ -188,7 +185,6 @@ pub const KEYWORDS: &[&str] = &[
     "parallel",
     "pipeline",
     "pub",
-    "request_approval",
     "require",
     "retry",
     "return",

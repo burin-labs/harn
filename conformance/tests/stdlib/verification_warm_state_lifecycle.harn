@@ -1,16 +1,16 @@
 import { verification_start_warm_state, verification_teardown_warm_state } from "std/verification"
 
-fn long_running_command() {
-  if platform() == "windows" {
+fn long_running_command(harness: Harness) {
+  if harness.system.platform().os == "windows" {
     return nil
   }
   return ["sh", "-c", "while true; do sleep 30; done"]
 }
 
-pipeline test(task) {
-  const command = long_running_command()
+pipeline test(harness: Harness, task) {
+  const command = long_running_command(harness)
   if command == nil {
-    __io_println("verification warm-state lifecycle skipped on windows")
+    harness.stdio.println("verification warm-state lifecycle skipped on windows")
     return nil
   }
   const row = {
@@ -48,5 +48,5 @@ pipeline test(task) {
   assert_eq(stopped.status, "torn_down")
   const repeated = verification_teardown_warm_state(started, {wait_result_ms: 100})
   assert_eq(repeated.cancelled, false)
-  __io_println("verification warm-state lifecycle ok")
+  harness.stdio.println("verification warm-state lifecycle ok")
 }

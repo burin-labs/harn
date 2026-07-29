@@ -185,14 +185,12 @@ fn __verdict_event(events) {
   return verdicts[0]
 }
 
-fn __run_case(case, classifier) {
-  const session = "scope-triage-eval-" + to_string(case?.id ?? uuid())
-  const captured = agent_capture_events(
-    session,
+fn __run_case(harness: Harness, case, classifier) {
+  const session = "scope-triage-eval-" + to_string(case?.id ?? harness.random.uuid())
+  const captured = agent_capture_events(harness,  harness, session,
     fn() {
-      agent_session_open(session, {workspace_anchor: __scope_eval_anchor()})
-      return agent_loop(
-        to_string(case?.prompt ?? case?.message ?? ""),
+      harness.agent.open(session, {workspace_anchor: __scope_eval_anchor()})
+      return agent_loop(to_string(case?.prompt ?? case?.message ?? ""),
         nil,
         {
           provider: "mock",
@@ -389,7 +387,7 @@ fn main(harness: Harness) -> int {
   )
   const output_dir = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_OUTPUT", "")
   const resolved_output = if trim(output_dir) == "" {
-    path_join(runtime_paths().run_root, "scope-triage", "latest")
+    path_join(harness.fs.runtime_paths().run_root, "scope-triage", "latest")
   } else {
     output_dir
   }
@@ -403,10 +401,10 @@ fn main(harness: Harness) -> int {
     return 1
   }
   const classifier = if live {
-    pre_turn_scope_classifier({enabled: true, model: model, confidence_threshold: threshold})
+    pre_turn_scope_classifier(harness, {enabled: true, model: model, confidence_threshold: threshold})
   } else {
     pre_turn_scope_classifier(
-      {
+      harness, {
         enabled: true,
         confidence_threshold: threshold,
         classifier: { payload -> __reference_classifier(payload) },
@@ -415,7 +413,7 @@ fn main(harness: Harness) -> int {
   }
   let reports = []
   for case in cases {
-    reports = reports.appending(__run_case(case, classifier))
+    reports = reports.appending(__run_case(harness, case, classifier))
   }
   const report = __summarize(dataset_path, resolved_output, live, model, threshold, cases, reports)
   __mkdirp(harness, resolved_output)
@@ -431,9 +429,9 @@ fn main(harness: Harness) -> int {
       + path_join(resolved_output, "summary.md"),
   )
   if json_mode {
-    __io_println(json_stringify_pretty(report))
+    harness.stdio.println(json_stringify_pretty(report))
   } else {
-    __io_println(
+    harness.stdio.println(
       "scope-triage eval: "
         + to_string(report.correct_cases)
         + "/"

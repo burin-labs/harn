@@ -19,7 +19,7 @@ import { write_jsonl } from "std/jsonl"
 import { is_type } from "std/schema"
 import { with_temp_dir } from "std/testing"
 
-pipeline test_agent_transcript_normalizes_modern_native_messages(_task) {
+pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harness, _task) {
   const records = [
     {type: "message", role: "user", content: [{type: "text", text: "write tests"}]},
     {
@@ -65,7 +65,7 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(_task) {
   assert(is_type(report, agent_transcript_report_schema()), "report satisfies schema")
 }
 
-pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(_task) {
+pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(harness: Harness, _task) {
   const records = [
     {
       type: "response",
@@ -111,7 +111,7 @@ pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request
   assert(results[1].is_error, "error marker classified")
 }
 
-pipeline test_agent_transcript_helpers_cover_provider_variants(_task) {
+pipeline test_agent_transcript_helpers_cover_provider_variants(harness: Harness, _task) {
   assert(
     agent_transcript_text([{type: "text", text: "hello"}, {type: "text", text: "world"}])
       == "hello\nworld",
@@ -139,7 +139,7 @@ pipeline test_agent_transcript_helpers_cover_provider_variants(_task) {
   assert(blocks[0].tool_call_id == "c1", "block id")
 }
 
-pipeline test_agent_transcript_normalize_is_composable(_task) {
+pipeline test_agent_transcript_normalize_is_composable(harness: Harness, _task) {
   const raw = [
     {
       type: "message",
@@ -169,12 +169,10 @@ pipeline test_agent_transcript_normalize_is_composable(_task) {
   )
 }
 
-pipeline test_agent_transcript_read_jsonl(_task) {
-  with_temp_dir(
-    { dir ->
+pipeline test_agent_transcript_read_jsonl(harness: Harness, _task) {
+  with_temp_dir(harness,  harness, { dir ->
       const path = path_join(dir, "llm_transcript.jsonl")
-      write_jsonl(
-        path,
+      write_jsonl(harness,  harness, path,
         [
           {
             type: "message",
@@ -187,14 +185,14 @@ pipeline test_agent_transcript_read_jsonl(_task) {
           },
         ],
       )
-      const rows = agent_transcript_read(path)
+      const rows = agent_transcript_read(harness, path)
       assert(len(rows) == 1, "read one row")
       assert(rows[0].tool_calls[0].args.path == "a", "read JSONL normalizes calls")
     },
   )
 }
 
-pipeline test_agent_transcript_report_surfaces_malformed_records(_task) {
+pipeline test_agent_transcript_report_surfaces_malformed_records(harness: Harness, _task) {
   let report = agent_transcript_normalize_report(
     [
       42,

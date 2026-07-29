@@ -1,12 +1,11 @@
 import { agent_prompt_overrides } from "std/agent/prompts"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [llm_text("<done>##DONE##</done>")],
+    harness.llm, [llm_text("<done>##DONE##</done>")],
     { ->
-      agent_loop(
-        "finish quickly",
+      agent_loop(harness, "finish quickly",
         "Base system.",
         {
           provider: "mock",
@@ -16,7 +15,7 @@ pipeline test(task) {
           prompts: {"agent.loop_contract": {text: "CUSTOM LOOP CONTRACT {{ done_sentinel }}"}},
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(contains(calls[0].system, "CUSTOM LOOP CONTRACT ##DONE##"), "prompt override rendered")
       assert(!contains(calls[0].system, "Keep working until"), "default loop prompt was replaced")
       assert(
@@ -24,8 +23,7 @@ pipeline test(task) {
         "message timestamp visible",
       )
       const bad_override = try {
-        agent_loop(
-          "bad prompt id",
+        agent_loop(harness, "bad prompt id",
           "Base system.",
           {
             provider: "mock",
@@ -43,17 +41,16 @@ pipeline test(task) {
     },
   )
   with_llm_script(
-    [llm_text("<done>##DONE##</done>")],
+    harness.llm, [llm_text("<done>##DONE##</done>")],
     { ->
       const typed_prompt_values = {loop_contract: {text: "TYPED LOOP CONTRACT {{ done_sentinel }}"}}
       const typed_prompt_options = agent_prompt_overrides(typed_prompt_values)
-      agent_loop(
-        "typed override",
+      agent_loop(harness, "typed override",
         "Base system.",
         typed_prompt_options
           + {provider: "mock", loop_until_done: true, max_iterations: 1},
       )
-      const typed_calls = llm_mock_calls()
+      const typed_calls = harness.llm.mock_calls()
       assert(
         contains(typed_calls[0].system, "TYPED LOOP CONTRACT ##DONE##"),
         "typed prompt helper rendered",
@@ -61,20 +58,19 @@ pipeline test(task) {
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("<user_response>turn done</user_response>\n<done>##DONE##</done>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"turn complete\"}"),
     ],
     { ->
-      agent_turn(
-        "turn preamble override",
+      agent_turn(harness, "turn preamble override",
         {
           provider: "mock",
           max_iterations: 2,
           prompts: {"agent.turn_preamble": {text: "CUSTOM TURN PREAMBLE"}},
         },
       )
-      const turn_calls = llm_mock_calls()
+      const turn_calls = harness.llm.mock_calls()
       assert(
         contains(turn_calls[0].system, "CUSTOM TURN PREAMBLE"),
         "agent_turn preamble override rendered",
@@ -89,10 +85,9 @@ pipeline test(task) {
     {handler: { args -> "hello " + args.name }, parameters: {name: {type: "string"}}},
   )
   with_llm_script(
-    [llm_text("<user_response>done</user_response>\n<done>##DONE##</done>")],
+    harness.llm, [llm_text("<user_response>done</user_response>\n<done>##DONE##</done>")],
     { ->
-      agent_loop(
-        "finish with a tool contract",
+      agent_loop(harness, "finish with a tool contract",
         "Base system.",
         {
           provider: "mock",
@@ -107,7 +102,7 @@ pipeline test(task) {
           },
         },
       )
-      const text_contract = llm_mock_calls()[0].system
+      const text_contract = harness.llm.mock_calls()[0].system
       assert(
         contains(text_contract, "name({ key: value })"),
         "text tool syntax is Harn-call shaped",
@@ -125,7 +120,7 @@ pipeline test(task) {
         !contains(text_contract, "{\"name\": \"tool_name\""),
         "legacy JSON tool syntax removed",
       )
-      log("agent_prompt_overrides_and_timestamps tests passed")
+      harness.stdio.println("agent_prompt_overrides_and_timestamps tests passed")
     },
   )
 }

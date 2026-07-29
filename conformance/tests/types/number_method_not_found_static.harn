@@ -3,6 +3,6 @@
 // compile-time type error rather than a silent `nil` or a deferred runtime
 // throw. (The VM keeps a runtime throw as defense-in-depth for receivers
 // whose type escapes static analysis — see `call_number_method`.)
-pipeline default() {
+pipeline default(harness: Harness) {
   const _ = 3.14.frobnicate()
 }

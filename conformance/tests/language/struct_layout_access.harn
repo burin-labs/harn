@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   struct Point {
     x: int
     y: int
@@ -25,5 +25,5 @@ pipeline test(task) {
   }
   const normalized = unwrap(schema_parse(point, schema))
   assert_eq(normalized.label, "origin", "schema defaults preserve struct access")
-  log("struct layout access: all tests passed")
+  harness.stdio.println("struct layout access: all tests passed")
 }

@@ -2,8 +2,8 @@
 // shape without a narrow (`schema_is` / `.has()`) is now a type error — the
 // hole that let unvalidated `json_parse`-style dicts masquerade as typed
 // records. `dict` behaves like `unknown` here.
-pipeline default() {
+pipeline default(harness: Harness) {
   const d: dict = {}
   const bad: {name: string} = d
-  __io_println(bad.name)
+  harness.stdio.println(bad.name)
 }

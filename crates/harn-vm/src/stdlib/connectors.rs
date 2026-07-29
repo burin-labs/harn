@@ -8,7 +8,6 @@ use crate::connectors::{
     active_connector_client, harn_module::active_harn_connector_ctx, ClientError, JwtKeySource,
     JwtVerificationOptions,
 };
-use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
 use crate::value::{VmError, VmValue};
@@ -22,13 +21,13 @@ pub(crate) fn register_connector_builtins(vm: &mut Vm) {
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &CONNECTOR_CALL_IMPL_DEF,
-    &SECRET_GET_IMPL_DEF,
-    &EVENT_LOG_EMIT_IMPL_DEF,
     &METRICS_INC_IMPL_DEF,
     &CONNECTOR_SHARED_VERIFY_JWT_INLINE_IMPL_DEF,
 ];
 
 #[harn_builtin(
+    exposure = "harness.net.connector_call",
+    effects = ["network.mutate@dynamic"],
     sig = "connector_call(provider: string, method: string, params?: dict) -> any",
     kind = "async",
     category = "connectors"
@@ -63,81 +62,10 @@ async fn connector_call_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("secret_get", &[Param::new("args", TY_ANY)], TY_ANY),
-    kind = "async",
-    category = "connectors"
-)]
-async fn secret_get_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let raw = required_string_arg(&args, 0, "secret_get", "secret_id")?;
-    let ctx = active_harn_connector_ctx().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "secret_get: no active Harn connector context",
-        )))
-    })?;
-    let secret_id = crate::secrets::parse_secret_id(raw.as_str()).map_err(|_| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "secret_get: expected secret id in namespace/name, namespace/name@version, or harn-secret://namespace/name form",
-        )))
-    })?;
-    let secret = ctx.secrets.get(&secret_id).await.map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "secret_get: {error}"
-        ))))
-    })?;
-    secret.with_exposed(|bytes| {
-        std::str::from_utf8(bytes)
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value.to_string())))
-            .map_err(|error| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                    "secret_get: secret '{secret_id}' is not valid UTF-8: {error}"
-                ))))
-            })
-    })
-}
-
-#[harn_builtin(
-    sig = "event_log_emit(topic: string, kind: string, payload?: any, headers?: dict) -> int",
-    kind = "async",
-    category = "connectors"
-)]
-async fn event_log_emit_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let topic_name = required_string_arg(&args, 0, "event_log_emit", "topic")?;
-    let kind = required_string_arg(&args, 1, "event_log_emit", "kind")?;
-    let payload = args
-        .get(2)
-        .map(vm_value_to_json)
-        .unwrap_or(serde_json::Value::Null);
-    let headers = optional_headers_arg(&args, 3, "event_log_emit")?;
-    let ctx = active_harn_connector_ctx().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "event_log_emit: no active Harn connector context",
-        )))
-    })?;
-    let topic = Topic::new(topic_name).map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "event_log_emit: invalid topic: {error}"
-        ))))
-    })?;
-    let event_id = ctx
-        .event_log
-        .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
-        .await
-        .map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "event_log_emit: {error}"
-            ))))
-        })?;
-    Ok(VmValue::Int(event_id as i64))
-}
-
-#[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("metrics_inc", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "harness.obs.metrics_inc",
+    effects = ["observability.write@arg0"],
+    sig_expr = BuiltinSignature::variadic("metrics_inc", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "connectors"
 )]
@@ -170,6 +98,8 @@ async fn metrics_inc_impl(
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "connector_shared_verify_jwt_inline(token: string, jwks: dict, options?: dict) -> dict",
     kind = "async",
     category = "connectors"
@@ -229,23 +159,6 @@ fn client_error_to_vm(error: ClientError) -> VmError {
     match error {
         ClientError::EgressBlocked(blocked) => blocked.to_vm_error(),
         other => VmError::Thrown(VmValue::String(arcstr::ArcStr::from(other.to_string()))),
-    }
-}
-
-fn optional_headers_arg(
-    args: &[VmValue],
-    index: usize,
-    builtin: &str,
-) -> Result<BTreeMap<String, String>, VmError> {
-    match args.get(index) {
-        None | Some(VmValue::Nil) => Ok(BTreeMap::new()),
-        Some(VmValue::Dict(dict)) => Ok(dict
-            .iter()
-            .map(|(key, value)| (key.to_string(), value.display()))
-            .collect()),
-        Some(_other) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{builtin}: headers must be a dict when provided"),
-        )))),
     }
 }
 

@@ -7,7 +7,7 @@
 // Run with: cargo run --quiet --bin harn -- run examples/llm_cost_budget.harn
 import { with_budget } from "std/llm/handlers"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const synthetic = { _call ->
     return {
       ok: true,
@@ -28,14 +28,14 @@ pipeline default() {
   while i < 5 {
     const env = caller(call)
     if !(env?.ok ?? false) {
-      __io_println("call " + to_string(i + 1) + " -> " + to_string(env.status))
+      harness.stdio.println("call " + to_string(i + 1) + " -> " + to_string(env.status))
       if exceeded_at < 0 {
         exceeded_at = i + 1
       }
     } else {
-      __io_println("call " + to_string(i + 1) + " -> ok")
+      harness.stdio.println("call " + to_string(i + 1) + " -> ok")
     }
     i = i + 1
   }
-  __io_println("exceeded after " + to_string(exceeded_at - 1) + " successful calls")
+  harness.stdio.println("exceeded after " + to_string(exceeded_at - 1) + " successful calls")
 }

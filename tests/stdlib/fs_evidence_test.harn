@@ -2,10 +2,10 @@
 import { EvidenceReceipt, search_evidence } from "std/fs"
 import { assert_eq } from "std/testing"
 
-pipeline test_search_evidence_returns_typed_one_pass_receipt(_task) {
-  const roots = [{id: "repo", path: path_join(source_dir(), "../fixtures/fs_evidence")}]
+pipeline test_search_evidence_returns_typed_one_pass_receipt(harness: Harness, _task) {
+  const roots = [{id: "repo", path: path_join(harness.fs.source_dir(), "../fixtures/fs_evidence")}]
   const patterns = [{id: "whole", text: "needle"}, {id: "prefix", text: "need"}]
-  const receipt: EvidenceReceipt = search_evidence(roots, patterns, {preset: "source", threads: 2})
+  const receipt: EvidenceReceipt = search_evidence(harness.fs, roots, patterns, {preset: "source", threads: 2})
   assert_eq(receipt.schema_version, "harn.fs.evidence.v1")
   assert_eq(receipt.status, "complete")
   assert_eq(receipt.files_scanned, 1)

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
+use crate::stdlib::macros::harn_builtin;
 use crate::stdlib::options::{expect_string_arg, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -284,13 +285,25 @@ async fn upload_file(path: String, provider: String) -> Result<String, VmError> 
 }
 
 pub(crate) fn register_file_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("__files_upload", |_ctx, args| async move {
-        let path = expect_string_arg(&args, 0, "__files_upload", ErrorKind::Runtime)?.to_string();
-        let provider =
-            expect_string_arg(&args, 1, "__files_upload", ErrorKind::Runtime)?.to_string();
-        let file_id = upload_file(path, provider).await?;
-        Ok(VmValue::String(arcstr::ArcStr::from(file_id)))
-    });
+    vm.register_builtin_def(&FILES_UPLOAD_BUILTIN_DEF);
+}
+
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__files_upload(path: string, provider: string) -> string",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
+async fn files_upload_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let path = expect_string_arg(&args, 0, "__files_upload", ErrorKind::Runtime)?.to_string();
+    let provider = expect_string_arg(&args, 1, "__files_upload", ErrorKind::Runtime)?.to_string();
+    let file_id = upload_file(path, provider).await?;
+    Ok(VmValue::String(arcstr::ArcStr::from(file_id)))
 }
 
 #[cfg(test)]

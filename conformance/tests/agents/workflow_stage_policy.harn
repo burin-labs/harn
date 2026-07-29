@@ -6,21 +6,21 @@ import {
   workflow_prepare_static_stage,
 } from "std/workflow/stage"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const verification = workflow_evaluate_verification(
     {
       verify: {assert_text: "ok", expect_status: 0},
       result: {visible_text: "all ok", exit_status: 0},
     },
   )
-  __io_println(verification.kind)
-  __io_println(verification.ok)
-  __io_println(len(verification.checks))
+  harness.stdio.println(verification.kind)
+  harness.stdio.println(verification.ok)
+  harness.stdio.println(len(verification.checks))
   const failed_verification = workflow_evaluate_verification(
     {verify: {assert_text: "missing", expect_status: 1}, result: {text: "present", exit_status: 0}},
   )
-  __io_println(failed_verification.ok)
-  __io_println(failed_verification.checks[1].actual)
+  harness.stdio.println(failed_verification.ok)
+  harness.stdio.println(failed_verification.checks[1].actual)
   const condition = workflow_evaluate_condition(
     {
       metadata: {contains_text: "needle"},
@@ -30,42 +30,42 @@ pipeline default() {
       ],
     },
   )
-  __io_println(condition.matched)
-  __io_println(json_stringify(condition.consumed_artifact_ids))
+  harness.stdio.println(condition.matched)
+  harness.stdio.println(json_stringify(condition.consumed_artifact_ids))
   const kind_condition = workflow_evaluate_condition(
     {metadata: {artifact_kind: "diff"}, artifacts: [{id: "d", kind: "diff"}]},
   )
-  __io_println(kind_condition.matched)
+  harness.stdio.println(kind_condition.matched)
   const verify_outcome = workflow_classify_stage_outcome(
     {node_kind: "verify", result: {status: "completed"}, verification: {ok: false}},
   )
-  __io_println(verify_outcome.outcome)
-  __io_println(verify_outcome.branch)
+  harness.stdio.println(verify_outcome.outcome)
+  harness.stdio.println(verify_outcome.branch)
   const stuck_outcome = workflow_classify_stage_outcome(
     {node_kind: "stage", result: {status: "stuck"}, verification: {ok: true}},
   )
-  __io_println(stuck_outcome.outcome)
-  __io_println(stuck_outcome.branch)
+  harness.stdio.println(stuck_outcome.outcome)
+  harness.stdio.println(stuck_outcome.branch)
   const done_outcome = workflow_classify_stage_outcome(
     {node_kind: "stage", result: {status: "done"}, verification: {ok: true}},
   )
-  __io_println(done_outcome.outcome)
-  __io_println(done_outcome.branch)
+  harness.stdio.println(done_outcome.outcome)
+  harness.stdio.println(done_outcome.branch)
   const subagent_outcome = workflow_classify_stage_outcome(
     {node_kind: "subagent", result: {status: "completed"}, verification: {ok: true}},
   )
-  __io_println(subagent_outcome.outcome)
-  __io_println(subagent_outcome.branch)
-  const static_condition = workflow_prepare_static_stage(
+  harness.stdio.println(subagent_outcome.outcome)
+  harness.stdio.println(subagent_outcome.branch)
+  const static_condition = workflow_prepare_static_stage(harness, 
     {
       node_id: "gate",
       node: {kind: "condition", metadata: {artifact_kind: "summary"}},
       artifacts: [{id: "s", kind: "summary", text: "ok"}],
     },
   )
-  __io_println(static_condition.result.text)
-  __io_println(static_condition.outcome)
-  const static_reduce = workflow_prepare_static_stage(
+  harness.stdio.println(static_condition.result.text)
+  harness.stdio.println(static_condition.outcome)
+  const static_reduce = workflow_prepare_static_stage(harness, 
     {
       node_id: "reduce",
       node: {
@@ -76,10 +76,10 @@ pipeline default() {
       artifacts: [{id: "a", kind: "summary", text: "one"}, {id: "b", kind: "summary", text: "two"}],
     },
   )
-  __io_println(static_reduce.result.text)
-  __io_println(static_reduce.artifacts[0].kind)
-  __io_println(json_stringify(static_reduce.artifacts[0].lineage))
-  const static_escalation = workflow_prepare_static_stage(
+  harness.stdio.println(static_reduce.result.text)
+  harness.stdio.println(static_reduce.artifacts[0].kind)
+  harness.stdio.println(json_stringify(static_reduce.artifacts[0].lineage))
+  const static_escalation = workflow_prepare_static_stage(harness, 
     {
       node_id: "escalate",
       node: {
@@ -89,12 +89,12 @@ pipeline default() {
       artifacts: [{id: "input", kind: "plan", text: "blocked"}],
     },
   )
-  __io_println(static_escalation.result.text)
-  __io_println(static_escalation.artifacts[0].data.queue)
-  __io_println(static_escalation.branch)
+  harness.stdio.println(static_escalation.result.text)
+  harness.stdio.println(static_escalation.artifacts[0].data.queue)
+  harness.stdio.println(static_escalation.branch)
   clear_host_mocks()
   mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
-  const static_gate = workflow_prepare_static_stage(
+  const static_gate = workflow_prepare_static_stage(harness, 
     {
       node_id: "gate",
       node: {
@@ -105,26 +105,26 @@ pipeline default() {
       artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
     },
   )
-  __io_println(static_gate.branch)
-  __io_println(static_gate.artifacts[0].data.approval_id)
-  __io_println(static_gate.artifacts[0].data.approved)
-  const argv = if platform() == "windows" {
+  harness.stdio.println(static_gate.branch)
+  harness.stdio.println(static_gate.artifacts[0].data.approval_id)
+  harness.stdio.println(static_gate.artifacts[0].data.approved)
+  const argv = if harness.system.platform().os == "windows" {
     ["cmd", "/C", "echo|set /p=command-ok"]
   } else {
     ["printf", "command-ok"]
   }
-  const static_command = workflow_prepare_static_stage(
+  const static_command = workflow_prepare_static_stage(harness, 
     {
       node_id: "cmd",
       node: {kind: "stage", mode: "command", metadata: {command_tool: "run", command_args: argv}},
       artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
     },
   )
-  __io_println(static_command.branch)
-  __io_println(static_command.result.ok)
-  __io_println(contains(static_command.result.text, "command-ok"))
-  __io_println(static_command.artifacts[0].kind)
-  const static_compact = workflow_prepare_static_stage(
+  harness.stdio.println(static_command.branch)
+  harness.stdio.println(static_command.result.ok)
+  harness.stdio.println(contains(static_command.result.text, "command-ok"))
+  harness.stdio.println(static_command.artifacts[0].kind)
+  const static_compact = workflow_prepare_static_stage(harness, 
     {
       node_id: "compact",
       node: {
@@ -140,8 +140,8 @@ pipeline default() {
       ],
     },
   )
-  __io_println(static_compact.branch)
-  __io_println(static_compact.artifacts[0].kind)
-  __io_println(contains(static_compact.artifacts[0].text, "auto-compacted"))
-  __io_println(static_compact.artifacts[0].data.compact_options.keep_last)
+  harness.stdio.println(static_compact.branch)
+  harness.stdio.println(static_compact.artifacts[0].kind)
+  harness.stdio.println(contains(static_compact.artifacts[0].text, "auto-compacted"))
+  harness.stdio.println(static_compact.artifacts[0].data.compact_options.keep_last)
 }

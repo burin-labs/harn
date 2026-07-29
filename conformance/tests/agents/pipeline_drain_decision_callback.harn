@@ -19,23 +19,23 @@
  */
 import { lifecycle_audit_log_take } from "std/lifecycle"
 
-const observed = atomic(0)
+const observed = harness.runtime.atomic(0)
 
-const observed_action_resume = atomic(0)
+const observed_action_resume = harness.runtime.atomic(0)
 
-const observed_action_cancel = atomic(0)
+const observed_action_cancel = harness.runtime.atomic(0)
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "on_drain_decision",
     { event ->
-      atomic_add(observed, 1)
+      harness.runtime.atomic_add(observed, 1)
       if event.action == "resume" {
-        atomic_add(observed_action_resume, 1)
+        harness.runtime.atomic_add(observed_action_resume, 1)
       }
       if event.action == "cancel" {
-        atomic_add(observed_action_cancel, 1)
+        harness.runtime.atomic_add(observed_action_cancel, 1)
       }
       return nil
     },
@@ -49,17 +49,17 @@ pipeline default() {
     "on_drain_decision",
     {action: "cancel", item: {category: "suspended_subagent", id: "worker://triage/43"}},
   )
-  __io_println("resume_control=" + resume_event.control)
-  __io_println("cancel_control=" + cancel_event.control)
-  __io_println("observed=" + to_string(atomic_get(observed)))
-  __io_println("observed_resume=" + to_string(atomic_get(observed_action_resume)))
-  __io_println("observed_cancel=" + to_string(atomic_get(observed_action_cancel)))
+  harness.stdio.println("resume_control=" + resume_event.control)
+  harness.stdio.println("cancel_control=" + cancel_event.control)
+  harness.stdio.println("observed=" + to_string(harness.runtime.atomic_get(observed)))
+  harness.stdio.println("observed_resume=" + to_string(harness.runtime.atomic_get(observed_action_resume)))
+  harness.stdio.println("observed_cancel=" + to_string(harness.runtime.atomic_get(observed_action_cancel)))
   // Clear hooks before the on_finish recording path, since the audit
   // route currently requires no registered hook to round-trip safely
   // (the lifecycle dispatcher requires an async-builtin VM context;
   // tracked separately in #1859 follow-ups).
-  clear_session_hooks()
-  pipeline_on_finish(
+  harness.agent.clear_session_hooks()
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const receipt = harness.emit_audit(
         "drain_decision",

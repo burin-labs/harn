@@ -662,6 +662,8 @@ fn parse_request(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "find_evidence(roots: list, patterns: list, options?: dict) -> any",
     category = "fs",
     doc = "Search labeled roots once for many labeled literal patterns and return deterministic evidence."

@@ -29,7 +29,7 @@ fn nested(limit: int) -> int {
   }
 }
 
-pipeline test(task) {
-  log(first_over(20))
-  log(nested(7))
+pipeline test(harness: Harness, task) {
+  harness.stdio.println(first_over(20))
+  harness.stdio.println(nested(7))
 }

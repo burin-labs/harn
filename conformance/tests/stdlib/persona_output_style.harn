@@ -1,18 +1,18 @@
 import "std/personas/prelude"
 
 @persona(output_style: "concise")
-fn styled_reviewer() {
-  log("reviewing")
+fn styled_reviewer(harness: Harness) {
+  harness.stdio.println("reviewing")
 }
 
 @persona(output_style: {name: "friendly", instructions: "Be warm."})
-fn styled_helper() {
-  log("helping")
+fn styled_helper(harness: Harness) {
+  harness.stdio.println("helping")
 }
 
 @persona(name: "styled_plain")
-fn styled_plain() {
-  log("plain")
+fn styled_plain(harness: Harness) {
+  harness.stdio.println("plain")
 }
 
 /**
@@ -20,13 +20,13 @@ fn styled_plain() {
  * table form) back via persona_output_style(), and confirms personas without
  * a declared style — and unknown personas — return nil.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const a = persona_output_style("styled_reviewer")
-  __io_println(a.name)
-  __io_println(a.instructions == nil)
+  harness.stdio.println(a.name)
+  harness.stdio.println(a.instructions == nil)
   const b = persona_output_style("styled_helper")
-  __io_println(b.name)
-  __io_println(b.instructions)
-  __io_println(persona_output_style("styled_plain") == nil)
-  __io_println(persona_output_style("unknown") == nil)
+  harness.stdio.println(b.name)
+  harness.stdio.println(b.instructions)
+  harness.stdio.println(persona_output_style("styled_plain") == nil)
+  harness.stdio.println(persona_output_style("unknown") == nil)
 }

@@ -202,7 +202,7 @@ pub fn run_release_smoke(config: ReleaseSmokeConfig, adapters = nil) -> ReleaseS
   return {platform: config.platform, steps: steps, failed: failed, success: failed.count == 0}
 }
 
-fn render_report(report: ReleaseSmokeReport) {
+fn render_report(harness: Harness, report: ReleaseSmokeReport) {
   for step in report.steps {
     harness.stdio.println("::group::[${report.platform}] ${step.name}")
     const output = result_output(step)
@@ -218,7 +218,7 @@ fn render_report(report: ReleaseSmokeReport) {
         "failed (exit ${step?.exit_code ?? "unknown"})"
       }
       gha_error(
-        "release-smoke (${report.platform}): ${step.name} ${detail}",
+        harness.stdio, "release-smoke (${report.platform}): ${step.name} ${detail}",
         {title: "release-smoke: ${report.platform}/${step.name}"},
       )
     }
@@ -227,7 +227,7 @@ fn render_report(report: ReleaseSmokeReport) {
     harness.stdio.println("release-smoke (${report.platform}): all capabilities ok")
   } else {
     gha_error(
-      "release-smoke (${report.platform}): ${report.failed.count} capability check(s) regressed",
+      harness.stdio, "release-smoke (${report.platform}): ${report.failed.count} capability check(s) regressed",
       {title: "release-smoke: ${report.platform}"},
     )
   }
@@ -251,7 +251,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("release-smoke: timeout values must be positive")
     return 2
   }
-  const root = path_normalize(path_join(source_dir(), ".."))
+  const root = path_normalize(path_join(harness.fs.source_dir(), ".."))
   const temp = harness.fs.mkdtemp_in_workspace("release-smoke-")
   const watch_target = path_join(temp, "watch_target.harn")
   harness.fs.write_text(
@@ -262,7 +262,7 @@ fn main(harness: Harness) -> int {
     run_release_smoke(
       {
         candidate: to_string(options.candidate),
-        platform: display_platform(platform()),
+        platform: display_platform(harness.system.platform().os),
         root: root,
         step_timeout_ms: step_timeout_ms,
         watch_timeout_ms: watch_timeout_ms,

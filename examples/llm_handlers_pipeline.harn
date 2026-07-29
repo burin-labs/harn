@@ -6,16 +6,16 @@
 // Run with: cargo run --quiet --bin harn -- run examples/llm_handlers_pipeline.harn
 import { compose, with_cache, with_logging, with_retry } from "std/llm/handlers"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Synthetic base — counts attempts via atomic, fails once then succeeds.
-  const counter = atomic(0)
+  const counter = harness.runtime.atomic(0)
   const base = { _call ->
-    let n = atomic_add(counter, 1)
+    let n = harness.runtime.atomic_add(counter, 1)
     if n < 1 {
-      __io_println("[base]   attempt " + to_string(n + 1) + " -> transient blip")
+      harness.stdio.println("[base]   attempt " + to_string(n + 1) + " -> transient blip")
       return {ok: false, status: "transient", error: "blip"}
     }
-    __io_println("[base]   attempt " + to_string(n + 1) + " -> success")
+    harness.stdio.println("[base]   attempt " + to_string(n + 1) + " -> success")
     return {
       ok: true,
       value: {
@@ -30,15 +30,15 @@ pipeline default() {
   }
   // compose([logging, retry, cache])(base) == logging(retry(cache(base))).
   const log_sink = { record ->
-    __io_println(
+    harness.stdio.println(
       "[logging] status=" + to_string(record?.status) + " latency_ms="
         + to_string(record?.latency_ms),
     )
   }
   const stack = compose(
     [
-      { next -> with_logging(next, {sink: log_sink}) },
-      { next -> with_retry(next, {max_attempts: 3, base_ms: 1}) },
+      { next -> with_logging(harness, next, {sink: log_sink}) },
+      { next -> with_retry(harness, next, {max_attempts: 3, base_ms: 1}) },
       { next -> with_cache(next) },
     ],
   )
@@ -51,6 +51,6 @@ pipeline default() {
       turn: {iteration: 0, session_id: "", attempt: 1},
     },
   )
-  __io_println("final: ok=" + to_string(env.ok) + " text=" + to_string(env.value.text))
-  __io_println("retries_attempted=" + to_string(env?.retries_attempted ?? 0))
+  harness.stdio.println("final: ok=" + to_string(env.ok) + " text=" + to_string(env.value.text))
+  harness.stdio.println("retries_attempted=" + to_string(env?.retries_attempted ?? 0))
 }

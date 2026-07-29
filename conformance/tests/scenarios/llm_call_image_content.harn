@@ -1,6 +1,6 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const png_path = path_join(harness.fs.temp_dir(), "vision_fixture.png")
   harness.fs.write_bytes(
     png_path,
@@ -12,9 +12,9 @@ pipeline test(task) {
   const image_base64 = bytes_to_base64(png)
   harness.fs.delete(png_path)
   with_llm_script(
-    [llm_text("seen")],
+    harness.llm, [llm_text("seen")],
     { ->
-      const result = llm_call(
+      const result = harness.llm.call(
         "",
         nil,
         {
@@ -33,7 +33,7 @@ pipeline test(task) {
         },
       )
       assert_eq(result.text, "seen")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert_eq(len(calls), 1)
       const blocks = calls[0].messages[0].content
       assert_eq(blocks[0].type, "text")
@@ -42,7 +42,7 @@ pipeline test(task) {
       assert_eq(blocks[1].base64, image_base64)
       assert_eq(blocks[1].detail, "low")
       const gate_error = try {
-        llm_call("plain", nil, {provider: "mock", model: "gpt-3.5-turbo", vision: true})
+        harness.llm.call("plain", nil, {provider: "mock", model: "gpt-3.5-turbo", vision: true})
         "unreachable"
       } catch (e) {
         e
@@ -51,7 +51,7 @@ pipeline test(task) {
         contains(gate_error, "option `vision` is not supported"),
         "vision gate should reject non-vision models",
       )
-      log("llm_call_image_content tests passed")
+      harness.stdio.println("llm_call_image_content tests passed")
     },
   )
 }

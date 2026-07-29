@@ -10,9 +10,9 @@ const REQUEST = {
   timeout_ms: 1000,
 }
 
-fn test_wait_for_ready() {
+fn test_wait_for_ready(harness: Harness) {
   const event = command_wait_for_output(
-    {handle_id: "hto-test-1", command_id: "cmd-test-1"},
+    harness.tools, {handle_id: "hto-test-1", command_id: "cmd-test-1"},
     REQUEST.pattern,
     {
       source: REQUEST.source,
@@ -32,7 +32,7 @@ fn test_wait_for_ready() {
   require event.result.status == "running"
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_host_mocks(
     [
       {
@@ -63,5 +63,5 @@ pipeline default() {
     ],
     test_wait_for_ready,
   )
-  __io_println("ok")
+  harness.stdio.println("ok")
 }

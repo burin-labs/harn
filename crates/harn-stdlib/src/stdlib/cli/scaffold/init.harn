@@ -145,7 +145,7 @@ fn __basic_files(project_name: string, harn_range: string) -> list {
         + "\n"
         + "pipeline default(task) {\n"
         + "  const greeting = greet(\"world\")\n"
-        + "  log(greeting)\n"
+        + "  harness.stdio.println(greeting)\n"
         + "}\n",
     ],
     [
@@ -188,7 +188,7 @@ fn __agent_files(project_name: string, harn_range: string) -> list {
     + "  const path = path_join(cwd(), \"agent\", \"instructions.md\")\n"
     + "  if harness.fs.exists(path) {\n" + "    return harness.fs.read_text(path)\n" + "  }\n"
     + "  return \"Review the workspace carefully.\"\n" + "}\n" + "\n"
-    + "pub fn agent_app_tools(root) {\n" + "  return agent_host_tools(\n" + "    nil,\n" + "    {\n"
+    + "pub fn agent_app_tools(root) {\n" + "  return agent_host_tools(harness, \n" + "    nil,\n" + "    {\n"
     + "      root: root,\n" + "      cwd: root,\n"
     + "      enabled_tools: [\"list_directory\", \"read_file\", \"search_files\"],\n"
     + "      max_inline_bytes: 6000,\n"
@@ -216,12 +216,12 @@ fn __agent_files(project_name: string, harn_range: string) -> list {
     + "      max_iterations: opts?.max_iterations ?? 6,\n"
     + "      loop_until_done: opts?.loop_until_done ?? true,\n"
     + "      llm_options: opts?.llm_options ?? {temperature: 0},\n" + "    },\n" + "  )\n"
-    + "  const result = agent_loop(task, audit_opts?.system, audit_opts)\n"
+    + "  const result = agent_loop(harness, task, audit_opts?.system, audit_opts)\n"
     + "  if opts?.emit_result ?? true {\n" + "    emit_agent_result(harness, result)\n" + "  }\n"
     + "  return result\n" + "}\n" + "\n" + "pub fn run_agent_app(harness: Harness) {\n"
     + "  const result = run_agent_app_with_options(harness, {emit_result: false})\n"
     + "  const exit_code = emit_agent_result(harness, result)\n" + "  if exit_code != 0 {\n"
-    + "    exit(exit_code)\n" + "  }\n" + "  return result\n" + "}\n"
+    + "    harness.runtime.exit(exit_code)\n" + "  }\n" + "  return result\n" + "}\n"
   const instructions = "# Agent Instructions\n"
     + "\n"
     + "You are a careful workspace agent. Inspect before answering, keep changes scoped,\n"
@@ -243,8 +243,8 @@ fn __agent_files(project_name: string, harn_range: string) -> list {
     "import { agent_result_exit_code, run_agent_app_with_options } from \"../agent/app\"\n"
     + "\n"
     + "pipeline test_agent_smoke(task) {\n"
-    + "  llm_mock_clear()\n"
-    + "  llm_mock({text: \"<user_response>Repository looks healthy.</user_response>\"})\n"
+    + "  harness.llm.mock_clear()\n"
+    + "  harness.llm.mock_enqueue({text: \"<user_response>Repository looks healthy.</user_response>\"})\n"
     + "  const result = run_agent_app_with_options(\n"
     + "    harness,\n"
     + "    {\n"
@@ -311,7 +311,7 @@ fn __chat_files(project_name: string, harn_range: string) -> list {
     + "\n"
     + "fn stream_reply(harness: Harness, prompt, system, options) {\n"
     + "  let answer = \"\"\n"
-    + "  const chunks = llm_stream_call(prompt, system, options)\n"
+    + "  const chunks = harness.llm.stream_call(prompt, system, options)\n"
     + "  for chunk in chunks {\n"
     + "    harness.stdio.print(chunk.visible_delta)\n"
     + "    answer = chunk.partial\n"
@@ -321,8 +321,8 @@ fn __chat_files(project_name: string, harn_range: string) -> list {
     + "}\n"
     + "\n"
     + "fn main(harness: Harness) {\n"
-    + "  const system = env_or(\"HARN_CHAT_SYSTEM\", \"You are a concise, helpful assistant.\")\n"
-    + "  const model = env_or(\"HARN_CHAT_MODEL\", \"chat\")\n"
+    + "  const system = env_or(harness, \"HARN_CHAT_SYSTEM\", \"You are a concise, helpful assistant.\")\n"
+    + "  const model = env_or(harness, \"HARN_CHAT_MODEL\", \"chat\")\n"
     + "  const options = {model: model, max_tokens: 2048, temperature: 0.7}\n"
     + "  let history = \"\"\n"
     + "  harness.stdio.println(\"Harn chat. Type /clear to reset history or /exit to quit.\")\n"
@@ -425,7 +425,7 @@ fn __eval_files(project_name: string, harn_range: string) -> list {
     + "  eval_metric(\"passed\", passed)\n"
     + "  eval_metric(\"output_length\", len(output))\n"
     + "\n"
-    + "  log(json_stringify({\n"
+    + "  harness.stdio.println(json_stringify({\n"
     + "    input: input,\n"
     + "    output: output,\n"
     + "    passed: passed\n"
@@ -470,12 +470,12 @@ fn __pipeline_lab_files(project_name: string, harn_range: string) -> list {
     + "  return true\n"
     + "}\n"
   const pipeline_harn = "pipeline default(task) {\n"
-    + "  const context = build_context(env_or(\"HARN_TASK\", \"\"))\n"
-    + "  const result = llm_call(\n"
+    + "  const context = build_context(env_or(harness, \"HARN_TASK\", \"\"))\n"
+    + "  const result = harness.llm.call(\n"
     + "    \"Task: \" + context.task + \"\\nWorkspace: \" + context.cwd,\n"
     + "    \"You are a concise coding assistant. Reply in 3 bullets max.\",\n"
     + "  )\n"
-    + "  log(result.text)\n"
+    + "  harness.stdio.println(result.text)\n"
     + "}\n"
   const readme = "# Pipeline Lab\n"
     + "\n"
@@ -552,7 +552,7 @@ fn __package_files(project_name: string, harn_range: string, harn_version: strin
   const main_harn = "import \"lib/main\"\n"
     + "\n"
     + "pipeline default(task) {\n"
-    + "  log(greet(\"world\"))\n"
+    + "  harness.stdio.println(greet(\"world\"))\n"
     + "}\n"
   const test_harn = "import \"../lib/main\"\n"
     + "\n"
@@ -637,7 +637,7 @@ fn __connector_files(project_name: string, harn_range: string, harn_version: str
   const main_harn = "import \"connectors/echo\"\n"
     + "\n"
     + "pipeline default(task) {\n"
-    + "  log(provider_id())\n"
+    + "  harness.stdio.println(provider_id())\n"
     + "}\n"
   const test_harn = "import \"../connectors/echo\"\n"
     + "\n"
@@ -810,7 +810,7 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(
       "init: HARN_INIT_DIR, HARN_INIT_HARN_RANGE, and HARN_INIT_HARN_VERSION must be set",
     )
-    exit(2)
+    harness.runtime.exit(2)
   }
   if name != "" {
     harness.stdio.println("Creating project '" + name + "'...")
@@ -821,7 +821,7 @@ fn main(harness: Harness) {
     __template_files(template, project_name, harn_range, harn_version)
   } catch (e) {
     harness.stdio.eprintln(to_string(e))
-    exit(2)
+    harness.runtime.exit(2)
   }
   for entry in files {
     __write_if_new(harness, dir, entry[0], entry[1])

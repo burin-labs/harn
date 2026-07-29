@@ -1,16 +1,16 @@
 /** Test that date_parse validates month/day ranges */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Valid date should work
   const ts = date_parse("2024-06-15")
-  __io_println(ts > 0)
+  harness.stdio.println(ts > 0)
   // Invalid month
   const r1 = try {
     date_parse("2024-13-01")
   }
-  __io_println(is_err(r1))
+  harness.stdio.println(is_err(r1))
   // Invalid day
   const r2 = try {
     date_parse("2024-01-32")
   }
-  __io_println(is_err(r2))
+  harness.stdio.println(is_err(r2))
 }

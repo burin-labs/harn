@@ -1,15 +1,15 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // RFC 4231 test case 2.
   const mac = hmac_sha256("Jefe", "what do ya want for nothing?")
-  log(mac)
+  harness.stdio.println(mac)
   // GitHub's documented webhook signature vector.
   const github = hmac_sha256("It's a Secret to Everybody", "Hello, World!")
-  log(github)
+  harness.stdio.println(github)
   // Slack-style base64 output.
   const slack = hmac_sha256_base64("Jefe", "what do ya want for nothing?")
-  log(slack)
+  harness.stdio.println(slack)
   // Constant-time equality. Same value, then differing byte, then differing length.
-  log(constant_time_eq(mac, mac))
-  log(constant_time_eq(mac, "0000000000000000000000000000000000000000000000000000000000000000"))
-  log(constant_time_eq(mac, "abc"))
+  harness.stdio.println(constant_time_eq(mac, mac))
+  harness.stdio.println(constant_time_eq(mac, "0000000000000000000000000000000000000000000000000000000000000000"))
+  harness.stdio.println(constant_time_eq(mac, "abc"))
 }

@@ -13,17 +13,17 @@ fn _has_tool(registry, name) {
   return false
 }
 
-pipeline test_agent_await_resumption_injected_by_default(task) {
+pipeline test_agent_await_resumption_injected_by_default(harness: Harness, task) {
   const tools = agent_lifecycle_tools(tool_registry(), {})
   assert(_has_tool(tools, "agent_await_resumption"))
 }
 
-pipeline test_agent_await_resumption_can_be_disabled(task) {
+pipeline test_agent_await_resumption_can_be_disabled(harness: Harness, task) {
   const tools = agent_lifecycle_tools(tool_registry(), {agent_await_resumption_enabled: false})
   assert(!_has_tool(tools, "agent_await_resumption"))
 }
 
-pipeline test_agent_await_resumption_opt_out_keeps_parent_subagent_tools(task) {
+pipeline test_agent_await_resumption_opt_out_keeps_parent_subagent_tools(harness: Harness, task) {
   const tools = agent_lifecycle_tools(
     tool_registry(),
     {agent_await_resumption_enabled: false, subagents: true},

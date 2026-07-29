@@ -1,5 +1,5 @@
 import * as lib from "namespace_import_lib"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   lib.does_not_exist()
 }

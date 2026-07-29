@@ -16,7 +16,7 @@ pub fn count_substring(haystack: string, needle: string) -> int {
  * conformance test source, and docs/fixtures may legitimately reference
  * the literal `@xfail:` string when describing the convention.
  */
-pub fn count_xfail_markers(root: string) -> int {
+pub fn count_xfail_markers(harness: Harness, root: string) -> int {
   const entries = harness.fs.walk(root)
   let total = 0
   for entry in entries {
@@ -32,22 +32,22 @@ pub fn count_xfail_markers(root: string) -> int {
   return total
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const threshold_file = "scripts/xfail_threshold.txt"
   if !harness.fs.exists(threshold_file) {
-    __io_eprintln("missing ${threshold_file}")
+    harness.stdio.eprintln("missing ${threshold_file}")
     return 1
   }
   const raw = harness.fs.read_text(threshold_file).trim()
   const threshold = to_int(raw)
   if threshold == nil || threshold < 0 {
-    __io_eprintln("${threshold_file} must contain a non-negative integer")
+    harness.stdio.eprintln("${threshold_file} must contain a non-negative integer")
     return 1
   }
-  const count = count_xfail_markers("conformance")
+  const count = count_xfail_markers(harness, "conformance")
   if count > threshold {
-    __io_eprintln("::error::xfail count went up: ${count} > ${threshold}")
+    harness.stdio.eprintln("::error::xfail count went up: ${count} > ${threshold}")
     return 1
   }
-  __io_println("xfail regression ratchet OK (${count} <= ${threshold})")
+  harness.stdio.println("xfail regression ratchet OK (${count} <= ${threshold})")
 }

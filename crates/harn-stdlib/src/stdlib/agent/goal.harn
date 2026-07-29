@@ -1,7 +1,7 @@
 // Goal object: a typed, long-running objective the agent converges on. A goal
 // bundles an `objective`, machine-checkable `success_criteria`, `constraints`,
 // and a `budget`. It renders into the outbound prompt through the existing
-// per-turn context-profile fragment channel (#2631) — NO new hook surface —
+// per-turn context-profile fragment harness.runtime.channel(#2631) — NO new hook surface —
 // composes a done-judge via the core `done_judge` agent_loop seam
 // (`std/agent/judge`), and re-loops on "not yet met" by reusing agent_loop's own
 // bounded completion loop (`verify_completion` veto -> feedback -> re-run),
@@ -182,29 +182,29 @@ pub fn goal_context_fragment(g) {
 /**
  * with_goal(agent_options, goal) renders the goal into the agent_loop options so
  * the objective/criteria/constraints appear in every outbound request, using the
- * existing `context_profile.prompt_fragments` channel (the same per-turn
+ * existing `context_profile.prompt_fragments` harness.runtime.channel(the same per-turn
  * fragment reducer, #2631) — preserving any fragments/profile the caller already
  * set. No new hook surface.
  *
  * @effects: []
  * @errors: []
  * @api_stability: stable
- * @example: agent_loop(task, nil, with_goal({provider: "anthropic"}, g))
+ * @example: agent_loop(harness, task, nil, with_goal({provider: "anthropic"}, g))
  */
 pub fn with_goal(agent_options, g) {
   return __with_prompt_fragment(agent_options, goal_context_fragment(g))
 }
 
 /**
- * goal_pin(goal) returns a self-replacing `goal`-kind PinSpec carrying the
+ * goal_pin(harness, goal) returns a self-replacing `goal`-kind PinSpec carrying the
  * rendered goal, so the goal survives compaction as a pin.
  *
  * @effects: []
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_pin(g) {
-  return pin("goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
+pub fn goal_pin(harness: Harness, g) {
+  return pin(harness, "goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
 }
 
 /**
@@ -259,7 +259,7 @@ fn __goal_judge_system(g) {
  * @effects: []
  * @errors: []
  * @api_stability: stable
- * @example: agent_loop(task, nil, {done_judge: goal_judge(g), loop_until_done: true})
+ * @example: agent_loop(harness, task, nil, {done_judge: goal_judge(g), loop_until_done: true})
  */
 pub fn goal_judge(g, opts = nil) {
   const o = if type_of(opts) == "dict" {
@@ -313,7 +313,7 @@ const __GOAL_RELOOP_CONTROL_KEYS = ["done_sentinel", "facts_fn", "judge", "max_a
  * completion, threads the unmet criteria (the findings) into the transcript as
  * feedback, and the agent re-runs — up to `opts.max_attempts` (default 3) times
  * (the iteration bound). Spread the result into
- * `agent_loop(task, nil, goal_reloop(g, opts))`.
+ * `agent_loop(harness, task, nil, goal_reloop(g, opts))`.
  *
  * `opts`: `facts_fn` (`(payload) -> facts` dict for `goal_check`; required for
  * machine-checkable convergence), `max_attempts`, `done_sentinel` (the
@@ -325,7 +325,7 @@ const __GOAL_RELOOP_CONTROL_KEYS = ["done_sentinel", "facts_fn", "judge", "max_a
  * @effects: []
  * @errors: [runtime]
  * @api_stability: stable
- * @example: agent_loop(task, nil, goal_reloop(g, {facts_fn: read_facts, max_attempts: 3}))
+ * @example: agent_loop(harness, task, nil, goal_reloop(g, {facts_fn: read_facts, max_attempts: 3}))
  */
 pub fn goal_reloop(g, opts = nil) {
   const o = if type_of(opts) == "dict" {

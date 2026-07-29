@@ -1,9 +1,9 @@
 import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn preset_agent(kind, prompt, options = nil) {
+fn preset_agent(harness: Harness, kind, prompt, options = nil) {
   const opts = agent_preset(kind, options)
-  return agent_loop(prompt, opts?.system, opts)
+  return agent_loop(harness, prompt, opts?.system, opts)
 }
 
 fn audit_tools() {
@@ -22,64 +22,64 @@ fn audit_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // audit preset: native completion, no done sentinel; must complete on
   // final user_response text.
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "i1", name: "inspect", arguments: {what: "release"}}]},
       llm_text("<user_response>Audit complete.</user_response>"),
     ],
     { ->
-      const audit = preset_agent(
+      const audit = preset_agent(harness, 
         "audit",
         "Audit the release",
         {provider: "mock", tools: audit_tools(), tool_format: "native"},
       )
-      __io_println(audit.status)
-      __io_println(audit.text)
-      __io_println(audit.adaptive_budget.mode)
-      const calls = llm_mock_calls()
-      __io_println(!contains(calls[0].system, "##DONE##"))
+      harness.stdio.println(audit.status)
+      harness.stdio.println(audit.text)
+      harness.stdio.println(audit.adaptive_budget.mode)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(!contains(calls[0].system, "##DONE##"))
     },
   )
   with_llm_script(
-    [llm_text("Just a summary.")],
+    harness.llm, [llm_text("Just a summary.")],
     { ->
-      const summary = preset_agent("summary", "Summarize.", {provider: "mock"})
-      __io_println(summary.status)
-      __io_println(summary.text)
-      __io_println(summary.llm.iterations)
+      const summary = preset_agent(harness, "summary", "Summarize.", {provider: "mock"})
+      harness.stdio.println(summary.status)
+      harness.stdio.println(summary.text)
+      harness.stdio.println(summary.llm.iterations)
     },
   )
   with_llm_script(
-    [llm_text("Local summary.")],
+    harness.llm, [llm_text("Local summary.")],
     { ->
-      const local_summary = preset_agent(
+      const local_summary = preset_agent(harness, 
         "summary",
         "Summarize locally.",
         {provider: "mock", model: "mystery-model-7b"},
       )
-      __io_println(local_summary.status)
-      __io_println(local_summary.text)
-      const summary_calls = llm_mock_calls()
-      __io_println(summary_calls[0]?.tool_choice == nil)
+      harness.stdio.println(local_summary.status)
+      harness.stdio.println(local_summary.text)
+      const summary_calls = harness.llm.mock_calls()
+      harness.stdio.println(summary_calls[0]?.tool_choice == nil)
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "r1", name: "inspect", arguments: {what: "fix"}}]},
       llm_text("<user_response>Fixed.</user_response>"),
     ],
     { ->
-      const repair = preset_agent(
+      const repair = preset_agent(harness, 
         "repair",
         "Repair the regression",
         {provider: "mock", tools: audit_tools(), tool_format: "native"},
       )
-      __io_println(repair.status)
-      __io_println(repair.adaptive_budget.mode)
-      __io_println(repair.adaptive_budget.max >= repair.adaptive_budget.initial)
+      harness.stdio.println(repair.status)
+      harness.stdio.println(repair.adaptive_budget.mode)
+      harness.stdio.println(repair.adaptive_budget.max >= repair.adaptive_budget.initial)
     },
   )
 }

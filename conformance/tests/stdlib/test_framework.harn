@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Test mock LLM provider returns deterministic responses
-  const result = llm_call("hello world", nil, {provider: "mock"})
+  const result = harness.llm.call("hello world", nil, {provider: "mock"})
   assert(contains(result.text, "Mock"))
   assert(contains(result.text, "2-word prompt"))
-  log("mock llm works")
+  harness.stdio.println("mock llm works")
 }

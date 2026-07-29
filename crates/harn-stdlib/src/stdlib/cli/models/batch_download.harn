@@ -115,9 +115,7 @@ fn __download_text_file(
   max_bytes: int,
 ) -> dict {
   const operation = __download_operation(provider, "GET", url, credential_env, out_path)
-  const response = __http_result(
-    harness,
-    "GET",
+  const response = __http_result(harness,  "GET",
     url,
     {headers: headers, timeout_ms: 120000, max_response_bytes: max_bytes},
   )
@@ -230,9 +228,7 @@ fn __download_fireworks_results(
   if !safe_bool(auth["ok"], false) {
     return {ok: false, artifacts: [], errors: [safe_string(auth["error"], "")]}
   }
-  const response = __http_result(
-    harness,
-    "GET",
+  const response = __http_result(harness,  "GET",
     endpoint_url,
     {
       headers: {Authorization: "Bearer " + safe_string(auth["value"], "")},
@@ -475,9 +471,7 @@ fn __download_xai_results(
   let page_count = 0
   while true {
     const url = __xai_results_url(harness, batch_id, token)
-    const response = __http_result(
-      harness,
-      "GET",
+    const response = __http_result(harness,  "GET",
       url,
       {
         headers: {

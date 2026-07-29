@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   enum NetworkError {
     Timeout
   }
@@ -10,9 +10,9 @@ pipeline test(task) {
     try {
       throw AuthError.Unauthorized("bad token")
     } catch (e: NetworkError) {
-      log("wrong handler — should not reach here")
+      harness.stdio.println("wrong handler — should not reach here")
     }
   } catch (e) {
-    log("outer caught: ${e.variant}")
+    harness.stdio.println("outer caught: ${e.variant}")
   }
 }

@@ -326,6 +326,8 @@ pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
 
 /// Subscribe a Harn callback to events for an agent session.
 #[harn_builtin(
+    exposure = "harness.agent.subscribe",
+    effects = ["state.observe@arg0"],
     sig = "agent_subscribe(session_id: string, callback: closure) -> nil",
     category = "agent.host"
 )]
@@ -352,6 +354,8 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 /// Inject pending feedback into an agent session.
 #[harn_builtin(
+    exposure = "harness.agent.inject_feedback",
+    effects = ["state.write@arg0"],
     sig = "agent_inject_feedback(session_id: string, kind: string, content: string) -> nil",
     category = "agent.host"
 )]
@@ -388,6 +392,8 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
 
 /// Inject a typed host-originated event into an agent session.
 #[harn_builtin(
+    exposure = "harness.agent.inject_host_event",
+    effects = ["state.write@arg0"],
     sig = "agent_inject_host_event(session_id: string, injection: dict) -> dict",
     category = "agent.host"
 )]
@@ -430,7 +436,11 @@ fn agent_inject_host_event_builtin(
 /// so you can see exactly which capability-gated instructions are active and
 /// why. Session reminders are layered at live call time and are not included
 /// in this static view.
-#[harn_builtin(sig = "prompt_explain(options: dict?) -> dict", category = "agent")]
+#[harn_builtin(
+    exposure = "harness.agent.prompt_explain",
+    effects = ["state.read@dynamic"],
+    sig = "prompt_explain(options: dict?) -> dict", category = "agent"
+)]
 fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = match args.first() {
         Some(VmValue::Dict(map)) => Some((**map).clone()),

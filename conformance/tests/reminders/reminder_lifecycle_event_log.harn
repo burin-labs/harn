@@ -1,6 +1,6 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const topic = "transcript.reminder.lifecycle"
-  const cursor = event_log.latest(topic)
+  const cursor = harness.obs.event_log_latest(topic)
   const first = transcript.inject_reminder(
     transcript(),
     {body: "first", tags: ["lifecycle"], dedupe_key: "slot", ttl_turns: 2},
@@ -10,27 +10,27 @@ pipeline main() {
     {body: "second", tags: ["lifecycle"], dedupe_key: "slot", ttl_turns: 3},
   )
   const _cleared = transcript.clear_reminders(second.transcript, {id: second.reminder_id})
-  const stream = event_log.subscribe(
+  const stream = harness.obs.event_log_subscribe(
     {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."},
   )
   const first_injected = stream.next().value
   const deduped = stream.next().value
   const second_injected = stream.next().value
   const cleared = stream.next().value
-  __io_println(first_injected.kind)
-  __io_println(first_injected.payload.reminder_id == first.reminder_id)
-  __io_println(first_injected.payload.tags[0])
-  __io_println(first_injected.payload.source)
-  __io_println(first_injected.payload.role_hint)
-  __io_println(first_injected.payload.propagate)
-  __io_println(contains(json_stringify(first_injected.payload), "\"session_id\""))
-  __io_println(contains(json_stringify(first_injected.payload), "\"agent_id\""))
-  __io_println(deduped.kind)
-  __io_println(deduped.payload.replaced_id == first.reminder_id)
-  __io_println(deduped.payload.replacing_id == second.reminder_id)
-  __io_println(second_injected.kind)
-  __io_println(second_injected.payload.reminder_id == second.reminder_id)
-  __io_println(cleared.kind)
-  __io_println(cleared.payload.reason)
-  __io_println(cleared.payload.reminder_id == second.reminder_id)
+  harness.stdio.println(first_injected.kind)
+  harness.stdio.println(first_injected.payload.reminder_id == first.reminder_id)
+  harness.stdio.println(first_injected.payload.tags[0])
+  harness.stdio.println(first_injected.payload.source)
+  harness.stdio.println(first_injected.payload.role_hint)
+  harness.stdio.println(first_injected.payload.propagate)
+  harness.stdio.println(contains(json_stringify(first_injected.payload), "\"session_id\""))
+  harness.stdio.println(contains(json_stringify(first_injected.payload), "\"agent_id\""))
+  harness.stdio.println(deduped.kind)
+  harness.stdio.println(deduped.payload.replaced_id == first.reminder_id)
+  harness.stdio.println(deduped.payload.replacing_id == second.reminder_id)
+  harness.stdio.println(second_injected.kind)
+  harness.stdio.println(second_injected.payload.reminder_id == second.reminder_id)
+  harness.stdio.println(cleared.kind)
+  harness.stdio.println(cleared.payload.reason)
+  harness.stdio.println(cleared.payload.reminder_id == second.reminder_id)
 }

@@ -19,6 +19,6 @@ pub fn describe(s: ImportedShape) -> string {
   }
 }
 
-pipeline default() {
-  __io_println(describe(ImportedShape.Circle(1)))
+pipeline default(harness: Harness) {
+  harness.stdio.println(describe(ImportedShape.Circle(1)))
 }

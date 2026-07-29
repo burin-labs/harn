@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   struct Pair<A, B> {
     first: A
     second: B
@@ -9,10 +9,10 @@ pipeline test(task) {
   }
   const pair: Pair<int, string> = Pair {first: 1, second: "two"}
   const maybe: Option<int> = Option.Some(pair.first)
-  log(pair.first)
-  log(pair.second)
+  harness.stdio.println(pair.first)
+  harness.stdio.println(pair.second)
   match maybe {
-    Option.Some(value) -> { log(value) }
-    Option.None -> { log("none") }
+    Option.Some(value) -> { harness.stdio.println(value) }
+    Option.None -> { harness.stdio.println("none") }
   }
 }

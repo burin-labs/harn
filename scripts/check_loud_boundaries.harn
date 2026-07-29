@@ -28,8 +28,8 @@ pub type BoundarySite = {path: string, id: string}
 /** One reason the gate failed, with the path that caused it. */
 pub type BoundaryFinding = {kind: string, id: string, path: string, message: string}
 
-fn repo_root() -> string {
-  return path_normalize(path_join(source_dir(), ".."))
+fn repo_root(harness: Harness) -> string {
+  return path_normalize(path_join(harness.fs.source_dir(), ".."))
 }
 
 /**
@@ -388,7 +388,7 @@ pub fn evaluate(
   return findings + audited_findings(registry?.audited ?? [], existing_paths, contents)
 }
 
-fn git_grep(root: string, pattern: string, globs: list<string>) -> string? {
+fn git_grep(harness: Harness, root: string, pattern: string, globs: list<string>) -> string? {
   // `--untracked` is load-bearing, not a convenience. Without it the gate reads
   // only committed files, so the exact case it exists for — a brand-new file
   // that starts reporting a boundary nobody registered — would pass locally and
@@ -420,33 +420,33 @@ fn referenced_paths(entries: list) -> list<string> {
   return paths.unique()
 }
 
-pipeline main(task) {
-  const root = repo_root()
+pipeline main(harness: Harness, task) {
+  const root = repo_root(harness)
   if !harness.fs.exists(path_join(root, REGISTRY_PATH)) {
-    __io_eprintln("::error::missing ${REGISTRY_PATH}")
+    harness.stdio.eprintln("::error::missing ${REGISTRY_PATH}")
     return 1
   }
   const registry = try {
     toml_parse(harness.fs.read_text(path_join(root, REGISTRY_PATH)))
   } catch (err) {
-    __io_eprintln("::error::failed to parse ${REGISTRY_PATH}: ${err}")
+    harness.stdio.eprintln("::error::failed to parse ${REGISTRY_PATH}: ${err}")
     return 1
   }
   if !harness.fs.exists(path_join(root, FUNNEL_PATH)) {
-    __io_eprintln("::error::missing the funnel definition ${FUNNEL_PATH}")
+    harness.stdio.eprintln("::error::missing the funnel definition ${FUNNEL_PATH}")
     return 1
   }
   const wire_strings = boundary_wire_strings(harness.fs.read_text(path_join(root, FUNNEL_PATH)))
   if wire_strings.keys().count == 0 {
-    __io_eprintln(
+    harness.stdio.eprintln(
       "::error::could not read any `Self::Variant => \"wire\"` arms from ${FUNNEL_PATH}; the gate would pass vacuously",
     )
     return 1
   }
-  const rust_grep = git_grep(root, "BoundaryId::", ["crates/*.rs"])
-  const harn_grep = git_grep(root, HARN_SITE_MARKER, ["crates/*.harn"])
+  const rust_grep = git_grep(harness, root, "BoundaryId::", ["crates/*.rs"])
+  const harn_grep = git_grep(harness, root, HARN_SITE_MARKER, ["crates/*.harn"])
   if rust_grep == nil || harn_grep == nil {
-    __io_eprintln("::error::git grep failed; cannot scan for boundary construction sites")
+    harness.stdio.eprintln("::error::git grep failed; cannot scan for boundary construction sites")
     return 1
   }
   let sites: list<BoundarySite> = []
@@ -474,16 +474,16 @@ pipeline main(task) {
   if findings.count == 0 {
     const count = (registry?.boundary ?? []).count
     const audited = (registry?.audited ?? []).count
-    __io_println(
+    harness.stdio.println(
       "loud-boundary registry OK (${to_string(count)} funnelled boundary(ies), ${to_string(audited)} audited)",
     )
     return 0
   }
-  __io_eprintln("::error::loud-boundary registry failed (${to_string(findings.count)} finding(s)):")
+  harness.stdio.eprintln("::error::loud-boundary registry failed (${to_string(findings.count)} finding(s)):")
   for finding in findings {
-    __io_eprintln("  [${finding.kind}] ${finding.id} @ ${finding.path}: ${finding.message}")
+    harness.stdio.eprintln("  [${finding.kind}] ${finding.id} @ ${finding.path}: ${finding.message}")
   }
-  __io_eprintln(
+  harness.stdio.eprintln(
     "hint: a boundary that can drop model output must report through crate::boundary::BoundaryFailure and be listed in ${REGISTRY_PATH}. See the header of that file for the checklist.",
   )
   return 1

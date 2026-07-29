@@ -15,24 +15,21 @@
 // the literal text is what makes the three channels agree.
 import { probe, sample_registry } from "_tool_parse_probe"
 
-pipeline main() {
-  probe("surrogate pair escape", "run({ command: \"hi \\uD83D\\uDE00 there\" })", sample_registry())
-  probe("brace form non-bmp escape", "run({ command: \"hi \\u{1F600} there\" })", sample_registry())
+pipeline main(harness: Harness) {
+  probe(harness, "surrogate pair escape", "run({ command: \"hi \\uD83D\\uDE00 there\" })", sample_registry())
+  probe(harness, "brace form non-bmp escape", "run({ command: \"hi \\u{1F600} there\" })", sample_registry())
   // A lone high surrogate is genuinely invalid: no silent half-character.
-  probe("lone high surrogate", "run({ command: \"x \\uD83D y\" })", sample_registry())
+  probe(harness, "lone high surrogate", "run({ command: \"x \\uD83D y\" })", sample_registry())
   // Unknown escapes keep their backslash, identically across all three channels.
-  probe(
-    "unknown escape, quoted channel",
+  probe(harness,  harness, "unknown escape, quoted channel",
     "edit({ action: \"create\", path: \"re.py\", content: \"p = '\\d+\\w*'\" })",
     sample_registry(),
   )
-  probe(
-    "unknown escape, template channel",
+  probe(harness,  harness, "unknown escape, template channel",
     "edit({ action: \"create\", path: \"re.py\", content: `p = '\\d+\\w*'` })",
     sample_registry(),
   )
-  probe(
-    "unknown escape, heredoc channel",
+  probe(harness,  harness, "unknown escape, heredoc channel",
     """edit({ action: "create", path: "re.py", content: <<EOF
 p = '\d+\w*'
 EOF
@@ -40,34 +37,29 @@ EOF
     sample_registry(),
   )
   // Known escapes still decode: no over-correction.
-  probe(
-    "known escapes in a quoted string",
+  probe(harness,  harness, "known escapes in a quoted string",
     "run({ command: \"a\\nb\\tc\\\\d\\\"e\" })",
     sample_registry(),
   )
   // Malformed known escapes degrade to the literal rather than dropping the call.
-  probe("perl hex brace regex", "run({ command: \"m/\\x{1F600}/\" })", sample_registry())
-  probe("backslash x then non-hex", "run({ command: \"C:\\xtra\\data\" })", sample_registry())
-  probe("trailing backslash x", "run({ command: \"ends with \\x\" })", sample_registry())
-  probe("short unicode escape", "run({ command: \"bad \\uAB stop\" })", sample_registry())
-  probe(
-    "unicode escape with a non-hex digit",
+  probe(harness, "perl hex brace regex", "run({ command: \"m/\\x{1F600}/\" })", sample_registry())
+  probe(harness, "backslash x then non-hex", "run({ command: \"C:\\xtra\\data\" })", sample_registry())
+  probe(harness, "trailing backslash x", "run({ command: \"ends with \\x\" })", sample_registry())
+  probe(harness, "short unicode escape", "run({ command: \"bad \\uAB stop\" })", sample_registry())
+  probe(harness,  harness, "unicode escape with a non-hex digit",
     "run({ command: \"bad \\uABCG end\" })",
     sample_registry(),
   )
-  probe(
-    "windows path after backslash u",
+  probe(harness,  harness, "windows path after backslash u",
     "run({ command: \"path C:\\users\\me\" })",
     sample_registry(),
   )
   // The same malformed escape across all three channels.
-  probe(
-    "malformed escape, template channel",
+  probe(harness,  harness, "malformed escape, template channel",
     "run({ command: `m/\\x{1F600}/` })",
     sample_registry(),
   )
-  probe(
-    "malformed escape, heredoc channel",
+  probe(harness,  harness, "malformed escape, heredoc channel",
     """run({ command: <<EOF
 m/\x{1F600}/
 EOF
@@ -75,14 +67,12 @@ EOF
     sample_registry(),
   )
   // Well-formed `\xHH` and a literal multibyte scalar in source still decode.
-  probe("well formed hex escapes", "run({ command: \"\\x41\\x42\" })", sample_registry())
-  probe(
-    "literal multibyte scalar in source",
+  probe(harness, "well formed hex escapes", "run({ command: \"\\x41\\x42\" })", sample_registry())
+  probe(harness,  harness, "literal multibyte scalar in source",
     "run({ command: \"snow ☃ done\" })",
     sample_registry(),
   )
-  probe(
-    "brace form non-bmp escape again",
+  probe(harness,  harness, "brace form non-bmp escape again",
     "run({ command: \"emoji \\u{1F600} done\" })",
     sample_registry(),
   )

@@ -1,11 +1,9 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Test multiple bridge calls in sequence
-  const file_content = read_file("README.md")
-  log("File: ${file_content}")
-  const llm_response = llm_call("Summarize this", "Be brief")
-  log("LLM: ${llm_response}")
-  const host_result = host_call("get_repo_map", {})
-  log("Host: ${host_result}")
+  const file_content = harness.fs.read_text("README.md")
+  harness.stdio.println("File: ${file_content}")
+  const llm_response = harness.llm.call("Summarize this", "Be brief")
+  harness.stdio.println("LLM: ${llm_response}")
   progress("done", "All bridge calls completed")
-  log("Success")
+  harness.stdio.println("Success")
 }

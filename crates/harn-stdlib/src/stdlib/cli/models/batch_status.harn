@@ -77,9 +77,7 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   const batch_id = safe_string(job["provider_batch_id"], "")
-  const response = __http_result(
-    harness,
-    "GET",
+  const response = __http_result(harness,  "GET",
     __join_url(__provider_base_url(harness, provider), "/batches/" + batch_id),
     {
       headers: __provider_auth_headers(
@@ -124,9 +122,7 @@ fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   const batch_id = safe_string(job["provider_batch_id"], "")
-  const response = __http_result(
-    harness,
-    "GET",
+  const response = __http_result(harness,  "GET",
     __join_url(__provider_base_url(harness, "anthropic"), "/v1/messages/batches/" + batch_id),
     {
       headers: {"x-api-key": safe_string(auth["value"], ""), "anthropic-version": "2023-06-01"},
@@ -212,9 +208,7 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   const batch_id = safe_string(job["provider_batch_id"], "")
-  const response = __http_result(
-    harness,
-    "GET",
+  const response = __http_result(harness,  "GET",
     __join_url(__provider_base_url(harness, "mistral"), "/batch/jobs/" + batch_id),
     {
       headers: {Authorization: "Bearer " + safe_string(auth["value"], "")},
@@ -274,9 +268,7 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
   }
   const account_id = safe_string(account["value"], "")
   const batch_id = __fireworks_batch_id_path(safe_string(job["provider_batch_id"], ""))
-  const response = __http_result(
-    harness,
-    "GET",
+  const response = __http_result(harness,  "GET",
     __join_url(
       __provider_base_url(harness, "fireworks"),
       "/accounts/" + account_id + "/batchInferenceJobs/" + batch_id,
@@ -337,9 +329,7 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   const batch_id = safe_string(job["provider_batch_id"], "")
-  const response = __http_result(
-    harness,
-    "GET",
+  const response = __http_result(harness,  "GET",
     __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id),
     {
       headers: {
@@ -381,9 +371,7 @@ fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   const batch_id = safe_string(job["provider_batch_id"], "")
-  const response = __http_result(
-    harness,
-    "GET",
+  const response = __http_result(harness,  "GET",
     __join_url(__provider_base_url(harness, "gemini"), "/v1beta/" + batch_id),
     {
       headers: {

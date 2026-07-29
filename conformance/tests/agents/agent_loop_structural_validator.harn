@@ -26,7 +26,7 @@ fn write_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const tool_text = "<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"
   const malformed_tool_text = "<tool_call>\nwrite_note({ path: })\n</tool_call>"
   const mixed_malformed_tool_text = "<notes>bad wrapper</notes>\n" + malformed_tool_text
@@ -38,17 +38,15 @@ pipeline default() {
   // re-emit loop until the stall detector fires (the create-heavy failure).
   const stray_prose_with_call_text = "I'll create notes.txt now.\n" + tool_text
   with_llm_script(
-    [
+    harness.llm, [
       llm_text("I fixed it already."),
       {tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const session = "structural-validator-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Update notes.txt and then finish.",
+      const session = "structural-validator-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Update notes.txt and then finish.",
           nil,
           {
             provider: "mock",
@@ -63,24 +61,23 @@ pipeline default() {
       )
       const decisions = events_of(captured.events, "structural_validator_decision")
       require len(decisions) == 1, "validator should emit exactly one decision"
-      __io_println(captured.result.status)
-      __io_println(captured.result.tools.successful[0] == "write_note")
-      __io_println(len(decisions))
-      __io_println(decisions[0].rule)
-      __io_println(decisions[0].vetoed)
-      __io_println(decisions[0].recommended_action.contains("tool call"))
-      const regen_messages = json_stringify(llm_mock_calls()[1].messages)
-      __io_println(!regen_messages.contains("I fixed it already."))
-      __io_println(regen_messages.contains("structural_validator"))
-      __io_println(regen_messages.contains("non_empty_when_writes_expected"))
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(captured.result.tools.successful[0] == "write_note")
+      harness.stdio.println(len(decisions))
+      harness.stdio.println(decisions[0].rule)
+      harness.stdio.println(decisions[0].vetoed)
+      harness.stdio.println(decisions[0].recommended_action.contains("tool call"))
+      const regen_messages = json_stringify(harness.llm.mock_calls()[1].messages)
+      harness.stdio.println(!regen_messages.contains("I fixed it already."))
+      harness.stdio.println(regen_messages.contains("structural_validator"))
+      harness.stdio.println(regen_messages.contains("non_empty_when_writes_expected"))
     },
   )
   with_llm_script(
-    [llm_text("Still done without tools.")],
+    harness.llm, [llm_text("Still done without tools.")],
     { ->
       try {
-        agent_loop(
-          "Update notes.txt and then finish.",
+        agent_loop(harness, "Update notes.txt and then finish.",
           nil,
           {
             provider: "mock",
@@ -88,25 +85,23 @@ pipeline default() {
             loop_until_done: true,
             max_iterations: 2,
             tools: write_tools(),
-            structural_validator: with_structural_validator({on_failure: "raise"}),
+            structural_validator: with_structural_validator(harness, {on_failure: "raise"}),
           },
         )
-        __io_println("no-throw")
+        harness.stdio.println("no-throw")
       } catch (e) {
-        __io_println("caught")
-        __io_println(contains(to_string(e), "Assistant emitted no tool calls"))
+        harness.stdio.println("caught")
+        harness.stdio.println(contains(to_string(e), "Assistant emitted no tool calls"))
       }
     },
   )
   with_llm_script(
-    [llm_text("I fixed it already.")],
+    harness.llm, [llm_text("I fixed it already.")],
     { ->
-      const phantom_session = "structural-validator-phantom-" + uuid()
-      const phantom = agent_capture_events(
-        phantom_session,
+      const phantom_session = "structural-validator-phantom-" + harness.random.uuid()
+      const phantom = agent_capture_events(harness,  harness, phantom_session,
         fn() { return try {
-          agent_loop(
-            "Update notes.txt and then finish.",
+          agent_loop(harness, "Update notes.txt and then finish.",
             nil,
             {
               provider: "mock",
@@ -116,7 +111,7 @@ pipeline default() {
               tools: write_tools(),
               session_id: phantom_session,
               structural_validator: with_structural_validator(
-                {on_failure: "raise", rules: ["no_phantom_completion"]},
+                harness, {on_failure: "raise", rules: ["no_phantom_completion"]},
               ),
             },
           )
@@ -126,22 +121,20 @@ pipeline default() {
         } },
       )
       const phantom_decisions = events_of(phantom.events, "structural_validator_decision")
-      __io_println(phantom.result == "caught")
-      __io_println(len(phantom_decisions) == 1)
-      __io_println(phantom_decisions[0].rule == "no_phantom_completion")
+      harness.stdio.println(phantom.result == "caught")
+      harness.stdio.println(len(phantom_decisions) == 1)
+      harness.stdio.println(phantom_decisions[0].rule == "no_phantom_completion")
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
       llm_text("I fixed it already.<done>##DONE##</done>"),
     ],
     { ->
-      const post_write_session = "structural-validator-post-write-" + uuid()
-      const post_write = agent_capture_events(
-        post_write_session,
-        fn() { return agent_loop(
-          "Update notes.txt and then finish.",
+      const post_write_session = "structural-validator-post-write-" + harness.random.uuid()
+      const post_write = agent_capture_events(harness,  harness, post_write_session,
+        fn() { return agent_loop(harness, "Update notes.txt and then finish.",
           nil,
           {
             provider: "mock",
@@ -150,26 +143,24 @@ pipeline default() {
             max_iterations: 3,
             tools: write_tools(),
             session_id: post_write_session,
-            structural_validator: with_structural_validator({rules: ["no_phantom_completion"]}),
+            structural_validator: with_structural_validator(harness, {rules: ["no_phantom_completion"]}),
           },
         ) },
       )
       const post_write_decisions = events_of(post_write.events, "structural_validator_decision")
-      __io_println(post_write.result.status == "done")
-      __io_println(len(post_write_decisions) == 0)
+      harness.stdio.println(post_write.result.status == "done")
+      harness.stdio.println(len(post_write_decisions) == 0)
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
       llm_text("I fixed it already."),
     ],
     { ->
-      const post_write_non_empty_session = "structural-validator-post-write-non-empty-" + uuid()
-      const post_write_non_empty = agent_capture_events(
-        post_write_non_empty_session,
-        fn() { return agent_loop(
-          "Update notes.txt and then summarize.",
+      const post_write_non_empty_session = "structural-validator-post-write-non-empty-" + harness.random.uuid()
+      const post_write_non_empty = agent_capture_events(harness,  harness, post_write_non_empty_session,
+        fn() { return agent_loop(harness, "Update notes.txt and then summarize.",
           nil,
           {
             provider: "mock",
@@ -185,18 +176,16 @@ pipeline default() {
         post_write_non_empty.events,
         "structural_validator_decision",
       )
-      __io_println(post_write_non_empty.result.status == "done")
-      __io_println(len(post_write_non_empty_decisions) == 0)
+      harness.stdio.println(post_write_non_empty.result.status == "done")
+      harness.stdio.println(len(post_write_non_empty_decisions) == 0)
     },
   )
   with_llm_script(
-    [llm_text("The PATCH_HINT is:\n\n```python\ndef add(a, b): return a + b\n```")],
+    harness.llm, [llm_text("The PATCH_HINT is:\n\n```python\ndef add(a, b): return a + b\n```")],
     { ->
-      const lifecycle_only_session = "structural-validator-lifecycle-only-" + uuid()
-      const lifecycle_only = agent_capture_events(
-        lifecycle_only_session,
-        fn() { return agent_loop(
-          "No tools are available. State the smallest code change.",
+      const lifecycle_only_session = "structural-validator-lifecycle-only-" + harness.random.uuid()
+      const lifecycle_only = agent_capture_events(harness,  harness, lifecycle_only_session,
+        fn() { return agent_loop(harness, "No tools are available. State the smallest code change.",
           nil,
           {
             provider: "mock",
@@ -211,19 +200,17 @@ pipeline default() {
         lifecycle_only.events,
         "structural_validator_decision",
       )
-      __io_println(lifecycle_only.result.status == "done")
-      __io_println(len(lifecycle_only_decisions) == 0)
+      harness.stdio.println(lifecycle_only.result.status == "done")
+      harness.stdio.println(len(lifecycle_only_decisions) == 0)
     },
   )
   with_llm_script(
-    [llm_text(malformed_tool_text)],
+    harness.llm, [llm_text(malformed_tool_text)],
     { ->
-      const malformed_session = "structural-validator-malformed-" + uuid()
-      const malformed = agent_capture_events(
-        malformed_session,
+      const malformed_session = "structural-validator-malformed-" + harness.random.uuid()
+      const malformed = agent_capture_events(harness,  harness, malformed_session,
         fn() { return try {
-          agent_loop(
-            "Update notes.txt and then finish.",
+          agent_loop(harness, "Update notes.txt and then finish.",
             nil,
             {
               provider: "mock",
@@ -233,7 +220,7 @@ pipeline default() {
               tools: write_tools(),
               session_id: malformed_session,
               structural_validator: with_structural_validator(
-                {on_failure: "raise", rules: ["tool_calls_well_formed"]},
+                harness, {on_failure: "raise", rules: ["tool_calls_well_formed"]},
               ),
             },
           )
@@ -243,20 +230,18 @@ pipeline default() {
         } },
       )
       const malformed_decisions = events_of(malformed.events, "structural_validator_decision")
-      __io_println(malformed.result == "caught")
-      __io_println(len(malformed_decisions) == 1)
-      __io_println(malformed_decisions[0].rule == "tool_calls_well_formed")
+      harness.stdio.println(malformed.result == "caught")
+      harness.stdio.println(len(malformed_decisions) == 1)
+      harness.stdio.println(malformed_decisions[0].rule == "tool_calls_well_formed")
     },
   )
   with_llm_script(
-    [llm_text(mixed_malformed_tool_text)],
+    harness.llm, [llm_text(mixed_malformed_tool_text)],
     { ->
-      const mixed_malformed_session = "structural-validator-mixed-malformed-" + uuid()
-      const mixed_malformed = agent_capture_events(
-        mixed_malformed_session,
+      const mixed_malformed_session = "structural-validator-mixed-malformed-" + harness.random.uuid()
+      const mixed_malformed = agent_capture_events(harness,  harness, mixed_malformed_session,
         fn() { return try {
-          agent_loop(
-            "Update notes.txt and then finish.",
+          agent_loop(harness, "Update notes.txt and then finish.",
             nil,
             {
               provider: "mock",
@@ -266,7 +251,7 @@ pipeline default() {
               tools: write_tools(),
               session_id: mixed_malformed_session,
               structural_validator: with_structural_validator(
-                {on_failure: "raise", rules: ["tool_calls_well_formed"]},
+                harness, {on_failure: "raise", rules: ["tool_calls_well_formed"]},
               ),
             },
           )
@@ -282,21 +267,19 @@ pipeline default() {
       const mixed_diagnostic = mixed_malformed_decisions[0].diagnostic
       const parse_idx = mixed_diagnostic.index_of("TOOL CALL PARSE ERROR")
       const wrapper_idx = mixed_diagnostic.index_of("Unknown top-level tag")
-      __io_println(mixed_malformed.result == "caught")
-      __io_println(len(mixed_malformed_decisions) == 1)
-      __io_println(parse_idx >= 0)
-      __io_println(wrapper_idx >= 0)
-      __io_println(parse_idx < wrapper_idx)
+      harness.stdio.println(mixed_malformed.result == "caught")
+      harness.stdio.println(len(mixed_malformed_decisions) == 1)
+      harness.stdio.println(parse_idx >= 0)
+      harness.stdio.println(wrapper_idx >= 0)
+      harness.stdio.println(parse_idx < wrapper_idx)
     },
   )
   with_llm_script(
-    [llm_text(tool_text), llm_text("<done>##DONE##</done>")],
+    harness.llm, [llm_text(tool_text), llm_text("<done>##DONE##</done>")],
     { ->
-      const well_formed_session = "structural-validator-well-formed-" + uuid()
-      const well_formed = agent_capture_events(
-        well_formed_session,
-        fn() { return agent_loop(
-          "Update notes.txt and then finish.",
+      const well_formed_session = "structural-validator-well-formed-" + harness.random.uuid()
+      const well_formed = agent_capture_events(harness,  harness, well_formed_session,
+        fn() { return agent_loop(harness, "Update notes.txt and then finish.",
           nil,
           {
             provider: "mock",
@@ -305,23 +288,21 @@ pipeline default() {
             max_iterations: 3,
             tools: write_tools(),
             session_id: well_formed_session,
-            structural_validator: with_structural_validator({rules: ["tool_calls_well_formed"]}),
+            structural_validator: with_structural_validator(harness, {rules: ["tool_calls_well_formed"]}),
           },
         ) },
       )
       const well_formed_decisions = events_of(well_formed.events, "structural_validator_decision")
-      __io_println(well_formed.result.status == "done")
-      __io_println(len(well_formed_decisions) == 0)
+      harness.stdio.println(well_formed.result.status == "done")
+      harness.stdio.println(len(well_formed_decisions) == 0)
     },
   )
   with_llm_script(
-    [llm_text(stray_prose_with_call_text), llm_text("<done>##DONE##</done>")],
+    harness.llm, [llm_text(stray_prose_with_call_text), llm_text("<done>##DONE##</done>")],
     { ->
-      const stray_call_session = "structural-validator-stray-prose-call-" + uuid()
-      const stray_call = agent_capture_events(
-        stray_call_session,
-        fn() { return agent_loop(
-          "Update notes.txt and then finish.",
+      const stray_call_session = "structural-validator-stray-prose-call-" + harness.random.uuid()
+      const stray_call = agent_capture_events(harness,  harness, stray_call_session,
+        fn() { return agent_loop(harness, "Update notes.txt and then finish.",
           nil,
           {
             provider: "mock",
@@ -330,28 +311,26 @@ pipeline default() {
             max_iterations: 3,
             tools: write_tools(),
             session_id: stray_call_session,
-            structural_validator: with_structural_validator({rules: ["tool_calls_well_formed"]}),
+            structural_validator: with_structural_validator(harness, {rules: ["tool_calls_well_formed"]}),
           },
         ) },
       )
       const stray_call_decisions = events_of(stray_call.events, "structural_validator_decision")
-      __io_println(stray_call.result.status == "done")
-      __io_println(stray_call.result.tools.successful[0] == "write_note")
-      __io_println(len(stray_call_decisions) == 0)
+      harness.stdio.println(stray_call.result.status == "done")
+      harness.stdio.println(stray_call.result.tools.successful[0] == "write_note")
+      harness.stdio.println(len(stray_call_decisions) == 0)
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "write_missing", name: "write_note", arguments: {}}]},
       {text: "", tool_calls: [{id: "write_2", name: "write_note", arguments: {path: "notes.txt"}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const missing_arg_session = "structural-validator-native-missing-arg-" + uuid()
-      const missing_arg = agent_capture_events(
-        missing_arg_session,
-        fn() { return agent_loop(
-          "Update notes.txt and then finish.",
+      const missing_arg_session = "structural-validator-native-missing-arg-" + harness.random.uuid()
+      const missing_arg = agent_capture_events(harness,  harness, missing_arg_session,
+        fn() { return agent_loop(harness, "Update notes.txt and then finish.",
           nil,
           {
             provider: "mock",
@@ -360,28 +339,26 @@ pipeline default() {
             max_iterations: 3,
             tools: write_tools(),
             session_id: missing_arg_session,
-            structural_validator: with_structural_validator({rules: ["tool_calls_well_formed"]}),
+            structural_validator: with_structural_validator(harness, {rules: ["tool_calls_well_formed"]}),
           },
         ) },
       )
       const missing_arg_decisions = events_of(missing_arg.events, "structural_validator_decision")
-      const missing_arg_regen_messages = json_stringify(llm_mock_calls()[1].messages)
-      __io_println(missing_arg.result.status == "done")
-      __io_println(missing_arg.result.tools.successful[0] == "write_note")
-      __io_println(len(missing_arg_decisions) == 1)
-      __io_println(missing_arg_decisions[0].diagnostic.contains("missing required parameter"))
-      __io_println(missing_arg_regen_messages.contains("missing required parameter"))
+      const missing_arg_regen_messages = json_stringify(harness.llm.mock_calls()[1].messages)
+      harness.stdio.println(missing_arg.result.status == "done")
+      harness.stdio.println(missing_arg.result.tools.successful[0] == "write_note")
+      harness.stdio.println(len(missing_arg_decisions) == 1)
+      harness.stdio.println(missing_arg_decisions[0].diagnostic.contains("missing required parameter"))
+      harness.stdio.println(missing_arg_regen_messages.contains("missing required parameter"))
     },
   )
   with_llm_script(
-    [{text: "Working on it.", output_tokens: 95}],
+    harness.llm, [{text: "Working on it.", output_tokens: 95}],
     { ->
-      const capped_session = "structural-validator-output-cap-" + uuid()
-      const capped = agent_capture_events(
-        capped_session,
+      const capped_session = "structural-validator-output-cap-" + harness.random.uuid()
+      const capped = agent_capture_events(harness,  harness, capped_session,
         fn() { return try {
-          agent_loop(
-            "Update notes.txt and then finish.",
+          agent_loop(harness, "Update notes.txt and then finish.",
             nil,
             {
               provider: "mock",
@@ -392,7 +369,7 @@ pipeline default() {
               tools: write_tools(),
               session_id: capped_session,
               structural_validator: with_structural_validator(
-                {on_failure: "raise", rules: ["output_token_cap_with_zero_calls"]},
+                harness, {on_failure: "raise", rules: ["output_token_cap_with_zero_calls"]},
               ),
             },
           )
@@ -402,22 +379,20 @@ pipeline default() {
         } },
       )
       const capped_decisions = events_of(capped.events, "structural_validator_decision")
-      __io_println(capped.result == "caught")
-      __io_println(len(capped_decisions) == 1)
-      __io_println(capped_decisions[0].rule == "output_token_cap_with_zero_calls")
+      harness.stdio.println(capped.result == "caught")
+      harness.stdio.println(len(capped_decisions) == 1)
+      harness.stdio.println(capped_decisions[0].rule == "output_token_cap_with_zero_calls")
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {text: "Brief update.", output_tokens: 94},
       {text: "<done>##DONE##</done>", output_tokens: 10},
     ],
     { ->
-      const under_cap_session = "structural-validator-output-under-cap-" + uuid()
-      const under_cap = agent_capture_events(
-        under_cap_session,
-        fn() { return agent_loop(
-          "Update notes.txt and then finish.",
+      const under_cap_session = "structural-validator-output-under-cap-" + harness.random.uuid()
+      const under_cap = agent_capture_events(harness,  harness, under_cap_session,
+        fn() { return agent_loop(harness, "Update notes.txt and then finish.",
           nil,
           {
             provider: "mock",
@@ -428,24 +403,22 @@ pipeline default() {
             tools: write_tools(),
             session_id: under_cap_session,
             structural_validator: with_structural_validator(
-              {rules: ["output_token_cap_with_zero_calls"]},
+              harness, {rules: ["output_token_cap_with_zero_calls"]},
             ),
           },
         ) },
       )
       const under_cap_decisions = events_of(under_cap.events, "structural_validator_decision")
-      __io_println(under_cap.result.status == "done")
-      __io_println(len(under_cap_decisions) == 0)
+      harness.stdio.println(under_cap.result.status == "done")
+      harness.stdio.println(len(under_cap_decisions) == 0)
     },
   )
   with_llm_script(
-    [llm_text(malformed_tool_text), llm_text(tool_text), llm_text("<done>##DONE##</done>")],
+    harness.llm, [llm_text(malformed_tool_text), llm_text(tool_text), llm_text("<done>##DONE##</done>")],
     { ->
-      const warn_only_session = "structural-validator-warn-only-" + uuid()
-      const warn_only = agent_capture_events(
-        warn_only_session,
-        fn() { return agent_loop(
-          "Update notes.txt and then finish.",
+      const warn_only_session = "structural-validator-warn-only-" + harness.random.uuid()
+      const warn_only = agent_capture_events(harness,  harness, warn_only_session,
+        fn() { return agent_loop(harness, "Update notes.txt and then finish.",
           nil,
           {
             provider: "mock",
@@ -455,41 +428,41 @@ pipeline default() {
             tools: write_tools(),
             session_id: warn_only_session,
             structural_validator: with_structural_validator(
-              {rules: [{name: "tool_calls_well_formed", warn_only: true}]},
+              harness, {rules: [{name: "tool_calls_well_formed", warn_only: true}]},
             ),
           },
         ) },
       )
       const warn_only_decisions = events_of(warn_only.events, "structural_validator_decision")
-      const warn_only_messages = json_stringify(llm_mock_calls()[1].messages)
-      __io_println(warn_only.result.status == "done")
-      __io_println(len(warn_only_decisions) == 1)
-      __io_println(warn_only_decisions[0].rule == "tool_calls_well_formed")
-      __io_println(!(warn_only_decisions[0].vetoed ?? true))
-      __io_println(warn_only_decisions[0].reason == "warn_only")
-      __io_println(!warn_only_messages.contains("structural_validator"))
+      const warn_only_messages = json_stringify(harness.llm.mock_calls()[1].messages)
+      harness.stdio.println(warn_only.result.status == "done")
+      harness.stdio.println(len(warn_only_decisions) == 1)
+      harness.stdio.println(warn_only_decisions[0].rule == "tool_calls_well_formed")
+      harness.stdio.println(!(warn_only_decisions[0].vetoed ?? true))
+      harness.stdio.println(warn_only_decisions[0].reason == "warn_only")
+      harness.stdio.println(!warn_only_messages.contains("structural_validator"))
     },
   )
   // Option validation is schema-backed: malformed public options fail at
   // construction time before any validator turn can run.
   const bad_options_type = try {
-    with_structural_validator("invalid")
+    with_structural_validator(harness, "invalid")
   }
-  __io_println(error_contains(bad_options_type, "dict"))
+  harness.stdio.println(error_contains(bad_options_type, "dict"))
   const bad_on_failure = try {
-    with_structural_validator({on_failure: "passthrough"})
+    with_structural_validator(harness, {on_failure: "passthrough"})
   }
-  __io_println(error_contains(bad_on_failure, "on_failure"))
+  harness.stdio.println(error_contains(bad_on_failure, "on_failure"))
   const bad_max_attempts = try {
-    with_structural_validator({max_attempts: 0})
+    with_structural_validator(harness, {max_attempts: 0})
   }
-  __io_println(error_contains(bad_max_attempts, "max_attempts"))
+  harness.stdio.println(error_contains(bad_max_attempts, "max_attempts"))
   const bad_catalog = try {
-    with_structural_validator({no_phantom_completion_catalog: {en: "done"}})
+    with_structural_validator(harness, {no_phantom_completion_catalog: {en: "done"}})
   }
-  __io_println(error_contains(bad_catalog, "no_phantom_completion_catalog"))
+  harness.stdio.println(error_contains(bad_catalog, "no_phantom_completion_catalog"))
   const bad_warn_only = try {
-    with_structural_validator({rules: [{name: "tool_calls_well_formed", warn_only: "yes"}]})
+    with_structural_validator(harness, {rules: [{name: "tool_calls_well_formed", warn_only: "yes"}]})
   }
-  __io_println(error_contains(bad_warn_only, "rules[0]"))
+  harness.stdio.println(error_contains(bad_warn_only, "rules[0]"))
 }

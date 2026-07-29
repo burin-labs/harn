@@ -110,6 +110,8 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.daemon_spawn",
+    effects = ["worker.mutate@dynamic", "state.mutate@dynamic"],
     sig = "daemon_spawn(config: dict) -> dict",
     kind = "async",
     category = "agent.daemon"
@@ -176,6 +178,8 @@ async fn daemon_spawn_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.daemon_trigger",
+    effects = ["worker.mutate@arg0", "state.mutate@arg0"],
     sig = "daemon_trigger(handle: any, event: any) -> dict",
     kind = "async",
     category = "agent.daemon"
@@ -236,6 +240,8 @@ async fn daemon_trigger_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.managed_daemon_snapshot",
+    effects = ["state.read@arg0"],
     sig = "daemon_snapshot(handle: any) -> dict",
     category = "agent.daemon"
 )]
@@ -266,6 +272,8 @@ fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.daemon_stop",
+    effects = ["worker.mutate@arg0", "state.mutate@arg0"],
     sig = "daemon_stop(handle: any) -> dict",
     kind = "async",
     category = "agent.daemon"
@@ -381,6 +389,8 @@ async fn finish_daemon_stop(state: Arc<parking_lot::Mutex<DaemonState>>) -> Resu
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.daemon_resume",
+    effects = ["worker.mutate@arg0", "state.mutate@arg0"],
     sig = "daemon_resume(path: string) -> dict",
     kind = "async",
     category = "agent.daemon"

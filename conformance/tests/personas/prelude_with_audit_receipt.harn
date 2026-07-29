@@ -1,6 +1,6 @@
 import { with_audit_receipt } from "std/personas/prelude"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const opts = {
     persona: "audit_captain",
     step: "write_receipt",
@@ -8,21 +8,20 @@ pipeline test(task) {
     started_at: "2026-05-03T00:00:00Z",
     completed_at: "2026-05-03T00:00:00Z",
   }
-  const wrapped = with_audit_receipt(fn() { return {done: true} }, opts)
+  const wrapped = with_audit_receipt(harness, fn() { return {done: true} }, opts)
   const ok = wrapped()
-  __io_println(ok.status)
-  __io_println(ok.result.done)
-  __io_println(ok.receipt.schema)
-  __io_println(ok.receipt.step)
-  __io_println(len(ok.receipt.tool_calls))
-  const failed_wrapper = with_audit_receipt(
-    fn() {
+  harness.stdio.println(ok.status)
+  harness.stdio.println(ok.result.done)
+  harness.stdio.println(ok.receipt.schema)
+  harness.stdio.println(ok.receipt.step)
+  harness.stdio.println(len(ok.receipt.tool_calls))
+  const failed_wrapper = with_audit_receipt(harness,  harness, fn() {
       throw "boom"
     },
     opts,
   )
   const failed = failed_wrapper()
-  __io_println(failed.status)
-  __io_println(failed.error.message)
-  __io_println(failed.receipt.status)
+  harness.stdio.println(failed.status)
+  harness.stdio.println(failed.error.message)
+  harness.stdio.println(failed.receipt.status)
 }

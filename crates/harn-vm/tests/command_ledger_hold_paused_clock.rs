@@ -132,7 +132,7 @@ fn make_vm() -> (harn_vm::Vm, Arc<PausedClock>) {
     let (harness, paused) = Harness::test();
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
-    vm.set_global("harness", harness.into_vm_value());
+    vm.set_harness(harness);
     (vm, paused)
 }
 

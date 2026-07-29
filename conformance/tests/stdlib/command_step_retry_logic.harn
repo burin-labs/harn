@@ -15,7 +15,7 @@ fn success_result(text) {
   return {status: "completed", exit_code: 0, stdout: text, stderr: "", timed_out: false}
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   mock_time(1700000000000)
   const retry_runner = { _spec, _options ->
     if harness.clock.now_ms() == 1700000000000 {
@@ -24,7 +24,7 @@ pipeline default() {
     return success_result("try-2")
   }
   const retried = command_step(
-    "retry",
+    harness.tools, "retry",
     ["fake"],
     {runner: retry_runner, retry: {max_attempts: 3, delay_ms: 25}, tail_bytes: 50},
   )
@@ -37,7 +37,7 @@ pipeline default() {
   assert_eq(harness.clock.now_ms(), 1700000000025)
   const exhausted_runner = { _spec, _options -> return failed_result(9, "still failing") }
   const exhausted = command_step(
-    "exhausted",
+    harness.tools, "exhausted",
     ["fake"],
     {runner: exhausted_runner, retry: {max_attempts: 3}, tail_bytes: 20},
   )
@@ -46,7 +46,7 @@ pipeline default() {
   assert_eq(len(exhausted.attempts), 3)
   assert(contains(exhausted.failure_tail, "still failing"))
   const classified = command_step(
-    "classified",
+    harness.tools, "classified",
     ["fake"],
     {
       runner: { _spec, _options ->
@@ -66,7 +66,7 @@ pipeline default() {
   assert_eq(classified.recovery_hint, "check credentials")
   assert_eq(classified.attempts[0].classification.kind, "permission")
   const appended = command_steps_append(
-    [],
+    harness.tools, [],
     "classified",
     ["fake"],
     {
@@ -88,12 +88,12 @@ pipeline default() {
   assert_eq(compact.status, "completed")
   assert_eq(compact.tail, "nied")
   const shell_err = try {
-    command_run({command: "echo nope"})
+    command_run(harness.tools, {command: "echo nope"})
     "unreachable"
   } catch (e) {
     e
   }
   assert(contains(shell_err, "mode: \"shell\""))
   unmock_time()
-  __io_println("ok")
+  harness.stdio.println("ok")
 }

@@ -260,6 +260,8 @@ fn unix_socket_json_request(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__net_unix_socket_json_request(path: string, request: any, options?: dict) -> dict",
     category = "net"
 )]

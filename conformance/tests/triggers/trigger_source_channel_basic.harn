@@ -2,20 +2,20 @@ import "std/triggers"
 
 /**
  * CH-02 (#1872): register a `channel:`-source trigger and verify it fires
- * on a matching emit_channel(...). The handler echoes the payload to a
+ * on a matching harness.channels.append(...). The handler echoes the payload to a
  * separate channel so the test can observe the dispatch synchronously.
  */
-fn handle_channel(event) {
+fn handle_channel(harness: Harness, event) {
   const payload = event.provider_payload
-  emit_channel("ch.basic.fired", {name: payload.name, repo: payload.payload?.repo})
+  harness.channels.append("ch.basic.fired", {name: payload.name, repo: payload.payload?.repo})
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "channel-basic-" + unique,
       kind: "channel.emit",
@@ -33,11 +33,11 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  __io_println(handle.provider)
-  __io_println(handle.kind)
-  const _ = emit_channel("ch.basic.input", {repo: "harn"})
-  const fired = channel_events("ch.basic.fired")
-  __io_println(len(fired))
-  __io_println(fired[0].payload.name)
-  __io_println(fired[0].payload.repo)
+  harness.stdio.println(handle.provider)
+  harness.stdio.println(handle.kind)
+  const _ = harness.channels.append("ch.basic.input", {repo: "harn"})
+  const fired = harness.channels.events("ch.basic.fired")
+  harness.stdio.println(len(fired))
+  harness.stdio.println(fired[0].payload.name)
+  harness.stdio.println(fired[0].payload.repo)
 }

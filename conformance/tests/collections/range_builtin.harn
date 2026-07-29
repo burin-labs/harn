@@ -1,18 +1,18 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // range(n) is half-open, 0-indexed. Ranges are lazy; printing them
   // mirrors the source form (half-open is always printed as `exclusive`).
   const xs = range(5)
-  log(xs)
+  harness.stdio.println(xs)
   // range(a, b) is half-open — use .to_list() to materialize for display
   const ys = range(3, 7)
-  log(ys.to_list())
+  harness.stdio.println(ys.to_list())
   // works in iteration with sum
   let total = 0
   for i in range(10) {
     total += i
   }
-  log(total)
+  harness.stdio.println(total)
   // empty when b <= a
-  log(len(range(5, 5)))
-  log(len(range(0)))
+  harness.stdio.println(len(range(5, 5)))
+  harness.stdio.println(len(range(0)))
 }

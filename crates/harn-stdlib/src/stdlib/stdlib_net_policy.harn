@@ -17,7 +17,7 @@
  *   import { NetPolicy } from "std/net_policy"
  *
  *   pipeline default() {
- *     pipeline_on_finish({ harness, return_value ->
+ *     harness.agent.pipeline_on_finish({ harness, return_value ->
  *       let policy = NetPolicy.create({
  *         allow: [
  *           NetPolicy.domain("github.com"),

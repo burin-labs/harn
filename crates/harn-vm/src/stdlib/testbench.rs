@@ -26,12 +26,20 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &TESTBENCH_CLOCK_LEAKS_IMPL_DEF,
 ];
 
-#[harn_builtin(sig = "testbench_is_active() -> bool", category = "testbench")]
+#[harn_builtin(
+    exposure = "harness.testing.is_active",
+    effects = ["state.read@const=testbench"],
+    sig = "testbench_is_active() -> bool", category = "testbench"
+)]
 fn testbench_is_active_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(crate::clock_mock::is_mocked()))
 }
 
-#[harn_builtin(sig = "testbench_fs_diff() -> list", category = "testbench")]
+#[harn_builtin(
+    exposure = "harness.testing.fs_diff",
+    effects = ["state.read@const=testbench"],
+    sig = "testbench_fs_diff() -> list", category = "testbench"
+)]
 fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(overlay) = overlay_fs::active_overlay() else {
         return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
@@ -71,7 +79,11 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
 // capability first surfaced for the active testbench session.
 // `finalize()` drains the same scoped list, so scripts typically read it
 // just before they end.
-#[harn_builtin(sig = "testbench_clock_leaks() -> list", category = "testbench")]
+#[harn_builtin(
+    exposure = "harness.testing.clock_leaks",
+    effects = ["state.read@const=testbench"],
+    sig = "testbench_clock_leaks() -> list", category = "testbench"
+)]
 fn testbench_clock_leaks_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let leaks = crate::clock_mock::leak_audit::snapshot();
     let entries: Vec<VmValue> = leaks

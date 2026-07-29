@@ -82,8 +82,8 @@ type CorrectionQueryFilters = {
  * @effects: []
  * @errors: []
  */
-pub fn record(correction: CorrectionInput) -> CorrectionId {
-  return corrections.record(correction)
+pub fn record(harness: Harness, correction: CorrectionInput) -> CorrectionId {
+  return harness.runtime.corrections_record(correction)
 }
 
 /**
@@ -92,6 +92,6 @@ pub fn record(correction: CorrectionInput) -> CorrectionId {
  * @effects: []
  * @errors: []
  */
-pub fn query(filters: CorrectionQueryFilters = {}) -> list<CorrectionRecord> {
-  return corrections.query(filters)
+pub fn query(harness: Harness, filters: CorrectionQueryFilters = {}) -> list<CorrectionRecord> {
+  return harness.runtime.corrections_query(filters)
 }

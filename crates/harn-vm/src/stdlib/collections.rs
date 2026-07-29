@@ -316,12 +316,18 @@ fn register_dict_builder_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "__dict_filter_nil(d: dict) -> dict", category = "collections")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__dict_filter_nil(d: dict) -> dict", category = "collections"
+)]
 fn dict_filter_nil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     dict_filter_nil(args.first().unwrap_or(&VmValue::Nil))
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__dict_merge(a: dict, b: dict) -> dict",
     category = "collections"
 )]
@@ -333,6 +339,8 @@ fn dict_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__dict_pick(d: dict, keys: list) -> dict",
     category = "collections"
 )]
@@ -344,6 +352,8 @@ fn dict_pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__dict_pick_keys(d: dict, keys: list, drop_nil?: bool) -> dict",
     category = "collections"
 )]
@@ -356,6 +366,8 @@ fn dict_pick_keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__dict_omit(d: dict, keys: list) -> dict",
     category = "collections"
 )]
@@ -366,19 +378,28 @@ fn dict_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     )
 }
 
-#[harn_builtin(sig = "clone(value: any) -> any", category = "collections")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "clone(value: any) -> any", category = "collections"
+)]
 fn clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(shallow_clone(args.first().unwrap_or(&VmValue::Nil)))
 }
 
-#[harn_builtin(sig = "deep_clone(value: any) -> any", category = "collections")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "deep_clone(value: any) -> any", category = "collections"
+)]
 fn deep_clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(deep_clone_value(args.first().unwrap_or(&VmValue::Nil)))
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "deep_merge(a: dict, b: dict) -> dict",
-    aliases = ["__deep_merge"],
     category = "collections"
 )]
 fn deep_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -389,8 +410,9 @@ fn deep_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "unique(items: list) -> list",
-    aliases = ["__list_unique"],
     category = "collections"
 )]
 fn unique_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -398,8 +420,9 @@ fn unique_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "dict_from_pairs(pairs: list) -> dict",
-    aliases = ["__dict_from_pairs"],
     category = "collections"
 )]
 fn dict_from_pairs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

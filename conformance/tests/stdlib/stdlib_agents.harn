@@ -1,7 +1,7 @@
 import "std/agents"
 import "std/context"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const flow = workflow(
     {
       name: "demo",
@@ -12,12 +12,12 @@ pipeline default() {
       repair: {mode: "llm", model_tier: "frontier"},
     },
   )
-  const result = task_run("Write a note", flow, {provider: "mock"})
-  __io_println(result?.status)
-  __io_println(result?.repair != nil)
-  __io_println(result?.transcript?._type)
+  const result = task_run(harness, "Write a note", flow, {provider: "mock"})
+  harness.stdio.println(result?.status)
+  harness.stdio.println(result?.repair != nil)
+  harness.stdio.println(result?.transcript?._type)
   const continued = workflow_continue(result, "Continue", flow, {provider: "mock"})
-  __io_println(continued?.transcript?._type)
+  harness.stdio.println(continued?.transcript?._type)
   const compacted = workflow_compact(continued, {provider: "mock", keep_last: 1})
-  __io_println(transcript_summary(compacted) != nil)
+  harness.stdio.println(transcript_summary(compacted) != nil)
 }

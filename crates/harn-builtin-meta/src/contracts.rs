@@ -1,0 +1,423 @@
+//! Typed authority and effect contracts for Harn builtins.
+//!
+//! This dependency-leaf model is the semantic owner for which script surface
+//! may reach a builtin and what that call can do. Runtime handler pointers stay
+//! in `harn-vm`; parser, IR, policy, hostlib, and documentation consumers can
+//! all depend on this crate without reversing the workspace dependency graph.
+
+/// Where a builtin is visible to Harn source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinExposure {
+    /// Contract has not been declared yet. Production registries must reject
+    /// this value; it exists only to make migration failures precise.
+    Undeclared,
+    /// Pure computation available as an ordinary global function.
+    PureGlobal,
+    /// Imported operation whose authority is carried by one explicit,
+    /// unforgeable argument derived from `Harness`. Importing the symbol
+    /// itself grants no authority.
+    CapabilityFunction { authority_argument: u16 },
+    /// Effectful operation available only through a typed harness handle.
+    HarnessMethod {
+        capability: CapabilityId,
+        method: &'static str,
+    },
+    /// Trusted embedder wire primitive. User modules cannot name or re-export
+    /// it; only artifacts stamped with privileged provenance may call it.
+    PrivilegedWire,
+    /// Compiler/runtime implementation detail that is never source-visible.
+    RuntimeInternal,
+}
+
+/// Closed vocabulary of capability handles exposed by `Harness`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CapabilityId {
+    Stdio,
+    Term,
+    Clock,
+    Fs,
+    Env,
+    Random,
+    Net,
+    Process,
+    Channels,
+    System,
+    Secrets,
+    Llm,
+    Agent,
+    Tenant,
+    Auth,
+    Observability,
+    Verdict,
+    Tools,
+    Ast,
+    CodeIndex,
+    Computer,
+    Embed,
+    Memory,
+    Sqlite,
+    Postgres,
+    FsWatch,
+    HostLease,
+    Scanner,
+    SecretStore,
+    TerminalSession,
+    Rules,
+    Lint,
+    Runtime,
+    Interaction,
+    Project,
+    Testing,
+}
+
+impl CapabilityId {
+    /// Rust enum variant spelling for generated contract expressions.
+    pub const fn variant_name(self) -> &'static str {
+        match self {
+            Self::Stdio => "Stdio",
+            Self::Term => "Term",
+            Self::Clock => "Clock",
+            Self::Fs => "Fs",
+            Self::Env => "Env",
+            Self::Random => "Random",
+            Self::Net => "Net",
+            Self::Process => "Process",
+            Self::Channels => "Channels",
+            Self::System => "System",
+            Self::Secrets => "Secrets",
+            Self::Llm => "Llm",
+            Self::Agent => "Agent",
+            Self::Tenant => "Tenant",
+            Self::Auth => "Auth",
+            Self::Observability => "Observability",
+            Self::Verdict => "Verdict",
+            Self::Tools => "Tools",
+            Self::Ast => "Ast",
+            Self::CodeIndex => "CodeIndex",
+            Self::Computer => "Computer",
+            Self::Embed => "Embed",
+            Self::Memory => "Memory",
+            Self::Sqlite => "Sqlite",
+            Self::Postgres => "Postgres",
+            Self::FsWatch => "FsWatch",
+            Self::HostLease => "HostLease",
+            Self::Scanner => "Scanner",
+            Self::SecretStore => "SecretStore",
+            Self::TerminalSession => "TerminalSession",
+            Self::Rules => "Rules",
+            Self::Lint => "Lint",
+            Self::Runtime => "Runtime",
+            Self::Interaction => "Interaction",
+            Self::Project => "Project",
+            Self::Testing => "Testing",
+        }
+    }
+
+    /// Every capability in canonical root-field order.
+    pub const ALL: &'static [Self] = &[
+        Self::Stdio,
+        Self::Term,
+        Self::Clock,
+        Self::Fs,
+        Self::Env,
+        Self::Random,
+        Self::Net,
+        Self::Process,
+        Self::Channels,
+        Self::System,
+        Self::Secrets,
+        Self::Llm,
+        Self::Agent,
+        Self::Tenant,
+        Self::Auth,
+        Self::Observability,
+        Self::Verdict,
+        Self::Tools,
+        Self::Ast,
+        Self::CodeIndex,
+        Self::Computer,
+        Self::Embed,
+        Self::Memory,
+        Self::Sqlite,
+        Self::Postgres,
+        Self::FsWatch,
+        Self::HostLease,
+        Self::Scanner,
+        Self::SecretStore,
+        Self::TerminalSession,
+        Self::Rules,
+        Self::Lint,
+        Self::Runtime,
+        Self::Interaction,
+        Self::Project,
+        Self::Testing,
+    ];
+
+    /// Canonical source-level `harness.<field>` name.
+    pub const fn field_name(self) -> &'static str {
+        match self {
+            Self::Stdio => "stdio",
+            Self::Term => "term",
+            Self::Clock => "clock",
+            Self::Fs => "fs",
+            Self::Env => "env",
+            Self::Random => "random",
+            Self::Net => "net",
+            Self::Process => "process",
+            Self::Channels => "channels",
+            Self::System => "system",
+            Self::Secrets => "secrets",
+            Self::Llm => "llm",
+            Self::Agent => "agent",
+            Self::Tenant => "tenant",
+            Self::Auth => "auth",
+            Self::Observability => "obs",
+            Self::Verdict => "verdict",
+            Self::Tools => "tools",
+            Self::Ast => "ast",
+            Self::CodeIndex => "code_index",
+            Self::Computer => "computer",
+            Self::Embed => "embed",
+            Self::Memory => "memory",
+            Self::Sqlite => "sqlite",
+            Self::Postgres => "postgres",
+            Self::FsWatch => "fs_watch",
+            Self::HostLease => "host_lease",
+            Self::Scanner => "scanner",
+            Self::SecretStore => "secret_store",
+            Self::TerminalSession => "terminal",
+            Self::Rules => "rules",
+            Self::Lint => "lint",
+            Self::Runtime => "runtime",
+            Self::Interaction => "interaction",
+            Self::Project => "project",
+            Self::Testing => "testing",
+        }
+    }
+
+    /// Nominal source type carried by this capability handle.
+    pub const fn type_name(self) -> &'static str {
+        match self {
+            Self::Stdio => "HarnessStdio",
+            Self::Term => "HarnessTerm",
+            Self::Clock => "HarnessClock",
+            Self::Fs => "HarnessFs",
+            Self::Env => "HarnessEnv",
+            Self::Random => "HarnessRandom",
+            Self::Net => "HarnessNet",
+            Self::Process => "HarnessProcess",
+            Self::Channels => "HarnessChannels",
+            Self::System => "HarnessSystem",
+            Self::Secrets => "HarnessSecrets",
+            Self::Llm => "HarnessLlm",
+            Self::Agent => "HarnessAgent",
+            Self::Tenant => "HarnessTenant",
+            Self::Auth => "HarnessAuth",
+            Self::Observability => "HarnessObs",
+            Self::Verdict => "HarnessVerdict",
+            Self::Tools => "HarnessTools",
+            Self::Ast => "HarnessAst",
+            Self::CodeIndex => "HarnessCodeIndex",
+            Self::Computer => "HarnessComputer",
+            Self::Embed => "HarnessEmbed",
+            Self::Memory => "HarnessMemory",
+            Self::Sqlite => "HarnessSqlite",
+            Self::Postgres => "HarnessPostgres",
+            Self::FsWatch => "HarnessFsWatch",
+            Self::HostLease => "HarnessHostLease",
+            Self::Scanner => "HarnessScanner",
+            Self::SecretStore => "HarnessSecretStore",
+            Self::TerminalSession => "HarnessTerminalSession",
+            Self::Rules => "HarnessRules",
+            Self::Lint => "HarnessLint",
+            Self::Runtime => "HarnessRuntime",
+            Self::Interaction => "HarnessInteraction",
+            Self::Project => "HarnessProject",
+            Self::Testing => "HarnessTesting",
+        }
+    }
+
+    /// Parse the closed source vocabulary used by the builtin macro.
+    pub const fn from_field_name(name: &str) -> Option<Self> {
+        match name.as_bytes() {
+            b"stdio" => Some(Self::Stdio),
+            b"term" => Some(Self::Term),
+            b"clock" => Some(Self::Clock),
+            b"fs" => Some(Self::Fs),
+            b"env" => Some(Self::Env),
+            b"random" => Some(Self::Random),
+            b"net" => Some(Self::Net),
+            b"process" => Some(Self::Process),
+            b"channels" => Some(Self::Channels),
+            b"system" => Some(Self::System),
+            b"secrets" => Some(Self::Secrets),
+            b"llm" => Some(Self::Llm),
+            b"agent" => Some(Self::Agent),
+            b"tenant" => Some(Self::Tenant),
+            b"auth" => Some(Self::Auth),
+            b"obs" => Some(Self::Observability),
+            b"verdict" => Some(Self::Verdict),
+            b"tools" => Some(Self::Tools),
+            b"ast" => Some(Self::Ast),
+            b"code_index" => Some(Self::CodeIndex),
+            b"computer" => Some(Self::Computer),
+            b"embed" => Some(Self::Embed),
+            b"memory" => Some(Self::Memory),
+            b"sqlite" => Some(Self::Sqlite),
+            b"postgres" => Some(Self::Postgres),
+            b"fs_watch" => Some(Self::FsWatch),
+            b"host_lease" => Some(Self::HostLease),
+            b"scanner" => Some(Self::Scanner),
+            b"secret_store" => Some(Self::SecretStore),
+            b"terminal" => Some(Self::TerminalSession),
+            b"rules" => Some(Self::Rules),
+            b"lint" => Some(Self::Lint),
+            b"runtime" => Some(Self::Runtime),
+            b"interaction" => Some(Self::Interaction),
+            b"project" => Some(Self::Project),
+            b"testing" => Some(Self::Testing),
+            _ => None,
+        }
+    }
+
+    pub fn from_type_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|capability| capability.type_name() == name)
+    }
+}
+
+/// Closed effect family used for static ceilings and runtime receipts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EffectKind {
+    Stdio,
+    Fs,
+    Env,
+    Clock,
+    Random,
+    Network,
+    Process,
+    Llm,
+    Tool,
+    Host,
+    Worker,
+    Secret,
+    Observability,
+    Channel,
+    State,
+}
+
+/// How an operation interacts with its effect resource.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EffectAccess {
+    Read,
+    Write,
+    Mutate,
+    Observe,
+}
+
+/// Declarative extraction of resource identities from nominal call arguments.
+///
+/// A contract may carry several selectors, which covers moves/renames, staged
+/// batches, and option-dependent scopes without another name-based classifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceSelector {
+    /// Whole positional argument at the declared index.
+    Argument(u16),
+    /// A nested field inside one positional argument.
+    Field {
+        argument: u16,
+        path: &'static [&'static str],
+    },
+    /// Every element in a positional list argument.
+    EachArgument(u16),
+    /// A registry-owned fixed resource identity.
+    Constant(&'static str),
+    /// The operation is effectful but the resource cannot be resolved
+    /// statically. Runtime receipt resolution may still supply it.
+    Dynamic,
+}
+
+/// One conservative effect entry for a builtin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectSpec {
+    pub kind: EffectKind,
+    pub access: EffectAccess,
+    pub resources: &'static [ResourceSelector],
+}
+
+impl EffectSpec {
+    pub const fn new(
+        kind: EffectKind,
+        access: EffectAccess,
+        resources: &'static [ResourceSelector],
+    ) -> Self {
+        Self {
+            kind,
+            access,
+            resources,
+        }
+    }
+}
+
+/// Complete source exposure and effect contract paired with one builtin
+/// implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltinContract {
+    pub exposure: BuiltinExposure,
+    pub effects: &'static [EffectSpec],
+}
+
+impl BuiltinContract {
+    pub const UNDECLARED: Self = Self {
+        exposure: BuiltinExposure::Undeclared,
+        effects: &[],
+    };
+
+    pub const PURE: Self = Self {
+        exposure: BuiltinExposure::PureGlobal,
+        effects: &[],
+    };
+
+    pub const RUNTIME_INTERNAL: Self = Self {
+        exposure: BuiltinExposure::RuntimeInternal,
+        effects: &[],
+    };
+
+    pub const fn harness(
+        capability: CapabilityId,
+        method: &'static str,
+        effects: &'static [EffectSpec],
+    ) -> Self {
+        Self {
+            exposure: BuiltinExposure::HarnessMethod { capability, method },
+            effects,
+        }
+    }
+
+    pub const fn capability_function(
+        authority_argument: u16,
+        effects: &'static [EffectSpec],
+    ) -> Self {
+        Self {
+            exposure: BuiltinExposure::CapabilityFunction { authority_argument },
+            effects,
+        }
+    }
+
+    pub const fn privileged_wire(effects: &'static [EffectSpec]) -> Self {
+        Self {
+            exposure: BuiltinExposure::PrivilegedWire,
+            effects,
+        }
+    }
+
+    pub const fn is_declared(self) -> bool {
+        !matches!(self.exposure, BuiltinExposure::Undeclared)
+    }
+
+    pub const fn is_pure(self) -> bool {
+        self.effects.is_empty()
+    }
+}

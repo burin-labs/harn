@@ -16,16 +16,15 @@ fn lookup_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
       llm_text("<user_response>Release notes are ready.</user_response>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"natural final text is complete\"}"),
     ],
     { ->
-      const result = agent_loop(
-        "Inspect evidence and finish.",
+      const result = agent_loop(harness, "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",
@@ -36,30 +35,29 @@ pipeline main() {
           max_iterations: 4,
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(result.text)
-      __io_println(result.llm.iterations)
-      __io_println(len(calls))
-      __io_println(!contains(calls[0].system, "##DONE##"))
-      __io_println(!contains(calls[1].system, "##DONE##"))
-      __io_println(!contains(calls[0].system, "<user_response>"))
-      __io_println(contains(calls[0].system, "provider's native tool-calling channel"))
-      __io_println(contains(json_stringify(calls[1].messages), "evidence for release"))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.text)
+      harness.stdio.println(result.llm.iterations)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(!contains(calls[0].system, "##DONE##"))
+      harness.stdio.println(!contains(calls[1].system, "##DONE##"))
+      harness.stdio.println(!contains(calls[0].system, "<user_response>"))
+      harness.stdio.println(contains(calls[0].system, "provider's native tool-calling channel"))
+      harness.stdio.println(contains(json_stringify(calls[1].messages), "evidence for release"))
     },
   )
   with_llm_script(
-    [llm_text("Plain final answer.")],
+    harness.llm, [llm_text("Plain final answer.")],
     { ->
-      agent_loop(
-        "Finish without tools.",
+      agent_loop(harness, "Finish without tools.",
         nil,
         {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
       )
-      const empty_calls = llm_mock_calls()
+      const empty_calls = harness.llm.mock_calls()
       const empty_system = empty_calls[0].system ?? ""
-      __io_println(!contains(empty_system, "Native tool protocol"))
-      __io_println(!contains(empty_system, "<user_response>"))
+      harness.stdio.println(!contains(empty_system, "Native tool protocol"))
+      harness.stdio.println(!contains(empty_system, "<user_response>"))
     },
   )
 }

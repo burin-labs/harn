@@ -1088,8 +1088,6 @@ because only 5 elements flow through the pipeline.
 const matches  = regex_match("[0-9]+", "abc 42 def 7")   // ["42", "7"] or nil
 const swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 //           -> "world hello"
-const same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
-//           -> alias of regex_replace; every match replaced.
 const captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
 const words    = regex_split("a, b, c", ",\\s*")
 const ci       = regex_match("hello", "HeLLo", "i")
@@ -1098,8 +1096,8 @@ const body     = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
 const body2    = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
 ```
 
-`regex_replace` and `regex_replace_all` both replace every match and
-both support `$1`, `$2`, `${name}` backrefs plus the same optional
+`regex_replace` replaces every match and supports `$1`, `$2`,
+`${name}` backrefs plus the same optional
 `i`/`m`/`s`/`x` flags as `regex_match`. Inline regex flags such as
 `(?is)` use the same semantics as the trailing flags argument. Each
 `regex_captures` result has `match`, positional `groups` excluding the

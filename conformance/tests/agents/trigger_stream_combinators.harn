@@ -1,6 +1,6 @@
 import "std/triggers"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const events = [
     {provider: "kafka", key: "acct-1", value: {amount: 10}},
     {provider: "nats", key: "acct-2", value: {amount: 20}},
@@ -26,5 +26,5 @@ pipeline test(task) {
   assert(classified.kind == "stream.llm_classify", "llm_classify should tag plans")
   assert(classified.cache == "stream:risk:v1", "llm_classify should preserve cache key")
   assert(classified.options.model == "fast", "llm_classify should preserve options")
-  log("trigger_stream_combinators tests passed")
+  harness.stdio.println("trigger_stream_combinators tests passed")
 }

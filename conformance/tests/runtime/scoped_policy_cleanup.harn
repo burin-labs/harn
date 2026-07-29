@@ -13,26 +13,26 @@ fn scoped_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const tools = scoped_tools()
   const call = {name: "write_note", arguments: {path: "notes.txt"}}
-  const denied = with_approval_policy(
+  const denied = harness.runtime.with_approval_policy(
     {auto_deny: ["write*"]},
-    fn() { return agent_dispatch_tool_call(call, tools) },
+    fn() { return agent_dispatch_tool_call(harness, call, tools) },
   )
-  __io_println(denied.ok)
-  __io_println(denied.error_category)
+  harness.stdio.println(denied.ok)
+  harness.stdio.println(denied.error_category)
   try {
-    with_approval_policy(
+    harness.runtime.with_approval_policy(
       {auto_deny: ["write*"]},
       fn() {
         throw "boom"
       },
     )
   } catch (e) {
-    __io_println("caught")
+    harness.stdio.println("caught")
   }
-  const allowed = agent_dispatch_tool_call(call, tools)
-  __io_println(allowed.ok)
-  __io_println(allowed.rendered_result)
+  const allowed = agent_dispatch_tool_call(harness, call, tools)
+  harness.stdio.println(allowed.ok)
+  harness.stdio.println(allowed.rendered_result)
 }

@@ -45,10 +45,6 @@ run_test "read_file delegation" \
     "$SCRIPT_DIR/test_read_file.harn" \
     "Mock content of src/main.rs"
 
-run_test "host_call delegation" \
-    "$SCRIPT_DIR/test_host_call.harn" \
-    "Mock host_call result for: get_system_prompt"
-
 run_test "task argument passing" \
     "$SCRIPT_DIR/test_task_arg.harn" \
     "Task: Fix the bug" \

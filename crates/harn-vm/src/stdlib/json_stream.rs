@@ -1,19 +1,14 @@
 use crate::value::VmDictExt;
-use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use serde_json::error::Category;
 
 use crate::schema;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
-
-thread_local! {
-    static JSON_STREAM_VALIDATORS: RefCell<BTreeMap<String, JsonStreamValidator>> =
-        const { RefCell::new(BTreeMap::new()) };
-    static NEXT_JSON_STREAM_VALIDATOR_ID: Cell<u64> = const { Cell::new(1) };
-}
 
 #[derive(Clone)]
 struct JsonStreamValidator {
@@ -205,8 +200,8 @@ struct EarlyInvalid {
 }
 
 pub(crate) fn reset_json_stream_state() {
-    JSON_STREAM_VALIDATORS.with(|validators| validators.borrow_mut().clear());
-    NEXT_JSON_STREAM_VALIDATOR_ID.with(|next| next.set(1));
+    // Validator state is owned by opaque VM resource values and is released
+    // when those values leave the VM. There is no ambient registry to reset.
 }
 
 pub(crate) fn register_json_stream_builtins(vm: &mut Vm) {
@@ -220,24 +215,22 @@ fn create_validator(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmError>
         .first()
         .ok_or_else(|| thrown(format!("{builtin}: requires a schema argument")))?;
     let schema = schema::schema_from_json_schema_value(schema)?;
-    let handle = next_handle();
-    JSON_STREAM_VALIDATORS.with(|validators| {
-        validators.borrow_mut().insert(
-            handle.clone(),
-            JsonStreamValidator {
-                schema,
-                buffer: String::new(),
-                scan: JsonStreamScan::default(),
-                status: JsonStreamStatus::Pending,
-                value: None,
-            },
-        );
-    });
-    Ok(VmValue::String(arcstr::ArcStr::from(handle)))
+    Ok(VmValue::resource(VmResourceHandle::new(
+        "json_stream_validator",
+        Mutex::new(JsonStreamValidator {
+            schema,
+            buffer: String::new(),
+            scan: JsonStreamScan::default(),
+            status: JsonStreamStatus::Pending,
+            value: None,
+        }),
+    )))
 }
 
 #[harn_builtin(
-    sig = "__json_stream_validator(schema: dict) -> string",
+    exposure = "harness.runtime.json_stream_validator",
+    effects = ["state.mutate@dynamic"],
+    sig = "__json_stream_validator(schema: dict) -> resource",
     category = "json_stream"
 )]
 fn json_stream_validator_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -245,7 +238,9 @@ fn json_stream_validator_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
-    sig = "__json_stream_validator_feed(handle: string, chunk: string | bytes) -> any",
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
+    sig = "__json_stream_validator_feed(handle: resource, chunk: string | bytes) -> any",
     category = "json_stream"
 )]
 fn json_stream_validator_feed_impl(
@@ -261,7 +256,9 @@ fn json_stream_validator_feed_impl(
 }
 
 #[harn_builtin(
-    sig = "__json_stream_validator_value(handle: string) -> any",
+    exposure = "capability_arg:0",
+    effects = ["state.observe@arg0"],
+    sig = "__json_stream_validator_value(handle: resource) -> any",
     category = "json_stream"
 )]
 fn json_stream_validator_value_impl(
@@ -278,7 +275,9 @@ fn json_stream_validator_value_impl(
 }
 
 #[harn_builtin(
-    sig = "__json_stream_validator_status(handle: string) -> any",
+    exposure = "capability_arg:0",
+    effects = ["state.observe@arg0"],
+    sig = "__json_stream_validator_status(handle: resource) -> any",
     category = "json_stream"
 )]
 fn json_stream_validator_status_impl(
@@ -290,7 +289,9 @@ fn json_stream_validator_status_impl(
 }
 
 #[harn_builtin(
-    sig = "__json_stream_validator_partial(handle: string) -> any",
+    exposure = "capability_arg:0",
+    effects = ["state.observe@arg0"],
+    sig = "__json_stream_validator_partial(handle: resource) -> any",
     category = "json_stream"
 )]
 fn json_stream_validator_partial_impl(
@@ -308,7 +309,9 @@ fn json_stream_validator_partial_impl(
 // reason?, path?}`) so streaming agents can dispatch on it without
 // pattern-matching enum variants.
 #[harn_builtin(
-    sig = "__json_stream_validate_create(schema: dict) -> string",
+    exposure = "harness.runtime.json_stream_validate_create",
+    effects = ["state.mutate@dynamic"],
+    sig = "__json_stream_validate_create(schema: dict) -> resource",
     category = "json_stream"
 )]
 fn json_stream_validate_create_impl(
@@ -319,7 +322,9 @@ fn json_stream_validate_create_impl(
 }
 
 #[harn_builtin(
-    sig = "__json_stream_validate_chunk(handle: string, chunk: string | bytes) -> dict",
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
+    sig = "__json_stream_validate_chunk(handle: resource, chunk: string | bytes) -> dict",
     category = "json_stream"
 )]
 fn json_stream_validate_chunk_impl(
@@ -335,7 +340,9 @@ fn json_stream_validate_chunk_impl(
 }
 
 #[harn_builtin(
-    sig = "__json_stream_validate_finalize(handle: string) -> dict",
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
+    sig = "__json_stream_validate_finalize(handle: resource) -> dict",
     category = "json_stream"
 )]
 fn json_stream_validate_finalize_impl(
@@ -846,17 +853,11 @@ impl JsonStreamScan {
     }
 }
 
-fn next_handle() -> String {
-    NEXT_JSON_STREAM_VALIDATOR_ID.with(|next| {
-        let id = next.get();
-        next.set(id.saturating_add(1));
-        format!("json_stream_validator:{id}")
-    })
-}
-
-fn handle_arg(args: &[VmValue], builtin: &str) -> Result<String, VmError> {
+fn handle_arg(args: &[VmValue], builtin: &str) -> Result<Arc<Mutex<JsonStreamValidator>>, VmError> {
     match args.first() {
-        Some(VmValue::String(handle)) => Ok(handle.to_string()),
+        Some(VmValue::Resource(handle)) if handle.label() == "json_stream_validator" => handle
+            .downcast::<Mutex<JsonStreamValidator>>()
+            .ok_or_else(|| thrown(format!("{builtin}: invalid validator authority"))),
         Some(other) => Err(thrown(format!(
             "{builtin}: expected validator handle, got {}",
             other.type_name()
@@ -878,18 +879,10 @@ fn chunk_arg(args: &[VmValue], builtin: &str) -> Result<Vec<u8>, VmError> {
 }
 
 fn with_validator<T>(
-    handle: &str,
+    handle: &Arc<Mutex<JsonStreamValidator>>,
     f: impl FnOnce(&mut JsonStreamValidator) -> Result<T, VmError>,
 ) -> Result<T, VmError> {
-    JSON_STREAM_VALIDATORS.with(|validators| {
-        let mut validators = validators.borrow_mut();
-        let validator = validators.get_mut(handle).ok_or_else(|| {
-            thrown(format!(
-                "json stream validator handle not found or expired: {handle}"
-            ))
-        })?;
-        f(validator)
-    })
+    f(&mut handle.lock())
 }
 
 fn status_value(status: &JsonStreamStatus) -> VmValue {

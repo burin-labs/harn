@@ -16,7 +16,7 @@ const spec = [
   {kind: "positional", name: "extra"},
 ]
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const one = parse_args(
     [
       "--dry-run",
@@ -37,27 +37,27 @@ pipeline default() {
     ],
     spec,
   )
-  __io_println(one.dry_run)
-  __io_println(one.verbose)
-  __io_println(one.model)
-  __io_println(one.max)
-  __io_println(one.ratio)
-  __io_println(one.tags)
-  __io_println(one.labels)
-  __io_println(one.target)
-  __io_println(one.extra)
-  __io_println(one._positional)
-  __io_println(one._help)
-  __io_println(len(one._errors))
+  harness.stdio.println(one.dry_run)
+  harness.stdio.println(one.verbose)
+  harness.stdio.println(one.model)
+  harness.stdio.println(one.max)
+  harness.stdio.println(one.ratio)
+  harness.stdio.println(one.tags)
+  harness.stdio.println(one.labels)
+  harness.stdio.println(one.target)
+  harness.stdio.println(one.extra)
+  harness.stdio.println(one._positional)
+  harness.stdio.println(one._help)
+  harness.stdio.println(len(one._errors))
   const two = parse_args(["--unknown-flag", "--", "--max", "raw"], spec)
-  __io_println(two.dry_run)
-  __io_println(two.max)
-  __io_println(two._extras)
-  __io_println(two._positional)
-  __io_println(two.target)
+  harness.stdio.println(two.dry_run)
+  harness.stdio.println(two.max)
+  harness.stdio.println(two._extras)
+  harness.stdio.println(two._positional)
+  harness.stdio.println(two.target)
   const help = parse_args(["--help"], spec)
-  __io_println(help._help)
+  harness.stdio.println(help._help)
   const with_errors = parse_args(["--max", "not-an-int"], spec)
-  __io_println(len(with_errors._errors) > 0)
-  __io_println(starts_with(help_text(spec, "demo"), "Usage: demo"))
+  harness.stdio.println(len(with_errors._errors) > 0)
+  harness.stdio.println(starts_with(help_text(spec, "demo"), "Usage: demo"))
 }

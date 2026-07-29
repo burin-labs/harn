@@ -33,13 +33,13 @@ fn resume_signature(final) {
   }
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn-session-bundle-resume-" + uuid_v7())
+  const root = path_join(harness.fs.temp_dir(), "harn-session-bundle-resume-" + harness.random.uuid_v7())
   const source_root = path_join(root, "source")
   const dest_root = path_join(root, "dest")
   harness.fs.mkdir(source_root)
@@ -48,17 +48,17 @@ pipeline main() {
   harness.fs.write_text(
     script,
     """
-pipeline main() {
-  llm_mock({tool_calls: [{id: "park_bundle", name: "agent_await_resumption", arguments: {reason: "bundle migration park"}}]})
-  let result = agent_loop("Park so a session bundle can carry this run.", nil, {provider: "mock", tool_format: "native", max_iterations: 2, session_id: "bundle-resume-" + uuid_v7()})
-  __io_println("status=" + result.status)
-  __io_println("snapshot=" + result.handle.snapshot_path)
+pipeline main(harness: Harness) {
+  harness.llm.mock_enqueue({tool_calls: [{id: "park_bundle", name: "agent_await_resumption", arguments: {reason: "bundle migration park"}}]})
+  let result = agent_loop(harness, "Park so a session bundle can carry this run.", nil, {provider: "mock", tool_format: "native", max_iterations: 2, session_id: "bundle-resume-" + harness.random.uuid_v7()})
+  harness.stdio.println("status=" + result.status)
+  harness.stdio.println("snapshot=" + result.handle.snapshot_path)
 }
 """,
   )
   const first = exec_at(source_root, harn_bin, "run", script)
-  __io_println("first_ok=" + to_string(first.success))
-  __io_println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
+  harness.stdio.println("first_ok=" + to_string(first.success))
+  harness.stdio.println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
   const snapshot = first_snapshot_line(first.stdout)
   require snapshot != nil, "session bundle suspend did not print a snapshot path"
   const snapshot_path = if path_is_absolute(snapshot) {
@@ -66,7 +66,7 @@ pipeline main() {
   } else {
     path_join(source_root, snapshot)
   }
-  __io_println("source_snapshot_exists=" + to_string(harness.fs.exists(snapshot_path)))
+  harness.stdio.println("source_snapshot_exists=" + to_string(harness.fs.exists(snapshot_path)))
   const snapshot_value = json_parse(harness.fs.read_text(snapshot_path))
   const bundle_path = path_join(source_root, "source.bundle.json")
   const exported = exec_at(
@@ -78,9 +78,9 @@ pipeline main() {
     "--out",
     bundle_path,
   )
-  __io_println("export_ok=" + to_string(exported.success))
+  harness.stdio.println("export_ok=" + to_string(exported.success))
   const validated = exec_at(source_root, harn_bin, "session", "validate", bundle_path, "--json")
-  __io_println("validate_ok=" + to_string(validated.success))
+  harness.stdio.println("validate_ok=" + to_string(validated.success))
   const imported_run_path = path_join(dest_root, "imported-run.json")
   const imported_snapshot_dir = path_join(dest_root, "worker-snapshots")
   const imported = exec_at(
@@ -95,26 +95,26 @@ pipeline main() {
     imported_snapshot_dir,
     "--json",
   )
-  __io_println("import_ok=" + to_string(imported.success))
+  harness.stdio.println("import_ok=" + to_string(imported.success))
   const import_report = json_parse(imported.stdout)
   const imported_snapshot = import_report.worker_snapshots[0].path
-  __io_println("worker_snapshot_count=" + to_string(import_report.worker_snapshot_count))
-  __io_println("imported_snapshot_exists=" + to_string(harness.fs.exists(imported_snapshot)))
-  __io_println("snapshot_rewritten=" + to_string(imported_snapshot != snapshot_path))
+  harness.stdio.println("worker_snapshot_count=" + to_string(import_report.worker_snapshot_count))
+  harness.stdio.println("imported_snapshot_exists=" + to_string(harness.fs.exists(imported_snapshot)))
+  harness.stdio.println("snapshot_rewritten=" + to_string(imported_snapshot != snapshot_path))
   const imported_snapshot_value = json_parse(harness.fs.read_text(imported_snapshot))
-  __io_println(
+  harness.stdio.println(
     "snapshot_self_ref_rewritten="
       + to_string(
       imported_snapshot_value.snapshot_path == imported_snapshot,
     ),
   )
-  __io_println(
+  harness.stdio.println(
     "suspension_ref_rewritten="
       + to_string(
       imported_snapshot_value.suspension?.snapshot_ref == imported_snapshot,
     ),
   )
-  __io_println(
+  harness.stdio.println(
     "transcript_prefix_preserved="
       + to_string(
       json_stringify(imported_snapshot_value.transcript?.messages ?? [])
@@ -123,39 +123,39 @@ pipeline main() {
       ),
     ),
   )
-  __io_println(
+  harness.stdio.println(
     "resume_command_points_to_snapshot="
       + to_string(
       import_report.worker_snapshots[0].resume_command[3] == imported_snapshot,
     ),
   )
   const imported_run = json_parse(harness.fs.read_text(imported_run_path))
-  __io_println(
+  harness.stdio.println(
     "imported_run_metadata_rewritten="
       + to_string(
       imported_run.metadata.worker_snapshot_path == imported_snapshot,
     ),
   )
   const source_resumed = exec_at(source_root, harn_bin, "run", "--resume", snapshot_path, "--json")
-  __io_println("source_resume_ok=" + to_string(source_resumed.success))
+  harness.stdio.println("source_resume_ok=" + to_string(source_resumed.success))
   const source_final = final_json_line(source_resumed)
   const source_signature = resume_signature(source_final)
   harness.fs.delete(source_root)
-  __io_println("source_host_removed=" + to_string(!harness.fs.exists(source_root)))
+  harness.stdio.println("source_host_removed=" + to_string(!harness.fs.exists(source_root)))
   const resumed = exec_at(dest_root, harn_bin, "run", "--resume", imported_snapshot, "--json")
-  __io_println("resume_ok=" + to_string(resumed.success))
+  harness.stdio.println("resume_ok=" + to_string(resumed.success))
   const final = final_json_line(resumed)
   const imported_signature = resume_signature(final)
-  __io_println(
+  harness.stdio.println(
     "resume_signature_matches_source="
       + to_string(
       json_stringify(imported_signature) == json_stringify(source_signature),
     ),
   )
-  __io_println("event_type=" + to_string(final.data.event_type))
-  __io_println("resumed_status=" + to_string(final.data.value.status))
-  __io_println("has_transcript=" + to_string(final.data.value.has_transcript))
-  __io_println(
+  harness.stdio.println("event_type=" + to_string(final.data.event_type))
+  harness.stdio.println("resumed_status=" + to_string(final.data.value.status))
+  harness.stdio.println("has_transcript=" + to_string(final.data.value.has_transcript))
+  harness.stdio.println(
     "summary_contains_mock="
       + to_string(contains(final.data.value.result.summary, "Mock response")),
   )

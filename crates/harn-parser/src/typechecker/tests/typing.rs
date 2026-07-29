@@ -1378,12 +1378,11 @@ fn test_builtin_return_type_inference() {
 }
 
 #[test]
-fn test_harness_crypto_sha256_type_inference() {
+fn test_pure_sha256_type_inference() {
     let errs = errors(
         r#"fn main(harness: Harness) {
-  let crypto: HarnessCrypto = harness.crypto
-  let digest: string = crypto.sha256("")
-  let wrong: int = harness.crypto.sha256("hello")
+  let digest: string = sha256_hex("")
+  let wrong: int = sha256_hex("hello")
 }"#,
     );
     assert_eq!(errs.len(), 1, "expected one mismatch, got: {errs:?}");

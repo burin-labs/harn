@@ -417,16 +417,7 @@ fn insert_host_call_capability(call: &harn_ir::CallSemantics, capabilities: &mut
 }
 
 fn capability_label(capability: Capability) -> &'static str {
-    match capability {
-        Capability::WorkspaceMutation => "workspace.write_text",
-        Capability::CommandExecution => "process.exec",
-        Capability::NetworkAccess => "network.http",
-        Capability::ConnectorAccess => "connector.call",
-        Capability::ModelCall => "llm.call",
-        Capability::WorkerDispatch => "worker.dispatch",
-        Capability::HumanApproval => "human.approval",
-        Capability::AutonomyPolicy => "autonomy.policy",
-    }
+    capability.canonical()
 }
 
 fn template_overhead_tokens_for_handler(

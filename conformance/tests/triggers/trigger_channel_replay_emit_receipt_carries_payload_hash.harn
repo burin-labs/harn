@@ -1,34 +1,34 @@
 import "std/triggers"
 
 /**
- * CH-07 (#1878): `emit_channel(...)` persists a durable
+ * CH-07 (#1878): `harness.channels.append(...)` persists a durable
  * `channel_emit_receipt` on the `lifecycle.channel.audit` topic carrying
  * the full payload, a SHA-256 `payload_hash`, the signed `emitted_at`
  * timestamp, and the resolved scope correlation fields. The receipt is
  * the cached emit row replay tooling reads to reproduce the chain
  * (drift in the producer code surfaces as `HARN-REP-CHN-002`).
  */
-pipeline default() {
-  const audit = event_log.subscribe({topic: "lifecycle.channel.audit"})
-  const _ = emit_channel("ch.replay.input", {repo: "harn", attempt: 1})
+pipeline default(harness: Harness) {
+  const audit = harness.obs.event_log_subscribe({topic: "lifecycle.channel.audit"})
+  const _ = harness.channels.append("ch.replay.input", {repo: "harn", attempt: 1})
   const entry = audit.next().value
-  __io_println(entry.kind)
-  __io_println(entry.headers.schema)
-  __io_println(entry.payload.name_resolved)
-  __io_println(entry.payload.scope)
-  __io_println(entry.payload.scope_id)
-  __io_println(entry.payload.payload.repo)
-  __io_println(entry.payload.payload.attempt)
-  __io_println(entry.payload.inserted)
+  harness.stdio.println(entry.kind)
+  harness.stdio.println(entry.headers.schema)
+  harness.stdio.println(entry.payload.name_resolved)
+  harness.stdio.println(entry.payload.scope)
+  harness.stdio.println(entry.payload.scope_id)
+  harness.stdio.println(entry.payload.payload.repo)
+  harness.stdio.println(entry.payload.payload.attempt)
+  harness.stdio.println(entry.payload.inserted)
   // Payload hash is a stable canonical-JSON SHA-256 — both runs of the
   // same producer code must emit the same hash for the same payload.
   const hash = entry.payload.payload_hash
-  __io_println(starts_with(hash, "sha256:"))
-  __io_println(len(hash) > 10)
+  harness.stdio.println(starts_with(hash, "sha256:"))
+  harness.stdio.println(len(hash) > 10)
   // Signed timestamp carries the algorithm + key id used by the
   // replay-oracle verifier; the actual `at_ms` is wall-clock and
   // intentionally elided from this fixture.
-  __io_println(entry.payload.emitted_at.algorithm)
-  __io_println(entry.payload.emitted_at.key_id)
-  __io_println(starts_with(entry.payload.emitted_at.signature, "sha256:"))
+  harness.stdio.println(entry.payload.emitted_at.algorithm)
+  harness.stdio.println(entry.payload.emitted_at.key_id)
+  harness.stdio.println(starts_with(entry.payload.emitted_at.signature, "sha256:"))
 }

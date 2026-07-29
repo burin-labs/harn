@@ -5,29 +5,28 @@ import { llm_text, with_llm_script } from "std/testing"
  * to the underlying llm_call. We println the observed iteration index so the
  * test asserts the wrapper sees per-turn information.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [llm_text("Still working."), llm_text("Finished. ##DONE##")],
+    harness.llm, [llm_text("Still working."), llm_text("Finished. ##DONE##")],
     { ->
       const observe_caller = { call ->
-        __io_println(
+        harness.stdio.println(
           "turn=" + to_string(call.turn.iteration) + " attempt=" + to_string(call.turn.attempt),
         )
         let result = try {
-          llm_call(call.prompt, call.system, call.opts)
+          harness.llm.call(call.prompt, call.system, call.opts)
         }
         if !is_err(result) {
           return {ok: true, value: unwrap(result)}
         }
         return {ok: false, status: "exception", error: unwrap_err(result)}
       }
-      const result = agent_loop(
-        "finish",
+      const result = agent_loop(harness, "finish",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 2, llm_caller: observe_caller},
       )
-      __io_println(result.status)
-      __io_println(result.visible_text)
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
     },
   )
 }

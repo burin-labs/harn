@@ -176,7 +176,7 @@ pub fn report_lines(
 }
 
 /** Env var value or `fallback` when unset/empty. */
-fn env_or(name: string, fallback: string) -> string {
+fn env_or(harness: Harness, name: string, fallback: string) -> string {
   const v = harness.env.get(name)
   if v == nil || v == "" {
     return fallback
@@ -185,7 +185,7 @@ fn env_or(name: string, fallback: string) -> string {
 }
 
 /** Absolute repo root (the glob search root marker). */
-fn repo_root() -> string {
+fn repo_root(harness: Harness) -> string {
   for g in harness.fs.glob("Cargo.toml") {
     const idx = g.index_of("/./")
     if idx >= 0 {
@@ -196,7 +196,7 @@ fn repo_root() -> string {
 }
 
 /** True when `cmd` resolves on PATH (bash `command -v`). */
-fn command_exists(cmd: string) -> bool {
+fn command_exists(harness: Harness, cmd: string) -> bool {
   const res = try {
     harness.process.spawn_captured({cmd: "sh", args: ["-c", "command -v ${cmd}"]})
   } catch (err) {
@@ -206,36 +206,36 @@ fn command_exists(cmd: string) -> bool {
 }
 
 @complexity(allow)
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const defaults = {
-    target: env_or("HARN_RELEASE_TARGET", ""),
-    harn_bin: env_or("HARN_BIN", ""),
-    budget_mb: env_or("BINARY_SIZE_BUDGET_MB", DEFAULT_BINARY_SIZE_BUDGET_MB),
-    report_dir: env_or("BINARY_SIZE_REPORT_DIR", ""),
+    target: env_or(harness, "HARN_RELEASE_TARGET", ""),
+    harn_bin: env_or(harness, "HARN_BIN", ""),
+    budget_mb: env_or(harness, "BINARY_SIZE_BUDGET_MB", DEFAULT_BINARY_SIZE_BUDGET_MB),
+    report_dir: env_or(harness, "BINARY_SIZE_REPORT_DIR", ""),
   }
   const parsed = parse_args(argv, defaults)
   if !parsed.ok {
-    __io_eprintln(parsed.message)
+    harness.stdio.eprintln(parsed.message)
     if parsed.show_usage {
-      __io_eprintln(usage_text())
+      harness.stdio.eprintln(usage_text())
     }
     return 2
   }
   const opts = parsed.opts
   if opts.help {
-    __io_println(usage_text())
+    harness.stdio.println(usage_text())
     return 0
   }
   const budget_mb = parse_budget_mb(opts.budget_mb)
   if budget_mb == nil {
-    __io_eprintln("error: --budget-mb must be a positive number, got '${opts.budget_mb}'")
+    harness.stdio.eprintln("error: --budget-mb must be a positive number, got '${opts.budget_mb}'")
     return 2
   }
-  const cargo_target_dir = env_or("CARGO_TARGET_DIR", "")
+  const cargo_target_dir = env_or(harness, "CARGO_TARGET_DIR", "")
   const target_dir = if cargo_target_dir != "" {
     cargo_target_dir
   } else {
-    "${repo_root()}/target"
+    "${repo_root(harness)}/target"
   }
   const target: string = opts.target
   let target_args: list<string> = []
@@ -252,7 +252,7 @@ pipeline main(task) {
   }
   const budget_bytes = budget_bytes_of(budget_mb)
   if opts.build_release {
-    const strip = env_or("CARGO_PROFILE_RELEASE_STRIP", "symbols")
+    const strip = env_or(harness, "CARGO_PROFILE_RELEASE_STRIP", "symbols")
     const build = harness.process.spawn_captured(
       {
         cmd: "cargo",
@@ -260,14 +260,14 @@ pipeline main(task) {
         env: {CARGO_PROFILE_RELEASE_STRIP: strip},
       },
     )
-    __io_print(build.stdout)
-    __io_eprint(build.stderr)
+    harness.stdio.print(build.stdout)
+    harness.stdio.eprint(build.stderr)
     if !build.success {
       return build.exit_code
     }
   }
   if !harness.fs.exists(harn_bin) {
-    __io_eprintln("error: harn binary not found at ${harn_bin}")
+    harness.stdio.eprintln("error: harn binary not found at ${harn_bin}")
     return 1
   }
   const actual_bytes: int = harness.fs.stat(harn_bin).size
@@ -275,18 +275,18 @@ pipeline main(task) {
   const bloat_report = "${report_dir}/cargo-bloat-crates.txt"
   harness.fs.mkdir(report_dir)
   const report = report_lines(harn_bin, target, actual_bytes, budget_bytes).join("\n") + "\n"
-  __io_print(report)
+  harness.stdio.print(report)
   harness.fs.write_text(size_report, report)
   let size_ok = true
   if actual_bytes > budget_bytes {
     size_ok = false
-    __io_eprintln(
+    harness.stdio.eprintln(
       "error: harn binary is ${format_mib(actual_bytes)} MiB, above budget ${format_mib(budget_bytes)} MiB",
     )
   }
   if opts.emit_bloat {
-    if !command_exists("cargo-bloat") {
-      __io_eprintln("error: cargo-bloat is required to produce ${bloat_report}")
+    if !command_exists(harness, "cargo-bloat") {
+      harness.stdio.eprintln("error: cargo-bloat is required to produce ${bloat_report}")
       return 2
     }
     /* `cargo bloat` performs its own analysis build and can relink the
@@ -298,7 +298,7 @@ pipeline main(task) {
       {cmd: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]},
     )
     if !mk.success {
-      __io_eprintln("error: could not create temp directory")
+      harness.stdio.eprintln("error: could not create temp directory")
       return 1
     }
     const restore_dir = mk.stdout.trim()
@@ -317,17 +317,17 @@ pipeline main(task) {
     }
     bloat_args = bloat_args + ["-n", "40"]
     const bloat = harness.process.spawn_captured({cmd: "cargo", args: bloat_args})
-    __io_eprint(bloat.stderr)
+    harness.stdio.eprint(bloat.stderr)
     if !bloat.success {
       return bloat.exit_code
     }
     harness.fs.write_text(bloat_report, bloat.stdout)
     const tail = "\ncargo-bloat report: ${bloat_report}\n"
-    __io_print(tail)
+    harness.stdio.print(tail)
     harness.fs.write_text(size_report, report + tail)
   } else {
     const tail = "\ncargo-bloat report: skipped\n"
-    __io_print(tail)
+    harness.stdio.print(tail)
     harness.fs.write_text(size_report, report + tail)
   }
   if !size_ok {

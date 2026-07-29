@@ -579,7 +579,7 @@ pub fn completion_model_route(opts = {}) -> CompletionRoute {
   if raw?.tier != nil {
     query = query + {tier: raw.tier}
   }
-  const selected = pick_model(query)
+  const selected = pick_model(harness, query)
   if selected == nil {
     return {
       schema: "harn.completion.route.v1",
@@ -703,12 +703,12 @@ fn __event_id(prefix, record_id, timestamp) -> string {
   return prefix + "_" + substring(sha256(__text(record_id) + ":" + __text(timestamp)), 0, 16)
 }
 
-fn __event_timestamp(opts) -> string {
+fn __event_timestamp(harness: Harness, opts) -> string {
   const explicit = __text_or_nil(opts?.timestamp)
   if explicit != nil {
     return explicit
   }
-  return date_now_iso()
+  return harness.clock.date_iso()
 }
 
 fn __usage_from(proposal, usage) {
@@ -729,7 +729,7 @@ fn __usage_from(proposal, usage) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_shown_event(
+pub fn completion_shown_event(harness: Harness, 
   proposal = {},
   context = {},
   usage = {},
@@ -739,7 +739,7 @@ pub fn completion_shown_event(
   const ctx = completion_context(context)
   const options = __dict(opts)
   const policy = completion_policy(options?.policy)
-  const timestamp = __event_timestamp(options)
+  const timestamp = __event_timestamp(harness, options)
   const record_id = __text_or_nil(options?.record_id ?? prop.id)
     ?? __completion_id(
     "record",
@@ -800,14 +800,14 @@ pub fn completion_shown_event(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_decision_event(
+pub fn completion_decision_event(harness: Harness, 
   shown_event = {},
   decision = "rejected",
   opts = {},
 ) -> CompletionEvent {
   const shown = __dict(shown_event)
   const options = __dict(opts)
-  const timestamp = __event_timestamp(options)
+  const timestamp = __event_timestamp(harness, options)
   const normalized = __decision(decision)
   const record_id = __text_or_nil(options?.record_id ?? options?.recordID ?? shown?.record_id)
     ?? __completion_id(
@@ -848,7 +848,7 @@ pub fn completion_decision_event(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_trust_record(event = {}, opts = {}) -> CompletionTrustRecord {
+pub fn completion_trust_record(harness: Harness, event = {}, opts = {}) -> CompletionTrustRecord {
   const row = __dict(event)
   const options = __dict(opts)
   const decision = __decision(row?.decision ?? options?.decision)
@@ -884,8 +884,8 @@ pub fn completion_trust_record(event = {}, opts = {}) -> CompletionTrustRecord {
         ),
       ],
       trace_id: __text_or_nil(row?.record_id ?? row?.id ?? options?.trace_id ?? options?.traceID)
-        ?? uuid_v7(),
-      timestamp: __text_or_nil(row?.timestamp ?? options?.timestamp) ?? date_now_iso(),
+        ?? harness.random.uuid_v7(),
+      timestamp: __text_or_nil(row?.timestamp ?? options?.timestamp) ?? harness.clock.date_iso(),
       autonomy_tier_at_time: __text_or_nil(options?.autonomy_tier) ?? "suggest",
     },
   )

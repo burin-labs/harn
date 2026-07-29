@@ -42,8 +42,7 @@ pub fn process_alive(pid) {
 
 /** Poll a subprocess log for a regex match and return the first capture group. */
 pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
-  return poll_until(
-    { ->
+  return poll_until(harness,  harness, { ->
       if !harness.fs.exists(log_path) {
         return nil
       }
@@ -80,8 +79,7 @@ pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
  * prereq should follow with a descriptive `require`.
  */
 pub fn wait_for_file_content(harness: Harness, path, check) {
-  return poll_until(
-    { ->
+  return poll_until(harness,  harness, { ->
       if !harness.fs.exists(path) {
         return nil
       }
@@ -116,8 +114,7 @@ fn log_contains(harness: Harness, log_path, needle) {
  * signal as a hard prereq should fail with a descriptive `require`.
  */
 pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
-  return poll_until(
-    { -> log_contains(harness, log_path, needle) },
+  return poll_until(harness,  harness, { -> log_contains(harness, log_path, needle) },
     {timeout_ms: 30000, interval_ms: 50},
   )
     ?? false
@@ -144,9 +141,8 @@ pub fn wait_for_a2a_server_url(harness: Harness, log_path) {
  * single-suite baseline. Returns false on timeout; callers that need the
  * process gone for subsequent steps should pair this with `kill -KILL`.
  */
-pub fn wait_for_exit(pid) {
-  return poll_until(
-    { ->
+pub fn wait_for_exit(harness: Harness, pid) {
+  return poll_until(harness,  harness, { ->
       if !process_alive(pid) {
         return true
       }

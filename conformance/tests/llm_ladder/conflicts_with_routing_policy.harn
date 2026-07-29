@@ -5,23 +5,23 @@ import { with_llm_script } from "std/testing"
  * selection, so combining them is ambiguous and must error up front rather
  * than silently ignoring the ladder.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
-    [{text: "should never run", model: "mock", provider: "mock"}],
+    harness.llm, [{text: "should never run", model: "mock", provider: "mock"}],
     { ->
       const out = try {
-        llm_call(
+        harness.llm.call(
           "hi",
           nil,
           {
             models: ["mock-a", "mock-b"],
-            routing: routing_policy({chain: [{provider: "mock", model: "mock-a"}]}),
+            routing: harness.llm.routing_policy({chain: [{provider: "mock", model: "mock-a"}]}),
           },
         )
       } catch (e) {
         {msg: to_string(e)}
       }
-      __io_println(contains(out.msg, "cannot be combined with an explicit"))
+      harness.stdio.println(contains(out.msg, "cannot be combined with an explicit"))
     },
   )
 }

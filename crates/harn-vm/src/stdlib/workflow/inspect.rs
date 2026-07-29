@@ -13,6 +13,8 @@ use super::policy::{normalize_policy, set_node_policy};
 
 /// Normalize a workflow value and return the canonical workflow graph dict.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_graph(input?: dict|nil) -> dict",
     category = "workflow.host"
 )]
@@ -30,6 +32,8 @@ pub(super) fn workflow_graph_builtin(
 
 /// Validate a workflow graph against a capability policy ceiling.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_validate(input?: dict|nil, ceiling?: dict|nil) -> dict",
     category = "workflow.host"
 )]
@@ -51,6 +55,8 @@ pub(super) fn workflow_validate_builtin(
 
 /// Return normalized workflow graph shape and validation details.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_inspect(input?: dict|nil, ceiling?: dict|nil) -> dict",
     category = "workflow.host"
 )]
@@ -76,6 +82,8 @@ pub(super) fn workflow_inspect_builtin(
 
 /// Report workflow and node policies against an effective ceiling.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_policy_report(graph: dict, ceiling?: dict|nil) -> dict",
     category = "workflow.host"
 )]
@@ -106,6 +114,8 @@ pub(super) fn workflow_policy_report_builtin(
 
 /// Clone a workflow graph and append audit metadata.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_clone(graph: dict) -> dict",
     category = "workflow.host"
 )]
@@ -126,6 +136,8 @@ pub(super) fn workflow_clone_builtin(
 
 /// Insert a node and optional edge into a workflow graph.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_insert_node(graph: dict, node: dict, edge?: dict|nil) -> dict",
     category = "workflow.host"
 )]
@@ -172,6 +184,8 @@ pub(super) fn workflow_insert_node_builtin(
 
 /// Replace one node in a workflow graph.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_replace_node(graph: dict, node_id: string, node: dict) -> dict",
     category = "workflow.host"
 )]
@@ -206,6 +220,8 @@ pub(super) fn workflow_replace_node_builtin(
 
 /// Replace outgoing edge wiring for one workflow graph node.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_rewire(graph: dict, from: string, to: string, branch?: string|nil) -> dict",
     category = "workflow.host"
 )]
@@ -241,6 +257,8 @@ pub(super) fn workflow_rewire_builtin(
 
 /// Set one node's model policy.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_set_model_policy(graph: dict, node_id: string, policy: dict) -> dict",
     category = "workflow.host"
 )]
@@ -257,6 +275,8 @@ pub(super) fn workflow_set_model_policy_builtin(
 
 /// Set one node's context policy.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_set_context_policy(graph: dict, node_id: string, policy: dict) -> dict",
     category = "workflow.host"
 )]
@@ -273,6 +293,8 @@ pub(super) fn workflow_set_context_policy_builtin(
 
 /// Set one node's auto-compaction policy.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_set_auto_compact(graph: dict, node_id: string, policy: dict) -> dict",
     category = "workflow.host"
 )]
@@ -289,6 +311,8 @@ pub(super) fn workflow_set_auto_compact_builtin(
 
 /// Set one node's output visibility policy.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_set_output_visibility(graph: dict, node_id: string, visibility: string|nil) -> dict",
     category = "workflow.host"
 )]
@@ -312,6 +336,8 @@ pub(super) fn workflow_set_output_visibility_builtin(
 
 /// Compare two workflow graph values for canonical JSON changes.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_diff(left: dict, right: dict) -> dict",
     category = "workflow.host"
 )]
@@ -338,6 +364,8 @@ pub(super) fn workflow_diff_builtin(
 
 /// Validate and commit workflow graph audit metadata.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "workflow_commit(graph: dict, reason?: string|nil) -> dict",
     category = "workflow.host"
 )]

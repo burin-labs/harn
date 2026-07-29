@@ -26,6 +26,8 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
 ];
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "project_context_profile_native(path?: string, options?: dict) -> dict",
     category = "project"
 )]
@@ -54,6 +56,8 @@ fn project_context_profile_native_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "project_fingerprint(path?: string) -> ProjectFingerprint",
     category = "project"
 )]
@@ -72,6 +76,8 @@ fn project_fingerprint_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "project_scan_native(path?: string, options?: dict) -> dict",
     category = "project"
 )]
@@ -86,6 +92,8 @@ fn project_scan_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "project_scan_tree_native(path?: string, options?: dict) -> dict",
     category = "project"
 )]
@@ -105,6 +113,8 @@ fn project_scan_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "project_walk_tree_native(path?: string, options?: dict) -> list",
     category = "project"
 )]
@@ -124,6 +134,8 @@ fn project_walk_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "project_catalog_native() -> list",
     category = "project"
 )]

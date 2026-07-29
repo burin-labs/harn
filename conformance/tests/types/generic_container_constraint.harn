@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   /** Generic constraint with container type: where T: Interface works inside list<T> */
   interface Printable {
     fn label(self) -> string
@@ -13,7 +13,7 @@ pipeline test(task) {
   }
   fn show_all<T>(items: list<T>) where T: Printable {
     for item in items {
-      log(item.label())
+      harness.stdio.println(item.label())
     }
   }
   const items = [Item({name: "alpha"}), Item({name: "beta"})]

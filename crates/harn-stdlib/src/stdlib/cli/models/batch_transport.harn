@@ -762,9 +762,7 @@ pub fn __fireworks_create_dataset(
   dataset_id: string,
   api_key: string,
 ) -> dict {
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(__provider_base_url(harness, "fireworks"), "/accounts/" + account_id + "/datasets"),
     {
       headers: {Authorization: "Bearer " + api_key, "content-type": "application/json"},
@@ -808,9 +806,7 @@ pub fn __fireworks_upload_dataset(
   api_key: string,
   file_path: string,
 ) -> dict {
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(
       __provider_base_url(harness, "fireworks"),
       "/accounts/" + account_id + "/datasets/" + dataset_id + ":upload",
@@ -860,9 +856,7 @@ pub fn __upload_jsonl_file(
   } else {
     "batch"
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     url,
     {
       headers: __provider_auth_headers(provider, credential_env, api_key),
@@ -899,9 +893,7 @@ pub fn __upload_jsonl_file(
  * @errors: [runtime]
  */
 pub fn __upload_xai_jsonl_file(harness: Harness, file_path: string, api_key: string) -> dict {
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __join_url(__provider_base_url(harness, "xai"), "/files"),
     {
       headers: {Authorization: "Bearer " + api_key},
@@ -1053,9 +1045,7 @@ pub fn __upload_gemini_jsonl_file(
   const base = __provider_base_url(harness, "gemini")
   const file_path = safe_string(payload["path"], "")
   const text = safe_string(payload["text"], "")
-  const start = __http_result(
-    harness,
-    "POST",
+  const start = __http_result(harness,  "POST",
     __join_url(base, "/upload/v1beta/files"),
     {
       headers: {
@@ -1080,9 +1070,7 @@ pub fn __upload_gemini_jsonl_file(
       response: start["body"],
     }
   }
-  const upload = __http_result(
-    harness,
-    "POST",
+  const upload = __http_result(harness,  "POST",
     upload_url,
     {
       headers: {

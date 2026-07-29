@@ -1,6 +1,6 @@
 import "std/project"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const root = path_join(harness.fs.temp_dir(), "project_scan_single")
   harness.fs.mkdir(path_join(root, "src"))
   harness.fs.write_text(
@@ -12,18 +12,18 @@ pipeline test(task) {
     path_join(root, "src/lib.rs"),
     "pub fn greet() -> &'static str { \"hi\" }\n",
   )
-  const ev = project_scan(root, {tiers: ["ambient", "config"]})
+  const ev = project_scan(harness.project, root, {tiers: ["ambient", "config"]})
   const catalog = project_catalog()
   const rust_entry = catalog.filter({ entry -> entry.id == "rust" })[0]
-  __io_println(ev.path.ends_with("/project_scan_single"))
-  __io_println(ev.languages[0] == "rust")
-  __io_println(ev.build_systems[0] == "cargo")
-  __io_println(ev.confidence.rust >= 0.95)
-  __io_println(ev.package_name == "scan-single")
-  __io_println(ev.build_commands[0] == "cargo build")
-  __io_println(ev.build_commands[1] == "cargo test")
-  __io_println(ev.anchors[0] == "Cargo.toml")
-  __io_println(ev.lockfiles[0] == "Cargo.lock")
-  __io_println(rust_entry.default_build_cmd == "cargo build")
-  __io_println(rust_entry.lockfiles[0] == "Cargo.lock")
+  harness.stdio.println(ev.path.ends_with("/project_scan_single"))
+  harness.stdio.println(ev.languages[0] == "rust")
+  harness.stdio.println(ev.build_systems[0] == "cargo")
+  harness.stdio.println(ev.confidence.rust >= 0.95)
+  harness.stdio.println(ev.package_name == "scan-single")
+  harness.stdio.println(ev.build_commands[0] == "cargo build")
+  harness.stdio.println(ev.build_commands[1] == "cargo test")
+  harness.stdio.println(ev.anchors[0] == "Cargo.toml")
+  harness.stdio.println(ev.lockfiles[0] == "Cargo.lock")
+  harness.stdio.println(rust_entry.default_build_cmd == "cargo build")
+  harness.stdio.println(rust_entry.lockfiles[0] == "Cargo.lock")
 }

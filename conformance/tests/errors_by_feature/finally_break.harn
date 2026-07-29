@@ -1,14 +1,14 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let cleanup_count = 0
   for i in 0 to 5 exclusive {
     try {
       if i == 2 {
         break
       }
-      log("i: ${i}")
+      harness.stdio.println("i: ${i}")
     } finally {
       cleanup_count = cleanup_count + 1
     }
   }
-  log("cleanup_count: ${cleanup_count}")
+  harness.stdio.println("cleanup_count: ${cleanup_count}")
 }

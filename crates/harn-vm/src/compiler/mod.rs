@@ -77,15 +77,34 @@ pub const HARN_DISABLE_OPTIMIZATIONS_ENV: &str = "HARN_DISABLE_OPTIMIZATIONS";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompilerOptions {
     optimize: bool,
+    privileged_wire_authority: bool,
 }
 
 impl CompilerOptions {
     pub fn optimized() -> Self {
-        Self { optimize: true }
+        Self {
+            optimize: true,
+            privileged_wire_authority: false,
+        }
     }
 
     pub fn without_optimizations() -> Self {
-        Self { optimize: false }
+        Self {
+            optimize: false,
+            privileged_wire_authority: false,
+        }
+    }
+
+    /// Options for a trusted embedder-owned wire module.
+    ///
+    /// This is intentionally not selected from source syntax, paths, or an
+    /// environment variable. Only the explicit privileged module compiler
+    /// entry point may grant the authority.
+    pub(crate) fn privileged_wire() -> Self {
+        Self {
+            optimize: true,
+            privileged_wire_authority: true,
+        }
     }
 
     pub fn from_env() -> Self {
@@ -98,6 +117,10 @@ impl CompilerOptions {
 
     pub fn optimizations_enabled(self) -> bool {
         self.optimize
+    }
+
+    pub(crate) fn privileged_wire_authority(self) -> bool {
+        self.privileged_wire_authority
     }
 }
 
@@ -200,6 +223,14 @@ pub struct Compiler {
     /// AST fallback; file-backed callers can opt out when the graph found no
     /// enum exports without paying for another syntax scan.
     imported_enum_candidates_authoritative: bool,
+    /// Callables supplied by this source module rather than the builtin
+    /// registry. This includes local declarations and selective imports.
+    ///
+    /// The distinction matters when a source callable deliberately shares a
+    /// name with a privileged wire builtin: lexical/module resolution owns
+    /// the call, so the builtin exposure policy must not capture it merely by
+    /// spelling. Runtime wire authority is enforced independently of names.
+    source_callable_names: std::collections::HashSet<String>,
     /// Source spans of enums predeclared into the module catalog. Re-visiting
     /// those AST nodes during bytecode emission must not replace the final
     /// prepass view with an earlier duplicate declaration.

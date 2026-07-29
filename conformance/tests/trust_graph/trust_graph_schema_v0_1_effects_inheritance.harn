@@ -7,7 +7,7 @@ import "std/triggers"
  * through the stdlib `trust_graph_record` / `trust_query` surface, and
  * the effect plus actor-chain inheritance invariants hold.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
@@ -35,7 +35,7 @@ pipeline test(task) {
     sub: actor_origin,
     act: {sub: grandchild_actor, act: {sub: child_actor, act: {sub: parent_actor}}},
   }
-  const parent_id: TrustEntryId = trust_graph_record(
+  const parent_id: TrustEntryId = harness.runtime.trust_graph_record(
     {
       agent: parent_agent,
       action: "agent.spawn",
@@ -46,7 +46,7 @@ pipeline test(task) {
       metadata: {actor_chain: parent_actor_chain, effects_grant: parent_grant},
     },
   )
-  const child_id: TrustEntryId = trust_graph_record(
+  const child_id: TrustEntryId = harness.runtime.trust_graph_record(
     {
       agent: child_agent,
       action: "agent.spawn",
@@ -61,7 +61,7 @@ pipeline test(task) {
       },
     },
   )
-  const _grandchild_id: TrustEntryId = trust_graph_record(
+  const _grandchild_id: TrustEntryId = harness.runtime.trust_graph_record(
     {
       agent: grandchild_agent,
       action: "fs.read",
@@ -76,22 +76,22 @@ pipeline test(task) {
       },
     },
   )
-  const parent: list<TrustRecord> = trust_query({agent: parent_agent})
-  const child: list<TrustRecord> = trust_query({agent: child_agent})
-  const grandchild: list<TrustRecord> = trust_query({agent: grandchild_agent})
-  const report: TrustChainReport = trust_graph_verify_chain()
-  __io_println(len(parent) == 1 && len(child) == 1 && len(grandchild) == 1)
-  __io_println(parent[0]?.schema == "opentrustgraph/v0.1")
-  __io_println(child[0]?.metadata?.parent_record_id == parent_id)
-  __io_println(grandchild[0]?.metadata?.parent_record_id == child_id)
-  __io_println(len(parent[0]?.metadata?.effects_grant) == 3)
-  __io_println(len(child[0]?.metadata?.effects_grant) == 2)
-  __io_println(len(grandchild[0]?.metadata?.effects_used) == 1)
-  __io_println(parent[0]?.metadata?.actor_chain?.sub == actor_origin)
-  __io_println(child[0]?.metadata?.actor_chain?.act?.sub == child_actor)
-  __io_println(child[0]?.metadata?.actor_chain?.act?.act?.sub == parent_actor)
-  __io_println(grandchild[0]?.metadata?.actor_chain?.act?.sub == grandchild_actor)
-  __io_println(grandchild[0]?.metadata?.actor_chain?.act?.act?.sub == child_actor)
-  __io_println(grandchild[0]?.metadata?.actor_chain?.act?.act?.act?.sub == parent_actor)
-  __io_println(report.verified)
+  const parent: list<TrustRecord> = harness.runtime.trust_query({agent: parent_agent})
+  const child: list<TrustRecord> = harness.runtime.trust_query({agent: child_agent})
+  const grandchild: list<TrustRecord> = harness.runtime.trust_query({agent: grandchild_agent})
+  const report: TrustChainReport = harness.runtime.trust_graph_verify_chain()
+  harness.stdio.println(len(parent) == 1 && len(child) == 1 && len(grandchild) == 1)
+  harness.stdio.println(parent[0]?.schema == "opentrustgraph/v0.1")
+  harness.stdio.println(child[0]?.metadata?.parent_record_id == parent_id)
+  harness.stdio.println(grandchild[0]?.metadata?.parent_record_id == child_id)
+  harness.stdio.println(len(parent[0]?.metadata?.effects_grant) == 3)
+  harness.stdio.println(len(child[0]?.metadata?.effects_grant) == 2)
+  harness.stdio.println(len(grandchild[0]?.metadata?.effects_used) == 1)
+  harness.stdio.println(parent[0]?.metadata?.actor_chain?.sub == actor_origin)
+  harness.stdio.println(child[0]?.metadata?.actor_chain?.act?.sub == child_actor)
+  harness.stdio.println(child[0]?.metadata?.actor_chain?.act?.act?.sub == parent_actor)
+  harness.stdio.println(grandchild[0]?.metadata?.actor_chain?.act?.sub == grandchild_actor)
+  harness.stdio.println(grandchild[0]?.metadata?.actor_chain?.act?.act?.sub == child_actor)
+  harness.stdio.println(grandchild[0]?.metadata?.actor_chain?.act?.act?.act?.sub == parent_actor)
+  harness.stdio.println(report.verified)
 }

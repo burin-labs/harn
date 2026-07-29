@@ -14,9 +14,9 @@ import { device_flow } from "std/oauth/device_flow"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const topic = "oauth.device_flow.audit"
-  const cursor = event_log.latest(topic) ?? 0
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
   const _ = mock_time(1700000000000)
   const store = memory()
   const provider = custom(
@@ -50,9 +50,9 @@ pipeline test(task) {
     },
   )
   const handler_topic = "oauth.device_flow.test.handler"
-  const handler_cursor = event_log.latest(handler_topic) ?? 0
+  const handler_cursor = harness.obs.event_log_latest(handler_topic) ?? 0
   const on_user_code = { user_code, verification_uri ->
-    let _ = event_log.emit(
+    let _ = harness.obs.event_log_emit(
       handler_topic,
       "called",
       {user_code: user_code, verification_uri: verification_uri},
@@ -60,11 +60,10 @@ pipeline test(task) {
     )
     nil
   }
-  const token_set = device_flow(
-    provider,
+  const token_set = device_flow(harness,  harness, provider,
     {client_id: "cli-id", scopes: ["repo", "user"], storage: store, on_user_code: on_user_code},
   )
-  const handler_stream = event_log.subscribe({topic: handler_topic, from_cursor: handler_cursor})
+  const handler_stream = harness.obs.event_log_subscribe({topic: handler_topic, from_cursor: handler_cursor})
   const handler_event = handler_stream.next().value
   assert_eq(handler_event.kind, "called", "on_user_code was invoked")
   assert_eq(handler_event.payload.user_code, "USER-123", "on_user_code receives user_code")
@@ -93,7 +92,7 @@ pipeline test(task) {
     "device-code grant type in token body",
   )
   assert(contains(calls[1].body, "device_code=DEV-XYZ"), "device_code in token body")
-  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const logged = stream.next().value
   assert_eq(logged.kind, "token_obtained", "audit event kind")
   assert_eq(logged.payload.provider, "mockDevice", "audit provider id")
@@ -105,5 +104,5 @@ pipeline test(task) {
   assert(logged.payload?.device_code == nil, "audit does NOT include device_code")
   assert(logged.payload?.user_code == nil, "audit does NOT include user_code")
   const _ = unmock_time()
-  log("oauth device flow happy path ok")
+  harness.stdio.println("oauth device flow happy path ok")
 }

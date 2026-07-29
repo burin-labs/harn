@@ -1,11 +1,11 @@
-pipeline test(task) {
-  const id = uuid()
-  log(id.count())
-  log(id.contains("-"))
+pipeline test(harness: Harness, task) {
+  const id = harness.random.uuid()
+  harness.stdio.println(id.count())
+  harness.stdio.println(id.contains("-"))
   // Force ANSI emission — conformance runs without a TTY, so the
   // "auto" default would suppress these color escapes.
   set_color_mode("always")
-  log(json_stringify(color("hi", "red")))
-  log(json_stringify(bold("hi")))
-  log(json_stringify(dim("hi")))
+  harness.stdio.println(json_stringify(color("hi", "red")))
+  harness.stdio.println(json_stringify(bold("hi")))
+  harness.stdio.println(json_stringify(dim("hi")))
 }

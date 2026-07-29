@@ -238,6 +238,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 const EMBED_CACHE_NAMESPACE: &str = "__embed";
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__embed(text: string, options?: dict) -> dict",
     kind = "async",
     category = "memory"
@@ -273,6 +275,8 @@ async fn embed_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__memory_store(namespace: string, key: string, value: any, tags?: any, options?: dict) -> dict",
     kind = "async",
     category = "memory"
@@ -319,6 +323,8 @@ async fn memory_store_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__memory_recall(namespace: string, query: string, limit?: int, options?: dict) -> list",
     kind = "async",
     category = "memory"
@@ -364,6 +370,8 @@ async fn memory_recall_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__memory_open(namespace: string, options?: dict) -> dict",
     kind = "async",
     category = "memory"
@@ -419,6 +427,8 @@ async fn memory_open_impl(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__memory_summarize(namespace: string, window?: any, options?: dict) -> dict",
     category = "memory"
 )]
@@ -439,6 +449,8 @@ fn memory_summarize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__memory_forget(namespace: string, predicate: any, options?: dict) -> dict",
     category = "memory"
 )]
@@ -469,6 +481,8 @@ fn memory_forget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__memory_update(namespace: string, id: string, patch: dict, options?: dict) -> dict",
     category = "memory"
 )]
@@ -522,6 +536,8 @@ fn memory_update_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__memory_list(namespace: string, options?: dict) -> list",
     category = "memory"
 )]

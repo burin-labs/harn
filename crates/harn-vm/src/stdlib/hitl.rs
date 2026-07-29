@@ -284,6 +284,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "ask_user(prompt: string, options?: dict) -> any",
     kind = "async",
     category = "hitl"
@@ -296,7 +298,10 @@ async fn ask_user_builtin(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("request_approval", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "runtime_internal",
+    effects = [],
+    sig_expr = BuiltinSignature::variadic("request_approval", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "hitl"
 )]
@@ -308,6 +313,8 @@ async fn request_approval_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "dual_control(n: int, m: int, action: closure, approvers?: list) -> dict",
     kind = "async",
     category = "hitl"
@@ -320,6 +327,8 @@ async fn dual_control_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "escalate_to(role: string, reason: string) -> dict",
     kind = "async",
     category = "hitl"

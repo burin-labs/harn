@@ -41,18 +41,18 @@ fn anchor_opts() {
   }
 }
 
-fn anchored_session(prefix) {
-  return prefix + "-" + uuid()
+fn anchored_session(harness: Harness, prefix) {
+  return prefix + "-" + harness.random.uuid()
 }
 
-fn open_anchored_session(session) {
-  agent_session_open(session, anchor_opts())
+fn open_anchored_session(harness: Harness, session) {
+  harness.agent.open(session, anchor_opts())
 }
 
-pipeline default() {
-  const out_session = anchored_session("scope-out")
+pipeline default(harness: Harness) {
+  const out_session = anchored_session(harness, "scope-out")
   const out_classifier = pre_turn_scope_classifier(
-    {
+    harness, {
       enabled: true,
       confidence_threshold: 0.8,
       classifier: { payload ->
@@ -66,12 +66,10 @@ pipeline default() {
       },
     },
   )
-  const out = agent_capture_events(
-    out_session,
+  const out = agent_capture_events(harness, out_session,
     fn() {
-      open_anchored_session(out_session)
-      return agent_loop(
-        "Change the CSS in /workspace/other.",
+      open_anchored_session(harness, out_session)
+      return agent_loop(harness, "Change the CSS in /workspace/other.",
         nil,
         {
           provider: "mock",
@@ -88,30 +86,28 @@ pipeline default() {
   )
   const out_events = scope_events(out.events)
   const out_reminders = scope_reminders(out.result)
-  __io_println(out.result.status)
-  __io_println(out.result.stop_reason)
-  __io_println(out.result.llm.iterations)
-  __io_println(len(out_events))
-  __io_println(out_events[0].label)
-  __io_println(out_events[0].confidence >= 0.9)
-  __io_println(len(out_reminders))
-  __io_println(contains(out.result.text, "Add Root"))
-  __io_println(contains(out_events[0].evidence, "/workspace/harn"))
-  __io_println(contains(out_events[0].evidence, "recent_context=true"))
-  const in_session = anchored_session("scope-in")
+  harness.stdio.println(out.result.status)
+  harness.stdio.println(out.result.stop_reason)
+  harness.stdio.println(out.result.llm.iterations)
+  harness.stdio.println(len(out_events))
+  harness.stdio.println(out_events[0].label)
+  harness.stdio.println(out_events[0].confidence >= 0.9)
+  harness.stdio.println(len(out_reminders))
+  harness.stdio.println(contains(out.result.text, "Add Root"))
+  harness.stdio.println(contains(out_events[0].evidence, "/workspace/harn"))
+  harness.stdio.println(contains(out_events[0].evidence, "recent_context=true"))
+  const in_session = anchored_session(harness, "scope-in")
   const in_classifier = pre_turn_scope_classifier(
-    {
+    harness, {
       enabled: true,
       confidence_threshold: 0.8,
       classifier: { _payload -> {label: "in_scope", confidence: 0.91, evidence: "current repo"} },
     },
   )
-  const in_scope = agent_capture_events(
-    in_session,
+  const in_scope = agent_capture_events(harness, in_session,
     fn() {
-      open_anchored_session(in_session)
-      return agent_loop(
-        "Add a parser conformance test in this repo.",
+      open_anchored_session(harness, in_session)
+      return agent_loop(harness, "Add a parser conformance test in this repo.",
         nil,
         {
           provider: "mock",
@@ -125,24 +121,22 @@ pipeline default() {
     },
   )
   const in_events = scope_events(in_scope.events)
-  __io_println(in_scope.result.status)
-  __io_println(in_scope.result.text)
-  __io_println(in_events[0].label)
-  __io_println(len(scope_reminders(in_scope.result)))
-  const low_session = anchored_session("scope-low")
+  harness.stdio.println(in_scope.result.status)
+  harness.stdio.println(in_scope.result.text)
+  harness.stdio.println(in_events[0].label)
+  harness.stdio.println(len(scope_reminders(in_scope.result)))
+  const low_session = anchored_session(harness, "scope-low")
   const low_classifier = pre_turn_scope_classifier(
-    {
+    harness, {
       enabled: true,
       confidence_threshold: 0.8,
       classifier: { _payload -> {label: "in_scope", confidence: 0.2, evidence: "weak signal"} },
     },
   )
-  const low = agent_capture_events(
-    low_session,
+  const low = agent_capture_events(harness, low_session,
     fn() {
-      open_anchored_session(low_session)
-      return agent_loop(
-        "Maybe compare this repository to a sibling repo.",
+      open_anchored_session(harness, low_session)
+      return agent_loop(harness, "Maybe compare this repository to a sibling repo.",
         nil,
         {
           provider: "mock",
@@ -156,17 +150,17 @@ pipeline default() {
     },
   )
   const low_events = scope_events(low.events)
-  __io_println(low.result.text)
-  __io_println(low_events[0].label)
-  __io_println(low_events[0].original_label)
+  harness.stdio.println(low.result.text)
+  harness.stdio.println(low_events[0].label)
+  harness.stdio.println(low_events[0].original_label)
   const invalid = try {
-    agent_loop_options({pre_turn_scope_classifier: "yes"})
+    agent_loop_options(harness, {pre_turn_scope_classifier: "yes"})
   }
-  __io_println(is_err(invalid))
-  __io_println(contains(to_string(unwrap_err(invalid)), "pre_turn_scope_classifier"))
+  harness.stdio.println(is_err(invalid))
+  harness.stdio.println(contains(to_string(unwrap_err(invalid)), "pre_turn_scope_classifier"))
   const invalid_threshold = try {
-    pre_turn_scope_classifier({enabled: true, confidence_threshold: -0.1})
+    pre_turn_scope_classifier(harness, {enabled: true, confidence_threshold: -0.1})
   }
-  __io_println(is_err(invalid_threshold))
-  __io_println(contains(to_string(unwrap_err(invalid_threshold)), "confidence_threshold"))
+  harness.stdio.println(is_err(invalid_threshold))
+  harness.stdio.println(contains(to_string(unwrap_err(invalid_threshold)), "confidence_threshold"))
 }

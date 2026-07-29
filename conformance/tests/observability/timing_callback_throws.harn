@@ -1,6 +1,6 @@
 import { timed } from "std/timing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   let caught = nil
   try {
     timed(
@@ -13,5 +13,5 @@ pipeline default() {
   } catch (e) {
     caught = e
   }
-  __io_println(caught)
+  harness.stdio.println(caught)
 }

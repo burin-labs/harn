@@ -16,27 +16,26 @@ fn tools() {
   return registry
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "native turn"}}]},
       llm_text("<user_response>Native turn complete.</user_response>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"),
     ],
     { ->
-      const result = agent_turn(
-        "Use the lookup tool and finish.",
+      const result = agent_turn(harness, "Use the lookup tool and finish.",
         {provider: "mock", tools: tools(), tool_format: "native", max_iterations: 3},
       )
-      const calls = llm_mock_calls()
-      __io_println(result.status)
-      __io_println(result.visible_text)
-      __io_println(result.llm.iterations)
-      __io_println(len(calls))
-      __io_println(!contains(calls[0].system, "##DONE##"))
-      __io_println(!contains(calls[1].system, "##DONE##"))
-      __io_println(result.judge_decisions[0].verdict)
-      __io_println(result.judge_decisions[0].source)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(result.llm.iterations)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(!contains(calls[0].system, "##DONE##"))
+      harness.stdio.println(!contains(calls[1].system, "##DONE##"))
+      harness.stdio.println(result.judge_decisions[0].verdict)
+      harness.stdio.println(result.judge_decisions[0].source)
     },
   )
 }

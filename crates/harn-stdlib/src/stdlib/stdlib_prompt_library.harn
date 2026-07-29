@@ -76,8 +76,7 @@ fn __front_matter_fragment(harness: Harness, path, text) {
   const meta_text = substring(rest, 0, marker)
   const body = substring(rest, marker + len("\n---\n"))
   const meta = toml_parse(meta_text)
-  return __fragment_from_config(
-    harness,
+  return __fragment_from_config(harness,  harness,
     meta + {body: body, path: path, source_path: path},
     dirname(path),
   )
@@ -105,14 +104,14 @@ fn __load_one(harness: Harness, path) {
   return prompt_library([__front_matter_fragment(harness, path, text)])
 }
 
-fn __render_fragment(fragment, bindings = nil) {
+fn __render_fragment(harness: Harness, fragment, bindings = nil) {
   const body = fragment?.body ?? fragment?.prompt ?? fragment?.text
   require body != nil, "prompt_library_inject: fragment has no body"
   const source_path = fragment?.source_path ?? fragment?.path
   if source_path != nil && starts_with(source_path, "std/") {
-    return render_prompt(source_path, bindings ?? {})
+    return harness.fs.render_prompt(source_path, bindings ?? {})
   }
-  return render_string(body, bindings ?? {})
+  return harness.fs.render_template(body, bindings ?? {})
 }
 
 fn __matches_filters(fragment, filters) {
@@ -449,11 +448,11 @@ pub fn prompt_library_define(library, fragment) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_load(path_or_paths) {
+pub fn prompt_library_load(harness: Harness, path_or_paths) {
   if type_of(path_or_paths) == "list" {
     let library = __empty_library()
     for path in path_or_paths {
-      const loaded = prompt_library_load(path)
+      const loaded = prompt_library_load(harness, path)
       for fragment in loaded.fragments {
         library = prompt_library_define(library, fragment)
       }
@@ -495,10 +494,10 @@ pub fn prompt_library_find(library, id) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_inject(library, id, bindings = nil) {
+pub fn prompt_library_inject(harness: Harness, library, id, bindings = nil) {
   const fragment = prompt_library_find(library, id)
   require fragment != nil, "prompt_library_inject: unknown fragment '" + id + "'"
-  return __render_fragment(fragment, bindings)
+  return __render_fragment(harness, fragment, bindings)
 }
 
 /**
@@ -507,12 +506,12 @@ pub fn prompt_library_inject(library, id, bindings = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_payload(library, id, bindings = nil) {
+pub fn prompt_library_payload(harness: Harness, library, id, bindings = nil) {
   const fragment = prompt_library_find(library, id)
   require fragment != nil, "prompt_library_payload: unknown fragment '" + id + "'"
   return {
     fragment_id: fragment.id,
-    text: __render_fragment(fragment, bindings),
+    text: __render_fragment(harness, fragment, bindings),
     cache_control: fragment?.cache_control ?? {type: "ephemeral"},
     cache_ttl: fragment?.cache_ttl ?? "5m",
     token_budget: fragment?.token_budget,
@@ -526,7 +525,7 @@ pub fn prompt_library_payload(library, id, bindings = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_inject_cluster(library, filters = nil, bindings = nil) {
+pub fn prompt_library_inject_cluster(harness: Harness, library, filters = nil, bindings = nil) {
   const max_tokens = filters?.max_tokens
   let used = 0
   let blocks = []
@@ -535,7 +534,7 @@ pub fn prompt_library_inject_cluster(library, filters = nil, bindings = nil) {
     if max_tokens != nil && used + budget > max_tokens {
       continue
     }
-    blocks = blocks.appending(__render_fragment(fragment, bindings))
+    blocks = blocks.appending(__render_fragment(harness, fragment, bindings))
     used = used + budget
   }
   return join(blocks, "\n\n")
@@ -564,15 +563,15 @@ pub fn prompt_library_suggest(library, ctx = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_api(library) {
+pub fn prompt_library_api(harness: Harness, library) {
   return {
-    inject: fn(id, bindings = nil) { return prompt_library_inject(library, id, bindings) },
-    inject_cluster: fn(filters = nil, bindings = nil) { return prompt_library_inject_cluster(
+    inject: fn(id, bindings = nil) { return prompt_library_inject(harness, library, id, bindings) },
+    inject_cluster: fn(filters = nil, bindings = nil) { return prompt_library_inject_cluster(harness, 
       library,
       filters,
       bindings,
     ) },
-    payload: fn(id, bindings = nil) { return prompt_library_payload(library, id, bindings) },
+    payload: fn(id, bindings = nil) { return prompt_library_payload(harness, library, id, bindings) },
     suggest: fn(ctx = nil) { return prompt_library_suggest(library, ctx) },
     list: fn(filters = nil) { return prompt_library_list(library, filters) },
     find: fn(id) { return prompt_library_find(library, id) },

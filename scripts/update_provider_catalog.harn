@@ -1,7 +1,7 @@
 // Provider catalog refresh entry script.
 //
 // Runs a configured set of source adapters, normalizes the
-// observations against `llm_provider_catalog()`, and writes:
+// observations against `harness.llm.provider_catalog()`, and writes:
 //
 //   .harn-runs/provider_catalog/drift-report.md
 //   .harn-runs/provider_catalog/candidate.toml
@@ -650,8 +650,8 @@ fn __check_against_golden(harness: Harness, outcome: dict, update: bool) -> int 
   if update {
     harness.fs.write_text(EXPECTED_REPORT_PATH, outcome.report)
     harness.fs.write_text(EXPECTED_CANDIDATE_PATH, outcome.candidate)
-    __io_println("Updated " + EXPECTED_REPORT_PATH)
-    __io_println("Updated " + EXPECTED_CANDIDATE_PATH)
+    harness.stdio.println("Updated " + EXPECTED_REPORT_PATH)
+    harness.stdio.println("Updated " + EXPECTED_CANDIDATE_PATH)
     return 0
   }
   const expected_report = if harness.fs.exists(EXPECTED_REPORT_PATH) {
@@ -665,19 +665,19 @@ fn __check_against_golden(harness: Harness, outcome: dict, update: bool) -> int 
     ""
   }
   if outcome.report != expected_report {
-    __io_eprintln("provider catalog drift report drifted from " + EXPECTED_REPORT_PATH)
-    __io_eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
+    harness.stdio.eprintln("provider catalog drift report drifted from " + EXPECTED_REPORT_PATH)
+    harness.stdio.eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
     return 1
   }
   if outcome.candidate != expected_candidate {
-    __io_eprintln("provider catalog candidate TOML drifted from " + EXPECTED_CANDIDATE_PATH)
-    __io_eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
+    harness.stdio.eprintln("provider catalog candidate TOML drifted from " + EXPECTED_CANDIDATE_PATH)
+    harness.stdio.eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
     return 1
   }
   return 0
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const live = argv.contains("--live")
   const check = argv.contains("--check")
   const update = argv.contains("--update")
@@ -687,7 +687,7 @@ pipeline main(task) {
     __adapter_specs(live)
   }
   const observed_at = if live {
-    date_now_iso()
+    harness.clock.date_iso()
   } else {
     FIXED_OBSERVED_AT
   }
@@ -711,7 +711,7 @@ pipeline main(task) {
     "fixtures"
   }
   const catalog = if live {
-    llm_provider_catalog()
+    harness.llm.provider_catalog()
   } else {
     json_parse(harness.fs.read_text(BASELINE_CATALOG_PATH))
   }
@@ -720,7 +720,7 @@ pipeline main(task) {
     return __check_against_golden(harness, outcome, update)
   }
   __write_outputs(harness, outcome)
-  __io_println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
-  __io_println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
+  harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
+  harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
   return 0
 }

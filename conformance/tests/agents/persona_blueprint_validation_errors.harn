@@ -4,7 +4,7 @@ fn has_code(report, code) {
   return report.errors.any({ error -> error.code == code })
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const forbidden_authority = persona_blueprint_validate(
     {
       schema_version: "1",
@@ -16,8 +16,8 @@ pipeline main() {
       cron: {cron: "0 * * * *", timezone: "UTC"},
     },
   )
-  __io_println(forbidden_authority.valid)
-  __io_println(has_code(forbidden_authority, "shape"))
+  harness.stdio.println(forbidden_authority.valid)
+  harness.stdio.println(has_code(forbidden_authority, "shape"))
   const catalog = [
     {
       provider: "github",
@@ -40,9 +40,9 @@ pipeline main() {
     },
     catalog,
   )
-  __io_println(invalid_external.valid)
-  __io_println(has_code(invalid_external, "ambiguous_provider_transport"))
-  __io_println(has_code(invalid_external, "event_namespace_mismatch"))
+  harness.stdio.println(invalid_external.valid)
+  harness.stdio.println(has_code(invalid_external, "ambiguous_provider_transport"))
+  harness.stdio.println(has_code(invalid_external, "event_namespace_mismatch"))
   const invalid_cron = persona_blueprint_validate(
     {
       schema_version: "1",
@@ -54,10 +54,10 @@ pipeline main() {
     },
     [],
   )
-  __io_println(invalid_cron.valid)
-  __io_println(has_code(invalid_cron, "invalid_cron"))
-  __io_println(has_code(invalid_cron, "invalid_timezone"))
-  __io_println(has_code(invalid_cron, "cron_unavailable"))
+  harness.stdio.println(invalid_cron.valid)
+  harness.stdio.println(has_code(invalid_cron, "invalid_cron"))
+  harness.stdio.println(has_code(invalid_cron, "invalid_timezone"))
+  harness.stdio.println(has_code(invalid_cron, "cron_unavailable"))
   const malformed_five_field_cron = persona_blueprint_validate(
     {
       schema_version: "1",
@@ -69,8 +69,8 @@ pipeline main() {
     },
     [],
   )
-  __io_println(malformed_five_field_cron.valid)
-  __io_println(has_code(malformed_five_field_cron, "invalid_cron"))
+  harness.stdio.println(malformed_five_field_cron.valid)
+  harness.stdio.println(has_code(malformed_five_field_cron, "invalid_cron"))
   const tab_separated_cron = persona_blueprint_validate(
     {
       schema_version: "1",
@@ -82,5 +82,5 @@ pipeline main() {
     },
     [{provider: "cron", kinds: ["cron"]}],
   )
-  __io_println(tab_separated_cron.valid)
+  harness.stdio.println(tab_separated_cron.valid)
 }

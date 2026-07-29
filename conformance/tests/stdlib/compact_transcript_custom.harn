@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const base = transcript_from_messages(
     [
       {role: "user", content: "one"},
@@ -21,5 +21,5 @@ pipeline test(task) {
     transcript_events_by_kind(compacted, "compaction")[0].metadata?.strategy == "custom",
     "custom event recorded",
   )
-  log("compact_transcript_custom tests passed")
+  harness.stdio.println("compact_transcript_custom tests passed")
 }

@@ -15,27 +15,25 @@
 // swallows a misconfigured endpoint.
 import { compose_tool_callers, with_telemetry } from "std/llm/tool_middleware"
 
-pipeline default() {
-  const posted = atomic(0)
-  const errors = atomic(0)
+pipeline default(harness: Harness) {
+  const posted = harness.runtime.atomic(0)
+  const errors = harness.runtime.atomic(0)
   // Two-sink fan-out: one to Langfuse for real export, one to a local
   // counter so the smoke can be observed without polling Langfuse.
-  const stack = compose_tool_callers(
-    [
-      with_telemetry(
-        {
+  const stack = compose_tool_callers(harness,  harness, [
+      with_telemetry(harness, {
           sinks: [
             {
               sink: "langfuse",
               project: "harn-smoke",
               environment: "dev",
               on_error: { message, _span ->
-                let _ = atomic_add(errors, 1)
-                __io_println("langfuse error: " + to_string(message))
+                let _ = harness.runtime.atomic_add(errors, 1)
+                harness.stdio.println("langfuse error: " + to_string(message))
               },
             },
             { _span ->
-              let _ = atomic_add(posted, 1)
+              let _ = harness.runtime.atomic_add(posted, 1)
             },
           ],
           persona: "smoke_captain",
@@ -67,8 +65,8 @@ pipeline default() {
     },
   )
   // Mocked LLM driving two tool calls then a done sentinel.
-  llm_mock_clear()
-  llm_mock(
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {
       tool_calls: [
         {id: "smoke-1", name: "lookup", arguments: {q: "rate limiter"}},
@@ -76,7 +74,7 @@ pipeline default() {
       ],
     },
   )
-  llm_mock({text: "Done. ##DONE##"})
+  harness.llm.mock_enqueue({text: "Done. ##DONE##"})
   const agent_options = {
     provider: "mock",
     tools: registry,
@@ -85,8 +83,8 @@ pipeline default() {
     loop_until_done: true,
     tool_caller: stack,
   }
-  const result = agent_loop("smoke telemetry", nil, agent_options)
-  __io_println("status: " + to_string(result.status))
-  __io_println("spans posted: " + to_string(atomic_get(posted)))
-  __io_println("errors: " + to_string(atomic_get(errors)))
+  const result = agent_loop(harness, "smoke telemetry", nil, agent_options)
+  harness.stdio.println("status: " + to_string(result.status))
+  harness.stdio.println("spans posted: " + to_string(harness.runtime.atomic_get(posted)))
+  harness.stdio.println("errors: " + to_string(harness.runtime.atomic_get(errors)))
 }

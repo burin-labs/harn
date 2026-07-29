@@ -28,7 +28,7 @@ fn summary_line(changed: int, applied: int, apply: bool) -> string {
   return to_string(changed) + " file(s) would change (dry run; pass --apply to write)"
 }
 
-fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
+fn run_codemod(harness: Harness, plan: list, apply: bool, allow_unsafe: bool) -> dict {
   let file_results = []
   let changed = 0
   let applied = 0
@@ -37,7 +37,7 @@ fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
       continue
     }
     const res = rules_apply(
-      {rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe},
+      harness.rules, {rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe},
     )
     for f in res.files ?? [] {
       if f.changed {
@@ -52,9 +52,9 @@ fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
   return {files: file_results, changed: changed, applied: applied}
 }
 
-fn run_builtin_recipe(name: string, files: list, apply: bool) -> dict {
+fn run_builtin_recipe(harness: Harness, name: string, files: list, apply: bool) -> dict {
   if name == "destructure-defaults" {
-    const res = rules_fold({paths: files, dry_run: !apply})
+    const res = rules_fold(harness.rules, {paths: files, dry_run: !apply})
     let file_results = []
     let changed = 0
     let applied = 0
@@ -80,18 +80,17 @@ fn main(harness: Harness) {
   // even for a dry run (which still never writes — the engine's own
   // `dry_run`/safety checks protect the files). `harn codemod` is a first-party
   // command the user invoked directly, so enabling it here is the intended use.
-  hostlib_enable("tools:deterministic")
   const recipe = harness.env.get_or("HARN_CODEMOD_RECIPE", "")
   const out = if recipe {
     let files = json_parse(harness.env.get_or("HARN_CODEMOD_RECIPE_FILES_JSON", "[]"))
-    run_builtin_recipe(recipe, files, apply)
+    run_builtin_recipe(harness, recipe, files, apply)
   } else {
     let raw = harness.env.get_or("HARN_CODEMOD_PLAN_JSON", "")
     if raw == "" {
       harness.stdio.eprintln("codemod: internal error — no codemod plan or recipe set by the shim")
-      exit(70)
+      harness.runtime.exit(70)
     }
-    run_codemod(json_parse(raw), apply, allow_unsafe)
+    run_codemod(harness, json_parse(raw), apply, allow_unsafe)
   }
   if json_mode {
     const envelope = {

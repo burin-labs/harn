@@ -8,7 +8,7 @@
 import { goal, goal_reloop } from "std/agent/goal"
 import { agent_session_messages } from "std/agent/state"
 
-pipeline test() {
+pipeline test(harness: Harness) {
   const g = goal(
     {
       objective: "make CI green",
@@ -47,9 +47,8 @@ pipeline test() {
   }
   // Durable session journals outlive a fixture process; a fresh id keeps this
   // re-loop hermetic without depending on external store cleanup.
-  const session = "agent-goal-reloop-conformance-" + uuid()
-  const result = agent_loop(
-    "achieve the goal",
+  const session = "agent-goal-reloop-conformance-" + harness.random.uuid()
+  const result = agent_loop(harness, "achieve the goal",
     nil,
     goal_reloop(
       g,
@@ -67,7 +66,7 @@ pipeline test() {
     result.stop_reason == "sentinel",
     "goal converged on completion; got " + to_string(result.stop_reason),
   )
-  const messages = agent_session_messages(session)
+  const messages = agent_session_messages(harness, session)
   let assistant_turns = 0
   for m in messages {
     if m?.role == "assistant" {
@@ -86,5 +85,5 @@ pipeline test() {
   }
   assert(findings_threaded, "the unmet criteria were threaded into the attempt-2 prompt")
   assert(result.visible_text.contains("CI_IS_GREEN"), "final answer satisfies the goal")
-  log("agent goal reloop test passed")
+  harness.stdio.println("agent goal reloop test passed")
 }

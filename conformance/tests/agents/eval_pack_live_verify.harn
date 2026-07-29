@@ -51,8 +51,8 @@ fn live_pack(root: string, workspace: string, executor_path: string, verify_name
 }
 
 @test
-pipeline test_live_verify(_task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-eval-pack-live-" + uuid())
+pipeline test_live_verify(harness: Harness, _task) {
+  const root = path_join(harness.fs.temp_dir(), "harn-eval-pack-live-" + harness.random.uuid())
   const workspace = path_join(root, "workspace")
   harness.fs.mkdir(root)
   harness.fs.mkdir(workspace)
@@ -62,12 +62,12 @@ pipeline test_live_verify(_task) {
   assert_eq(manifest.cases[0].kind, "live-verify")
   assert(manifest.cases[0].case_fingerprint != "", "case fingerprint is stamped")
   const ledger_options = {
-    namespace: "live-verify-" + uuid(),
+    namespace: "live-verify-" + harness.random.uuid(),
     suite: "live-verify-pack",
     model: "mock-live",
     commit: "conformance-live",
   }
-  const report = eval_pack_run(manifest, ledger_options)
+  const report = harness.runtime.eval_pack_run(manifest, ledger_options)
   assert_eq(report.trial_count, 2)
   assert_eq(report.cases[0].reliability.status, "all-pass")
   assert_eq(report.cases[0].stats_row.passes, 2)
@@ -75,16 +75,16 @@ pipeline test_live_verify(_task) {
   assert_eq(report.cases[0].trials[0].produced_paths[0], "answer.txt")
   assert_eq(report.cases[0].trials[0].tool_call_summary.byTool.edit, 1)
   assert_eq(report.stats.reliability.all_pass_cases, 1)
-  const resume = eval_pack_run(manifest, ledger_options)
+  const resume = harness.runtime.eval_pack_run(manifest, ledger_options)
   assert_eq(resume.run_state.all_skipped, true)
   assert_eq(resume.run_state.skipped_cells, 2)
   assert_eq(resume.cases[0].reliability.status, "all-pass")
-  const broken = eval_pack_run(
+  const broken = harness.runtime.eval_pack_run(
     eval_pack_manifest(live_pack(root, workspace, executor_path, "missing.txt")),
-    ledger_options + {namespace: "live-verify-broken-" + uuid()},
+    ledger_options + {namespace: "live-verify-broken-" + harness.random.uuid()},
   )
   assert_eq(broken.cases[0].reliability.status, "all-fail")
   assert_eq(broken.cases[0].stats_row.fails, 2)
   assert_eq(broken.pass, false)
-  log("eval pack live verify ok")
+  harness.stdio.println("eval pack live verify ok")
 }

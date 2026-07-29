@@ -1,8 +1,8 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   try {
     throw {code: 404, msg: "not found"}
   } catch (e) {
-    log(e.code)
-    log(e.msg)
+    harness.stdio.println(e.code)
+    harness.stdio.println(e.msg)
   }
 }

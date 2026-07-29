@@ -5,11 +5,10 @@ import {
   run_refresh_job,
 } from "./triggers/context-maintenance/lib"
 
-pipeline default() {
-  const refresh = on_file_edited({event: "FileEdited", session: {id: "demo"}, path: "src/lib.rs"})
-  const crystallize = on_session_end(
-    {event: "SessionEnd", session: {id: "demo"}, final_status: "done"},
+pipeline default(harness: Harness) {
+  const refresh = on_file_edited(harness, {event: "FileEdited", session: {id: "demo"}, path: "src/lib.rs"})
+  const crystallize = on_session_end(harness,  harness, {event: "SessionEnd", session: {id: "demo"}, final_status: "done"},
   )
-  __io_println(run_refresh_job(refresh).status)
-  __io_println(run_crystallize_job(crystallize).artifact_ids[0])
+  harness.stdio.println(run_refresh_job(refresh).status)
+  harness.stdio.println(run_crystallize_job(crystallize).artifact_ids[0])
 }

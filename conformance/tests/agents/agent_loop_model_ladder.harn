@@ -11,9 +11,9 @@ import { llm_text, with_llm_script } from "std/testing"
  * NOTE: the ladder owns provider/model selection, so NO top-level `provider:`
  * pin is set here — a standalone pin alongside `models:` is a hard conflict.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {
         error: {category: "rate_limit", message: "HTTP 429", retry_after_ms: 10},
         model: "mock-cheap",
@@ -22,8 +22,7 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "finish quickly",
+      const result = agent_loop(harness, "finish quickly",
         nil,
         {
           tool_format: "text",
@@ -36,10 +35,10 @@ pipeline default() {
           ],
         },
       )
-      const advances = agent_trace().filter({ e -> e.type == "models_advance" })
-      __io_println(result.status)
-      __io_println(len(advances))
-      __io_println(advances[0].to_model)
+      const advances = harness.obs.agent_trace().filter({ e -> e.type == "models_advance" })
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(advances))
+      harness.stdio.println(advances[0].to_model)
     },
   )
 }

@@ -15,7 +15,7 @@ fn meter_row(name, fingerprint, passes, fails, skips, pass_rate, cost) {
   }
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const baseline = [
     meter_row("python-alpha", "a", 3, 1, 0, 0.75, 0.1),
     meter_row("python-beta", "b", 2, 2, 0, 0.5, 0.1),
@@ -45,5 +45,5 @@ pipeline test(task) {
   assert_eq(round(delta.ci_lo * 1000), -250)
   assert_eq(round(delta.ci_hi * 1000), 500)
   assert_eq(delta.status, "inconclusive")
-  log("stdlib eval stats ledger aliases ok")
+  harness.stdio.println("stdlib eval stats ledger aliases ok")
 }

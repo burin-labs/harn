@@ -337,7 +337,7 @@ fn __stage_prepare_escalation(node_id, node, consumed_artifact_ids) {
   }
 }
 
-fn __stage_prepare_manual_gate(node_id, node, artifacts) {
+fn __stage_prepare_manual_gate(harness: Harness, node_id, node, artifacts) {
   const metadata = node?.metadata ?? {}
   const approval_id = __stage_string(metadata?.approval_id, node_id)
   const prompt = __stage_string(
@@ -358,7 +358,7 @@ fn __stage_prepare_manual_gate(node_id, node, artifacts) {
   }
   options = options + pick_keys(metadata, ["reviewers", "quorum", "deadline"], {drop_nil: true})
   const requested = try {
-    request_approval(prompt, options)
+    harness.interaction.request_approval(prompt, options)
   }
   if is_err(requested) {
     const error = unwrap_err(requested)
@@ -760,7 +760,7 @@ pub fn workflow_stage_attempt_outcome(config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_prepare_static_stage(config = nil) {
+pub fn workflow_prepare_static_stage(harness: Harness, config = nil) {
   const node_id = __stage_string(config?.node_id, "stage")
   const node = config?.node ?? {}
   const kind = __stage_string(node?.kind, "")
@@ -783,7 +783,7 @@ pub fn workflow_prepare_static_stage(config = nil) {
     return __stage_prepare_escalation(node_id, node, consumed_artifact_ids)
   }
   if kind == "stage" && mode == "manual" && __stage_bool(node?.metadata?.human_gate, false) {
-    return __stage_prepare_manual_gate(node_id, node, artifacts)
+    return __stage_prepare_manual_gate(harness, node_id, node, artifacts)
   }
   if kind == "stage" && mode == "command" {
     return __stage_prepare_command(node_id, node, consumed_artifact_ids)
@@ -1022,7 +1022,7 @@ fn __stage_run_executor(node, task, attempt, prior, selected, transcript) {
   return __stage_shape_executor_result(unwrap(attempted), transcript)
 }
 
-fn __stage_attempt_record(attempt, status, outcome, branch, error, verification) {
+fn __stage_attempt_record(harness: Harness, attempt, status, outcome, branch, error, verification) {
   return {
     attempt: attempt,
     status: status,
@@ -1030,8 +1030,8 @@ fn __stage_attempt_record(attempt, status, outcome, branch, error, verification)
     branch: branch,
     error: error,
     verification: verification,
-    started_at: uuid_v7(),
-    finished_at: uuid_v7(),
+    started_at: harness.random.uuid_v7(),
+    finished_at: harness.random.uuid_v7(),
   }
 }
 
@@ -1049,7 +1049,7 @@ fn __stage_attempt_record(attempt, status, outcome, branch, error, verification)
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_execute_stage_attempts(
+pub fn workflow_execute_stage_attempts(harness: Harness, 
   task,
   node_id,
   node = nil,
@@ -1112,7 +1112,7 @@ pub fn workflow_execute_stage_attempts(
       }
       attempts = __host_stage_record_attempt(
         attempts,
-        __stage_attempt_record(
+        __stage_attempt_record(harness, 
           attempt,
           status,
           settled?.outcome,
@@ -1145,7 +1145,7 @@ pub fn workflow_execute_stage_attempts(
       const error_message = __stage_string(settled?.error, "")
       attempts = __host_stage_record_attempt(
         attempts,
-        __stage_attempt_record(attempt, "failed", "error", "error", error_message, nil),
+        __stage_attempt_record(harness, attempt, "failed", "error", "error", error_message, nil),
       )
       if attempt == max_attempts {
         return {

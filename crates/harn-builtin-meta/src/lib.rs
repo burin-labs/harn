@@ -13,10 +13,17 @@
 //! parser's static typechecking tables and the `#[harn_builtin]` macro's
 //! `@NAME` signature injection.
 
+pub mod contracts;
+pub mod host_capabilities;
 pub mod llm_options;
 pub mod runtime_type_tags;
 pub mod shapes;
 pub mod signatures;
+
+pub use contracts::{
+    BuiltinContract, BuiltinExposure, CapabilityId, EffectAccess, EffectKind, EffectSpec,
+    ResourceSelector,
+};
 
 /// A complete, static description of one builtin: identifier, arity range,
 /// per-parameter types, generic type parameters, return type, and any
@@ -42,6 +49,13 @@ pub struct BuiltinSignature {
     /// `where T: Foo` constraints. Each entry binds a generic type
     /// parameter name to the name of an interface it must implement.
     pub where_clauses: &'static [(&'static str, &'static str)],
+}
+
+impl BuiltinSignature {
+    /// Reuse a canonical signature shape under a projected source name.
+    pub const fn with_name(self, name: &'static str) -> Self {
+        Self { name, ..self }
+    }
 }
 
 /// One parameter slot inside a [`BuiltinSignature`].
@@ -373,6 +387,7 @@ pub const TY_INT: Ty = Ty::Named("int");
 pub const TY_LIST: Ty = Ty::Named("list");
 pub const TY_NEVER: Ty = Ty::Never;
 pub const TY_NIL: Ty = Ty::Named("nil");
+pub const TY_RESOURCE: Ty = Ty::Named("resource");
 pub const TY_STRING: Ty = Ty::Named("string");
 
 /// `string | nil`.

@@ -1,11 +1,11 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const a = iter([1, 2, 3, 4, 5]).chunks(2).to_list()
-  log(a)
+  harness.stdio.println(a)
   const b = iter([1, 2, 3, 4, 5, 6]).chunks(3).to_list()
-  log(b)
+  harness.stdio.println(b)
   const c = iter([1, 2, 3]).chunks(10).to_list()
-  log(c)
+  harness.stdio.println(c)
   const d = iter([]).chunks(2).to_list()
-  log(d)
-  log(len(d))
+  harness.stdio.println(d)
+  harness.stdio.println(len(d))
 }

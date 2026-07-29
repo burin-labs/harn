@@ -12,7 +12,7 @@
  * @effects: [time]
  * @errors: []
  */
-pub fn wait_for(timeout_ms, interval_ms, predicate) {
+pub fn wait_for(harness: Harness, timeout_ms, interval_ms, predicate) {
   const end_time = harness.clock.timestamp() * 1000 + timeout_ms
   let interval = interval_ms
   if interval <= 0 {
@@ -23,7 +23,7 @@ pub fn wait_for(timeout_ms, interval_ms, predicate) {
     if value {
       return Ok(value)
     }
-    sleep(interval)
+    harness.clock.sleep_ms(interval)
   }
   // One final check after deadline
   const value = predicate()
@@ -54,7 +54,7 @@ pub fn retry_until(max_attempts, predicate) {
   return Err("exhausted")
 }
 
-// retry_predicate_with_backoff(max_attempts, base_ms, predicate) -> Result
+// retry_predicate_with_backoff(harness, max_attempts, base_ms, predicate) -> Result
 // Calls predicate() with exponential backoff (base_ms * 2^attempt).
 // Returns Ok(value) on first truthy result, or Err("exhausted").
 /**
@@ -63,7 +63,7 @@ pub fn retry_until(max_attempts, predicate) {
  * @effects: []
  * @errors: []
  */
-pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
+pub fn retry_predicate_with_backoff(harness: Harness, max_attempts, base_ms, predicate) {
   let attempt = 0
   while attempt < max_attempts {
     const value = predicate()
@@ -73,7 +73,7 @@ pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
     attempt = attempt + 1
     if attempt < max_attempts {
       const delay = base_ms * pow(2, attempt - 1)
-      sleep(delay)
+      harness.clock.sleep_ms(delay)
     }
   }
   return Err("exhausted")
@@ -92,8 +92,8 @@ pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
  * @effects: []
  * @errors: []
  */
-pub fn circuit_call(name, closure) {
-  const state = circuit_check(name)
+pub fn circuit_call(harness: Harness, name, closure) {
+  const state = harness.runtime.circuit_check(name)
   if state == "open" {
     return Err("circuit_open")
   }
@@ -101,9 +101,9 @@ pub fn circuit_call(name, closure) {
     closure()
   }
   if is_ok(result) {
-    circuit_record_success(name)
+    harness.runtime.circuit_record_success(name)
   } else {
-    circuit_record_failure(name)
+    harness.runtime.circuit_record_failure(name)
   }
   return result
 }

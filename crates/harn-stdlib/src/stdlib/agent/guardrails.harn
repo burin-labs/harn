@@ -225,9 +225,9 @@ pub fn __agent_input_guardrail_fail_open(err, opts = nil, context = nil) {
  * @effects: [llm]
  * @errors: []
  * @api_stability: experimental
- * @example: agent_loop(task, nil, base_opts + agent_input_guardrail(classifier))
+ * @example: agent_loop(harness, task, nil, base_opts + agent_input_guardrail(classifier))
  */
-pub fn agent_input_guardrail(classifier = nil, options = nil) {
+pub fn agent_input_guardrail(harness: Harness, classifier = nil, options = nil) {
   const opts = options ?? {}
   if type_of(opts) != "dict" {
     throw "agent_input_guardrail: options must be a dict or nil; got " + type_of(opts)
@@ -299,7 +299,7 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
       }
     }
     let checkpoint = agent_typed_output_checkpoint(
-      "agent.input_guardrail",
+      harness, "agent.input_guardrail",
       __input_guardrail_prompt(payload, opts),
       schema,
       llm_opts,
@@ -341,7 +341,7 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
  * @api_stability: experimental
  * @example: agent_input_guardrail_check(task, classifier)
  */
-pub fn agent_input_guardrail_check(task, classifier = nil, options = nil) {
-  const bundle = agent_input_guardrail(classifier, options)
+pub fn agent_input_guardrail_check(harness: Harness, task, classifier = nil, options = nil) {
+  const bundle = agent_input_guardrail(harness, classifier, options)
   return bundle.input_guardrail({task: task, user_message: task, messages: [], recent_context: []})
 }

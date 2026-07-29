@@ -1,6 +1,6 @@
 import { sum_by } from "std/collections"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const users = [
     {name: "Alice", age: 30, role: "engineer"},
     {name: "Bob", age: 25, role: "designer"},
@@ -8,19 +8,19 @@ pipeline default(task) {
     {name: "Diana", age: 28, role: "manager"},
   ]
   const engineers = users.filter({ u -> u.role == "engineer" })
-  log("Engineers:")
+  harness.stdio.println("Engineers:")
   for eng in engineers {
-    log("  ${eng.name} (age ${eng.age})")
+    harness.stdio.println("  ${eng.name} (age ${eng.age})")
   }
   const names = users.map({ u -> u.name })
-  log("All names: ${names}")
+  harness.stdio.println("All names: ${names}")
   const total_age = sum_by(users, { u -> u.age })
-  log("Total age: ${total_age}")
+  harness.stdio.println("Total age: ${total_age}")
   const has_senior = users.any({ u -> u.age > 30 })
-  log("Has someone over 30: ${has_senior}")
+  harness.stdio.println("Has someone over 30: ${has_senior}")
   const result = users |> { list -> list.filter({ u -> u.age >= 28 }) }
     |> { list ->
     list.map({ u -> u.name })
   }
-  log("28+ names: ${result}")
+  harness.stdio.println("28+ names: ${result}")
 }

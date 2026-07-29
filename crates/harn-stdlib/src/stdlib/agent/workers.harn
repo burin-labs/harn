@@ -155,14 +155,13 @@ fn __agent_tool_registry_has(registry, name) {
   return false
 }
 
-fn __agent_lifecycle_tool_audit(tool_name, initiator, reason, handle = nil, conditions = nil) {
-  const session_id = agent_session_current_id()
+fn __agent_lifecycle_tool_audit(harness: Harness, tool_name, initiator, reason, handle = nil, conditions = nil) {
+  const session_id = harness.agent.current_id()
   if session_id == nil || session_id == "" {
     return
   }
   const _ = try {
-    agent_emit_event(
-      session_id,
+    agent_emit_event(harness,  harness, session_id,
       "tool_call_audit",
       {
         tool_call_id: "",
@@ -182,7 +181,7 @@ fn __agent_lifecycle_tool_audit(tool_name, initiator, reason, handle = nil, cond
   }
 }
 
-fn __subagent_pause_tool(args) {
+fn __subagent_pause_tool(harness: Harness, args) {
   const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_pause: handle is required"
@@ -191,11 +190,11 @@ fn __subagent_pause_tool(args) {
   if reason == "" {
     throw "subagent_pause: reason is required"
   }
-  __agent_lifecycle_tool_audit("subagent_pause", "parent", reason, handle)
+  __agent_lifecycle_tool_audit(harness, "subagent_pause", "parent", reason, handle)
   return suspend_agent(handle, reason, {initiator: "parent"})
 }
 
-fn __subagent_resume_tool(args) {
+fn __subagent_resume_tool(harness: Harness, args) {
   const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_resume: handle is required"
@@ -204,11 +203,11 @@ fn __subagent_resume_tool(args) {
   if type_of(continue_transcript) != "bool" {
     throw "subagent_resume: continue_transcript must be a bool"
   }
-  __agent_lifecycle_tool_audit("subagent_resume", "parent", "resume requested", handle)
+  __agent_lifecycle_tool_audit(harness, "subagent_resume", "parent", "resume requested", handle)
   return resume_agent(handle, args?.input, continue_transcript)
 }
 
-fn __subagent_stop_tool(args) {
+fn __subagent_stop_tool(harness: Harness, args) {
   const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_stop: handle is required"
@@ -221,7 +220,7 @@ fn __subagent_stop_tool(args) {
   if reason == "" {
     reason = "parent requested stop"
   }
-  __agent_lifecycle_tool_audit("subagent_stop", "parent", reason, handle)
+  __agent_lifecycle_tool_audit(harness, "subagent_stop", "parent", reason, handle)
   return agent_stop(handle, {graceful: graceful, reason: reason})
 }
 
@@ -627,15 +626,15 @@ fn __sub_agent_string_list(value, label) {
   return out
 }
 
-fn __sub_agent_base_tools(opts) {
+fn __sub_agent_base_tools(harness: Harness, opts) {
   if opts?.tools != nil {
     return opts.tools
   }
-  return __host_current_tool_registry()
+  return harness.tools.current_registry()
 }
 
-fn __sub_agent_selected_tools(opts, allowed_tools) {
-  const base = __sub_agent_base_tools(opts)
+fn __sub_agent_selected_tools(harness: Harness, opts, allowed_tools) {
+  const base = __sub_agent_base_tools(harness, opts)
   if len(allowed_tools) == 0 {
     return base
   }
@@ -678,15 +677,15 @@ fn __sub_agent_options(opts, session_id, selected_tools) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn sub_agent_request(task, options = nil) {
+pub fn sub_agent_request(harness: Harness, task, options = nil) {
   const task_text = __sub_agent_string(task)
   if task_text == "" {
     throw "sub_agent_run: task is required"
   }
   const opts = __worker_resume_options(__worker_options(options, "sub_agent_run"))
   const allowed_tools = __sub_agent_string_list(opts?.allowed_tools, "sub_agent_run.allowed_tools")
-  const selected_tools = __sub_agent_selected_tools(opts, allowed_tools)
-  const session_id = __sub_agent_string(opts?.session_id, "sub_agent_session_" + uuid_v7())
+  const selected_tools = __sub_agent_selected_tools(harness, opts, allowed_tools)
+  const session_id = __sub_agent_string(opts?.session_id, "sub_agent_session_" + harness.random.uuid_v7())
   return filter_nil(
     {
       _type: "sub_agent_request",
@@ -714,8 +713,8 @@ pub fn sub_agent_request(task, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn sub_agent_run(task, options = nil) {
-  return __host_sub_agent_run(sub_agent_request(task, options))
+pub fn sub_agent_run(harness: Harness, task, options = nil) {
+  return __host_sub_agent_run(sub_agent_request(harness, task, options))
 }
 
 fn __fanout_options(options) {
@@ -849,7 +848,7 @@ fn __fanout_spawn_error_summary(error) {
  *
  * This is the general building block for parallel agent fan-out: map a list of
  * independent units onto concurrent child agents. Each request is launched as a
- * background `sub_agent_run(task, options + {background: true})`, so a whole
+ * background `sub_agent_run(harness, task, options + {background: true})`, so a whole
  * wave's LLM turns overlap in wall-clock time; `wait_agent` then joins the wave
  * before the next one starts. Harnesses layer their own per-unit tool surface,
  * capability policy, model, and prompts on top by setting each request's
@@ -877,9 +876,9 @@ fn __fanout_spawn_error_summary(error) {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: agent_fanout([{task: "port a", options: child_opts, label: "a"}], {max_parallel: 4})
+ * @example: agent_fanout(harness, [{task: "port a", options: child_opts, label: "a"}], {max_parallel: 4})
  */
-pub fn agent_fanout(requests, options = nil) {
+pub fn agent_fanout(harness: Harness, requests, options = nil) {
   if type_of(requests) != "list" {
     throw "agent_fanout: requests must be a list of {task, options?, label?}"
   }
@@ -907,7 +906,7 @@ pub fn agent_fanout(requests, options = nil) {
     let outcomes = []
     for request in wave {
       const outcome = try {
-        let handle = sub_agent_run(
+        let handle = sub_agent_run(harness, 
           request.task,
           request.options + {background: true, name: request.label},
         )

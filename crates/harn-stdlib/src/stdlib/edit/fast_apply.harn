@@ -64,14 +64,14 @@ fn __edit_fast_apply_content(response) {
   }
 }
 
-fn __edit_fast_apply_validate(path, proposed, params) {
+fn __edit_fast_apply_validate(ast: HarnessAst, path, proposed, params) {
   const opts = params ?? {}
   const should_validate = opts?.validate_syntax ?? true
   if !should_validate {
     return {ok: true, skipped: true, reason: "disabled", errors: []}
   }
   const raw = try {
-    hostlib_ast_parse_errors({path: path, content: proposed, language: opts?.language})
+    ast.parse_errors({path: path, content: proposed, language: opts?.language})
   }
   if is_err(raw) {
     return {
@@ -110,8 +110,9 @@ fn __edit_fast_apply_validate(path, proposed, params) {
   }
 }
 
-fn __edit_fast_apply_preview(path, before, after) {
+fn __edit_fast_apply_preview(ast: HarnessAst, path, before, after) {
   const dry = edit_dry_run(
+    ast,
     {plan: [{op: "safe_text_patch", path: path, old_text: before, new_text: after}]},
   )
   if dry.ok {
@@ -236,7 +237,13 @@ fn __edit_fast_apply_result(ctx, fields = nil) {
  * @api_stability: experimental
  * @example: edit_fast_apply({path: "src/lib.rs", intent: "Rename alpha to beta"})
  */
-pub fn edit_fast_apply(params) {
+pub fn edit_fast_apply(
+  fs: HarnessFs,
+  random: HarnessRandom,
+  ast: HarnessAst,
+  llm: HarnessLlm,
+  params,
+) {
   const opts = params ?? {}
   const path = opts?.path ?? ""
   const intent = opts?.intent ?? opts?.edit_intent ?? opts?.instruction ?? ""
@@ -264,7 +271,7 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  const read = hostlib_fs_read_text({path: path, session_id: opts?.session_id})
+  const read = fs.staged_read_text({path: path, session_id: opts?.session_id})
   const before = read?.content ?? ""
   const before_hash = read?.sha256 ?? edit_fast_apply_content_hash(before)
   const ctx = {path: path, before_hash: before_hash, dry_run: opts?.dry_run ?? false, options: opts}
@@ -285,7 +292,7 @@ pub fn edit_fast_apply(params) {
     },
   )
   const response_result = try {
-    llm_call(
+    llm.call(
       __edit_fast_apply_prompt(path, before_hash, intent, before),
       __edit_fast_apply_system(),
       llm_opts,
@@ -332,7 +339,7 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  const validation = __edit_fast_apply_validate(path, proposed, opts)
+  const validation = __edit_fast_apply_validate(ast, path, proposed, opts)
   if !validation.ok {
     return __edit_fast_apply_result(
       ctx,
@@ -349,7 +356,7 @@ pub fn edit_fast_apply(params) {
       },
     )
   }
-  const preview = __edit_fast_apply_preview(path, before, proposed)
+  const preview = __edit_fast_apply_preview(ast, path, before, proposed)
   if !preview.ok {
     return __edit_fast_apply_result(
       ctx,
@@ -393,6 +400,8 @@ pub fn edit_fast_apply(params) {
     )
   }
   const commit = edit_safe_text_patch(
+    fs,
+    random,
     {
       path: path,
       expected_hash: before_hash,
@@ -441,6 +450,20 @@ pub fn edit_fast_apply(params) {
  * @api_stability: experimental
  * @example: fast_apply("src/lib.rs", "Rename alpha to beta")
  */
-pub fn fast_apply(path, edit_intent, options = nil) {
-  return edit_fast_apply((options ?? {}).merging({path: path, intent: edit_intent}))
+pub fn fast_apply(
+  fs: HarnessFs,
+  random: HarnessRandom,
+  ast: HarnessAst,
+  llm: HarnessLlm,
+  path,
+  edit_intent,
+  options = nil,
+) {
+  return edit_fast_apply(
+    fs,
+    random,
+    ast,
+    llm,
+    (options ?? {}).merging({path: path, intent: edit_intent}),
+  )
 }

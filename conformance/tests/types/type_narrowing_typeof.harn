@@ -1,5 +1,5 @@
 /** Test type_of() based narrowing */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn describe(x: string | int | nil) -> string {
     if type_of(x) == "string" {
       return "string: ${x}"
@@ -15,9 +15,9 @@ pipeline test(task) {
     }
     return "is string: ${x}"
   }
-  log(describe("hello"))
-  log(describe(42))
-  log(describe(nil))
-  log(not_string(99))
-  log(not_string("hi"))
+  harness.stdio.println(describe("hello"))
+  harness.stdio.println(describe(42))
+  harness.stdio.println(describe(nil))
+  harness.stdio.println(not_string(99))
+  harness.stdio.println(not_string("hi"))
 }

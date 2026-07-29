@@ -256,7 +256,7 @@ pub fn indent_output(output: string) -> list<string> {
  * else the workspace target dir's debug build (building it quietly when
  * missing) — the same ladder as the bash original.
  */
-fn resolve_harn_bin() -> string {
+fn resolve_harn_bin(harness: Harness) -> string {
   const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin
@@ -281,20 +281,20 @@ fn resolve_harn_bin() -> string {
   }
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
-    __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
+    harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
     const build = harness.process.spawn_captured(
       {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
     )
     if !build.success {
-      __io_eprint(build.stderr)
+      harness.stdio.eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
     }
   }
   return bin
 }
 
-pipeline main(task) {
-  const harn_bin = resolve_harn_bin()
+pipeline main(harness: Harness, task) {
+  const harn_bin = resolve_harn_bin(harness)
   let md_files: list<string> = []
   for g in harness.fs.glob(DOCS_GLOB) {
     md_files = md_files + [rel_path(g)]
@@ -307,8 +307,8 @@ pipeline main(task) {
     {cmd: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]},
   )
   if !mk.success {
-    __io_eprintln("error: could not create temp directory")
-    exit(1)
+    harness.stdio.eprintln("error: could not create temp directory")
+    harness.runtime.exit(1)
   }
   const tmp_dir = mk.stdout.trim()
   defer {
@@ -326,9 +326,9 @@ pipeline main(task) {
     for event in extract_blocks(harness.fs.read_text(md_file)) {
       if event.kind == "unclosed" {
         failures = failures + 1
-        __io_println("")
-        __io_println("FAIL: ${md_file} (unclosed ```harn fence opened at line ${event.open_line})")
-        __io_println("      hint: the next fenced block opens before this one closes.")
+        harness.stdio.println("")
+        harness.stdio.println("FAIL: ${md_file} (unclosed ```harn fence opened at line ${event.open_line})")
+        harness.stdio.println("      hint: the next fenced block opens before this one closes.")
         continue
       }
       if event.kind == "skip" {
@@ -343,31 +343,31 @@ pipeline main(task) {
       )
       if !res.success {
         failures = failures + 1
-        __io_println("")
-        __io_println("FAIL: ${md_file} (${mode_label(event.mode)} block #${event.idx})")
-        __io_println("      temp file: ${block_path}")
+        harness.stdio.println("")
+        harness.stdio.println("FAIL: ${md_file} (${mode_label(event.mode)} block #${event.idx})")
+        harness.stdio.println("      temp file: ${block_path}")
         for line in indent_output(res.stdout + res.stderr) {
-          __io_println(line)
+          harness.stdio.println(line)
         }
       }
     }
   }
-  __io_println("")
-  __io_println(
+  harness.stdio.println("")
+  harness.stdio.println(
     "docs snippets: ${checked} checked, ${skipped} skipped (,ignore), ${failures} failed",
   )
   if failures > 0 {
-    __io_println("")
-    __io_println("hint: ```harn snippets must parse under `harn parse` — wrap bare")
-    __io_println("      statements in `pipeline default() { ... }` or fix syntax")
-    __io_println("      placeholders. ```harn-prompt blocks must parse under the prompt")
-    __io_println("      engine: `if` and `for` both close with `{{ end }}`, and")
-    __io_println("      `{{ endif }}` is a variable lookup, not a closing tag.")
-    __io_println("      Tag a block ```harn,ignore / ```harn-prompt,ignore if it is an")
-    __io_println("      intentional fragment.")
-    // exit() bypasses defer, so remove the scratch directory before reporting
+    harness.stdio.println("")
+    harness.stdio.println("hint: ```harn snippets must parse under `harn parse` — wrap bare")
+    harness.stdio.println("      statements in `pipeline default() { ... }` or fix syntax")
+    harness.stdio.println("      placeholders. ```harn-prompt blocks must parse under the prompt")
+    harness.stdio.println("      engine: `if` and `for` both close with `{{ end }}`, and")
+    harness.stdio.println("      `{{ endif }}` is a variable lookup, not a closing tag.")
+    harness.stdio.println("      Tag a block ```harn,ignore / ```harn-prompt,ignore if it is an")
+    harness.stdio.println("      intentional fragment.")
+    // harness.runtime.exit() bypasses defer, so remove the scratch directory before reporting
     // failure to the calling shell.
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_dir]})
-    exit(1)
+    harness.runtime.exit(1)
   }
 }

@@ -2,7 +2,7 @@
  * std/oauth/client — RFC 6749 + RFC 7636 OAuth client with PKCE +
  * transparent refresh per RFC 9700 BCP.
  *
- * `client(provider, opts)` builds a client handle around a provider
+ * `client(harness, provider, opts)` builds a client handle around a provider
  * record from `std/oauth/providers` (or any compatible dict) and a
  * storage backend from `std/oauth/storage`. The handle exposes
  * authorization-code helpers, an explicit refresh, and a
@@ -21,8 +21,7 @@
  *     import { memory } from "std/oauth/storage"
  *     import { client, token } from "std/oauth/client"
  *
- *     let cli = client(
- *       providers().github,
+ *     let cli = client(harness, *       providers().github,
  *       {
  *         client_id: env("GITHUB_CLIENT_ID"),
  *         client_secret: env("GITHUB_CLIENT_SECRET"),
@@ -127,11 +126,11 @@ fn __require_storage(storage) {
   return storage
 }
 
-fn __pkce_verifier_string(n_bytes) {
+fn __pkce_verifier_string(random: HarnessRandom, n_bytes) {
   // base64url-no-pad over CSPRNG bytes. RFC 7636 §4.1 requires 43..128
   // chars from the URL-safe alphabet; 64 random bytes encode to ~86
   // chars, well inside the band.
-  return bytes_to_base64url(crypto_random_bytes(n_bytes))
+  return bytes_to_base64url(random.bytes(n_bytes))
 }
 
 fn __pkce_challenge(verifier) {
@@ -140,8 +139,8 @@ fn __pkce_challenge(verifier) {
   return sha256_base64url(verifier)
 }
 
-fn __random_state(n_bytes) {
-  return bytes_to_base64url(crypto_random_bytes(n_bytes))
+fn __random_state(random: HarnessRandom, n_bytes) {
+  return bytes_to_base64url(random.bytes(n_bytes))
 }
 
 fn __scope_separator(provider) {
@@ -380,7 +379,7 @@ fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {
   return token_set
 }
 
-fn __audit_refresh(provider_id, storage_key, prev, next, reason) {
+fn __audit_refresh(harness: Harness, provider_id, storage_key, prev, next, reason) {
   // Audit MUST NOT include the access token. Only timing and presence.
   const payload = {
     provider: to_string(provider_id),
@@ -389,7 +388,7 @@ fn __audit_refresh(provider_id, storage_key, prev, next, reason) {
     prev: __redact_token(prev),
     next: __redact_token(next),
   }
-  const _ = event_log.emit(
+  const _ = harness.obs.event_log_emit(
     __AUDIT_TOPIC,
     __AUDIT_KIND_REFRESH,
     payload,
@@ -397,13 +396,13 @@ fn __audit_refresh(provider_id, storage_key, prev, next, reason) {
   )
 }
 
-fn __audit_exchange(provider_id, storage_key, next) {
+fn __audit_exchange(harness: Harness, provider_id, storage_key, next) {
   const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
     next: __redact_token(next),
   }
-  const _ = event_log.emit(
+  const _ = harness.obs.event_log_emit(
     __AUDIT_TOPIC,
     __AUDIT_KIND_EXCHANGE,
     payload,
@@ -411,7 +410,7 @@ fn __audit_exchange(provider_id, storage_key, next) {
   )
 }
 
-fn __audit_token_exchange(provider_id, storage_key, next, mode, requested_token_type) {
+fn __audit_token_exchange(harness: Harness, provider_id, storage_key, next, mode, requested_token_type) {
   const payload = {
     provider: to_string(provider_id),
     storage_key: storage_key,
@@ -421,7 +420,7 @@ fn __audit_token_exchange(provider_id, storage_key, next, mode, requested_token_
     issued_token_type: next?.issued_token_type,
     next: __redact_token(next),
   }
-  const _ = event_log.emit(
+  const _ = harness.obs.event_log_emit(
     __AUDIT_TOPIC,
     __AUDIT_KIND_EXCHANGE,
     payload,
@@ -429,7 +428,7 @@ fn __audit_token_exchange(provider_id, storage_key, next, mode, requested_token_
   )
 }
 
-fn __audit_revoked(provider_id, storage_key, prev, revoke_url_used) {
+fn __audit_revoked(harness: Harness, provider_id, storage_key, prev, revoke_url_used) {
   // Audit MUST NOT include the access token. Records presence + the
   // (sanitised) endpoint that was contacted so compliance reviewers
   // can confirm the RFC 7009 hint was used.
@@ -439,7 +438,7 @@ fn __audit_revoked(provider_id, storage_key, prev, revoke_url_used) {
     revoke_endpoint: __redact_endpoint(revoke_url_used),
     prev: __redact_token(prev),
   }
-  const _ = event_log.emit(
+  const _ = harness.obs.event_log_emit(
     __AUDIT_TOPIC,
     __AUDIT_KIND_REVOKED,
     payload,
@@ -474,13 +473,12 @@ fn __try_revoke_remote(harness: Harness, cfg, token_value) {
 fn __revoke_locked(harness: Harness, cfg) {
   const prev = cfg.storage.get(cfg.storage_key)
   const access = prev?.access_token
-  const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(
-    harness,
+  const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(harness,  harness,
     cfg,
     to_string(access),
   )
   cfg.storage.delete(cfg.storage_key)
-  __audit_revoked(cfg.provider_id, cfg.storage_key, prev, remote_url)
+  __audit_revoked(harness, cfg.provider_id, cfg.storage_key, prev, remote_url)
   return nil
 }
 
@@ -516,7 +514,7 @@ fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
   }
   const next_token = __build_token_set(parsed, cfg.scopes, issued_at, refresh)
   cfg.storage.set(cfg.storage_key, next_token)
-  __audit_refresh(cfg.provider_id, cfg.storage_key, prev_token, next_token, reason)
+  __audit_refresh(harness, cfg.provider_id, cfg.storage_key, prev_token, next_token, reason)
   return next_token
 }
 
@@ -590,10 +588,10 @@ fn __get_valid_token(harness: Harness, cfg) {
   return __maybe_refresh(harness, cfg, "ttl_threshold")
 }
 
-fn __start_authorization(cfg) {
-  const verifier = __pkce_verifier_string(__DEFAULT_PKCE_VERIFIER_BYTES)
+fn __start_authorization(random: HarnessRandom, cfg) {
+  const verifier = __pkce_verifier_string(random, __DEFAULT_PKCE_VERIFIER_BYTES)
   const challenge = __pkce_challenge(verifier)
-  const state = __random_state(__DEFAULT_STATE_BYTES)
+  const state = __random_state(random, __DEFAULT_STATE_BYTES)
   const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
   let pairs = [
     {key: "response_type", value: "code"},
@@ -663,7 +661,7 @@ fn __exchange_code(harness: Harness, cfg, pkce, code, state) {
   )
   const token_set = __build_token_set(parsed, cfg.scopes, issued_at, nil)
   cfg.storage.set(cfg.storage_key, token_set)
-  __audit_exchange(cfg.provider_id, cfg.storage_key, token_set)
+  __audit_exchange(harness, cfg.provider_id, cfg.storage_key, token_set)
   return token_set
 }
 
@@ -864,7 +862,7 @@ fn __token_exchange(harness: Harness, cfg, opts) {
     }
     cfg.storage.set(storage_key, token_set)
   }
-  __audit_token_exchange(cfg.provider_id, storage_key, token_set, mode, requested_token_type)
+  __audit_token_exchange(harness, cfg.provider_id, storage_key, token_set, mode, requested_token_type)
   return token_set
 }
 
@@ -912,9 +910,9 @@ fn __token_request(harness: Harness, cfg, method, url, opts) {
  * @effects: [time, net]
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: client(providers().github, {client_id: id, storage: memory()})
+ * @example: client(harness, providers().github, {client_id: id, storage: memory()})
  */
-pub fn client(provider, opts) -> OAuthClient {
+pub fn client(harness: Harness, provider, opts) -> OAuthClient {
   if type_of(opts) != "dict" {
     throw "std/oauth/client: opts must be a dict"
   }
@@ -954,7 +952,7 @@ pub fn client(provider, opts) -> OAuthClient {
     token_auth_method: token_auth_method,
     token_endpoint: __redact_endpoint(cfg.token_url),
     auth_endpoint: __redact_endpoint(cfg.auth_url),
-    start_authorization: { -> __start_authorization(cfg) },
+    start_authorization: { -> __start_authorization(harness.random, cfg) },
     exchange_code: { pkce, code, state -> __exchange_code(harness, cfg, pkce, code, state) },
     refresh: { -> __maybe_refresh(harness, cfg, "forced", cfg.storage.get(cfg.storage_key)) },
     token: { -> __get_valid_token(harness, cfg).access_token },

@@ -171,6 +171,7 @@ fn run_returns_error_after_reporting_skipped_files() {
         dry_run: false,
         safety: None,
         harness_threading: HarnessThreadingMode::default(),
+        capability_migrations_only: false,
         json: false,
         path: temp.path().to_path_buf(),
     };
@@ -214,6 +215,7 @@ fn apply_rejects_needs_human_safety_ceiling() {
         dry_run: false,
         safety: Some(RepairSafety::NeedsHuman),
         harness_threading: HarnessThreadingMode::default(),
+        capability_migrations_only: false,
         json: false,
         path: PathBuf::from("repair_demo.harn"),
     };
@@ -276,6 +278,7 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
         None,
         FixOptions {
             harness_threading: HarnessThreadingMode::ThreadParams,
+            capability_migrations_only: false,
         },
     )
     .unwrap();
@@ -288,6 +291,57 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
     assert_eq!(repair.repair.id, "bindings/thread-harness-needs-param");
     assert_eq!(repair.repair.safety, "surface-changing");
     assert_eq!(repair.impact.classification, "public-signature-change");
+}
+
+#[test]
+fn callable_param_insert_handles_dict_defaults_before_body() {
+    let source = "pub fn poll(check, options: dict = {}) -> any {\n  harness.clock.now_ms()\n}\n";
+    let (offset, has_params) = callable_param_insert(
+        source,
+        harn_lexer::Span::with_offsets(0, source.len(), 1, 1),
+    )
+    .expect("callable header");
+    assert!(has_params);
+    assert_eq!(&source[offset..offset + 5], "check");
+}
+
+#[test]
+fn missing_capability_argument_repair_uses_typed_root_field() {
+    let span = harn_lexer::Span::with_offsets(12, 16, 1, 13);
+    let (_, edits, _) = synthesize_missing_capability_argument_repair(
+        span,
+        "argument 1 `fs`: expected HarnessFs, found string",
+    )
+    .expect("capability migration repair");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].span.start, 12);
+    assert_eq!(edits[0].span.end, 12);
+    assert_eq!(edits[0].replacement, "harness.fs, ");
+}
+
+#[test]
+fn capability_only_plan_excludes_unrelated_repairs() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("capability_only.harn");
+    fs::write(
+        &script,
+        "pub const EXPORTED = 1\n\npub fn helper() {\n  println(\"hi\")\n}\n",
+    )
+    .unwrap();
+    let plan = build_plan_with_options(
+        &script,
+        None,
+        FixOptions {
+            harness_threading: HarnessThreadingMode::ThreadParams,
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(!plan.repairs.is_empty());
+    assert!(plan
+        .repairs
+        .iter()
+        .all(|repair| { repair.repair.id.starts_with("bindings/thread-harness") }));
 }
 
 #[test]
@@ -311,6 +365,7 @@ fn plan_json_reports_cross_module_public_signature_impact() {
         None,
         FixOptions {
             harness_threading: HarnessThreadingMode::ThreadParams,
+            capability_migrations_only: false,
         },
     )
     .unwrap();
@@ -370,6 +425,7 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
         false,
         FixOptions {
             harness_threading: HarnessThreadingMode::ThreadParams,
+            capability_migrations_only: false,
         },
     )
     .unwrap();
@@ -448,6 +504,7 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
             false,
             FixOptions {
                 harness_threading: HarnessThreadingMode::ThreadParams,
+                capability_migrations_only: false,
             },
         )
         .unwrap();
@@ -532,6 +589,7 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
         false,
         FixOptions {
             harness_threading: HarnessThreadingMode::ThreadParams,
+            capability_migrations_only: false,
         },
     )
     .unwrap();
@@ -648,6 +706,7 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
         false,
         FixOptions {
             harness_threading: HarnessThreadingMode::ThreadParams,
+            capability_migrations_only: false,
         },
     )
     .unwrap();
@@ -698,6 +757,7 @@ fn apply_dedupes_shared_stdio_threading_edits() {
         false,
         FixOptions {
             harness_threading: HarnessThreadingMode::ThreadParams,
+            capability_migrations_only: false,
         },
     )
     .unwrap();

@@ -10,9 +10,9 @@ fn hook_reminder_tools() {
   )
 }
 
-pipeline main() {
-  clear_tool_hooks()
-  register_tool_hook(
+pipeline main(harness: Harness) {
+  harness.tools.clear_hooks()
+  harness.tools.register_hook(
     {
       pattern: "hooked_tool",
       pre: { _event ->
@@ -27,13 +27,12 @@ pipeline main() {
     },
   )
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "tool_1", name: "hooked_tool", arguments: {}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "call the hooked tool",
+      const result = agent_loop(harness, "call the hooked tool",
         nil,
         {
           provider: "mock",
@@ -45,13 +44,13 @@ pipeline main() {
         },
       )
       const events = transcript_events_by_kind(result.transcript, "system_reminder")
-      __io_println(result.status)
-      __io_println(len(events))
-      __io_println(events[0].reminder.body)
-      __io_println(events[0].reminder.role_hint)
-      __io_println(events[1].reminder.body)
-      __io_println(events[1].reminder.source)
-      clear_tool_hooks()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(events))
+      harness.stdio.println(events[0].reminder.body)
+      harness.stdio.println(events[0].reminder.role_hint)
+      harness.stdio.println(events[1].reminder.body)
+      harness.stdio.println(events[1].reminder.source)
+      harness.tools.clear_hooks()
     },
   )
 }

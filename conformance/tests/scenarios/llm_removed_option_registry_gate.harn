@@ -5,7 +5,7 @@ fn main(_harness: Harness) {
     let opts = {provider: "mock"}
     opts[key] = nil
     const result = try {
-      llm_call("This call must fail before dispatch.", nil, opts)
+      harness.llm.call("This call must fail before dispatch.", nil, opts)
     }
     require is_err(result), "removed option must fail: " + key
     const message = to_string(unwrap_err(result))
@@ -13,5 +13,5 @@ fn main(_harness: Harness) {
     require contains(message, registry.removed[key]), message
     tested = tested + 1
   }
-  __io_println(tested == len(keys(registry.removed)))
+  harness.stdio.println(tested == len(keys(registry.removed)))
 }

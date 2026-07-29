@@ -62,7 +62,7 @@ fn build_tools() -> dict {
   return registry
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const registry = build_tools()
   const task_text =
     "Investigate this small repo and tell me what the compute function does and how it is used in main."
@@ -72,11 +72,10 @@ pipeline main(task) {
     let names = info?.tool_names ?? []
     let count = info?.tool_count ?? 0
     let iter = info?.iteration ?? 0
-    log("[exp5] iter=${iter} tools=${count} names=${names}")
+    harness.stdio.println("[exp5] iter=${iter} tools=${count} names=${names}")
     nil
   }
-  const result = agent_loop(
-    task_text,
+  const result = agent_loop(harness, task_text,
     system_prompt,
     {
       provider: "llamacpp",
@@ -88,5 +87,5 @@ pipeline main(task) {
       post_turn_callback: cb,
     },
   )
-  log("[exp5] DONE status=${result.status} iters=${result.llm.iterations}")
+  harness.stdio.println("[exp5] DONE status=${result.status} iters=${result.llm.iterations}")
 }

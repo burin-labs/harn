@@ -12,7 +12,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * and assert the feedback surfaces on the next turn's user messages.
  * That proves the subscriber fired live (not on post-turn replay).
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -41,20 +41,20 @@ pipeline test(task) {
     },
   )
   const events_session = "ts_events_session"
-  agent_subscribe(
+  harness.agent.subscribe(
     events_session,
     { ev ->
       if ev?.type == "tool_search_query" {
-        agent_inject_feedback(events_session, "observed_ts_query", "LIVE_TS_QUERY_FIRED")
+        harness.agent.inject_feedback(events_session, "observed_ts_query", "LIVE_TS_QUERY_FIRED")
       }
       if ev?.type == "tool_search_result" {
-        agent_inject_feedback(events_session, "observed_ts_result", "LIVE_TS_RESULT_FIRED")
+        harness.agent.inject_feedback(events_session, "observed_ts_result", "LIVE_TS_RESULT_FIRED")
       }
     },
   )
   // Turn 1: model calls the synthetic search tool with "deploy".
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "Looking up deploy tooling.",
         tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
@@ -66,8 +66,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "Ship the release",
+      const result = agent_loop(harness, "Ship the release",
         nil,
         {
           provider: "mock",
@@ -79,7 +78,7 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "loop completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) >= 2, "at least two LLM calls happened")
       const turn2_messages = calls[1].messages
       let saw_query_marker = false
@@ -121,13 +120,13 @@ pipeline test(task) {
       }
       assert(query_events == 1, "one tool_search_query in transcript")
       assert(result_events == 1, "one tool_search_result in transcript")
-      log("tool_search_client_bm25_events tests passed")
+      harness.stdio.println("tool_search_client_bm25_events tests passed")
     },
   )
 }
 // Turn 2's recorded messages must include the two feedback markers
 // injected by the subscriber — direct proof the live event fired.
-// `llm_mock_calls()` captures every inbound call's final message list;
+// `harness.llm.mock_calls()` captures every inbound call's final message list;
 // turn 2 is the first call after the tool_search events fired on turn 1.
 // Transcript fidelity: the transcript events still match the client-path
 // shape — same metadata the direct agent-loop subscriber path saw.

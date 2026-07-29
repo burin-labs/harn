@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Register a prompt with arguments
   const r = mcp_prompt(
     {
@@ -22,5 +22,5 @@ pipeline test(task) {
       },
     },
   )
-  __io_println("mcp_prompt registered")
+  harness.stdio.println("mcp_prompt registered")
 }

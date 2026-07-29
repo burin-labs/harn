@@ -355,7 +355,7 @@ pub fn validate(
  * Concatenate the workflow file contents in sorted repo-relative order
  * (each followed by a newline).
  */
-fn read_workflows() -> string {
+fn read_workflows(harness: Harness) -> string {
   const globbed = harness.fs.glob(WORKFLOWS_GLOB)
   let rels = []
   for g in globbed {
@@ -379,11 +379,11 @@ fn read_workflows() -> string {
   return text
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const registry = try {
     toml_parse(harness.fs.read_text(REGISTRY))
   } catch (err) {
-    __io_eprintln("error: failed to parse ${REGISTRY}: ${err}")
+    harness.stdio.eprintln("error: failed to parse ${REGISTRY}: ${err}")
     return 1
   }
   const artifacts = registry?.artifact ?? []
@@ -392,7 +392,7 @@ pipeline main(task) {
   const make_text = harness.fs.read_text(MAKEFILE)
   const targets = makefile_targets(make_text)
   const all_recipe = make_all_recipe(make_text)
-  const workflow_text = read_workflows()
+  const workflow_text = read_workflows(harness)
   // Precompute which declared outputs are missing on disk so validate stays
   // filesystem free (preserving exact per-artifact error ordering).
   let missing_outputs = []
@@ -409,16 +409,16 @@ pipeline main(task) {
     dispatch,
   )
   if errors.count > 0 {
-    __io_eprintln("error: generated-artifact registry is out of sync:\n")
+    harness.stdio.eprintln("error: generated-artifact registry is out of sync:\n")
     for e in errors {
-      __io_eprintln("  - ${e}")
+      harness.stdio.eprintln("  - ${e}")
     }
-    __io_eprintln(
+    harness.stdio.eprintln(
       "\nhint: edit scripts/generated_artifacts.toml (and the Makefile / workflows it points at) until they agree. See the header of that file for the add-a-new-artifact checklist.",
     )
     return 1
   }
-  __io_println(
+  harness.stdio.println(
     "    Generated-artifact registry OK (${artifacts.count} artifacts, ${exempt.count} exempt checks, ${dispatch.keys().count} preflight-classified targets).",
   )
   return 0

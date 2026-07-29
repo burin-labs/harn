@@ -1,6 +1,6 @@
 import { timed } from "std/timing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Pin the wall clock so wall-start aligns with our fixture.
   mock_time(1700000000000)
   const outcome = timed(
@@ -11,10 +11,10 @@ pipeline default() {
       return "ok"
     },
   )
-  __io_println(outcome.result)
-  __io_println(outcome.timing.started_at_ms)
-  __io_println(outcome.timing.attributes.tier)
+  harness.stdio.println(outcome.result)
+  harness.stdio.println(outcome.timing.started_at_ms)
+  harness.stdio.println(outcome.timing.attributes.tier)
   // Duration is monotonic-derived; advance_time also advances monotonic.
-  __io_println(outcome.timing.duration_ms >= 250)
+  harness.stdio.println(outcome.timing.duration_ms >= 250)
   unmock_time()
 }

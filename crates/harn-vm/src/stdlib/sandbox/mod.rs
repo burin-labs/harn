@@ -310,6 +310,8 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
 ];
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sandbox_active_backend() -> string",
     category = "sandbox"
 )]
@@ -318,6 +320,8 @@ fn sandbox_active_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sandbox_backend_available() -> bool",
     category = "sandbox"
 )]
@@ -329,6 +333,8 @@ fn sandbox_backend_available_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sandbox_active_profile() -> string",
     category = "sandbox"
 )]

@@ -4,13 +4,13 @@ fn handle_channel(event) {
   return event.provider_payload.name
 }
 
-pipeline default() {
-  const audit = event_log.subscribe({topic: "lifecycle.channel.audit"})
+pipeline default(harness: Harness) {
+  const audit = harness.obs.event_log_subscribe({topic: "lifecycle.channel.audit"})
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-replay-match-" + unique,
       kind: "channel.emit",
@@ -28,19 +28,19 @@ pipeline default() {
       package_name: "conformance",
     },
   )
-  const _ = emit_channel("ch.replay.match.input", {repo: "harn"})
+  const _ = harness.channels.append("ch.replay.match.input", {repo: "harn"})
   const emit_entry = audit.next().value
   const match_entry = audit.next().value
-  __io_println(emit_entry.kind)
-  __io_println(match_entry.kind)
-  __io_println(match_entry.headers.schema)
-  __io_println(emit_entry.payload.event_id == match_entry.payload.event_id)
-  __io_println(match_entry.payload.name_resolved)
-  __io_println(match_entry.payload.scope)
-  __io_println(starts_with(match_entry.payload.trigger_id, "channel-replay-match-"))
-  __io_println(match_entry.payload.handler_kind)
-  __io_println(match_entry.payload.handler_result.status)
-  __io_println(match_entry.payload.matched_at.algorithm)
-  __io_println(match_entry.payload.matched_at.key_id)
-  __io_println(starts_with(match_entry.payload.matched_at.signature, "sha256:"))
+  harness.stdio.println(emit_entry.kind)
+  harness.stdio.println(match_entry.kind)
+  harness.stdio.println(match_entry.headers.schema)
+  harness.stdio.println(emit_entry.payload.event_id == match_entry.payload.event_id)
+  harness.stdio.println(match_entry.payload.name_resolved)
+  harness.stdio.println(match_entry.payload.scope)
+  harness.stdio.println(starts_with(match_entry.payload.trigger_id, "channel-replay-match-"))
+  harness.stdio.println(match_entry.payload.handler_kind)
+  harness.stdio.println(match_entry.payload.handler_result.status)
+  harness.stdio.println(match_entry.payload.matched_at.algorithm)
+  harness.stdio.println(match_entry.payload.matched_at.key_id)
+  harness.stdio.println(starts_with(match_entry.payload.matched_at.signature, "sha256:"))
 }

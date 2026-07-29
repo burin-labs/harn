@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Match with no matching arm should throw
   const result = try {
     match "unexpected" {
@@ -6,6 +6,6 @@ pipeline test(task) {
       "b" -> { "got b" }
     }
   }
-  log(is_err(result))
-  log(unwrap_err(result))
+  harness.stdio.println(is_err(result))
+  harness.stdio.println(unwrap_err(result))
 }

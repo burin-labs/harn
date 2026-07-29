@@ -415,9 +415,9 @@ pub fn sort_by_path_parts(paths: list<string>) -> list<string> {
   return out
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   if argv.contains("--self-test") {
-    return run_self_test()
+    return run_self_test(harness)
   }
   // Parse flags: --root, --allowlist, --threshold (each takes the next arg),
   // and the remaining positionals as path overrides.
@@ -447,17 +447,17 @@ pipeline main(task) {
   }
   // Read allowlist (missing -> SystemExit(1)).
   if !harness.fs.exists(join_root(root, allowlist)) {
-    __io_eprintln("allowlist not found: ${allowlist}")
+    harness.stdio.eprintln("allowlist not found: ${allowlist}")
     return 1
   }
   const alw = parse_allowlist(harness.fs.read_text(join_root(root, allowlist)), allowlist)
   if alw.error != nil {
-    __io_eprintln(alw.error)
+    harness.stdio.eprintln(alw.error)
     return 1
   }
   const allowed: list<string> = alw.locations
   if allowed.count > MAX_ALLOWLIST_ENTRIES {
-    __io_eprintln(
+    harness.stdio.eprintln(
       "${allowlist}: allowlist has ${allowed.count} entries; keep it at <= ${MAX_ALLOWLIST_ENTRIES}",
     )
     return 1
@@ -465,7 +465,7 @@ pipeline main(task) {
   // Scan.
   let findings: list = []
   let observed: list<string> = []
-  for rel in collect_files(root, paths) {
+  for rel in collect_files(harness, root, paths) {
     const source = harness.fs.read_text(join_root(root, rel))
     for lit in iter_literals_text(source) {
       const length = normalized_length(lit.text)
@@ -492,23 +492,23 @@ pipeline main(task) {
   }
   if stale.count > 0 {
     for location in stale.sorted() {
-      __io_eprintln("${allowlist}: stale allowlist entry: ${location}")
+      harness.stdio.eprintln("${allowlist}: stale allowlist entry: ${location}")
     }
     return 1
   }
   if findings.count > 0 {
     for f in findings {
-      __io_eprintln(format_finding(f.location, f.length, digest(f.text), make_preview(f.text)))
+      harness.stdio.eprintln(format_finding(f.location, f.length, digest(f.text), make_preview(f.text)))
     }
     const first = findings[0].location
-    __io_eprintln(
+    harness.stdio.eprintln(
       "\nMove model-facing wording to stdlib .harn.prompt assets, or add "
         + "a reviewed '${first} # justification' entry "
         + "to ${allowlist} for a primitive constant.",
     )
     return 1
   }
-  __io_println("rust prompt prose ratchet OK")
+  harness.stdio.println("rust prompt prose ratchet OK")
   return 0
 }
 
@@ -517,7 +517,7 @@ pipeline main(task) {
  * source with one over-threshold literal must yield exactly one finding and an
  * "ok" source must yield none.
  */
-fn run_self_test() -> int {
+fn run_self_test(harness: Harness) -> int {
   const bad_source = "fn bad() { let _ = \"You are an assistant. You must respond with a "
     + "careful tool call, then explain the result to the user in detail "
     + "without skipping any required schema fields. Include enough "
@@ -528,16 +528,16 @@ fn run_self_test() -> int {
   const bad_findings = scan_source("bad.rs", bad_source, DEFAULT_THRESHOLD)
   const ok_findings = scan_source("ok.rs", ok_source, DEFAULT_THRESHOLD)
   if bad_findings.count != 1 || ok_findings.count > 0 {
-    __io_eprintln("self-test failed")
+    harness.stdio.eprintln("self-test failed")
     let all: list = []
     all = all + bad_findings
     all = all + ok_findings
     for f in all {
-      __io_eprintln(format_finding(f.location, f.length, digest(f.text), make_preview(f.text)))
+      harness.stdio.eprintln(format_finding(f.location, f.length, digest(f.text), make_preview(f.text)))
     }
     return 1
   }
-  __io_println("rust prompt prose ratchet self-test OK")
+  harness.stdio.println("rust prompt prose ratchet self-test OK")
   return 0
 }
 
@@ -599,7 +599,7 @@ fn rel_from_glob(path: string, root: string) -> string {
  * and excluded-file filtering; file entries (ending `.rs`) are included when
  * present and not excluded. Path order follows the input `paths` list.
  */
-fn collect_files(root: string, paths: list<string>) -> list<string> {
+fn collect_files(harness: Harness, root: string, paths: list<string>) -> list<string> {
   let out: list<string> = []
   for path in paths {
     if path.ends_with(".rs") {

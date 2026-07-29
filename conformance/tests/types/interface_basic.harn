@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   /** Define an interface */
   interface Printable {
     fn to_display() -> string
@@ -10,8 +10,8 @@ pipeline default() {
   }
   // Create struct instances (dict-style construction)
   const p = {x: 10, y: 20}
-  __io_println(p.x)
-  __io_println(p.y)
+  harness.stdio.println(p.x)
+  harness.stdio.println(p.y)
   // Interfaces are declarative type contracts
-  __io_println("interfaces work")
+  harness.stdio.println("interfaces work")
 }

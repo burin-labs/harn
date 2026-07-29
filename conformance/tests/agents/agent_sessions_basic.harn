@@ -1,36 +1,35 @@
 import { agent_capture_events } from "std/agent/events"
 
-pipeline main(task) {
-  const s = agent_session_open()
-  require agent_session_exists(s), "open returns an id that exists"
-  require s == agent_session_open(s), "open(id) is idempotent"
-  require agent_session_length(s) == 0, "new session is empty"
-  agent_session_inject(s, {role: "user", content: "hello"})
-  agent_session_inject(s, {role: "assistant", content: "hi"})
-  require agent_session_length(s) == 2, "inject appends"
-  const snap = agent_session_snapshot(s)
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  require harness.agent.exists(s), "open returns an id that exists"
+  require s == harness.agent.open(s), "open(id) is idempotent"
+  require harness.agent.length(s) == 0, "new session is empty"
+  harness.agent.inject(s, {role: "user", content: "hello"})
+  harness.agent.inject(s, {role: "assistant", content: "hi"})
+  require harness.agent.length(s) == 2, "inject appends"
+  const snap = harness.agent.snapshot(s)
   require len(snap["messages"]) == 2, "snapshot mirrors transcript"
   require snap["id"] == s, "snapshot preserves id"
-  agent_session_reset(s)
-  require agent_session_length(s) == 0, "reset clears history"
-  require agent_session_exists(s), "reset preserves id"
-  agent_session_inject(s, {role: "user", content: "one"})
-  agent_session_inject(s, {role: "user", content: "two"})
-  agent_session_inject(s, {role: "user", content: "three"})
-  const kept = agent_session_trim(s, 2)
+  harness.agent.reset(s)
+  require harness.agent.length(s) == 0, "reset clears history"
+  require harness.agent.exists(s), "reset preserves id"
+  harness.agent.inject(s, {role: "user", content: "one"})
+  harness.agent.inject(s, {role: "user", content: "two"})
+  harness.agent.inject(s, {role: "user", content: "three"})
+  const kept = harness.agent.trim(s, 2)
   require kept == 2, "trim returns kept count"
-  const after = agent_session_snapshot(s)
+  const after = harness.agent.snapshot(s)
   require after["messages"][0]["content"] == "two", "trim drops oldest"
   require after["messages"][1]["content"] == "three", "trim retains newest"
-  agent_session_close(s)
-  require !agent_session_exists(s), "close evicts"
-  const close_session = "close-status-" + uuid()
-  const captured = agent_capture_events(
-    close_session,
+  harness.agent.close(s)
+  require !harness.agent.exists(s), "close evicts"
+  const close_session = "close-status-" + harness.random.uuid()
+  const captured = agent_capture_events(harness,  harness, close_session,
     fn() {
-      let _ = agent_session_open(close_session)
-      agent_session_close(close_session, {reason: "timeout", status: "idle", source: "test"})
-      return agent_session_exists(close_session)
+      let _ = harness.agent.open(close_session)
+      harness.agent.close(close_session, {reason: "timeout", status: "idle", source: "test"})
+      return harness.agent.exists(close_session)
     },
   )
   require !captured.result, "close with status evicts"
@@ -40,5 +39,5 @@ pipeline main(task) {
   require event.reason == "timeout", "close event carries reason"
   require event.status == "idle", "close event carries status"
   require event.metadata.source == "test", "close event carries metadata"
-  log("agent_sessions basic tests passed")
+  harness.stdio.println("agent_sessions basic tests passed")
 }

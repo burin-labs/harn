@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * the same assertions against a 2-node workflow graph so the
  * workflow-level skill wiring is no longer silently dropped.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -53,16 +53,15 @@ pipeline test(task) {
   // the only one with tools + skills attached, so only its system
   // prompt carries the active-skill section.
   with_llm_script(
-    [llm_text("Queued up deploy."), llm_text("Verification ok.")],
+    harness.llm, [llm_text("Queued up deploy."), llm_text("Verification ok.")],
     { ->
-      const result = workflow_execute(
-        "Ship the new release to production",
+      const result = workflow_execute(harness, "Ship the new release to production",
         flow,
         [],
         {max_steps: 4, skills: registry, skill_match: {strategy: "metadata"}},
       )
       assert(result?.status == "completed", "workflow completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
       const execute_system = calls[0].system
       assert(
@@ -90,7 +89,7 @@ pipeline test(task) {
       }
       assert(seen_deploy, "scoped tool survives into the execute stage's tool schema")
       assert(!seen_metrics, "out-of-scope tool filtered out on the workflow path")
-      log("skill_lifecycle_workflow tests passed")
+      harness.stdio.println("skill_lifecycle_workflow tests passed")
     },
   )
 }

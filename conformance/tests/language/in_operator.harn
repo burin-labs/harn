@@ -1,22 +1,22 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // List membership
   const items = [1, 2, 3, 4, 5]
-  __io_println(3 in items)
-  __io_println(6 in items)
-  __io_println(6 not in items)
-  __io_println(3 not in items)
+  harness.stdio.println(3 in items)
+  harness.stdio.println(6 in items)
+  harness.stdio.println(6 not in items)
+  harness.stdio.println(3 not in items)
   // String containment
   const msg = "hello world"
-  __io_println("world" in msg)
-  __io_println("xyz" in msg)
-  __io_println("xyz" not in msg)
+  harness.stdio.println("world" in msg)
+  harness.stdio.println("xyz" in msg)
+  harness.stdio.println("xyz" not in msg)
   // Dict key membership
   const data = {name: "Alice", age: 30}
-  __io_println("name" in data)
-  __io_println("email" in data)
-  __io_println("email" not in data)
+  harness.stdio.println("name" in data)
+  harness.stdio.println("email" in data)
+  harness.stdio.println("email" not in data)
   // Set membership
   const s = set(1, 2, 3)
-  __io_println(2 in s)
-  __io_println(5 in s)
+  harness.stdio.println(2 in s)
+  harness.stdio.println(5 in s)
 }

@@ -136,12 +136,12 @@ fn __render_failure(source: string, child: dict) -> string {
 fn main(harness: Harness) {
   if len(argv) < 1 {
     harness.stdio.eprintln("precompile: target path is required")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const bin = harness.env.get_or("HARN_CLI_SELF_EXE", "")
   if bin == "" {
     harness.stdio.eprintln("internal error: HARN_CLI_SELF_EXE not set by dispatch shim")
-    exit(70)
+    harness.runtime.exit(70)
   }
   const target = argv[0]
   const out_root = harness.env.get_or("HARN_PRECOMPILE_OUT", "")
@@ -149,7 +149,7 @@ fn main(harness: Harness) {
   const quiet = harness.env.get_or("HARN_PRECOMPILE_QUIET", "0") == "1"
   if !harness.fs.exists(target) {
     harness.stdio.eprintln("error: target does not exist: " + target)
-    exit(1)
+    harness.runtime.exit(1)
   }
   const info = harness.fs.stat(target)
   const is_dir = info["is_dir"] ?? false
@@ -165,7 +165,7 @@ fn main(harness: Harness) {
   }
   if len(sources) == 0 {
     harness.stdio.eprintln("error: no .harn files found under " + target)
-    exit(1)
+    harness.runtime.exit(1)
   }
   let compiled = 0
   let failed = 0
@@ -206,6 +206,6 @@ fn main(harness: Harness) {
     )
   }
   if failed > 0 {
-    exit(1)
+    harness.runtime.exit(1)
   }
 }

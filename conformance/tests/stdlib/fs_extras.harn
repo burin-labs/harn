@@ -1,5 +1,5 @@
 /** Verifies move_file, read_lines, walk_dir, and glob. */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const root = path_join(harness.fs.temp_dir(), "fs_extras_test")
   if harness.fs.exists(root) {
     harness.fs.delete(root)
@@ -10,22 +10,22 @@ pipeline test(task) {
   harness.fs.write_text(path_join(root, "sub", "c.md"), "deeper\n")
   // read_lines splits without the trailing empty line
   const lines = harness.fs.read_lines(path_join(root, "a.txt"))
-  log(len(lines))
-  log(lines[0])
-  log(lines[2])
+  harness.stdio.println(len(lines))
+  harness.stdio.println(lines[0])
+  harness.stdio.println(lines[2])
   // move_file across the same dir
   harness.fs.rename(path_join(root, "b.txt"), path_join(root, "renamed.txt"))
-  log(harness.fs.exists(path_join(root, "b.txt")))
-  log(harness.fs.exists(path_join(root, "renamed.txt")))
+  harness.stdio.println(harness.fs.exists(path_join(root, "b.txt")))
+  harness.stdio.println(harness.fs.exists(path_join(root, "renamed.txt")))
   // glob "*.txt" only finds top-level .txt files (a.txt and renamed.txt)
   const txts = harness.fs.glob("*.txt", root)
-  log(len(txts))
+  harness.stdio.println(len(txts))
   // glob "**/*.md" finds the nested md
   const mds = harness.fs.glob("**/*.md", root)
-  log(len(mds))
+  harness.stdio.println(len(mds))
   // walk_dir returns dicts with path/is_dir/depth
   const walked = harness.fs.walk(root)
   // 1 root dir + a.txt + renamed.txt + sub dir + sub/c.md = 5 entries
-  log(len(walked))
+  harness.stdio.println(len(walked))
   harness.fs.delete(root)
 }

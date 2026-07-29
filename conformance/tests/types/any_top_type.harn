@@ -1,5 +1,5 @@
 /** `any` is a true top type — everything flows in, everything flows out. */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Every concrete type is assignable to `any`.
   const a1: any = 42
   const a2: any = "hello"
@@ -7,26 +7,26 @@ pipeline test(task) {
   const a4: any = [1, 2, 3]
   const a5: any = {k: "v"}
   const a6: any = true
-  log(a1)
-  log(a2)
-  log(a3)
-  log(a4)
-  log(a5)
-  log(a6)
+  harness.stdio.println(a1)
+  harness.stdio.println(a2)
+  harness.stdio.println(a3)
+  harness.stdio.println(a4)
+  harness.stdio.println(a5)
+  harness.stdio.println(a6)
   // `any` flows back out to concrete types (escape hatch — no narrowing required).
   const s: string = a2
-  log(s)
+  harness.stdio.println(s)
   // Function with untyped/any parameter and return.
   fn passthrough(x: any) -> any {
     return x
   }
-  log(passthrough(7))
-  log(passthrough("world"))
-  log(passthrough(nil))
+  harness.stdio.println(passthrough(7))
+  harness.stdio.println(passthrough("world"))
+  harness.stdio.println(passthrough(nil))
   // `any | nil` is still legal — union with top is equivalent to `any`,
   // but explicit unions remain valid annotations.
   fn maybe() -> any? {
     return nil
   }
-  log(maybe())
+  harness.stdio.println(maybe())
 }

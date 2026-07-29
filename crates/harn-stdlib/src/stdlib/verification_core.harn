@@ -14,8 +14,11 @@ import { shell_quote } from "std/runtime"
 import { regex_first_capture } from "std/text"
 import "std/verification_types"
 
-pub fn verification_file_hash_snapshot(paths: list<string>) -> VerificationFileHashSnapshot {
-  return hostlib_code_index_file_hash_snapshot({paths: paths})
+pub fn verification_file_hash_snapshot(
+  code_index: HarnessCodeIndex,
+  paths: list<string>,
+) -> VerificationFileHashSnapshot {
+  return code_index.file_hash_snapshot({paths: paths})
 }
 
 pub fn verification_snapshot_staleness(bound_snapshot, current_hashes) -> dict {
@@ -121,11 +124,11 @@ pub fn __verification_snapshot_map(value) {
   return value
 }
 
-pub fn __verification_capture_snapshot(opts) {
+pub fn __verification_capture_snapshot(code_index: HarnessCodeIndex, opts) {
   let snapshot_fact = nil
   let snapshot = __verification_snapshot_map(opts?.snapshot)
   if opts?.snapshot_paths != nil {
-    snapshot_fact = verification_file_hash_snapshot(opts.snapshot_paths)
+    snapshot_fact = verification_file_hash_snapshot(code_index, opts.snapshot_paths)
     snapshot = snapshot_fact.snapshot
   }
   return {fact: snapshot_fact, snapshot: snapshot}
@@ -144,7 +147,7 @@ pub fn __verification_result_text(result, source: string) -> string {
   return ""
 }
 
-pub fn __verification_failure_signature(result, opts) {
+pub fn __verification_failure_signature(harness: Harness, result, opts) {
   if opts?.failure_signature != nil {
     const explicit = to_string(opts.failure_signature)
     return trim(explicit) == "" ? nil : explicit
@@ -159,8 +162,7 @@ pub fn __verification_failure_signature(result, opts) {
   const max_chars = to_int(opts?.max_failure_signature_chars) ?? 4000
   const text = trim(__verification_result_text(result, source))
   if text != "" {
-    return agent_truncate_prompt_text(
-      text,
+    return agent_truncate_prompt_text(harness,  harness, text,
       max_chars,
       "verification failure signature exceeded its model-visible budget",
     )
@@ -703,38 +705,37 @@ pub fn __verification_delta_replacement_text(entry) -> string {
   return " "
 }
 
-pub fn __verification_delta_normalize_text(text: string, cfg: dict) -> string {
+pub fn __verification_delta_normalize_text(harness: Harness, text: string, cfg: dict) -> string {
   let out = to_string(text ?? "")
   if cfg?.strip_ansi != false {
-    out = regex_replace_all("\\u{1b}\\[[0-9;]*m", "", out)
+    out = regex_replace("\\u{1b}\\[[0-9;]*m", "", out)
   }
   for replacement in cfg?.replacements ?? [] {
     const pattern = __verification_delta_replacement_pattern(replacement)
     if pattern != "" {
-      out = regex_replace_all(pattern, __verification_delta_replacement_text(replacement), out)
+      out = regex_replace(pattern, __verification_delta_replacement_text(replacement), out)
     }
   }
   for pattern in __verification_string_list(cfg?.strip_patterns ?? cfg?.stripPatterns) {
-    out = regex_replace_all(pattern, " ", out)
+    out = regex_replace(pattern, " ", out)
   }
   if cfg?.lowercase != false {
     out = lowercase(out)
   }
   if cfg?.strip_locations != false {
-    out = regex_replace_all("[^\\s:]+:[0-9]+(?::[0-9]+)?", " ", out)
-    out = regex_replace_all("\\b(?:line|col|column)\\s+[0-9]+\\b", " ", out)
+    out = regex_replace("[^\\s:]+:[0-9]+(?::[0-9]+)?", " ", out)
+    out = regex_replace("\\b(?:line|col|column)\\s+[0-9]+\\b", " ", out)
   }
   if cfg?.strip_temp_paths != false {
-    out = regex_replace_all("/tmp/[^\\s:]*", " ", out)
-    out = regex_replace_all("/var/folders/[^\\s:]*", " ", out)
+    out = regex_replace("/tmp/[^\\s:]*", " ", out)
+    out = regex_replace("/var/folders/[^\\s:]*", " ", out)
   }
   if cfg?.collapse_whitespace != false {
-    out = trim(regex_replace_all("\\s+", " ", out))
+    out = trim(regex_replace("\\s+", " ", out))
   }
   const max_chars = to_int(cfg?.max_chars) ?? 4000
   if max_chars > 0 {
-    out = agent_truncate_prompt_text(
-      out,
+    out = agent_truncate_prompt_text(harness,  harness, out,
       max_chars,
       "verification evidence exceeded its model-visible budget",
     )
@@ -742,7 +743,7 @@ pub fn __verification_delta_normalize_text(text: string, cfg: dict) -> string {
   return out
 }
 
-pub fn __verification_delta_signature(value, cfg: dict) -> string {
+pub fn __verification_delta_signature(harness: Harness, value, cfg: dict) -> string {
   let parts: list<string> = []
   if type_of(value) == "dict" {
     if cfg?.include_path == true {
@@ -772,7 +773,7 @@ pub fn __verification_delta_signature(value, cfg: dict) -> string {
   if text != "" {
     parts = parts.appending(text)
   }
-  return __verification_delta_normalize_text(join(parts, " "), cfg)
+  return __verification_delta_normalize_text(harness, join(parts, " "), cfg)
 }
 
 pub fn __verification_delta_ignored(signature: string, cfg: dict) -> bool {
@@ -791,11 +792,11 @@ pub fn __verification_delta_direct_count(value) {
   )
 }
 
-pub fn __verification_delta_info(value, cfg: dict) -> dict {
+pub fn __verification_delta_info(harness: Harness, value, cfg: dict) -> dict {
   const entries = __verification_delta_raw_entries(value)
   let normalized: list<string> = []
   for entry in entries {
-    const signature = __verification_delta_signature(entry, cfg)
+    const signature = __verification_delta_signature(harness, entry, cfg)
     if signature != "" && !__verification_delta_ignored(signature, cfg) {
       normalized = normalized.appending(signature)
     }

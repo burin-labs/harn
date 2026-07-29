@@ -151,12 +151,12 @@ fn __is_allowed_secret_id(value) {
 fn __secret_ref(value, fallback_id) {
   const raw = trim(to_string(value ?? ""))
   if raw == "" {
-    return secret_get(fallback_id)
+    return harness.secrets.read(fallback_id)
   }
   if !__is_allowed_secret_id(raw) {
     throw {code: "invalid_secret_ref", message: "linear connector secret refs must start with `linear/`"}
   }
-  return secret_get(raw)
+  return harness.secrets.read(raw)
 }
 
 fn __auth_token(literal, secret_ref, fallback_id) {
@@ -187,7 +187,7 @@ fn __secret_get_optional(secret_id) {
     return nil
   }
   const value = try {
-    secret_get(secret_id)
+    harness.secrets.read(secret_id)
   }
   if is_ok(value) {
     return unwrap(value)
@@ -244,7 +244,7 @@ fn __reject(status, code, message) {
 
 fn __metrics_inc(name, amount = 1) {
   const _ = try {
-    metrics_inc(name, amount)
+    harness.obs.metrics_inc(name, amount)
   }
   return nil
 }
@@ -309,7 +309,7 @@ fn __replay_window_default_secs() {
   return 60
 }
 
-fn __verify(raw, body) {
+fn __verify(harness: Harness, raw, body) {
   if body?.webhookTimestamp == nil {
     return __reject(400, "missing_webhook_timestamp", "Linear webhookTimestamp is required")
   }
@@ -335,7 +335,7 @@ fn __verify(raw, body) {
   // F10: trust the clock, not the envelope. raw.received_at is host-supplied
   // and can be plumbed from an attacker-controllable field; deriving `now`
   // from date_now() keeps the replay window meaningful for hostile callers.
-  const received_ms = to_int(date_now().timestamp * 1000)
+  const received_ms = to_int(harness.clock.now().timestamp * 1000)
   const age_ms = if received_ms >= timestamp_ms {
     received_ms - timestamp_ms
   } else {
@@ -540,7 +540,7 @@ fn __required_string(args, field) {
   return to_string(value)
 }
 
-fn __graphql(args) {
+fn __graphql(harness: Harness, args) {
   const query = args?.query
   if query == nil || trim(query) == "" {
     throw {message: "graphql requires query", code: "invalid_args"}
@@ -557,8 +557,7 @@ fn __graphql(args) {
     {operation_name: args?.operation_name ?? args?.operationName},
   )
   const api_base_url = __validate_api_base_url(args?.api_base_url)
-  const response = connector_http_json(
-    "POST",
+  const response = connector_http_json(harness,  harness, "POST",
     api_base_url,
     {
       provider: "linear",
@@ -607,9 +606,8 @@ fn __operation(name, document, options = nil) {
   return graphql_operation(name, document, options)
 }
 
-fn __execute(operation, variables, args) {
-  const envelope = __graphql(
-    (args ?? {})
+fn __execute(harness: Harness, operation, variables, args) {
+  const envelope = __graphql((args ?? {})
       + {
       query: operation.document,
       variables: variables,
@@ -658,8 +656,8 @@ fn __search_operation(use_term = false) {
   return __operation("HarnLinearSearchIssues", document, {root_field: "searchIssues"})
 }
 
-fn __list_issues(args) {
-  const connection = __execute(
+fn __list_issues(harness: Harness, args) {
+  const connection = __execute(harness, 
     __list_issues_operation(),
     {
       filter: args?.filter,
@@ -672,27 +670,27 @@ fn __list_issues(args) {
   return merge(connection, {page: graphql_page_info(connection)})
 }
 
-fn __update_issue(args) {
-  return __execute(
+fn __update_issue(harness: Harness, args) {
+  return __execute(harness, 
     __update_issue_operation(),
     {id: __required_string(args, "id"), input: args?.changes ?? {}},
     args,
   ).result
 }
 
-fn __create_comment(args) {
-  return __execute(
+fn __create_comment(harness: Harness, args) {
+  return __execute(harness, 
     __create_comment_operation(),
     {input: {issueId: __required_string(args, "issue_id"), body: __required_string(args, "body")}},
     args,
   ).result
 }
 
-fn __search(args) {
+fn __search(harness: Harness, args) {
   const first = args?.first ?? 10
   const query = __required_string(args, "query")
   const primary = try {
-    __execute(__search_operation(false), {query: query, first: first}, args).result
+    __execute(harness, __search_operation(false), {query: query, first: first}, args).result
   }
   if is_ok(primary) {
     return unwrap(primary)
@@ -702,7 +700,7 @@ fn __search(args) {
     && !__has_graphql_error_code(err?.errors, "GRAPHQL_VALIDATION_FAILED") {
     throw err
   }
-  return __execute(__search_operation(true), {term: query, first: first}, args).result
+  return __execute(harness, __search_operation(true), {term: query, first: first}, args).result
 }
 
 /** Return the Harn provider id for this connector. */
@@ -783,7 +781,7 @@ pub fn shutdown() {
 }
 
 /** Verify and normalize one Linear inbound webhook into NormalizeResult v1. */
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text ?? "{}")
   const rejection = __verify(raw, body)
   if rejection != nil {
@@ -793,21 +791,21 @@ pub fn normalize_inbound(raw) {
 }
 
 /** Dispatch outbound Linear connector methods. */
-pub fn call(method, args) {
+pub fn call(harness: Harness, method, args) {
   if method == "graphql" {
     return __graphql(args ?? {})
   }
   if method == "list_issues" {
-    return __list_issues(args ?? {})
+    return __list_issues(harness, args ?? {})
   }
   if method == "update_issue" {
-    return __update_issue(args ?? {})
+    return __update_issue(harness, args ?? {})
   }
   if method == "create_comment" {
-    return __create_comment((args ?? {}) + {issue_id: args?.issue_id ?? args?.issueId})
+    return __create_comment(harness, (args ?? {}) + {issue_id: args?.issue_id ?? args?.issueId})
   }
   if method == "search" {
-    return __search(args ?? {})
+    return __search(harness, args ?? {})
   }
   throw "method_not_found:" + method
 }

@@ -282,7 +282,11 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "env(name: string) -> string?", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "env(name: string) -> string?", category = "process"
+)]
 fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(value) = read_env_value(&name) {
@@ -292,6 +296,8 @@ fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "env_or(name: string, default: any) -> any",
     category = "process"
 )]
@@ -304,13 +310,21 @@ fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     Ok(default)
 }
 
-#[harn_builtin(sig = "exit(code?: int) -> never", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "exit(code?: int) -> never", category = "process"
+)]
 fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let code = args.first().and_then(|a| a.as_int()).unwrap_or(0);
     Err(VmError::ProcessExit(code as i32))
 }
 
-#[harn_builtin(sig = "exec(...command: string) -> dict", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "exec(...command: string) -> dict", category = "process"
+)]
 fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -323,7 +337,11 @@ fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(vm_output_to_value(output))
 }
 
-#[harn_builtin(sig = "shell(command: string) -> dict", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "shell(command: string) -> dict", category = "process"
+)]
 fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let cmd = args.first().map(|a| a.display()).unwrap_or_default();
     if cmd.is_empty() {
@@ -338,6 +356,8 @@ fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "exec_at(dir: string, ...command: string) -> dict",
     category = "process"
 )]
@@ -355,6 +375,8 @@ fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "shell_at(dir: string, command: string) -> dict",
     category = "process"
 )]
@@ -377,7 +399,11 @@ fn shell_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     Ok(vm_output_to_value(output))
 }
 
-#[harn_builtin(sig = "username(...args: any) -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "username(...args: any) -> string", category = "process"
+)]
 fn username_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
@@ -385,7 +411,11 @@ fn username_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(user)))
 }
 
-#[harn_builtin(sig = "hostname() -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "hostname() -> string", category = "process"
+)]
 fn hostname_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
@@ -400,7 +430,11 @@ fn hostname_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(name)))
 }
 
-#[harn_builtin(sig = "platform(...args: any) -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "platform(...args: any) -> string", category = "process"
+)]
 fn platform_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let os = if cfg!(target_os = "macos") {
         "darwin"
@@ -414,14 +448,22 @@ fn platform_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(os)))
 }
 
-#[harn_builtin(sig = "arch() -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "arch() -> string", category = "process"
+)]
 fn arch_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(arcstr::ArcStr::from(
         std::env::consts::ARCH,
     )))
 }
 
-#[harn_builtin(sig = "home_dir() -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "home_dir() -> string", category = "process"
+)]
 fn home_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let home = crate::user_dirs::home_dir()
         .map(|home| home.to_string_lossy().into_owned())
@@ -429,12 +471,20 @@ fn home_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(home)))
 }
 
-#[harn_builtin(sig = "pid(...args: any) -> int", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "pid(...args: any) -> int", category = "process"
+)]
 fn pid_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(std::process::id() as i64))
 }
 
-#[harn_builtin(sig = "date_iso() -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "date_iso() -> string", category = "process"
+)]
 fn date_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     // `date_iso` reads the OS wall clock directly (it predates the
     // unified `clock_mock`). Routing through `leak_audit::wall_now`
@@ -449,7 +499,11 @@ fn date_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     )))
 }
 
-#[harn_builtin(sig = "cwd() -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "cwd() -> string", category = "process"
+)]
 fn cwd_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let dir = current_execution_context()
         .and_then(|context| context.cwd)
@@ -462,14 +516,22 @@ fn cwd_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(arcstr::ArcStr::from(dir)))
 }
 
-#[harn_builtin(sig = "execution_root() -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "execution_root() -> string", category = "process"
+)]
 fn execution_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(arcstr::ArcStr::from(
         execution_root_path().to_string_lossy().into_owned(),
     )))
 }
 
-#[harn_builtin(sig = "asset_root() -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "asset_root() -> string", category = "process"
+)]
 fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(arcstr::ArcStr::from(
         asset_root_path().to_string_lossy().into_owned(),
@@ -490,6 +552,8 @@ fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 /// an absolute `HARN_STATE_DIR` deliberately discards the base, which is right
 /// for the current run and wrong for an arbitrary one.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "runtime_paths() -> {execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}",
     category = "process"
 )]
@@ -513,9 +577,13 @@ fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::dict(paths))
 }
 
-#[harn_builtin(sig = "spawn_captured(opts: dict) -> dict", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "spawn_captured(opts: dict) -> dict", category = "process"
+)]
 fn spawn_captured_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    spawn_captured_value(args)
+    run_process_value(args)
 }
 
 // `term_width()` / `term_height()` return the current terminal
@@ -527,12 +595,20 @@ fn spawn_captured_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 // `harness.term.height()`. `std/tui` already exposes
 // `__tui_terminal_width` for its renderer; these aliases keep
 // ported subcommands working without importing the tui module.
-#[harn_builtin(sig = "term_width() -> int", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "term_width() -> int", category = "process"
+)]
 fn term_width_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(crate::term::width() as i64))
 }
 
-#[harn_builtin(sig = "term_height() -> int", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "term_height() -> int", category = "process"
+)]
 fn term_height_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Int(crate::term::height() as i64))
 }
@@ -565,21 +641,21 @@ const PROCESS_BUILTINS: &[&VmBuiltinDef] = &[
 
 /// Run an external command synchronously and return captured output.
 ///
-/// Shared by the legacy free builtin and `harness.process.spawn_captured` so
+/// Shared by the hidden runtime primitive and `harness.process.run` so
 /// subprocess capture has one implementation and one result shape.
-pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError> {
+pub(crate) fn run_process_value(args: &[VmValue]) -> Result<VmValue, VmError> {
     let opts = match args.first() {
         Some(VmValue::Dict(opts)) => opts.clone(),
         _ => {
             return Err(VmError::Runtime(
-                "spawn_captured: options dict is required".to_string(),
+                "HarnessProcess.run: command dict is required".to_string(),
             ));
         }
     };
-    let cmd = match opts.get("cmd").map(|v| v.display()).unwrap_or_default() {
+    let cmd = match opts.get("program").map(|v| v.display()).unwrap_or_default() {
         s if s.is_empty() => {
             return Err(VmError::Runtime(
-                "spawn_captured: opts.cmd is required".to_string(),
+                "HarnessProcess.run: command.program is required".to_string(),
             ));
         }
         s => s,
@@ -589,7 +665,7 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         None | Some(VmValue::Nil) => Vec::new(),
         Some(other) => {
             return Err(VmError::Runtime(format!(
-                "spawn_captured: opts.args must be a list of strings, got {}",
+                "HarnessProcess.run: command.args must be a list of strings, got {}",
                 other.type_name()
             )));
         }
@@ -606,7 +682,7 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         None | Some(VmValue::Nil) => Vec::new(),
         Some(other) => {
             return Err(VmError::Runtime(format!(
-                "spawn_captured: opts.env must be a dict, got {}",
+                "HarnessProcess.run: command.env must be a dict, got {}",
                 other.type_name()
             )));
         }
@@ -617,7 +693,7 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         None | Some(VmValue::Nil) => None,
         Some(other) => {
             return Err(VmError::Runtime(format!(
-                "spawn_captured: opts.stdin must be string or bytes, got {}",
+                "HarnessProcess.run: command.stdin must be string or bytes, got {}",
                 other.type_name()
             )));
         }
@@ -629,12 +705,12 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         .map(|n| Duration::from_millis(n as u64));
 
     let spawn = CapturedSpawn {
-        label: "spawn_captured",
+        label: "harness.process.run",
         cmd: &cmd,
         args: &cmd_args,
         cwd: cwd.as_deref(),
         env: &env_overrides,
-        // `spawn_captured` layers `env` over the ambient environment rather
+        // `harness.process.run` layers `env` over the ambient environment rather
         // than replacing it. Under a session environment that ambient base is the
         // resolver's allowlist + grants, not the raw parent env.
         env_clear: false,
@@ -917,6 +993,8 @@ fn captured_run_to_value(run: &CapturedRun) -> VmValue {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "exec_opts(command: list, options: dict?) -> dict",
     category = "process"
 )]
@@ -937,6 +1015,8 @@ fn exec_opts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "exec_at_opts(dir: string, command: list, options: dict?) -> dict",
     category = "process"
 )]
@@ -1001,7 +1081,11 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "source_dir(...args: any) -> string", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "source_dir(...args: any) -> string", category = "process"
+)]
 fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let dir = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
     match dir {
@@ -1017,7 +1101,11 @@ fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     }
 }
 
-#[harn_builtin(sig = "project_root() -> string?", category = "process")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "project_root() -> string?", category = "process"
+)]
 fn project_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if let Some(root) = project_root_path() {
         return Ok(VmValue::String(arcstr::ArcStr::from(

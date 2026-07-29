@@ -1,17 +1,17 @@
 import "std/collections"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // filter_nil: removes nil, empty string, and "null" string
   const d = {name: "alice", age: 30, empty: "", nothing: nil, fake_null: "null", valid: "ok"}
   const cleaned = filter_nil(d)
-  __io_println(cleaned.name)
-  __io_println(cleaned.age)
-  __io_println(cleaned.valid)
-  __io_println(len(cleaned.keys()))
+  harness.stdio.println(cleaned.name)
+  harness.stdio.println(cleaned.age)
+  harness.stdio.println(cleaned.valid)
+  harness.stdio.println(len(cleaned.keys()))
   const picked = pick_keys({a: 1, b: nil, c: 3}, ["c", "missing", "b"], {drop_nil: true})
-  __io_println(picked.c)
-  __io_println(contains(picked.keys(), "missing"))
-  __io_println(contains(picked.keys(), "b"))
+  harness.stdio.println(picked.c)
+  harness.stdio.println(contains(picked.keys(), "missing"))
+  harness.stdio.println(contains(picked.keys(), "b"))
   const rows = [
     {tokens: 3, ok: true},
     nil,
@@ -19,10 +19,10 @@ pipeline default() {
     {ok: true},
     {tokens: 7, ok: true},
   ]
-  __io_println(sum_by(rows, { row -> row?.tokens }))
-  __io_println(sum_by([], { row -> row?.tokens }))
-  __io_println(sum_by([nil], { row -> row?.tokens }))
-  __io_println(count_where(rows, { row -> row?.ok ?? false }))
-  __io_println(count_where([], { row -> row.ok }))
-  __io_println(count_where([nil, true, nil], { item -> item == nil }))
+  harness.stdio.println(sum_by(rows, { row -> row?.tokens }))
+  harness.stdio.println(sum_by([], { row -> row?.tokens }))
+  harness.stdio.println(sum_by([nil], { row -> row?.tokens }))
+  harness.stdio.println(count_where(rows, { row -> row?.ok ?? false }))
+  harness.stdio.println(count_where([], { row -> row.ok }))
+  harness.stdio.println(count_where([nil, true, nil], { item -> item == nil }))
 }

@@ -59,9 +59,9 @@ fn apply_fix_call(id) {
   return {text: "", tool_calls: [{id: id, name: "apply_fix", arguments: {}}]}
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       run_test_call("r1", "42:5"),
       apply_fix_call("e1"),
       run_test_call("r2", "99:1"),
@@ -70,11 +70,9 @@ pipeline default() {
       llm_text("Giving up. ##DONE##"),
     ],
     { ->
-      const session = "repair-thrash-loc-" + uuid()
-      const captured = agent_capture_events(
-        session,
-        fn() { return agent_loop(
-          "Make the failing test pass.",
+      const session = "repair-thrash-loc-" + harness.random.uuid()
+      const captured = agent_capture_events(harness,  harness, session,
+        fn() { return agent_loop(harness, "Make the failing test pass.",
           nil,
           {
             provider: "mock",
@@ -96,8 +94,8 @@ pipeline default() {
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
       const repair_stalls = stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
-      __io_println(len(repair_stalls))
-      __io_println(repair_stalls[0].warning.pattern)
+      harness.stdio.println(len(repair_stalls))
+      harness.stdio.println(repair_stalls[0].warning.pattern)
     },
   )
 }

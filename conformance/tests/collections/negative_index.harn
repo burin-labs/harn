@@ -1,8 +1,8 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const arr = [10, 20, 30, 40, 50]
-  log(arr[-1])
-  log(arr[-2])
-  log(arr[-5])
+  harness.stdio.println(arr[-1])
+  harness.stdio.println(arr[-2])
+  harness.stdio.println(arr[-5])
   // Out of bounds negative returns nil
-  log(arr[-100])
+  harness.stdio.println(arr[-100])
 }

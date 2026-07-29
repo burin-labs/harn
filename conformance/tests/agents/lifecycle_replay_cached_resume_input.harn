@@ -9,10 +9,10 @@
  * the same logical payload can re-validate even if a serializer reorders
  * keys.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const _ = mock_time(1700000001000)
   const original_input = {approved: true, comment: "ship it", reviewer: "alice"}
-  const receipt = lifecycle_receipt_record_resumption(
+  const receipt = harness.agent.lifecycle_receipt_record_resumption(
     {
       handle: "worker://triage/42",
       session_id: "session-a",
@@ -23,23 +23,23 @@ pipeline default() {
     },
   )
   // Replay with identical payload — succeeds, returns cached input.
-  const hit = lifecycle_replay_resume_input(receipt.payload, original_input)
-  __io_println("hit_ok=" + to_string(hit.ok))
-  __io_println("hit_input_approved=" + to_string(hit.input?.approved))
-  __io_println("hit_input_reviewer=" + hit.input?.reviewer)
+  const hit = harness.agent.lifecycle_replay_resume_input(receipt.payload, original_input)
+  harness.stdio.println("hit_ok=" + to_string(hit.ok))
+  harness.stdio.println("hit_input_approved=" + to_string(hit.input?.approved))
+  harness.stdio.println("hit_input_reviewer=" + hit.input?.reviewer)
   // Replay with reordered keys — canonical hash matches.
   const reordered = {reviewer: "alice", approved: true, comment: "ship it"}
-  const reorder_hit = lifecycle_replay_resume_input(receipt.payload, reordered)
-  __io_println("reorder_ok=" + to_string(reorder_hit.ok))
+  const reorder_hit = harness.agent.lifecycle_replay_resume_input(receipt.payload, reordered)
+  harness.stdio.println("reorder_ok=" + to_string(reorder_hit.ok))
   // Replay with a drifted payload — mismatch, HARN-SUS-011.
   const drifted = {approved: false, comment: "ship it", reviewer: "alice"}
-  const miss = lifecycle_replay_resume_input(receipt.payload, drifted)
-  __io_println("miss_ok=" + to_string(miss.ok))
-  __io_println("miss_code=" + miss.code)
+  const miss = harness.agent.lifecycle_replay_resume_input(receipt.payload, drifted)
+  harness.stdio.println("miss_ok=" + to_string(miss.ok))
+  harness.stdio.println("miss_code=" + miss.code)
   // Hash is stable across orderings.
   const h1 = lifecycle_resume_input_hash(original_input)
   const h2 = lifecycle_resume_input_hash(reordered)
-  __io_println("hash_canonical=" + to_string(h1 == h2))
+  harness.stdio.println("hash_canonical=" + to_string(h1 == h2))
   const _ = unmock_time()
   return "ok"
 }

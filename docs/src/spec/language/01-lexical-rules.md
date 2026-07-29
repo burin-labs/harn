@@ -92,10 +92,6 @@ The following identifiers are reserved:
 | `continue` | `.continue` |
 | `select` | `.select` |
 | `impl` | `.impl` |
-| `request_approval` | `.requestApproval` |
-| `dual_control` | `.dualControl` |
-| `ask_user` | `.askUser` |
-| `escalate_to` | `.escalateTo` |
 
 ### Identifiers
 
@@ -287,4 +283,3 @@ const doc = """
 |---|---|
 | `.newline` | Line break character |
 | `.eof` | End of input |
-

@@ -14,15 +14,13 @@ import {
 import { agent_emit_event } from "std/agent/state"
 import { is_type } from "std/schema"
 
-pipeline default() {
-  const session = "agent-event-schema-" + uuid()
-  const captured = agent_capture_events(
-    session,
+pipeline default(harness: Harness) {
+  const session = "agent-event-schema-" + harness.random.uuid()
+  const captured = agent_capture_events(harness,  harness, session,
     fn() {
       const args_hash = "0000000000000000000000000000000000000000000000000000000000000000"
       const result_hash = "1111111111111111111111111111111111111111111111111111111111111111"
-      agent_emit_event(
-        session,
+      agent_emit_event(harness,  harness, session,
         "tool_call_update",
         {
           tool_call_id: "call-1",
@@ -34,8 +32,7 @@ pipeline default() {
           future_extension: {schema: "harn.future.event.v1"},
         },
       )
-      agent_emit_event(
-        session,
+      agent_emit_event(harness,  harness, session,
         "tool_call_audit",
         {
           tool_call_id: "call-1",
@@ -65,8 +62,7 @@ pipeline default() {
           },
         },
       )
-      agent_emit_event(
-        session,
+      agent_emit_event(harness,  harness, session,
         "typed_checkpoint",
         {
           kind: "llm_call_start",
@@ -82,18 +78,18 @@ pipeline default() {
       return {ok: true}
     },
   )
-  __io_println(is_type(captured, agent_event_capture_schema()))
-  __io_println(agent_event_capture_report(captured).ok)
-  __io_println(agent_event_capture_value(captured).result.ok)
-  __io_println(is_type(captured.events[0], agent_event_schema()))
-  __io_println(agent_event_report(captured.events[0], agent_tool_lifecycle_event_schema()).ok)
-  __io_println(agent_event_value(captured.events[0], agent_tool_lifecycle_event_schema()).tool_name)
-  __io_println(agent_event_report(captured.events[1], agent_tool_audit_event_schema()).ok)
-  __io_println(
+  harness.stdio.println(is_type(captured, agent_event_capture_schema()))
+  harness.stdio.println(agent_event_capture_report(captured).ok)
+  harness.stdio.println(agent_event_capture_value(captured).result.ok)
+  harness.stdio.println(is_type(captured.events[0], agent_event_schema()))
+  harness.stdio.println(agent_event_report(captured.events[0], agent_tool_lifecycle_event_schema()).ok)
+  harness.stdio.println(agent_event_value(captured.events[0], agent_tool_lifecycle_event_schema()).tool_name)
+  harness.stdio.println(agent_event_report(captured.events[1], agent_tool_audit_event_schema()).ok)
+  harness.stdio.println(
     agent_event_value(captured.events[1], agent_tool_audit_event_schema()).receipt.status,
   )
-  __io_println(agent_event_report(captured.events[1].receipt, agent_tool_call_receipt_schema()).ok)
-  __io_println(agent_event_report(captured.events[2], agent_typed_checkpoint_event_schema()).ok)
+  harness.stdio.println(agent_event_report(captured.events[1].receipt, agent_tool_call_receipt_schema()).ok)
+  harness.stdio.println(agent_event_report(captured.events[2], agent_typed_checkpoint_event_schema()).ok)
   const missing = agent_event_report(
     {
       type: "tool_call_update",
@@ -103,12 +99,12 @@ pipeline default() {
     },
     agent_tool_lifecycle_event_schema(),
   )
-  __io_println(!missing.ok)
+  harness.stdio.println(!missing.ok)
   const missing_mutation_status = agent_event_report(
     {type: "tool_call_update", tool_call_id: "call-2", tool_name: "edit", status: "completed"},
     agent_tool_lifecycle_event_schema(),
   )
-  __io_println(!missing_mutation_status.ok)
+  harness.stdio.println(!missing_mutation_status.ok)
   const bad_receipt = agent_event_report(
     {
       type: "tool_call_audit",
@@ -119,5 +115,5 @@ pipeline default() {
     },
     agent_tool_audit_event_schema(),
   )
-  __io_println(!bad_receipt.ok)
+  harness.stdio.println(!bad_receipt.ok)
 }

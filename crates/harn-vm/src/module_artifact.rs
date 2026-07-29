@@ -21,6 +21,19 @@ use crate::value::VmError;
 
 type ImportedEnumCache = BTreeMap<PathBuf, ([u8; 32], Vec<String>)>;
 
+/// Authority provenance carried by a compiled module.
+///
+/// Ordinary source compilation always produces [`User`](Self::User).
+/// [`PrivilegedWire`](Self::PrivilegedWire) can only be selected through the
+/// explicit trusted-embedder compiler entry point; there is no source
+/// annotation, filename convention, or environment switch that grants it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ModuleProvenance {
+    #[default]
+    User,
+    PrivilegedWire,
+}
+
 fn imported_enum_cache() -> &'static Mutex<ImportedEnumCache> {
     static CACHE: OnceLock<Mutex<ImportedEnumCache>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
@@ -47,6 +60,8 @@ pub struct ModuleImportSpec {
 /// [`imports`](Self::imports).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleArtifact {
+    #[serde(default)]
+    pub provenance: ModuleProvenance,
     pub imports: Vec<ModuleImportSpec>,
     /// Cached bytecode that materializes exported type aliases after imports
     /// are bound and before value initialization runs.
@@ -125,7 +140,21 @@ fn compile_module_artifact_with_imported_enums(
     module_source_file: Option<String>,
     imported_enum_candidates: &[String],
 ) -> Result<ModuleArtifact, VmError> {
-    let imports = program
+    compile_module_artifact_with_provenance(
+        program,
+        module_source_file,
+        imported_enum_candidates,
+        ModuleProvenance::User,
+    )
+}
+
+fn compile_module_artifact_with_provenance(
+    program: &[harn_parser::SNode],
+    module_source_file: Option<String>,
+    imported_enum_candidates: &[String],
+    provenance: ModuleProvenance,
+) -> Result<ModuleArtifact, VmError> {
+    let imports: Vec<ModuleImportSpec> = program
         .iter()
         .filter_map(|node| match &node.node {
             harn_parser::Node::ImportDecl { path, is_pub } => Some(ModuleImportSpec {
@@ -158,6 +187,17 @@ fn compile_module_artifact_with_imported_enums(
         })
         .collect();
 
+    if provenance == ModuleProvenance::PrivilegedWire {
+        validate_privileged_wire_surface(program, &imports)?;
+    }
+
+    let compiler = || match provenance {
+        ModuleProvenance::User => crate::Compiler::new(),
+        ModuleProvenance::PrivilegedWire => {
+            crate::Compiler::with_options(crate::CompilerOptions::privileged_wire())
+        }
+    };
+
     let init_nodes: Vec<harn_parser::SNode> = program
         .iter()
         .filter(|sn| {
@@ -186,7 +226,7 @@ fn compile_module_artifact_with_imported_enums(
     let init_chunk = if init_nodes.is_empty() {
         None
     } else {
-        let compiler = crate::Compiler::new();
+        let compiler = compiler();
         Some(
             compiler
                 .compile_module_init(program, &init_nodes, imported_enum_candidates)
@@ -231,7 +271,7 @@ fn compile_module_artifact_with_imported_enums(
             // them in the artifact function table avoids replaying the
             // declaration through the module-init chunk while preserving
             // private struct use and public constructor imports.
-            let constructor = crate::Compiler::new()
+            let constructor = compiler()
                 .compile_struct_constructor(name, fields)
                 .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
             functions.insert(name.clone(), constructor.freeze_for_cache());
@@ -245,7 +285,7 @@ fn compile_module_artifact_with_imported_enums(
             ..
         } = &inner.node
         {
-            let mut compiler = crate::Compiler::new();
+            let mut compiler = compiler();
             compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
             let pipeline = compiler
                 .compile_pipeline_callable(program, name, params, body, extends.as_deref())
@@ -264,7 +304,7 @@ fn compile_module_artifact_with_imported_enums(
             continue;
         };
 
-        let mut compiler = crate::Compiler::new();
+        let mut compiler = compiler();
         compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
         compiler.prepare_module_context(program);
         let func_chunk = compiler
@@ -279,6 +319,7 @@ fn compile_module_artifact_with_imported_enums(
             .map(|chunk| chunk.freeze_for_cache());
 
     Ok(ModuleArtifact {
+        provenance,
         imports,
         type_schema_init_chunk,
         init_chunk,
@@ -287,6 +328,26 @@ fn compile_module_artifact_with_imported_enums(
         public_value_names,
         public_type_names,
     })
+}
+
+fn validate_privileged_wire_surface(
+    program: &[harn_parser::SNode],
+    imports: &[ModuleImportSpec],
+) -> Result<(), VmError> {
+    if imports.iter().any(|import| import.is_pub) {
+        return Err(VmError::Runtime(
+            "Privileged wire modules cannot re-export imports".to_string(),
+        ));
+    }
+    for export in program.iter().flat_map(public_declarations) {
+        if export.kind.has_runtime_value() && export.kind != DefKind::Variable {
+            return Err(VmError::Runtime(format!(
+                "Privileged wire module export `{}` is a {:?}; only explicit capability-value bindings may cross the wire boundary",
+                export.name, export.kind
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Lex + parse + [`compile_module_artifact`] in one call. Used when the
@@ -303,6 +364,29 @@ pub fn compile_module_artifact_from_source(
         &program,
         Some(source_path.display().to_string()),
         &imported_enum_candidates,
+    )
+}
+
+/// Compile a trusted embedder-owned module that may call
+/// [`BuiltinExposure::PrivilegedWire`](harn_builtin_meta::BuiltinExposure)
+/// primitives.
+///
+/// The resulting module may export only initialized capability values and
+/// erased types. Runtime instantiation validates those values again, so
+/// closures, dictionaries, and arbitrary host results cannot smuggle wire
+/// authority into user modules.
+pub fn compile_privileged_wire_module_artifact_from_source(
+    source_path: &Path,
+    source: &str,
+) -> Result<ModuleArtifact, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    let imported_enum_candidates =
+        imported_enum_candidates_for_program(source_path, source, &program);
+    compile_module_artifact_with_provenance(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_enum_candidates,
+        ModuleProvenance::PrivilegedWire,
     )
 }
 
@@ -443,7 +527,8 @@ mod tests {
 
     use super::{
         compile_module_artifact, compile_module_artifact_from_source,
-        needs_imported_enum_candidates, parse_module_source,
+        compile_privileged_wire_module_artifact_from_source, needs_imported_enum_candidates,
+        parse_module_source, ModuleProvenance,
     };
     use crate::chunk::Constant;
 
@@ -488,6 +573,59 @@ pub type UserList = list<UserShape>
         assert!(artifact.public_type_names.contains("UserShape"));
         assert!(artifact.public_type_names.contains("UserList"));
         assert!(artifact.type_schema_init_chunk.is_some());
+    }
+
+    #[test]
+    fn ordinary_modules_cannot_name_privileged_wire_builtins() {
+        let error = compile_module_artifact_from_source(
+            Path::new("<test>/user.harn"),
+            r#"fn probe() { host_call("project.scan", {}) }"#,
+        )
+        .expect_err("ordinary source must not acquire wire authority");
+        assert!(
+            error.to_string().contains("not callable source API"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn explicit_privileged_compilation_stamps_private_wire_code() {
+        let artifact = compile_privileged_wire_module_artifact_from_source(
+            Path::new("<trusted>/wire.harn"),
+            r#"fn probe() { host_call("project.scan", {}) }"#,
+        )
+        .expect("trusted private wire function compiles");
+        assert_eq!(artifact.provenance, ModuleProvenance::PrivilegedWire);
+        assert!(artifact.functions.contains_key("probe"));
+        assert!(artifact.public_exports.is_empty());
+    }
+
+    #[test]
+    fn privileged_wire_functions_cannot_cross_the_module_boundary() {
+        let error = compile_privileged_wire_module_artifact_from_source(
+            Path::new("<trusted>/wire.harn"),
+            r#"pub fn probe() { host_call("project.scan", {}) }"#,
+        )
+        .expect_err("wire closures must not be exportable");
+        assert!(
+            error
+                .to_string()
+                .contains("only explicit capability-value bindings"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn privileged_wire_modules_cannot_reexport_imports() {
+        let error = compile_privileged_wire_module_artifact_from_source(
+            Path::new("<trusted>/wire.harn"),
+            r#"pub import { probe } from "./other""#,
+        )
+        .expect_err("wire authority must be non-reexportable");
+        assert!(
+            error.to_string().contains("cannot re-export imports"),
+            "{error}"
+        );
     }
 
     #[test]

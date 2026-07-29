@@ -13,13 +13,13 @@ const CORPUS_ROOT = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpu
 
 const FIXTURE_PATH = "../../crates/harn-hostlib/tests/fixtures/code_index_queries/queries_nl.json"
 
-fn _load_fixture() {
+fn _load_fixture(harness: Harness) {
   const text = harness.fs.read_text(FIXTURE_PATH)
   return json_parse(text)
 }
 
-fn _ensure_index() {
-  return hostlib_code_index_rebuild({root: CORPUS_ROOT})
+fn _ensure_index(harness: Harness) {
+  return harness.code_index.rebuild({root: CORPUS_ROOT})
 }
 
 fn _row_value(row, key) {
@@ -52,20 +52,20 @@ fn _recall(result, expected, match_key) {
   return found_count
 }
 
-pipeline test_query_pass_through(task) {
-  const _ = _ensure_index()
+pipeline test_query_pass_through(harness: Harness, task) {
+  const _ = _ensure_index(harness)
   const result = code_librarian_query(
-    "MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path",
+    harness.code_index, "MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path",
   )
   const rows = result.rows
   assert(len(rows) >= 1)
   assert_eq(_row_value(rows[0], "path"), "src/util.ts")
 }
 
-pipeline test_query_nl_compile_path(task) {
-  const _ = _ensure_index()
-  llm_mock_push_scope()
-  llm_mock(
+pipeline test_query_nl_compile_path(harness: Harness, task) {
+  const _ = _ensure_index(harness)
+  harness.llm.mock_push_scope()
+  harness.llm.mock_enqueue(
     {
       data: {cypher: "MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path"},
       model: "mock",
@@ -73,8 +73,8 @@ pipeline test_query_nl_compile_path(task) {
       text: "{\"cypher\": \"MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path\"}",
     },
   )
-  const r = code_librarian_query_nl("Which file defines formatDate?")
-  llm_mock_pop_scope()
+  const r = code_librarian_query_nl(harness, harness.code_index, "Which file defines formatDate?")
+  harness.llm.mock_pop_scope()
   assert_eq(r.path, "compile")
   assert(!r.cache_hit)
   assert_eq(r.mcts_expansions, 0)
@@ -82,10 +82,10 @@ pipeline test_query_nl_compile_path(task) {
   assert_eq(_row_value(r.rows[0], "path"), "src/util.ts")
 }
 
-pipeline test_query_nl_cache_hit_inside_5_minutes(task) {
-  const _ = _ensure_index()
-  llm_mock_push_scope()
-  llm_mock(
+pipeline test_query_nl_cache_hit_inside_5_minutes(harness: Harness, task) {
+  const _ = _ensure_index(harness)
+  harness.llm.mock_push_scope()
+  harness.llm.mock_enqueue(
     {
       data: {cypher: "MATCH (f:Function {name: 'parseQuery'}) RETURN f.path AS path"},
       model: "mock",
@@ -93,21 +93,21 @@ pipeline test_query_nl_cache_hit_inside_5_minutes(task) {
       text: "{\"cypher\": \"MATCH (f:Function {name: 'parseQuery'}) RETURN f.path AS path\"}",
     },
   )
-  const r1 = code_librarian_query_nl("Where is parseQuery defined?")
-  const r2 = code_librarian_query_nl("Where is parseQuery defined?")
-  llm_mock_pop_scope()
+  const r1 = code_librarian_query_nl(harness, harness.code_index, "Where is parseQuery defined?")
+  const r2 = code_librarian_query_nl(harness, harness.code_index, "Where is parseQuery defined?")
+  harness.llm.mock_pop_scope()
   assert(!r1.cache_hit)
   assert(r2.cache_hit)
   assert_eq(_row_value(r2.rows[0], "path"), "src/util.ts")
 }
 
-pipeline test_query_nl_mcts_fallback_when_compile_empty(task) {
-  const _ = _ensure_index()
-  llm_mock_push_scope()
+pipeline test_query_nl_mcts_fallback_when_compile_empty(harness: Harness, task) {
+  const _ = _ensure_index(harness)
+  harness.llm.mock_push_scope()
   // Mock a cypher whose execution returns zero rows. The library must
   // fall back to MCTS, emit a `code_librarian_query_nl_fallback` event,
   // and surface candidate nodes with the right `path`.
-  llm_mock(
+  harness.llm.mock_enqueue(
     {
       data: {cypher: "MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path"},
       model: "mock",
@@ -115,8 +115,8 @@ pipeline test_query_nl_mcts_fallback_when_compile_empty(task) {
       text: "{\"cypher\": \"MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path\"}",
     },
   )
-  const r = code_librarian_query_nl("Where is the formatDate function defined?")
-  llm_mock_pop_scope()
+  const r = code_librarian_query_nl(harness, harness.code_index, "Where is the formatDate function defined?")
+  harness.llm.mock_pop_scope()
   assert_eq(r.path, "mcts")
   // MCTS expansion cap is 200; the actual count must be in (0, 200].
   assert(r.mcts_expansions > 0)
@@ -132,10 +132,10 @@ pipeline test_query_nl_mcts_fallback_when_compile_empty(task) {
   assert(found_util)
 }
 
-pipeline test_query_nl_mcts_caps_are_respected(task) {
-  const _ = _ensure_index()
-  llm_mock_push_scope()
-  llm_mock(
+pipeline test_query_nl_mcts_caps_are_respected(harness: Harness, task) {
+  const _ = _ensure_index(harness)
+  harness.llm.mock_push_scope()
+  harness.llm.mock_enqueue(
     {
       data: {cypher: "MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path"},
       model: "mock",
@@ -143,30 +143,29 @@ pipeline test_query_nl_mcts_caps_are_respected(task) {
       text: "{\"cypher\": \"MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path\"}",
     },
   )
-  const r = code_librarian_query_nl(
-    "Find any function or type containing the word main",
+  const r = code_librarian_query_nl(harness,  harness, harness.code_index, "Find any function or type containing the word main",
     {mcts_depth_max: 2, mcts_expansions_max: 10},
   )
-  llm_mock_pop_scope()
+  harness.llm.mock_pop_scope()
   assert_eq(r.path, "mcts")
   assert(r.mcts_expansions <= 10)
   assert(r.mcts_depth <= 2)
 }
 
-pipeline test_query_nl_recall_at_least_80_percent(task) {
-  const _ = _ensure_index()
-  const fixture = _load_fixture()
+pipeline test_query_nl_recall_at_least_80_percent(harness: Harness, task) {
+  const _ = _ensure_index(harness)
+  const fixture = _load_fixture(harness)
   const questions = fixture.questions
   assert_eq(len(questions), 30)
   let total_expected = 0
   let total_found = 0
   let failures = []
   for q in questions {
-    llm_mock_push_scope()
+    harness.llm.mock_push_scope()
     const mock_text = "{\"cypher\": \"" + q.cypher + "\"}"
-    llm_mock({data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text})
-    const result = code_librarian_query_nl(q.nl)
-    llm_mock_pop_scope()
+    harness.llm.mock_enqueue({data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text})
+    const result = code_librarian_query_nl(harness, q.nl)
+    harness.llm.mock_pop_scope()
     const hits = _recall(result, q.expected, q.match_key)
     total_expected = total_expected + len(q.expected)
     total_found = total_found + hits
@@ -175,7 +174,7 @@ pipeline test_query_nl_recall_at_least_80_percent(task) {
     }
   }
   const recall_pct = to_float(total_found) / to_float(total_expected)
-  __io_println(
+  harness.stdio.println(
     "[query_nl] recall=" + to_string(recall_pct) + " (" + to_string(total_found) + "/"
       + to_string(
       total_expected,
@@ -183,7 +182,7 @@ pipeline test_query_nl_recall_at_least_80_percent(task) {
       + ")",
   )
   if len(failures) > 0 {
-    __io_println("[query_nl] failures: " + json_stringify(failures))
+    harness.stdio.println("[query_nl] failures: " + json_stringify(failures))
   }
   assert(recall_pct >= 0.8)
 }

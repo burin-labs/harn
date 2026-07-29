@@ -15,7 +15,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *      land with the Anthropic-compatible shape (tagged `mode:
  *      "client"` so replayers can distinguish path-1 from path-2).
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -45,7 +45,7 @@ pipeline test(task) {
   )
   // Turn 1: model calls the synthetic search tool with "deploy".
   with_llm_script(
-    [
+    harness.llm, [
       {
         text: "Looking up deploy tooling.",
         tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
@@ -57,8 +57,7 @@ pipeline test(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(
-        "Ship the release",
+      const result = agent_loop(harness, "Ship the release",
         nil,
         {
           provider: "mock",
@@ -68,7 +67,7 @@ pipeline test(task) {
           max_iterations: 5,
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) >= 2, "at least two LLM calls happened")
       const first_system = calls[0].system
       assert(contains(first_system, "__harn_tool_search"), "synthetic tool advertised on turn 1")
@@ -112,7 +111,7 @@ pipeline test(task) {
       }
       assert(query_events == 1, "exactly one search query happened")
       assert(result_events == 1, "exactly one search result event emitted")
-      log("tool_search_client_bm25 tests passed")
+      harness.stdio.println("tool_search_client_bm25 tests passed")
     },
   )
 }

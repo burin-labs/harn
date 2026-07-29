@@ -12,7 +12,7 @@
  * satisfy the policy, or a ready-to-return HTTP envelope (built by
  * `http_error`) when they do not — so a handler denies in one line:
  *
- *   let denial = require_policy({kinds: ["operator"], scopes: ["secrets:write"]})
+ *   let denial = require_policy(harness, {kinds: ["operator"], scopes: ["secrets:write"]})
  *   if denial != nil { return denial }
  *   // ...authorized work...
  *
@@ -45,7 +45,7 @@ fn __policy_missing_auth() {
   return http_error(401, "unauthorized", "authentication required", {kind: "missing_auth"})
 }
 
-fn __policy_auth_view() {
+fn __policy_auth_view(harness: Harness) {
   return {
     subject: harness.auth.try_subject(),
     scheme: harness.auth.try_scheme(),
@@ -54,7 +54,7 @@ fn __policy_auth_view() {
   }
 }
 
-fn __policy_tenant_view() {
+fn __policy_tenant_view(harness: Harness) {
   return {id: harness.tenant.try_id()}
 }
 
@@ -114,7 +114,7 @@ fn __policy_ref_needs_auth(ref) {
   return root == "auth" || root == "tenant"
 }
 
-fn __policy_resolve_ref(ref, req, ctx) {
+fn __policy_resolve_ref(harness: Harness, ref, req, ctx) {
   if type_of(ref) == "dict" && ref.keys().contains("value") {
     return ref.value
   }
@@ -131,10 +131,10 @@ fn __policy_resolve_ref(ref, req, ctx) {
     return __policy_follow_path(__policy_request_body(req), parts, 1)
   }
   if root == "auth" {
-    return __policy_follow_path(__policy_auth_view(), parts, 1)
+    return __policy_follow_path(__policy_auth_view(harness), parts, 1)
   }
   if root == "tenant" {
-    return __policy_follow_path(__policy_tenant_view(), parts, 1)
+    return __policy_follow_path(__policy_tenant_view(harness), parts, 1)
   }
   if root == "ctx" || root == "context" {
     return __policy_follow_path(ctx ?? {}, parts, 1)
@@ -142,7 +142,7 @@ fn __policy_resolve_ref(ref, req, ctx) {
   return __policy_follow_path(req ?? {}, parts, 0)
 }
 
-fn __policy_enforce_segment(opts, req, ctx) {
+fn __policy_enforce_segment(harness: Harness, opts, req, ctx) {
   const kinds = __policy_list(opts?.kinds, "require_policy: kinds")
   const scopes = __policy_list(opts?.scopes, "require_policy: scopes")
   const matches = __policy_match_list(opts?.matches, "require_policy: matches")
@@ -185,8 +185,8 @@ fn __policy_enforce_segment(opts, req, ctx) {
       .is_authenticated() {
       return __policy_missing_auth()
     }
-    const left_value = __policy_resolve_ref(left, req, ctx)
-    const right_value = __policy_resolve_ref(right, req, ctx)
+    const left_value = __policy_resolve_ref(harness, left, req, ctx)
+    const right_value = __policy_resolve_ref(harness, right, req, ctx)
     if left_value != right_value {
       const kind = spec.kind ?? "resource_mismatch"
       const label = spec.label ?? "resource"
@@ -223,11 +223,11 @@ fn __policy_enforce_segment(opts, req, ctx) {
  * @effects: []
  * @errors: []
  */
-pub fn require_policy(opts, req = nil, ctx = nil) {
+pub fn require_policy(harness: Harness, opts, req = nil, ctx = nil) {
   if opts != nil && type_of(opts) != "dict" {
     throw "require_policy: opts must be a dict"
   }
-  const base = __policy_enforce_segment(opts ?? {}, req, ctx)
+  const base = __policy_enforce_segment(harness, opts ?? {}, req, ctx)
   if base != nil {
     return base
   }
@@ -237,13 +237,13 @@ pub fn require_policy(opts, req = nil, ctx = nil) {
       throw "require_policy: methods must be a dict"
     }
     const selector_path = opts?.method_path ?? "req.method"
-    const selector = __policy_resolve_ref(selector_path, req, ctx)
+    const selector = __policy_resolve_ref(harness, selector_path, req, ctx)
     if selector != nil && methods[to_string(selector)] != nil {
       const method = methods[to_string(selector)]
       if type_of(method) != "dict" {
         throw "require_policy: method policy must be a dict"
       }
-      return __policy_enforce_segment(method, req, ctx)
+      return __policy_enforce_segment(harness, method, req, ctx)
     }
   }
   return nil

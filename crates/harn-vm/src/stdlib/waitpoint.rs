@@ -175,7 +175,9 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
-    sig = "__waitpoint_create(options?: string | dict | nil) -> dict",
+    exposure = "harness.runtime.waitpoint_create",
+    effects = ["state.mutate@dynamic"],
+    sig = "__waitpoint_create(options?: string | dict | nil) -> @WAITPOINT",
     kind = "async",
     category = "waitpoint"
 )]
@@ -187,7 +189,9 @@ async fn waitpoint_create_builtin_macro(
 }
 
 #[harn_builtin(
-    sig = "__waitpoint_wait(handles: string | dict | list, options?: dict) -> dict | list",
+    exposure = "harness.runtime.waitpoint_wait",
+    effects = ["state.observe@arg0"],
+    sig = "__waitpoint_wait(handles: string | dict | list, options?: dict) -> @WAITPOINT | list<@WAITPOINT>",
     kind = "async",
     category = "waitpoint"
 )]
@@ -199,7 +203,9 @@ async fn waitpoint_wait_builtin_macro(
 }
 
 #[harn_builtin(
-    sig = "__waitpoint_complete(handle: string | dict, value?: any, options?: dict) -> dict",
+    exposure = "harness.runtime.waitpoint_complete",
+    effects = ["state.mutate@arg0"],
+    sig = "__waitpoint_complete(handle: string | dict, value?: any, options?: dict) -> @WAITPOINT",
     kind = "async",
     category = "waitpoint"
 )]
@@ -211,7 +217,9 @@ async fn waitpoint_complete_builtin_macro(
 }
 
 #[harn_builtin(
-    sig = "__waitpoint_cancel(handle: string | dict, options?: dict) -> dict",
+    exposure = "harness.runtime.waitpoint_cancel",
+    effects = ["state.mutate@arg0"],
+    sig = "__waitpoint_cancel(handle: string | dict, options?: dict) -> @WAITPOINT",
     kind = "async",
     category = "waitpoint"
 )]

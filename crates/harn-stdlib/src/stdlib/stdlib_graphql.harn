@@ -340,7 +340,7 @@ pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") 
  * @effects: [net]
  * @errors: []
  */
-pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
+pub fn graphql_request(harness: Harness, endpoint, query, variables = nil, options = nil) {
   const auth = options?.auth ?? options?.authorization
   const headers = graphql_auth_headers(auth, options?.headers)
   const body = graphql_request_body(query, variables, options)
@@ -394,7 +394,7 @@ pub fn graphql_operation(name, document, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_execute_operation(client, operation, variables = nil, options = nil) {
+pub fn graphql_execute_operation(harness: Harness, client, operation, variables = nil, options = nil) {
   const endpoint = if type_of(client) == "string" {
     client
   } else {
@@ -415,7 +415,7 @@ pub fn graphql_execute_operation(client, operation, variables = nil, options = n
   } else {
     variables
   }
-  const envelope = graphql_request(
+  const envelope = graphql_request(harness, 
     endpoint,
     operation.document,
     checked_variables,
@@ -545,7 +545,7 @@ pub fn graphql_codegen_wrapper(operation, client_param = "client") {
     + "  let operation = json_parse("
     + operation_literal
     + ")\n"
-    + "  return graphql_execute_operation("
+    + "  return graphql_execute_operation(harness, "
     + client_param
     + ", operation, variables, options)\n"
     + "}\n"

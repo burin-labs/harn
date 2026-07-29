@@ -27,7 +27,11 @@ use super::journal::{
 use super::TRIGGER_EVENTS_TOPIC;
 use crate::event_log::LogEvent;
 
-#[harn_builtin(sig = "handler_context() -> dict | nil", category = "triggers")]
+#[harn_builtin(
+    exposure = "harness.runtime.handler_context",
+    effects = ["state.read@const=trigger-dispatch"],
+    sig = "handler_context() -> dict | nil", category = "triggers"
+)]
 fn handler_context_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(context) = current_dispatch_context() else {
         return Ok(VmValue::Nil);
@@ -42,7 +46,11 @@ fn handler_context_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
     })))
 }
 
-#[harn_builtin(sig = "list_providers_native() -> list", category = "triggers")]
+#[harn_builtin(
+    exposure = "harness.llm.list_providers_native",
+    effects = ["state.read@const=provider-catalog"],
+    sig = "list_providers_native() -> list", category = "triggers"
+)]
 fn list_providers_native_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::List(std::sync::Arc::new(
         registered_provider_metadata()
@@ -52,7 +60,11 @@ fn list_providers_native_impl(_args: &[VmValue], _out: &mut String) -> Result<Vm
     )))
 }
 
-#[harn_builtin(sig = "trigger_list(...args: any) -> list", category = "triggers")]
+#[harn_builtin(
+    exposure = "harness.runtime.trigger_list",
+    effects = ["state.read@const=triggers"],
+    sig = "trigger_list(...args: any) -> list", category = "triggers"
+)]
 fn trigger_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::List(std::sync::Arc::new(
         snapshot_trigger_bindings()
@@ -63,6 +75,8 @@ fn trigger_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trigger_register",
+    effects = ["state.mutate@dynamic"],
     sig = "trigger_register(...args: any) -> TriggerHandle",
     kind = "async",
     category = "triggers"
@@ -82,6 +96,8 @@ async fn trigger_register_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trigger_fire",
+    effects = ["state.mutate@dynamic"],
     sig = "trigger_fire(...args: any) -> DispatchHandle",
     kind = "async",
     category = "triggers"
@@ -99,6 +115,8 @@ async fn trigger_fire_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trigger_replay",
+    effects = ["state.mutate@dynamic"],
     sig = "trigger_replay(...args: any) -> DispatchHandle",
     kind = "async",
     category = "triggers"
@@ -118,6 +136,8 @@ async fn trigger_replay_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.trigger_test_harness",
+    effects = ["state.mutate@dynamic"],
     sig = "trigger_test_harness(...args: any) -> dict",
     kind = "async",
     category = "triggers"

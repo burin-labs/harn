@@ -1,40 +1,40 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Test model tier detection. Tier is now self-declared on each
   // catalog row (#2463); unknown model ids fall through to the
   // tier_defaults.default ("mid"), so look up models that exist in
   // the bundled catalog instead of un-versioned aliases.
-  const tier1 = llm_model_tier("claude-sonnet-4-20250514")
+  const tier1 = harness.llm.model_tier("claude-sonnet-4-20250514")
   assert_eq(tier1, "frontier")
-  const tier2 = llm_model_tier("gpt-4o")
+  const tier2 = harness.llm.model_tier("gpt-4o")
   assert_eq(tier2, "frontier")
-  const tier3 = llm_model_tier("Qwen/Qwen3.5-9B")
+  const tier3 = harness.llm.model_tier("Qwen/Qwen3.5-9B")
   assert_eq(tier3, "small")
-  const tier4 = llm_model_tier("deepseek-v4-flash")
+  const tier4 = harness.llm.model_tier("deepseek-v4-flash")
   assert_eq(tier4, "mid")
-  const resolved = llm_resolve_model("frontier")
+  const resolved = harness.llm.resolve_model("frontier")
   assert_eq(resolved.family, "anthropic-claude")
   assert_eq(resolved.lineage, "claude-sonnet-opus")
   // Test provider inference
-  const p1 = llm_infer_provider("claude-sonnet-4-20250514")
+  const p1 = harness.llm.infer_provider("claude-sonnet-4-20250514")
   assert_eq(p1, "anthropic")
-  const p2 = llm_infer_provider("gpt-4o")
+  const p2 = harness.llm.infer_provider("gpt-4o")
   assert_eq(p2, "openai")
-  const p3 = llm_infer_provider("qwen/qwen3-coder")
+  const p3 = harness.llm.infer_provider("qwen/qwen3-coder")
   assert_eq(p3, "openrouter")
-  const p4 = llm_infer_provider("llama3.2:latest")
+  const p4 = harness.llm.infer_provider("llama3.2:latest")
   assert_eq(p4, "ollama")
   // Test providers list
-  const providers = llm_providers()
+  const providers = harness.llm.providers()
   assert(len(providers) >= 6)
   // Test config access
-  const anthropic_config = llm_config("anthropic")
+  const anthropic_config = harness.llm.config("anthropic")
   assert_eq(anthropic_config?.auth_style, "header")
-  const local_config = llm_config("local")
+  const local_config = harness.llm.config("local")
   assert_eq(local_config?.auth_style, "none")
-  const llamacpp_config = llm_config("llamacpp")
+  const llamacpp_config = harness.llm.config("llamacpp")
   assert_eq(llamacpp_config?.base_url_env, "LLAMACPP_BASE_URL")
-  const ollama_warm_missing = llm_healthcheck("ollama", {warm: true})
+  const ollama_warm_missing = harness.llm.healthcheck("ollama", {warm: true})
   assert_eq(ollama_warm_missing?.valid, false)
   assert_eq(ollama_warm_missing?.status, "invalid_request")
-  log("All llm_config tests passed")
+  harness.stdio.println("All llm_config tests passed")
 }

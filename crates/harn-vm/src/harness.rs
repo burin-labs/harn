@@ -4,9 +4,9 @@
 //! `Harness` is the Harn-language analog of an explicit-capability handle: a
 //! single value the runtime hands to a script's `main` so that stdio,
 //! terminal, clock, filesystem, environment, randomness, network, process,
-//! crypto, system, secrets, and LLM catalog access become surface in the type system
+//! channels, system, secrets, and LLM catalog access become surface in the type system
 //! instead of ambient globals. Each sub-handle (`stdio`, `term`, `clock`, `fs`,
-//! `env`, `random`, `net`, `process`, `crypto`, `system`, `secrets`, `llm`,
+//! `env`, `random`, `net`, `process`, `channels`, `system`, `secrets`, `llm`,
 //! `tenant`, `auth`, `obs`) is a distinct named type that anchors the surface
 //! for its capability slice.
 //!
@@ -27,118 +27,80 @@ use async_trait::async_trait;
 use harn_clock::{Clock, PausedClock, RealClock};
 use time::OffsetDateTime;
 
-/// Capability slices exposed by a [`Harness`].
+/// Runtime discriminator for the root grant or one typed capability handle.
 ///
-/// `Root` is the parent handle; the others are the typed sub-handles users
-/// reach through field access (`harness.stdio`, `harness.clock`, ...).
+/// [`harn_builtin_meta::CapabilityId`] owns the closed capability vocabulary;
+/// this wrapper adds the root state without duplicating its field/type maps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HarnessKind {
-    Root,
-    Stdio,
-    Term,
-    Clock,
-    Fs,
-    Env,
-    Random,
-    Net,
-    Process,
-    Crypto,
-    System,
-    Secrets,
-    Llm,
-    /// Tenant sub-handle exposing the ambient `TenantId` (if any) that
-    /// the dispatching host bound to this call. See
-    /// [`crate::harness_tenant`].
-    Tenant,
-    /// Auth sub-handle exposing the ambient authenticated principal (if
-    /// any) — subject, scheme, granted scopes, and optional principal
-    /// kind — that the dispatching host bound to this call. See
-    /// [`crate::harness_auth`].
-    Auth,
-    /// Observability sub-handle: spans, counter/histogram/gauge
-    /// instruments, structured logs, and the ambient request_id
-    /// surfaced by the dispatching host. See
-    /// [`crate::observability::request_id`] and
-    /// [`crate::observability::vocabulary`].
-    Obs,
-    /// Verdict issuance sub-handle: `harness.verdict.issue(evidence_ref)` mints
-    /// a host-validated proof-of-execution receipt (the payload of a positive
-    /// `Verdict`). The caller cannot assert a pass — issuance authority lives
-    /// here, at the host boundary. See PR2.
-    Verdict,
-}
+pub struct HarnessKind(Option<harn_builtin_meta::CapabilityId>);
 
+#[allow(non_upper_case_globals)]
 impl HarnessKind {
+    pub const Root: Self = Self(None);
+    pub const Stdio: Self = Self(Some(harn_builtin_meta::CapabilityId::Stdio));
+    pub const Term: Self = Self(Some(harn_builtin_meta::CapabilityId::Term));
+    pub const Clock: Self = Self(Some(harn_builtin_meta::CapabilityId::Clock));
+    pub const Fs: Self = Self(Some(harn_builtin_meta::CapabilityId::Fs));
+    pub const Env: Self = Self(Some(harn_builtin_meta::CapabilityId::Env));
+    pub const Random: Self = Self(Some(harn_builtin_meta::CapabilityId::Random));
+    pub const Net: Self = Self(Some(harn_builtin_meta::CapabilityId::Net));
+    pub const Process: Self = Self(Some(harn_builtin_meta::CapabilityId::Process));
+    pub const Channels: Self = Self(Some(harn_builtin_meta::CapabilityId::Channels));
+    pub const System: Self = Self(Some(harn_builtin_meta::CapabilityId::System));
+    pub const Secrets: Self = Self(Some(harn_builtin_meta::CapabilityId::Secrets));
+    pub const Llm: Self = Self(Some(harn_builtin_meta::CapabilityId::Llm));
+    pub const Agent: Self = Self(Some(harn_builtin_meta::CapabilityId::Agent));
+    pub const Tenant: Self = Self(Some(harn_builtin_meta::CapabilityId::Tenant));
+    pub const Auth: Self = Self(Some(harn_builtin_meta::CapabilityId::Auth));
+    pub const Obs: Self = Self(Some(harn_builtin_meta::CapabilityId::Observability));
+    pub const Verdict: Self = Self(Some(harn_builtin_meta::CapabilityId::Verdict));
+    pub const Tools: Self = Self(Some(harn_builtin_meta::CapabilityId::Tools));
+    pub const Ast: Self = Self(Some(harn_builtin_meta::CapabilityId::Ast));
+    pub const CodeIndex: Self = Self(Some(harn_builtin_meta::CapabilityId::CodeIndex));
+    pub const Computer: Self = Self(Some(harn_builtin_meta::CapabilityId::Computer));
+    pub const Embed: Self = Self(Some(harn_builtin_meta::CapabilityId::Embed));
+    pub const Memory: Self = Self(Some(harn_builtin_meta::CapabilityId::Memory));
+    pub const Sqlite: Self = Self(Some(harn_builtin_meta::CapabilityId::Sqlite));
+    pub const Postgres: Self = Self(Some(harn_builtin_meta::CapabilityId::Postgres));
+    pub const FsWatch: Self = Self(Some(harn_builtin_meta::CapabilityId::FsWatch));
+    pub const HostLease: Self = Self(Some(harn_builtin_meta::CapabilityId::HostLease));
+    pub const Scanner: Self = Self(Some(harn_builtin_meta::CapabilityId::Scanner));
+    pub const SecretStore: Self = Self(Some(harn_builtin_meta::CapabilityId::SecretStore));
+    pub const TerminalSession: Self = Self(Some(harn_builtin_meta::CapabilityId::TerminalSession));
+    pub const Rules: Self = Self(Some(harn_builtin_meta::CapabilityId::Rules));
+    pub const Lint: Self = Self(Some(harn_builtin_meta::CapabilityId::Lint));
+    pub const Runtime: Self = Self(Some(harn_builtin_meta::CapabilityId::Runtime));
+    pub const Interaction: Self = Self(Some(harn_builtin_meta::CapabilityId::Interaction));
+    pub const Project: Self = Self(Some(harn_builtin_meta::CapabilityId::Project));
+    pub const Testing: Self = Self(Some(harn_builtin_meta::CapabilityId::Testing));
+
+    pub const fn capability_id(self) -> Option<harn_builtin_meta::CapabilityId> {
+        self.0
+    }
+
     /// The Harn-language type name for this kind (`Harness`, `HarnessStdio`,
     /// etc.). Used by the typechecker primitive registration and by
     /// `VmValue::type_name`.
     pub const fn type_name(self) -> &'static str {
-        match self {
-            HarnessKind::Root => "Harness",
-            HarnessKind::Stdio => "HarnessStdio",
-            HarnessKind::Term => "HarnessTerm",
-            HarnessKind::Clock => "HarnessClock",
-            HarnessKind::Fs => "HarnessFs",
-            HarnessKind::Env => "HarnessEnv",
-            HarnessKind::Random => "HarnessRandom",
-            HarnessKind::Net => "HarnessNet",
-            HarnessKind::Process => "HarnessProcess",
-            HarnessKind::Crypto => "HarnessCrypto",
-            HarnessKind::System => "HarnessSystem",
-            HarnessKind::Secrets => "HarnessSecrets",
-            HarnessKind::Llm => "HarnessLlm",
-            HarnessKind::Tenant => "HarnessTenant",
-            HarnessKind::Auth => "HarnessAuth",
-            HarnessKind::Obs => "HarnessObs",
-            HarnessKind::Verdict => "HarnessVerdict",
+        match self.0 {
+            None => "Harness",
+            Some(capability) => capability.type_name(),
         }
     }
 
     /// Field name a parent `Harness` exposes for this sub-handle (e.g. the
     /// `stdio` in `harness.stdio`). Returns `None` for the root.
     pub const fn field_name(self) -> Option<&'static str> {
-        match self {
-            HarnessKind::Root => None,
-            HarnessKind::Stdio => Some("stdio"),
-            HarnessKind::Term => Some("term"),
-            HarnessKind::Clock => Some("clock"),
-            HarnessKind::Fs => Some("fs"),
-            HarnessKind::Env => Some("env"),
-            HarnessKind::Random => Some("random"),
-            HarnessKind::Net => Some("net"),
-            HarnessKind::Process => Some("process"),
-            HarnessKind::Crypto => Some("crypto"),
-            HarnessKind::System => Some("system"),
-            HarnessKind::Secrets => Some("secrets"),
-            HarnessKind::Llm => Some("llm"),
-            HarnessKind::Tenant => Some("tenant"),
-            HarnessKind::Auth => Some("auth"),
-            HarnessKind::Obs => Some("obs"),
-            HarnessKind::Verdict => Some("verdict"),
+        match self.0 {
+            None => None,
+            Some(capability) => Some(capability.field_name()),
         }
     }
 
     /// Parse the field name a script uses to reach a sub-handle.
     pub fn from_field_name(name: &str) -> Option<Self> {
-        match name {
-            "stdio" => Some(HarnessKind::Stdio),
-            "term" => Some(HarnessKind::Term),
-            "clock" => Some(HarnessKind::Clock),
-            "fs" => Some(HarnessKind::Fs),
-            "env" => Some(HarnessKind::Env),
-            "random" => Some(HarnessKind::Random),
-            "net" => Some(HarnessKind::Net),
-            "process" => Some(HarnessKind::Process),
-            "crypto" => Some(HarnessKind::Crypto),
-            "system" => Some(HarnessKind::System),
-            "secrets" => Some(HarnessKind::Secrets),
-            "llm" => Some(HarnessKind::Llm),
-            "tenant" => Some(HarnessKind::Tenant),
-            "auth" => Some(HarnessKind::Auth),
-            "obs" => Some(HarnessKind::Obs),
-            "verdict" => Some(HarnessKind::Verdict),
-            _ => None,
-        }
+        harn_builtin_meta::CapabilityId::from_field_name(name)
+            .map(|capability| Self(Some(capability)))
     }
 
     /// All sub-handle kinds, in the canonical field order.
@@ -151,14 +113,34 @@ impl HarnessKind {
         HarnessKind::Random,
         HarnessKind::Net,
         HarnessKind::Process,
-        HarnessKind::Crypto,
+        HarnessKind::Channels,
         HarnessKind::System,
         HarnessKind::Secrets,
         HarnessKind::Llm,
+        HarnessKind::Agent,
         HarnessKind::Tenant,
         HarnessKind::Auth,
         HarnessKind::Obs,
         HarnessKind::Verdict,
+        HarnessKind::Tools,
+        HarnessKind::Ast,
+        HarnessKind::CodeIndex,
+        HarnessKind::Computer,
+        HarnessKind::Embed,
+        HarnessKind::Memory,
+        HarnessKind::Sqlite,
+        HarnessKind::Postgres,
+        HarnessKind::FsWatch,
+        HarnessKind::HostLease,
+        HarnessKind::Scanner,
+        HarnessKind::SecretStore,
+        HarnessKind::TerminalSession,
+        HarnessKind::Rules,
+        HarnessKind::Lint,
+        HarnessKind::Runtime,
+        HarnessKind::Interaction,
+        HarnessKind::Project,
+        HarnessKind::Testing,
     ];
 
     /// Every kind a Harn-script type annotation may reference.
@@ -172,14 +154,34 @@ impl HarnessKind {
         HarnessKind::Random,
         HarnessKind::Net,
         HarnessKind::Process,
-        HarnessKind::Crypto,
+        HarnessKind::Channels,
         HarnessKind::System,
         HarnessKind::Secrets,
         HarnessKind::Llm,
+        HarnessKind::Agent,
         HarnessKind::Tenant,
         HarnessKind::Auth,
         HarnessKind::Obs,
         HarnessKind::Verdict,
+        HarnessKind::Tools,
+        HarnessKind::Ast,
+        HarnessKind::CodeIndex,
+        HarnessKind::Computer,
+        HarnessKind::Embed,
+        HarnessKind::Memory,
+        HarnessKind::Sqlite,
+        HarnessKind::Postgres,
+        HarnessKind::FsWatch,
+        HarnessKind::HostLease,
+        HarnessKind::Scanner,
+        HarnessKind::SecretStore,
+        HarnessKind::TerminalSession,
+        HarnessKind::Rules,
+        HarnessKind::Lint,
+        HarnessKind::Runtime,
+        HarnessKind::Interaction,
+        HarnessKind::Project,
+        HarnessKind::Testing,
     ];
 }
 
@@ -206,6 +208,7 @@ pub struct HarnessInner {
     /// is per-`Arc` (i.e. per-`Harness` build) so unrelated harnesses
     /// stay independent.
     quarantined: Mutex<bool>,
+    fixtures: Arc<CapabilityFixtureState>,
 }
 
 impl fmt::Debug for HarnessInner {
@@ -222,6 +225,7 @@ impl fmt::Debug for HarnessInner {
                     .map(|provider| provider.namespace().to_string()),
             )
             .field("quarantined", &self.is_quarantined())
+            .field("fixtures", &self.fixtures)
             .finish()
     }
 }
@@ -251,6 +255,123 @@ impl HarnessInner {
 
     pub fn is_quarantined(&self) -> bool {
         self.quarantined.lock().map(|guard| *guard).unwrap_or(false)
+    }
+
+    pub(crate) fn fixtures(&self) -> &CapabilityFixtureState {
+        &self.fixtures
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CapabilityFixtureState {
+    inner: Mutex<CapabilityFixtureScopes>,
+}
+
+#[derive(Debug, Default)]
+struct CapabilityFixtureScopes {
+    current: CapabilityFixtureInner,
+    stack: Vec<CapabilityFixtureInner>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct CapabilityFixtureInner {
+    enabled: bool,
+    responses: BTreeMap<
+        (harn_builtin_meta::CapabilityId, String),
+        VecDeque<Result<crate::VmValue, String>>,
+    >,
+    calls: Vec<CapabilityFixtureCall>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CapabilityFixtureCall {
+    pub(crate) capability: harn_builtin_meta::CapabilityId,
+    pub(crate) method: String,
+    pub(crate) args: Vec<crate::VmValue>,
+}
+
+impl CapabilityFixtureState {
+    pub(crate) fn clear(&self) {
+        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
+        scopes.current = CapabilityFixtureInner {
+            enabled: true,
+            ..CapabilityFixtureInner::default()
+        };
+    }
+
+    pub(crate) fn push_scope(&self) {
+        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
+        let previous = std::mem::replace(
+            &mut scopes.current,
+            CapabilityFixtureInner {
+                enabled: true,
+                ..CapabilityFixtureInner::default()
+            },
+        );
+        scopes.stack.push(previous);
+    }
+
+    pub(crate) fn pop_scope(&self) -> Result<(), crate::VmError> {
+        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
+        let Some(previous) = scopes.stack.pop() else {
+            return Err(crate::VmError::Runtime(
+                "HarnessTesting.pop_scope called without a matching push_scope".to_string(),
+            ));
+        };
+        scopes.current = previous;
+        Ok(())
+    }
+
+    pub(crate) fn respond(
+        &self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        response: Result<crate::VmValue, String>,
+    ) {
+        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
+        scopes.current.enabled = true;
+        scopes
+            .current
+            .responses
+            .entry((capability, method.to_string()))
+            .or_default()
+            .push_back(response);
+    }
+
+    pub(crate) fn dispatch(
+        &self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        args: &[crate::VmValue],
+    ) -> Option<Result<crate::VmValue, crate::VmError>> {
+        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
+        if !scopes.current.enabled {
+            return None;
+        }
+        scopes.current.calls.push(CapabilityFixtureCall {
+            capability,
+            method: method.to_string(),
+            args: args.to_vec(),
+        });
+        scopes
+            .current
+            .responses
+            .get_mut(&(capability, method.to_string()))
+            .and_then(VecDeque::pop_front)
+            .map(|response| {
+                response.map_err(|message| {
+                    crate::VmError::Thrown(crate::VmValue::String(arcstr::ArcStr::from(message)))
+                })
+            })
+    }
+
+    pub(crate) fn calls(&self) -> Vec<CapabilityFixtureCall> {
+        self.inner
+            .lock()
+            .expect("capability fixtures poisoned")
+            .current
+            .calls
+            .clone()
     }
 }
 
@@ -316,6 +437,8 @@ pub(crate) struct MockHarnessState {
     fs_reads: BTreeMap<String, Vec<u8>>,
     net_gets: BTreeMap<String, String>,
     random_u64: Mutex<VecDeque<u64>>,
+    capability_responses:
+        Mutex<BTreeMap<(harn_builtin_meta::CapabilityId, String), VecDeque<crate::VmValue>>>,
     stdin_lines: Mutex<VecDeque<String>>,
     stdio: Mutex<String>,
     stderr: Mutex<String>,
@@ -357,6 +480,18 @@ impl MockHarnessState {
     pub(crate) fn next_random_u64(&self) -> Option<u64> {
         let mut values = self.random_u64.lock().expect("random values poisoned");
         values.pop_front()
+    }
+
+    pub(crate) fn capability_response(
+        &self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+    ) -> Option<crate::VmValue> {
+        self.capability_responses
+            .lock()
+            .expect("capability responses poisoned")
+            .get_mut(&(capability, method.to_string()))
+            .and_then(VecDeque::pop_front)
     }
 
     pub(crate) fn advance_clock(&self, duration: std::time::Duration) {
@@ -417,6 +552,7 @@ pub struct MockHarnessBuilder {
     fs_reads: BTreeMap<String, Vec<u8>>,
     net_gets: BTreeMap<String, String>,
     random_u64: Vec<u64>,
+    capability_responses: BTreeMap<(harn_builtin_meta::CapabilityId, String), Vec<crate::VmValue>>,
     stdin_lines: Vec<String>,
 }
 
@@ -428,6 +564,7 @@ impl MockHarnessBuilder {
             fs_reads: BTreeMap::new(),
             net_gets: BTreeMap::new(),
             random_u64: Vec::new(),
+            capability_responses: BTreeMap::new(),
             stdin_lines: Vec::new(),
         }
     }
@@ -462,6 +599,23 @@ impl MockHarnessBuilder {
         self
     }
 
+    /// Queue an exact return value for a capability method that does not have
+    /// a purpose-built fixture helper. Responses are consumed FIFO and belong
+    /// to this harness instance; no process registry or thread-local mock
+    /// state participates.
+    pub fn capability_response(
+        mut self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: impl Into<String>,
+        value: crate::VmValue,
+    ) -> Self {
+        self.capability_responses
+            .entry((capability, method.into()))
+            .or_default()
+            .push(value);
+        self
+    }
+
     /// Queue a line that `harness.stdio.read_line()` or
     /// `harness.stdio.prompt(...)` will return next. Lines are dequeued
     /// FIFO; once the queue is empty subsequent reads surface EOF
@@ -483,6 +637,12 @@ impl MockHarnessBuilder {
                 fs_reads: self.fs_reads,
                 net_gets: self.net_gets,
                 random_u64: Mutex::new(self.random_u64.into()),
+                capability_responses: Mutex::new(
+                    self.capability_responses
+                        .into_iter()
+                        .map(|(key, values)| (key, values.into()))
+                        .collect(),
+                ),
                 stdin_lines: Mutex::new(self.stdin_lines.into()),
                 stdio: Mutex::new(String::new()),
                 stderr: Mutex::new(String::new()),
@@ -554,6 +714,7 @@ impl Harness {
             net_policy: None,
             secret_provider: None,
             quarantined: Mutex::new(false),
+            fixtures: Arc::new(CapabilityFixtureState::default()),
         });
         Self { inner }
     }
@@ -582,6 +743,7 @@ impl Harness {
             net_policy: Some(policy),
             secret_provider: self.inner.secret_provider.clone(),
             quarantined: Mutex::new(self.is_quarantined()),
+            fixtures: Arc::clone(&self.inner.fixtures),
         });
         Self { inner }
     }
@@ -601,6 +763,7 @@ impl Harness {
             net_policy: self.inner.net_policy.clone(),
             secret_provider: Some(provider),
             quarantined: Mutex::new(self.is_quarantined()),
+            fixtures: Arc::clone(&self.inner.fixtures),
         });
         Self { inner }
     }
@@ -727,9 +890,9 @@ impl Harness {
         }
     }
 
-    /// Field access for `harness.crypto`.
-    pub fn crypto(&self) -> HarnessCrypto {
-        HarnessCrypto {
+    /// Field access for `harness.channels`.
+    pub fn channels(&self) -> HarnessChannels {
+        HarnessChannels {
             inner: Arc::clone(&self.inner),
         }
     }
@@ -772,6 +935,38 @@ impl Harness {
     /// Field access for `harness.obs`.
     pub fn obs(&self) -> HarnessObs {
         HarnessObs {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    /// Field access for `harness.testing`.
+    pub fn testing(&self) -> HarnessTesting {
+        HarnessTesting {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    /// Field access for `harness.memory`.
+    pub fn memory(&self) -> HarnessMemory {
+        HarnessMemory {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    pub fn sqlite(&self) -> HarnessSqlite {
+        HarnessSqlite {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    pub fn postgres(&self) -> HarnessPostgres {
+        HarnessPostgres {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    pub fn agent(&self) -> HarnessAgent {
+        HarnessAgent {
             inner: Arc::clone(&self.inner),
         }
     }
@@ -858,9 +1053,9 @@ pub struct HarnessProcess {
     inner: Arc<HarnessInner>,
 }
 
-/// crypto sub-handle: deterministic digest helpers such as `sha256`.
+/// Durable transcript channel sub-handle.
 #[derive(Debug, Clone)]
-pub struct HarnessCrypto {
+pub struct HarnessChannels {
     inner: Arc<HarnessInner>,
 }
 
@@ -922,6 +1117,37 @@ pub struct HarnessObs {
     inner: Arc<HarnessInner>,
 }
 
+/// Per-harness deterministic fixture control. Responses and call records are
+/// owned by this Harness instance rather than a process registry or
+/// thread-local scope.
+#[derive(Debug, Clone)]
+pub struct HarnessTesting {
+    inner: Arc<HarnessInner>,
+}
+
+/// Durable memory sub-handle. Keeping this distinct from [`HarnessEmbed`]
+/// prevents a caller that can compute vectors from implicitly gaining
+/// persistent read/write authority.
+#[derive(Debug, Clone)]
+pub struct HarnessMemory {
+    inner: Arc<HarnessInner>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HarnessSqlite {
+    inner: Arc<HarnessInner>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HarnessPostgres {
+    inner: Arc<HarnessInner>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HarnessAgent {
+    inner: Arc<HarnessInner>,
+}
+
 macro_rules! sub_handle_inner {
     ($($ty:ty),* $(,)?) => {
         $(
@@ -942,13 +1168,18 @@ sub_handle_inner!(
     HarnessRandom,
     HarnessNet,
     HarnessProcess,
-    HarnessCrypto,
+    HarnessChannels,
     HarnessSystem,
     HarnessSecrets,
     HarnessLlm,
     HarnessTenant,
     HarnessAuth,
     HarnessObs,
+    HarnessMemory,
+    HarnessSqlite,
+    HarnessPostgres,
+    HarnessAgent,
+    HarnessTesting,
 );
 
 impl HarnessClock {
@@ -1434,7 +1665,6 @@ mod tests {
             r"fn main(harness: Harness) { harness.random.gen_u64() }",
             r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#,
             r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf", args: ["x"]}) }"#,
-            r#"fn main(harness: Harness) { harness.crypto.sha256("") }"#,
             r"fn main(harness: Harness) { harness.system.cpu() }",
             r#"fn main(harness: Harness) { harness.secrets.read("blocked") }"#,
             r"fn main(harness: Harness) { harness.llm.catalog() }",
@@ -1465,7 +1695,6 @@ mod tests {
                 (HarnessKind::Random, "gen_u64"),
                 (HarnessKind::Net, "get"),
                 (HarnessKind::Process, "spawn_captured"),
-                (HarnessKind::Crypto, "sha256"),
                 (HarnessKind::System, "cpu"),
                 (HarnessKind::Secrets, "read"),
                 (HarnessKind::Llm, "catalog"),
@@ -1781,7 +2010,7 @@ fn main(harness: Harness) {
   __io_println(harness.fs.exists("/missing"))
   __io_println(harness.random.gen_u64())
   __io_println(harness.net.get("https://example.test"))
-  __io_println(harness.crypto.sha256(""))
+  __io_println(sha256_hex(""))
   __io_println(len(harness.llm.catalog()) > 0)
 }
 "#,
@@ -1815,8 +2044,61 @@ fn main(harness: Harness) {
                 (HarnessKind::Fs, "exists".to_string()),
                 (HarnessKind::Random, "gen_u64".to_string()),
                 (HarnessKind::Net, "get".to_string()),
-                (HarnessKind::Crypto, "sha256".to_string()),
                 (HarnessKind::Llm, "catalog".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn mock_harness_owns_generic_capability_responses_without_global_registries() {
+        let harness = Harness::mock()
+            .capability_response(
+                harn_builtin_meta::CapabilityId::Process,
+                "run",
+                crate::stdlib::json_to_vm_value(&serde_json::json!({"ok": true})),
+            )
+            .capability_response(
+                harn_builtin_meta::CapabilityId::Interaction,
+                "ask",
+                crate::VmValue::String(arcstr::ArcStr::from("yes")),
+            )
+            .capability_response(
+                harn_builtin_meta::CapabilityId::Project,
+                "scan",
+                crate::stdlib::json_to_vm_value(&serde_json::json!({"language": "rust"})),
+            )
+            .build();
+
+        run_harness_source(
+            r#"
+pipeline default(harness: Harness) {
+  const process = harness.process.run({argv: ["never-executed"]})
+  const answer = harness.interaction.ask("continue?")
+  const project = harness.project.scan("/never-read")
+  harness.stdio.println(process.ok)
+  harness.stdio.println(answer)
+  harness.stdio.println(project.language)
+}
+"#,
+            harness.clone(),
+        )
+        .expect("every effect is served by the harness instance");
+
+        assert_eq!(harness.captured_stdio(), "true\nyes\nrust\n");
+        let observed = harness
+            .calls()
+            .into_iter()
+            .map(|call| (call.sub_handle, call.method))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observed,
+            vec![
+                (HarnessKind::Process, "run".to_string()),
+                (HarnessKind::Interaction, "ask".to_string()),
+                (HarnessKind::Project, "scan".to_string()),
+                (HarnessKind::Stdio, "println".to_string()),
+                (HarnessKind::Stdio, "println".to_string()),
+                (HarnessKind::Stdio, "println".to_string()),
             ]
         );
     }
@@ -2058,6 +2340,33 @@ fn main(harness: Harness) {
         assert!(
             error.contains("sandbox violation"),
             "deny should keep the underlying sandbox-rejection message, got: {error}"
+        );
+    }
+
+    #[test]
+    fn runtime_effect_receipt_comes_from_the_capability_contract() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let effects = rt.block_on(async {
+            let source = r#"fn main(harness: Harness) { harness.stdio.println("record me") }"#;
+            harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+            let chunk = crate::compile_source(source).expect("compile");
+            let mut vm = crate::Vm::new();
+            crate::stdlib::register_vm_stdlib(&mut vm);
+            vm.set_harness(Harness::mock().build());
+            vm.execute(&chunk).await.expect("execute");
+            vm.executed_effects()
+        });
+
+        assert_eq!(
+            effects,
+            vec![crate::orchestration::EffectRecord::new(
+                crate::orchestration::EffectKind::Stdio,
+                crate::orchestration::EffectScope::Write,
+            )
+            .with_resource("stdout")]
         );
     }
 

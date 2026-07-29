@@ -18,9 +18,8 @@ fn has_import_status(items, package, symbol, status) {
   return false
 }
 
-pipeline test(task) {
-  const curated = web_search(
-    "fastapi dependency injection",
+pipeline test(harness: Harness, task) {
+  const curated = web_search(harness,  harness, "fastapi dependency injection",
     {
       limit: 1,
       index: [
@@ -61,8 +60,7 @@ pipeline test(task) {
       ),
     },
   )
-  const api = web_search(
-    "harn web",
+  const api = web_search(harness,  harness, "harn web",
     {
       api: {
         url: "https://search.example/api",
@@ -86,7 +84,7 @@ pipeline test(task) {
     "web_search used web_fetch/http mock",
   )
   assert(contains(calls[0].url, "q=harn"), "web_search forwarded query")
-  const root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + uuid_v7())
+  const root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "package.json"),
@@ -175,12 +173,12 @@ pipeline test(task) {
     "low-trust package warning",
   )
   assert(has_finding(verified.warnings, "fresh_package", "fresh-slop"), "fresh package warning")
-  const explained = prompt_explain({tools: web_grounding_tools()})
+  const explained = harness.agent.prompt_explain({tools: web_grounding_tools(harness)})
   assert(contains(explained.system, "call web_search"), "search guidance is gated with the tool")
   assert(
     contains(explained.system, "call verify_imports"),
     "verify guidance is gated with the tool",
   )
   harness.fs.delete(root)
-  __io_println("web_search_grounding_ok")
+  harness.stdio.println("web_search_grounding_ok")
 }

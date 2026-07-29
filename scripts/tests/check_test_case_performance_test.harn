@@ -14,7 +14,7 @@ fn sample_diag(name: string, setup: int, execute: int) -> string {
 }
 
 @test
-pipeline test_diagnose_parser_requires_exact_lines(task) {
+pipeline test_diagnose_parser_requires_exact_lines(harness: Harness, task) {
   const parsed = parse_diagnose_output(
     sample_diag("alpha", 4, 7)
       + "\nnoise\n[harn test diag] FAIL beta setup=8ms compile=2ms execute=9ms teardown=1ms total=20ms\n",
@@ -27,7 +27,7 @@ pipeline test_diagnose_parser_requires_exact_lines(task) {
 }
 
 @test
-pipeline test_diagnose_parser_accepts_additive_fields(task) {
+pipeline test_diagnose_parser_accepts_additive_fields(harness: Harness, task) {
   const parsed = parse_diagnose_output(
     "[harn test diag] ok perf_0_8 setup=10ms compile=0ms execute=37ms teardown=1ms module_compile=14ms module_load=21ms modules_compiled=5 modules_loaded=5 total=51ms\n",
   )
@@ -42,7 +42,7 @@ pipeline test_diagnose_parser_accepts_additive_fields(task) {
 }
 
 @test
-pipeline test_linux_time_uses_one_explicit_combined_format(task) {
+pipeline test_linux_time_uses_one_explicit_combined_format(harness: Harness, task) {
   const args = time_args("linux")
   assert_eq(args.count, 2)
   assert_eq(args[0], "-f")
@@ -66,7 +66,7 @@ pipeline test_linux_time_uses_one_explicit_combined_format(task) {
 }
 
 @test
-pipeline test_portable_time_parser_reads_gnu_output(task) {
+pipeline test_portable_time_parser_reads_gnu_output(harness: Harness, task) {
   const parsed = parse_time_output(
     "real 0.42\nuser 0.31\nsys 0.17\n\tMaximum resident set size (kbytes): 12345\n\tMajor (requiring I/O) page faults: 2\n\tMinor (reclaiming a frame) page faults: 300\n\tVoluntary context switches: 41\n\tInvoluntary context switches: 5\n\tFile system inputs: 6\n\tFile system outputs: 7\n",
   )
@@ -84,7 +84,7 @@ pipeline test_portable_time_parser_reads_gnu_output(task) {
 }
 
 @test
-pipeline test_portable_time_parser_reads_bsd_output(task) {
+pipeline test_portable_time_parser_reads_bsd_output(harness: Harness, task) {
   const parsed = parse_time_output(
     "real 0.55\nuser 0.40\nsys 0.20\n  54321  maximum resident set size\n  77  page reclaims\n  3  page faults\n  19  voluntary context switches\n  4  involuntary context switches\n  8  block input operations\n  9  block output operations\n",
   )
@@ -98,12 +98,12 @@ pipeline test_portable_time_parser_reads_bsd_output(task) {
 }
 
 @test
-pipeline test_portable_time_parser_fails_closed(task) {
+pipeline test_portable_time_parser_fails_closed(harness: Harness, task) {
   assert_eq(parse_time_output("real 1.0\nuser 0.5\n").ok, false)
 }
 
 @test
-pipeline test_percentile_uses_nearest_rank(task) {
+pipeline test_percentile_uses_nearest_rank(harness: Harness, task) {
   assert_eq(percentile([], 90), 0)
   assert_eq(percentile([1, 2, 3, 4, 5], 50), 3)
   assert_eq(percentile([1, 2, 3, 4, 5], 90), 5)
@@ -111,7 +111,7 @@ pipeline test_percentile_uses_nearest_rank(task) {
 }
 
 @test
-pipeline test_aggregate_keeps_parallel_wall_and_sums_cpu(task) {
+pipeline test_aggregate_keeps_parallel_wall_and_sums_cpu(harness: Harness, task) {
   const first = {
     time: {
       wall_ms: 400.0,
@@ -182,14 +182,14 @@ fn metrics() -> dict {
 }
 
 @test
-pipeline test_evaluation_passes_below_multiplicative_and_additive_limits(task) {
+pipeline test_evaluation_passes_below_multiplicative_and_additive_limits(harness: Harness, task) {
   const verdict = evaluate_metrics(metrics(), baseline())
   assert_eq(verdict.ok, true)
   assert_eq(verdict.failures, [])
 }
 
 @test
-pipeline test_evaluation_fails_checked_metric_and_only_warns_telemetry(task) {
+pipeline test_evaluation_fails_checked_metric_and_only_warns_telemetry(harness: Harness, task) {
   const regressed = metrics() + {sum_sys_ms: 401.0, telemetry: {max_rss_kb: 500.0}}
   const verdict = evaluate_metrics(regressed, baseline())
   assert_eq(verdict.ok, false)
@@ -198,14 +198,14 @@ pipeline test_evaluation_fails_checked_metric_and_only_warns_telemetry(task) {
 }
 
 @test
-pipeline test_evaluation_rejects_unmeasured_zero_reference(task) {
+pipeline test_evaluation_rejects_unmeasured_zero_reference(harness: Harness, task) {
   const verdict = evaluate_metrics(metrics(), baseline() + {setup_p50_ms: 0.0})
   assert_eq(verdict.ok, false)
   assert_eq(verdict.failures.contains("baseline `setup_p50_ms` must be positive"), true)
 }
 
 @test
-pipeline test_baseline_loader_is_platform_specific_and_versioned(task) {
+pipeline test_baseline_loader_is_platform_specific_and_versioned(harness: Harness, task) {
   const text =
     "schema_version = 1\nworkload_version = 1\n[platform.macos]\nmax_child_wall_ms = 12.0\n"
   const found = load_platform_baseline(text, "macos")
@@ -219,7 +219,7 @@ pipeline test_baseline_loader_is_platform_specific_and_versioned(task) {
 }
 
 @test
-pipeline test_best_metrics_takes_the_per_metric_minimum_across_rounds(task) {
+pipeline test_best_metrics_takes_the_per_metric_minimum_across_rounds(harness: Harness, task) {
   const noisy = metrics() + {setup_p90_ms: 40.0, sum_sys_ms: 600.0}
   const clean = metrics() + {max_child_wall_ms: 900.0}
   const best = best_metrics([noisy, clean])
@@ -230,7 +230,7 @@ pipeline test_best_metrics_takes_the_per_metric_minimum_across_rounds(task) {
 }
 
 @test
-pipeline test_transient_noise_spike_clears_on_the_re_measured_round(task) {
+pipeline test_transient_noise_spike_clears_on_the_re_measured_round(harness: Harness, task) {
   const spiked = metrics() + {setup_p90_ms: 40.0}
   assert_eq(evaluate_metrics(best_metrics([spiked]), baseline()).ok, false)
   const remeasured = best_metrics([spiked, metrics()])
@@ -238,7 +238,7 @@ pipeline test_transient_noise_spike_clears_on_the_re_measured_round(task) {
 }
 
 @test
-pipeline test_persistent_regression_breaches_every_round_and_still_fails(task) {
+pipeline test_persistent_regression_breaches_every_round_and_still_fails(harness: Harness, task) {
   const regressed = metrics() + {setup_p90_ms: 40.0}
   const verdict = evaluate_metrics(best_metrics([regressed, regressed, regressed]), baseline())
   assert_eq(verdict.ok, false)

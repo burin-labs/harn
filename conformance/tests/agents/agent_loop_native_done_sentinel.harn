@@ -16,16 +16,15 @@ fn tools() {
   return registry
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
-    [
+    harness.llm, [
       {text: "", tool_calls: [{id: "lookup1", name: "lookup", arguments: {}}]},
       llm_text("Final answer without sentinel."),
       llm_text("##DONE##"),
     ],
     { ->
-      const result = agent_loop(
-        "Use the tool, then finish.",
+      const result = agent_loop(harness, "Use the tool, then finish.",
         nil,
         {
           provider: "mock",
@@ -38,16 +37,16 @@ pipeline main() {
           max_nudges: 2,
         },
       )
-      __io_println(result.status)
-      __io_println(result.stop_reason)
-      __io_println(result.llm.iterations)
-      __io_println(result.text)
-      __io_println(!contains(result.text, "##DONE##"))
-      const calls = llm_mock_calls()
-      __io_println(contains(calls[0].system, "##DONE##"))
-      __io_println(contains(calls[1].system, "##DONE##"))
-      __io_println(contains(calls[2].system, "##DONE##"))
-      __io_println(!contains(calls[0].system, "<user_response>"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.stop_reason)
+      harness.stdio.println(result.llm.iterations)
+      harness.stdio.println(result.text)
+      harness.stdio.println(!contains(result.text, "##DONE##"))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(contains(calls[0].system, "##DONE##"))
+      harness.stdio.println(contains(calls[1].system, "##DONE##"))
+      harness.stdio.println(contains(calls[2].system, "##DONE##"))
+      harness.stdio.println(!contains(calls[0].system, "<user_response>"))
     },
   )
 }

@@ -8,7 +8,7 @@ fn admin_merge(pr) {
   return "body:" + pr
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const result = merge_pr("PR-9")
-  log(result)
+  harness.stdio.println(result)
 }

@@ -44,7 +44,7 @@ impl HostlibCapability for VerdictCapability {
         // Resolves a host-owned execution handle (never a caller path), but stays
         // on the deterministic-tools gate: issuing a verdict is part of the same
         // opt-in tool surface as the `run_test` that produced the handle.
-        registry.register_gated_fn("verdict", ISSUE_BUILTIN, "issue", verdict_issue_builtin);
+        registry.register_fn("verdict", ISSUE_BUILTIN, "issue", verdict_issue_builtin);
     }
 }
 

@@ -1,22 +1,21 @@
 import { live_bump_adapter } from "std/bump/live"
 
-pipeline test_apply_version_writes_bare_semver() {
-  const root = path_join(harness.fs.temp_dir(), "harn-bump-live-" + uuid())
+pipeline test_apply_version_writes_bare_semver(harness: Harness) {
+  const root = path_join(harness.fs.temp_dir(), "harn-bump-live-" + harness.random.uuid())
   harness.fs.mkdir(root)
   const version_file = path_join(root, ".harn-version")
-  const adapter = live_bump_adapter({version_file: version_file, refresh_command: "true"})
+  const adapter = live_bump_adapter(harness, {version_file: version_file, refresh_command: "true"})
   const outcome = adapter.apply_version("v1.2.3")
   assert(outcome.ok)
   assert(harness.fs.read_text(version_file) == "1.2.3\n")
   harness.fs.delete(root)
 }
 
-pipeline test_apply_version_reports_refresh_failure() {
-  const root = path_join(harness.fs.temp_dir(), "harn-bump-live-" + uuid())
+pipeline test_apply_version_reports_refresh_failure(harness: Harness) {
+  const root = path_join(harness.fs.temp_dir(), "harn-bump-live-" + harness.random.uuid())
   harness.fs.mkdir(root)
   const version_file = path_join(root, ".harn-version")
-  const adapter = live_bump_adapter(
-    {version_file: version_file, refresh_command: "echo refresh-broke >&2; false"},
+  const adapter = live_bump_adapter(harness,  harness, {version_file: version_file, refresh_command: "echo refresh-broke >&2; false"},
   )
   const outcome = adapter.apply_version("v1.2.3")
   assert(!outcome.ok)

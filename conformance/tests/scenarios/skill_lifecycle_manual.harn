@@ -6,7 +6,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * supplied registry. Harn must not add its catalog prompt until the model
  * explicitly loads a skill.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   skill alpha {
     description "Alpha workflow"
     when_to_use "Use alpha for alpha-shaped work"
@@ -19,13 +19,12 @@ pipeline test(task) {
   }
   const registry = skill_define(alpha, "beta", skill_find(beta, "beta") ?? {})
   with_llm_script(
-    [
+    harness.llm, [
       {tool_calls: [{id: "load-alpha", name: "load_skill", arguments: {name: "alpha"}}]},
       llm_text("Alpha loaded."),
     ],
     { ->
-      const result = agent_loop(
-        "alpha please",
+      const result = agent_loop(harness, "alpha please",
         "Host-rendered cards mention `alpha`.",
         {
           provider: "mock",
@@ -36,7 +35,7 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "manual skill loop completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) == 2, "load_skill creates a second model turn")
       assert(
         !contains(calls[0].system, "## Available skills"),
@@ -59,7 +58,7 @@ pipeline test(task) {
         !contains(calls[1].system, "## Available skills"),
         "manual strategy never adds the catalog",
       )
-      log("skill_lifecycle_manual tests passed")
+      harness.stdio.println("skill_lifecycle_manual tests passed")
     },
   )
 }

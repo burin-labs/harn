@@ -9,7 +9,7 @@ fn describe(door: Door) -> string {
   }
 }
 
-pipeline default() {
-  __io_println(describe(Door.Open))
-  __io_println(describe(Door.Closed))
+pipeline default(harness: Harness) {
+  harness.stdio.println(describe(Door.Open))
+  harness.stdio.println(describe(Door.Closed))
 }

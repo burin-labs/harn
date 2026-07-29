@@ -2,7 +2,7 @@ import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
 
 fn gated(gate, value) {
   return { ->
-    receive(gate)
+    harness.runtime.receive(gate)
     return value
   }
 }
@@ -11,8 +11,8 @@ fn constant(value) {
   return { -> value }
 }
 
-fn drop_oldest_case(bp) {
-  const gate = channel(nil, 1)
+fn drop_oldest_case(harness: Harness, bp) {
+  const gate = harness.runtime.channel(nil, 1)
   const pool = pool_create(
     {name: "bp-drop-oldest", max_concurrent: 1, backpressure: bp.queue(1, "drop_oldest")},
   )
@@ -20,19 +20,19 @@ fn drop_oldest_case(bp) {
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
   const saturated = pool.snapshot()
-  __io_println(saturated.backpressure.on_full)
-  __io_println(saturated.rejected)
-  __io_println(saturated.queued)
-  send(gate, "go")
+  harness.stdio.println(saturated.backpressure.on_full)
+  harness.stdio.println(saturated.rejected)
+  harness.stdio.println(saturated.queued)
+  harness.runtime.send(gate, "go")
   const results = pool_wait([warmup, old, newest])
-  __io_println(results[1].status)
-  __io_println(results[1].rejection_policy)
-  __io_println(results[2].status)
-  __io_println(results[2].result)
+  harness.stdio.println(results[1].status)
+  harness.stdio.println(results[1].rejection_policy)
+  harness.stdio.println(results[2].status)
+  harness.stdio.println(results[2].result)
 }
 
-fn drop_newest_case(bp) {
-  const gate = channel(nil, 1)
+fn drop_newest_case(harness: Harness, bp) {
+  const gate = harness.runtime.channel(nil, 1)
   const pool = pool_create(
     {name: "bp-drop-newest", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
   )
@@ -40,19 +40,19 @@ fn drop_newest_case(bp) {
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
   const saturated = pool.snapshot()
-  __io_println(saturated.backpressure.on_full)
-  __io_println(saturated.rejected)
-  __io_println(saturated.queued)
-  send(gate, "go")
+  harness.stdio.println(saturated.backpressure.on_full)
+  harness.stdio.println(saturated.rejected)
+  harness.stdio.println(saturated.queued)
+  harness.runtime.send(gate, "go")
   const results = pool_wait([warmup, old, newest])
-  __io_println(results[1].status)
-  __io_println(results[1].result)
-  __io_println(results[2].status)
-  __io_println(results[2].rejection_policy)
+  harness.stdio.println(results[1].status)
+  harness.stdio.println(results[1].result)
+  harness.stdio.println(results[2].status)
+  harness.stdio.println(results[2].rejection_policy)
 }
 
-fn ring_buffer_case(bp) {
-  const gate = channel(nil, 1)
+fn ring_buffer_case(harness: Harness, bp) {
+  const gate = harness.runtime.channel(nil, 1)
   const pool = pool_create(
     {name: "bp-ring-buffer", max_concurrent: 1, backpressure: bp.ring_buffer(1)},
   )
@@ -60,19 +60,19 @@ fn ring_buffer_case(bp) {
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
   const saturated = pool.snapshot()
-  __io_println(saturated.backpressure.kind)
-  __io_println(saturated.backpressure.max_depth)
-  __io_println(saturated.rejected)
-  send(gate, "go")
+  harness.stdio.println(saturated.backpressure.kind)
+  harness.stdio.println(saturated.backpressure.max_depth)
+  harness.stdio.println(saturated.rejected)
+  harness.runtime.send(gate, "go")
   const results = pool_wait([warmup, old, newest])
-  __io_println(results[1].status)
-  __io_println(results[1].rejection_policy)
-  __io_println(results[2].status)
-  __io_println(results[2].result)
+  harness.stdio.println(results[1].status)
+  harness.stdio.println(results[1].rejection_policy)
+  harness.stdio.println(results[2].status)
+  harness.stdio.println(results[2].result)
 }
 
-fn fail_submitter_case(bp) {
-  const gate = channel(nil, 1)
+fn fail_submitter_case(harness: Harness, bp) {
+  const gate = harness.runtime.channel(nil, 1)
   const pool = pool_create(
     {name: "bp-fail-submitter", max_concurrent: 1, backpressure: bp.queue(1, "fail_submitter")},
   )
@@ -81,78 +81,78 @@ fn fail_submitter_case(bp) {
   const failed = try {
     pool.submit(constant("overflow"))
   }
-  __io_println(is_err(failed))
-  __io_println(contains(to_string(unwrap_err(failed)), "HARN-POL-001"))
-  send(gate, "go")
+  harness.stdio.println(is_err(failed))
+  harness.stdio.println(contains(to_string(unwrap_err(failed)), "HARN-POL-001"))
+  harness.runtime.send(gate, "go")
   const results = pool_wait([warmup, queued])
-  __io_println(results[0].status)
-  __io_println(results[1].result)
+  harness.stdio.println(results[0].status)
+  harness.stdio.println(results[1].result)
 }
 
-fn fail_fast_case(bp) {
-  const gate = channel(nil, 1)
+fn fail_fast_case(harness: Harness, bp) {
+  const gate = harness.runtime.channel(nil, 1)
   const pool = pool_create({name: "bp-fail-fast", max_concurrent: 1, backpressure: bp.fail_fast})
   const warmup = pool.submit(gated(gate, "warmup"))
   const failed = try {
     pool.submit(constant("overflow"))
   }
-  __io_println(is_err(failed))
-  __io_println(contains(to_string(unwrap_err(failed)), "HARN-POL-002"))
-  send(gate, "go")
+  harness.stdio.println(is_err(failed))
+  harness.stdio.println(contains(to_string(unwrap_err(failed)), "HARN-POL-002"))
+  harness.runtime.send(gate, "go")
   const result = pool_wait(warmup)
-  __io_println(result.status)
-  __io_println(result.result)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.result)
 }
 
-fn block_submitter_case(bp) {
-  const gate = channel(nil, 1)
-  const started = channel(nil, 1)
-  const returned = channel(nil, 1)
+fn block_submitter_case(harness: Harness, bp) {
+  const gate = harness.runtime.channel(nil, 1)
+  const started = harness.runtime.channel(nil, 1)
+  const returned = harness.runtime.channel(nil, 1)
   const pool = pool_create(
     {name: "bp-block-submitter", max_concurrent: 1, backpressure: bp.queue(1)},
   )
   const warmup = pool.submit(gated(gate, "warmup"))
   const queued = pool.submit(constant("queued"))
   const submitter = spawn {
-    send(started, "started")
+    harness.runtime.send(started, "started")
     let late = pool.submit(constant("late"))
-    send(returned, "returned")
+    harness.runtime.send(returned, "returned")
     return late
   }
-  receive(started)
-  __io_println(try_receive(returned) == nil)
-  send(gate, "go")
+  harness.runtime.receive(started)
+  harness.stdio.println(harness.runtime.try_receive(returned) == nil)
+  harness.runtime.send(gate, "go")
   const late = await(submitter)
-  __io_println(receive(returned))
+  harness.stdio.println(harness.runtime.receive(returned))
   const results = pool_wait([warmup, queued, late])
-  __io_println(results[0].status)
-  __io_println(results[1].result)
-  __io_println(results[2].result)
+  harness.stdio.println(results[0].status)
+  harness.stdio.println(results[1].result)
+  harness.stdio.println(results[2].result)
 }
 
-fn audit_case() {
+fn audit_case(harness: Harness) {
   // Filter to drop receipts so the assertion ignores the `pool_submit`
   // and `pool_dequeue` receipts emitted on the same topic by PL-06.
-  const stream = event_log.subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
+  const stream = harness.obs.event_log_subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
   const first = stream.next().value
   const second = stream.next().value
   const third = stream.next().value
-  __io_println(first.kind)
-  __io_println(first.payload.policy)
-  __io_println(first.headers.schema)
-  __io_println(second.payload.policy)
-  __io_println(third.payload.policy)
+  harness.stdio.println(first.kind)
+  harness.stdio.println(first.payload.policy)
+  harness.stdio.println(first.headers.schema)
+  harness.stdio.println(second.payload.policy)
+  harness.stdio.println(third.payload.policy)
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const bp = Backpressure()
-  __io_println(bp.fail_fast.kind)
-  __io_println(bp.queue(2, "block_submitter").max_depth)
-  drop_oldest_case(bp)
-  drop_newest_case(bp)
-  ring_buffer_case(bp)
-  fail_submitter_case(bp)
-  fail_fast_case(bp)
-  block_submitter_case(bp)
-  audit_case()
+  harness.stdio.println(bp.fail_fast.kind)
+  harness.stdio.println(bp.queue(2, "block_submitter").max_depth)
+  drop_oldest_case(harness, bp)
+  drop_newest_case(harness, bp)
+  ring_buffer_case(harness, bp)
+  fail_submitter_case(harness, bp)
+  fail_fast_case(harness, bp)
+  block_submitter_case(harness, bp)
+  audit_case(harness)
 }

@@ -32,7 +32,7 @@ import { invoke_for_ci_failure, invoke_for_merge_conflict } from "repair_worker"
 import { is_terminal } from "states"
 
 fn _gen_sweep_id() {
-  return "sweep-${to_string(now_ms())}"
+  return "sweep-${to_string(harness.clock.now_ms())}"
 }
 
 /**
@@ -94,7 +94,7 @@ fn _command_for_repair_run(run) {
 }
 
 /** Apply the action a classification calls for, returning an outcome string. */
-pub fn apply_action(adapter, policy, observation, classification, dry_run) {
+pub fn apply_action(harness: Harness, adapter, policy, observation, classification, dry_run) {
   const action = classification.action
   if action == "noop" || action == "wait" {
     return {outcome: "wait", commands: []}
@@ -169,7 +169,7 @@ pub fn apply_action(adapter, policy, observation, classification, dry_run) {
     }
   }
   if action == "run_local_verification" {
-    const results = run_local_verify(policy.local_verification, dry_run)
+    const results = run_local_verify(harness, policy.local_verification, dry_run)
     return {
       outcome: if dry_run {
         "dry_run"
@@ -185,7 +185,7 @@ pub fn apply_action(adapter, policy, observation, classification, dry_run) {
   return {outcome: "noop", commands: []}
 }
 
-fn _dispatch_repair_worker(kind, args) {
+fn _dispatch_repair_worker(harness: Harness, kind, args) {
   const observation = args.observation
   const policy = args.policy
   const parent_receipt_ref = {
@@ -209,13 +209,13 @@ fn _dispatch_repair_worker(kind, args) {
     allowed_write_scope: args.allowed_write_scope,
   }
   if kind == "merge_conflict" {
-    return invoke_for_merge_conflict(common + {conflict_paths: args.conflict_paths ?? []})
+    return invoke_for_merge_conflict(harness, common + {conflict_paths: args.conflict_paths ?? []})
   }
-  return invoke_for_ci_failure(common + {failing_check_logs: args.failing_check_logs ?? []})
+  return invoke_for_ci_failure(harness, common + {failing_check_logs: args.failing_check_logs ?? []})
 }
 
 /** Process a single PR: classify, persist, act, build receipt. */
-pub fn process_pr(args) {
+pub fn process_pr(harness: Harness, args) {
   const adapter = args.adapter
   const policy = args.policy
   const raw_pr = args.pr
@@ -237,12 +237,12 @@ pub fn process_pr(args) {
       reason: "${classification.reason} (illegal transition; ${edge.error})",
       evidence: classification.evidence,
     }
-    const action_result = apply_action(adapter, policy, observation, safe_class, dry_run)
-    save_checkpoint(checkpoint_handle, sweep_id, observation, safe_class)
+    const action_result = apply_action(harness, adapter, policy, observation, safe_class, dry_run)
+    save_checkpoint(harness, checkpoint_handle, sweep_id, observation, safe_class)
     return build_receipt(
       {
         sweep_id: sweep_id,
-        observed_at: now_ms(),
+        observed_at: harness.clock.now_ms(),
         policy: policy,
         observation: observation,
         classification: safe_class,
@@ -260,7 +260,7 @@ pub fn process_pr(args) {
     } else {
       {}
     }
-    const run = _dispatch_repair_worker(
+    const run = _dispatch_repair_worker(harness, 
       repair_kind,
       {
         observation: observation,
@@ -277,11 +277,11 @@ pub fn process_pr(args) {
         allowed_write_scope: extras.allowed_write_scope ?? args.allowed_write_scope,
       },
     )
-    save_checkpoint(checkpoint_handle, sweep_id, observation, classification)
+    save_checkpoint(harness, checkpoint_handle, sweep_id, observation, classification)
     return build_receipt(
       {
         sweep_id: sweep_id,
-        observed_at: now_ms(),
+        observed_at: harness.clock.now_ms(),
         policy: policy,
         observation: observation,
         classification: classification,
@@ -293,16 +293,16 @@ pub fn process_pr(args) {
       },
     )
   }
-  const action_result = apply_action(adapter, policy, observation, classification, dry_run)
+  const action_result = apply_action(harness, adapter, policy, observation, classification, dry_run)
   if is_terminal(classification.state) {
     forget_checkpoint(checkpoint_handle, observation.repo, observation.number)
   } else {
-    save_checkpoint(checkpoint_handle, sweep_id, observation, classification)
+    save_checkpoint(harness, checkpoint_handle, sweep_id, observation, classification)
   }
   return build_receipt(
     {
       sweep_id: sweep_id,
-      observed_at: now_ms(),
+      observed_at: harness.clock.now_ms(),
       policy: policy,
       observation: observation,
       classification: classification,
@@ -315,7 +315,7 @@ pub fn process_pr(args) {
 }
 
 /** Reconcile PRs that disappeared from the open list (merged or closed remotely). */
-pub fn reconcile_disappeared(args) {
+pub fn reconcile_disappeared(harness: Harness, args) {
   const adapter = args.adapter
   const checkpoint_handle = args.checkpoint_handle
   const policy = args.policy
@@ -370,12 +370,12 @@ pub fn reconcile_disappeared(args) {
       reason: "PR no longer in open list",
       evidence: {previously: env.last_state},
     }
-    const action_result = apply_action(adapter, policy, final_obs, synthetic, dry_run)
+    const action_result = apply_action(harness, adapter, policy, final_obs, synthetic, dry_run)
     forget_checkpoint(checkpoint_handle, env.repo, env.number)
     const receipt = build_receipt(
       {
         sweep_id: sweep_id,
-        observed_at: now_ms(),
+        observed_at: harness.clock.now_ms(),
         policy: policy,
         observation: final_obs,
         classification: synthetic,
@@ -391,13 +391,13 @@ pub fn reconcile_disappeared(args) {
 }
 
 /** Run a single sweep across all configured repos. */
-pub fn sweep(args) {
+pub fn sweep(harness: Harness, args) {
   const adapter = args.adapter
   const policies = args.policies
   const checkpoint_handle = args.checkpoint_handle
   const dry_run = args.dry_run ?? true
   const sweep_id = args.sweep_id ?? _gen_sweep_id()
-  const started_at = now_ms()
+  const started_at = harness.clock.now_ms()
   let all_receipts = []
   for policy in policies {
     let receipts_for_repo = []
@@ -410,7 +410,7 @@ pub fn sweep(args) {
     }
     for pr in trimmed {
       observed_numbers = observed_numbers + [pr.number]
-      const receipt = process_pr(
+      const receipt = process_pr(harness, 
         {
           adapter: adapter,
           policy: policy,
@@ -428,7 +428,7 @@ pub fn sweep(args) {
         receipts_for_repo = receipts_for_repo + [receipt]
       }
     }
-    const disappeared = reconcile_disappeared(
+    const disappeared = reconcile_disappeared(harness, 
       {
         adapter: adapter,
         policy: policy,
@@ -440,16 +440,16 @@ pub fn sweep(args) {
     )
     all_receipts = all_receipts + receipts_for_repo + disappeared
   }
-  const finished_at = now_ms()
+  const finished_at = harness.clock.now_ms()
   return summarize_sweep(all_receipts, sweep_id, started_at, finished_at)
 }
 
 /** Helper for fixture-based runs: load a list of policy json paths. */
-pub fn load_policies(paths) {
+pub fn load_policies(harness: Harness, paths) {
   let ok_policies = []
   let errors = []
   for path in paths {
-    const raw = read_file(path)
+    const raw = harness.fs.read_text(path)
     const res = load_policy(raw)
     if res.ok {
       ok_policies = ok_policies + [res.policy]

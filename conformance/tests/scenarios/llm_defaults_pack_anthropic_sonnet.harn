@@ -5,9 +5,9 @@
 //   4. task overlay (agent) fills only unset fields
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const r = pack_for(
-    {model: "claude-sonnet-4-5", reasoning_policy: "medium", reasoning_task: "agent"},
+    harness, {model: "claude-sonnet-4-5", reasoning_policy: "medium", reasoning_task: "agent"},
   )
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, "claude-sonnet-4-5")
@@ -26,5 +26,5 @@ pipeline test(task) {
   // Canonical policy fields survive for introspection.
   assert_eq(r.reasoning_policy, "medium")
   assert_eq(r.reasoning_task, "agent")
-  log("llm_defaults_pack_anthropic_sonnet passed")
+  harness.stdio.println("llm_defaults_pack_anthropic_sonnet passed")
 }

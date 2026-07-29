@@ -64,6 +64,8 @@ pub(crate) fn register_hitl_read_builtins(vm: &mut Vm) {
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&HITL_PENDING_BUILTIN_DEF];
 
 #[harn_builtin(
+    exposure = "harness.interaction.hitl_pending",
+    effects = ["state.read@const=hitl"],
     sig = "hitl_pending(filters?: dict) -> list",
     kind = "async",
     category = "hitl"

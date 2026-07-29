@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Test tool_define builtin for ergonomic tool registration.
   let registry = tool_registry()
   registry = tool_define(
@@ -40,5 +40,5 @@ pipeline test(task) {
   // Tool list
   const tools = tool_list(registry)
   assert(len(tools) == 2, "tool_list should return 2 tools")
-  log("tool_define tests passed")
+  harness.stdio.println("tool_define tests passed")
 }

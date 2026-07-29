@@ -10,8 +10,8 @@
  */
 import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const result = on_finish_drain(harness, return_value)
       const audits = lifecycle_audit_log_take()

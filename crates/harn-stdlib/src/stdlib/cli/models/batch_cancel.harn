@@ -154,9 +154,7 @@ fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> 
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __cancel_url_for_job(harness, job, provider),
     {
       headers: __provider_auth_headers(
@@ -202,9 +200,7 @@ fn __cancel_anthropic(harness: Harness, job: dict) -> dict {
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __cancel_url_for_job(harness, job, "anthropic"),
     {
       headers: {"x-api-key": safe_string(auth["value"], ""), "anthropic-version": "2023-06-01"},
@@ -244,9 +240,7 @@ fn __cancel_gemini(harness: Harness, job: dict) -> dict {
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  const response = __http_result(
-    harness,
-    "POST",
+  const response = __http_result(harness,  "POST",
     __cancel_url_for_job(harness, job, "gemini"),
     {
       headers: {
