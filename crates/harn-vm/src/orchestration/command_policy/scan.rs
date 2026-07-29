@@ -334,18 +334,12 @@ pub(super) fn risk_labels_from_scan(scan: &JsonValue) -> Vec<String> {
 }
 
 pub(super) fn has_destructive_tokens(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("rm -rf /")
-        || lower.contains("rm -fr /")
-        || lower.contains("mkfs")
-        // A raw-device/file overwrite is `dd of=…`; the input side (`dd if=…`)
-        // is a read and is not destructive on its own. (The catastrophic floor
-        // independently hard-denies `dd of=…`.)
-        || lower.contains("dd of=")
-        || lower.contains(":(){")
-        || lower.contains("chmod -r 777 /")
-        || lower.contains("chown -r ")
-        || has_cwd_wipe_tokens(text)
+    // Catastrophic machine/data destruction (`mkfs`, `dd of=`, fork bombs,
+    // absolute recursive deletes, etc.) is classified once by the
+    // workspace-aware catastrophic parser above. This label owns the
+    // additional recursive workspace/permission families and must therefore
+    // stay command-aware rather than substring-matching quoted prose.
+    has_cwd_wipe_tokens(text)
 }
 
 /// Detects recursive deletes that destroy the current workspace itself —
@@ -383,6 +377,14 @@ pub(super) fn segment_is_workspace_wipe(segment: &str) -> bool {
     // through BOTH the PowerShell-alias path and the cmd.exe path so a `del /s
     // /q .` (cmd) and `del -recurse .` (ps alias) are each caught.
     tokens.iter().enumerate().any(|(idx, raw_token)| {
+        // `split_whitespace` intentionally preserves quote markers for the
+        // target-expansion checks below, but that means a quoted sentence such
+        // as `echo 'rm -rf .'` produces a raw token `'rm`. It is an argument,
+        // not a command word. A fully quoted word (`"rm" -rf .`) remains a
+        // valid executable and must still be classified.
+        if starts_quoted_phrase(raw_token) {
+            return false;
+        }
         let token = command_arg_text(raw_token);
         let rest = &tokens[idx + 1..];
         match token.as_str() {
@@ -403,9 +405,34 @@ pub(super) fn segment_is_workspace_wipe(segment: &str) -> bool {
             // `format` / `format.com` reformatting a volume is unconditionally
             // destructive once a drive target is present.
             "format" | "format.com" => format_targets_drive(rest),
+            "chmod" => chmod_world_writable_root(rest),
+            "chown" => recursive_option_present(rest),
             _ => false,
         }
     })
+}
+
+fn chmod_world_writable_root(args: &[&str]) -> bool {
+    recursive_option_present(args)
+        && args.iter().any(|arg| command_arg_text(arg) == "777")
+        && args.iter().any(|arg| command_arg_text(arg) == "/")
+}
+
+fn recursive_option_present(args: &[&str]) -> bool {
+    args.iter().map(|arg| command_arg_text(arg)).any(|arg| {
+        arg == "--recursive"
+            || (arg.starts_with('-')
+                && !arg.starts_with("--")
+                && arg.chars().skip(1).any(|flag| flag == 'r'))
+    })
+}
+
+fn starts_quoted_phrase(raw_token: &str) -> bool {
+    let token = raw_token.trim();
+    let Some(quote @ ('\'' | '"')) = token.chars().next() else {
+        return false;
+    };
+    !token[quote.len_utf8()..].contains(quote)
 }
 
 /// cmd.exe `rmdir`/`rd`/`del`/`erase` wipe judge. The danger signature is a

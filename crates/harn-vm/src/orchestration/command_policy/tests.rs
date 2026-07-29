@@ -273,6 +273,54 @@ fn scoped_and_named_deletes_are_not_over_flagged() {
 }
 
 #[test]
+fn deterministic_scan_ignores_quoted_wipe_mentions_and_in_workspace_absolute_deletes() {
+    for cmd in [
+        "echo 'rm -rf ./*'",
+        "printf '%s\\n' \"rm -rf .\"",
+        "echo 'find . -delete'",
+        "echo 'mkfs /dev/sda'",
+        "printf '%s\\n' 'dd of=/dev/sda'",
+        "echo 'chmod -R 777 /'",
+        "echo 'chown -R user build'",
+    ] {
+        let scan = command_risk_scan_json(&shell_ctx(cmd), None);
+        assert!(
+            !labels(&scan).contains(&"destructive".to_string()),
+            "quoted mention must not be destructive: {cmd} => {scan}"
+        );
+        assert_ne!(
+            scan["recommended_action"], "deny",
+            "quoted mention must not be denied: {cmd}"
+        );
+    }
+
+    let in_workspace = command_risk_scan_json(&shell_ctx("rm -rf /tmp/work/build"), None);
+    assert!(
+        !labels(&in_workspace).contains(&"destructive".to_string()),
+        "named in-workspace delete must not be destructive: {in_workspace}"
+    );
+    assert_eq!(in_workspace["recommended_action"], "allow");
+
+    // Quote-normalized executable words and wrapped payloads are real commands,
+    // unlike a quoted argument passed to echo/printf.
+    for cmd in [
+        "\"rm\" -rf .",
+        "sh -c 'rm -rf .'",
+        "rm -rf /tmp/other",
+        "mkfs /dev/sda",
+        "dd of=/dev/sda",
+        "chmod -R 777 /",
+        "chown -R user build",
+    ] {
+        let scan = command_risk_scan_json(&shell_ctx(cmd), None);
+        assert_eq!(
+            scan["recommended_action"], "deny",
+            "real destructive command must remain denied: {cmd} => {scan}"
+        );
+    }
+}
+
+#[test]
 fn windows_cmd_wipe_deletes_are_flagged_destructive() {
     // SB-3 (Windows): cmd.exe whole-tree / drive-root wipes. Flag order is
     // insensitive (`/s /q` vs `/q /s`); `/q` (quiet) and `/f` (force) do not
