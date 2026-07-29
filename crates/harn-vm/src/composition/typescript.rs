@@ -9,6 +9,9 @@ pub fn composition_typescript_declarations(manifest: &BindingManifest) -> String
         "export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };\n",
     );
     out.push_str("export type CompositionToolResult = JsonValue;\n\n");
+    if manifest.state.is_some() {
+        out.push_str(super::state::typescript_api_source());
+    }
     for binding in &manifest.bindings {
         if binding.policy.disposition != BindingPolicyDisposition::Allowed {
             continue;

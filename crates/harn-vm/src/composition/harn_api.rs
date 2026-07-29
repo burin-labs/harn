@@ -10,6 +10,9 @@ pub fn composition_harn_api(manifest: &BindingManifest) -> String {
          // Use map_bounded(items, { item -> ... }, {concurrency: N}) for settled fan-out.\n",
     );
     out.push_str("type JsonValue = unknown\n\n");
+    if manifest.state.is_some() {
+        out.push_str(super::state::harn_api_source());
+    }
     for binding in &manifest.bindings {
         if binding.policy.disposition != BindingPolicyDisposition::Allowed {
             continue;

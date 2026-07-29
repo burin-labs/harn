@@ -176,6 +176,10 @@ pub struct CompositionChildResult {
     pub raw_output: Option<Value>,
     pub error: Option<String>,
     pub error_category: Option<ToolCallErrorCategory>,
+    /// Structured failure details when the owning binding has a closed error
+    /// contract. Older producers omit this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_details: Option<Value>,
     pub executor: Option<ToolExecutor>,
     pub duration_ms: Option<u64>,
     pub execution_duration_ms: Option<u64>,
@@ -196,6 +200,7 @@ impl Default for CompositionChildResult {
             raw_output: None,
             error: None,
             error_category: None,
+            error_details: None,
             executor: None,
             duration_ms: None,
             execution_duration_ms: None,

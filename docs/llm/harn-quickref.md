@@ -2006,6 +2006,36 @@ transcript/audit content stays available by pointer. Useful options:
 reachability-GC projection automatically supplies the current scratchpad as a
 root plus a scratchpad-version write barrier for that turn.
 
+## Governed Code Mode session state
+
+Code Mode snippets are isolated by default. Grant bounded JSON state through
+the normal binding manifest when snippets in one session and tool window must
+exchange values:
+
+```harn
+const manifest = composition_binding_manifest(tools, {
+  state: {max_value_bytes: 16384, max_total_bytes: 65536, max_keys: 64},
+})
+const saved = composition_execute(
+  "state.put(\"draft\", {ready: true})\nreturn state.list()",
+  manifest,
+  {session_id: session_id},
+)
+const loaded = composition_execute(
+  "return state.get(\"draft\")",
+  manifest,
+  {session_id: session_id},
+)
+```
+
+The injected API is `state.get`, `state.put`, `state.list`, and
+`state.delete`. The scope is `(session_id, manifest hash)`, using the current
+agent session when `session_id` is omitted, and is removed at session end.
+Values must be JSON; limits fail closed with typed
+`composition_state_error` records. Every operation is a composition child
+call, so reports, events, crystallization, and replay retain the ordered state
+transitions.
+
 ## Read-only stance (experimental)
 
 `agent_loop({read_only_stance: {...}})` arms a least-privilege tool window

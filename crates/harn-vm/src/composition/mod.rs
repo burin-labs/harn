@@ -19,17 +19,20 @@ use crate::tool_annotations::SideEffectLevel;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+mod builtins;
 mod crystallization;
 mod events;
 mod harn_api;
 mod hosts;
 mod manifest;
+mod state;
 mod types;
 mod typescript;
 
 #[cfg(test)]
 mod tests;
 
+pub use builtins::register_composition_builtins;
 pub use crystallization::composition_crystallization_trace;
 pub use events::composition_report_events;
 pub use harn_api::composition_harn_api;
@@ -38,6 +41,10 @@ pub use manifest::{
     binding_manifest_from_tool_surface, binding_manifest_hash, BindingManifest,
     BindingManifestEntry, BindingManifestOptions, BindingPolicyDisposition, BindingPolicyStatus,
     BINDING_MANIFEST_SCHEMA_VERSION,
+};
+pub use state::{
+    CompositionStateBinding, CompositionStateError, CompositionStateErrorCode,
+    COMPOSITION_STATE_CAPABILITY, COMPOSITION_STATE_SCHEMA_VERSION,
 };
 pub use types::{
     CompositionChildCall, CompositionChildResult, CompositionExecutionLimits,
@@ -66,11 +73,7 @@ struct ExecutionState {
 }
 
 impl ExecutionState {
-    fn next_call(
-        &mut self,
-        tool_name: &str,
-        input: Value,
-    ) -> Result<(BindingManifestEntry, CompositionChildCall), VmError> {
+    fn check_operation_budget(&self) -> Result<(), VmError> {
         if self.results.len() as u64 >= self.request.limits.max_operations {
             return Err(VmError::Runtime(format!(
                 "composition exceeded max_operations={}",
@@ -84,6 +87,15 @@ impl ExecutionState {
                 )));
             }
         }
+        Ok(())
+    }
+
+    fn next_call(
+        &mut self,
+        tool_name: &str,
+        input: Value,
+    ) -> Result<(BindingManifestEntry, CompositionChildCall), VmError> {
+        self.check_operation_budget()?;
         let binding = self
             .request
             .manifest
@@ -129,6 +141,29 @@ impl ExecutionState {
         Ok((binding, call))
     }
 
+    fn next_state_call(
+        &mut self,
+        operation: &str,
+        input: Value,
+        tool_window_id: Option<&str>,
+    ) -> Result<(BindingManifestEntry, CompositionChildCall), VmError> {
+        self.check_operation_budget()?;
+        let binding = state::binding_entry(operation);
+        let mut call = self.push_call(&binding, input);
+        call.policy_context = serde_json::json!({
+            "disposition": "allowed",
+            "grant": "manifest.state",
+            "capability_class": state::COMPOSITION_STATE_CAPABILITY,
+            "operation": operation,
+            "tool_window_id": tool_window_id,
+            "ceiling": self.request.requested_side_effect_ceiling,
+        });
+        if let Some(stored) = self.calls.last_mut() {
+            stored.policy_context.clone_from(&call.policy_context);
+        }
+        Ok((binding, call))
+    }
+
     fn push_call(&mut self, binding: &BindingManifestEntry, input: Value) -> CompositionChildCall {
         let operation_index = self.calls.len() as u64;
         let call = CompositionChildCall {
@@ -164,6 +199,7 @@ impl ExecutionState {
             raw_output: None,
             error: Some(message.to_string()),
             error_category: Some(category),
+            error_details: None,
             executor: Some(crate::agent_events::ToolExecutor::HarnBuiltin),
             duration_ms: Some(0),
             execution_duration_ms: Some(0),
@@ -200,6 +236,7 @@ impl ExecutionState {
             raw_output: outcome.output.value.clone(),
             error: outcome.output.error.clone(),
             error_category: outcome.output.error_category,
+            error_details: outcome.error_details.clone(),
             executor: outcome.output.executor.clone(),
             duration_ms: Some(elapsed_ms),
             execution_duration_ms: Some(elapsed_ms),
@@ -216,6 +253,8 @@ struct CompositionRuntime {
     state: Arc<parking_lot::Mutex<ExecutionState>>,
     host: Arc<dyn CompositionToolHost>,
     bulkheads: Arc<CompositionBulkheads>,
+    state_binding: Option<CompositionStateBinding>,
+    state_scope: Option<state::CompositionStateScope>,
 }
 
 struct CompositionBulkheads {
@@ -271,10 +310,38 @@ impl CompositionBulkheads {
 
 struct CompositionDispatchOutcome {
     output: CompositionToolOutput,
+    error_details: Option<Value>,
     attempt: u32,
     retry_attempts: u32,
     retry_errors: Vec<String>,
     retry_delays_ms: Vec<u64>,
+}
+
+impl CompositionDispatchOutcome {
+    fn state_ok(value: Value) -> Self {
+        Self {
+            output: CompositionToolOutput::ok(value),
+            error_details: None,
+            attempt: 1,
+            retry_attempts: 0,
+            retry_errors: Vec::new(),
+            retry_delays_ms: Vec::new(),
+        }
+    }
+
+    fn state_error(error: &CompositionStateError) -> Self {
+        Self {
+            output: CompositionToolOutput::error(
+                error.message.clone(),
+                ToolCallErrorCategory::SchemaValidation,
+            ),
+            error_details: Some(error.to_value()),
+            attempt: 1,
+            retry_attempts: 0,
+            retry_errors: Vec::new(),
+            retry_delays_ms: Vec::new(),
+        }
+    }
 }
 
 /// Execute a read-only Harn-native composition snippet against a manifest.
@@ -384,6 +451,41 @@ async fn execute_harn_composition_inner(
         Vec<CompositionChildResult>,
     ),
 > {
+    let state_binding = request.manifest.state.clone();
+    if let Some(binding) = &state_binding {
+        binding.validate().map_err(|error| {
+            (
+                CompositionFailureCategory::SchemaValidation,
+                format!("invalid composition state binding: {}", error.message),
+                Vec::new(),
+                Vec::new(),
+            )
+        })?;
+        if request
+            .manifest
+            .bindings
+            .iter()
+            .any(|entry| entry.binding == "state" || entry.binding.starts_with("state."))
+        {
+            return Err((
+                CompositionFailureCategory::SchemaValidation,
+                "composition state binding conflicts with a tool binding named `state`".to_string(),
+                Vec::new(),
+                Vec::new(),
+            ));
+        }
+    }
+    let state_scope = state_binding.as_ref().and_then(|_| {
+        request
+            .session_id
+            .as_deref()
+            .filter(|session_id| !session_id.trim().is_empty())
+            .and_then(|session_id| {
+                request.manifest.hash().ok().map(|window_id| {
+                    state::CompositionStateScope::new(session_id.to_string(), window_id)
+                })
+            })
+    });
     let validation_source = composition_validation_source(&request.snippet);
     let validation_program = harn_parser::parse_source(&validation_source).map_err(|error| {
         (
@@ -438,8 +540,13 @@ async fn execute_harn_composition_inner(
         state: state.clone(),
         host,
         bulkheads: Arc::new(CompositionBulkheads::new(&limits)),
+        state_binding,
+        state_scope,
     };
     register_composition_call_builtin(&mut vm, runtime.clone());
+    if state.lock().request.manifest.state.is_some() {
+        register_composition_state_builtin(&mut vm, runtime.clone());
+    }
     register_composition_map_bounded_builtin(&mut vm, runtime);
     if let Some(timeout_ms) = state.lock().request.limits.timeout_ms {
         vm.push_deadline_after(std::time::Duration::from_millis(timeout_ms));
@@ -532,11 +639,112 @@ fn register_composition_call_builtin(vm: &mut Vm, runtime: CompositionRuntime) {
     });
 }
 
+fn register_composition_state_builtin(vm: &mut Vm, runtime: CompositionRuntime) {
+    vm.register_async_builtin("__composition_state", move |_ctx, args| {
+        let runtime = runtime.clone();
+        async move {
+            let operation = args
+                .first()
+                .and_then(|value| match value {
+                    VmValue::String(value) => Some(value.to_string()),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    VmError::Runtime("__composition_state: missing state operation".into())
+                })?;
+            let raw_key = args.get(1).map(crate::llm::vm_value_to_json);
+            let raw_value = args.get(2).map(crate::llm::vm_value_to_json);
+            let input = match operation.as_str() {
+                "put" => serde_json::json!({
+                    "key": raw_key.clone().unwrap_or(Value::Null),
+                    "value": raw_value.unwrap_or(Value::Null),
+                }),
+                "get" | "delete" => serde_json::json!({
+                    "key": raw_key.clone().unwrap_or(Value::Null),
+                }),
+                _ => serde_json::json!({}),
+            };
+            let tool_window_id = runtime
+                .state_scope
+                .as_ref()
+                .map(state::CompositionStateScope::tool_window_id);
+            let (binding, call, clock) = {
+                let mut execution = runtime.state.lock();
+                let (binding, call) =
+                    execution.next_state_call(&operation, input.clone(), tool_window_id)?;
+                (binding, call, execution.clock.clone())
+            };
+            let started_ms = clock.monotonic_ms();
+            let input = if operation == "put" {
+                let key = input.get("key").and_then(Value::as_str);
+                match args.get(2) {
+                    Some(value) => {
+                        match crate::llm::vm_value_to_json_strict(value, "composition state value")
+                        {
+                            Ok(value) => serde_json::json!({"key": key, "value": value}),
+                            Err(message) => {
+                                let error =
+                                    CompositionStateError::non_json(&operation, key, message);
+                                let outcome = CompositionDispatchOutcome::state_error(&error);
+                                runtime.state.lock().push_result(
+                                    &call,
+                                    &outcome,
+                                    elapsed_ms(&*clock, started_ms),
+                                );
+                                return Err(error.into_vm_error());
+                            }
+                        }
+                    }
+                    None => input,
+                }
+            } else {
+                input
+            };
+            let outcome = dispatch_binding_with_policy(&runtime, &binding, input).await?;
+            runtime
+                .state
+                .lock()
+                .push_result(&call, &outcome, elapsed_ms(&*clock, started_ms));
+            if let Some(error) = outcome.output.error {
+                if let Some(details) = outcome.error_details {
+                    return Err(VmError::Thrown(crate::json_to_vm_value(&details)));
+                }
+                return Err(VmError::Runtime(error));
+            }
+            Ok(crate::json_to_vm_value(
+                &outcome.output.value.unwrap_or(Value::Null),
+            ))
+        }
+    });
+}
+
 async fn dispatch_binding_with_policy(
     runtime: &CompositionRuntime,
     binding: &BindingManifestEntry,
     input: Value,
 ) -> Result<CompositionDispatchOutcome, VmError> {
+    if binding.source == state::COMPOSITION_STATE_CAPABILITY {
+        let operation = binding
+            .metadata
+            .get("state_operation")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let key = input.get("key").and_then(Value::as_str);
+        let value = input.get("value").cloned();
+        let result = match (runtime.state_binding.as_ref(), runtime.state_scope.as_ref()) {
+            (Some(limits), Some(scope)) => state::execute(scope, limits, operation, key, value),
+            (Some(_), None) => Err(CompositionStateError::session_required(operation)),
+            (None, _) => Err(CompositionStateError::invalid_key(
+                operation,
+                "composition state binding is unavailable",
+            )),
+        };
+        return Ok(match result {
+            Ok(value) => CompositionDispatchOutcome::state_ok(value),
+            Err(error) => CompositionDispatchOutcome::state_error(&error),
+        });
+    }
+
     let policy = runtime.state.lock().request.mcp_policy.clone();
     let retry = policy.retry.clone();
     let max_attempts = retry.max_attempts.max(1);
@@ -585,6 +793,7 @@ async fn dispatch_binding_with_policy(
         {
             return Ok(CompositionDispatchOutcome {
                 output,
+                error_details: None,
                 attempt,
                 retry_attempts: attempt.saturating_sub(1),
                 retry_errors,
@@ -922,6 +1131,9 @@ fn composition_source(manifest: &BindingManifest, snippet: &str) -> String {
         ));
     }
     source.push_str("pipeline main() {\n");
+    if manifest.state.is_some() {
+        source.push_str(state::harn_runtime_source());
+    }
     source.push_str(snippet);
     if !snippet.ends_with('\n') {
         source.push('\n');
@@ -946,6 +1158,11 @@ fn validate_composition_program(
         .iter()
         .map(|entry| entry.binding.clone())
         .collect::<BTreeSet<_>>();
+    let state_operations = manifest
+        .state
+        .as_ref()
+        .map(|_| state::operation_names())
+        .unwrap_or_default();
     let mut local_functions = BTreeSet::from(["__composition_call".to_string()]);
     walk_program(program, &mut |node| {
         if let Node::FnDecl { name, .. } = &node.node {
@@ -977,12 +1194,29 @@ fn validate_composition_program(
                 if DENIED_COMPOSITION_CALLS.contains(&name.as_str()) && !bindings.contains(name) {
                     error = Some(format!("composition snippets cannot call `{name}`"));
                 } else if !bindings.contains(name)
+                    && !state_operations.contains(name)
                     && !local_functions.contains(name)
                     && !PURE_COMPOSITION_CALLS.contains(&name.as_str())
                 {
                     error = Some(format!(
                         "composition call target `{name}` is not a manifest binding or pure helper"
                     ));
+                }
+            }
+            Node::MethodCall { object, method, .. }
+            | Node::OptionalMethodCall { object, method, .. }
+                if matches!(&object.node, Node::Identifier(name) if name == "state") =>
+            {
+                let operation = format!("state.{method}");
+                if !state_operations.contains(&operation) {
+                    error = Some(if manifest.state.is_some() {
+                        format!("composition state has no operation `{method}`")
+                    } else {
+                        format!(
+                            "composition operation `{operation}` is unavailable unless \
+                             manifest.state is granted"
+                        )
+                    });
                 }
             }
             _ => {}
@@ -1104,228 +1338,4 @@ pub fn composition_search_examples(query: &str, limit: usize) -> Value {
     }
     examples.truncate(limit.max(1));
     Value::Array(examples)
-}
-
-pub fn register_composition_builtins(vm: &mut Vm) {
-    vm.register_builtin("composition_binding_manifest", |args, _out| {
-        let tools = args
-            .first()
-            .map(crate::llm::vm_value_to_json)
-            .unwrap_or(Value::Null);
-        let options_json = args
-            .get(1)
-            .map(crate::llm::vm_value_to_json)
-            .unwrap_or(Value::Null);
-        let mut options = BindingManifestOptions::default();
-        if let Some(ceiling) = options_json
-            .get("side_effect_ceiling")
-            .and_then(Value::as_str)
-        {
-            options.side_effect_ceiling = SideEffectLevel::parse(ceiling);
-        }
-        if let Some(include_denied) = options_json.get("include_denied").and_then(Value::as_bool) {
-            options.include_denied = include_denied;
-        }
-        options.denied_tools = string_set_option(&options_json, "denied_tools");
-        options.gated_tools = string_set_option(&options_json, "gated_tools");
-        let manifest = binding_manifest_from_tool_surface(&tools, options);
-        let value = if options_json.get("form").and_then(Value::as_str) == Some("compact") {
-            manifest.to_compact_value()
-        } else {
-            manifest.to_value()
-        };
-        Ok(crate::json_to_vm_value(&value))
-    });
-
-    vm.register_builtin("composition_search_examples", |args, _out| {
-        let query = args.first().map(VmValue::display).unwrap_or_default();
-        let limit = args
-            .get(1)
-            .and_then(|value| match value {
-                VmValue::Int(n) => Some((*n).max(1) as usize),
-                _ => None,
-            })
-            .unwrap_or(10);
-        Ok(crate::json_to_vm_value(&composition_search_examples(
-            &query, limit,
-        )))
-    });
-
-    vm.register_builtin("composition_typescript_declarations", |args, _out| {
-        let manifest_value = args
-            .first()
-            .map(crate::llm::vm_value_to_json)
-            .ok_or_else(|| {
-                VmError::Runtime("composition_typescript_declarations: manifest is required".into())
-            })?;
-        let manifest: BindingManifest =
-            serde_json::from_value(manifest_value).map_err(|error| {
-                VmError::Runtime(format!(
-                    "composition_typescript_declarations: invalid manifest: {error}"
-                ))
-            })?;
-        Ok(VmValue::String(arcstr::ArcStr::from(
-            composition_typescript_declarations(&manifest),
-        )))
-    });
-
-    vm.register_builtin("composition_harn_api", |args, _out| {
-        let manifest_value = args
-            .first()
-            .map(crate::llm::vm_value_to_json)
-            .ok_or_else(|| VmError::Runtime("composition_harn_api: manifest is required".into()))?;
-        let manifest: BindingManifest =
-            serde_json::from_value(manifest_value).map_err(|error| {
-                VmError::Runtime(format!("composition_harn_api: invalid manifest: {error}"))
-            })?;
-        Ok(VmValue::String(arcstr::ArcStr::from(composition_harn_api(
-            &manifest,
-        ))))
-    });
-
-    vm.register_builtin("composition_crystallization_trace", |args, _out| {
-        let report_value = args
-            .first()
-            .map(crate::llm::vm_value_to_json)
-            .ok_or_else(|| {
-                VmError::Runtime("composition_crystallization_trace: report is required".into())
-            })?;
-        let report: CompositionExecutionReport =
-            serde_json::from_value(report_value).map_err(|error| {
-                VmError::Runtime(format!(
-                    "composition_crystallization_trace: invalid report: {error}"
-                ))
-            })?;
-        let options = args
-            .get(1)
-            .map(crate::llm::vm_value_to_json)
-            .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-        Ok(crate::json_to_vm_value(&composition_crystallization_trace(
-            &report, &options,
-        )))
-    });
-
-    vm.register_async_builtin("composition_execute", |ctx, args| async move {
-        let snippet = args
-            .first()
-            .map(VmValue::display)
-            .ok_or_else(|| VmError::Runtime("composition_execute: snippet is required".into()))?;
-        let manifest_value = args
-            .get(1)
-            .map(crate::llm::vm_value_to_json)
-            .ok_or_else(|| VmError::Runtime("composition_execute: manifest is required".into()))?;
-        let dispatcher = args.get(2).and_then(|value| match value {
-            VmValue::Closure(closure) => Some((**closure).clone()),
-            VmValue::Dict(dict) => match dict.get("dispatcher") {
-                Some(VmValue::Closure(closure)) => Some((**closure).clone()),
-                _ => None,
-            },
-            _ => None,
-        });
-        let mut request = CompositionExecutionRequest {
-            snippet,
-            manifest: serde_json::from_value(manifest_value).map_err(|error| {
-                VmError::Runtime(format!("composition_execute: invalid manifest: {error}"))
-            })?,
-            ..CompositionExecutionRequest::default()
-        };
-        if let Some(options) = args.get(2).map(crate::llm::vm_value_to_json) {
-            if let Some(session_id) = options.get("session_id").and_then(Value::as_str) {
-                request.session_id = Some(session_id.to_string());
-            }
-            if let Some(run_id) = options.get("run_id").and_then(Value::as_str) {
-                request.run_id = run_id.to_string();
-            }
-            if let Some(max_operations) = options.get("max_operations").and_then(Value::as_u64) {
-                request.limits.max_operations = max_operations;
-            }
-            if let Some(timeout_ms) = options.get("timeout_ms").and_then(Value::as_u64) {
-                request.limits.timeout_ms = Some(timeout_ms);
-            }
-            if let Some(max_output_bytes) = options.get("max_output_bytes").and_then(Value::as_u64)
-            {
-                request.limits.max_output_bytes = max_output_bytes;
-            }
-            if let Some(max_concurrent) = options
-                .get("max_concurrent_operations")
-                .or_else(|| options.get("max_concurrent"))
-                .and_then(Value::as_u64)
-            {
-                request.limits.max_concurrent_operations =
-                    usize::try_from(max_concurrent).unwrap_or(usize::MAX).max(1);
-            }
-            if let Some(per_server) = options
-                .get("max_concurrent_per_server")
-                .or_else(|| options.get("per_server_concurrency"))
-                .and_then(Value::as_u64)
-            {
-                request.limits.max_concurrent_per_server =
-                    usize::try_from(per_server).unwrap_or(usize::MAX).max(1);
-            }
-            let trusted_servers = string_set_option(&options, "trusted_servers");
-            let trusted_mcp_servers = string_set_option(&options, "trusted_mcp_servers");
-            if !trusted_servers.is_empty() || !trusted_mcp_servers.is_empty() {
-                request
-                    .mcp_policy
-                    .trusted_servers
-                    .extend(trusted_servers.into_iter().chain(trusted_mcp_servers));
-            }
-            if let Some(trust_annotations) = options
-                .get("trust_annotations")
-                .or_else(|| options.get("trust_mcp_annotations"))
-                .and_then(Value::as_bool)
-            {
-                request.mcp_policy.trust_annotations = trust_annotations;
-            }
-            if let Some(call_timeout_ms) = options.get("call_timeout_ms").and_then(Value::as_u64) {
-                request.mcp_policy.call_timeout_ms = Some(call_timeout_ms);
-            }
-            if let Some(retry_options) = options.get("retry") {
-                if let Some(max_attempts) =
-                    retry_options.get("max_attempts").and_then(Value::as_u64)
-                {
-                    request.mcp_policy.retry.max_attempts =
-                        u32::try_from(max_attempts).unwrap_or(u32::MAX).max(1);
-                }
-                if let Some(base_delay_ms) =
-                    retry_options.get("base_delay_ms").and_then(Value::as_u64)
-                {
-                    request.mcp_policy.retry.base_delay_ms = base_delay_ms;
-                }
-                if let Some(max_delay_ms) =
-                    retry_options.get("max_delay_ms").and_then(Value::as_u64)
-                {
-                    request.mcp_policy.retry.max_delay_ms = max_delay_ms;
-                }
-                if let Some(honor_retry_after) = retry_options
-                    .get("honor_retry_after")
-                    .and_then(Value::as_bool)
-                {
-                    request.mcp_policy.retry.honor_retry_after = honor_retry_after;
-                }
-            }
-        }
-        let host: Arc<dyn CompositionToolHost> = match dispatcher {
-            Some(closure) => Arc::new(ClosureCompositionToolHost::new(closure, ctx.clone())),
-            None => Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
-        };
-        let report = execute_harn_composition(request, host).await;
-        Ok(crate::json_to_vm_value(
-            &serde_json::to_value(report).unwrap_or_else(|_| serde_json::json!({"ok": false})),
-        ))
-    });
-}
-
-fn string_set_option(value: &Value, key: &str) -> BTreeSet<String> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
 }

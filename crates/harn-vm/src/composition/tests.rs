@@ -266,6 +266,313 @@ async fn harn_composition_executes_read_only_binding_and_records_child_trace() {
     assert_eq!(report.run.result.unwrap()["text"], "hello");
 }
 
+fn state_manifest(limits: CompositionStateBinding) -> BindingManifest {
+    binding_manifest_from_tool_surface(
+        &serde_json::json!([]),
+        BindingManifestOptions {
+            state: Some(limits),
+            ..BindingManifestOptions::default()
+        },
+    )
+}
+
+async fn execute_state_snippet(
+    session_id: &str,
+    run_id: &str,
+    snippet: &str,
+    manifest: BindingManifest,
+) -> CompositionExecutionReport {
+    execute_harn_composition(
+        CompositionExecutionRequest {
+            session_id: Some(session_id.to_string()),
+            run_id: run_id.to_string(),
+            snippet: snippet.to_string(),
+            manifest,
+            ..CompositionExecutionRequest::default()
+        },
+        Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
+    )
+    .await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn composition_state_is_unavailable_without_a_manifest_grant() {
+    let report = execute_state_snippet(
+        "state-unavailable-session",
+        "state-unavailable-run",
+        "return state.get(\"missing\")",
+        BindingManifest::default(),
+    )
+    .await;
+
+    assert!(!report.ok);
+    assert_eq!(
+        report.run.failure_category,
+        Some(CompositionFailureCategory::PolicyDenied)
+    );
+    assert!(report.summary.contains("state.get"));
+    assert!(report.child_calls.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn composition_state_persists_only_within_the_same_session_and_tool_window() {
+    let manifest = state_manifest(CompositionStateBinding::default());
+    let first = execute_state_snippet(
+        "state-scope-session-a",
+        "state-scope-put",
+        "state.put(\"draft\", {step: 1})\nreturn state.list()",
+        manifest.clone(),
+    )
+    .await;
+    assert!(first.ok, "{}", first.summary);
+    assert_eq!(first.run.result, Some(serde_json::json!(["draft"])));
+    assert_eq!(
+        first
+            .child_calls
+            .iter()
+            .map(|call| call.tool_name.as_str())
+            .collect::<Vec<_>>(),
+        ["state.put", "state.list"]
+    );
+    assert_eq!(
+        first.child_calls[0]
+            .annotations
+            .as_ref()
+            .unwrap()
+            .capabilities[COMPOSITION_STATE_CAPABILITY],
+        ["write"]
+    );
+
+    let same_scope = execute_state_snippet(
+        "state-scope-session-a",
+        "state-scope-get",
+        "const value = state.get(\"draft\")\nconst removed = state.delete(\"draft\")\nreturn {value: value, removed: removed, keys: state.list()}",
+        manifest.clone(),
+    )
+    .await;
+    assert!(same_scope.ok, "{}", same_scope.summary);
+    assert_eq!(
+        same_scope.run.result,
+        Some(serde_json::json!({
+            "value": {"step": 1},
+            "removed": true,
+            "keys": [],
+        }))
+    );
+    assert_eq!(
+        same_scope
+            .child_calls
+            .iter()
+            .map(|call| call.tool_name.as_str())
+            .collect::<Vec<_>>(),
+        ["state.get", "state.delete", "state.list"]
+    );
+
+    let _ = execute_state_snippet(
+        "state-scope-session-a",
+        "state-scope-reseed",
+        "state.put(\"draft\", 2)\nreturn nil",
+        manifest.clone(),
+    )
+    .await;
+    crate::llm::fire_session_end_hooks("state-scope-session-a", false);
+    let after_suspend = execute_state_snippet(
+        "state-scope-session-a",
+        "state-scope-after-suspend",
+        "return state.get(\"draft\")",
+        manifest.clone(),
+    )
+    .await;
+    assert_eq!(after_suspend.run.result, Some(serde_json::json!(2)));
+
+    let other_session = execute_state_snippet(
+        "state-scope-session-b",
+        "state-scope-other-session",
+        "return state.get(\"draft\")",
+        manifest.clone(),
+    )
+    .await;
+    assert_eq!(other_session.run.result, Some(Value::Null));
+
+    let mut other_window = manifest.clone();
+    other_window.metadata = serde_json::json!({"tool_window": "other"});
+    let other_window = execute_state_snippet(
+        "state-scope-session-a",
+        "state-scope-other-window",
+        "return state.get(\"draft\")",
+        other_window,
+    )
+    .await;
+    assert_eq!(other_window.run.result, Some(Value::Null));
+
+    crate::llm::fire_session_close_hooks("state-scope-session-a");
+    let after_session_end = execute_state_snippet(
+        "state-scope-session-a",
+        "state-scope-after-end",
+        "return state.get(\"draft\")",
+        manifest,
+    )
+    .await;
+    assert_eq!(after_session_end.run.result, Some(Value::Null));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn composition_state_limits_fail_closed_with_structured_errors() {
+    let value_limit = execute_state_snippet(
+        "state-limit-value",
+        "state-limit-value-run",
+        "return state.put(\"key\", \"long\")",
+        state_manifest(CompositionStateBinding {
+            max_value_bytes: 4,
+            max_total_bytes: 32,
+            max_keys: 4,
+            ..CompositionStateBinding::default()
+        }),
+    )
+    .await;
+    assert!(!value_limit.ok);
+    assert_eq!(value_limit.child_results.len(), 1);
+    assert_eq!(
+        value_limit.child_results[0].error_details,
+        Some(serde_json::json!({
+            "code": "value_too_large",
+            "operation": "put",
+            "message": "state value exceeds max_value_bytes=4",
+            "key": "key",
+            "limit": 4,
+            "actual": 6,
+        }))
+    );
+
+    let key_limit = execute_state_snippet(
+        "state-limit-keys",
+        "state-limit-keys-run",
+        "state.put(\"a\", 1)\nreturn state.put(\"b\", 2)",
+        state_manifest(CompositionStateBinding {
+            max_value_bytes: 8,
+            max_total_bytes: 32,
+            max_keys: 1,
+            ..CompositionStateBinding::default()
+        }),
+    )
+    .await;
+    assert!(!key_limit.ok);
+    assert_eq!(key_limit.child_results.len(), 2);
+    assert_eq!(
+        key_limit.child_results[1].error_details.as_ref().unwrap()["code"],
+        "too_many_keys"
+    );
+
+    let total_limit = execute_state_snippet(
+        "state-limit-total",
+        "state-limit-total-run",
+        "state.put(\"a\", \"12\")\nreturn state.put(\"b\", \"34\")",
+        state_manifest(CompositionStateBinding {
+            max_value_bytes: 4,
+            max_total_bytes: 9,
+            max_keys: 4,
+            ..CompositionStateBinding::default()
+        }),
+    )
+    .await;
+    assert!(!total_limit.ok);
+    assert_eq!(
+        total_limit.child_results[1].error_details.as_ref().unwrap()["code"],
+        "total_too_large"
+    );
+
+    let non_json = execute_state_snippet(
+        "state-limit-json",
+        "state-limit-json-run",
+        "return state.put(\"closure\", { -> 1 })",
+        state_manifest(CompositionStateBinding::default()),
+    )
+    .await;
+    assert!(!non_json.ok);
+    assert_eq!(
+        non_json.child_results[0].error_details.as_ref().unwrap()["code"],
+        "non_json_value"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn composition_state_replay_receipts_preserve_the_transition_sequence() {
+    let report = execute_state_snippet(
+        "state-replay-session",
+        "state-replay-run",
+        "state.put(\"answer\", 42)\nconst value = state.get(\"answer\")\nconst removed = state.delete(\"answer\")\nreturn {value: value, removed: removed}",
+        state_manifest(CompositionStateBinding::default()),
+    )
+    .await;
+    assert!(report.ok, "{}", report.summary);
+
+    let trace = composition_crystallization_trace(&report, &serde_json::json!({}));
+    let receipts = trace["replay_run"]["effect_receipts"]
+        .as_array()
+        .expect("effect receipts");
+    let state_receipts = receipts
+        .iter()
+        .filter(|receipt| {
+            receipt["tool_name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("state."))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(state_receipts.len(), 3);
+    assert_eq!(state_receipts[0]["tool_name"], "state.put");
+    assert_eq!(
+        state_receipts[0]["input"],
+        serde_json::json!({"key": "answer", "value": 42})
+    );
+    assert_eq!(state_receipts[1]["tool_name"], "state.get");
+    assert_eq!(state_receipts[1]["output"], 42);
+    assert_eq!(state_receipts[2]["tool_name"], "state.delete");
+    assert_eq!(state_receipts[2]["output"], true);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn composition_state_runs_through_the_public_harn_builtin_path() {
+    let _session = crate::agent_sessions::enter_current_session("state-builtin-session");
+    let result = run_composition_dispatcher_source(
+        r#"
+pipeline default(task) {
+  const manifest = composition_binding_manifest([], {
+    state: {max_value_bytes: 32, max_total_bytes: 64, max_keys: 2},
+  })
+  const first = composition_execute(
+    "state.put(\"step\", {done: true})\nreturn state.list()",
+    manifest,
+    {run_id: "state-builtin-first"},
+  )
+  const second = composition_execute(
+    "return state.get(\"step\")",
+    manifest,
+    {run_id: "state-builtin-second"},
+  )
+  return {
+    first_ok: first.ok,
+    first_result: first.run.result,
+    second_ok: second.ok,
+    second_result: second.run.result,
+    state_manifest: manifest.state,
+  }
+}
+"#,
+        |_| {},
+    )
+    .await
+    .expect("state-enabled compositions succeed");
+
+    assert_eq!(result["first_ok"], true);
+    assert_eq!(result["first_result"], serde_json::json!(["step"]));
+    assert_eq!(result["second_ok"], true);
+    assert_eq!(result["second_result"], serde_json::json!({"done": true}));
+    assert_eq!(result["state_manifest"]["max_value_bytes"], 32);
+    assert_eq!(result["state_manifest"]["max_total_bytes"], 64);
+    assert_eq!(result["state_manifest"]["max_keys"], 2);
+    crate::llm::fire_session_close_hooks("state-builtin-session");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn harn_composition_dispatcher_closure_can_call_host_has() {
     let report = run_composition_dispatcher_source(

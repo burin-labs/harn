@@ -33,6 +33,9 @@ pub(super) fn finish_agent_session(
     abandon_in_flight: bool,
 ) {
     crate::llm::agent_runtime::fire_session_end_hooks(session_id, abandon_in_flight);
+    if abandon_in_flight {
+        crate::llm::agent_runtime::fire_session_close_hooks(session_id);
+    }
     if let Some(guard) = session.nested_policy_guard.take() {
         guard.finish();
     }
@@ -55,6 +58,7 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
     crate::llm::permissions::clear_session_grants(session_id);
     crate::orchestration::clear_approval_policy_repeat_counts(session_id);
     crate::llm::agent_runtime::fire_session_end_hooks(session_id, false);
+    crate::llm::agent_runtime::fire_session_close_hooks(session_id);
     Ok(())
 }
 

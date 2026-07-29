@@ -2607,7 +2607,7 @@ tool registry dict.
 | `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
 | `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
 | `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
-| `composition_binding_manifest(tools, options?)` | tools: list or dict, options?: dict | dict | Build a stable Code Mode binding manifest from Harn, host bridge, MCP, provider-native, or deferred tools |
+| `composition_binding_manifest(tools, options?)` | tools: list or dict, options?: dict | dict | Build a stable Code Mode binding manifest; `options.state` may grant bounded session state |
 | `composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
 | `composition_search_examples(query?, limit?)` | query?: string, limit?: int | list | Return curated read-only composition examples |
 | `composition_harn_api(manifest)` | manifest: dict | string | Emit typed Harn wrapper declarations for a Code Mode binding manifest |
@@ -2632,6 +2632,15 @@ caps, retry policy, trusted MCP annotation gates, idempotency keys, and
 `harn.code.execute_composition`. The MCP executor profile returns only a
 reduced result envelope by default; use `composition_execute(...)` directly for
 the full child audit report.
+
+`composition_binding_manifest(..., {state: {...}})` injects the
+`state.get(key)`, `state.put(key, value)`, `state.list()`, and
+`state.delete(key)` bindings. State is disabled by default, accepts only JSON,
+and is scoped by the explicit or current agent `session_id` and manifest hash.
+Configure `max_value_bytes`, `max_total_bytes`, and `max_keys`; failed
+operations return typed errors and remain visible as ordinary composition child
+results. State windows are cleared at session end and are never durable. See
+[Governed Code Mode](./code-mode.md#session-scoped-state).
 
 `tool_synthesize(config)` is the guarded natural-language tool bootstrapper. It
 returns a callable closure and pins the synthesis in an in-memory cache keyed by
