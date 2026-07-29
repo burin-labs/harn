@@ -277,6 +277,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "self_consistency_tie",
     "session_closed",
     "structural_validator_decision",
+    "subagent_stop",
     "step_judge_decision",
     "tool_batch_disposition",
     "tool_call_audit",

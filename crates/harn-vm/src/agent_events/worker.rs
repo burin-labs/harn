@@ -1,5 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+/// Structured terminal outcome for one delegated sub-agent run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentTerminalStatus {
+    Success,
+    Failure,
+    Cancellation,
+    Timeout,
+}
+
 /// One coalesced filesystem notification from a hostlib `fs_watch`
 /// subscription.
 #[derive(Clone, Debug, Serialize, Deserialize)]

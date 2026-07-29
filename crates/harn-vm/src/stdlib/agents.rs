@@ -9,6 +9,8 @@ pub(super) mod agents_workers;
 pub(super) mod records;
 #[path = "agents_sub_agent.rs"]
 mod sub_agent;
+#[path = "agents_sub_agent_lifecycle.rs"]
+mod sub_agent_lifecycle;
 #[path = "workflow/mod.rs"]
 pub(super) mod workflow;
 
@@ -87,6 +89,9 @@ pub(super) struct SubAgentRunSpec {
     /// runtime validates the anchor is inside the parent's anchor +
     /// mounted roots before launch.
     pub(super) workspace_anchor: Option<crate::workspace_anchor::WorkspaceAnchor>,
+    /// Shared by the executing child and its worker lifecycle bridge so a
+    /// cancellation racing a normal return still produces one stop event.
+    pub(super) stop_emitted: Arc<AtomicBool>,
 }
 
 pub(super) struct SubAgentExecutionResult {
@@ -742,6 +747,7 @@ async fn top_level_agent_suspend_builtin(
             parent_session_id: None,
             reminder_propagation: Vec::new(),
             workspace_anchor: None,
+            stop_emitted: Arc::new(AtomicBool::new(false)),
         }),
     };
     let request = worker_request_for_config(&task, &config);

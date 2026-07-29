@@ -84,3 +84,230 @@ pub type RecurringDiagnosticObservation = {
   state: RecurringDiagnosticState?,
   signal: UnheededRecurringDiagnostic?,
 }
+
+/** One caller-declared environment surface used to judge action futility. */
+pub type AgentObservationSurface = {
+  name: string,
+  value?: any,
+  fingerprint?: string,
+  observable?: bool,
+  evidence?: string,
+}
+
+/** Canonical fingerprint of the observable subset of an environment. */
+pub type AgentObservationFingerprint = {
+  fingerprint: string?,
+  surfaces: list<{name: string, fingerprint: string, evidence?: string}>,
+}
+
+/** Stable identity for deciding whether an agent repeated the same action. */
+pub type AgentActionIdentity = {name: string, arguments_fingerprint: string, identity: string}
+
+/** Structural verdict for an action's before/after environment observations. */
+pub type AgentFutilityVerdict = {
+  kind: "changed" | "unchanged" | "unobservable",
+  action: AgentActionIdentity,
+  repeated_action: bool,
+  before_fingerprint: string?,
+  after_fingerprint: string?,
+  compared_surfaces: list<string>,
+  evidence: list<{
+    surface: string,
+    before_fingerprint: string,
+    after_fingerprint: string,
+    changed: bool,
+    before_evidence?: string,
+    after_evidence?: string,
+  }>,
+}
+
+pub type AgentFutilityPolicyAction = "retry" | "reformulate" | "escalate" | "stop"
+
+/** Policy decision layered over a structural futility verdict. */
+pub type AgentFutilityDecision = {
+  verdict: AgentFutilityVerdict,
+  action: AgentFutilityPolicyAction,
+  repeat_count: int,
+  threshold: int,
+  retry_allowed: bool,
+  blocked: bool,
+}
+
+/**
+ * Fingerprint named observable surfaces once at the caller-owned observation
+ * boundary. `observable: false`, a missing value, or an empty explicit
+ * fingerprint excludes that surface; an empty result is deliberately
+ * unobservable rather than equal to another empty result.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn agent_observation_fingerprint(
+  surfaces: list<AgentObservationSurface>,
+) -> AgentObservationFingerprint {
+  let normalized = []
+  let names = []
+  for surface in surfaces {
+    const name = trim(surface.name)
+    if name == "" {
+      throw "agent_observation_fingerprint: surface name must not be empty"
+    }
+    if names.contains(name) {
+      throw "agent_observation_fingerprint: duplicate surface name: " + name
+    }
+    names = names + [name]
+    const explicit = trim(to_string(surface?.fingerprint ?? ""))
+    const observable = (surface?.observable ?? true)
+      && (explicit != "" || surface?.value != nil)
+    if observable {
+      const fingerprint = if explicit != "" {
+        explicit
+      } else {
+        sha256(json_stringify(surface.value))
+      }
+      normalized = normalized
+        + [{name: name, fingerprint: fingerprint, evidence: surface?.evidence}]
+    }
+  }
+  if len(normalized) == 0 {
+    return {fingerprint: nil, surfaces: []}
+  }
+  const stable = normalized.sort_by({ surface -> surface.name })
+  let fingerprint_rows = []
+  for surface in stable {
+    fingerprint_rows = fingerprint_rows
+      + [{name: surface.name, fingerprint: surface.fingerprint}]
+  }
+  return {fingerprint: sha256(json_stringify(fingerprint_rows)), surfaces: stable}
+}
+
+/**
+ * Build the stable repeated-action identity from a name and typed arguments.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_action_identity(name: string, arguments: any) -> AgentActionIdentity {
+  const arguments_fingerprint = sha256(json_stringify(arguments))
+  return {
+    name: name,
+    arguments_fingerprint: arguments_fingerprint,
+    identity: sha256(name + "\n" + arguments_fingerprint),
+  }
+}
+
+fn __agent_observation_surface(observation: AgentObservationFingerprint, name: string) {
+  for surface in observation.surfaces {
+    if surface.name == name {
+      return surface
+    }
+  }
+  return nil
+}
+
+/**
+ * Compare the intersection of named before/after surfaces. At least one
+ * comparable surface is required for `unchanged`; missing observations never
+ * become evidence that the environment stayed the same.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_futility_verdict(
+  before: AgentObservationFingerprint,
+  after: AgentObservationFingerprint,
+  action: AgentActionIdentity,
+  previous_action: AgentActionIdentity? = nil,
+) -> AgentFutilityVerdict {
+  let evidence = []
+  let compared = []
+  let changed = false
+  for before_surface in before.surfaces {
+    const after_surface = __agent_observation_surface(after, before_surface.name)
+    if after_surface != nil {
+      const surface_changed = before_surface.fingerprint != after_surface.fingerprint
+      changed = changed || surface_changed
+      compared = compared + [before_surface.name]
+      evidence = evidence
+        + [
+        {
+          surface: before_surface.name,
+          before_fingerprint: before_surface.fingerprint,
+          after_fingerprint: after_surface.fingerprint,
+          changed: surface_changed,
+          before_evidence: before_surface?.evidence,
+          after_evidence: after_surface?.evidence,
+        },
+      ]
+    }
+  }
+  const kind = if changed {
+    "changed"
+  } else if len(compared) == 0
+    || len(compared) != len(before.surfaces)
+    || len(compared) != len(after.surfaces) {
+    "unobservable"
+  } else {
+    "unchanged"
+  }
+  return {
+    kind: kind,
+    action: action,
+    repeated_action: previous_action != nil && previous_action.identity == action.identity,
+    before_fingerprint: before.fingerprint,
+    after_fingerprint: after.fingerprint,
+    compared_surfaces: compared,
+    evidence: evidence,
+  }
+}
+
+fn __agent_futility_default_policy(verdict, repeat_count, threshold) {
+  if verdict.kind == "unobservable" {
+    return "escalate"
+  }
+  if verdict.kind == "unchanged"
+    && verdict.repeated_action
+    && repeat_count >= threshold {
+    return "reformulate"
+  }
+  return "retry"
+}
+
+/**
+ * Apply caller policy after the stdlib-owned verdict. The optional hook
+ * receives `{verdict, repeat_count, threshold}` and must return one of retry,
+ * reformulate, escalate, or stop. Non-retry actions block the identical retry;
+ * callers retain ownership of wording and the concrete recovery mechanism.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn agent_futility_decide(
+  verdict: AgentFutilityVerdict,
+  repeat_count: int = 1,
+  threshold: int = 1,
+  policy = nil,
+) -> AgentFutilityDecision {
+  if threshold <= 0 {
+    throw "agent_futility_decide: threshold must be a positive int"
+  }
+  if repeat_count <= 0 {
+    throw "agent_futility_decide: repeat_count must be a positive int"
+  }
+  const selected = if policy == nil {
+    __agent_futility_default_policy(verdict, repeat_count, threshold)
+  } else {
+    policy({verdict: verdict, repeat_count: repeat_count, threshold: threshold})
+  }
+  if !["retry", "reformulate", "escalate", "stop"].contains(selected) {
+    throw "agent_futility_decide: policy must return retry, reformulate, escalate, or stop"
+  }
+  return {
+    verdict: verdict,
+    action: selected,
+    repeat_count: repeat_count,
+    threshold: threshold,
+    retry_allowed: selected == "retry",
+    blocked: selected != "retry",
+  }
+}

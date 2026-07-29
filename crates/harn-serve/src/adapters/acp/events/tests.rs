@@ -21,10 +21,10 @@ use super::super::schema::{
 use super::test_support::{self, update_harn_meta};
 use super::{AcpAgentEventSink, AcpOutput};
 mod registration_fixtures;
+mod subagent_stop;
 pub(super) async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    let expected_len = events.len();
+    let (sink, expected_len) = (AcpAgentEventSink::new(AcpOutput::Channel(tx)), events.len());
     for event in events {
         sink.handle_event(&event);
     }

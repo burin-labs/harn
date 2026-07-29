@@ -1,6 +1,9 @@
 use crate::value::VmDictExt;
 
 use super::agents_workers;
+use super::sub_agent_lifecycle::{
+    emit_subagent_stop_once, stop_details_for_error, stop_details_for_result, SubagentStopDetails,
+};
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
 use crate::orchestration::{
     annotate_nested_execution_options, CapabilityPolicy, NestedExecutionKind,
@@ -10,6 +13,10 @@ use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
+
+#[cfg(test)]
+#[path = "agents_sub_agent_lifecycle_tests.rs"]
+mod lifecycle_tests;
 
 pub(super) struct ParsedSubAgentRequest {
     pub(super) spec: SubAgentRunSpec,
@@ -150,6 +157,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
             parent_session_id,
             reminder_propagation,
             workspace_anchor,
+            stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         },
         background,
         carry_policy: policies.carry_policy,
@@ -805,6 +813,19 @@ fn parse_structured_sub_agent_data(
     })
 }
 
+fn finish_sub_agent(
+    spec: &SubAgentRunSpec,
+    payload: serde_json::Value,
+    transcript: VmValue,
+    details: SubagentStopDetails,
+) -> SubAgentExecutionResult {
+    emit_subagent_stop_once(spec, details);
+    SubAgentExecutionResult {
+        payload,
+        transcript,
+    }
+}
+
 pub(super) async fn execute_sub_agent(
     ctx: &AsyncBuiltinCtx,
     spec: SubAgentRunSpec,
@@ -854,6 +875,7 @@ pub(super) async fn execute_sub_agent(
             (result, crate::stdlib::json_to_vm_value(&transcript_json))
         }
         Err(error) => {
+            let stop_details = stop_details_for_error(&error);
             let error_value = match &error {
                 VmError::CategorizedError { message, category } => {
                     sub_agent_error_dict(category.as_str(), message.clone(), None)
@@ -891,10 +913,12 @@ pub(super) async fn execute_sub_agent(
                     Some(crate::llm::vm_value_to_json(&error_value)),
                 ),
             );
-            return Ok(SubAgentExecutionResult {
-                payload: crate::llm::vm_value_to_json(&envelope),
+            return Ok(finish_sub_agent(
+                &spec,
+                crate::llm::vm_value_to_json(&envelope),
                 transcript,
-            });
+                stop_details,
+            ));
         }
     };
     let tokens_used = transcript_tokens_used(&transcript);
@@ -905,6 +929,7 @@ pub(super) async fn execute_sub_agent(
             transcript,
         });
     }
+    let terminal_details = stop_details_for_result(&result);
 
     let wants_structured_output =
         spec.returns_schema.is_some() || option_requests_structured_output(&spec.options);
@@ -940,8 +965,9 @@ pub(super) async fn execute_sub_agent(
                 Some(crate::llm::vm_value_to_json(&error_value)),
             ),
         );
-        return Ok(SubAgentExecutionResult {
-            payload: crate::llm::vm_value_to_json(&wrap_sub_agent_error(
+        return Ok(finish_sub_agent(
+            &spec,
+            crate::llm::vm_value_to_json(&wrap_sub_agent_error(
                 summary,
                 artifacts,
                 evidence_added,
@@ -952,7 +978,8 @@ pub(super) async fn execute_sub_agent(
                 Some(transcript.clone()),
             )),
             transcript,
-        });
+            SubagentStopDetails::failure("budget_exhausted", "nested budget was exhausted"),
+        ));
     }
 
     let mut envelope = sub_agent_base_envelope(
@@ -1007,8 +1034,9 @@ pub(super) async fn execute_sub_agent(
                         ))),
                     ),
                 );
-                return Ok(SubAgentExecutionResult {
-                    payload: crate::llm::vm_value_to_json(&wrap_sub_agent_error(
+                return Ok(finish_sub_agent(
+                    &spec,
+                    crate::llm::vm_value_to_json(&wrap_sub_agent_error(
                         summary,
                         artifacts,
                         evidence_added,
@@ -1017,13 +1045,14 @@ pub(super) async fn execute_sub_agent(
                         &spec.session_id,
                         sub_agent_error_dict(
                             crate::value::error_to_category(&error).as_str(),
-                            message,
+                            message.clone(),
                             None,
                         ),
                         Some(transcript.clone()),
                     )),
                     transcript,
-                });
+                    SubagentStopDetails::failure("schema_validation", message),
+                ));
             }
         }
     }
@@ -1044,8 +1073,9 @@ pub(super) async fn execute_sub_agent(
                 ))),
             ),
         );
-        return Ok(SubAgentExecutionResult {
-            payload: crate::llm::vm_value_to_json(&wrap_sub_agent_error(
+        return Ok(finish_sub_agent(
+            &spec,
+            crate::llm::vm_value_to_json(&wrap_sub_agent_error(
                 summary,
                 artifacts,
                 evidence_added,
@@ -1056,7 +1086,8 @@ pub(super) async fn execute_sub_agent(
                 Some(transcript.clone()),
             )),
             transcript,
-        });
+            SubagentStopDetails::failure("permission_denied", "sub-agent tool permission denied"),
+        ));
     }
 
     append_parent_sub_agent_event(
@@ -1071,16 +1102,18 @@ pub(super) async fn execute_sub_agent(
         ),
     );
 
-    Ok(SubAgentExecutionResult {
-        payload: crate::llm::vm_value_to_json(&VmValue::dict(envelope)),
+    Ok(finish_sub_agent(
+        &spec,
+        crate::llm::vm_value_to_json(&VmValue::dict(envelope)),
         transcript,
-    })
+        terminal_details,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::mock::{push_llm_mock, reset_llm_mock_state, LlmMock};
+    use crate::llm::mock::reset_llm_mock_state;
 
     struct ExecutionPolicyGuard;
 
@@ -1097,6 +1130,51 @@ mod tests {
             ..CapabilityPolicy::default()
         });
         ExecutionPolicyGuard
+    }
+
+    #[test]
+    fn stop_details_preserve_cancel_and_timeout_provenance() {
+        let cancelled = stop_details_for_error(&VmError::CategorizedError {
+            message: "parent cancelled".to_string(),
+            category: crate::value::ErrorCategory::Cancelled,
+        });
+        assert_eq!(
+            cancelled.status,
+            crate::agent_events::SubagentTerminalStatus::Cancellation
+        );
+        assert!(cancelled.cancellation.is_some());
+        assert!(cancelled.timeout.is_none());
+
+        let timed_out = stop_details_for_error(&VmError::CategorizedError {
+            message: "deadline elapsed".to_string(),
+            category: crate::value::ErrorCategory::Timeout,
+        });
+        assert_eq!(
+            timed_out.status,
+            crate::agent_events::SubagentTerminalStatus::Timeout
+        );
+        assert!(timed_out.timeout.is_some());
+        assert!(timed_out.cancellation.is_none());
+
+        let failed = stop_details_for_result(&serde_json::json!({
+            "status": "provider_error",
+            "stop_reason": "provider_error",
+            "error": {"category": "provider"}
+        }));
+        assert_eq!(
+            failed.status,
+            crate::agent_events::SubagentTerminalStatus::Failure
+        );
+        assert_eq!(failed.terminal_class, "provider_error");
+
+        let succeeded = stop_details_for_result(&serde_json::json!({
+            "status": "done",
+            "stop_reason": "completed"
+        }));
+        assert_eq!(
+            succeeded.status,
+            crate::agent_events::SubagentTerminalStatus::Success
+        );
     }
 
     #[test]
@@ -1496,112 +1574,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn execute_sub_agent_uses_child_transcript_and_appends_parent_events() {
-        crate::agent_sessions::reset_session_store();
-        reset_llm_mock_state();
-        let parent = crate::agent_sessions::open_or_create(Some("parent-subagent".into()));
-        let parent_chain = crate::ActorChain::new("user:kenneth").pushed("agent:root");
-        crate::agent_sessions::set_actor_chain(&parent, Some(parent_chain)).unwrap();
-        crate::agent_sessions::inject_message(&parent, assistant_message("parent context"))
-            .unwrap();
-        crate::agent_sessions::claim_tool_format(&parent, "text").unwrap();
-        push_llm_mock(LlmMock {
-            text: "child result".to_string(),
-            tool_calls: Vec::new(),
-            raw_tool_calls: Vec::new(),
-            match_pattern: None,
-            scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
-            entry_id: String::new(),
-            sticky: false,
-            input_tokens: None,
-            output_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            thinking: None,
-            thinking_summary: None,
-            stop_reason: None,
-            model: "mock".to_string(),
-            provider: None,
-            blocks: None,
-            logprobs: Vec::new(),
-            error: None,
-            stream_chunks: Vec::new(),
-        });
-        let spec = SubAgentRunSpec {
-            name: "research-worker".to_string(),
-            task: "inspect the repo".to_string(),
-            system: None,
-            options: crate::value::DictMap::from_iter([
-                (
-                    crate::value::intern_key("provider"),
-                    VmValue::String(arcstr::ArcStr::from("mock")),
-                ),
-                (
-                    crate::value::intern_key("model"),
-                    VmValue::String(arcstr::ArcStr::from("mock")),
-                ),
-                (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
-            ]),
-            returns_schema: None,
-            session_id: "child-subagent".to_string(),
-            parent_session_id: Some(parent.clone()),
-            reminder_propagation: Vec::new(),
-            workspace_anchor: None,
-        };
-
-        let mut vm = crate::Vm::new();
-        crate::register_vm_stdlib(&mut vm);
-        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
-        let result = execute_sub_agent(&ctx, spec).await.unwrap();
-        assert_eq!(result.payload["ok"].as_bool(), Some(true));
-
-        let child_messages = crate::agent_sessions::messages_json("child-subagent");
-        assert!(!child_messages
-            .iter()
-            .any(|message| message["content"].as_str() == Some("parent context")));
-        // The child sub-agent resolves its OWN tool_format default — the spec
-        // pins none, and `mock`/`mock` has no capability pin, so it lands on the
-        // global text-channel default, which is now fenced-json (`json`), not
-        // heredoc (`text`). (The parent's separate `text` claim does not bleed
-        // into the child; the child always resolved its own default here.)
-        assert_eq!(
-            crate::agent_sessions::tool_format("child-subagent").as_deref(),
-            Some("json")
-        );
-        assert_eq!(
-            crate::agent_sessions::actor_chain("child-subagent").map(|chain| chain.to_json_value()),
-            Some(serde_json::json!({
-                "sub": "user:kenneth",
-                "act": {
-                    "sub": "research-worker",
-                    "act": {
-                        "sub": "agent:root"
-                    }
-                }
-            }))
-        );
-
-        let parent_events = crate::agent_sessions::snapshot(&parent)
-            .and_then(|value| value.as_dict().cloned())
-            .and_then(|dict| dict.get("events").cloned())
-            .and_then(|value| match value {
-                VmValue::List(list) => Some((*list).clone()),
-                _ => None,
-            })
-            .expect("parent events");
-        let event_kinds: Vec<String> = parent_events
-            .iter()
-            .filter_map(|event| event.as_dict())
-            .filter_map(|dict| dict.get("kind").map(VmValue::display))
-            .collect();
-        assert!(event_kinds.iter().any(|kind| kind == "sub_agent_start"));
-        assert!(event_kinds.iter().any(|kind| kind == "sub_agent_result"));
-
-        reset_llm_mock_state();
-        crate::agent_sessions::reset_session_store();
-    }
-
-    #[tokio::test(flavor = "current_thread")]
     async fn execute_sub_agent_propagates_nested_budget_denial() {
         crate::agent_sessions::reset_session_store();
         reset_llm_mock_state();
@@ -1634,6 +1606,7 @@ mod tests {
             parent_session_id: Some(parent.clone()),
             reminder_propagation: Vec::new(),
             workspace_anchor: None,
+            stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         let mut vm = crate::Vm::new();

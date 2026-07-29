@@ -176,6 +176,7 @@ fn persist_worker_snapshot_strips_closures_from_sub_agent_options_with_warning()
                 parent_session_id: None,
                 reminder_propagation: Vec::new(),
                 workspace_anchor: None,
+                stop_emitted: Arc::new(AtomicBool::new(false)),
             }),
         },
         snapshot_path.clone(),
@@ -498,6 +499,7 @@ fn worker_summary_exposes_request_and_provenance() {
                 parent_session_id: Some("session_parent".to_string()),
                 reminder_propagation: Vec::new(),
                 workspace_anchor: None,
+                stop_emitted: Arc::new(AtomicBool::new(false)),
             }),
         },
         handle: None,
@@ -855,6 +857,7 @@ async fn emit_worker_event_routes_through_parent_session_sink() {
             ..Default::default()
         }
         .normalize(),
+        subagent_spec: None,
     };
 
     super::bridge::emit_worker_event(None, &snapshot, WorkerEvent::WorkerWaitingForInput)
@@ -884,6 +887,74 @@ async fn emit_worker_event_routes_through_parent_session_sink() {
     }
 
     clear_session_sinks(&parent_session);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancelled_subagent_worker_emits_one_typed_stop() {
+    use std::sync::Mutex;
+
+    use crate::agent_events::{
+        clear_session_sinks, register_sink, AgentEvent, AgentEventSink, SubagentTerminalStatus,
+        WorkerEvent,
+    };
+
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0.lock().unwrap().push(event.clone());
+        }
+    }
+
+    let parent = "parent-subagent-cancel".to_string();
+    clear_session_sinks(&parent);
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    register_sink(parent.clone(), Arc::new(CapturingSink(captured.clone())));
+    let snapshot = super::bridge::WorkerEventSnapshot {
+        worker_id: "worker-cancel".to_string(),
+        worker_name: "cancelled-child".to_string(),
+        worker_task: "wait".to_string(),
+        worker_mode: "sub_agent".to_string(),
+        metadata: serde_json::json!({"error": "cancelled by parent"}),
+        audit: MutationSessionRecord {
+            parent_session_id: Some(parent.clone()),
+            ..Default::default()
+        }
+        .normalize(),
+        subagent_spec: Some(SubAgentRunSpec {
+            name: "cancelled-child".to_string(),
+            task: "wait".to_string(),
+            session_id: "child-subagent-cancel".to_string(),
+            parent_session_id: Some(parent.clone()),
+            ..Default::default()
+        }),
+    };
+
+    super::bridge::emit_worker_event(None, &snapshot, WorkerEvent::WorkerCancelled)
+        .await
+        .unwrap();
+    // Exercise the hard-cancel/normal-cleanup race: both paths can observe a
+    // terminal worker, but the shared token must admit one stop record.
+    super::bridge::emit_worker_event(None, &snapshot, WorkerEvent::WorkerCancelled)
+        .await
+        .unwrap();
+
+    let events = captured.lock().unwrap();
+    let stops: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::SubagentStop {
+                terminal_status,
+                cancellation,
+                ..
+            } => Some((*terminal_status, cancellation.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stops.len(), 1);
+    assert_eq!(stops[0].0, SubagentTerminalStatus::Cancellation);
+    assert!(stops[0].1.is_some());
+    drop(events);
+    clear_session_sinks(&parent);
 }
 
 /// The `--approve auto` (headless) shape: a live auto-approve policy sits on

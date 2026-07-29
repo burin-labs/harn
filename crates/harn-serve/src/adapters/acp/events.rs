@@ -1276,7 +1276,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 session_id,
                 ext_payloads::missing_tool_call_verdict(event),
             ),
-            AgentEvent::RequireSuccessfulToolsViolation { .. }
+            AgentEvent::SubagentStop { .. }
+            | AgentEvent::RequireSuccessfulToolsViolation { .. }
             | AgentEvent::FinalWrapup { .. }
             | AgentEvent::PackThinkingStripped { .. }
             | AgentEvent::SelfConsistencyTie { .. }
@@ -1802,10 +1803,9 @@ impl AgentEventSink for AcpAgentEventSink {
     }
 }
 
-mod ext_payloads;
-
 #[cfg(test)]
 mod boundary_tests;
+mod ext_payloads;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
