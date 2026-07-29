@@ -59,6 +59,7 @@ GATES=(
   check-prompt-grammar
   check-language-spec
   check-grammar-keywords
+  check-tree-sitter-parser
   verify-tree-sitter-parse
   check-trigger-quickref
   check-provider-matrix
