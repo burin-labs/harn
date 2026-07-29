@@ -622,7 +622,7 @@ pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(task) {
           paths: [
             "Cargo.toml",
             "crates/harn-cli/src/cli/**",
-            "perf/cli/**",
+            "bench/cli/**",
             "scripts/bench_cli_cold_start.sh",
             "scripts/bench_cli_cold_start.harn",
             ".github/workflows/cli-cold-start-budget.yml",

@@ -5,12 +5,12 @@
   "fixtures": [
     {
       "id": "simple_tool_run",
-      "path": "benchmarks/replay/fixtures/simple_tool_run.valid.json",
+      "path": "bench/replay/fixtures/simple_tool_run.valid.json",
       "category": "simple_tool_run"
     },
     {
       "id": "composition_readonly",
-      "path": "benchmarks/replay/fixtures/composition_readonly.valid.json",
+      "path": "bench/replay/fixtures/composition_readonly.valid.json",
       "category": "code_mode_composition"
     },
     {

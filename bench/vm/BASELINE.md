@@ -15,7 +15,7 @@ Method:
 - Built once with `cargo build --release --bin harn`.
 - Ran `./scripts/bench_vm.sh --no-build --iterations 20` three times back-to-back.
 - `mean_avg_ms` is the average of each pass's `avg_ms`; this is the value used
-  by `scripts/bench_vm.sh --baseline perf/vm/BASELINE.md` for comparisons.
+  by `scripts/bench_vm.sh --baseline bench/vm/BASELINE.md` for comparisons.
 - `best_min_ms` and `worst_max_ms` are the lowest and highest per-iteration
   wall times observed across the three passes.
 

@@ -1,6 +1,6 @@
 import { shell_quote } from "std/runtime"
 
-const BASELINES = "perf/test-case-performance/baselines.toml"
+const BASELINES = "bench/test-case-performance/baselines.toml"
 
 const SUITE_COUNT = 4
 

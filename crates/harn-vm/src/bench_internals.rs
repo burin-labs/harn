@@ -597,7 +597,7 @@ fn synthetic_closure(name: &str, env: VmEnv) -> VmClosure {
 /// (`crates/harn-vm/src/stdlib/harn_entry.rs`). The stage-loop inversion
 /// re-architecture multiplies the number of these crossings (per tool
 /// call, per turn, per stage attempt), so
-/// `perf/orchestration/bench_harn_entry_crossing.rs` regression-gates the
+/// `bench/orchestration/bench_harn_entry_crossing.rs` regression-gates the
 /// seam. Both production entry points are covered:
 ///
 /// - [`call_export_by_name`] — the `&[VmValue]`-direct path (no JSON
@@ -687,7 +687,7 @@ pub mod harn_entry_crossing {
 
 /// Bench-only access to the transcript projection path
 /// (`crates/harn-vm/src/stdlib/transcript_project.rs`) exercised once
-/// per agent turn. `perf/orchestration/bench_transcript_projection.rs`
+/// per agent turn. `bench/orchestration/bench_transcript_projection.rs`
 /// drives it with synthetic transcripts at ~10k/50k/100k tokens.
 pub mod transcript_projection {
     use crate::value::{VmDictExt, VmError, VmValue};

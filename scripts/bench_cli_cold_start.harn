@@ -6,7 +6,7 @@ const DEFAULT_REGRESSION_X = 1.25
 
 /**
  * Future port tickets can append rows here and add matching
- * `[commands.<key>]` entries in perf/cli/budgets.toml.
+ * `[commands.<key>]` entries in bench/cli/budgets.toml.
  */
 pub fn tracked_commands() {
   return [{key: "version", args: ["version"]}, {key: "try --help", args: ["try", "--help"]}]

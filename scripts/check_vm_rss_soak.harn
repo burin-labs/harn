@@ -14,7 +14,7 @@
 // Exits 0 on success (prints the `vm rss soak: OK ...` line); exits 1 with
 // an `error: ...` message on any failed check, mirroring the Python
 // `SystemExit` behavior.
-const FIXTURE = "benchmarks/vm_memory/module_cycle_entry.harn"
+const FIXTURE = "bench/vm_memory/module_cycle_entry.harn"
 
 const DEFAULT_ITERATIONS = 24
 

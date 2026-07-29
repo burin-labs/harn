@@ -81,7 +81,7 @@ fn install_noop_hook(runtime: &Runtime) -> Vm {
     register_vm_stdlib(&mut vm);
     let exports = runtime
         .block_on(vm.load_module_exports_from_source(
-            "perf/orchestration/noop_hook.harn",
+            "bench/orchestration/noop_hook.harn",
             "pub fn noop(event) {\n  return nil\n}\n",
         ))
         .expect("compile noop hook");

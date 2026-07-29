@@ -12,7 +12,7 @@ metrics and stable receipt hashes.
 harn bench replay --json --output replay-benchmark.json
 ```
 
-By default the command reads `benchmarks/replay/suite.json`. That suite
+By default the command reads `bench/replay/suite.json`. That suite
 references three canonical replay-oracle fixtures:
 
 - simple tool run
@@ -87,8 +87,8 @@ then maps them into Harn replay trace buckets.
 ```bash
 harn bench replay \
   --adapter opencode-jsonl \
-  --external-first benchmarks/replay/adapters/opencode/first.jsonl \
-  --external-second benchmarks/replay/adapters/opencode/second.jsonl \
+  --external-first bench/replay/adapters/opencode/first.jsonl \
+  --external-second bench/replay/adapters/opencode/second.jsonl \
   --external-name opencode-permission-run \
   --json
 ```

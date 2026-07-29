@@ -155,7 +155,7 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
       write_source(root, "crates/app/src/lib.rs", 1)
       write_source(root, "crates/app/tests/integration.rs", 1)
       write_source(root, "crates/app/benches/latency.rs", 1)
-      write_source(root, "perf/src/bin/bench.rs", 1)
+      write_source(root, "bench/src/bin/bench.rs", 1)
       write_source(root, "tree-sitter-harn/bindings/rust/lib.rs", 1)
       write_source(root, "tools/new.rs", 1)
       write_source(root, "spec/protocol-artifacts/harn-protocol.rs", 1)
@@ -182,12 +182,12 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
       assert_eq(
         source_files(root),
         [
+          "bench/src/bin/bench.rs",
           "crates/app/benches/latency.rs",
           "crates/app/src/lib.rs",
           "crates/app/target-codex0-4942/debug/generated.rs",
           "crates/app/tests/integration.rs",
           "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-          "perf/src/bin/bench.rs",
           "target-source/src/lib.rs",
           "tools/new.rs",
           "tree-sitter-harn/bindings/rust/lib.rs",

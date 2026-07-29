@@ -62,9 +62,9 @@ Useful flags:
 - `--iterations N` (default 20) — number of timed runs per subcommand.
 - `--no-build` — skip `cargo build --release --bin harn` when you have
   already built it.
-- `--baseline FILE` (default `perf/cli/baselines/main.json`) — JSON file
+- `--baseline FILE` (default `bench/cli/baselines/main.json`) — JSON file
   to compare against and update on a passing run.
-- `--budgets FILE` (default `perf/cli/budgets.toml`) — per-command
+- `--budgets FILE` (default `bench/cli/budgets.toml`) — per-command
   budget table.
 - `--commands name1,name2` — restrict the run to a subset of the
   configured commands. Useful when iterating on one W ticket.
@@ -124,7 +124,7 @@ the W-ticket work, not the G5 skeleton.
 
 The first real baseline in `baselines/main.json` is the **pre-migration
 reference point** for the VM-heavier re-architecture (stage-loop
-inversion; see `perf/README.md`). Provenance:
+inversion; see `bench/README.md`). Provenance:
 
 - **Host**: Apple M5 Pro, macOS (Darwin 25.5.0, arm64) — the same
   machine class as the self-hosted `[self-hosted, macos, m5pro]` pool

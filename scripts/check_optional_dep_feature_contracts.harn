@@ -11,7 +11,7 @@ const ORT_TLS_FEATURES = [
   "tls-native-vendored",
 ]
 
-const MANIFEST_GLOBS = ["Cargo.toml", "crates/*/Cargo.toml", "perf/*/Cargo.toml"]
+const MANIFEST_GLOBS = ["Cargo.toml", "crates/*/Cargo.toml", "bench/*/Cargo.toml"]
 
 const DEP_SECTIONS = ["dependencies", "build-dependencies", "dev-dependencies"]
 

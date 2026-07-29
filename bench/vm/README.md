@@ -21,7 +21,7 @@ fixture:
 To compare against the checked-in local baseline:
 
 ```bash
-./scripts/bench_vm.sh --iterations 20 --baseline perf/vm/BASELINE.md
+./scripts/bench_vm.sh --iterations 20 --baseline bench/vm/BASELINE.md
 ```
 
 `BASELINE.md` records the current local baseline as an average across several

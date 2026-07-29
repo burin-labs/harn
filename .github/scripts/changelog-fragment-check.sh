@@ -75,7 +75,7 @@ fi
 #      the segment at the root or after any `/`, so `crates/foo/tests/bar.rs`
 #      is covered. The `(^|/)` guard (not a bare `.*`) keeps `contests/` from
 #      matching `tests/`.
-ignorable_dir_anywhere='(^|/)(tests?|conformance|benchmarks|evals|examples|experiments|perf|playground|docs|spec|editors)/'
+ignorable_dir_anywhere='(^|/)(tests?|conformance|bench|evals|examples|experiments|playground|docs|spec|editors)/'
 #   2. Documentation/agent files that are documentation wherever they live.
 ignorable_doc_file_anywhere='(^|/)(README(\.md)?|AGENTS\.md|CLAUDE\.md|CONTRIBUTING\.md)$'
 #   3. Genuinely repo-root-only infrastructure (a nested `.github/` or
