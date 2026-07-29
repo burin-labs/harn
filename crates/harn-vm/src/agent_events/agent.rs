@@ -10,7 +10,7 @@ use super::host_injection::{
     SanitizationVerdict,
 };
 use super::tool::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus};
-use super::worker::{FsWatchEvent, WorkerEvent};
+use super::worker::{FsWatchEvent, SubagentTerminalStatus, WorkerEvent};
 
 /// Reviewable summary of one path in the staged filesystem overlay.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -801,6 +801,26 @@ pub enum AgentEvent {
         metadata: serde_json::Value,
         audit: Option<serde_json::Value>,
     },
+    /// Exactly-once terminal lifecycle record for `sub_agent_run`.
+    /// Unlike the generic worker update, this is present for both foreground
+    /// and background delegation and preserves the parent/child lineage.
+    SubagentStop {
+        session_id: String,
+        parent_run_id: String,
+        child_run_id: String,
+        terminal_status: SubagentTerminalStatus,
+        terminal_class: String,
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result_ref: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        receipt_ref: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cancellation: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<serde_json::Value>,
+        completed_at_ms: i64,
+    },
     /// A human-in-the-loop primitive (`ask_user`, `request_approval`,
     /// `dual_control`, `escalate`) has just suspended the script and is
     /// waiting on a response. Hosts that bridge the VM onto a remote
@@ -1136,6 +1156,7 @@ impl AgentEvent {
             | Self::SafeTextPatchResult { session_id, .. }
             | Self::ControlOutcome { session_id, .. }
             | Self::WorkerUpdate { session_id, .. }
+            | Self::SubagentStop { session_id, .. }
             | Self::HitlRequested { session_id, .. }
             | Self::HitlResolved { session_id, .. }
             | Self::LoopControlDecision { session_id, .. }

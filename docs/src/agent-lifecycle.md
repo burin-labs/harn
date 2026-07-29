@@ -186,6 +186,26 @@ a handoff artifact shaped for parent takeover. `handoff.metadata` includes
 the child `session_id`, workspace anchor, token budget/usage, snapshot path,
 and `child_handoffs` for recursively stopped descendant subagents.
 
+### Terminal `SubagentStop` event
+
+Every terminal `sub_agent_run` emits exactly one typed `SubagentStop` through
+the standard session event sink, for foreground and background children.
+Cooperative suspension is nonterminal and does not emit it. The event carries:
+
+- `parent_run_id` and `child_run_id` for lineage;
+- `terminal_status`: `success`, `failure`, `cancellation`, or `timeout`;
+- a stable terminal class and human-readable reason;
+- result and receipt references;
+- structured cancellation or timeout provenance when applicable; and
+- `completed_at_ms` from the runtime event clock.
+
+The event is persisted by the existing agent-event log and therefore survives
+replay with its lineage intact. Background worker cleanup and the returning
+child share a single emission token, so a cancellation racing a normal return
+cannot duplicate the terminal record. Generic `WorkerUpdate` events remain
+available for worker presentation; `SubagentStop` is the manifest-declared
+semantic terminal contract.
+
 ## Conditioned resume
 
 Pair `agent_await_resumption` with `conditions` to declare what should

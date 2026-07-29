@@ -9,6 +9,37 @@
 
 use harn_vm::agent_events::AgentEvent;
 
+pub(super) fn subagent_stop(event: &AgentEvent) -> serde_json::Value {
+    let AgentEvent::SubagentStop {
+        parent_run_id,
+        child_run_id,
+        terminal_status,
+        terminal_class,
+        reason,
+        result_ref,
+        receipt_ref,
+        cancellation,
+        timeout,
+        completed_at_ms,
+        ..
+    } = event
+    else {
+        return serde_json::json!({});
+    };
+    serde_json::json!({
+        "parentRunId": parent_run_id,
+        "childRunId": child_run_id,
+        "terminalStatus": terminal_status,
+        "terminalClass": terminal_class,
+        "reason": reason,
+        "resultRef": result_ref,
+        "receiptRef": receipt_ref,
+        "cancellation": cancellation,
+        "timeout": timeout,
+        "completedAtMs": completed_at_ms,
+    })
+}
+
 pub(super) fn missing_tool_call_verdict(event: &AgentEvent) -> serde_json::Value {
     let AgentEvent::MissingToolCallVerdict {
         iteration,
@@ -46,6 +77,9 @@ pub(super) fn documented_stdlib_event(
     event: &AgentEvent,
 ) -> (&'static str, &str, serde_json::Value) {
     match event {
+        AgentEvent::SubagentStop { session_id, .. } => {
+            ("subagent_stop", session_id, subagent_stop(event))
+        }
         AgentEvent::RequireSuccessfulToolsViolation {
             session_id,
             kind,

@@ -62,6 +62,7 @@ pub(in super::super) struct WorkerEventSnapshot {
     pub(in super::super) worker_mode: String,
     pub(in super::super) metadata: serde_json::Value,
     pub(in super::super) audit: MutationSessionRecord,
+    pub(in super::super) subagent_spec: Option<super::super::SubAgentRunSpec>,
 }
 
 pub(in super::super) async fn emit_worker_event(
@@ -107,6 +108,51 @@ pub(in super::super) async fn emit_worker_event(
             metadata: snapshot.metadata.clone(),
             audit: audit_value,
         });
+    }
+    if event.is_terminal() {
+        if let Some(spec) = snapshot.subagent_spec.as_ref() {
+            use crate::agent_events::SubagentTerminalStatus;
+            let error = snapshot
+                .metadata
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let details = match event {
+                WorkerEvent::WorkerCompleted => {
+                    super::super::sub_agent_lifecycle::SubagentStopDetails::success()
+                }
+                WorkerEvent::WorkerCancelled | WorkerEvent::WorkerStopped => {
+                    super::super::sub_agent_lifecycle::SubagentStopDetails {
+                        status: SubagentTerminalStatus::Cancellation,
+                        terminal_class: event.as_status().to_string(),
+                        reason: if error.is_empty() {
+                            format!("background sub-agent {}", event.as_status())
+                        } else {
+                            error.clone()
+                        },
+                        cancellation: Some(serde_json::json!({
+                            "source": "worker_lifecycle",
+                            "event": event.as_str(),
+                            "reason": error,
+                        })),
+                        timeout: None,
+                    }
+                }
+                WorkerEvent::WorkerFailed => {
+                    super::super::sub_agent_lifecycle::SubagentStopDetails::failure(
+                        "worker_failed",
+                        if error.is_empty() {
+                            "background sub-agent failed".to_string()
+                        } else {
+                            error
+                        },
+                    )
+                }
+                _ => unreachable!("terminal worker event matched above"),
+            };
+            super::super::sub_agent_lifecycle::emit_subagent_stop_once(spec, details);
+        }
     }
 
     if let Some(bridge) = crate::llm::current_host_bridge() {
@@ -167,6 +213,10 @@ pub(in super::super) fn worker_event_snapshot(state: &WorkerState) -> WorkerEven
         worker_mode: state.mode.clone(),
         metadata: worker_bridge_metadata(state),
         audit: state.audit.clone(),
+        subagent_spec: match &state.config {
+            super::WorkerConfig::SubAgent { spec } => Some((**spec).clone()),
+            _ => None,
+        },
     }
 }
 

@@ -428,6 +428,29 @@ Same as `llm_call`, plus additional options:
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
 | `mcp_servers` | list | nil | MCP servers to connect for this loop. Harn calls `tools/list` once per server, adds discovered tools as `<server>__<tool>`, and dispatches matching tool calls through `tools/call` |
 
+### Environment-unchanged futility
+
+`stall_diagnostics` observes the loop's transcript, but some callers have a
+stronger signal: the relevant environment before and after an action. The
+`std/agent/stall` facade provides a typed, pure contract for that boundary:
+
+- `agent_observation_fingerprint(surfaces)` fingerprints caller-named
+  observable surfaces and excludes unavailable observations.
+- `agent_action_identity(name, arguments)` identifies an exact repeated
+  action without parsing rendered tool output.
+- `agent_futility_verdict(before, after, action, previous_action?)` returns
+  `changed`, `unchanged`, or `unobservable`, with the compared surfaces and
+  evidence. Missing or only partially comparable surfaces are `unobservable`,
+  never `unchanged`; an observed difference remains `changed`.
+- `agent_futility_decide(verdict, repeat_count?, threshold?, policy?)` applies
+  caller policy. The default reformulates a repeated unchanged action at the
+  threshold and escalates an unobservable environment; a policy hook may
+  choose `retry`, `reformulate`, `escalate`, or `stop`.
+
+The stdlib owns fingerprint comparison and verdict semantics. The caller owns
+which environment surfaces matter, retry thresholds, recovery mechanics, and
+user-facing wording.
+
 ### Effect-phased tool batches
 
 The shared dispatcher classifies local calls from tool annotations into

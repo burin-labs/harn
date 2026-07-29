@@ -190,6 +190,7 @@ fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec
                 })
             })
             .transpose()?,
+        stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }
 
