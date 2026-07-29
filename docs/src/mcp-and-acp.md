@@ -339,6 +339,13 @@ registration using Harn's published metadata document at
 server does not advertise CIMD support, Harn falls back to dynamic client
 registration.
 
+All MCP surfaces use the same redirect policy after authorization-server
+discovery selects a client mode. A host-provided app URI is exact. The CLI
+tries its requested loopback port first; on conflict, CIMD and DCR flows may
+acquire an OS-selected port, while a fixed BYO preregistration fails rather
+than sending an unregistered URI. DCR registers the acquired URI anew for
+every authorization, including reauthorization after the OS port changes.
+
 For a pre-registered client, store the client secret with `harn connect
 api-key` and reference it from `auth.client_secret_id`:
 

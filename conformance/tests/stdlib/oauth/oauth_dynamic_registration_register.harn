@@ -50,6 +50,18 @@ pipeline test(task) {
   assert_eq(len(listed2), 2, "two registrations in store")
   const fetched2 = store.get(response2.client_id)
   assert_eq(fetched2.client_id, response2.client_id, "store.get closure works")
+  // Native clients register the effective OS-selected loopback port. The
+  // server-side validator must accept any secure loopback port so a new
+  // authorization can deliberately re-register after that port changes.
+  const loopback = register_client(
+    store,
+    {redirect_uris: ["http://127.0.0.1:54321/oauth/callback"], token_endpoint_auth_method: "none"},
+  )
+  assert_eq(
+    loopback.redirect_uris,
+    ["http://127.0.0.1:54321/oauth/callback"],
+    "arbitrary secure loopback port round-tripped",
+  )
   // Defaults are applied on registration.
   const defaulted = register_client(store, {redirect_uris: ["https://app.example/cb-3"]})
   assert(defaulted.grant_types.contains("authorization_code"), "default grant_types applied")

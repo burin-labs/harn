@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{env, fs, process};
 
@@ -9,7 +10,7 @@ use harn_vm::mcp_bulk_auth::{
     BulkAuthConfig, BulkAuthMode, BulkAuthServer, McpAuthPhase, McpAuthStatus, McpBulkAuth,
     PrepareOutcome, RealOAuthFlowEngine,
 };
-use harn_vm::mcp_oauth::{self, BeginAuthorization};
+use harn_vm::mcp_oauth::{self, AuthorizationCallback, BeginAuthorization, LoopbackCallback};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -524,28 +525,32 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         server.client_secret.clone()
     };
 
-    let callback_listener = bind_callback_listener(&options.redirect_uri)?;
-    let pending = mcp_oauth::begin_authorization(BeginAuthorization {
-        server_url: server.url.clone(),
-        redirect_uri: options.redirect_uri.clone(),
-        mode: server.auth.as_ref().and_then(|auth| auth.mode),
-        client_id: options
-            .client_id
-            .clone()
-            .or_else(|| server.auth.as_ref().and_then(|auth| auth.client_id.clone()))
-            .or(server.client_id.clone()),
-        client_secret,
-        static_secret_id: server.auth.as_ref().and_then(|auth| auth.secret_id.clone()),
-        scopes: options
-            .scope
-            .clone()
-            .or_else(|| server.auth.as_ref().and_then(|auth| auth.scopes.clone()))
-            .or(server.scopes.clone()),
-    })
+    let callback = Arc::new(LoopbackCallback::new(&options.redirect_uri));
+    let pending = mcp_oauth::begin_authorization_with_callback(
+        BeginAuthorization {
+            server_url: server.url.clone(),
+            redirect_uri: options.redirect_uri.clone(),
+            mode: server.auth.as_ref().and_then(|auth| auth.mode),
+            client_id: options
+                .client_id
+                .clone()
+                .or_else(|| server.auth.as_ref().and_then(|auth| auth.client_id.clone()))
+                .or(server.client_id.clone()),
+            client_secret,
+            static_secret_id: server.auth.as_ref().and_then(|auth| auth.secret_id.clone()),
+            scopes: options
+                .scope
+                .clone()
+                .or_else(|| server.auth.as_ref().and_then(|auth| auth.scopes.clone()))
+                .or(server.scopes.clone()),
+        },
+        &AuthorizationCallback::Loopback(callback.clone()),
+    )
     .await?;
+    let (callback_listener, redirect_uri) = callback.take_listener()?;
 
     println!("Server: {} ({})", server.name, server.url);
-    println!("Redirect URI: {}", options.redirect_uri);
+    println!("Redirect URI: {redirect_uri}");
     println!("Protocol Version: {MCP_PROTOCOL_VERSION}");
     println!("Opening browser for OAuth authorization...");
 
@@ -553,8 +558,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         println!("Open this URL manually:\n{}", pending.authorize_url);
     }
 
-    let callback =
-        wait_for_oauth_response(callback_listener, &options.redirect_uri, &pending.state)?;
+    let callback = wait_for_oauth_response(callback_listener, &redirect_uri, &pending.state)?;
     mcp_oauth::complete_authorization(&pending.state, &callback.code, callback.issuer.as_deref())
         .await?;
     println!("OAuth token stored for {}.", server.name);
@@ -598,17 +602,15 @@ async fn login_bulk(options: &McpLoginArgs) -> Result<(), String> {
         );
     }
 
-    let listener = bind_callback_listener(&options.redirect_uri)?;
-    let expected_path = Url::parse(&options.redirect_uri)
-        .map_err(|error| format!("Invalid redirect URI: {error}"))?
-        .path()
-        .to_string();
-
     let mut config = BulkAuthConfig::load();
     if let Some(concurrency) = options.concurrency {
         config.concurrency = concurrency.max(1);
     }
-    let driver = McpBulkAuth::with_engine(RealOAuthFlowEngine, config);
+    let callback = Arc::new(LoopbackCallback::new(&options.redirect_uri));
+    let driver = McpBulkAuth::with_engine(
+        RealOAuthFlowEngine::with_callback(AuthorizationCallback::Loopback(callback.clone())),
+        config,
+    );
     let json = options.json;
     let mut rx = driver.subscribe();
     let printer = tokio::spawn(async move {
@@ -643,6 +645,11 @@ async fn login_bulk(options: &McpLoginArgs) -> Result<(), String> {
         }
         return Ok(());
     }
+    let (listener, redirect_uri) = callback.take_listener()?;
+    let expected_path = Url::parse(&redirect_uri)
+        .map_err(|error| format!("Invalid redirect URI: {error}"))?
+        .path()
+        .to_string();
 
     // Open each consent serially (stagger to avoid a popup storm). All flows
     // share the one listener; callbacks are demuxed by `state`.
@@ -962,23 +969,6 @@ fn find_manifest() -> Result<(PathBuf, package::Manifest), String> {
 
 fn canonical_server_resource(server_url: &str) -> Result<String, String> {
     harn_vm::mcp_auth::canonical_resource_indicator(server_url).map_err(|error| error.to_string())
-}
-
-fn bind_callback_listener(redirect_uri: &str) -> Result<TcpListener, String> {
-    let parsed =
-        Url::parse(redirect_uri).map_err(|error| format!("Invalid redirect URI: {error}"))?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "Redirect URI must include a host".to_string())?;
-    let port = parsed
-        .port_or_known_default()
-        .ok_or_else(|| "Redirect URI must include a port".to_string())?;
-    let listener = TcpListener::bind((host, port))
-        .map_err(|error| format!("Failed to bind redirect URI {redirect_uri}: {error}"))?;
-    listener
-        .set_nonblocking(false)
-        .map_err(|error| format!("Failed to configure redirect listener: {error}"))?;
-    Ok(listener)
 }
 
 struct OAuthCallbackResponse {

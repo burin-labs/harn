@@ -210,9 +210,18 @@ pub trait OAuthFlowEngine: Send + Sync {
     ) -> Result<StoredMcpToken, String>;
 }
 
-/// Production [`OAuthFlowEngine`] — a thin delegation to `mcp_oauth`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct RealOAuthFlowEngine;
+/// Production [`OAuthFlowEngine`] — delegates flow ownership to `mcp_oauth`
+/// while carrying the callback adapter selected by the surface.
+#[derive(Clone, Debug, Default)]
+pub struct RealOAuthFlowEngine {
+    callback: mcp_oauth::AuthorizationCallback,
+}
+
+impl RealOAuthFlowEngine {
+    pub fn with_callback(callback: mcp_oauth::AuthorizationCallback) -> Self {
+        Self { callback }
+    }
+}
 
 #[async_trait]
 impl OAuthFlowEngine for RealOAuthFlowEngine {
@@ -232,7 +241,7 @@ impl OAuthFlowEngine for RealOAuthFlowEngine {
     }
 
     async fn begin(&self, request: BeginAuthorization) -> Result<PendingAuthorization, String> {
-        mcp_oauth::begin_authorization(request).await
+        mcp_oauth::begin_authorization_with_callback(request, &self.callback).await
     }
 
     async fn complete(
@@ -267,7 +276,7 @@ impl McpBulkAuth<RealOAuthFlowEngine> {
     /// Construct the driver backed by the real `mcp_oauth` engine, with config
     /// resolved from the overlay.
     pub fn new() -> Self {
-        Self::with_engine(RealOAuthFlowEngine, BulkAuthConfig::load())
+        Self::with_engine(RealOAuthFlowEngine::default(), BulkAuthConfig::load())
     }
 }
 
@@ -483,7 +492,7 @@ async fn prepare_one<E: OAuthFlowEngine>(
                 server_url: server.server_url,
                 authorize_url: pending_auth.authorize_url,
                 state: pending_auth.state,
-                redirect_uri,
+                redirect_uri: pending_auth.redirect_uri,
             })
         }
         Ok(Err(error)) => fail(&status_tx, server, &error),
