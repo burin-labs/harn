@@ -27,6 +27,170 @@ pub const HARN_PROVIDER_CATALOG_METHOD: &str = "_harn/providerCatalog";
 /// Schema discriminator for typed `session/prompt` JSON-RPC error data.
 pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str = "harn.acp.prompt_error.v1";
 
+/// Author identity on a collaborative plan revision or comment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanAuthor {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Source identity for an immutable plan revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanSource {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+}
+
+/// Closed collaborative plan-comment lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnPlanCommentState {
+    Open,
+    Addressed,
+    Resolved,
+    Reopened,
+}
+
+/// Closed executable-plan approval lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnPlanApprovalState {
+    Unrequested,
+    Requested,
+    Approved,
+    Rejected,
+}
+
+/// One normalized executable plan step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanStep {
+    pub id: String,
+    pub content: String,
+    pub status: String,
+    pub priority: Option<Value>,
+}
+
+/// Typed approval state for an executable plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanApproval {
+    pub state: HarnPlanApprovalState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Normalized executable plan embedded in a collaborative revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanArtifact {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub schema_version: String,
+    pub id: String,
+    pub tool: String,
+    pub title: String,
+    pub summary: String,
+    pub steps: Vec<HarnPlanStep>,
+    pub assumptions: Vec<String>,
+    pub open_questions: Vec<String>,
+    pub verification_commands: Vec<String>,
+    pub approval: HarnPlanApproval,
+}
+
+/// Typed mutation that produced an immutable plan revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HarnPlanRevisionOperation {
+    Create { event_id: String },
+    Edit { event_id: String },
+    Comment { event_id: String, comment_id: String },
+    CommentState {
+        event_id: String,
+        comment_id: String,
+        state: HarnPlanCommentState,
+    },
+}
+
+/// Immutable collaborative plan revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanRevision {
+    pub revision_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_revision_id: Option<String>,
+    pub markdown: String,
+    pub plan: HarnPlanArtifact,
+    pub author: HarnPlanAuthor,
+    pub source: HarnPlanSource,
+    pub created_at: String,
+    pub operation: HarnPlanRevisionOperation,
+}
+
+/// UTF-8 byte range fallback for a plan-comment anchor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanTextRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Stable-step and quoted-text/range anchor for a plan comment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanCommentAnchor {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quoted_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<HarnPlanTextRange>,
+}
+
+/// Anchored collaborative plan comment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanComment {
+    pub comment_id: String,
+    pub anchor: HarnPlanCommentAnchor,
+    pub body: String,
+    pub state: HarnPlanCommentState,
+    pub author: HarnPlanAuthor,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Receipt binding a comment resolution to input/output revisions and an agent event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanCommentResolutionReceipt {
+    pub receipt_id: String,
+    pub comment_id: String,
+    pub input_revision_id: String,
+    pub output_revision_id: String,
+    pub agent_run_id: String,
+    pub event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
+    pub created_at: String,
+}
+
+/// Harn's canonical collaborative plan-document contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanDocument {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub schema_version: String,
+    pub document_id: String,
+    pub current_revision: HarnPlanRevision,
+    pub comments: Vec<HarnPlanComment>,
+    pub resolution_receipts: Vec<HarnPlanCommentResolutionReceipt>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// Closed ACP permission-option vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -124,6 +288,7 @@ pub enum HarnAgentEventKind {
     McpAuthRequired,
     McpCatalogChanged,
     McpNotification,
+    OrchestrationDecision,
     PackThinkingStripped,
     ProgressReported,
     RequireSuccessfulToolsViolation,
@@ -169,6 +334,7 @@ impl HarnAgentEventKind {
             Self::McpAuthRequired => "mcp_auth_required",
             Self::McpCatalogChanged => "mcp_catalog_changed",
             Self::McpNotification => "mcp_notification",
+            Self::OrchestrationDecision => "orchestration_decision",
             Self::PackThinkingStripped => "pack_thinking_stripped",
             Self::ProgressReported => "progress_reported",
             Self::RequireSuccessfulToolsViolation => "require_successful_tools_violation",
@@ -229,6 +395,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "mcp_auth_required" => Self::McpAuthRequired,
             "mcp_catalog_changed" => Self::McpCatalogChanged,
             "mcp_notification" => Self::McpNotification,
+            "orchestration_decision" => Self::OrchestrationDecision,
             "pack_thinking_stripped" => Self::PackThinkingStripped,
             "progress_reported" => Self::ProgressReported,
             "require_successful_tools_violation" => Self::RequireSuccessfulToolsViolation,
@@ -755,6 +922,7 @@ pub const HARN_AGENT_EVENT_KIND_LOOP_STUCK: &str = "loop_stuck";
 pub const HARN_AGENT_EVENT_KIND_MCP_AUTH_REQUIRED: &str = "mcp_auth_required";
 pub const HARN_AGENT_EVENT_KIND_MCP_CATALOG_CHANGED: &str = "mcp_catalog_changed";
 pub const HARN_AGENT_EVENT_KIND_MCP_NOTIFICATION: &str = "mcp_notification";
+pub const HARN_AGENT_EVENT_KIND_ORCHESTRATION_DECISION: &str = "orchestration_decision";
 pub const HARN_AGENT_EVENT_KIND_PACK_THINKING_STRIPPED: &str = "pack_thinking_stripped";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
 pub const HARN_AGENT_EVENT_KIND_REQUIRE_SUCCESSFUL_TOOLS_VIOLATION: &str = "require_successful_tools_violation";
@@ -797,6 +965,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
+    "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
     "require_successful_tools_violation",

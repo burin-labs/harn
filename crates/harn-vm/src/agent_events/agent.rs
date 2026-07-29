@@ -192,9 +192,15 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         audit: Option<MutationSessionRecord>,
     },
-    Plan {
+    PlanDocumentUpdated {
         session_id: String,
-        plan: serde_json::Value,
+        event: Box<crate::llm::plan::PlanDocumentEvent>,
+    },
+    /// Typed orchestration policy decision. This is intentionally distinct from
+    /// the collaborative plan-document lifecycle projected to ACP/A2A.
+    OrchestrationDecision {
+        session_id: String,
+        decision: serde_json::Value,
     },
     ProgressReported {
         session_id: String,
@@ -1110,7 +1116,8 @@ impl AgentEvent {
             | Self::UserMessage { session_id, .. }
             | Self::ToolCall { session_id, .. }
             | Self::ToolCallUpdate { session_id, .. }
-            | Self::Plan { session_id, .. }
+            | Self::PlanDocumentUpdated { session_id, .. }
+            | Self::OrchestrationDecision { session_id, .. }
             | Self::ProgressReported { session_id, .. }
             | Self::CompassRoutingDecision { session_id, .. }
             | Self::AgentScratchpadReorganization { session_id, .. }

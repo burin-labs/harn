@@ -55,10 +55,15 @@ pipeline main() {
       const events = transcript_events(result?.transcript)
       let saw_plan = false
       for event in events {
-        if event.kind == "plan" {
+        if event.kind == "plan_document" {
           saw_plan = true
-          require event.metadata.plan.schema_version == "harn.plan.v1",
-            "transcript plan metadata should be structured"
+          const document = event.metadata.plan_document
+          require document.schema_version == "harn.plan_document.v1",
+            "transcript plan document metadata should be structured"
+          require document.current_revision.plan.schema_version == "harn.plan.v1",
+            "plan document should carry the normalized executable plan"
+          require document.current_revision.markdown.contains("Read parser tests."),
+            "plan document should carry editable Markdown"
         }
       }
       require saw_plan, "agent loop should persist an emitted plan event"

@@ -20,13 +20,14 @@ The generated contract includes:
   metadata fields, A2A task states, MCP metadata vocabulary, and a `bindings`
   block enumerating the published TypeScript, Swift, Python, and Go modules
   with their stability tier and (for Go) the canonical module path.
-- `schemas/*.schema.json`: stable copies of the ACP, A2A, and MCP adapter
-  profiles validated by `harn test protocols`. MCP publishes both the stable
+- `schemas/*.schema.json`: stable copies of the ACP, A2A, MCP, tool-receipt,
+  and collaborative plan-document contracts validated by generated drift and
+  protocol checks. MCP publishes both the stable
   `2025-11-25` profile and the opt-in `DRAFT-2026-v1` RC profile so
   downstreams can prepare without changing runtime negotiation behavior.
 - `harn-protocol.ts`: TypeScript bindings for JSON-RPC messages, ACP
-  `session/update`, Harn tool lifecycle metadata, A2A task events, and MCP
-  tool/resource/prompt metadata.
+  `session/update`, collaborative plan documents, Harn tool lifecycle metadata,
+  A2A task events, and MCP tool/resource/prompt metadata.
 - `HarnProtocol.swift`: Swift `Codable` definitions for the same
   host-facing surface.
 - `python/harn_protocol.py`: stdlib-only Python 3.9+ module with `Enum`
@@ -41,7 +42,8 @@ The generated contract includes:
   as the canonical module path so consumers can `go get` directly from the
   repository.
 - `fixtures/round_trip.json`: representative request/response/notification
-  envelopes plus an A2A task and an MCP tool entry. `make check-bindings`
+  envelopes, including a collaborative plan update, plus an A2A task and an MCP
+  tool entry. `make check-bindings`
   decodes and re-encodes these through the Python and Go bindings on every
   CI run, catching wire-vocabulary drift before downstream consumers see it.
 

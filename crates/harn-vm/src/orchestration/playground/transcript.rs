@@ -128,9 +128,9 @@ pub fn synthesize_sweep(
         events.push(envelope(
             i,
             now,
-            AgentEvent::Plan {
+            AgentEvent::OrchestrationDecision {
                 session_id: session_id.clone(),
-                plan: pr_plan(pr),
+                decision: pr_plan(pr),
             },
         ));
 
@@ -179,9 +179,9 @@ pub fn synthesize_sweep(
         events.push(envelope(
             i,
             now,
-            AgentEvent::Plan {
+            AgentEvent::OrchestrationDecision {
                 session_id: session_id.clone(),
-                plan: risk_plan(pr),
+                decision: risk_plan(pr),
             },
         ));
     }

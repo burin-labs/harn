@@ -82,6 +82,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
+    "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
     "require_successful_tools_violation",

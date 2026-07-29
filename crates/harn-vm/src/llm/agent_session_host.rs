@@ -60,6 +60,9 @@ pub(crate) mod cancellation;
 mod tool_result_messages;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
+mod plan_document;
+
+use plan_document::{next_plan_document_event, plan_artifact_from_result};
 
 use tool_result_messages::{
     assistant_tool_use_blocks, paired_tool_result_ids, screenshots_from_tool_result,
@@ -1437,38 +1440,6 @@ fn record_write_provenance(
     }
 }
 
-/// Recover the plan artifact from a dispatched emit_plan/update_plan result.
-///
-/// The local short-circuit handler (`handle_tool_locally`) returns the
-/// pretty-printed plan JSON as a string, so the dispatch result's
-/// `result` field is typically a string. We try parsing it; if that
-/// fails, fall back to renormalizing from the tool arguments. Either
-/// way we get a structured plan value the transcript "plan" event can
-/// carry under `metadata.plan`.
-fn plan_artifact_from_result(result: &VmValue) -> Option<serde_json::Value> {
-    if let Some(VmValue::String(rendered)) = dict_get(result, "result") {
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(rendered) {
-            if parsed.is_object() {
-                return Some(parsed);
-            }
-        }
-    }
-    if let Some(value) = dict_get(result, "result") {
-        let json = vm_to_json(value);
-        if json.is_object() {
-            return Some(json);
-        }
-    }
-    let tool_name = dict_get(result, "tool_name")
-        .or_else(|| dict_get(result, "name"))
-        .map(|v| v.display())
-        .unwrap_or_default();
-    let arguments = dict_get(result, "arguments").map(vm_to_json)?;
-    Some(super::plan::normalize_plan_tool_call(
-        &tool_name, &arguments,
-    ))
-}
-
 /// Test seam: invoke the real `record_tool_results` builtin logic against a
 /// session with a `dispatch` payload, so a repro can drive the production record
 /// path without a live agent loop.
@@ -1677,9 +1648,23 @@ fn host_agent_session_record_tool_results_builtin(
         }
         if ok && super::plan::is_plan_tool(&name) {
             if let Some(plan_value) = plan_artifact_from_result(result) {
-                let plan_metadata = serde_json::json!({"plan": plan_value});
+                let created_at = crate::orchestration::now_unix_seconds_text();
+                let event_id = crate::orchestration::new_id("plan_event");
+                let document_event = next_plan_document_event(
+                    &session_id,
+                    &name,
+                    result,
+                    plan_value,
+                    created_at,
+                    event_id,
+                )
+                .map_err(|error| VmError::Runtime(error.to_string()))?;
+                let plan_metadata = serde_json::json!({
+                    "plan_document": document_event.document(),
+                    "plan_document_event": document_event,
+                });
                 let event = super::helpers::transcript_event(
-                    "plan",
+                    "plan_document",
                     "tool",
                     "public",
                     "",
@@ -1687,9 +1672,9 @@ fn host_agent_session_record_tool_results_builtin(
                 );
                 crate::agent_sessions::append_event(&session_id, event)
                     .map_err(VmError::Runtime)?;
-                super::agent_runtime::emit_agent_event_sync(&AgentEvent::Plan {
+                super::agent_runtime::emit_agent_event_sync(&AgentEvent::PlanDocumentUpdated {
                     session_id: session_id.clone(),
-                    plan: plan_value,
+                    event: Box::new(document_event),
                 });
             }
         }

@@ -86,6 +86,52 @@
             "status": "pending"
           }
         ],
+        "harnPlanDocument": {
+          "_type": "plan_document",
+          "comments": [],
+          "created_at": "2026-01-01T00:00:00Z",
+          "current_revision": {
+            "author": {
+              "id": "test-agent"
+            },
+            "created_at": "2026-01-01T00:00:00Z",
+            "markdown": "# Plan\n\n## Steps\n- [pending] edit\n\nApproval: unrequested",
+            "operation": {
+              "event_id": "plan-event-test",
+              "kind": "create"
+            },
+            "plan": {
+              "_type": "plan_artifact",
+              "approval": {
+                "state": "unrequested"
+              },
+              "assumptions": [],
+              "id": "plan_c4169e9e1acd",
+              "open_questions": [],
+              "schema_version": "harn.plan.v1",
+              "steps": [
+                {
+                  "content": "edit",
+                  "id": "step-1",
+                  "priority": null,
+                  "status": "pending"
+                }
+              ],
+              "summary": "",
+              "title": "Plan",
+              "tool": "update_plan",
+              "verification_commands": []
+            },
+            "revision_id": "plan_revision_b31f02c6193e9420",
+            "source": {
+              "kind": "test"
+            }
+          },
+          "document_id": "plan_document_c4169e9e1acd",
+          "resolution_receipts": [],
+          "schema_version": "harn.plan_document.v1",
+          "updated_at": "2026-01-01T00:00:00Z"
+        },
         "sessionUpdate": "plan"
       }
     }

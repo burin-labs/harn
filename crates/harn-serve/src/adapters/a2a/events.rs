@@ -73,15 +73,13 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
                 }
                 payload
             }
-            harn_vm::agent_events::AgentEvent::Plan { plan, .. }
-                if plan.get("schema_version").and_then(JsonValue::as_str)
-                    == Some(harn_vm::llm::plan::PLAN_SCHEMA_VERSION) =>
-            {
+            harn_vm::agent_events::AgentEvent::PlanDocumentUpdated { event, .. } => {
+                let document = event.document();
                 json!({
-                    "type": "harn_plan",
+                    "type": "harn_plan_document",
                     "taskId": self.task_id,
-                    "entries": harn_vm::llm::plan::plan_entries(plan),
-                    "plan": plan,
+                    "entries": harn_vm::llm::plan::plan_document_entries(document),
+                    "planDocument": document,
                 })
             }
             harn_vm::agent_events::AgentEvent::ProgressReported {

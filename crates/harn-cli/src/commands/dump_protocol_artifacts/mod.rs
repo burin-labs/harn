@@ -29,6 +29,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
+use harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT;
 use harn_vm::llm::receipts::TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT;
 
 use constants::*;
@@ -155,6 +156,11 @@ fn generate_artifacts(
         Artifact::new(
             TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
             generate_tool_call_receipt_schema()?,
+        ),
+        Artifact::new(
+            PLAN_DOCUMENT_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(&harn_vm::llm::plan::plan_document_json_schema())
+                .map_err(|error| format!("failed to encode plan document schema: {error}"))?,
         ),
     ];
 

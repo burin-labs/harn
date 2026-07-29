@@ -669,50 +669,6 @@ fn a2a_worker_sink_publishes_worker_update_to_task_stream() {
 }
 
 #[test]
-fn a2a_worker_sink_publishes_plan_extension_to_task_stream() {
-    let task_id = "task-plan".to_string();
-    let task = TaskState {
-        id: task_id.clone(),
-        context_id: None,
-        status: TaskStatus::Working,
-        history: Vec::new(),
-        artifacts: Vec::new(),
-        metadata: BTreeMap::new(),
-        events: Vec::new(),
-        subscribers: Vec::new(),
-        cancel_token: None,
-    };
-    let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
-    let sink = super::A2aWorkerSink {
-        task_id: task_id.clone(),
-        tasks: tasks.clone(),
-    };
-    let plan = harn_vm::llm::plan::normalize_plan_tool_call(
-        harn_vm::llm::plan::UPDATE_PLAN_TOOL,
-        &serde_json::json!({
-            "explanation": "Plan the task.",
-            "plan": [{"step": "Inspect files.", "status": "pending"}],
-        }),
-    );
-
-    sink.handle_event(&harn_vm::agent_events::AgentEvent::Plan {
-        session_id: super::a2a_worker_session_id(&task_id),
-        plan,
-    });
-
-    let tasks = tasks.lock().expect("tasks");
-    let task = tasks.get(&task_id).expect("task");
-    let event = task
-        .events
-        .iter()
-        .find(|event| event.get("type").and_then(JsonValue::as_str) == Some("harn_plan"))
-        .expect("harn_plan event");
-    assert_eq!(event["taskId"], task_id);
-    assert_eq!(event["entries"][0]["content"], "Inspect files.");
-    assert_eq!(event["plan"]["schema_version"], "harn.plan.v1");
-}
-
-#[test]
 fn a2a_worker_sink_publishes_progress_as_status_update() {
     let task_id = "task-progress".to_string();
     let task = TaskState {
@@ -1648,3 +1604,4 @@ fn tool_call_pending_does_not_emit_artifact_update() {
         "no artifact-update events should be emitted for non-Completed tool updates",
     );
 }
+mod plan_document;

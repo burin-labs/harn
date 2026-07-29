@@ -203,6 +203,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "mcp_auth_required",
   "mcp_catalog_changed",
   "mcp_notification",
+  "orchestration_decision",
   "pack_thinking_stripped",
   "progress_reported",
   "require_successful_tools_violation",
@@ -443,6 +444,102 @@ export type ACPObject = { [key: string]: ACPValue }
 export type ACPValue = null | boolean | number | string | ACPValue[] | ACPObject
 export type JsonRpcId = number | string | null
 
+export type HarnPlanStepStatus = "pending" | "in_progress" | "completed" | "blocked" | "cancelled"
+export type HarnPlanApprovalState = "unrequested" | "requested" | "approved" | "rejected"
+export type HarnPlanCommentState = "open" | "addressed" | "resolved" | "reopened"
+
+export interface HarnPlanAuthor {
+  id: string
+  display_name?: string
+}
+
+export interface HarnPlanSource {
+  kind: string
+  uri?: string
+}
+
+export interface HarnPlanStep {
+  id: string
+  content: string
+  status: HarnPlanStepStatus
+  priority?: ACPValue
+}
+
+export interface HarnPlanApproval {
+  state: HarnPlanApprovalState
+  request_id?: string
+  reviewer?: string
+  reviewers?: string[]
+  approved_at?: string
+  reason?: string
+}
+
+export interface HarnPlanArtifact {
+  _type: "plan_artifact"
+  schema_version: "harn.plan.v1"
+  id: string
+  tool: string
+  title: string
+  summary: string
+  steps: HarnPlanStep[]
+  assumptions: string[]
+  open_questions: string[]
+  verification_commands: string[]
+  approval: HarnPlanApproval
+}
+
+export interface HarnPlanRevision {
+  revision_id: string
+  parent_revision_id?: string
+  markdown: string
+  plan: HarnPlanArtifact
+  author: HarnPlanAuthor
+  source: HarnPlanSource
+  created_at: string
+  operation:
+    | { kind: "create" | "edit"; event_id: string }
+    | { kind: "comment"; event_id: string; comment_id: string }
+    | { kind: "comment_state"; event_id: string; comment_id: string; state: HarnPlanCommentState }
+}
+
+export interface HarnPlanCommentAnchor {
+  step_id?: string
+  quoted_text?: string
+  range?: { start: number; end: number }
+}
+
+export interface HarnPlanComment {
+  comment_id: string
+  anchor: HarnPlanCommentAnchor
+  body: string
+  state: HarnPlanCommentState
+  author: HarnPlanAuthor
+  created_at: string
+  updated_at: string
+}
+
+export interface HarnPlanCommentResolutionReceipt {
+  receipt_id: string
+  comment_id: string
+  input_revision_id: string
+  output_revision_id: string
+  agent_run_id: string
+  event_id: string
+  explanation?: string
+  created_at: string
+}
+
+export interface HarnPlanDocument {
+  _type: "plan_document"
+  schema_version: "harn.plan_document.v1"
+  document_id: string
+  current_revision: HarnPlanRevision
+  comments: HarnPlanComment[]
+  resolution_receipts: HarnPlanCommentResolutionReceipt[]
+  created_at: string
+  updated_at: string
+}
+
 export interface ACPRequest {
   jsonrpc: "2.0"
   id: Exclude<JsonRpcId, null>
@@ -641,7 +738,7 @@ export interface ACPUserMessageUpdate {
 export interface ACPPlanUpdate {
   sessionUpdate: "plan"
   entries: ACPValue[]
-  harnPlan?: ACPValue
+  harnPlanDocument?: HarnPlanDocument
 }
 
 export interface ACPSessionTruncatedUpdate {

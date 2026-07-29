@@ -175,7 +175,171 @@ pub(super) fn generate_rust_for_version(artifact_version: &str) -> String {
 
 fn rust_wire_types() -> String {
     let mut out = String::from(
-        r#"/// Closed ACP permission-option vocabulary.
+        r#"/// Author identity on a collaborative plan revision or comment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanAuthor {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Source identity for an immutable plan revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanSource {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+}
+
+/// Closed collaborative plan-comment lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnPlanCommentState {
+    Open,
+    Addressed,
+    Resolved,
+    Reopened,
+}
+
+/// Closed executable-plan approval lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnPlanApprovalState {
+    Unrequested,
+    Requested,
+    Approved,
+    Rejected,
+}
+
+/// One normalized executable plan step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanStep {
+    pub id: String,
+    pub content: String,
+    pub status: String,
+    pub priority: Option<Value>,
+}
+
+/// Typed approval state for an executable plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanApproval {
+    pub state: HarnPlanApprovalState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Normalized executable plan embedded in a collaborative revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanArtifact {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub schema_version: String,
+    pub id: String,
+    pub tool: String,
+    pub title: String,
+    pub summary: String,
+    pub steps: Vec<HarnPlanStep>,
+    pub assumptions: Vec<String>,
+    pub open_questions: Vec<String>,
+    pub verification_commands: Vec<String>,
+    pub approval: HarnPlanApproval,
+}
+
+/// Typed mutation that produced an immutable plan revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HarnPlanRevisionOperation {
+    Create { event_id: String },
+    Edit { event_id: String },
+    Comment { event_id: String, comment_id: String },
+    CommentState {
+        event_id: String,
+        comment_id: String,
+        state: HarnPlanCommentState,
+    },
+}
+
+/// Immutable collaborative plan revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanRevision {
+    pub revision_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_revision_id: Option<String>,
+    pub markdown: String,
+    pub plan: HarnPlanArtifact,
+    pub author: HarnPlanAuthor,
+    pub source: HarnPlanSource,
+    pub created_at: String,
+    pub operation: HarnPlanRevisionOperation,
+}
+
+/// UTF-8 byte range fallback for a plan-comment anchor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanTextRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Stable-step and quoted-text/range anchor for a plan comment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanCommentAnchor {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quoted_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<HarnPlanTextRange>,
+}
+
+/// Anchored collaborative plan comment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanComment {
+    pub comment_id: String,
+    pub anchor: HarnPlanCommentAnchor,
+    pub body: String,
+    pub state: HarnPlanCommentState,
+    pub author: HarnPlanAuthor,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Receipt binding a comment resolution to input/output revisions and an agent event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanCommentResolutionReceipt {
+    pub receipt_id: String,
+    pub comment_id: String,
+    pub input_revision_id: String,
+    pub output_revision_id: String,
+    pub agent_run_id: String,
+    pub event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
+    pub created_at: String,
+}
+
+/// Harn's canonical collaborative plan-document contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanDocument {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub schema_version: String,
+    pub document_id: String,
+    pub current_revision: HarnPlanRevision,
+    pub comments: Vec<HarnPlanComment>,
+    pub resolution_receipts: Vec<HarnPlanCommentResolutionReceipt>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Closed ACP permission-option vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ACPPermissionOptionKind {
