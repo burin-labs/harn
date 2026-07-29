@@ -20,8 +20,12 @@ use super::super::schema::{
 };
 use super::test_support::{self, update_harn_meta};
 use super::{AcpAgentEventSink, AcpOutput};
+mod plan_document;
 mod registration_fixtures;
 mod subagent_stop;
+
+use plan_document::fixture_plan_document_event;
+
 pub(super) async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (sink, expected_len) = (AcpAgentEventSink::new(AcpOutput::Channel(tx)), events.len());
@@ -123,11 +127,11 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             raw_input_partial: None,
             audit: None,
         },
-        AgentEvent::Plan {
+        AgentEvent::PlanDocumentUpdated {
             session_id: "session-1".to_string(),
-            plan: serde_json::json!([
+            event: Box::new(fixture_plan_document_event(serde_json::json!([
                 {"content": "edit", "status": "pending"}
-            ]),
+            ]))),
         },
     ]
 }
@@ -1226,31 +1230,6 @@ async fn artifact_manifest_session_update_keeps_bundle_spec_under_harn_meta() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn structured_plan_extension_fixture_is_pinned() {
-    let plan = harn_vm::llm::plan::normalize_plan_tool_call(
-        harn_vm::llm::plan::EMIT_PLAN_TOOL,
-        &serde_json::json!({
-            "summary": "Ship plan events.",
-            "steps": [
-                {"content": "Emit plan event.", "status": "completed"},
-                {"content": "Verify fixtures.", "status": "pending"}
-            ],
-            "verification_commands": ["cargo test -p harn-serve acp"],
-        }),
-    );
-    let actual = collect_notifications(vec![AgentEvent::Plan {
-        session_id: "session-1".to_string(),
-        plan,
-    }])
-    .await;
-    let expected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/fixtures/acp/session_update_plan_extension.json"
-    ))
-    .expect("fixture json");
-    assert_eq!(serde_json::Value::Array(actual), expected);
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn worker_update_serializes_to_session_update_with_lifecycle_metadata() {
     // Every typed `WorkerEvent` must round-trip onto the ACP
     // `session/update` stream as a `worker_update` entry. The
@@ -1448,9 +1427,11 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             raw_input_partial: None,
             audit: None,
         },
-        AgentEvent::Plan {
+        AgentEvent::PlanDocumentUpdated {
             session_id: "session-1".to_string(),
-            plan: serde_json::json!([{"step": "edit", "status": "pending"}]),
+            event: Box::new(fixture_plan_document_event(
+                serde_json::json!([{"step": "edit", "status": "pending"}]),
+            )),
         },
         AgentEvent::SkillActivated {
             session_id: "session-1".to_string(),

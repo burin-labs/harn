@@ -2,6 +2,10 @@
 
 use sha2::{Digest, Sha256};
 
+mod document;
+
+pub use document::*;
+
 pub const PLAN_SCHEMA_VERSION: &str = "harn.plan.v1";
 pub const EMIT_PLAN_TOOL: &str = "emit_plan";
 pub const UPDATE_PLAN_TOOL: &str = "update_plan";
@@ -34,6 +38,51 @@ pub fn normalize_plan_tool_call(tool_name: &str, args: &serde_json::Value) -> se
     let digest = hex::encode(Sha256::digest(digest_input));
     plan["id"] = serde_json::Value::String(format!("plan_{}", &digest[..12]));
     plan
+}
+
+pub fn create_plan_document(
+    plan: serde_json::Value,
+    author_id: impl Into<String>,
+    source_kind: impl Into<String>,
+    created_at: impl Into<String>,
+    event_id: impl Into<String>,
+) -> Result<PlanDocument, PlanDocumentError> {
+    Ok(
+        create_plan_document_event(plan, author_id, source_kind, created_at, event_id)?
+            .document()
+            .clone(),
+    )
+}
+
+pub fn create_plan_document_event(
+    plan: serde_json::Value,
+    author_id: impl Into<String>,
+    source_kind: impl Into<String>,
+    created_at: impl Into<String>,
+    event_id: impl Into<String>,
+) -> Result<PlanDocumentEvent, PlanDocumentError> {
+    let plan: PlanArtifact = serde_json::from_value(plan)
+        .map_err(|error| PlanDocumentError::Invalid(format!("invalid executable plan: {error}")))?;
+    let document_id = format!("plan_document_{}", plan.id.trim_start_matches("plan_"));
+    let markdown = render_plan(&serde_json::to_value(&plan).map_err(|error| {
+        PlanDocumentError::Invalid(format!("cannot render executable plan: {error}"))
+    })?);
+    let store = PlanDocumentStore::create(CreatePlanDocument {
+        document_id,
+        markdown,
+        plan,
+        author: PlanAuthor {
+            id: author_id.into(),
+            display_name: None,
+        },
+        source: PlanSource {
+            kind: source_kind.into(),
+            uri: None,
+        },
+        created_at: created_at.into(),
+        event_id: event_id.into(),
+    })?;
+    Ok(store.events()[0].clone())
 }
 
 pub fn plan_entries(plan: &serde_json::Value) -> serde_json::Value {
@@ -77,6 +126,12 @@ pub fn plan_entries(plan: &serde_json::Value) -> serde_json::Value {
         return serde_json::json!([{ "content": content, "status": "pending" }]);
     }
     serde_json::Value::Array(entries)
+}
+
+pub fn plan_document_entries(document: &PlanDocument) -> serde_json::Value {
+    serde_json::to_value(&document.current_revision.plan)
+        .map(|plan| plan_entries(&plan))
+        .unwrap_or_else(|_| serde_json::json!([]))
 }
 
 pub fn render_plan(plan: &serde_json::Value) -> String {

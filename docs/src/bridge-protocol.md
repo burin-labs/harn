@@ -509,9 +509,12 @@ task-stream entry root (it has its own envelope conventions). ACP hosts
 should always read worker fields from `update._meta.harn.<field>`.
 
 Structured Harn plan emissions use the same task stream. When an agent calls
-`emit_plan` or `update_plan`, A2A subscribers receive a `harn_plan` entry with
-standard ACP-compatible `entries` plus the normalized `harn.plan.v1` artifact
-under `plan`.
+`emit_plan` or `update_plan`, A2A subscribers receive a
+`harn_plan_document` entry with standard ACP-compatible `entries` plus the
+canonical `harn.plan_document.v1` value under `planDocument`. Its current
+immutable revision contains editable Markdown and the normalized executable
+`harn.plan.v1` plan; anchored comments and resolution receipts travel with the
+same update and event-log replay.
 
 Agent progress reports use protocol-native A2A status updates. When
 `agent_progress` emits narration or entries, task-stream subscribers receive a

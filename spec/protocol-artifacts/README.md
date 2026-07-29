@@ -33,6 +33,8 @@ profile (`DRAFT-2026-v1`), pinned beside the stable profile until the
 final `2026-07-28` specification lands.
 - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving
 `ToolCallReceipt` schema for audited tool calls.
+- `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative
+plan-document schema with revisions, comments, and resolution receipts.
 - `harn-protocol.ts`: TypeScript definitions for ACP session updates,
 tool lifecycle metadata, A2A task events, and MCP metadata.
 - `HarnProtocol.swift`: Swift definitions for the same host-facing surface.

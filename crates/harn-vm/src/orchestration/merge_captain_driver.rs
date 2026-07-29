@@ -458,7 +458,7 @@ fn collect_stats(events: &[PersistedAgentEvent]) -> TranscriptStats {
 
     for env in events {
         match &env.event {
-            AgentEvent::Plan { plan, .. } => {
+            AgentEvent::OrchestrationDecision { decision: plan, .. } => {
                 if plan
                     .get("approval_required")
                     .and_then(|value| value.as_bool())

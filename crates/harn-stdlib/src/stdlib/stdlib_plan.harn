@@ -32,6 +32,79 @@ type PlanArtifact = {
   approval: PlanApproval,
 }
 
+pub type PlanAuthor = {id: string, display_name?: string}
+
+pub type PlanSource = {kind: string, uri?: string}
+
+pub type PlanCommentState = "open" | "addressed" | "resolved" | "reopened"
+
+pub type PlanRevisionCreate = {kind: "create", event_id: string}
+
+pub type PlanRevisionEdit = {kind: "edit", event_id: string}
+
+pub type PlanRevisionComment = {kind: "comment", event_id: string, comment_id: string}
+
+pub type PlanRevisionCommentState = {
+  kind: "comment_state",
+  event_id: string,
+  comment_id: string,
+  state: PlanCommentState,
+}
+
+pub type PlanRevisionOperation = PlanRevisionCreate \
+  | PlanRevisionEdit \
+  | PlanRevisionComment \
+  | PlanRevisionCommentState
+
+pub type PlanRevision = {
+  revision_id: string,
+  parent_revision_id?: string,
+  markdown: string,
+  plan: PlanArtifact,
+  author: PlanAuthor,
+  source: PlanSource,
+  created_at: string,
+  operation: PlanRevisionOperation,
+}
+
+pub type PlanCommentAnchor = {
+  step_id?: string,
+  quoted_text?: string,
+  range?: {start: int, end: int},
+}
+
+pub type PlanComment = {
+  comment_id: string,
+  anchor: PlanCommentAnchor,
+  body: string,
+  state: PlanCommentState,
+  author: PlanAuthor,
+  created_at: string,
+  updated_at: string,
+}
+
+pub type PlanCommentResolutionReceipt = {
+  receipt_id: string,
+  comment_id: string,
+  input_revision_id: string,
+  output_revision_id: string,
+  agent_run_id: string,
+  event_id: string,
+  explanation?: string,
+  created_at: string,
+}
+
+pub type PlanDocument = {
+  _type: "plan_document",
+  schema_version: "harn.plan_document.v1",
+  document_id: string,
+  current_revision: PlanRevision,
+  comments: list<PlanComment>,
+  resolution_receipts: list<PlanCommentResolutionReceipt>,
+  created_at: string,
+  updated_at: string,
+}
+
 /**
  * plan_from normalizes flexible model/user plan shapes into harn.plan.v1.
  *
@@ -120,6 +193,21 @@ pub fn update_plan_tool(registry) {
       executor: "harn",
       parameters: {
         explanation: {type: "string", description: "Short reason for the update", required: false},
+        document_id: {
+          type: "string",
+          description: "Stable collaborative plan document id",
+          required: false,
+        },
+        expected_revision_id: {
+          type: "string",
+          description: "Revision observed by the editor; stale values fail with a conflict",
+          required: false,
+        },
+        markdown: {
+          type: "string",
+          description: "Canonical editable Markdown for the new revision",
+          required: false,
+        },
         plan: {type: "array", description: "Plan steps with step/content and status"},
         assumptions: {
           type: "array",

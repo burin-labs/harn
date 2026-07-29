@@ -1385,11 +1385,24 @@ Canonical ACP envelope types are provided as Harn type aliases in
 return types so a pipeline's contract matches the ACP schema
 byte-for-byte.
 
-`std/plan` provides Harn-owned `emit_plan` and `update_plan` tools plus a
-`harn.plan.v1` artifact shape. ACP keeps emitting the standard
-`sessionUpdate: "plan"` `entries` array; when the source is a Harn plan
-artifact, the update also carries `harnPlan` with the normalized steps,
-assumptions, open questions, verification commands, and approval state.
+`std/plan` provides Harn-owned `emit_plan` and `update_plan` tools. Their
+normalized executable `harn.plan.v1` value is embedded in the current immutable
+revision of a canonical `harn.plan_document.v1` document alongside editable
+Markdown, author/source/timestamps, anchored comments, and resolution receipts.
+ACP keeps emitting the standard `sessionUpdate: "plan"` `entries` array and
+carries the typed document in `harnPlanDocument`. Edits use the observed
+revision id and fail with a typed conflict when another writer has already
+advanced the document; replay applies the persisted document events in revision
+order.
+
+The owning Rust API is `harn_vm::llm::plan::PlanDocumentStore`. `create`,
+`edit`, `add_comment`, and `change_comment_state` each append a typed
+`PlanDocumentEvent`; every mutation takes the revision the caller observed.
+`replay` reconstructs from events, while `PlanDocumentEvent::to_artifact_record`
+and `replay_artifacts` persist through Harn's existing artifact lifecycle
+instead of a plan-specific sidecar. Revision ids hash the editable Markdown,
+normalized plan, comments, receipts, author/source metadata, timestamp, parent,
+and operation, so replay rejects state modified without a new revision.
 
 When a workflow emits a typed handoff artifact, ACP also mirrors it as a
 structured `session/update` with `sessionUpdate: "handoff"`, so hosts can show

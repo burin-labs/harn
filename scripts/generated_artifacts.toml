@@ -204,6 +204,7 @@ outputs = [
   "spec/protocol-artifacts/harn-protocol.ts",
   "spec/protocol-artifacts/HarnProtocol.swift",
   "spec/protocol-artifacts/manifest.json",
+  "spec/protocol-artifacts/schemas/plan-document-v1.schema.json",
 ]
 sources = ["spec/openapi.yaml", "crates/harn-cli/src/commands/"]
 ci = true

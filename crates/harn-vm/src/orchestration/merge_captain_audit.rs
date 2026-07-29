@@ -674,7 +674,7 @@ pub fn audit_transcript(
                     &mut verifier_scopes,
                 );
             }
-            AgentEvent::Plan { plan, .. } => {
+            AgentEvent::OrchestrationDecision { decision: plan, .. } => {
                 check_plan_transitions(
                     &state_steps_owned,
                     plan,
@@ -1218,9 +1218,9 @@ mod tests {
     fn plan(index: u64, session: &str, plan: serde_json::Value) -> PersistedAgentEvent {
         env(
             index,
-            AgentEvent::Plan {
+            AgentEvent::OrchestrationDecision {
                 session_id: session.into(),
-                plan,
+                decision: plan,
             },
         )
     }

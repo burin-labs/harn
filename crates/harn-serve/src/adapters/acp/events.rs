@@ -381,27 +381,13 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
-            AgentEvent::Plan { session_id, plan } => {
-                let entries = if plan
-                    .get("schema_version")
-                    .and_then(serde_json::Value::as_str)
-                    == Some(harn_vm::llm::plan::PLAN_SCHEMA_VERSION)
-                {
-                    harn_vm::llm::plan::plan_entries(plan)
-                } else {
-                    plan.clone()
-                };
-                let mut update = serde_json::json!({
+            AgentEvent::PlanDocumentUpdated { session_id, event } => {
+                let document = event.document();
+                let update = serde_json::json!({
                     "sessionUpdate": "plan",
-                    "entries": entries,
+                    "entries": harn_vm::llm::plan::plan_document_entries(document),
+                    "harnPlanDocument": document,
                 });
-                if plan
-                    .get("schema_version")
-                    .and_then(serde_json::Value::as_str)
-                    == Some(harn_vm::llm::plan::PLAN_SCHEMA_VERSION)
-                {
-                    update["harnPlan"] = plan.clone();
-                }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": update,
@@ -1797,6 +1783,16 @@ impl AgentEventSink for AcpAgentEventSink {
                         "resource": resource,
                         "scope": scope,
                     }),
+                );
+            }
+            AgentEvent::OrchestrationDecision {
+                session_id,
+                decision,
+            } => {
+                self.emit_agent_event_ext(
+                    "orchestration_decision",
+                    session_id,
+                    serde_json::json!({"decision": decision}),
                 );
             }
         }

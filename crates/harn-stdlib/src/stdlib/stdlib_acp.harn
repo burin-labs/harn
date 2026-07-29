@@ -41,7 +41,7 @@ type ToolCallUpdate = {
 type Plan = {
   sessionUpdate: string,
   entries: list<{content: string, priority: string?, status: string?}>,
-  harnPlan?: dict,
+  harnPlanDocument?: dict,
 }
 
 type Handoff = {sessionUpdate: string, handoffId: string, artifactId: string?, handoff: dict}
@@ -89,13 +89,17 @@ pub fn plan(entries) {
 }
 
 /**
- * harn_plan builds an ACP plan update from a harn.plan.v1 artifact.
+ * harn_plan builds standard ACP entries from a collaborative plan document.
  *
  * @effects: []
  * @errors: []
  */
-pub fn harn_plan(plan_artifact) {
-  return {sessionUpdate: "plan", entries: plan_entries(plan_artifact), harnPlan: plan_artifact}
+pub fn harn_plan(plan_document) {
+  return {
+    sessionUpdate: "plan",
+    entries: plan_entries(plan_document.current_revision.plan),
+    harnPlanDocument: plan_document,
+  }
 }
 
 pub fn handoff_update(handoff_id, artifact_id, handoff) {

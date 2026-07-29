@@ -66,6 +66,15 @@ pub(super) fn generate_manifest_for_version(
             .cloned()
             .unwrap_or(serde_json::Value::Null),
     }));
+    schemas.push(json!({
+        "protocol": "harn",
+        "source": "crates/harn-vm/src/llm/plan/document.rs",
+        "artifact": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::llm::plan",
+            "schema_version": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_VERSION,
+        },
+    }));
 
     serde_json::to_string_pretty(&json!({
         "schemaVersion": 1,
@@ -167,6 +176,11 @@ pub(super) fn generate_manifest_for_version(
             "toolCallReceiptStatuses": TOOL_CALL_RECEIPT_STATUSES,
             "toolCallReceiptExecutors": TOOL_CALL_RECEIPT_EXECUTORS,
         },
+        "plans": {
+            "documentSchemaVersion": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_VERSION,
+            "documentSchema": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT,
+            "commentStates": ["open", "addressed", "resolved", "reopened"],
+        },
     }))
     .map_err(|error| format!("failed to serialize manifest: {error}"))
 }
@@ -214,6 +228,8 @@ pub(super) fn generate_readme() -> String {
            final `2026-07-28` specification lands.\n\
          - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\
            `ToolCallReceipt` schema for audited tool calls.\n\
+         - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative\n\
+           plan-document schema with revisions, comments, and resolution receipts.\n\
          - `harn-protocol.ts`: TypeScript definitions for ACP session updates,\n\
            tool lifecycle metadata, A2A task events, and MCP metadata.\n\
          - `HarnProtocol.swift`: Swift definitions for the same host-facing surface.\n\
@@ -270,6 +286,31 @@ pub(super) fn generate_round_trip_fixture_for_version(
         "params": {
             "sessionId": "sess-42",
             "update": tool_call,
+        }
+    });
+    let plan = harn_vm::llm::plan::normalize_plan_tool_call(
+        harn_vm::llm::plan::UPDATE_PLAN_TOOL,
+        &json!({"plan": [{"step": "Verify bindings.", "status": "pending"}]}),
+    );
+    let plan_event = harn_vm::llm::plan::create_plan_document_event(
+        plan,
+        "fixture-agent",
+        "fixture",
+        "2026-01-01T00:00:00Z",
+        "fixture-plan-create",
+    )
+    .map_err(|error| format!("failed to create plan document fixture: {error}"))?;
+    let plan_document = plan_event.document();
+    let plan_session_update = json!({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": "sess-42",
+            "update": {
+                "sessionUpdate": "plan",
+                "entries": harn_vm::llm::plan::plan_document_entries(plan_document),
+                "harnPlanDocument": plan_document,
+            },
         }
     });
     let agent_event = json!({
@@ -422,6 +463,7 @@ pub(super) fn generate_round_trip_fixture_for_version(
             "response": response,
             "errorResponse": error_response,
             "sessionUpdateNotification": session_update,
+            "planSessionUpdateNotification": plan_session_update,
             "agentEventNotification": agent_event,
         },
         "a2aTask": a2a_task,

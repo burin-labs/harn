@@ -149,11 +149,14 @@ fn generated_types_include_harn_wire_vocabularies() {
     assert!(ts.contains("export interface HarnACPPromptErrorData"));
     assert!(ts.contains("export interface HarnACPPromptResult"));
     assert!(ts.contains("export interface HarnAgentTerminalOutcome"));
+    assert!(ts.contains("export interface HarnPlanDocument"));
+    assert!(ts.contains("harnPlanDocument?: HarnPlanDocument"));
     assert!(ts.contains("export interface ACPToolCallDiff"));
     assert!(ts.contains("content?: ACPToolCallContent[]"));
     assert!(swift.contains("public struct HarnACPPromptErrorData"));
     assert!(swift.contains("public struct HarnACPPromptResult"));
     assert!(swift.contains("public struct HarnAgentTerminalOutcome"));
+    assert!(swift.contains("public struct HarnPlanDocument"));
     for value in agent_terminal_class_values() {
         assert!(ts.contains(&value), "TypeScript artifact missing {value}");
         assert!(swift.contains(&value), "Swift artifact missing {value}");
@@ -210,6 +213,7 @@ fn generated_rust_includes_harn_wire_vocabularies() {
         "Rust artifact missing provenance header"
     );
     assert!(rust.contains("pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str ="));
+    assert!(rust.contains("pub struct HarnPlanDocument"));
     assert!(rust.contains("pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str ="));
     assert!(rust.contains("pub const AGENT_TERMINAL_CLASSES: &[&str] = &["));
     assert!(rust.contains("pub const AGENT_TERMINAL_KINDS: &[&str] = &["));
@@ -487,6 +491,7 @@ fn transport_control_acp_methods_match_artifact() {
 #[test]
 fn generated_python_includes_harn_wire_vocabularies() {
     let py = generate_python();
+    assert!(py.contains("class HarnPlanDocument(_HarnDataclass):"));
     assert!(py.contains("MCP_DRAFT_PROTOCOL_VERSION: str = \"DRAFT-2026-v1\""));
     assert!(py.contains("MCP_LEGACY_2025_06_18_PROTOCOL_VERSION: str = \"2025-06-18\""));
     assert!(py.contains("MCP_REQUIRED_METADATA_KEYS: tuple"));
@@ -527,6 +532,7 @@ fn generated_python_includes_harn_wire_vocabularies() {
 #[test]
 fn generated_go_includes_harn_wire_vocabularies() {
     let go = generate_go();
+    assert!(go.contains("type HarnPlanDocument struct {"));
     assert!(go.contains("package harnprotocol"));
     assert!(go.contains("const MCPDraftProtocolVersion = \"DRAFT-2026-v1\""));
     assert!(go.contains("const MCPLegacy20250618ProtocolVersion = \"2025-06-18\""));
@@ -655,6 +661,11 @@ fn round_trip_fixture_matches_python_and_go_field_set() {
     assert_eq!(
         fixture["envelopes"]["sessionUpdateNotification"]["params"]["update"]["sessionUpdate"],
         json!("tool_call")
+    );
+    assert_eq!(
+        fixture["envelopes"]["planSessionUpdateNotification"]["params"]["update"]
+            ["harnPlanDocument"]["schema_version"],
+        json!("harn.plan_document.v1")
     );
     assert_eq!(
         fixture["envelopes"]["agentEventNotification"]["method"],
@@ -804,6 +815,16 @@ fn generated_manifest_references_schema_artifacts() {
             .iter()
             .any(|entry| entry["artifact"] == TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT),
         "manifest missing {TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT}"
+    );
+    assert!(
+        manifest["schemas"]
+            .as_array()
+            .expect("schema array")
+            .iter()
+            .any(|entry| {
+                entry["artifact"] == harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT
+            }),
+        "manifest missing collaborative plan document schema"
     );
 }
 
