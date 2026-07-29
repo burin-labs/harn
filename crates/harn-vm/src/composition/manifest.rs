@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 
+use super::state::CompositionStateBinding;
+
 pub const BINDING_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 /// Policy disposition for a binding projected into a composition manifest.
@@ -87,6 +89,10 @@ impl Default for BindingManifestEntry {
 pub struct BindingManifest {
     pub schema_version: u32,
     pub bindings: Vec<BindingManifestEntry>,
+    /// Optional, bounded state binding for one session and manifest window.
+    /// Absence is the grant boundary: no `state` value is injected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<CompositionStateBinding>,
     pub side_effect_ceiling: SideEffectLevel,
     pub metadata: Value,
 }
@@ -96,6 +102,7 @@ impl Default for BindingManifest {
         Self {
             schema_version: BINDING_MANIFEST_SCHEMA_VERSION,
             bindings: Vec::new(),
+            state: None,
             side_effect_ceiling: SideEffectLevel::ReadOnly,
             metadata: Value::Object(serde_json::Map::new()),
         }
@@ -117,7 +124,7 @@ impl BindingManifest {
     }
 
     pub fn to_compact_value(&self) -> Value {
-        Value::Object(serde_json::Map::from_iter([
+        let mut compact = serde_json::Map::from_iter([
             (
                 "schema_version".to_string(),
                 Value::Number(self.schema_version.into()),
@@ -147,7 +154,14 @@ impl BindingManifest {
                         .collect(),
                 ),
             ),
-        ]))
+        ]);
+        if let Some(state) = &self.state {
+            compact.insert(
+                "state".to_string(),
+                serde_json::to_value(state).unwrap_or(Value::Null),
+            );
+        }
+        Value::Object(compact)
     }
 
     pub fn hash(&self) -> Result<String, serde_json::Error> {
@@ -179,6 +193,7 @@ pub struct BindingManifestOptions {
     pub include_denied: bool,
     pub denied_tools: BTreeSet<String>,
     pub gated_tools: BTreeSet<String>,
+    pub state: Option<CompositionStateBinding>,
 }
 
 impl Default for BindingManifestOptions {
@@ -188,6 +203,7 @@ impl Default for BindingManifestOptions {
             include_denied: false,
             denied_tools: BTreeSet::new(),
             gated_tools: BTreeSet::new(),
+            state: None,
         }
     }
 }
@@ -199,6 +215,9 @@ pub fn binding_manifest_from_tool_surface(
     options: BindingManifestOptions,
 ) -> BindingManifest {
     let mut used_bindings = BTreeSet::new();
+    if options.state.is_some() {
+        used_bindings.insert("state".to_string());
+    }
     let annotations_by_name = crate::tool_surface::tool_annotations_from_spec(tools);
     let mut entries = Vec::new();
     for tool in tool_surface_entries(tools) {
@@ -292,7 +311,9 @@ pub fn binding_manifest_from_tool_surface(
             metadata: binding_metadata(&tool),
         });
     }
-    BindingManifest::new(entries, options.side_effect_ceiling)
+    let mut manifest = BindingManifest::new(entries, options.side_effect_ceiling);
+    manifest.state = options.state;
+    manifest
 }
 
 fn tool_surface_entries(value: &Value) -> Vec<Value> {

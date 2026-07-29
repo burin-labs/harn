@@ -68,6 +68,25 @@ pub fn composition_crystallization_trace(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let side_effects = call
+            .annotations
+            .as_ref()
+            .filter(|annotations| {
+                annotations
+                    .capabilities
+                    .get(super::state::COMPOSITION_STATE_CAPABILITY)
+                    .is_some_and(|operations| {
+                        operations.iter().any(|operation| operation == "write")
+                    })
+            })
+            .map(|_| {
+                vec![serde_json::json!({
+                    "class": super::state::COMPOSITION_STATE_CAPABILITY,
+                    "operation": call.tool_name,
+                    "input": call.raw_input,
+                })]
+            })
+            .unwrap_or_default();
         serde_json::json!({
             "id": format!("composition_child_{}", call.operation_index),
             "kind": "tool_call",
@@ -77,7 +96,7 @@ pub fn composition_crystallization_trace(
             "output": result.and_then(|result| result.raw_output.clone()),
             "observed_output": result.and_then(|result| result.raw_output.clone()),
             "capabilities": capabilities,
-            "side_effects": [],
+            "side_effects": side_effects,
             "duration_ms": result.and_then(|result| result.duration_ms).unwrap_or(0),
             "deterministic": true,
             "fuzzy": false,
@@ -90,6 +109,7 @@ pub fn composition_crystallization_trace(
                 "policy_context": call.policy_context,
                 "status": result.map(|result| result.status),
                 "error_category": result.and_then(|result| result.error_category),
+                "error_details": result.and_then(|result| result.error_details.clone()),
             }
         })
     }));
@@ -176,6 +196,7 @@ fn composition_replay_run(report: &CompositionExecutionReport, trace_id: &str) -
             "input": call.raw_input,
             "status": result.map(|result| result.status),
             "error_category": result.and_then(|result| result.error_category),
+            "error_details": result.and_then(|result| result.error_details.clone()),
             "output": result.and_then(|result| result.raw_output.clone()),
         }));
         policy_decisions.push(serde_json::json!({

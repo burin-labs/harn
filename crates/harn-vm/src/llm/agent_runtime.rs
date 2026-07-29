@@ -27,6 +27,7 @@ const LOOP_EXIT_ABANDON_REASON: &str =
 
 /// Boxed session-end hook: receives a `session_id` string.
 pub type SessionEndHook = Arc<dyn Fn(&str) + Send + Sync>;
+type SessionCloseHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 thread_local! {
     static CURRENT_HOST_BRIDGE: RefCell<Option<Arc<crate::bridge::HostBridge>>> =
@@ -51,6 +52,9 @@ thread_local! {
 static NEXT_SESSION_END_HOOK_ID: AtomicU64 = AtomicU64::new(1);
 static SESSION_END_HOOKS: LazyLock<Mutex<BTreeMap<u64, SessionEndHook>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static NEXT_SESSION_CLOSE_HOOK_ID: AtomicU64 = AtomicU64::new(1);
+static SESSION_CLOSE_HOOKS: LazyLock<Mutex<BTreeMap<u64, SessionCloseHook>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 /// Owns one session-end hook registration.
 ///
@@ -65,6 +69,22 @@ pub struct SessionEndHookRegistration {
 impl Drop for SessionEndHookRegistration {
     fn drop(&mut self) {
         SESSION_END_HOOKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.id);
+    }
+}
+
+/// Owns one hook for resources that must survive suspension but be released
+/// when the logical session is permanently closed.
+#[must_use = "dropping the registration unregisters the session-close hook"]
+pub(crate) struct SessionCloseHookRegistration {
+    id: u64,
+}
+
+impl Drop for SessionCloseHookRegistration {
+    fn drop(&mut self) {
+        SESSION_CLOSE_HOOKS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&self.id);
@@ -354,6 +374,27 @@ pub fn register_session_end_hook(hook: SessionEndHook) -> SessionEndHookRegistra
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(id, hook);
     SessionEndHookRegistration { id }
+}
+
+pub(crate) fn register_session_close_hook(hook: SessionCloseHook) -> SessionCloseHookRegistration {
+    let id = NEXT_SESSION_CLOSE_HOOK_ID.fetch_add(1, Ordering::Relaxed);
+    SESSION_CLOSE_HOOKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(id, hook);
+    SessionCloseHookRegistration { id }
+}
+
+pub(crate) fn fire_session_close_hooks(session_id: &str) {
+    let hooks = SESSION_CLOSE_HOOKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    for hook in hooks {
+        hook(session_id);
+    }
 }
 
 /// Fire every registered session-end hook with `session_id`. Called by

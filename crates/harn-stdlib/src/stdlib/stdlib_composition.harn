@@ -272,6 +272,8 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
       parameters: {
         snippet: {type: "string"},
         manifest: {type: "object", required: false},
+        state: {type: "object", required: false},
+        session_id: {type: "string", required: false},
         run_id: {type: "string", required: false},
         max_operations: {type: "integer", required: false},
         timeout_ms: {type: "integer", required: false},

@@ -109,8 +109,11 @@ The report contains:
   context.
 - `child_results`: ordered child statuses with raw output or error.
 
-The current executor is intentionally read-only. It enforces child-call,
-timeout, output-size, global concurrency, and per-MCP-server concurrency limits.
+The current executor keeps manifest tool bindings read-only. It enforces
+child-call, timeout, output-size, global concurrency, and per-MCP-server
+concurrency limits. The optional session-state binding described below is the
+only bounded internal mutation; granting it does not grant workspace writes or
+raise the external tool ceiling.
 `map_bounded(items, { item -> ... }, {concurrency: N})` is available inside
 snippets for settled fan-out; each item returns a `Result.Ok` or `Result.Err`
 entry plus `succeeded` and `failed` counts, while child calls still pass through
@@ -130,6 +133,56 @@ the caller wants Harn to emit the corresponding `composition_start`,
 `composition_child_call`, `composition_child_result`, and terminal composition
 events to the live agent event sinks. Future frontends must route every binding
 call through the same child dispatch path.
+
+### Session-scoped state
+
+State is absent by default. Grant it in the binding manifest when snippets in
+one agent session and tool window need to exchange bounded JSON values:
+
+```harn
+const manifest = composition_binding_manifest(tools, {
+  state: {
+    max_value_bytes: 16384,
+    max_total_bytes: 65536,
+    max_keys: 64,
+  },
+})
+
+const first = composition_execute(
+  "state.put(\"search_hits\", [{id: 1}])\nreturn state.list()",
+  manifest,
+  {session_id: session_id},
+)
+const second = composition_execute(
+  "return state.get(\"search_hits\")",
+  manifest,
+  {session_id: session_id},
+)
+```
+
+The injected binding is `state.get(key)`, `state.put(key, value)`,
+`state.list()`, and `state.delete(key)`. Values must be JSON; `list` returns
+sorted keys, `get` returns `nil` for a missing key, `put` returns `nil`, and
+`delete` returns whether a key existed.
+
+The scope key is the execute option's `session_id` (or the current agent
+session when the option is omitted) plus the binding-manifest hash. The hash is
+the tool-window identity: the same session with a different manifest does not
+inherit state. Harn deletes every window for a session when that session ends.
+State is never durable or shared across sessions.
+
+The manifest limits are enforced atomically. Failed writes do not partially
+change the store and return a structured `composition_state_error` with a
+stable `code` (`invalid_limits`, `session_required`, `invalid_key`,
+`non_json_value`, `value_too_large`, `total_too_large`, or `too_many_keys`).
+The matching child result keeps the same record in `error_details`.
+
+Every state operation is a normal composition child call. Its annotations carry
+the `composition_state.read` or `composition_state.write` capability, and its
+input, output, policy context, and typed failure are retained in the execution
+report, events, crystallization trace, and replay receipts. Replay therefore
+reconstructs the same ordered state transitions from the recorded inputs
+without a live provider or host dispatcher.
 
 ### Host dispatcher
 
