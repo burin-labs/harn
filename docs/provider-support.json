@@ -2294,13 +2294,14 @@
         "GOOGLE_APPLICATION_CREDENTIALS"
       ],
       "recommended": {
-        "selector": "vertex:gemini-*",
+        "selector": "vertex:vertex/gemini-2.5-flash",
         "provider": "vertex",
-        "model": "gemini-*",
-        "display_name": null,
+        "model": "vertex/gemini-2.5-flash",
+        "display_name": "Gemini 2.5 Flash (Vertex AI)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"vertex\"",
+          "model = \"vertex/gemini-2.5-flash\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]

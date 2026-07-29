@@ -5838,6 +5838,8 @@ local = "openai"
 dashscope = "openai"
 llamacpp = "openai"
 mlx = "openai"
+tgi = "openai"
+vllm = "openai"
 # New 2026-05 routes (open-weight frontier additions). MiniMax + Z.AI
 # both speak the OpenAI chat-completions wire format on their
 # advertised compat endpoints, so the openai family rules cover the

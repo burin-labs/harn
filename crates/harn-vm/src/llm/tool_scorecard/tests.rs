@@ -458,6 +458,10 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
         !unscorecardable_by_provider.contains_key("bedrock"),
         "Bedrock has catalog models and routing routes"
     );
+    assert!(
+        !unscorecardable_by_provider.contains_key("vertex"),
+        "Vertex has a stable catalog model and routing route"
+    );
     let single_tool_case = plan.routes[0]
         .cases
         .iter()
@@ -648,6 +652,65 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
             "--dry-run-request".to_string(),
             "--json".to_string(),
         ]
+    );
+}
+
+#[test]
+fn scorecard_plan_consumes_dynamic_local_model_overlays() {
+    struct OverlayGuard;
+
+    impl Drop for OverlayGuard {
+        fn drop(&mut self) {
+            crate::llm_config::clear_user_overrides();
+        }
+    }
+
+    let overlay = crate::llm_config::parse_config_toml(concat!(
+        "[models.\"runtime/qwen-vllm\"]\n",
+        "name = \"Runtime Qwen (vLLM)\"\n",
+        "provider = \"vllm\"\n",
+        "context_window = 32768\n",
+        "wire_model = \"qwen-runtime\"\n",
+        "\n",
+        "[models.\"runtime/qwen-tgi\"]\n",
+        "name = \"Runtime Qwen (TGI)\"\n",
+        "provider = \"tgi\"\n",
+        "context_window = 32768\n",
+        "wire_model = \"qwen-runtime\"\n",
+    ))
+    .expect("runtime model overlay parses");
+    crate::llm_config::set_user_overrides(Some(overlay));
+    let _guard = OverlayGuard;
+
+    let plan = tool_scorecard_plan_from_catalog(
+        &[
+            String::from("vllm:qwen-runtime"),
+            String::from("tgi:qwen-runtime"),
+        ],
+        false,
+    )
+    .expect("runtime overlay routes are scorecardable");
+
+    assert_eq!(plan.route_count, 2);
+    assert_eq!(
+        plan.routes
+            .iter()
+            .map(|route| (route.provider.as_str(), route.model.as_str()))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([("tgi", "qwen-runtime"), ("vllm", "qwen-runtime")])
+    );
+    assert!(
+        plan.routes
+            .iter()
+            .all(|route| route.catalog_claim.text_tools),
+        "OpenAI-compatible runtime overlays inherit the shared text-tool contract"
+    );
+    assert!(
+        !plan
+            .unscorecardable_providers
+            .iter()
+            .any(|provider| matches!(provider.provider.as_str(), "vllm" | "tgi")),
+        "providers with concrete runtime overlay models are no longer unscorecardable"
     );
 }
 

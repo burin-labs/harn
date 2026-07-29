@@ -502,6 +502,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `vercel_ai_gateway` | `vercel/anthropic/claude-haiku-4.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/google/gemini-3.1-flash-lite-preview` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/openai/gpt-5.4-nano` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vertex` | `vertex/gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-build-0.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
