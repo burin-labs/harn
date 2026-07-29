@@ -32,7 +32,8 @@ configure_release_gate_cargo_env() {
 release_gate_stale_out_dir_packages() {
   local diagnostics="$1"
   local output="$2"
-  local build_prefix="${CARGO_BUILD_BUILD_DIR%/}/debug/build/"
+  local build_dir="${3:-$CARGO_BUILD_BUILD_DIR}"
+  local build_prefix="${build_dir%/}/debug/build/"
   local line remainder component package
   : > "$output"
   while IFS= read -r line; do
@@ -61,6 +62,8 @@ release_gate_stale_out_dir_packages() {
 release_gate_clean_stale_out_dir_packages() {
   local operation="$1"
   local packages="$2"
+  local target_dir="${3:-$CARGO_TARGET_DIR}"
+  local build_dir="${4:-$CARGO_BUILD_BUILD_DIR}"
   local -a clean_args=(clean)
   local package
   while IFS= read -r package; do
@@ -71,7 +74,8 @@ release_gate_clean_stale_out_dir_packages() {
   recovery_started="$(date +%s)"
   printf 'recovery: stale Cargo build-script outputs detected for %s (packages=%s)\n' \
     "$operation" "$(paste -sd, "$packages")"
-  if ! cargo "${clean_args[@]}"; then
+  if ! CARGO_TARGET_DIR="$target_dir" CARGO_BUILD_BUILD_DIR="$build_dir" \
+    cargo "${clean_args[@]}"; then
     echo "error: package-scoped stale build-script cleanup failed for $operation" >&2
     return 1
   fi
@@ -597,9 +601,16 @@ cmd_audit() {
     local runner="${runners[$idx]}"
     local first_log="$tmp/$step.first-attempt.log"
     local packages="$tmp/$step.stale-packages"
+    local recovery_target_dir="$CARGO_TARGET_DIR"
+    local recovery_build_dir="$CARGO_BUILD_BUILD_DIR"
+    if [[ "$step" == "package-audit" ]]; then
+      recovery_target_dir="${HARN_PACKAGE_VERIFY_TARGET_DIR:-$CARGO_TARGET_DIR/package-check-target}"
+      recovery_build_dir="${HARN_PACKAGE_VERIFY_BUILD_DIR:-$recovery_target_dir/build}"
+    fi
 
     local classification_status=0
-    release_gate_stale_out_dir_packages "$tmp/$step.log" "$packages" || classification_status=$?
+    release_gate_stale_out_dir_packages \
+      "$tmp/$step.log" "$packages" "$recovery_build_dir" || classification_status=$?
     if [[ "$classification_status" -eq 1 ]]; then
       echo "recovery: $step failed without a recoverable stale build-script output"
       failed=1
@@ -611,7 +622,8 @@ cmd_audit() {
       continue
     fi
     cp "$tmp/$step.log" "$first_log"
-    if ! release_gate_clean_stale_out_dir_packages "$step" "$packages"; then
+    if ! release_gate_clean_stale_out_dir_packages \
+      "$step" "$packages" "$recovery_target_dir" "$recovery_build_dir"; then
       failed=1
       continue
     fi

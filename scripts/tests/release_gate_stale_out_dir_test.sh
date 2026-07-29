@@ -19,6 +19,7 @@ version = "1.2.3"
 members = []
 EOF
 mkdir -p "$release_root/docs/src" "$release_root/crates/harn-vm" "$release_root/crates/harn-cli" "$release_root/.github"
+mkdir -p "$release_root/scripts"
 touch "$release_root/README.md" "$release_root/CLAUDE.md"
 git -C "$release_root" init -q
 git -C "$release_root" config user.email test@example.com
@@ -39,6 +40,9 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]];
     parallel)
       printf 'lane\trust-audit\trun_rust_audit\n'
       printf 'lane\tsecurity-audit\trun_security_audit\n'
+      ;;
+    package)
+      printf 'lane\tpackage-audit\trun_package_audit\n'
       ;;
     *)
       printf 'lane\tsecurity-audit\trun_security_audit\n'
@@ -101,6 +105,9 @@ case "${1:-}" in
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
     ;;
   clean)
+    if [[ -n "${FAKE_CARGO_ENV_RECORD:-}" ]]; then
+      printf '%s\t%s\n' "$CARGO_TARGET_DIR" "$CARGO_BUILD_BUILD_DIR" >> "$FAKE_CARGO_ENV_RECORD"
+    fi
     if [[ -n "${FAKE_EVENT_RECORD:-}" ]]; then
       printf 'cargo-clean\n' >> "$FAKE_EVENT_RECORD"
     fi
@@ -166,6 +173,23 @@ cat > "$fake_bin/env" <<'SH'
 exit 0
 SH
 chmod +x "$fake_bin/env"
+
+cat > "$release_root/scripts/verify_crate_packages.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+count=0
+if [[ -f "$FAKE_CARGO_STATE/package-count" ]]; then
+  count=$(<"$FAKE_CARGO_STATE/package-count")
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$FAKE_CARGO_STATE/package-count"
+if [[ "$count" -eq 1 ]]; then
+  package_build="$CARGO_TARGET_DIR/package-check-target/build"
+  echo "error: couldn't read $package_build/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out/bindgen.rs: No such file or directory (os error 2)" >&2
+  exit 101
+fi
+SH
+chmod +x "$release_root/scripts/verify_crate_packages.sh"
 
 run_case() {
   local label="$1"
@@ -426,5 +450,48 @@ grep -Fq -- '--- rust-audit (first attempt, before stale-output recovery) ---' \
   "$failed_retry_state/output"
 grep -Fq -- '--- rust-audit (terminal attempt) ---' \
   "$failed_retry_state/output"
+
+package_state="$tmp_root/state-package"
+package_target="$tmp_root/target package"
+package_build="$tmp_root/build package"
+mkdir -p "$package_state" "$package_target" "$package_build"
+: > "$package_state/cargo-record"
+: > "$package_state/cargo-env-record"
+: > "$package_state/make-record"
+set +e
+HARN_RELEASE_ROOT="$release_root" \
+  HARN_BIN="$fake_harn" \
+  CARGO_TARGET_DIR="$package_target" \
+  CARGO_BUILD_BUILD_DIR="$package_build" \
+  FAKE_AUDIT_LANE=package \
+  FAKE_CARGO_MODE=stale-then-success \
+  FAKE_CARGO_RECORD="$package_state/cargo-record" \
+  FAKE_CARGO_ENV_RECORD="$package_state/cargo-env-record" \
+  FAKE_CARGO_STATE="$package_state" \
+  FAKE_MAKE_RECORD="$package_state/make-record" \
+  PATH="$fake_bin:$PATH" \
+  "$release_tools/release_gate.sh" audit --source-only > "$package_state/output" 2>&1
+package_status=$?
+set -e
+if [[ "$package_status" -ne 0 ]]; then
+  cat "$package_state/output" >&2
+  exit 1
+fi
+if [[ "$(<"$package_state/package-count")" -ne 2 ]]; then
+  echo "recoverable package audit should retry exactly once" >&2
+  cat "$package_state/output" >&2
+  exit 1
+fi
+if [[ "$(<"$package_state/cargo-env-record")" != \
+  "$package_target/package-check-target"$'\t'"$package_target/package-check-target/build" ]]; then
+  echo "package-audit recovery should clean in the package verification Cargo context" >&2
+  cat "$package_state/cargo-env-record" >&2
+  exit 1
+fi
+if ! grep -Fxq 'clean -p libsqlite3-sys' "$package_state/cargo-record"; then
+  echo "package-audit recovery should clean only the implicated package" >&2
+  cat "$package_state/cargo-record" >&2
+  exit 1
+fi
 
 echo "release_gate_stale_out_dir_test: ok"
