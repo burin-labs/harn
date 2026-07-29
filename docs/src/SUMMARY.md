@@ -277,6 +277,7 @@
 - [Staged filesystem (hostlib)](./hostlib/staged-fs.md)
 - [Per-tool-call FS snapshots (hostlib)](./hostlib/fs-snapshot.md)
 - [Typed terminal sessions (hostlib)](./hostlib/terminal-session.md)
+- [Ambient host conditions (hostlib)](./hostlib/host-conditions.md)
 
 # Explanation
 

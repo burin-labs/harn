@@ -33,6 +33,7 @@ mod fs_path_scope;
 mod fs_snapshot;
 mod fs_staging;
 mod fs_watch;
+mod host_conditions;
 mod parser_agreement_corpus;
 mod process_artifact_retention;
 mod process_tools;

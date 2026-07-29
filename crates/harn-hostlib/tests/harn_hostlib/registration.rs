@@ -18,10 +18,11 @@ use harn_hostlib::terminal_session::TerminalSessionCapability;
 use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, embed::EmbedCapability, fs::FsCapability,
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability,
-    host_lease_capability::HostLeaseCapability, scanner::ScannerCapability, schemas,
-    secret_store::SecretStoreCapability, tools::permissions, tools::ToolsCapability,
-    BuiltinRegistry, HostLeasePriorityClass, HostLeaseRequest, HostLeaseResourceClass,
-    HostLeaseStore, HostlibCapability, HostlibError, HostlibRegistry, HOST_LEASE_ROOT_ENV,
+    host_conditions::HostConditionsCapability, host_lease_capability::HostLeaseCapability,
+    scanner::ScannerCapability, schemas, secret_store::SecretStoreCapability, tools::permissions,
+    tools::ToolsCapability, BuiltinRegistry, HostLeasePriorityClass, HostLeaseRequest,
+    HostLeaseResourceClass, HostLeaseStore, HostlibCapability, HostlibError, HostlibRegistry,
+    HOST_LEASE_ROOT_ENV,
 };
 use harn_lexer::Lexer;
 use harn_parser::Parser;
@@ -586,6 +587,7 @@ fn install_default_wires_every_module_into_a_vm() {
         "tools",
         "secret_store",
         "verdict",
+        "host_conditions",
         "host_lease",
     ];
     // The computer-use module is registered only when the `computer` feature is
@@ -598,8 +600,9 @@ fn install_default_wires_every_module_into_a_vm() {
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 4 host_lease = 84.
-    assert!(registry.builtins().len() >= 84);
+    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 1 host_conditions
+    // + 4 host_lease = 85.
+    assert!(registry.builtins().len() >= 85);
 }
 
 #[test]
@@ -1179,6 +1182,7 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(FsWatchCapability)
         .with(ToolsCapability)
         .with(SecretStoreCapability)
+        .with(HostConditionsCapability::default())
         .with(HostLeaseCapability);
     #[cfg(feature = "terminal-session")]
     let registry = registry.with(TerminalSessionCapability::new());

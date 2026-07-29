@@ -14,6 +14,9 @@ Opt-in host builtins for the Harn VM that provide:
 4. **Typed terminal sessions** — default-off PTY lifecycle, key input,
    resize, idle waits, and VT screen/cursor/style capture through the shared
    `harn-terminal` engine.
+5. **Ambient host conditions** — portable contention questions with explicit
+   observed, unavailable, and not-observable states, backed by local probes or
+   injected control-plane facts.
 
 ## Cargo features
 
@@ -141,6 +144,7 @@ and commit the updated goldens.
 | #568  | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | ✅ shipped |
 | #1722 | `fs/`                    | `set_mode`, `staged_status`, `commit_staged`, `discard_staged`                    | ✅ shipped |
 | #1720 | `fs/` (snapshots)        | `snapshot`, `restore`, `list_snapshots`, `drop_snapshot`                          | ✅ shipped |
+| #5617 | `host_conditions/`       | read-only, versioned `sample` over portable contention questions                  | ✅ shipped |
 
 ### Process tools
 
