@@ -84,6 +84,7 @@ pub use worker_queue::{
     claims_topic_name as worker_claims_topic_name, job_topic_name as worker_job_topic_name,
     response_topic_name as worker_response_topic_name, ClaimedWorkerJob, WorkerQueue,
     WorkerQueueClaimHandle, WorkerQueueEnqueueReceipt, WorkerQueueInspectSnapshot, WorkerQueueJob,
-    WorkerQueueJobState, WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState,
-    WorkerQueueSummary, WORKER_QUEUE_CATALOG_TOPIC,
+    WorkerQueueJobState, WorkerQueuePriority, WorkerQueueResponseRecord,
+    WorkerQueueSchedulingDecision, WorkerQueueSchedulingReceipt, WorkerQueueState,
+    WorkerQueueSummary, DEFERRABLE_PROMOTION_AGE_MS, WORKER_QUEUE_CATALOG_TOPIC,
 };

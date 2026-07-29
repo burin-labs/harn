@@ -14,7 +14,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::worker_queue::{WorkerQueueJobState, WorkerQueuePriority};
+use super::worker_queue::{
+    WorkerQueueJobState, WorkerQueuePriority, WorkerQueueSchedulingDecision,
+};
 use super::TenantId;
 
 /// Default starvation-age promotion threshold (5 minutes).
@@ -282,6 +284,8 @@ impl<'a> SchedulableJob<'a> {
 pub struct SchedulerSelection {
     pub job_event_id: u64,
     pub fairness_key: String,
+    pub decision: WorkerQueueSchedulingDecision,
+    pub promotion_deadline_at_ms: Option<i64>,
 }
 
 /// Mutable in-memory state. Self-correcting: deficits even out over time so
@@ -324,13 +328,20 @@ impl SchedulerState {
         if candidates.is_empty() {
             return None;
         }
-        match &policy.strategy {
+        let selection = match &policy.strategy {
             SchedulerStrategy::Fifo => fifo_select(candidates, policy, now_ms),
             SchedulerStrategy::DeficitRoundRobin {
                 quantum,
                 starvation_age_ms,
             } => self.drr_select(candidates, policy, *quantum, *starvation_age_ms, now_ms),
+        };
+        if selection.as_ref().is_some_and(|selection| {
+            selection.decision == WorkerQueueSchedulingDecision::StarvationDeadline
+        }) && matches!(policy.strategy, SchedulerStrategy::Fifo)
+        {
+            self.starvation_promotions_total += 1;
         }
+        selection
     }
 
     /// Increment in-flight counter for a fairness key. Call when a claim
@@ -438,7 +449,7 @@ impl SchedulerState {
         for jobs in groups.values_mut() {
             jobs.sort_by_key(|j| {
                 (
-                    j.priority.effective_rank(j.enqueued_at_ms, now_ms),
+                    j.priority.selection_rank(j.enqueued_at_ms, now_ms),
                     j.enqueued_at_ms,
                     j.job_event_id,
                 )
@@ -448,7 +459,7 @@ impl SchedulerState {
         // Starvation override: any eligible head whose age exceeds the
         // threshold wins, with the oldest head breaking ties.
         if let Some(threshold) = starvation_age_ms {
-            let mut oldest: Option<(i64, String, u64)> = None;
+            let mut oldest: Option<(i64, String, u64, Option<i64>)> = None;
             for (key, jobs) in &groups {
                 if policy.max_concurrent_per_key > 0
                     && self.in_flight_for(key) >= policy.max_concurrent_per_key
@@ -463,18 +474,25 @@ impl SchedulerState {
                 if (age_ms as u64) >= threshold
                     && oldest
                         .as_ref()
-                        .map(|(prev, _, _)| head.enqueued_at_ms < *prev)
+                        .map(|(prev, _, _, _)| head.enqueued_at_ms < *prev)
                         .unwrap_or(true)
                 {
-                    oldest = Some((head.enqueued_at_ms, key.clone(), head.job_event_id));
+                    oldest = Some((
+                        head.enqueued_at_ms,
+                        key.clone(),
+                        head.job_event_id,
+                        scheduling_deadline(head, starvation_age_ms),
+                    ));
                 }
             }
-            if let Some((_, key, job_event_id)) = oldest {
+            if let Some((_, key, job_event_id, promotion_deadline_at_ms)) = oldest {
                 self.starvation_promotions_total += 1;
                 self.commit_selection(&key);
                 return Some(SchedulerSelection {
                     job_event_id,
                     fairness_key: key,
+                    decision: WorkerQueueSchedulingDecision::StarvationDeadline,
+                    promotion_deadline_at_ms,
                 });
             }
         }
@@ -505,15 +523,20 @@ impl SchedulerState {
             let idx = (start + offset) % n;
             let key = eligible_keys[idx].clone();
             if self.credits.get(&key).copied().unwrap_or(0) >= 1 {
-                let job_event_id = groups
-                    .get(&key)
-                    .and_then(|jobs| jobs.first())
-                    .map(|job| job.job_event_id)?;
+                let job = groups.get(&key).and_then(|jobs| jobs.first()).copied()?;
                 self.spend_credit(&key);
                 self.commit_selection(&key);
+                let decision = if job.priority.deadline_promoted(job.enqueued_at_ms, now_ms) {
+                    self.starvation_promotions_total += 1;
+                    WorkerQueueSchedulingDecision::StarvationDeadline
+                } else {
+                    WorkerQueueSchedulingDecision::FairShare
+                };
                 return Some(SchedulerSelection {
-                    job_event_id,
+                    job_event_id: job.job_event_id,
                     fairness_key: key,
+                    decision,
+                    promotion_deadline_at_ms: scheduling_deadline(job, starvation_age_ms),
                 });
             }
         }
@@ -530,15 +553,20 @@ impl SchedulerState {
             let idx = (start + offset) % n;
             let key = eligible_keys[idx].clone();
             if self.credits.get(&key).copied().unwrap_or(0) >= 1 {
-                let job_event_id = groups
-                    .get(&key)
-                    .and_then(|jobs| jobs.first())
-                    .map(|job| job.job_event_id)?;
+                let job = groups.get(&key).and_then(|jobs| jobs.first()).copied()?;
                 self.spend_credit(&key);
                 self.commit_selection(&key);
+                let decision = if job.priority.deadline_promoted(job.enqueued_at_ms, now_ms) {
+                    self.starvation_promotions_total += 1;
+                    WorkerQueueSchedulingDecision::StarvationDeadline
+                } else {
+                    WorkerQueueSchedulingDecision::FairShare
+                };
                 return Some(SchedulerSelection {
-                    job_event_id,
+                    job_event_id: job.job_event_id,
                     fairness_key: key,
+                    decision,
+                    promotion_deadline_at_ms: scheduling_deadline(job, starvation_age_ms),
                 });
             }
         }
@@ -567,6 +595,15 @@ impl SchedulerState {
     }
 }
 
+fn scheduling_deadline(job: &SchedulableJob<'_>, starvation_age_ms: Option<u64>) -> Option<i64> {
+    let class_deadline = job.priority.promotion_deadline_at_ms(job.enqueued_at_ms);
+    let policy_deadline = starvation_age_ms.map(|age| {
+        job.enqueued_at_ms
+            .saturating_add(i64::try_from(age).unwrap_or(i64::MAX))
+    });
+    class_deadline.into_iter().chain(policy_deadline).min()
+}
+
 fn fifo_select(
     candidates: &[SchedulableJob<'_>],
     policy: &SchedulerPolicy,
@@ -574,7 +611,7 @@ fn fifo_select(
 ) -> Option<SchedulerSelection> {
     let pick = candidates.iter().min_by_key(|job| {
         (
-            job.priority.effective_rank(job.enqueued_at_ms, now_ms),
+            job.priority.selection_rank(job.enqueued_at_ms, now_ms),
             job.enqueued_at_ms,
             job.job_event_id,
         )
@@ -582,6 +619,12 @@ fn fifo_select(
     Some(SchedulerSelection {
         job_event_id: pick.job_event_id,
         fairness_key: policy.fairness_key_of(pick),
+        decision: if pick.priority.deadline_promoted(pick.enqueued_at_ms, now_ms) {
+            WorkerQueueSchedulingDecision::StarvationDeadline
+        } else {
+            WorkerQueueSchedulingDecision::Priority
+        },
+        promotion_deadline_at_ms: pick.priority.promotion_deadline_at_ms(pick.enqueued_at_ms),
     })
 }
 
@@ -758,6 +801,38 @@ mod tests {
             .select(&snapshot_views(&jobs), &policy, 1_000)
             .unwrap();
         assert_eq!(pick.job_event_id, 2, "high priority always wins under FIFO");
+        assert_eq!(pick.decision, WorkerQueueSchedulingDecision::Priority);
+    }
+
+    #[test]
+    fn fifo_promotes_deferrable_work_at_its_bounded_deadline() {
+        let deadline = crate::triggers::worker_queue::DEFERRABLE_PROMOTION_AGE_MS;
+        let jobs = vec![
+            state(1, 0, Some("a"), "deferred", WorkerQueuePriority::Low),
+            state(2, -1, Some("a"), "interactive", WorkerQueuePriority::High),
+        ];
+        let mut sched = SchedulerState::new();
+        let policy = SchedulerPolicy::fifo();
+
+        let before_deadline = sched
+            .select(&snapshot_views(&jobs), &policy, deadline - 1)
+            .unwrap();
+        assert_eq!(before_deadline.job_event_id, 2);
+        assert_eq!(
+            before_deadline.decision,
+            WorkerQueueSchedulingDecision::Priority
+        );
+
+        let at_deadline = sched
+            .select(&snapshot_views(&jobs), &policy, deadline)
+            .unwrap();
+        assert_eq!(at_deadline.job_event_id, 1);
+        assert_eq!(
+            at_deadline.decision,
+            WorkerQueueSchedulingDecision::StarvationDeadline
+        );
+        assert_eq!(at_deadline.promotion_deadline_at_ms, Some(deadline));
+        assert_eq!(sched.starvation_promotions_total(), 1);
     }
 
     #[test]
@@ -889,6 +964,11 @@ mod tests {
             .select(&snapshot_views(&jobs), &policy, 20_000)
             .unwrap();
         assert_eq!(pick.fairness_key, "tenant-b");
+        assert_eq!(
+            pick.decision,
+            WorkerQueueSchedulingDecision::StarvationDeadline
+        );
+        assert_eq!(pick.promotion_deadline_at_ms, Some(1_010));
         assert_eq!(sched.starvation_promotions_total(), 1);
     }
 

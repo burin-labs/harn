@@ -165,6 +165,15 @@ Existing per-binding flow-control gates (`max_concurrent`, throttle, debounce,
 batch, singleton) still apply after a job is selected. The scheduler decides
 _who gets a turn first_, not whether the gate ultimately admits the dispatch.
 
+Every successful claim includes a typed `scheduling` receipt with the original
+priority, enqueue and selection timestamps, wait duration, fairness key,
+promotion deadline, and the decision (`priority`, `fair-share`, or
+`starvation-deadline`). On the default FIFO path, low-priority deferrable work
+is promoted after 30 minutes, so a continuous stream of newer interactive work
+cannot starve it indefinitely. Promotion guarantees selection at the next
+available claim opportunity; it does not preempt a handler that is already
+running.
+
 ### Inspecting fairness state
 
 `harn orchestrator queue ls --json` now includes a `scheduler` block:
