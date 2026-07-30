@@ -673,6 +673,44 @@ fn pairing_validator_accepts_ordered_pairs() {
             tool_call_id: Some("tc_1".to_string()),
             ..TrainingMessage::default()
         },
+        TrainingMessage {
+            role: "assistant".to_string(),
+            content: "done".to_string(),
+            ..TrainingMessage::default()
+        },
     ];
     validate_training_example_pairing(&messages).unwrap();
+}
+
+#[test]
+fn pairing_validator_rejects_a_run_without_a_no_tool_terminal_turn() {
+    let messages = vec![
+        TrainingMessage {
+            role: "assistant".to_string(),
+            content: "<tool_call>{\"name\":\"read_file\",\"arguments\":{}}</tool_call> ##DONE##"
+                .to_string(),
+            tool_calls: vec![TrainingToolCall {
+                id: "tc_0".to_string(),
+                call_type: "function".to_string(),
+                function: TrainingToolFunction {
+                    name: "read_file".to_string(),
+                    arguments: json!({}),
+                },
+            }],
+            ..TrainingMessage::default()
+        },
+        TrainingMessage {
+            role: "tool".to_string(),
+            content: "result".to_string(),
+            tool_call_id: Some("tc_0".to_string()),
+            ..TrainingMessage::default()
+        },
+    ];
+
+    let error = validate_training_example_pairing(&messages).unwrap_err();
+    assert_eq!(error.kind, "missing_terminal_assistant");
+    assert!(
+        error.message.contains("no-tool assistant completion"),
+        "{error}"
+    );
 }

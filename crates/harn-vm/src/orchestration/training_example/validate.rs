@@ -7,7 +7,8 @@
 //!
 //! The invariant: every tool call an assistant turn makes is answered by
 //! exactly one `role: "tool"` message carrying that call's id, the answers
-//! arrive in request order, and they all arrive before the next non-tool turn.
+//! arrive in request order, they all arrive before the next non-tool turn, and
+//! the example ends on a no-tool assistant completion turn.
 
 use std::collections::BTreeSet;
 
@@ -159,5 +160,20 @@ pub fn validate_training_example_pairing(
             format!("example ends with call {id} ({name}) unanswered"),
         ));
     }
-    Ok(())
+    match messages.last() {
+        Some(message) if message.role == "assistant" && message.tool_calls.is_empty() => Ok(()),
+        Some(message) => Err(TrainingPairingError::new(
+            "missing_terminal_assistant",
+            messages.len() - 1,
+            format!(
+                "example must end with a no-tool assistant completion turn, not `{}`",
+                message.role
+            ),
+        )),
+        None => Err(TrainingPairingError::new(
+            "missing_terminal_assistant",
+            0,
+            "example must end with a no-tool assistant completion turn",
+        )),
+    }
 }
