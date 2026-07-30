@@ -39,7 +39,7 @@ pipeline default(harness: Harness, _task) {
   // The edit primitives that write to disk share the deterministic-tools
   // gate; enable it once before any apply_node call (even dry-run).
   // 1. Capability matrix — the onboarding contract, queryable.
-  const caps = edit_capabilities()
+  const caps = edit_capabilities(harness.ast)
   const rows = caps.languages
   const apply_count = count_supporting(rows, "apply_node")
   const rename_count = count_supporting(rows, "rename_symbol")
@@ -48,7 +48,8 @@ pipeline default(harness: Harness, _task) {
   // 3. Real format-preserving edits against bundled data-format seeds.
   const assets = harness.fs.runtime_paths().asset_root
   const json_edit = edit_apply_node(
-    harness.ast, {
+    harness.ast,
+    {
       path: assets + "/seed/config.json",
       query: "(pair value: (number) @target)",
       replacement: "2",
@@ -56,7 +57,8 @@ pipeline default(harness: Harness, _task) {
     },
   )
   const css_edit = edit_apply_node(
-    harness.ast, {
+    harness.ast,
+    {
       path: assets + "/seed/theme.css",
       query: "(declaration (plain_value) @target)",
       replacement: "blue",

@@ -1,4 +1,4 @@
-// Build-or-check the shipped harn release binary against a size budget and,
+// Build-oharness.fs, r-check the shipped harn release binary against a size budget and,
 // unless disabled, write a cargo-bloat report for follow-up analysis.
 //
 // Ported from scripts/check_binary_size.sh — same flags, env vars, report
@@ -176,8 +176,8 @@ pub fn report_lines(
 }
 
 /** Env var value or `fallback` when unset/empty. */
-fn env_or(harness: Harness, name: string, fallback: string) -> string {
-  const v = harness.env.get(name)
+fn binary_size_env_or(env: HarnessEnv, name: string, fallback: string) -> string {
+  const v = env.get(name)
   if v == nil || v == "" {
     return fallback
   }
@@ -185,8 +185,8 @@ fn env_or(harness: Harness, name: string, fallback: string) -> string {
 }
 
 /** Absolute repo root (the glob search root marker). */
-fn repo_root(harness: Harness) -> string {
-  for g in harness.fs.glob("Cargo.toml") {
+fn repo_root(fs: HarnessFs) -> string {
+  for g in fs.glob("Cargo.toml") {
     const idx = g.index_of("/./")
     if idx >= 0 {
       return g.substring(0, idx)
@@ -196,9 +196,9 @@ fn repo_root(harness: Harness) -> string {
 }
 
 /** True when `cmd` resolves on PATH (bash `command -v`). */
-fn command_exists(harness: Harness, cmd: string) -> bool {
+fn command_exists(process: HarnessProcess, cmd: string) -> bool {
   const res = try {
-    harness.process.run({cmd: "sh", args: ["-c", "command -v ${cmd}"]})
+    process.run({program: "sh", args: ["-c", "command -v ${cmd}"]})
   } catch (err) {
     return false
   }
@@ -208,10 +208,14 @@ fn command_exists(harness: Harness, cmd: string) -> bool {
 @complexity(allow)
 pipeline main(harness: Harness, task) {
   const defaults = {
-    target: env_or(harness, "HARN_RELEASE_TARGET", ""),
-    harn_bin: env_or(harness, "HARN_BIN", ""),
-    budget_mb: env_or(harness, "BINARY_SIZE_BUDGET_MB", DEFAULT_BINARY_SIZE_BUDGET_MB),
-    report_dir: env_or(harness, "BINARY_SIZE_REPORT_DIR", ""),
+    target: binary_size_env_or(harness.env, "HARN_RELEASE_TARGET", ""),
+    harn_bin: binary_size_env_or(harness.env, "HARN_BIN", ""),
+    budget_mb: binary_size_env_or(
+      harness.env,
+      "BINARY_SIZE_BUDGET_MB",
+      DEFAULT_BINARY_SIZE_BUDGET_MB,
+    ),
+    report_dir: binary_size_env_or(harness.env, "BINARY_SIZE_REPORT_DIR", ""),
   }
   const parsed = parse_args(argv, defaults)
   if !parsed.ok {
@@ -231,11 +235,11 @@ pipeline main(harness: Harness, task) {
     harness.stdio.eprintln("error: --budget-mb must be a positive number, got '${opts.budget_mb}'")
     return 2
   }
-  const cargo_target_dir = env_or(harness, "CARGO_TARGET_DIR", "")
+  const cargo_target_dir = binary_size_env_or(harness.env, "CARGO_TARGET_DIR", "")
   const target_dir = if cargo_target_dir != "" {
     cargo_target_dir
   } else {
-    "${repo_root(harness)}/target"
+    "${repo_root(harness.fs)}/target"
   }
   const target: string = opts.target
   let target_args: list<string> = []
@@ -252,10 +256,10 @@ pipeline main(harness: Harness, task) {
   }
   const budget_bytes = budget_bytes_of(budget_mb)
   if opts.build_release {
-    const strip = env_or(harness, "CARGO_PROFILE_RELEASE_STRIP", "symbols")
+    const strip = binary_size_env_or(harness.env, "CARGO_PROFILE_RELEASE_STRIP", "symbols")
     const build = harness.process.run(
       {
-        cmd: "cargo",
+        program: "cargo",
         args: ["build", "--release", "-p", "harn-cli", "--bin", "harn"] + target_args,
         env: {CARGO_PROFILE_RELEASE_STRIP: strip},
       },
@@ -285,7 +289,7 @@ pipeline main(harness: Harness, task) {
     )
   }
   if opts.emit_bloat {
-    if !command_exists(harness, "cargo-bloat") {
+    if !command_exists(harness.process, "cargo-bloat") {
       harness.stdio.eprintln("error: cargo-bloat is required to produce ${bloat_report}")
       return 2
     }
@@ -294,21 +298,19 @@ pipeline main(harness: Harness, task) {
      * binary whose size we checked so the script is safe to run before a
      * packaging step. The scratch dir lives in the workspace (the runtime
      * sandbox only permits writes inside the workspace root). */
-    const mk = harness.process.run(
-      {cmd: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]},
-    )
+    const mk = harness.process.run({program: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]})
     if !mk.success {
       harness.stdio.eprintln("error: could not create temp directory")
       return 1
     }
     const restore_dir = mk.stdout.trim()
     const checked_binary = "${restore_dir}/harn"
-    harness.process.run({cmd: "cp", args: ["-p", harn_bin, checked_binary]})
+    harness.process.run({program: "cp", args: ["-p", harn_bin, checked_binary]})
     defer {
       if harness.fs.exists(checked_binary) {
-        harness.process.run({cmd: "cp", args: ["-p", checked_binary, harn_bin]})
+        harness.process.run({program: "cp", args: ["-p", checked_binary, harn_bin]})
       }
-      harness.process.run({cmd: "rm", args: ["-rf", restore_dir]})
+      harness.process.run({program: "rm", args: ["-rf", restore_dir]})
     }
     let bloat_args = ["bloat", "--release", "--crates", "-p", "harn-cli", "--bin", "harn"]
       + target_args
@@ -316,7 +318,7 @@ pipeline main(harness: Harness, task) {
       bloat_args = bloat_args + ["--target-dir", cargo_target_dir]
     }
     bloat_args = bloat_args + ["-n", "40"]
-    const bloat = harness.process.run({cmd: "cargo", args: bloat_args})
+    const bloat = harness.process.run({program: "cargo", args: bloat_args})
     harness.stdio.eprint(bloat.stderr)
     if !bloat.success {
       return bloat.exit_code

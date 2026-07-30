@@ -8,16 +8,16 @@ pub fn semantic_eval_provider(harness: Harness) {
   if configured != "" {
     return configured
   }
-  return provider_name(harness)
+  return provider_name(harness.env)
 }
 
 /** Resolve the model for semantic Burin Mini grading runs. */
-pub fn semantic_eval_model(harness: Harness) {
-  const configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_MODEL", "")
+pub fn semantic_eval_model(env: HarnessEnv) {
+  const configured = env.get_or("BURIN_MINI_SEMANTIC_EVAL_MODEL", "")
   if configured != "" {
     return configured
   }
-  return evaluator_model(harness)
+  return evaluator_model(env)
 }
 
 /** Select heuristic or LLM semantic grading mode. */
@@ -33,9 +33,9 @@ pub fn semantic_eval_mode(harness: Harness) {
 }
 
 /** Load and parse a JSON file or throw with context. */
-pub fn load_json_file(harness: Harness, path) {
+pub fn load_json_file(fs: HarnessFs, path) {
   const parsed: Result<unknown, JsonParseFailure> = try {
-    json_parse(harness.fs.read_text(path))
+    json_parse(fs.read_text(path))
   }
   if is_err(parsed) {
     throw "Failed to parse JSON file: ${path}: " + unwrap_err(parsed).message
@@ -275,11 +275,13 @@ pub fn render_inference_transcripts(harness: Harness, task_root) {
   }
   return join(
     [
-      render_file_bundle(harness,
+      render_file_bundle(
+        harness,
         path_join(task_root, "llm"),
         "Top-level and provider transcripts",
       ),
-      render_file_bundle(harness,
+      render_file_bundle(
+        harness,
         path_join(task_root, "events"),
         "Event logs and forked session traces",
       ),

@@ -10,7 +10,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "user_prompt_submit",
-    { event ->
+    { _hook_harness, event ->
       const prompt = to_string(event?.prompt ?? "")
       if prompt.contains("secret") {
         return {block: true, reason: "policy violation: secret in prompt"}
@@ -19,7 +19,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("should not run")],
+    harness.llm,
+    [llm_text("should not run")],
     { ->
       const blocked = agent_loop(harness, "share the secret password", nil, {provider: "mock"})
       harness.stdio.println(blocked.status)
@@ -28,7 +29,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       const allowed = agent_loop(harness, "hello world", nil, {provider: "mock"})
       harness.stdio.println(allowed.status)

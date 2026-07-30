@@ -13,12 +13,17 @@ fn call(options) {
 }
 
 fn retry_caller(harness: Harness) {
-  return with_retry(harness, default_llm_caller(harness), {max_attempts: 2, base_ms: 0, max_ms: 0})
+  return with_retry(
+    harness,
+    default_llm_caller(harness.agent, harness.llm),
+    {max_attempts: 2, base_ms: 0, max_ms: 0},
+  )
 }
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [{error: {category: "rate_limit", message: "mock 429 transient"}}, llm_text("recovered")],
+    harness.llm,
+    [{error: {category: "rate_limit", message: "mock 429 transient"}}, llm_text("recovered")],
     { ->
       const caller = retry_caller(harness)
       const result = caller(
@@ -33,7 +38,8 @@ pipeline default(harness: Harness) {
   // Direct LLM callers can still request a prefill on every retry. Only the
   // private Harn marker opts into one-shot clearing.
   with_llm_script(
-    harness.llm, [{error: {category: "rate_limit", message: "mock 429 transient"}}, llm_text("recovered")],
+    harness.llm,
+    [{error: {category: "rate_limit", message: "mock 429 transient"}}, llm_text("recovered")],
     { ->
       const caller = retry_caller(harness)
       const result = caller(call({provider: "mock", prefill: "ordinary prefill"}))

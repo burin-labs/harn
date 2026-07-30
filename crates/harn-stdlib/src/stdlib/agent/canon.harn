@@ -60,12 +60,12 @@ fn __canon_manifest_path(root) -> string {
   return path_join(text, "canon-packs.json")
 }
 
-fn __canon_root_with_manifest(harness: Harness, root) -> string {
+fn __canon_root_with_manifest(fs: HarnessFs, root) -> string {
   const text = __canon_text(root)
   if text == "" {
     return ""
   }
-  if harness.fs.exists(__canon_manifest_path(text)) {
+  if fs.exists(__canon_manifest_path(text)) {
     return text
   }
   return ""
@@ -136,24 +136,22 @@ fn __canon_pack_ids_for_path_from_manifest(path, manifest) -> list<string> {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_resolve_root(harness: Harness, options = nil) -> string {
+pub fn canon_resolve_root(env: HarnessEnv, fs: HarnessFs, options = nil) -> string {
   const opts = options ?? {}
   const explicit = __canon_text(opts?.canon_root)
   if explicit != "" {
     return explicit
   }
-  const env_root = __canon_root_with_manifest(harness, harness.env.get_or("HARN_CANON_ROOT", ""))
+  const env_root = __canon_root_with_manifest(fs, env.get_or("HARN_CANON_ROOT", ""))
   if env_root != "" {
     return env_root
   }
-  const root = __canon_text(
-    opts?.project_root ?? harness.fs.project_root() ?? harness.fs.cwd() ?? "",
-  )
+  const root = __canon_text(opts?.project_root ?? fs.project_root() ?? fs.cwd() ?? "")
   if root == "" {
     return ""
   }
   for candidate in [path_join(root, ".harn", "canon"), path_join(root, ".harn", "harn-canon")] {
-    const found = __canon_root_with_manifest(harness, candidate)
+    const found = __canon_root_with_manifest(fs, candidate)
     if found != "" {
       return found
     }
@@ -233,7 +231,7 @@ pub fn canon_slice_from_files(files, metadata = nil) -> dict {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_slice_from_paths(harness: Harness, paths, options = nil) -> dict {
+pub fn canon_slice_from_paths(fs: HarnessFs, paths, options = nil) -> dict {
   const opts = options ?? {}
   const root = opts?.root ?? opts?.workspace_root
   let files = []
@@ -247,8 +245,8 @@ pub fn canon_slice_from_paths(harness: Harness, paths, options = nil) -> dict {
       continue
     }
     const read_path = __canon_path(root, path)
-    if harness.fs.exists(read_path) {
-      files = files.appending({path: path, text: harness.fs.read_text(read_path)})
+    if fs.exists(read_path) {
+      files = files.appending({path: path, text: fs.read_text(read_path)})
     } else if opts?.include_missing ?? false {
       files = files.appending({path: path, text: "", missing: true})
     }
@@ -263,13 +261,13 @@ pub fn canon_slice_from_paths(harness: Harness, paths, options = nil) -> dict {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_load_manifest(harness: Harness, canon_root: string) -> CanonManifest {
+pub fn canon_load_manifest(fs: HarnessFs, canon_root: string) -> CanonManifest {
   const root = __canon_text(canon_root)
   if root == "" {
     throw "canon_load_manifest: canon_root is required"
   }
   const path = __canon_manifest_path(root)
-  return read_json_typed<CanonManifest>(harness.fs, path, __canon_manifest_schema())
+  return read_json_typed<CanonManifest>(fs, path, __canon_manifest_schema())
 }
 
 fn __canon_manifest_pack(manifest, id) {
@@ -320,7 +318,7 @@ fn __canon_append_manifest_packs(packs, base_dir, manifest) {
   return out
 }
 
-fn __canon_manifest_path_for_contribution(harness: Harness, package_dir, contribution) -> string {
+fn __canon_manifest_path_for_contribution(fs: HarnessFs, package_dir, contribution) -> string {
   const explicit = __canon_text(
     contribution?.manifest ?? contribution?.canon_packs ?? contribution?.canonPacks,
   )
@@ -332,32 +330,32 @@ fn __canon_manifest_path_for_contribution(harness: Harness, package_dir, contrib
     return ""
   }
   const manifest_path = path_join(__canon_path(package_dir, raw_path), "canon-packs.json")
-  if harness.fs.exists(manifest_path) {
+  if fs.exists(manifest_path) {
     return manifest_path
   }
   return ""
 }
 
-fn __canon_manifest_from_installed_packages(harness: Harness, project_root_value) -> dict? {
+fn __canon_manifest_from_installed_packages(fs: HarnessFs, project_root_value) -> dict? {
   const root = __canon_text(project_root_value)
   if root == "" {
     return nil
   }
-  const snapshot = harness.fs.package_snapshot_open(root)
+  const snapshot = fs.package_snapshot_open(root)
   if snapshot == nil {
     return nil
   }
   defer {
-    harness.fs.package_snapshot_close(snapshot.handle)
+    fs.package_snapshot_close(snapshot.handle)
   }
   const packages_dir = snapshot.packages_root
   let packs = []
   for package_name in snapshot.packages {
     const manifest_path = path_join(packages_dir, package_name, "harn.toml")
-    if !harness.fs.exists(manifest_path) {
+    if !fs.exists(manifest_path) {
       continue
     }
-    const manifest = read_toml(harness.fs, manifest_path, nil)
+    const manifest = read_toml(fs, manifest_path, nil)
     if manifest == nil {
       continue
     }
@@ -367,7 +365,7 @@ fn __canon_manifest_from_installed_packages(harness: Harness, project_root_value
         continue
       }
       const contribution_manifest_path = __canon_manifest_path_for_contribution(
-        harness,
+        fs,
         package_dir,
         contribution,
       )
@@ -375,11 +373,7 @@ fn __canon_manifest_from_installed_packages(harness: Harness, project_root_value
         packs = __canon_append_manifest_packs(
           packs,
           dirname(contribution_manifest_path),
-          read_json_typed<CanonManifest>(
-            harness.fs,
-            contribution_manifest_path,
-            __canon_manifest_schema(),
-          ),
+          read_json_typed<CanonManifest>(fs, contribution_manifest_path, __canon_manifest_schema()),
         )
         continue
       }
@@ -493,14 +487,12 @@ fn __canon_pack_from_item(item, manifest, canon_root) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_resolve_packs(harness: Harness, options = nil) -> list<dict> {
+pub fn canon_resolve_packs(env: HarnessEnv, fs: HarnessFs, options = nil) -> list<dict> {
   const opts = options ?? {}
-  const project = __canon_text(
-    opts?.project_root ?? harness.fs.project_root() ?? harness.fs.cwd() ?? "",
-  )
+  const project = __canon_text(opts?.project_root ?? fs.project_root() ?? fs.cwd() ?? "")
   const explicit_root = __canon_text(opts?.canon_root)
   const env_root = if explicit_root == "" {
-    __canon_root_with_manifest(harness, harness.env.get_or("HARN_CANON_ROOT", ""))
+    __canon_root_with_manifest(fs, env.get_or("HARN_CANON_ROOT", ""))
   } else {
     ""
   }
@@ -510,7 +502,7 @@ pub fn canon_resolve_packs(harness: Harness, options = nil) -> list<dict> {
   } else if env_root != "" {
     env_root
   } else {
-    canon_resolve_root(harness, opts)
+    canon_resolve_root(env, fs, opts)
   }
   let requested = opts?.packs ?? opts?.pack_ids ?? []
   if type_of(requested) == "string" {
@@ -521,17 +513,17 @@ pub fn canon_resolve_packs(harness: Harness, options = nil) -> list<dict> {
     ?? if needs_manifest && canon_root != nil
     && __canon_text(canon_root)
     != "" {
-    const root_manifest = canon_load_manifest(harness, canon_root)
+    const root_manifest = canon_load_manifest(fs, canon_root)
     if configured_root {
       root_manifest
     } else {
       __canon_merge_manifest_packs(
         root_manifest,
-        __canon_manifest_from_installed_packages(harness, project),
+        __canon_manifest_from_installed_packages(fs, project),
       )
     }
   } else if needs_manifest {
-    __canon_manifest_from_installed_packages(harness, project)
+    __canon_manifest_from_installed_packages(fs, project)
   } else {
     nil
   }
@@ -557,7 +549,7 @@ pub fn canon_resolve_packs(harness: Harness, options = nil) -> list<dict> {
  */
 pub fn canon_evaluate_slice(harness: Harness, slice, options = nil) -> dict {
   const opts = options ?? {}
-  const packs = canon_resolve_packs(harness, opts + {slice: slice})
+  const packs = canon_resolve_packs(harness.env, harness.fs, opts + {slice: slice})
   let reports = []
   let selected = []
   let ok = true
@@ -638,7 +630,7 @@ pub fn canon_inject_feedback(harness: Harness, session_id: string, slice, option
   let reminder_id = nil
   if feedback != "" && mode == "feedback" {
     agent_session_inject_feedback(
-      harness,
+      harness.agent,
       session_id,
       opts?.feedback_kind ?? "harn_canon",
       feedback,
@@ -653,7 +645,7 @@ pub fn canon_inject_feedback(harness: Harness, session_id: string, slice, option
       ttl_turns: opts?.reminder?.ttl_turns ?? 1,
       preserve_on_compact: opts?.reminder?.preserve_on_compact ?? true,
     }
-    reminder_id = agent_session_inject_reminder(harness, session_id, reminder)
+    reminder_id = agent_session_inject_reminder(harness.agent, session_id, reminder)
   } else if mode != "none" && mode != "feedback" && mode != "reminder" {
     throw "canon_inject_feedback: inject must be feedback|reminder|none"
   }
@@ -684,7 +676,7 @@ pub fn canon_inject_paths_feedback(
   options = nil,
 ) -> dict {
   const opts = options ?? {}
-  const slice = canon_slice_from_paths(harness, paths, opts)
+  const slice = canon_slice_from_paths(harness.fs, paths, opts)
   return canon_inject_feedback(harness, session_id, slice, opts + {files: slice.files})
 }
 

@@ -35,7 +35,8 @@ pipeline default(harness: Harness, task) {
   for category in categories {
     const model = "mock-" + category
     with_llm_script(
-      harness.llm, [{error: mock_error(category, "synthetic-" + category)}],
+      harness.llm,
+      [{error: mock_error(category, "synthetic-" + category)}],
       { ->
         try {
           harness.llm.call("probe", nil, {provider: "mock", model: model})
@@ -49,7 +50,8 @@ pipeline default(harness: Harness, task) {
       },
     )
     with_llm_script(
-      harness.llm, [{error: mock_error(category, "safe-" + category)}],
+      harness.llm,
+      [{error: mock_error(category, "safe-" + category)}],
       { ->
         const r = harness.llm.call_safe("probe", nil, {provider: "mock", model: model})
         harness.stdio.println(

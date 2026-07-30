@@ -282,8 +282,8 @@ pub fn load_platform_baseline(text: string, platform: string) -> dict {
   return {ok: true, error: "", baseline: baseline}
 }
 
-fn platform_name(harness: Harness) -> string {
-  const uname = harness.process.run({cmd: "uname", args: ["-s"]})
+fn platform_name(process: HarnessProcess) -> string {
+  const uname = process.run({program: "uname", args: ["-s"]})
   if !uname.success {
     return "unknown"
   }
@@ -297,13 +297,13 @@ fn platform_name(harness: Harness) -> string {
   }
 }
 
-fn harn_argv(harness: Harness) -> list<string> {
-  const bin_override = harness.env.get("HARN_CHECK_BIN")
+fn harn_argv(env: HarnessEnv, process: HarnessProcess) -> list<string> {
+  const bin_override = env.get("HARN_CHECK_BIN")
   if bin_override != nil && bin_override != "" {
     return [bin_override ?? ""]
   }
-  const metadata = harness.process.run(
-    {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
+  const metadata = process.run(
+    {program: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
   )
   if !metadata.success {
     throw "cargo metadata failed while resolving the measured harn binary"
@@ -320,40 +320,40 @@ fn harn_argv(harness: Harness) -> list<string> {
   return [target_dir + "/debug/harn"]
 }
 
-fn mkdir(harness: Harness, path: string) -> nil {
-  harness.fs.mkdir(path)
+fn mkdir(fs: HarnessFs, path: string) -> nil {
+  fs.mkdir(path)
   return nil
 }
 
-fn materialize_suite(harness: Harness, root: string, index: int) -> string {
+fn materialize_suite(fs: HarnessFs, root: string, index: int) -> string {
   const suite = path_join(root, "suite-${index}")
   const state = path_join(suite, ".harn")
   const generation = "perf-v1"
   const generation_root = path_join(path_join(state, "package-generations"), generation)
   const packages = path_join(generation_root, "packages")
   const tests = path_join(suite, "tests")
-  mkdir(harness, suite)
-  mkdir(harness, state)
-  mkdir(harness, generation_root)
-  mkdir(harness, packages)
-  mkdir(harness, tests)
+  mkdir(fs, suite)
+  mkdir(fs, state)
+  mkdir(fs, generation_root)
+  mkdir(fs, packages)
+  mkdir(fs, tests)
   let lock_body =
     "# Generated performance fixture.\nversion = 4\ngenerator_version = \"performance-check\"\nprotocol_artifact_version = \"performance-check\"\n"
   for item in range(0, 128) {
     lock_body = lock_body + "# deterministic-padding-${item}=abcdefghijklmnopqrstuvwxyz0123456789\n"
   }
-  harness.fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
-  harness.fs.write_text(path_join(generation_root, "lease.lock"), "")
-  harness.fs.write_text(
+  fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
+  fs.write_text(path_join(generation_root, "lease.lock"), "")
+  fs.write_text(
     path_join(generation_root, "generation.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\nlock_digest = \"${sha256(lock_body)}\"\n",
   )
-  harness.fs.write_text(
+  fs.write_text(
     path_join(state, "package-current.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\n",
   )
-  harness.fs.write_text(path_join(state, "package-generation.lock"), "")
-  harness.fs.write_text(
+  fs.write_text(path_join(state, "package-generation.lock"), "")
+  fs.write_text(
     path_join(suite, "support.harn"),
     "pub fn helper(value: int) -> int { return value + 1 }\n",
   )
@@ -364,7 +364,7 @@ fn materialize_suite(harness: Harness, root: string, index: int) -> string {
       + "@test\npipeline perf_${index}_${case_index}(task) {\n  assert_eq(helper(${case_index}), ${case_index + 1})\n}\n\n"
   }
   const test_file = path_join(tests, "performance.harn")
-  harness.fs.write_text(test_file, source)
+  fs.write_text(test_file, source)
   return test_file
 }
 
@@ -383,16 +383,21 @@ fn invocation(argv: list<string>) -> string {
   return argv.map({ part -> shell_quote(part) }).to_list().join(" ")
 }
 
-fn run_parallel(harness: Harness, root: string, platform: string, test_files: list<string>) -> dict {
-  const prefix = harn_argv(harness)
+fn run_parallel(
+  harness: Harness,
+  root: string,
+  platform: string,
+  test_files: list<string>,
+) -> dict {
+  const prefix = harn_argv(harness.env, harness.process)
   let script = "set -u\npids=\"\"\n"
   for index in range(0, test_files.count) {
     const run_root = path_join(root, "run-${index}")
     const home = path_join(run_root, "home")
     const cache = path_join(run_root, "cache")
-    mkdir(harness, run_root)
-    mkdir(harness, home)
-    mkdir(harness, cache)
+    mkdir(harness.fs, run_root)
+    mkdir(harness.fs, home)
+    mkdir(harness.fs, cache)
     const stdout_path = path_join(run_root, "stdout.txt")
     const stderr_path = path_join(run_root, "stderr.txt")
     const status_path = path_join(run_root, "status.txt")
@@ -424,7 +429,7 @@ fn run_parallel(harness: Harness, root: string, platform: string, test_files: li
   }
   script = script
     + "failed=0\nfor pid in $pids; do wait \"$pid\" || failed=1; done\nexit \"$failed\"\n"
-  const fanout = harness.process.run({cmd: "sh", args: ["-c", script]})
+  const fanout = harness.process.run({program: "sh", args: ["-c", script]})
   let runs = []
   let errors = []
   for index in range(0, test_files.count) {
@@ -440,7 +445,7 @@ fn run_parallel(harness: Harness, root: string, platform: string, test_files: li
     const diagnose = parse_diagnose_output(stderr)
     const timing = parse_time_output(stderr)
     harness.process.run(
-      {cmd: "rm", args: ["-rf", path_join(run_root, "home"), path_join(run_root, "cache")]},
+      {program: "rm", args: ["-rf", path_join(run_root, "home"), path_join(run_root, "cache")]},
     )
     if status != 0 {
       errors = errors + ["run ${index} exited ${status}"]
@@ -472,15 +477,15 @@ fn run_parallel(harness: Harness, root: string, platform: string, test_files: li
  */
 fn measure_round(harness: Harness, platform: string) -> dict {
   const root = path_join(".harn-runs/test-case-performance", harness.random.uuid_v7())
-  mkdir(harness, root)
+  mkdir(harness.fs, root)
   let test_files = []
   for index in range(0, SUITE_COUNT) {
-    test_files = test_files + [materialize_suite(harness, root, index)]
+    test_files = test_files + [materialize_suite(harness.fs, root, index)]
   }
   const execution = run_parallel(harness, root, platform, test_files)
   const metrics = aggregate_runs(execution.runs)
   if execution.errors.count == 0 {
-    harness.process.run({cmd: "rm", args: ["-rf", root]})
+    harness.process.run({program: "rm", args: ["-rf", root]})
   } else {
     harness.stdio.eprintln("error: preserved failed workload at " + root)
   }
@@ -495,7 +500,7 @@ fn measure_round(harness: Harness, platform: string) -> dict {
 const MAX_MEASUREMENT_ROUNDS = 3
 
 pipeline main(harness: Harness, task) {
-  const platform = platform_name(harness)
+  const platform = platform_name(harness.process)
   if platform != "macos" && platform != "linux" {
     harness.stdio.eprintln("error: unsupported performance-check platform `${platform}`")
     return 1

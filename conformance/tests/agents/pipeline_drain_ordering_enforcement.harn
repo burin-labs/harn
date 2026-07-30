@@ -25,7 +25,7 @@ pipeline default(harness: Harness) {
       const ack = harness.acknowledge_trigger("trigger://inbox/event-1")
       harness.stdio.println("ack_status=" + ack.status)
       harness.stdio.println("ack_reason=" + ack.reason)
-      const audits = lifecycle_audit_log_take(harness)
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       return return_value
     },

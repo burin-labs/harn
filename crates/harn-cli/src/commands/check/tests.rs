@@ -80,9 +80,9 @@ fn preflight_reports_template_syntax_error() {
     // Unterminated `{{ for }}` block.
     std::fs::write(dir.join("broken.prompt"), "{{ for x in xs }}oops\n").unwrap();
     let source = r#"
-pipeline main() {
-  const text = render("broken.prompt")
-  __io_println(text)
+pipeline main(harness: Harness) {
+  const text = harness.fs.render_prompt("broken.prompt")
+  harness.stdio.println(text)
 }
 "#;
     let program = parse_program(source);
@@ -104,16 +104,16 @@ fn preflight_reports_missing_literal_render_target() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.harn");
     let source = r#"
-pipeline main() {
-  const text = render("missing.txt")
-  __io_println(text)
+pipeline main(harness: Harness) {
+  const text = harness.fs.render_prompt("missing.txt")
+  harness.stdio.println(text)
 }
 "#;
     let program = parse_program(source);
     let diagnostics =
         collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
     assert_eq!(diagnostics.len(), 1);
-    assert!(diagnostics[0].message.contains("render target"));
+    assert!(diagnostics[0].message.contains("render_prompt target"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -127,9 +127,9 @@ fn preflight_reports_missing_literal_render_prompt_target() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("chat.harn");
     let source = r#"
-pub fn chat() -> string {
+pub fn chat(fs: HarnessFs) -> string {
   const trimmed = "hello"
-  return harness.fs.render_prompt("lane-classifier.harn.prompt", {task: trimmed})
+  return fs.render_prompt("lane-classifier.harn.prompt", {task: trimmed})
 }
 "#;
     let program = parse_program(source);
@@ -529,8 +529,8 @@ fn preflight_reports_missing_worker_execution_repo() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.harn");
     let source = r#"
-pipeline main() {
-  spawn_agent({
+pipeline main(harness: Harness) {
+  spawn_agent(harness.agent, {
     task: "do it",
     node: {kind: "stage"},
     execution: {worktree: {repo: "./missing-repo"}}
@@ -556,8 +556,8 @@ fn preflight_detects_import_collision() {
 import "lib/a.harn"
 import "lib/b.harn"
 
-pipeline main() {
-  log(helper())
+pipeline main(harness: Harness) {
+  harness.stdio.log(helper())
 }
 "#;
     let program = parse_program(source);
@@ -592,9 +592,9 @@ fn preflight_no_collision_with_selective_imports() {
 import { foo } from "lib/a.harn"
 import { bar } from "lib/b.harn"
 
-pipeline main() {
-  log(foo())
-  log(bar())
+pipeline main(harness: Harness) {
+  harness.stdio.log(foo())
+  harness.stdio.log(bar())
 }
 "#;
     let program = parse_program(source);
@@ -859,8 +859,8 @@ fn check_file_inner_enforces_invariants_when_requested() {
         &file,
         r#"
 @invariant("fs.writes", "src/**")
-fn handler() {
-  write_file("/tmp/out.txt", "unsafe")
+fn handler(fs: HarnessFs) {
+  fs.write_text("/tmp/out.txt", "unsafe")
 }
 "#,
     )
@@ -945,9 +945,9 @@ fn check_file_inner_resolves_stdlib_llm_catalog_routing_routes() {
         r#"
 import { routing_routes } from "std/llm/catalog"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const routes = routing_routes()
-  __io_println(len(routes) >= 0)
+  harness.stdio.println(len(routes) >= 0)
 }
 "#,
     )
@@ -983,8 +983,8 @@ fn check_file_inner_skips_invariants_when_disabled() {
         &file,
         r#"
 @invariant("fs.writes", "src/**")
-fn handler() {
-  write_file("/tmp/out.txt", "unsafe")
+fn handler(fs: HarnessFs) {
+  fs.write_text("/tmp/out.txt", "unsafe")
 }
 "#,
     )
@@ -1072,9 +1072,9 @@ fn capability_policy_approval_matches_replay_oracle_fixture() {
   workspace: "notes/**",
   require_approval: "fs.write",
 )
-fn _handler() {
-  const _approval = request_approval("write_file", {capabilities_requested: ["fs.write"]})
-  write_file("notes/triage.md", "approved")
+fn _handler(interaction: HarnessInteraction, fs: HarnessFs) {
+  interaction.request_approval("write", {capabilities_requested: ["fs.write"]})
+  fs.write_text("notes/triage.md", "approved")
 }
 "#,
     )
@@ -1204,9 +1204,9 @@ fn preflight_accepts_render_target_from_bundle_root() {
     std::fs::write(dir.join("bundle").join("shared.prompt"), "hello").unwrap();
     let file = dir.join("main.harn");
     let source = r#"
-pipeline main() {
-  const text = render("shared.prompt")
-  __io_println(text)
+pipeline main(harness: Harness) {
+  const text = harness.fs.render_prompt("shared.prompt")
+  harness.stdio.println(text)
 }
 "#;
     let program = parse_program(source);
@@ -1236,15 +1236,15 @@ fn preflight_validates_render_in_imported_module() {
     // Module references a template that doesn't exist
     std::fs::write(
         dir.join("lib").join("tmpl.harn"),
-        "pub fn load() { render(\"missing_template.txt\") }\n",
+        "pub fn load(fs: HarnessFs) { fs.render_prompt(\"missing_template.txt\") }\n",
     )
     .unwrap();
     let file = dir.join("main.harn");
     let source = r#"
 import "lib/tmpl.harn"
 
-pipeline main() {
-  log(load())
+pipeline main(harness: Harness) {
+  harness.stdio.log(load(harness.fs))
 }
 "#;
     let program = parse_program(source);
@@ -1253,7 +1253,7 @@ pipeline main() {
     assert!(
         diagnostics
             .iter()
-            .any(|d| d.message.contains("render target")),
+            .any(|d| d.message.contains("render_prompt target")),
         "expected render target diagnostic for imported module, got: {:?}",
         diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
@@ -1282,18 +1282,18 @@ pub fn helper() -> string {
         r#"
 import "lib/helper.harn"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const review = harness.fs.render_prompt("prompts/review.harn.prompt")
-  const snippet = render("shared/snippet.prompt")
+  const snippet = harness.fs.render_prompt("shared/snippet.prompt")
   const contract = harness.fs.render_prompt("std/agent/prompts/tool_contract_text.harn.prompt")
-  host_call("project.scan", {})
-  exec_at("shared", "pwd")
-  spawn_agent({
+  harness.project.scan(".", {})
+  harness.process.exec_at("shared", "pwd")
+  spawn_agent(harness.agent, {
     task: "scan",
     node: {kind: "stage"},
     execution: {worktree: {repo: "./repo"}}
   })
-  __io_println(review + snippet + contract)
+  harness.stdio.println(review + snippet + contract)
 }
 "#,
     )
@@ -1325,7 +1325,7 @@ pipeline main() {
     }));
     assert!(assets.iter().any(|asset| {
         asset["kind"] == "prompt_asset"
-            && asset["via"] == "render"
+            && asset["via"] == "render_prompt"
             && asset["target"] == "shared/snippet.prompt"
     }));
     assert!(manifest["prompt_assets"]
@@ -1379,8 +1379,8 @@ fn bundle_manifest_tracks_reachable_stdlib_imports() {
         r#"
 import { process_run } from "std/runtime"
 
-pipeline main() {
-  process_run(["echo", "ok"], {timeout_ms: 1000})
+pipeline main(harness: Harness) {
+  process_run(harness.process, ["echo", "ok"], {timeout_ms: 1000})
 }
 "#,
     )
@@ -1414,7 +1414,7 @@ pipeline main() {
         .as_array()
         .expect("process capabilities")
         .iter()
-        .any(|op| op.as_str() == Some("exec")));
+        .any(|op| op.as_str() == Some("run")));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1533,9 +1533,9 @@ fn check_and_lint_json_share_typecheck_cache() {
     std::fs::write(
         &file,
         r"
-pipeline main() {
+pipeline main(harness: Harness) {
   const x = 1
-  log(x)
+  harness.stdio.log(x)
 }
 ",
     )
@@ -1590,8 +1590,8 @@ fn seeded_module_graph_avoids_reparsing_for_check() {
     std::fs::write(
         &file,
         r#"
-pipeline main() {
-  log("ready")
+pipeline main(harness: Harness) {
+  harness.stdio.log("ready")
 }
 "#,
     )

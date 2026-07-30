@@ -25,7 +25,6 @@ pub(crate) mod assemble;
 pub mod asset_paths;
 mod bytes;
 mod calendar;
-mod capability_contracts;
 mod channel_guardrails;
 mod channels;
 pub(crate) mod clock;
@@ -68,6 +67,7 @@ mod lifecycle_receipts;
 mod logging;
 pub mod long_running;
 mod math;
+pub(crate) use math::call_seeded_random_method;
 pub(crate) mod memory;
 mod monitors;
 mod multipart;
@@ -441,6 +441,35 @@ pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::Built
                     })) as &'static harn_builtin_registry::BuiltinManifestEntry,
                 );
             }
+        }
+        for entry in harn_capability_contracts::manifest() {
+            let harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } =
+                entry.contract.exposure
+            else {
+                unreachable!("leaf capability manifest contains a non-method contract")
+            };
+            if !capability_methods.insert((capability, method)) {
+                let runtime_entry = out
+                    .iter()
+                    .find(|candidate| candidate.contract.exposure == entry.contract.exposure)
+                    .expect("duplicate capability key must have a runtime manifest entry");
+                assert_eq!(
+                    runtime_entry.contract,
+                    entry.contract,
+                    "runtime effect contract drift for harness.{}.{}",
+                    capability.field_name(),
+                    method
+                );
+                assert_eq!(
+                    runtime_entry.signature,
+                    entry.signature,
+                    "runtime signature drift for harness.{}.{}",
+                    capability.field_name(),
+                    method
+                );
+                continue;
+            }
+            out.push(*entry);
         }
         for group in harn_builtin_meta::host_capabilities::HOST_CAPABILITY_GROUPS {
             for method in group.methods {

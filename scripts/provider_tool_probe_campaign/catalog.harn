@@ -5,7 +5,7 @@ const RUNTIME_RECEIPT_SCHEMA = "harn.provider_tool_probe_runtime.v1"
 
 const CATALOG_RECEIPT_SCHEMA = "harn.provider_tool_probe_catalog.v1"
 
-pub fn __catalog_receipt(
+pub type ProviderToolProbeCatalogReceiptRequest = {
   command: list<string>,
   command_env: dict,
   status: ProviderToolProbeCatalogStatus,
@@ -16,7 +16,21 @@ pub fn __catalog_receipt(
   model_count: int,
   route_count: int,
   reason: string,
+}
+
+pub fn __catalog_receipt(
+  request: ProviderToolProbeCatalogReceiptRequest,
 ) -> ProviderToolProbeCatalogReceipt {
+  const command = request.command
+  const command_env = request.command_env
+  const status = request.status
+  const exit_code = request.exit_code
+  const providers_config = request.providers_config
+  const catalog_sha256 = request.catalog_sha256
+  const provider_count = request.provider_count
+  const model_count = request.model_count
+  const route_count = request.route_count
+  const reason = request.reason
   return {
     schema_version: CATALOG_RECEIPT_SCHEMA,
     command: command,
@@ -45,19 +59,21 @@ pub fn provider_tool_probe_campaign_catalog_snapshot(
     const stderr = trim(to_string(child?.stderr ?? ""))
     return {
       receipt: __catalog_receipt(
-        command,
-        command_env,
-        "unavailable",
-        exit_code,
-        trim(providers_config),
-        "",
-        0,
-        0,
-        0,
-        if stderr != "" {
-          stderr
-        } else {
-          "target Harn catalog command exited unsuccessfully"
+        {
+          command: command,
+          command_env: command_env,
+          status: "unavailable",
+          exit_code: exit_code,
+          providers_config: trim(providers_config),
+          catalog_sha256: "",
+          provider_count: 0,
+          model_count: 0,
+          route_count: 0,
+          reason: if stderr != "" {
+            stderr
+          } else {
+            "target Harn catalog command exited unsuccessfully"
+          },
         },
       ),
       catalog: {},
@@ -74,16 +90,18 @@ pub fn provider_tool_probe_campaign_catalog_snapshot(
     || type_of(parsed?.routing_routes) != "list" {
     return {
       receipt: __catalog_receipt(
-        command,
-        command_env,
-        "invalid",
-        exit_code,
-        trim(providers_config),
-        "",
-        0,
-        0,
-        0,
-        "target Harn runtime produced invalid provider catalog JSON",
+        {
+          command: command,
+          command_env: command_env,
+          status: "invalid",
+          exit_code: exit_code,
+          providers_config: trim(providers_config),
+          catalog_sha256: "",
+          provider_count: 0,
+          model_count: 0,
+          route_count: 0,
+          reason: "target Harn runtime produced invalid provider catalog JSON",
+        },
       ),
       catalog: {},
     }
@@ -91,16 +109,18 @@ pub fn provider_tool_probe_campaign_catalog_snapshot(
   const canonical = json_stringify(parsed)
   return {
     receipt: __catalog_receipt(
-      command,
-      command_env,
-      "verified",
-      exit_code,
-      trim(providers_config),
-      "sha256:" + sha256(canonical),
-      len(parsed.providers),
-      len(parsed.models),
-      len(parsed.routing_routes),
-      "target Harn provider catalog identified",
+      {
+        command: command,
+        command_env: command_env,
+        status: "verified",
+        exit_code: exit_code,
+        providers_config: trim(providers_config),
+        catalog_sha256: "sha256:" + sha256(canonical),
+        provider_count: len(parsed.providers),
+        model_count: len(parsed.models),
+        route_count: len(parsed.routing_routes),
+        reason: "target Harn provider catalog identified",
+      },
     ),
     catalog: parsed,
   }
@@ -204,11 +224,11 @@ pub fn provider_tool_probe_campaign_runtime_allows_live(
 }
 
 pub fn __provider_tool_probe_campaign_runtime(
-  harness: Harness,
+  process: HarnessProcess,
   harn_bin: string,
 ) -> ProviderToolProbeRuntimeReceipt {
   const child = try {
-    harness.process.run({cmd: harn_bin, args: ["version", "--json"]})
+    process.run({program: harn_bin, args: ["version", "--json"]})
   } catch (e) {
     {exit_code: -1, stdout: "", stderr: to_string(e)}
   }
@@ -227,15 +247,15 @@ pub fn provider_tool_probe_campaign_providers_config_text_error(text: string) ->
   return nil
 }
 
-pub fn __providers_config_error(harness: Harness, path: string) -> string? {
+pub fn __providers_config_error(fs: HarnessFs, path: string) -> string? {
   if path == "" {
     return nil
   }
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     return "providers config does not exist: " + path
   }
   const text = try {
-    harness.fs.read_text(path)
+    fs.read_text(path)
   } catch (error) {
     return "providers config is unreadable: " + path + ": " + to_string(error)
   }
@@ -243,15 +263,15 @@ pub fn __providers_config_error(harness: Harness, path: string) -> string? {
 }
 
 pub fn __provider_tool_probe_campaign_catalog(
-  harness: Harness,
+  process: HarnessProcess,
   harn_bin: string,
   providers_config: string,
 ) -> dict {
   const command = ["provider", "catalog", "show"]
   const child = try {
-    harness.process.run(
+    process.run(
       {
-        cmd: harn_bin,
+        program: harn_bin,
         args: command,
         env: provider_tool_probe_campaign_command_env(providers_config),
       },

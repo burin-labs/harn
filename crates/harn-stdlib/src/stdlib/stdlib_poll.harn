@@ -4,7 +4,7 @@
 // `retry_predicate_with_backoff` primitives) with three patterns harnesses
 // repeatedly hand-roll:
 //
-//   * `poll_until(harness, check, opts)` — call `check()` on an interval until it
+//   * `poll_until(harness.clock, check, opts)` — call `check()` on an interval until it
 //     returns a truthy value; return that value (not a Result), or nil on
 //     timeout.
 //   * `wait_for_status(harness, probe, terminal, opts)` — drive a status machine
@@ -51,12 +51,12 @@ fn __poll_options(options) {
  * @effects: []
  * @errors: []
  */
-pub fn poll_until(harness: Harness, check, options: PollOptions = {}) -> any {
+pub fn poll_until(clock: HarnessClock, check, options: PollOptions = {}) -> any {
   const resolved = __poll_options(options)
   if resolved.initial_delay_ms > 0 {
-    harness.clock.sleep_ms(resolved.initial_delay_ms)
+    clock.sleep_ms(resolved.initial_delay_ms)
   }
-  const started = harness.clock.monotonic_ms()
+  const started = clock.monotonic_ms()
   let attempts = 0
   while true {
     const value = check()
@@ -67,10 +67,10 @@ pub fn poll_until(harness: Harness, check, options: PollOptions = {}) -> any {
     if resolved.max_attempts > 0 && attempts >= resolved.max_attempts {
       return nil
     }
-    if harness.clock.monotonic_ms() - started >= resolved.timeout_ms {
+    if clock.monotonic_ms() - started >= resolved.timeout_ms {
       return nil
     }
-    harness.clock.sleep_ms(resolved.interval_ms)
+    clock.sleep_ms(resolved.interval_ms)
   }
 }
 
@@ -87,7 +87,8 @@ pub fn poll_until(harness: Harness, check, options: PollOptions = {}) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn wait_for_status(harness: Harness, 
+pub fn wait_for_status(
+  harness: Harness,
   probe,
   terminal: list<string>,
   options: PollOptions = {},
@@ -176,15 +177,15 @@ fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -
  * @effects: []
  * @errors: []
  */
-pub fn retry_with_result(harness: Harness, action, options: RetryOptions = {}) -> RetryReport {
+pub fn retry_with_result(clock: HarnessClock, action, options: RetryOptions = {}) -> RetryReport {
   const resolved = __retry_options(options)
-  const timing = start_timing(harness, "poll.retry", {max_attempts: resolved.max_attempts})
+  const timing = start_timing(clock, "poll.retry", {max_attempts: resolved.max_attempts})
   let attempt = 0
   let last_error = nil
   while attempt < resolved.max_attempts {
     const outcome = action(attempt)
     if is_ok(outcome) {
-      const report = end_timing(harness, timing, {attempts: attempt + 1, outcome: "ok"})
+      const report = end_timing(clock, timing, {attempts: attempt + 1, outcome: "ok"})
       return {
         ok: true,
         value: unwrap(outcome),
@@ -196,15 +197,16 @@ pub fn retry_with_result(harness: Harness, action, options: RetryOptions = {}) -
     last_error = unwrap_err(outcome)
     attempt = attempt + 1
     if attempt < resolved.max_attempts {
-      const delay = __backoff_delay(resolved.base_ms,
+      const delay = __backoff_delay(
+        resolved.base_ms,
         attempt - 1,
         resolved.multiplier,
         resolved.cap_ms,
       )
-      harness.clock.sleep_ms(delay)
+      clock.sleep_ms(delay)
     }
   }
-  const report = end_timing(harness, timing, {attempts: resolved.max_attempts, outcome: "exhausted"})
+  const report = end_timing(clock, timing, {attempts: resolved.max_attempts, outcome: "exhausted"})
   return {
     ok: false,
     value: nil,

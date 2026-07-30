@@ -78,5 +78,7 @@ pipeline test(harness: Harness, task) {
   )
   harness.stdio.println(len(augmented) == 2)
   harness.stdio.println(augmented[0].installed && augmented[0].cataloged)
-  harness.stdio.println(augmented[1].id == "local-only" && augmented[1].installed && !augmented[1].cataloged)
+  harness.stdio.println(
+    augmented[1].id == "local-only" && augmented[1].installed && !augmented[1].cataloged,
+  )
 }

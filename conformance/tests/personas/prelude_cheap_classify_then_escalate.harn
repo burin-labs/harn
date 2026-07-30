@@ -9,7 +9,10 @@ pipeline test(harness: Harness, task) {
     completed_at: "2026-05-03T00:00:00Z",
     min_confidence: 0.7,
   }
-  const escalated = cheap_classify_then_escalate(harness, "PR-42",
+  const escalated = cheap_classify_then_escalate(
+    harness.clock,
+    harness.llm,
+    "PR-42",
     fn(input) { return {label: "maybe", confidence: 0.4, input: input} },
     fn(input) { return {label: "merge", confidence: 0.99, input: input} },
     fn(result) { return result.label == "maybe" },
@@ -19,7 +22,10 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(escalated.escalated)
   harness.stdio.println(escalated.result.label)
   harness.stdio.println(len(escalated.receipt.tool_calls))
-  const cheap = cheap_classify_then_escalate(harness, "PR-43",
+  const cheap = cheap_classify_then_escalate(
+    harness.clock,
+    harness.llm,
+    "PR-43",
     fn(input) { return {label: "ignore", confidence: 0.95, input: input} },
     fn(input) { return {label: "unused", confidence: 1.0, input: input} },
     fn(result) { return result.label == "maybe" },

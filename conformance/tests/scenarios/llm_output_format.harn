@@ -3,7 +3,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
   with_llm_script(
-    harness.llm, [llm_text("{\"answer\":\"typed\"}")],
+    harness.llm,
+    [llm_text("{\"answer\":\"typed\"}")],
     { ->
       const typed = harness.llm.call(
         "Return JSON",
@@ -14,14 +15,16 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("{\"answer\":\"legacy\"}")],
+    harness.llm,
+    [llm_text("{\"answer\":\"legacy\"}")],
     { ->
       const legacy = harness.llm.call("Return JSON", nil, {provider: "mock", output: schema})
       harness.stdio.println(legacy.data?.answer)
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("{\"answer\":\"loose\"}")],
+    harness.llm,
+    [llm_text("{\"answer\":\"loose\"}")],
     { ->
       const loose = harness.llm.call("Return JSON", nil, {provider: "mock", output: "json"})
       harness.stdio.println(loose.data.answer)

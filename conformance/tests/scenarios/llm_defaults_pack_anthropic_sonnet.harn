@@ -7,7 +7,9 @@ import { pack_for } from "std/llm/defaults"
 
 pipeline test(harness: Harness, task) {
   const r = pack_for(
-    harness, {model: "claude-sonnet-4-5", reasoning_policy: "medium", reasoning_task: "agent"},
+    harness.agent,
+    harness.llm,
+    {model: "claude-sonnet-4-5", reasoning_policy: "medium", reasoning_task: "agent"},
   )
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, "claude-sonnet-4-5")

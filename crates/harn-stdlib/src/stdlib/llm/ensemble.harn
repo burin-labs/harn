@@ -46,8 +46,8 @@ fn __merge_call_opts(base, sampler_opts) {
 // best_of_n
 // -------------------------------------------------------------------------------------------------
 
-fn __sample_one(harness: Harness, prompt, system, call_opts, index) {
-  const envelope = safe_call(harness, prompt, system, call_opts)
+fn __sample_one(llm: HarnessLlm, prompt, system, call_opts, index) {
+  const envelope = safe_call(llm, prompt, system, call_opts)
   if !(envelope?.ok ?? false) {
     return {ok: false, index: index, status: envelope?.status, error: envelope?.error, text: ""}
   }
@@ -55,7 +55,7 @@ fn __sample_one(harness: Harness, prompt, system, call_opts, index) {
   return {ok: true, index: index, text: text, value: envelope.value}
 }
 
-fn __collect_samples(harness: Harness, prompt, system, base_opts, sampler_opts, n, run_parallel) {
+fn __collect_samples(llm: HarnessLlm, prompt, system, base_opts, sampler_opts, n, run_parallel) {
   const call_opts = __merge_call_opts(base_opts, sampler_opts)
   let indices = []
   let i = 0
@@ -65,12 +65,12 @@ fn __collect_samples(harness: Harness, prompt, system, base_opts, sampler_opts, 
   }
   if run_parallel {
     return parallel each indices { idx ->
-      __sample_one(harness, prompt, system, call_opts, idx)
+      __sample_one(llm, prompt, system, call_opts, idx)
     }
   }
   let out = []
   for idx in indices {
-    out = out.appending(__sample_one(harness, prompt, system, call_opts, idx))
+    out = out.appending(__sample_one(llm, prompt, system, call_opts, idx))
   }
   return out
 }
@@ -95,7 +95,7 @@ fn __reward_filter(samples, reward) {
   return scored
 }
 
-fn __structured_judge(harness: Harness, samples, opts) {
+fn __structured_judge(llm: HarnessLlm, samples, opts) {
   let labelled = []
   const total = len(samples)
   let i = 0
@@ -136,7 +136,7 @@ fn __structured_judge(harness: Harness, samples, opts) {
     required: ["best_index"],
   }
   const envelope = try {
-    harness.llm.call_structured_result(prompt, schema, jopts + {system: system})
+    llm.call_structured_result(prompt, schema, jopts + {system: system})
   }
   if is_err(envelope) {
     return {ok: false, status: "exception", error: unwrap_err(envelope)}
@@ -156,7 +156,7 @@ fn __structured_judge(harness: Harness, samples, opts) {
 }
 
 /**
- * best_of_n(harness, prompt, system, opts) -> dict
+ * best_of_n(harness.llm, prompt, system, opts) -> dict
  *
  * Sample N candidates in parallel and ask a judge to pick the best.
  *
@@ -174,7 +174,7 @@ fn __structured_judge(harness: Harness, samples, opts) {
  * @effects: []
  * @errors: []
  */
-pub fn best_of_n(harness: Harness, prompt, system, opts = nil) {
+pub fn best_of_n(llm: HarnessLlm, prompt, system, opts = nil) {
   const cfg = if type_of(opts) == "dict" {
     opts
   } else {
@@ -188,7 +188,7 @@ pub fn best_of_n(harness: Harness, prompt, system, opts = nil) {
   } else {
     {}
   }
-  const samples = __collect_samples(harness, prompt, system, base_opts, sampler_opts, n, run_parallel)
+  const samples = __collect_samples(llm, prompt, system, base_opts, sampler_opts, n, run_parallel)
   const valid = samples.filter({ s -> s?.ok ?? false })
   if len(valid) == 0 {
     return {ok: false, status: "all_samples_failed", candidates: samples}
@@ -218,7 +218,7 @@ pub fn best_of_n(harness: Harness, prompt, system, opts = nil) {
       reasoning: to_string(verdict?.reasoning ?? ""),
     }
   }
-  const verdict = __structured_judge(harness, samples, cfg)
+  const verdict = __structured_judge(llm, samples, cfg)
   if !(verdict.ok ?? false) {
     return {
       ok: false,
@@ -410,7 +410,7 @@ fn __build_distribution(keys_in_order, counts) {
 }
 
 /**
- * self_consistency(harness, prompt, system, opts) -> dict
+ * self_consistency(harness.agent, harness.llm, prompt, system, opts) -> dict
  *
  * Sample N times at temperature > 0, extract a canonical answer per sample,
  * and majority-vote (Wang et al. 2022; arxiv:2203.11171).
@@ -432,7 +432,7 @@ fn __build_distribution(keys_in_order, counts) {
  * @effects: []
  * @errors: []
  */
-pub fn self_consistency(harness: Harness, prompt, system, opts = nil) {
+pub fn self_consistency(agent: HarnessAgent, llm: HarnessLlm, prompt, system, opts = nil) {
   const cfg = if type_of(opts) == "dict" {
     opts
   } else {
@@ -459,7 +459,7 @@ pub fn self_consistency(harness: Harness, prompt, system, opts = nil) {
   } else {
     {}
   }
-  const samples = __collect_samples(harness, prompt, system, base_opts, sampler_opts, n, run_parallel)
+  const samples = __collect_samples(llm, prompt, system, base_opts, sampler_opts, n, run_parallel)
   const tally = __tally_samples(samples, extract, cfg?.normalize, vote_mode, confidence_fn)
   if len(tally.keys_in_order) == 0 {
     return {ok: false, status: "no_extractable_answers", candidates: samples}
@@ -473,7 +473,9 @@ pub fn self_consistency(harness: Harness, prompt, system, opts = nil) {
   const session_id = to_string(cfg?._session_id ?? "")
   if winner.tie && session_id != "" {
     const _ = try {
-      agent_emit_event(harness, session_id,
+      agent_emit_event(
+        agent,
+        session_id,
         "self_consistency_tie",
         {answer: winner.key, total: dist.total, distribution: dist.distribution},
       )
@@ -496,12 +498,12 @@ pub fn self_consistency(harness: Harness, prompt, system, opts = nil) {
 
 // One judged item. Returns `Ok(record)` / `Err(record)` so `settle_with_abort`
 // can see the failure: the record itself is the payload either way.
-fn __parallel_judge_step(harness: Harness, entry, judge_fn, total, on_progress) {
-  const started = harness.clock.now_ms()
+fn __parallel_judge_step(clock: HarnessClock, entry, judge_fn, total, on_progress) {
+  const started = clock.now_ms()
   const r = try {
     judge_fn(entry.item)
   }
-  const duration = harness.clock.now_ms() - started
+  const duration = clock.now_ms() - started
   if is_err(r) {
     const record = {
       index: entry.index,
@@ -580,8 +582,11 @@ pub fn parallel_judge(harness: Harness, items, judge_fn, opts = nil) {
   } else {
     {max_concurrent: cap}
   }
-  const outcome = settle_with_abort(harness,  indexed,
-    { entry -> __parallel_judge_step(harness, entry, judge_fn, total, on_progress) },
+  const outcome = settle_with_abort(
+    harness.random,
+    harness.runtime,
+    indexed,
+    { entry -> __parallel_judge_step(harness.clock, entry, judge_fn, total, on_progress) },
     settle_options,
   )
   if on_error == "fail_fast" {
@@ -833,13 +838,13 @@ fn __debate_response(debater_name, result) {
   return response
 }
 
-fn __debate_run_round(harness: Harness, opts, round_number, previous_rounds) {
+fn __debate_run_round(llm: HarnessLlm, opts, round_number, previous_rounds) {
   let responses = []
   let index = 0
   while index < len(opts.debaters) {
     const debater = opts.debaters[index]
     const name = __debater_name(debater, index)
-    const result = harness.llm.call(
+    const result = llm.call(
       __debate_call_prompt(opts, debater, name, round_number, previous_rounds),
       __debate_system(opts, debater),
       __debate_llm_options(opts, debater),
@@ -944,8 +949,8 @@ fn __round_stability(previous_round, current_round, threshold) {
   }
 }
 
-fn __emit_stability_short_circuit(harness: Harness, opts, stability) {
-  return harness.obs.event_log_emit(
+fn __emit_stability_short_circuit(obs: HarnessObs, opts, stability) {
+  return obs.event_log_emit(
     "llm.ensemble.debate",
     "debate_stability_short_circuit",
     {
@@ -968,7 +973,7 @@ fn __emit_stability_short_circuit(harness: Harness, opts, stability) {
  * @effects: []
  * @errors: []
  */
-pub fn debate(harness: Harness, opts) -> DebateResult {
+pub fn debate(llm: HarnessLlm, obs: HarnessObs, opts) -> DebateResult {
   const config = __debate_options(opts)
   let rounds = []
   let stability = []
@@ -976,7 +981,7 @@ pub fn debate(harness: Harness, opts) -> DebateResult {
   let short_circuit_event_id = nil
   let round_number = 1
   while round_number <= config.n_rounds {
-    const responses = __debate_run_round(harness, config, round_number, rounds)
+    const responses = __debate_run_round(llm, config, round_number, rounds)
     let round = {round: round_number, responses: responses}
     if len(rounds) > 0 {
       const round_stability = __round_stability(rounds[-1], round, config.stability_threshold)
@@ -997,7 +1002,7 @@ pub fn debate(harness: Harness, opts) -> DebateResult {
     }
     rounds = rounds.appending(round)
     if config.adaptive_stop && consecutive_stable >= config.stability_patience {
-      short_circuit_event_id = __emit_stability_short_circuit(harness, config, stability[-1])
+      short_circuit_event_id = __emit_stability_short_circuit(obs, config, stability[-1])
       break
     }
     round_number += 1

@@ -26,11 +26,13 @@ fn dispatch(hash: string, current_hash: string) {
   }
 }
 
-fn run(harness: Harness, dispatches, config) {
+fn run(agent: HarnessAgent, random: HarnessRandom, dispatches, config) {
   let state = agent_stall_initial_state()
   let warnings = []
   for item in dispatches {
-    const obs = agent_stall_observe_tool_calls(harness, "stall-stale-diag-" + harness.random.uuid(),
+    const obs = agent_stall_observe_tool_calls(
+      agent,
+      "stall-stale-diag-" + random.uuid(),
       call(),
       1,
       config,
@@ -47,7 +49,10 @@ fn run(harness: Harness, dispatches, config) {
 }
 
 pipeline default(harness: Harness) {
-  const stale = run(harness, [
+  const stale = run(
+    harness.agent,
+    harness.random,
+    [
       dispatch("old", "new"),
       dispatch("old", "new"),
       dispatch("old", "new"),
@@ -67,12 +72,18 @@ pipeline default(harness: Harness) {
   assert_eq(stale.state.same_diagnostic_streak, 0)
   assert_eq(stale.state.failing_verify_turns, 0)
   assert_eq(agent_stall_no_net_progress({no_net_progress_extend_guard: true}, stale.state), false)
-  const repeated_stale = run(harness, [dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new")],
+  const repeated_stale = run(
+    harness.agent,
+    harness.random,
+    [dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new")],
     {enabled: true, inject_feedback: false, repair_aware: false, repeat_same_error: 2},
   )
   assert_eq(len(repeated_stale.warnings), 0)
   assert_eq(repeated_stale.state.same_error_streak, 0)
-  const fresh = run(harness, [dispatch("new", "new"), dispatch("new", "new")],
+  const fresh = run(
+    harness.agent,
+    harness.random,
+    [dispatch("new", "new"), dispatch("new", "new")],
     {enabled: true, inject_feedback: false, repair_aware: true, stuck_same_diagnostic_after: 2},
   )
   assert_eq(len(fresh.warnings), 1)

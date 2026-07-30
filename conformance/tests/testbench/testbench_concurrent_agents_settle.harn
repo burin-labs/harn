@@ -10,7 +10,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [{text: "ok", input_tokens: 1, output_tokens: 1, model: "mock"}],
+    harness.llm,
+    [{text: "ok", input_tokens: 1, output_tokens: 1, model: "mock"}],
     { ->
       const inputs = range(0, 100).to_list()
       const results = parallel each inputs with { max_concurrent: 10 } { i ->

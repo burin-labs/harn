@@ -13,7 +13,8 @@ use harn_vm::value::VmError;
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
+    let chunk = harn_vm::compile_source(&source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -58,22 +59,22 @@ fn out_lines(raw: &str) -> Vec<String> {
 #[test]
 fn cancel_in_flight_tool_call_overrides_dispatch_with_cancelled_result() {
     let source = r#"
-pipeline main(_) {
-  clear_tool_hooks()
+pipeline main(harness: Harness, _) {
+  harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(
     registry,
     "slow_tool",
     "A tool that sleeps long enough that we can cancel mid-flight.",
     {parameters: {}, handler: { _args ->
-      sleep_ms(5000)
+      harness.clock.sleep_ms(5000)
       return "should not arrive"
     }},
   )
-  const counter = shared_cell({scope: "task_group", key: "llm-cancel-test", initial: 0})
+  const counter = harness.runtime.shared_cell({scope: "task_group", key: "llm-cancel-test", initial: 0})
   const mock_llm = { _call ->
-    const snap = shared_snapshot(counter)
-    shared_cas(counter, snap, snap.value + 1)
+    const snap = harness.runtime.shared_snapshot(counter)
+    harness.runtime.shared_cas(counter, snap, snap.value + 1)
     if snap.value == 0 {
       return {
         ok: true,
@@ -91,14 +92,15 @@ pipeline main(_) {
     }
   }
   const canceller = spawn {
-    sleep_ms(100)
-    cancel_in_flight_tool_call(
+    harness.clock.sleep_ms(100)
+    harness.agent.cancel_in_flight_tool_call(
       "tcc-test-session",
       "slow_call_1",
       {reason: "test cancel mid-flight", inject_reminder: false},
     )
   }
   const result = agent_loop(
+    harness,
     "do slow work",
     nil,
     {
@@ -112,9 +114,9 @@ pipeline main(_) {
     },
   )
   const cancel_outcome = await(canceller)
-  log(result.status)
-  log(cancel_outcome.status)
-  log(cancel_outcome.tool ?? "<no tool>")
+  harness.stdio.log(result.status)
+  harness.stdio.log(cancel_outcome.status)
+  harness.stdio.log(cancel_outcome.tool ?? "<no tool>")
   // The tool_result message recorded in the transcript renders the
   // observation text from the cancellation result. Verify the
   // "cancelled call to slow_tool" stamp made it in.
@@ -130,7 +132,7 @@ pipeline main(_) {
       saw_cancellation_observation = true
     }
   }
-  log(saw_cancellation_observation ? "observation_seen" : "observation_missing")
+  harness.stdio.log(saw_cancellation_observation ? "observation_seen" : "observation_missing")
 }
 "#;
     let raw = run_with_bridge(source).expect("script must run");
@@ -152,15 +154,15 @@ pipeline main(_) {
 #[test]
 fn cancel_in_flight_tool_call_returns_not_found_for_unknown_call_id() {
     let source = r#"
-pipeline main(_) {
-  const outcome = cancel_in_flight_tool_call(
+pipeline main(harness: Harness, _) {
+  const outcome = harness.agent.cancel_in_flight_tool_call(
     "no-such-session",
     "no-such-call",
     {reason: "missing", inject_reminder: false, timeout_ms: 0},
   )
-  log(outcome.status)
-  log(outcome.tool ?? "<nil>")
-  log(outcome.call_id)
+  harness.stdio.log(outcome.status)
+  harness.stdio.log(outcome.tool ?? "<nil>")
+  harness.stdio.log(outcome.call_id)
 }
 "#;
     let raw = run_with_bridge(source).expect("script must run");
@@ -178,22 +180,22 @@ pipeline main(_) {
 #[test]
 fn cancel_in_flight_tool_call_returns_already_cancelled_on_repeat() {
     let source = r#"
-pipeline main(_) {
-  clear_tool_hooks()
+pipeline main(harness: Harness, _) {
+  harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(
     registry,
     "slow_tool",
     "A tool that sleeps long enough that we can cancel mid-flight.",
     {parameters: {}, handler: { _args ->
-      sleep_ms(5000)
+      harness.clock.sleep_ms(5000)
       return "should not arrive"
     }},
   )
-  const counter = shared_cell({scope: "task_group", key: "llm-cancel-repeat", initial: 0})
+  const counter = harness.runtime.shared_cell({scope: "task_group", key: "llm-cancel-repeat", initial: 0})
   const mock_llm = { _call ->
-    const snap = shared_snapshot(counter)
-    shared_cas(counter, snap, snap.value + 1)
+    const snap = harness.runtime.shared_snapshot(counter)
+    harness.runtime.shared_cas(counter, snap, snap.value + 1)
     if snap.value == 0 {
       return {
         ok: true,
@@ -211,13 +213,13 @@ pipeline main(_) {
     }
   }
   const canceller = spawn {
-    sleep_ms(100)
-    const first = cancel_in_flight_tool_call(
+    harness.clock.sleep_ms(100)
+    const first = harness.agent.cancel_in_flight_tool_call(
       "tcc-test-session-repeat",
       "slow_call_repeat",
       {reason: "first cancel", inject_reminder: false, timeout_ms: 0},
     )
-    const second = cancel_in_flight_tool_call(
+    const second = harness.agent.cancel_in_flight_tool_call(
       "tcc-test-session-repeat",
       "slow_call_repeat",
       {reason: "second cancel", inject_reminder: false, timeout_ms: 0},
@@ -225,6 +227,7 @@ pipeline main(_) {
     return [first.status, second.status]
   }
   const result = agent_loop(
+    harness,
     "do slow work",
     nil,
     {
@@ -238,9 +241,9 @@ pipeline main(_) {
     },
   )
   const statuses = await(canceller)
-  log(result.status)
-  log(statuses[0])
-  log(statuses[1])
+  harness.stdio.log(result.status)
+  harness.stdio.log(statuses[0])
+  harness.stdio.log(statuses[1])
 }
 "#;
     let raw = run_with_bridge(source).expect("script must run");
@@ -262,22 +265,24 @@ fn cancel_in_flight_tool_call_pushes_reminder_when_requested() {
 
     harn_vm::reset_thread_local_state();
     let source = r#"
-pipeline main(_) {
-  clear_tool_hooks()
+import { agent_loop } from "std/agent/loop"
+
+pipeline main(harness: Harness, _) {
+  harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(
     registry,
     "slow_tool",
     "A tool that sleeps long enough that we can cancel mid-flight.",
     {parameters: {}, handler: { _args ->
-      sleep_ms(5000)
+      harness.clock.sleep_ms(5000)
       return "should not arrive"
     }},
   )
-  const counter = shared_cell({scope: "task_group", key: "llm-cancel-reminder", initial: 0})
+  const counter = harness.runtime.shared_cell({scope: "task_group", key: "llm-cancel-reminder", initial: 0})
   const mock_llm = { _call ->
-    const snap = shared_snapshot(counter)
-    shared_cas(counter, snap, snap.value + 1)
+    const snap = harness.runtime.shared_snapshot(counter)
+    harness.runtime.shared_cas(counter, snap, snap.value + 1)
     if snap.value == 0 {
       return {
         ok: true,
@@ -295,14 +300,15 @@ pipeline main(_) {
     }
   }
   const canceller = spawn {
-    sleep_ms(100)
-    cancel_in_flight_tool_call(
+    harness.clock.sleep_ms(100)
+    harness.agent.cancel_in_flight_tool_call(
       "tcc-test-session-reminder",
       "slow_call_rem",
       {reason: "user clicked stop", inject_reminder: true, timeout_ms: 0},
     )
   }
   const result = agent_loop(
+    harness,
     "do slow work",
     nil,
     {
@@ -316,7 +322,7 @@ pipeline main(_) {
     },
   )
   const _ = await(canceller)
-  log(result.status)
+  harness.stdio.log(result.status)
   const reminders = transcript_events_by_kind(result.transcript, "system_reminder")
   let saw_cancellation = false
   for event in reminders {
@@ -324,7 +330,7 @@ pipeline main(_) {
       saw_cancellation = true
     }
   }
-  log(saw_cancellation)
+  harness.stdio.log(saw_cancellation)
 }
 "#;
     let chunk = harn_vm::compile_source(source).expect("compile");

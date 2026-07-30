@@ -10,7 +10,10 @@ pipeline main(harness: Harness) {
   }
   harness.stdio.println(has_code(invalid_type, "HARN-RMD-001"))
   const bad_propagate = try {
-    harness.agent.transcript_inject_reminder(transcript(), {body: "remember", propagate: "workspace"})
+    harness.agent.transcript_inject_reminder(
+      transcript(),
+      {body: "remember", propagate: "workspace"},
+    )
   }
   harness.stdio.println(has_code(bad_propagate, "HARN-RMD-005"))
   harness.agent.clear_reminder_providers()
@@ -24,7 +27,13 @@ pipeline main(harness: Harness) {
   const session = harness.agent.open("reminder-diagnostic-codes")
   harness.agent.reset(session)
   const bad_provider = try {
-    agent_reminder_providers_fire(harness, session, "session_idle", {session: {id: session}}, {})
+    agent_reminder_providers_fire(
+      harness.agent,
+      session,
+      "session_idle",
+      {session: {id: session}},
+      {},
+    )
   }
   harness.stdio.println(has_code(bad_provider, "HARN-RMD-006"))
   harness.agent.clear_reminder_providers()

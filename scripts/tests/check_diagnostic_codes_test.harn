@@ -93,7 +93,10 @@ pipeline test_struct_literal_with_code_ok(harness: Harness, task) {
 }
 
 @test
-pipeline test_struct_literal_definition_marker_only_skips_when_name_in_prefix(harness: Harness, task) {
+pipeline test_struct_literal_definition_marker_only_skips_when_name_in_prefix(
+  harness: Harness,
+  task,
+) {
   // The `pub struct {name}` guard fires only when the marker lands in the
   // 80-char prefix *before* the `{name} {` needle. A real definition body
   // that itself carries a `code:` field is therefore skipped by the

@@ -693,10 +693,10 @@ ${json_stringify_pretty(notice)}
 """
 }
 
-pub fn extract_notice(harness: Harness, notice: ProviderNotice, options: dict) -> NoticeExtraction {
+pub fn extract_notice(llm: HarnessLlm, notice: ProviderNotice, options: dict) -> NoticeExtraction {
   const resolved: LlmCallOptions = schema_expect(
     options + {budget: options?.budget ?? {max_cost_usd: 0.1}, max_tokens: 1200},
     schema_of(LlmCallOptions),
   )
-  return harness.llm.call_structured(extraction_prompt(notice), schema_of(NoticeExtraction), resolved)
+  return llm.call_structured(extraction_prompt(notice), schema_of(NoticeExtraction), resolved)
 }

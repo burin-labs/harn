@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 /**
  * Custom llm_caller short-circuits llm_call with a hardcoded value;
  * agent_loop returns the caller's `value` payload as the visible text.

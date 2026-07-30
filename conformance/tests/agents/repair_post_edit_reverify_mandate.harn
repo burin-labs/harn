@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -59,7 +59,8 @@ fn reverify_probe(info) {
 
 fn run_scenario(harness: Harness, repair_aware, post_edit_reverify) {
   return with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       // Turn 1: run the tests -> fail.
       {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
       // Turn 2: apply a corrective edit (no completion proposed -> continue).
@@ -70,7 +71,9 @@ fn run_scenario(harness: Harness, repair_aware, post_edit_reverify) {
     ],
     { ->
       const session = "repair-reverify-" + harness.random.uuid()
-      const _result = agent_loop(harness, "Make the tests pass.",
+      const _result = agent_loop(
+        harness,
+        "Make the tests pass.",
         nil,
         {
           provider: "mock",
@@ -120,7 +123,8 @@ fn veto_post_edit_reverify(info) {
 
 fn run_cap_scenario(harness: Harness, verify_completion) {
   return with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       // Turn 1: run the tests -> fail.
       {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
       // Turn 2: apply a fix at the iteration cap. The loop must verify this
@@ -129,8 +133,12 @@ fn run_cap_scenario(harness: Harness, verify_completion) {
     ],
     { ->
       const session = "repair-reverify-cap-" + harness.random.uuid()
-      return agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Make the tests pass.",
+      return agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the tests pass.",
           nil,
           {
             provider: "mock",

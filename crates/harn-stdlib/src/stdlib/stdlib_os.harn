@@ -69,7 +69,12 @@ pub fn env_int(env: HarnessEnv, name: string, fallback = nil) {
  * @effects: [env, host]
  * @errors: []
  */
-pub fn env_list(env: HarnessEnv, system: HarnessSystem, name: string, separator = nil) -> list<string> {
+pub fn env_list(
+  env: HarnessEnv,
+  system: HarnessSystem,
+  name: string,
+  separator = nil,
+) -> list<string> {
   const value = env.get(name)
   if value == nil || value == "" {
     return []

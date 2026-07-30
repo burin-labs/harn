@@ -26,27 +26,27 @@ import {
   safe_string,
 } from "std/cli/render"
 
-fn __render_human(harness: Harness, report: dict) {
+fn __render_human(stdio: HarnessStdio, report: dict) {
   const request = safe_dict(report["request"])
   const contract = safe_dict(report["contract"])
   const totals = safe_dict(report["totals"])
   const cases = safe_list(report["cases"])
   const warnings = safe_list(report["warnings"])
   const errors = safe_list(report["errors"])
-  harness.stdio.println("LoRA promotion probe matrix")
-  harness.stdio.println("  train receipt: " + safe_string(request["train_receipt"], ""))
-  harness.stdio.println("  probe root: " + safe_string(request["probe_root"], ""))
+  stdio.println("LoRA promotion probe matrix")
+  stdio.println("  train receipt: " + safe_string(request["train_receipt"], ""))
+  stdio.println("  probe root: " + safe_string(request["probe_root"], ""))
   const out = safe_string(request["out"], "")
   if out != "" {
-    harness.stdio.println("  receipt: " + out)
+    stdio.println("  receipt: " + out)
   }
-  harness.stdio.println("  promotion id: " + safe_string(contract["promotion_id"], ""))
-  harness.stdio.println("  LoRA contract: " + safe_string(contract["lora_contract_id"], ""))
-  render_trainer_identity_check(harness, contract["trainer_identity"])
-  render_trainer_environment_check(harness, contract["trainer_environment"])
-  harness.stdio.println("  eval dataset: " + safe_string(contract["eval_dataset"], ""))
-  harness.stdio.println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
-  harness.stdio.println(
+  stdio.println("  promotion id: " + safe_string(contract["promotion_id"], ""))
+  stdio.println("  LoRA contract: " + safe_string(contract["lora_contract_id"], ""))
+  render_trainer_identity_check(stdio, contract["trainer_identity"])
+  render_trainer_environment_check(stdio, contract["trainer_environment"])
+  stdio.println("  eval dataset: " + safe_string(contract["eval_dataset"], ""))
+  stdio.println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
+  stdio.println(
     "  totals: adapter_passed="
       + safe_int_string(totals["adapter_passed"], "0")
       + " adapter_failed="
@@ -59,7 +59,7 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_number_string(totals["total_cost_usd"], "0"),
   )
   if len(cases) > 0 {
-    harness.stdio.println("  probe cases:")
+    stdio.println("  probe cases:")
     for item in cases {
       const probe = safe_dict(item)
       const summary_path = safe_string(probe["summary_path"], "")
@@ -79,20 +79,22 @@ fn __render_human(harness: Harness, report: dict) {
       if summary_path != "" {
         line = line + " (" + summary_path + ")"
       }
-      harness.stdio.println("    - " + line)
-      print_list(harness,  "probe " + safe_string(probe["case_id"], "") + " failures",
+      stdio.println("    - " + line)
+      print_list(
+        stdio,
+        "probe " + safe_string(probe["case_id"], "") + " failures",
         safe_list(probe["failed_case_reasons"]),
       )
     }
   }
-  print_list(harness, "warnings", warnings)
-  print_list(harness, "errors", errors)
+  print_list(stdio, "warnings", warnings)
+  print_list(stdio, "errors", errors)
   const result = if safe_bool(report["ok"], false) {
     "PASS"
   } else {
     "FAIL"
   }
-  harness.stdio.println("  result: " + result)
+  stdio.println("  result: " + result)
 }
 
 fn __render_json(report: dict) -> string {
@@ -305,7 +307,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness, report)
+    __render_human(harness.stdio, report)
   }
   if ok || !check {
     return 0

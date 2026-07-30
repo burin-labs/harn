@@ -12,9 +12,15 @@ fn judge_until_confident(harness: Harness, task) {
   const schema = {
     type: "object",
     required: ["decision", "confidence", "rationale"],
-    properties: {decision: {type: "string"}, confidence: {type: "number"}, rationale: {type: "string"}},
+    properties: {
+      decision: {type: "string"},
+      confidence: {type: "number"},
+      rationale: {type: "string"},
+    },
   }
-  return bounded_loop(harness, {decision: nil, confidence: 0.0, attempts: 0},
+  return bounded_loop(
+    harness.clock,
+    {decision: nil, confidence: 0.0, attempts: 0},
     fn(state) {
       const prompt = harness.fs.render_prompt(
         "../prompts/system.harn.prompt",
@@ -24,7 +30,11 @@ fn judge_until_confident(harness: Harness, task) {
           request: fixture?.request ?? "review",
         },
       )
-      const result = harness.llm.call_structured_safe(prompt, schema, {provider: "mock", model: "mock", retries: 0})
+      const result = harness.llm.call_structured_safe(
+        prompt,
+        schema,
+        {provider: "mock", model: "mock", retries: 0},
+      )
       return {
         state: result.data + {attempts: state.attempts + 1},
         progress: result.ok,

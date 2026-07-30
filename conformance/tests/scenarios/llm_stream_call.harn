@@ -2,7 +2,8 @@ import { with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "Visible <think>hidden", stop_reason: "stop"},
       {text: "Visible <think>hidden", stop_reason: "stop"},
     ],
@@ -25,7 +26,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [{text: "early cancel text", stop_reason: "stop"}],
+    harness.llm,
+    [{text: "early cancel text", stop_reason: "stop"}],
     { ->
       const first = stream.first(harness.llm.stream_call("cancel early", nil, {provider: "mock"}))
       harness.stdio.println(first.delta == "early cancel text")
@@ -33,7 +35,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [{text: "break cancel text", stop_reason: "stop"}],
+    harness.llm,
+    [{text: "break cancel text", stop_reason: "stop"}],
     { ->
       let broke_before_terminal = false
       const cancel_stream = harness.llm.stream_call("break early", nil, {provider: "mock"})

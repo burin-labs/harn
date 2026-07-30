@@ -19,7 +19,7 @@ pipeline test(harness: Harness, task) {
     harness,
     {
       provider: "mock",
-      on_model_turn: with_turn_recorder(harness, observer),
+      on_model_turn: with_turn_recorder(harness.stdio, observer),
       on_user_input: { _state -> {kind: "exit", reason: "done"} },
       wait_for_user_tool: false,
     },

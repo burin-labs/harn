@@ -459,7 +459,7 @@ fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
     let b = bridge;
     let metadata = VmBuiltinMetadata::async_static("llm_call")
-        .signature_static("llm_call(prompt, system?, options?)")
+        .signature_static("harness.llm.call(prompt, system?, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 3 })
         .category_static("llm.host")
         .doc_static("Execute one bridge-observed LLM call and return the normalized result dict.");

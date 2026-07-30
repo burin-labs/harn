@@ -2,25 +2,21 @@
 
 ## What it means
 
-The lint fires on calls to the ambient `http_get`, `http_post`,
-`http_put`, `http_patch`, `http_delete`, `http_request`, and
-`http_download` builtins. Outbound HTTP now routes through the
-`harness.net.*` sub-handle so capability requirements appear in the
-type system instead of being hidden in the stdlib surface.
+The lint recognizes removed ambient network calls and supplies a migration
+repair. Requests, downloads, streams, sessions, SSE, WebSockets, and servers
+all route through the `HarnessNet` interface so capability requirements appear
+in the type system instead of being hidden in a global surface. Pure response
+constructors and event encoders remain ordinary globals.
 
-This is a lint, not a hard error. The legacy builtins still compile
-while the migration is in flight, but every new call site should use
-the matching `harness.net.*` method (`http_get` → `harness.net.get`,
-`http_post` → `harness.net.post`, etc.). Streaming, server-mode, and
-session builtins keep their ambient names today and will migrate in a
-follow-up ticket.
+The legacy effectful globals are not a compatibility surface: ordinary source
+must use the corresponding `harness.net.*` method. The lint exists so old
+source gets an actionable repair before the checker reports the removed
+symbol.
 
 ## How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient network calls to the VM-level `harness` binding with
-  `bindings/use-enclosing-harness-global`, preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with `HarnessNet`.

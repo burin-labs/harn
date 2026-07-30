@@ -71,14 +71,21 @@ pub fn json_path_check(doc, path: string, expected: string) {
 }
 
 /** Assert one JSON-path expectation, exiting 1 with the FAIL block on mismatch. */
-fn expect_json_path(harness: Harness, label: string, doc, path: string, expected: string) {
+fn expect_json_path(
+  runtime: HarnessRuntime,
+  stdio: HarnessStdio,
+  label: string,
+  doc,
+  path: string,
+  expected: string,
+) {
   const res = json_path_check(doc, path, expected)
   if !res.ok {
-    harness.stdio.eprintln("FAIL: ${label}")
-    harness.stdio.eprintln("  path:     ${path}")
-    harness.stdio.eprintln("  expected: ${expected}")
-    harness.stdio.eprintln("  actual:   ${res.actual}")
-    harness.runtime.exit(1)
+    stdio.eprintln("FAIL: ${label}")
+    stdio.eprintln("  path:     ${path}")
+    stdio.eprintln("  expected: ${expected}")
+    stdio.eprintln("  actual:   ${res.actual}")
+    runtime.exit(1)
   }
 }
 
@@ -94,7 +101,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
   }
   let target_dir = ""
   const meta = harness.process.run(
-    {cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
+    {program: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
   )
   if meta.success {
     const parsed = try {
@@ -113,9 +120,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process.run(
-      {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
-    )
+    const build = harness.process.run({program: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
       harness.stdio.eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
@@ -130,7 +135,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
  * (the bash `set -e` behavior).
  */
 fn harn_json(harness: Harness, harn_bin: string, args: list<string>, cwd: string?) {
-  let spec = {cmd: harn_bin, args: args, env: {HARN_SECRET_PROVIDERS: "env"}}
+  let spec = {program: harn_bin, args: args, env: {HARN_SECRET_PROVIDERS: "env"}}
   if cwd != nil {
     spec = {...spec, cwd: cwd}
   }
@@ -147,38 +152,94 @@ pipeline main(harness: Harness, task) {
   const harn_bin = resolve_harn_bin(harness)
   harness.stdio.println("=== Checking workflow quickstart fixtures ===")
   // --- 1. Minimal bundle ---
-  let validate = harn_json(harness, 
+  let validate = harn_json(
+    harness,
     harn_bin,
     ["workflow", "validate", "--bundle", MIN_BUNDLE, "--json"],
     nil,
   )
-  expect_json_path(harness, "minimal validate.valid", validate, "valid", "true")
-  expect_json_path(harness, "minimal validate.bundle_id", validate, "bundle_id", "\"quickstart-minimal\"")
-  expect_json_path(harness, 
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "minimal validate.valid",
+    validate,
+    "valid",
+    "true",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "minimal validate.bundle_id",
+    validate,
+    "bundle_id",
+    "\"quickstart-minimal\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
     "minimal validate.workflow_id",
     validate,
     "workflow_id",
     "\"quickstart_minimal_workflow\"",
   )
-  expect_json_path(harness, "minimal validate.errors empty", validate, "errors", "[]")
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "minimal validate.errors empty",
+    validate,
+    "errors",
+    "[]",
+  )
   const min_digest: string = validate.graph_digest
   let run = harn_json(harness, harn_bin, ["workflow", "run", "--bundle", MIN_BUNDLE, "--json"], nil)
-  expect_json_path(harness, "minimal run.status", run, "status", "\"completed\"")
-  expect_json_path(harness, 
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "minimal run.status",
+    run,
+    "status",
+    "\"completed\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
     "minimal run.run_id (pinned)",
     run,
     "run_id",
     "\"bundle_run_quickstart_minimal_fixture\"",
   )
-  expect_json_path(harness, "minimal run.trigger_id", run, "trigger_id", "\"manual-start\"")
-  expect_json_path(harness, 
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "minimal run.trigger_id",
+    run,
+    "trigger_id",
+    "\"manual-start\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
     "minimal run.executed_nodes[0]",
     run,
     "executed_nodes[0].node_id",
     "\"summarize\"",
   )
-  expect_json_path(harness, "minimal run.executed_nodes[1]", run, "executed_nodes[1].node_id", "\"notify\"")
-  expect_json_path(harness, "minimal run.graph_digest", run, "graph_digest", "\"${min_digest}\"")
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "minimal run.executed_nodes[1]",
+    run,
+    "executed_nodes[1].node_id",
+    "\"notify\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "minimal run.graph_digest",
+    run,
+    "graph_digest",
+    "\"${min_digest}\"",
+  )
   if min_digest != EXPECTED_MIN_DIGEST {
     harness.stdio.eprintln("FAIL: minimal bundle graph_digest drifted from the value pinned in")
     harness.stdio.eprintln("      docs/src/workflow-authoring-quickstart.md")
@@ -190,16 +251,72 @@ pipeline main(harness: Harness, task) {
     return 1
   }
   // --- 2. Agentic bundle ---
-  validate = harn_json(harness, harn_bin, ["workflow", "validate", "--bundle", AGENT_BUNDLE, "--json"], nil)
-  expect_json_path(harness, "agentic validate.valid", validate, "valid", "true")
-  expect_json_path(harness, "agentic validate.bundle_id", validate, "bundle_id", "\"quickstart-agentic\"")
-  expect_json_path(harness, "agentic validate.errors empty", validate, "errors", "[]")
+  validate = harn_json(
+    harness,
+    harn_bin,
+    ["workflow", "validate", "--bundle", AGENT_BUNDLE, "--json"],
+    nil,
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "agentic validate.valid",
+    validate,
+    "valid",
+    "true",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "agentic validate.bundle_id",
+    validate,
+    "bundle_id",
+    "\"quickstart-agentic\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "agentic validate.errors empty",
+    validate,
+    "errors",
+    "[]",
+  )
   run = harn_json(harness, harn_bin, ["workflow", "run", "--bundle", AGENT_BUNDLE, "--json"], nil)
-  expect_json_path(harness, "agentic run.status", run, "status", "\"completed\"")
-  expect_json_path(harness, "agentic run.trigger_id", run, "trigger_id", "\"github-pr-opened\"")
-  expect_json_path(harness, "agentic run.executed_nodes[1]", run, "executed_nodes[1].node_id", "\"review\"")
-  expect_json_path(harness, "agentic run.review.kind", run, "executed_nodes[1].kind", "\"agent\"")
-  expect_json_path(harness, 
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "agentic run.status",
+    run,
+    "status",
+    "\"completed\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "agentic run.trigger_id",
+    run,
+    "trigger_id",
+    "\"github-pr-opened\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "agentic run.executed_nodes[1]",
+    run,
+    "executed_nodes[1].node_id",
+    "\"review\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "agentic run.review.kind",
+    run,
+    "executed_nodes[1].kind",
+    "\"agent\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
     "agentic run.review.capsule",
     run,
     "executed_nodes[1].prompt_capsule",
@@ -207,32 +324,86 @@ pipeline main(harness: Harness, task) {
   )
   // Agentic bundle must continue to declare exactly one connector
   // requirement; the docs walkthrough relies on this.
-  expect_json_path(harness, "agentic run.connectors[0]", run, "connectors[0].id", "\"github\"")
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "agentic run.connectors[0]",
+    run,
+    "connectors[0].id",
+    "\"github\"",
+  )
   // --- 3. Connect demo manifest ---
   const status = harn_json(harness, harn_bin, ["connect", "status", "--json"], DEMO_DIR)
-  expect_json_path(harness, "demo status.connectors[0].id", status, "connectors[0].id", "\"demo\"")
-  expect_json_path(harness, "demo status.connectors[0].installed", status, "connectors[0].installed", "true")
-  expect_json_path(harness, "demo status.connectors[0].usable", status, "connectors[0].usable", "false")
-  expect_json_path(harness, 
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "demo status.connectors[0].id",
+    status,
+    "connectors[0].id",
+    "\"demo\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "demo status.connectors[0].installed",
+    status,
+    "connectors[0].installed",
+    "true",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "demo status.connectors[0].usable",
+    status,
+    "connectors[0].usable",
+    "false",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
     "demo status.connectors[0].status",
     status,
     "connectors[0].status",
     "\"missing_auth\"",
   )
-  expect_json_path(harness, 
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
     "demo status.connectors[0].auth_type",
     status,
     "connectors[0].auth_type",
     "\"api-key\"",
   )
-  const plan = harn_json(harness, 
+  const plan = harn_json(
+    harness,
     harn_bin,
     ["connect", "setup-plan", "--connector", "demo", "--json"],
     DEMO_DIR,
   )
-  expect_json_path(harness, "demo setup-plan.connector", plan, "connector", "\"demo\"")
-  expect_json_path(harness, "demo setup-plan.auth_type", plan, "auth_type", "\"api-key\"")
-  expect_json_path(harness, "demo setup-plan.steps[0].id", plan, "steps[0].id", "\"authorize\"")
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "demo setup-plan.connector",
+    plan,
+    "connector",
+    "\"demo\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "demo setup-plan.auth_type",
+    plan,
+    "auth_type",
+    "\"api-key\"",
+  )
+  expect_json_path(
+    harness.runtime,
+    harness.stdio,
+    "demo setup-plan.steps[0].id",
+    plan,
+    "steps[0].id",
+    "\"authorize\"",
+  )
   harness.stdio.println("    Workflow quickstart fixtures OK.")
   return 0
 }

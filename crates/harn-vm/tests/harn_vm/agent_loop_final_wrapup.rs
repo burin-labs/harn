@@ -21,7 +21,8 @@ use harn_vm::value::VmError;
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
+    let chunk = harn_vm::compile_source(&source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -68,8 +69,8 @@ fn llm_call_start_events(events) {
   return events.filter({ event -> event.type == "typed_checkpoint" && event.checkpoint?.kind == "llm_call_start" })
 }
 
-pipeline main(task) {
-  const session = "agent-loop-llm-call-start-" + uuid()
+pipeline main(harness: Harness, task) {
+  const session = "agent-loop-llm-call-start-" + harness.random.uuid()
   const caller = { call -> return {
     ok: true,
     value: {
@@ -80,9 +81,9 @@ pipeline main(task) {
       output_tokens: 0,
     },
   } }
-  const captured = agent_capture_events(
+  const captured = agent_capture_events(harness.agent,
     session,
-    fn() { return agent_loop(
+    fn() { return agent_loop(harness,
       "finish",
       nil,
       {
@@ -99,15 +100,15 @@ pipeline main(task) {
   )
   const starts = llm_call_start_events(captured.events)
   const checkpoint = starts[0].checkpoint
-  log(captured.result.status)
-  log(len(starts))
-  log(checkpoint.kind)
-  log(checkpoint.iteration)
-  log(checkpoint.attempt)
-  log(checkpoint.provider)
-  log(checkpoint.model)
-  log(checkpoint.tool_format)
-  log(checkpoint.final_wrapup)
+  harness.stdio.log(captured.result.status)
+  harness.stdio.log(len(starts))
+  harness.stdio.log(checkpoint.kind)
+  harness.stdio.log(checkpoint.iteration)
+  harness.stdio.log(checkpoint.attempt)
+  harness.stdio.log(checkpoint.provider)
+  harness.stdio.log(checkpoint.model)
+  harness.stdio.log(checkpoint.tool_format)
+  harness.stdio.log(checkpoint.final_wrapup)
 }
 "#,
     )
@@ -137,8 +138,7 @@ pipeline main(task) {
 fn exhaustion_pipeline(session_id: &str, final_wrapup_opt: &str) -> String {
     format!(
         r#"
-pipeline main(task) {{
-  clear_tool_hooks()
+pipeline main(harness: Harness, task) {{
   let registry = tool_registry()
   let tools = tool_define(
     registry,
@@ -146,16 +146,16 @@ pipeline main(task) {{
     "Test stand-in for a tool the model keeps calling.",
     {{parameters: {{}}, handler: {{ _args -> return "explored" }}}},
   )
-  let tool_calls_counter = shared_cell(
+  let tool_calls_counter = harness.runtime.shared_cell(
     {{scope: "task_group", key: "wrapup-tool-calls-{session_id}", initial: 0}},
   )
-  let wrapup_counter = shared_cell(
+  let wrapup_counter = harness.runtime.shared_cell(
     {{scope: "task_group", key: "wrapup-final-calls-{session_id}", initial: 0}},
   )
   let mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
-      let wsnap = shared_snapshot(wrapup_counter)
-      shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
+      let wsnap = harness.runtime.shared_snapshot(wrapup_counter)
+      harness.runtime.shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
       return {{
         ok: true,
         value: {{
@@ -166,8 +166,8 @@ pipeline main(task) {{
         }},
       }}
     }}
-    let snap = shared_snapshot(tool_calls_counter)
-    shared_cas(tool_calls_counter, snap, snap.value + 1)
+    let snap = harness.runtime.shared_snapshot(tool_calls_counter)
+    harness.runtime.shared_cas(tool_calls_counter, snap, snap.value + 1)
     return {{
       ok: true,
       value: {{
@@ -178,7 +178,7 @@ pipeline main(task) {{
       }},
     }}
   }}
-  let result = agent_loop(
+  let result = agent_loop(harness,
     "do the work",
     nil,
     {{
@@ -193,10 +193,10 @@ pipeline main(task) {{
 {final_wrapup_opt}
     }},
   )
-  log(result.status)
-  log(shared_get(tool_calls_counter))
-  log(shared_get(wrapup_counter))
-  log(contains(result.text, "Refactored the parser"))
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(tool_calls_counter))
+  harness.stdio.log(harness.runtime.shared_get(wrapup_counter))
+  harness.stdio.log(contains(result.text, "Refactored the parser"))
 }}
 "#
     )
@@ -207,15 +207,14 @@ pipeline main(task) {{
 fn clean_done_pipeline(session_id: &str) -> String {
     format!(
         r#"
-pipeline main(task) {{
-  clear_tool_hooks()
-  const wrapup_counter = shared_cell(
+pipeline main(harness: Harness, task) {{
+  const wrapup_counter = harness.runtime.shared_cell(
     {{scope: "task_group", key: "clean-done-wrapup-{session_id}", initial: 0}},
   )
   const mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
-      const wsnap = shared_snapshot(wrapup_counter)
-      shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
+      const wsnap = harness.runtime.shared_snapshot(wrapup_counter)
+      harness.runtime.shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
     }}
     return {{
       ok: true,
@@ -227,7 +226,7 @@ pipeline main(task) {{
       }},
     }}
   }}
-  const result = agent_loop(
+  const result = agent_loop(harness,
     "do the work",
     nil,
     {{
@@ -239,9 +238,9 @@ pipeline main(task) {{
       llm_caller: mock_llm,
     }},
   )
-  log(result.status)
-  log(shared_get(wrapup_counter))
-  log(contains(result.text, "All done."))
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(wrapup_counter))
+  harness.stdio.log(contains(result.text, "All done."))
 }}
 "#
     )
@@ -309,8 +308,7 @@ fn clean_done_exit_does_not_fire_wrapup() {
 fn host_directive_capture_pipeline(session_id: &str) -> String {
     format!(
         r#"
-pipeline main(task) {{
-  clear_tool_hooks()
+pipeline main(harness: Harness, task) {{
   let registry = tool_registry()
   let tools = tool_define(
     registry,
@@ -318,19 +316,19 @@ pipeline main(task) {{
     "Test stand-in for a tool the model keeps calling.",
     {{parameters: {{}}, handler: {{ _args -> return "explored" }}}},
   )
-  let wrapup_counter = shared_cell({{scope: "task_group", key: "hd-wc-{session_id}", initial: 0}})
-  let sys_cell = shared_cell({{scope: "task_group", key: "hd-sys-{session_id}", initial: ""}})
-  let lastmsg_cell = shared_cell({{scope: "task_group", key: "hd-last-{session_id}", initial: ""}})
+  let wrapup_counter = harness.runtime.shared_cell({{scope: "task_group", key: "hd-wc-{session_id}", initial: 0}})
+  let sys_cell = harness.runtime.shared_cell({{scope: "task_group", key: "hd-sys-{session_id}", initial: ""}})
+  let lastmsg_cell = harness.runtime.shared_cell({{scope: "task_group", key: "hd-last-{session_id}", initial: ""}})
   let mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
-      let wsnap = shared_snapshot(wrapup_counter)
-      shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
+      let wsnap = harness.runtime.shared_snapshot(wrapup_counter)
+      harness.runtime.shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
       let msgs = _call?.opts?.messages ?? []
       let last = if len(msgs) > 0 {{ msgs[len(msgs) - 1] }} else {{ {{}} }}
-      let ssnap = shared_snapshot(sys_cell)
-      shared_cas(sys_cell, ssnap, to_string(_call?.system ?? ""))
-      let lsnap = shared_snapshot(lastmsg_cell)
-      shared_cas(lastmsg_cell, lsnap, to_string(last?.content ?? ""))
+      let ssnap = harness.runtime.shared_snapshot(sys_cell)
+      harness.runtime.shared_cas(sys_cell, ssnap, to_string(_call?.system ?? ""))
+      let lsnap = harness.runtime.shared_snapshot(lastmsg_cell)
+      harness.runtime.shared_cas(lastmsg_cell, lsnap, to_string(last?.content ?? ""))
       return {{
         ok: true,
         value: {{
@@ -351,7 +349,7 @@ pipeline main(task) {{
       }},
     }}
   }}
-  let result = agent_loop(
+  let result = agent_loop(harness,
     "do the work",
     nil,
     {{
@@ -367,14 +365,14 @@ pipeline main(task) {{
       wrapup_context: {{terminal_kind: "budget_exhausted", files_touched: [{{path: "parser.rs", added_lines: 12}}]}},
     }},
   )
-  log(result.status)
-  log(shared_get(wrapup_counter))
-  log(contains(shared_get(sys_cell), "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
-  log(contains(shared_get(lastmsg_cell), "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
-  log(contains(shared_get(lastmsg_cell), "narrate it truthfully"))
-  log(contains(shared_get(lastmsg_cell), "terminal_kind"))
-  log(contains(shared_get(lastmsg_cell), "Terminal context (authoritative facts)"))
-  log(contains(result.text, "parser half-migrated"))
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(wrapup_counter))
+  harness.stdio.log(contains(harness.runtime.shared_get(sys_cell), "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
+  harness.stdio.log(contains(harness.runtime.shared_get(lastmsg_cell), "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
+  harness.stdio.log(contains(harness.runtime.shared_get(lastmsg_cell), "narrate it truthfully"))
+  harness.stdio.log(contains(harness.runtime.shared_get(lastmsg_cell), "terminal_kind"))
+  harness.stdio.log(contains(harness.runtime.shared_get(lastmsg_cell), "Terminal context (authoritative facts)"))
+  harness.stdio.log(contains(result.text, "parser half-migrated"))
 }}
 "#
     )
@@ -387,13 +385,12 @@ pipeline main(task) {{
 fn no_tool_terminal_pipeline(session_id: &str, wrapup_opts: &str) -> String {
     format!(
         r#"
-pipeline main(task) {{
-  clear_tool_hooks()
-  let wrapup_counter = shared_cell({{scope: "task_group", key: "nt-wc-{session_id}", initial: 0}})
+pipeline main(harness: Harness, task) {{
+  let wrapup_counter = harness.runtime.shared_cell({{scope: "task_group", key: "nt-wc-{session_id}", initial: 0}})
   let mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
-      let wsnap = shared_snapshot(wrapup_counter)
-      shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
+      let wsnap = harness.runtime.shared_snapshot(wrapup_counter)
+      harness.runtime.shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
       return {{
         ok: true,
         value: {{
@@ -409,7 +406,7 @@ pipeline main(task) {{
       value: {{text: "Still thinking, no action yet.", tool_calls: [], provider: "mock", model: "mock"}},
     }}
   }}
-  let result = agent_loop(
+  let result = agent_loop(harness,
     "do the work",
     nil,
     {{
@@ -423,8 +420,8 @@ pipeline main(task) {{
 {wrapup_opts}
     }},
   )
-  log(result.status)
-  log(shared_get(wrapup_counter))
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(wrapup_counter))
 }}
 "#
     )
@@ -437,8 +434,7 @@ pipeline main(task) {{
 fn host_directive_degrade_pipeline(session_id: &str) -> String {
     format!(
         r#"
-pipeline main(task) {{
-  clear_tool_hooks()
+pipeline main(harness: Harness, task) {{
   let registry = tool_registry()
   let tools = tool_define(
     registry,
@@ -446,11 +442,11 @@ pipeline main(task) {{
     "Test stand-in for a tool the model keeps calling.",
     {{parameters: {{}}, handler: {{ _args -> return "explored" }}}},
   )
-  let wrapup_counter = shared_cell({{scope: "task_group", key: "deg-wc-{session_id}", initial: 0}})
+  let wrapup_counter = harness.runtime.shared_cell({{scope: "task_group", key: "deg-wc-{session_id}", initial: 0}})
   let mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
-      let wsnap = shared_snapshot(wrapup_counter)
-      shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
+      let wsnap = harness.runtime.shared_snapshot(wrapup_counter)
+      harness.runtime.shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
       return {{ok: false, status: "provider_error", error: {{message: "wrap-up provider down"}}}}
     }}
     return {{
@@ -463,7 +459,7 @@ pipeline main(task) {{
       }},
     }}
   }}
-  let result = agent_loop(
+  let result = agent_loop(harness,
     "do the work",
     nil,
     {{
@@ -478,9 +474,9 @@ pipeline main(task) {{
       wrapup_directive: "PRODUCT_SADPATH_DIRECTIVE_XYZ",
     }},
   )
-  log(result.status)
-  log(shared_get(wrapup_counter))
-  log(contains(result.text, "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(wrapup_counter))
+  harness.stdio.log(contains(result.text, "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
 }}
 "#
     )

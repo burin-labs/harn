@@ -3,7 +3,8 @@ import { with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "first ##DONE##", input_tokens: 1, output_tokens: 1, model: "o3"},
       {text: "second ##DONE##", input_tokens: 1, output_tokens: 1, model: "o3"},
     ],
@@ -13,7 +14,9 @@ pipeline default(harness: Harness) {
         session_id,
         {workspace_anchor: {primary: "/workspace/a", anchored_at: "2026-05-24T00:00:00Z"}},
       )
-      const first = agent_loop(harness, "first",
+      const first = agent_loop(
+        harness,
+        "first",
         "Base system.",
         {
           provider: "mock",
@@ -33,7 +36,9 @@ pipeline default(harness: Harness) {
           anchored_at: "2026-05-24T00:00:02Z",
         },
       )
-      const second = agent_loop(harness, "second",
+      const second = agent_loop(
+        harness,
+        "second",
         nil,
         {
           provider: "mock",

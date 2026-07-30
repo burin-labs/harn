@@ -20,6 +20,7 @@ pipeline test(harness: Harness, task) {
   )
   const pool_name = "spawn-to-pool-cap-demo-" + unique
   const _ = pool_create(
+    harness.agent,
     {name: pool_name, max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")},
   )
   const task_factory = { _event ->
@@ -72,7 +73,7 @@ pipeline test(harness: Harness, task) {
   for _i in 0 to len(handles) exclusive {
     harness.runtime.send(gate, "go")
   }
-  const results = pool_wait(handles)
+  const results = pool_wait(harness.agent, handles)
   harness.stdio.println(len(results) == 8)
   harness.stdio.println(harness.runtime.atomic_get(peak) <= 3)
   harness.stdio.println(harness.runtime.atomic_get(inflight) == 0)

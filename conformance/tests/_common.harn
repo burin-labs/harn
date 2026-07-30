@@ -12,16 +12,23 @@ fn first_group(pattern, text) {
 /** Resolve the built Harn CLI for conformance fixtures that spawn subprocesses. */
 pub fn resolve_harn_bin(harness: Harness, repo_root) {
   const conformance_bin = harness.env.get("HARN_CONFORMANCE_HARN_BIN")
-  if conformance_bin {
+  if conformance_bin && harness.fs.exists(conformance_bin) {
     return conformance_bin
   }
   const env_bin = harness.env.get("HARN_BIN")
-  if env_bin {
+  if env_bin && harness.fs.exists(env_bin) {
     return env_bin
+  }
+  const worktree_bin = path_join(repo_root, "target/debug/harn")
+  if harness.fs.exists(worktree_bin) {
+    return worktree_bin
   }
   const env_target_dir = harness.env.get("CARGO_TARGET_DIR")
   if env_target_dir {
-    return path_join(env_target_dir, "debug/harn")
+    const candidate = path_join(env_target_dir, "debug/harn")
+    if harness.fs.exists(candidate) {
+      return candidate
+    }
   }
   const cargo_config = path_join(repo_root, ".cargo/config.toml")
   if harness.fs.exists(cargo_config) {
@@ -31,7 +38,7 @@ pub fn resolve_harn_bin(harness: Harness, repo_root) {
       return path_join(configured, "debug/harn")
     }
   }
-  return path_join(repo_root, "target/debug/harn")
+  return worktree_bin
 }
 
 /** Return whether a subprocess still exists according to the platform shell. */
@@ -42,7 +49,9 @@ pub fn process_alive(process: HarnessProcess, pid) {
 
 /** Poll a subprocess log for a regex match and return the first capture group. */
 pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
-  return poll_until(harness, { ->
+  return poll_until(
+    harness.clock,
+    { ->
       if !harness.fs.exists(log_path) {
         return nil
       }
@@ -78,20 +87,22 @@ pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
  * timeout. Returns nil on timeout; callers that need the content as a hard
  * prereq should follow with a descriptive `require`.
  */
-pub fn wait_for_file_content(harness: Harness, path, check) {
-  return poll_until(harness, { ->
-      if !harness.fs.exists(path) {
+pub fn wait_for_file_content(clock: HarnessClock, fs: HarnessFs, path, check) {
+  return poll_until(
+    clock,
+    { ->
+      if !fs.exists(path) {
         return nil
       }
-      return check(harness.fs.read_text(path))
+      return check(fs.read_text(path))
     },
     {timeout_ms: 15000, interval_ms: 50},
   )
 }
 
-fn log_contains(harness: Harness, log_path, needle) {
-  if harness.fs.exists(log_path) {
-    const log = harness.process.exec("cat", log_path).stdout
+fn log_contains(fs: HarnessFs, process: HarnessProcess, log_path, needle) {
+  if fs.exists(log_path) {
+    const log = process.exec("cat", log_path).stdout
     if contains(log, needle) {
       return true
     }
@@ -114,7 +125,9 @@ fn log_contains(harness: Harness, log_path, needle) {
  * signal as a hard prereq should fail with a descriptive `require`.
  */
 pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
-  return poll_until(harness, { -> log_contains(harness, log_path, needle) },
+  return poll_until(
+    harness.clock,
+    { -> log_contains(harness.fs, harness.process, log_path, needle) },
     {timeout_ms: 30000, interval_ms: 50},
   )
     ?? false
@@ -141,9 +154,11 @@ pub fn wait_for_a2a_server_url(harness: Harness, log_path) {
  * single-suite baseline. Returns false on timeout; callers that need the
  * process gone for subsequent steps should pair this with `kill -KILL`.
  */
-pub fn wait_for_exit(harness: Harness, pid) {
-  return poll_until(harness, { ->
-      if !process_alive(harness.process, pid) {
+pub fn wait_for_exit(clock: HarnessClock, process: HarnessProcess, pid) {
+  return poll_until(
+    clock,
+    { ->
+      if !process_alive(process, pid) {
         return true
       }
       return nil

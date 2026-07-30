@@ -11,7 +11,12 @@ pipeline default(harness: Harness) {
   harness.stdio.println(published?.query_count == 1)
   harness.stdio.println(harness.runtime.workflow_query(target, "progress_pct") == 42)
   const waiter = spawn {
-    let result = harness.runtime.workflow_update(target, "adjust_budget", {max_usd: 10}, {timeout_ms: 1000})
+    let result = harness.runtime.workflow_update(
+      target,
+      "adjust_budget",
+      {max_usd: 10},
+      {timeout_ms: 1000},
+    )
     harness.stdio.println(result?.ok)
   }
   harness.clock.sleep_ms(50ms)

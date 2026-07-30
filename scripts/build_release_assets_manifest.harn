@@ -308,7 +308,7 @@ pipeline main(harness: Harness, task) {
     const meta = target_meta(triple)
     const filename: string = meta.filename
     const path = join_path(artifacts_dir, filename)
-    if !is_regular_file(harness, path) {
+    if !is_regular_file(harness.fs, path) {
       missing = missing + [filename]
       continue
     }
@@ -333,9 +333,9 @@ pipeline main(harness: Harness, task) {
  * Python `Path.is_file()`. `stat` throws on a missing path, so gate on
  * `exists` first.
  */
-fn is_regular_file(harness: Harness, path: string) -> bool {
-  if !harness.fs.exists(path) {
+fn is_regular_file(fs: HarnessFs, path: string) -> bool {
+  if !fs.exists(path) {
     return false
   }
-  return harness.fs.stat(path).is_file
+  return fs.stat(path).is_file
 }

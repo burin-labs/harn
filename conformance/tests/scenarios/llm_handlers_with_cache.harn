@@ -11,7 +11,7 @@ pipeline default(harness: Harness) {
       "harn-with-cache-sqlite-" + harness.random.uuid() + ".sqlite",
     ),
   }
-  cache_clear(harness, {store: store})
+  cache_clear(harness.llm, {store: store})
   with_llm_script(
     harness.llm,
     [

@@ -344,10 +344,10 @@ pub fn structural_diff(ast: HarnessAst, path_a: string, path_b: string, options 
  * @effects: [host]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: changeset_summary([{path: "src/lib.rs", before: old, after: next}])
+ * @example: changeset_summary(harness.ast, [{path: "src/lib.rs", before: old, after: next}])
  */
-pub fn changeset_summary(files: list<ChangesetFileImage>) -> ChangesetSummary {
-  return hostlib_ast_changeset_summary({files: files})
+pub fn changeset_summary(ast: HarnessAst, files: list<ChangesetFileImage>) -> ChangesetSummary {
+  return ast.changeset_summary({files: files})
 }
 
 /**

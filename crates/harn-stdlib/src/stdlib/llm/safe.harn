@@ -291,10 +291,10 @@ pub fn __wrap_llm_result(result) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn safe_call(harness: Harness, prompt, system, options) {
+pub fn safe_call(llm: HarnessLlm, prompt, system, options) {
   return __wrap_llm_result(
     try {
-      harness.llm.call(prompt, system, options)
+      llm.call(prompt, system, options)
     },
   )
 }
@@ -443,11 +443,11 @@ fn __session_tool_names(messages) {
  * @effects: []
  * @errors: []
  */
-pub fn judge_payload(harness: Harness, session, _opts, stop_reason, text, iteration) {
+pub fn judge_payload(agent: HarnessAgent, session, _opts, stop_reason, text, iteration) {
   const session_id = session?.session_id ?? ""
   const messages = if session_id != "" {
     let m = try {
-      agent_session_messages(harness, session_id)
+      agent_session_messages(agent, session_id)
     }
     if is_err(m) {
       []
@@ -573,14 +573,14 @@ pub fn schema_retry_nudge_for(schema, hint) {
  * @effects: []
  * @errors: []
  */
-pub fn safe_structured_call(harness: Harness, prompt, schema, options) {
+pub fn safe_structured_call(llm: HarnessLlm, prompt, schema, options) {
   const user_options = if type_of(options) == "dict" {
     options
   } else {
     {}
   }
-  const resolved = __apply_judge_defaults(harness, schema, user_options)
-  const envelope = harness.llm.call_structured_result(prompt, schema, resolved)
+  const resolved = __apply_judge_defaults(llm, schema, user_options)
+  const envelope = llm.call_structured_result(prompt, schema, resolved)
   return __augment_envelope(envelope)
 }
 
@@ -629,8 +629,8 @@ const STRUCTURED_MAX_MAX_TOKENS = 32768
  * fallback when the resolved `thinking` dict carries no explicit `budget_tokens`
  * (e.g. an `effort`-mode route, which exposes `{mode, level}` but no budget).
  */
-fn __reasoning_effort_budget(harness: Harness, level) {
-  return harness.llm.reasoning_effort_budget(to_string(level ?? ""))
+fn __reasoning_effort_budget(llm: HarnessLlm, level) {
+  return llm.reasoning_effort_budget(to_string(level ?? ""))
 }
 
 /**
@@ -642,14 +642,14 @@ fn __reasoning_effort_budget(harness: Harness, level) {
  * explicit `effort` is honored directly since the policy passes such
  * opts through untouched.
  */
-fn __structured_reasoning_budget(harness: Harness, options) {
+fn __structured_reasoning_budget(llm: HarnessLlm, options) {
   const opts = if type_of(options) == "dict" {
     options
   } else {
     {}
   }
   const resolved = try {
-    harness.llm.apply_reasoning_policy(opts)
+    llm.apply_reasoning_policy(opts)
   }
   const safe_resolved = if is_err(resolved) {
     opts
@@ -665,7 +665,7 @@ fn __structured_reasoning_budget(harness: Harness, options) {
       if effort == "off" || effort == "none" || effort == "disabled" {
         return 0
       }
-      return __reasoning_effort_budget(harness, effort)
+      return __reasoning_effort_budget(llm, effort)
     }
     return 0
   }
@@ -678,11 +678,11 @@ fn __structured_reasoning_budget(harness: Harness, options) {
     return explicit_budget
   }
   if mode == "effort" {
-    return __reasoning_effort_budget(harness, thinking?.level)
+    return __reasoning_effort_budget(llm, thinking?.level)
   }
   // `enabled`/`adaptive` with no numeric budget: use the medium fallback so a
   // reasoning route still clears the verdict-starvation floor.
-  return __reasoning_effort_budget(harness, "medium")
+  return __reasoning_effort_budget(llm, "medium")
 }
 
 /**
@@ -697,8 +697,8 @@ fn __structured_reasoning_budget(harness: Harness, options) {
  * @effects: []
  * @errors: []
  */
-pub fn structured_min_max_tokens(harness: Harness, options) {
-  const reasoning_budget = __structured_reasoning_budget(harness, options)
+pub fn structured_min_max_tokens(llm: HarnessLlm, options) {
+  const reasoning_budget = __structured_reasoning_budget(llm, options)
   if reasoning_budget <= 0 {
     return STRUCTURED_MIN_MAX_TOKENS
   }
@@ -727,18 +727,18 @@ pub fn structured_min_max_tokens(harness: Harness, options) {
  * @effects: []
  * @errors: []
  */
-pub fn repair_min_max_tokens(harness: Harness, options) {
-  const floor = structured_min_max_tokens(harness, options)
+pub fn repair_min_max_tokens(llm: HarnessLlm, options) {
+  const floor = structured_min_max_tokens(llm, options)
   if floor > REPAIR_MIN_MAX_TOKENS {
     return floor
   }
   return REPAIR_MIN_MAX_TOKENS
 }
 
-fn __apply_judge_defaults(harness: Harness, schema, options) {
+fn __apply_judge_defaults(llm: HarnessLlm, schema, options) {
   let resolved = options
   const requested_max_tokens = to_int(resolved?.max_tokens ?? 0) ?? 0
-  const floor = structured_min_max_tokens(harness, resolved)
+  const floor = structured_min_max_tokens(llm, resolved)
   if requested_max_tokens < floor {
     resolved = resolved + {max_tokens: floor}
   }
@@ -766,7 +766,7 @@ fn __apply_judge_defaults(harness: Harness, schema, options) {
   // starved by the route's hidden reasoning harness.runtime.channel(twin of the #3598 judge
   // bug). Resolved against the same options as the main floor so the two never
   // drift. Only ever RAISES.
-  const repair_floor = repair_min_max_tokens(harness, resolved)
+  const repair_floor = repair_min_max_tokens(llm, resolved)
   const requested_repair_max_tokens = to_int(repair?.max_tokens ?? 0) ?? 0
   if requested_repair_max_tokens < repair_floor {
     repair = repair + {max_tokens: repair_floor}

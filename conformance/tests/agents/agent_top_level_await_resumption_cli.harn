@@ -14,12 +14,15 @@ pipeline main(harness: Harness) {
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-top-level-resume-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-top-level-resume-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   const script = path_join(root, "top_level_suspend.harn")
   harness.fs.write_text(
     script,
-    "pipeline main() {\n"
+    "import { agent_loop } from \"std/agent/loop\"\n\npipeline main(harness: Harness) {\n"
       + "  harness.llm.mock_enqueue({tool_calls: [{id: \"park_1\", name: \"agent_await_resumption\", arguments: {reason: \"waiting on operator\"}}]})\n"
       + "  let result = agent_loop(harness, \"Park until the operator resumes.\", nil, {provider: \"mock\", tool_format: \"native\", max_iterations: 2, session_id: \"top-level-\" + harness.random.uuid_v7()})\n"
       + "  harness.stdio.println(\"status=\" + result.status)\n"

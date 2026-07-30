@@ -3,7 +3,7 @@
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(harness: Harness, task) {
-  const r = pack_for(harness, {model: "totally-fake-model-id"})
+  const r = pack_for(harness.agent, harness.llm, {model: "totally-fake-model-id"})
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, "totally-fake-model-id")
   assert_eq(type_of(r.provider), "string")

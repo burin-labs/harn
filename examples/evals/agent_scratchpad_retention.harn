@@ -58,14 +58,14 @@ fn __eval_excerpt(text, limit) {
   return substring(cleaned, 0, limit - 3) + "..."
 }
 
-fn __eval_append_callback(harness: Harness, arm) {
+fn __eval_append_callback(agent: HarnessAgent, arm) {
   return { info ->
     const text = info?.text ?? ""
     const fact = __eval_fact_for_text(text)
     if fact == "" {
       return nil
     }
-    const pad = harness.agent.scratchpad(info.session_id)
+    const pad = agent.scratchpad(info.session_id)
     if pad == nil {
       return nil
     }
@@ -76,7 +76,7 @@ fn __eval_append_callback(harness: Harness, arm) {
       {id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)},
     )
     const facts = (pad?.facts ?? []).appending({text: fact, source_ref: ref_id})
-    harness.agent.set_scratchpad(
+    agent.set_scratchpad(
       info.session_id,
       pad + {facts: facts, refs: refs},
       {source: "scratchpad_eval", reason: "append_turn_fact", metadata: {arm: arm, turn: turn}},
@@ -145,9 +145,11 @@ fn __eval_run_arm(harness: Harness, name, arm_id, scratchpad, reorg_mocks, appen
     opts = opts + {scratchpad: scratchpad}
   }
   if append_facts {
-    opts = opts + {post_turn_callback: __eval_append_callback(harness, arm_id)}
+    opts = opts + {post_turn_callback: __eval_append_callback(harness.agent, arm_id)}
   }
-  const result = agent_loop(harness, "Complete five subtasks and use the subtask-1 account key in the final handoff.",
+  const result = agent_loop(
+    harness,
+    "Complete five subtasks and use the subtask-1 account key in the final handoff.",
     "You are a cheap deterministic worker model in a retention eval.",
     opts,
   )
@@ -176,14 +178,16 @@ fn __eval_run_arm(harness: Harness, name, arm_id, scratchpad, reorg_mocks, appen
 
 pipeline default(harness: Harness) {
   const none = __eval_run_arm(harness, "none", "none", nil, [], false)
-  const append = __eval_run_arm(harness, 
+  const append = __eval_run_arm(
+    harness,
     "append_only_recitation",
     "append",
     {enabled: true, reorganize_every: 0},
     [],
     true,
   )
-  const strong = __eval_run_arm(harness, 
+  const strong = __eval_run_arm(
+    harness,
     "periodic_reorg_strong",
     "strong",
     {
@@ -197,7 +201,8 @@ pipeline default(harness: Harness) {
     ],
     true,
   )
-  const weak = __eval_run_arm(harness, 
+  const weak = __eval_run_arm(
+    harness,
     "periodic_reorg_weak_ablation",
     "weak",
     {

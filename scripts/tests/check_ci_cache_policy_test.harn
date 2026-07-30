@@ -266,12 +266,18 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Har
   )
 }
 
-pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_owner(harness: Harness, task) {
+pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_owner(
+  harness: Harness,
+  task,
+) {
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
 }
 
-pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_target_mapping(harness: Harness, task) {
+pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_target_mapping(
+  harness: Harness,
+  task,
+) {
   const declared = workflows()
   const producer = declared["windows-nightly.yml"].jobs.nextest
   const producer_cache = producer.steps[3]
@@ -308,7 +314,10 @@ pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_targe
   assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
 }
 
-pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(harness: Harness, task) {
+pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
+  harness: Harness,
+  task,
+) {
   const invalid = {
     ...workflows(),
     "build-release-binaries.yml": {
@@ -375,12 +384,18 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
 }
 
 @test
-pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_restore(harness: Harness, task) {
+pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_restore(
+  harness: Harness,
+  task,
+) {
   assert_eq(setup_harn_cache_action_errors(setup_harn_action()), [])
 }
 
 @test
-pipeline test_setup_harn_cache_rejects_ephemeral_writer_or_incompatible_key(harness: Harness, task) {
+pipeline test_setup_harn_cache_rejects_ephemeral_writer_or_incompatible_key(
+  harness: Harness,
+  task,
+) {
   const invalid = {
     runs: {
       steps: [
@@ -441,7 +456,10 @@ pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(harness:
   )
 }
 
-pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(harness: Harness, task) {
+pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(
+  harness: Harness,
+  task,
+) {
   const valid_action = action()
   const invalid_action = {
     ...valid_action,
@@ -503,7 +521,10 @@ pipeline test_ci_cache_policy_rejects_writer_key_drift(harness: Harness, task) {
   )
 }
 
-pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(harness: Harness, task) {
+pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
+  harness: Harness,
+  task,
+) {
   const invalid = {
     ...workflows(),
     "ci.yml": {

@@ -16,14 +16,11 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use harn_hostlib::tools::permissions;
 use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
 fn registry() -> BuiltinRegistry {
-    permissions::reset();
-    permissions::enable_for_test();
     let mut registry = BuiltinRegistry::new();
     ToolsCapability.register_builtins(&mut registry);
     registry
@@ -356,58 +353,6 @@ fn git_rejects_unknown_operation() {
         err,
         HostlibError::InvalidParameter {
             param: "operation",
-            ..
-        }
-    ));
-}
-
-#[test]
-fn enable_builtin_flips_the_gate() {
-    permissions::reset();
-    let mut reg = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut reg);
-
-    // Pre-enable: search must refuse.
-    let search = reg.find("hostlib_tools_search").unwrap();
-    let err = (search.handler)(&dict_arg(&[("pattern", vm_string("foo"))])).unwrap_err();
-    assert!(matches!(err, HostlibError::Backend { .. }));
-
-    // hostlib_enable can be called with either a bare string or a dict.
-    let enable = reg.find("hostlib_enable").unwrap();
-    let result = (enable.handler)(&[vm_string("tools:deterministic")]).unwrap();
-    if let VmValue::Dict(d) = &result {
-        assert!(matches!(d.get("enabled"), Some(VmValue::Bool(true))));
-        assert!(matches!(d.get("newly_enabled"), Some(VmValue::Bool(true))));
-    } else {
-        panic!("expected dict");
-    }
-
-    // After enable: search returns Ok (with no matches in a tmpdir).
-    let dir = tempfile::TempDir::new().unwrap();
-    let result = (search.handler)(&dict_arg(&[
-        ("pattern", vm_string("foo")),
-        ("path", vm_string(&dir.path().to_string_lossy())),
-    ]))
-    .unwrap();
-    assert!(matches!(&result, VmValue::Dict(_)));
-
-    // Calling enable a second time reports the feature as already on.
-    let again = (enable.handler)(&[vm_string("tools:deterministic")]).unwrap();
-    if let VmValue::Dict(d) = &again {
-        assert!(matches!(d.get("newly_enabled"), Some(VmValue::Bool(false))));
-    }
-}
-
-#[test]
-fn enable_builtin_rejects_unknown_features() {
-    let mut reg = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut reg);
-    let enable = reg.find("hostlib_enable").unwrap();
-    let err = (enable.handler)(&[vm_string("tools:exec")]).unwrap_err();
-    assert!(matches!(
-        err,
-        HostlibError::InvalidParameter {
-            param: "feature",
             ..
         }
     ));

@@ -1,11 +1,14 @@
 import { QueueStrategy, fifo, lifo, pool_create, pool_wait, priority } from "std/lifecycle/pool"
 
-fn stamp(harness: Harness, order) {
-  return { -> harness.runtime.atomic_add(order, 1) }
+fn stamp(runtime: HarnessRuntime, order) {
+  return { -> runtime.atomic_add(order, 1) }
 }
 
 pipeline default(harness: Harness) {
-  const fifo_pool = pool_create({name: "queue-strategy-fifo", max_concurrent: 1, queue: fifo()})
+  const fifo_pool = pool_create(
+    harness.agent,
+    {name: "queue-strategy-fifo", max_concurrent: 1, queue: fifo()},
+  )
   const fifo_order = harness.runtime.atomic(0)
   const fifo_gate = harness.runtime.channel(nil, 1)
   const fifo_warmup = fifo_pool.submit(
@@ -15,16 +18,19 @@ pipeline default(harness: Harness) {
     },
     {tenant_id: "warmup"},
   )
-  const fifo_a1 = fifo_pool.submit(stamp(harness, fifo_order), {tenant_id: "a"})
-  const fifo_b1 = fifo_pool.submit(stamp(harness, fifo_order), {tenant_id: "b"})
-  const fifo_a2 = fifo_pool.submit(stamp(harness, fifo_order), {tenant_id: "a"})
+  const fifo_a1 = fifo_pool.submit(stamp(harness.runtime, fifo_order), {tenant_id: "a"})
+  const fifo_b1 = fifo_pool.submit(stamp(harness.runtime, fifo_order), {tenant_id: "b"})
+  const fifo_a2 = fifo_pool.submit(stamp(harness.runtime, fifo_order), {tenant_id: "a"})
   harness.runtime.send(fifo_gate, "go")
-  const fifo_results = pool_wait([fifo_warmup, fifo_a1, fifo_b1, fifo_a2])
+  const fifo_results = pool_wait(harness.agent, [fifo_warmup, fifo_a1, fifo_b1, fifo_a2])
   harness.stdio.log("fifo")
   harness.stdio.log(fifo_results[1].result)
   harness.stdio.log(fifo_results[2].result)
   harness.stdio.log(fifo_results[3].result)
-  const lifo_pool = pool_create({name: "queue-strategy-lifo", max_concurrent: 1, queue: lifo()})
+  const lifo_pool = pool_create(
+    harness.agent,
+    {name: "queue-strategy-lifo", max_concurrent: 1, queue: lifo()},
+  )
   const lifo_order = harness.runtime.atomic(0)
   const lifo_gate = harness.runtime.channel(nil, 1)
   const lifo_warmup = lifo_pool.submit(
@@ -34,16 +40,17 @@ pipeline default(harness: Harness) {
     },
     {tenant_id: "warmup"},
   )
-  const lifo_a1 = lifo_pool.submit(stamp(harness, lifo_order), {tenant_id: "a"})
-  const lifo_b1 = lifo_pool.submit(stamp(harness, lifo_order), {tenant_id: "b"})
-  const lifo_a2 = lifo_pool.submit(stamp(harness, lifo_order), {tenant_id: "a"})
+  const lifo_a1 = lifo_pool.submit(stamp(harness.runtime, lifo_order), {tenant_id: "a"})
+  const lifo_b1 = lifo_pool.submit(stamp(harness.runtime, lifo_order), {tenant_id: "b"})
+  const lifo_a2 = lifo_pool.submit(stamp(harness.runtime, lifo_order), {tenant_id: "a"})
   harness.runtime.send(lifo_gate, "go")
-  const lifo_results = pool_wait([lifo_warmup, lifo_a1, lifo_b1, lifo_a2])
+  const lifo_results = pool_wait(harness.agent, [lifo_warmup, lifo_a1, lifo_b1, lifo_a2])
   harness.stdio.log("lifo")
   harness.stdio.log(lifo_results[3].result)
   harness.stdio.log(lifo_results[2].result)
   harness.stdio.log(lifo_results[1].result)
   const priority_pool = pool_create(
+    harness.agent,
     {name: "queue-strategy-priority", max_concurrent: 1, queue: priority()},
   )
   const priority_order = harness.runtime.atomic(0)
@@ -56,25 +63,29 @@ pipeline default(harness: Harness) {
     {tenant_id: "warmup", priority: 0},
   )
   const priority_a1 = priority_pool.submit(
-    stamp(harness, priority_order),
+    stamp(harness.runtime, priority_order),
     {tenant_id: "a", priority: 0},
   )
   const priority_b1 = priority_pool.submit(
-    stamp(harness, priority_order),
+    stamp(harness.runtime, priority_order),
     {tenant_id: "b", priority: 10},
   )
   const priority_a2 = priority_pool.submit(
-    stamp(harness, priority_order),
+    stamp(harness.runtime, priority_order),
     {tenant_id: "a", priority: 5},
   )
   harness.runtime.send(priority_gate, "go")
-  const priority_results = pool_wait([priority_warmup, priority_a1, priority_b1, priority_a2])
+  const priority_results = pool_wait(
+    harness.agent,
+    [priority_warmup, priority_a1, priority_b1, priority_a2],
+  )
   harness.stdio.log("priority")
   harness.stdio.log(priority_results[2].result)
   harness.stdio.log(priority_results[3].result)
   harness.stdio.log(priority_results[1].result)
   const strategy_ns = QueueStrategy()
   const fair_pool = pool_create(
+    harness.agent,
     {
       name: "queue-strategy-fair",
       max_concurrent: 1,
@@ -90,13 +101,16 @@ pipeline default(harness: Harness) {
     },
     {tenant_id: "warmup"},
   )
-  const fair_a1 = fair_pool.submit(stamp(harness, fair_order), {tenant_id: "a"})
-  const fair_a2 = fair_pool.submit(stamp(harness, fair_order), {tenant_id: "a"})
-  const fair_b1 = fair_pool.submit(stamp(harness, fair_order), {tenant_id: "b"})
-  const fair_a3 = fair_pool.submit(stamp(harness, fair_order), {tenant_id: "a"})
-  const fair_b2 = fair_pool.submit(stamp(harness, fair_order), {tenant_id: "b"})
+  const fair_a1 = fair_pool.submit(stamp(harness.runtime, fair_order), {tenant_id: "a"})
+  const fair_a2 = fair_pool.submit(stamp(harness.runtime, fair_order), {tenant_id: "a"})
+  const fair_b1 = fair_pool.submit(stamp(harness.runtime, fair_order), {tenant_id: "b"})
+  const fair_a3 = fair_pool.submit(stamp(harness.runtime, fair_order), {tenant_id: "a"})
+  const fair_b2 = fair_pool.submit(stamp(harness.runtime, fair_order), {tenant_id: "b"})
   harness.runtime.send(fair_gate, "go")
-  const fair_results = pool_wait([fair_warmup, fair_a1, fair_a2, fair_b1, fair_a3, fair_b2])
+  const fair_results = pool_wait(
+    harness.agent,
+    [fair_warmup, fair_a1, fair_a2, fair_b1, fair_a3, fair_b2],
+  )
   harness.stdio.log("fair")
   harness.stdio.log(fair_results[1].result)
   harness.stdio.log(fair_results[3].result)

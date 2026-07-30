@@ -40,8 +40,8 @@ Enum variants are matched using `EnumName.Variant(binding)` patterns in
 
 ```harn
 match s {
-  Shape.Circle(radius) -> { log("circle r=${radius}") }
-  Shape.Rectangle(w, h) -> { log("rect ${w}x${h}") }
+  Shape.Circle(radius) -> { harness.obs.log("circle r=${radius}") }
+  Shape.Rectangle(w, h) -> { harness.obs.log("rect ${w}x${h}") }
 }
 ```
 
@@ -59,8 +59,8 @@ always available this way:
 
 ```harn
 match s {
-  Circle(radius) -> { log("circle r=${radius}") }
-  Rectangle(w, h) -> { log("rect ${w}x${h}") }
+  Circle(radius) -> { harness.obs.log("circle r=${radius}") }
+  Rectangle(w, h) -> { harness.obs.log("rect ${w}x${h}") }
 }
 ```
 
@@ -146,8 +146,8 @@ optional subscript spelling is `expr?.[...]`. For example,
 
 ```harn
 match result {
-  Result.Ok(val) -> { log("success: ${val}") }
-  Result.Err(err) -> { log("error: ${err}") }
+  Result.Ok(val) -> { harness.obs.log("success: ${val}") }
+  Result.Err(err) -> { harness.obs.log("error: ${err}") }
 }
 ```
 
@@ -197,8 +197,8 @@ in `Result`.
 The `?` operator works naturally in pipelines:
 
 ```harn
-fn fetch_and_parse(url) {
-  const response = http_get(url)?
+fn fetch_and_parse(net: HarnessNet, url) {
+  const response = net.get(url)?
   const data = json_parse(response)?
   return Ok(data)
 }

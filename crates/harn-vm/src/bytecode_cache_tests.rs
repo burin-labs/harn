@@ -9,8 +9,9 @@ use crate::compile_source;
 
 #[test]
 fn header_round_trips_chunk() {
-    let chunk = compile_source("__io_println(\"hello\")").expect("compile");
-    let key = CacheKey::from_source(Path::new("/tmp/example.harn"), "__io_println(\"hello\")");
+    let source = "fn main(harness: Harness) { harness.stdio.println(\"hello\") }";
+    let chunk = compile_source(source).expect("compile");
+    let key = CacheKey::from_source(Path::new("/tmp/example.harn"), source);
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("entry.harnbc");
     store_at(&path, &key, &chunk).expect("write");
@@ -25,8 +26,9 @@ fn serialize_chunk_artifact_matches_store_at() {
     // bundle). The contract is: the resulting bytes match what
     // `store_at` would have written for the same key+chunk, so the
     // shipped artifact is byte-identical to the on-disk cache form.
-    let chunk = compile_source("__io_println(\"hi\")").expect("compile");
-    let key = CacheKey::from_source(Path::new("/tmp/pack.harn"), "__io_println(\"hi\")");
+    let source = "fn main(harness: Harness) { harness.stdio.println(\"hi\") }";
+    let chunk = compile_source(source).expect("compile");
+    let key = CacheKey::from_source(Path::new("/tmp/pack.harn"), source);
     let tmp = tempfile::tempdir().unwrap();
     let on_disk = tmp.path().join("pack.harnbc");
     store_at(&on_disk, &key, &chunk).expect("write");
@@ -111,7 +113,7 @@ fn codegen_fingerprint_changes_cache_key() {
     // constant, so exercise the parameterized inner hash directly.
     let tmp = tempfile::tempdir().unwrap();
     let entry = tmp.path().join("entry.harn");
-    std::fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
+    std::fs::write(&entry, "harness.stdio.println(\"hi\")\n").unwrap();
     let source = std::fs::read_to_string(&entry).unwrap();
     // The key is the hash; the manifest alongside it carries the capture time
     // of its own walk and is deliberately not stable across walks.
@@ -307,13 +309,13 @@ fn import_hash_is_stable_across_import_order() {
     let ab = tmp.path().join("entry_ab.harn");
     std::fs::write(
         &ab,
-        "import \"./a\"\nimport \"./b\"\n__io_println(\"hi\")\n",
+        "import \"./a\"\nimport \"./b\"\nharness.stdio.println(\"hi\")\n",
     )
     .unwrap();
     let ba = tmp.path().join("entry_ba.harn");
     std::fs::write(
         &ba,
-        "import \"./b\"\nimport \"./a\"\n__io_println(\"hi\")\n",
+        "import \"./b\"\nimport \"./a\"\nharness.stdio.println(\"hi\")\n",
     )
     .unwrap();
     let hash_ab = hash_transitive_user_imports(&ab, &std::fs::read_to_string(&ab).unwrap());
@@ -339,7 +341,7 @@ fn import_hash_picks_up_nested_imports() {
     )
     .unwrap();
     let entry = tmp.path().join("entry.harn");
-    std::fs::write(&entry, "import \"./mid\"\n__io_println(\"hi\")\n").unwrap();
+    std::fs::write(&entry, "import \"./mid\"\nharness.stdio.println(\"hi\")\n").unwrap();
 
     let before = hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
     std::fs::write(
@@ -371,7 +373,7 @@ fn import_hash_sees_a_dependency_that_appears_between_walks() {
     // dependency.
     let tmp = tempfile::tempdir().unwrap();
     let entry = tmp.path().join("entry.harn");
-    std::fs::write(&entry, "import \"./late\"\n__io_println(\"hi\")\n").unwrap();
+    std::fs::write(&entry, "import \"./late\"\nharness.stdio.println(\"hi\")\n").unwrap();
 
     let missing = hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
     std::fs::write(
@@ -413,7 +415,7 @@ fn identical_import_strings_in_different_directories_resolve_separately() {
     let entry = tmp.path().join("entry.harn");
     std::fs::write(
         &entry,
-        "import \"./left/mod\"\nimport \"./right/mod\"\n__io_println(\"hi\")\n",
+        "import \"./left/mod\"\nimport \"./right/mod\"\nharness.stdio.println(\"hi\")\n",
     )
     .unwrap();
 
@@ -461,7 +463,9 @@ enum Settle {
 
 fn seed_entry(tmp: &Path, dep_body: &str, settle: Settle) -> (PathBuf, String) {
     let entry = tmp.join("entry.harn");
-    let entry_source = "import \"./dep\"\n__io_println(\"hi\")\n".to_string();
+    let entry_source =
+        "import \"./dep\"\nfn main(harness: Harness) { harness.stdio.println(\"hi\") }\n"
+            .to_string();
     std::fs::write(&entry, &entry_source).unwrap();
     std::fs::write(tmp.join("dep.harn"), dep_body).unwrap();
     if settle == Settle::Yes {
@@ -574,7 +578,8 @@ fn a_directory_shadowed_import_does_not_defeat_the_manifest() {
     // caught it. This pins the manifest's *presence*, not just its answer.
     let tmp = tempfile::tempdir().unwrap();
     let entry = tmp.path().join("entry.harn");
-    let entry_source = "import \"./types\"\nimport \"./dep\"\n__io_println(\"hi\")\n".to_string();
+    let entry_source =
+        "import \"./types\"\nimport \"./dep\"\nharness.stdio.println(\"hi\")\n".to_string();
     std::fs::write(&entry, &entry_source).unwrap();
     std::fs::write(
         tmp.path().join("dep.harn"),
@@ -788,7 +793,7 @@ fn import_hash_busts_on_same_length_edit_in_same_process() {
     let leaf = tmp.path().join("leaf.harn");
     std::fs::write(&leaf, "pub fn x() -> int { return 111 }\n").unwrap();
     let entry = tmp.path().join("entry.harn");
-    std::fs::write(&entry, "import \"./leaf\"\n__io_println(\"hi\")\n").unwrap();
+    std::fs::write(&entry, "import \"./leaf\"\nharness.stdio.println(\"hi\")\n").unwrap();
 
     let before = hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
 
@@ -835,7 +840,7 @@ fn import_hash_stable_across_repeated_calls_same_process() {
     )
     .unwrap();
     let entry = tmp.path().join("entry.harn");
-    std::fs::write(&entry, "import \"./dep\"\n__io_println(\"hi\")\n").unwrap();
+    std::fs::write(&entry, "import \"./dep\"\nharness.stdio.println(\"hi\")\n").unwrap();
     let src = std::fs::read_to_string(&entry).unwrap();
     let first = hash_transitive_user_imports(&entry, &src);
     for _ in 0..50 {
@@ -855,7 +860,9 @@ fn import_hash_stable_across_repeated_calls_same_process() {
 /// cache identity while having genuinely different graphs.
 fn seed_shared_identity_entry(dir: &Path, dep_body: &str) -> (PathBuf, String) {
     let entry = dir.join("entry.harn");
-    let entry_source = "import \"./dep\"\n__io_println(\"same\")\n".to_string();
+    let entry_source =
+        "import \"./dep\"\nfn main(harness: Harness) { harness.stdio.println(\"same\") }\n"
+            .to_string();
     std::fs::write(&entry, &entry_source).unwrap();
     std::fs::write(dir.join("dep.harn"), dep_body).unwrap();
     (entry, entry_source)

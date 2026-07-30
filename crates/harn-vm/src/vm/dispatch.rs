@@ -609,7 +609,54 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
-        self.call_builtin_impl(name, args, None).await
+        self.call_builtin_impl(name, args, None, true).await
+    }
+
+    /// Invoke a hidden builtin that implements an already-authorized Harness
+    /// method. The nominal capability contract is the policy/effect owner;
+    /// applying the legacy builtin contract again would duplicate receipts
+    /// and, for approval-gated effects, request human approval twice.
+    pub(in crate::vm) async fn call_capability_builtin(
+        &mut self,
+        name: &str,
+        args: Vec<VmValue>,
+    ) -> Result<VmValue, VmError> {
+        self.call_builtin_impl(name, args, None, false).await
+    }
+
+    /// Invoke a synchronous hidden builtin behind an already-authorized
+    /// Harness method without constructing the recursive async dispatcher.
+    ///
+    /// Capability dispatch has already applied autonomy, policy, and receipt
+    /// handling before reaching this seam. Calling the sync handler directly
+    /// therefore preserves one contract owner and keeps deeply nested
+    /// agent/tool execution from accumulating the much larger async builtin
+    /// frame for ordinary filesystem operations.
+    pub(in crate::vm) fn call_capability_sync_builtin(
+        &mut self,
+        name: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        if self.denied_builtins.contains(name) {
+            return Err(VmError::CategorizedError {
+                message: format!("Tool '{name}' is not permitted."),
+                category: ErrorCategory::ToolRejected,
+            });
+        }
+        let builtin = self
+            .builtins
+            .get(name)
+            .cloned()
+            .ok_or_else(|| VmError::UndefinedBuiltin(name.to_string()))?;
+        let _observe = Self::observe_builtin_call(name);
+        // The Harness method contract has already applied policy and recorded
+        // its typed effects. Only validate the hidden implementation's runtime
+        // argument shape here; `validate_sync_builtin_args` would reapply the
+        // obsolete ambient-builtin policy and can reject an already-approved
+        // capability call.
+        crate::typecheck::validate_builtin_call(name, args, None)?;
+        let _interrupt = self.sync_builtin_interrupt_guard();
+        builtin(args, &mut self.output)
     }
 
     pub(crate) async fn call_builtin_id_or_name(
@@ -618,7 +665,7 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
-        self.call_builtin_impl(name, args, Some(id)).await
+        self.call_builtin_impl(name, args, Some(id), true).await
     }
 
     /// Install the thread-local [`crate::op_interrupt`] context for the
@@ -707,6 +754,7 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
         direct_id: Option<BuiltinId>,
+        enforce_contract: bool,
     ) -> Result<VmValue, VmError> {
         let _observe = Self::observe_builtin_call(name);
 
@@ -717,21 +765,24 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
-        let autonomy = if crate::autonomy::needs_async_side_effect_enforcement(name) {
-            crate::autonomy::enforce_builtin_side_effect_boxed(name, &args).await?
-        } else {
-            None
-        };
+        let autonomy =
+            if enforce_contract && crate::autonomy::needs_async_side_effect_enforcement(name) {
+                crate::autonomy::enforce_builtin_side_effect_boxed(name, &args).await?
+            } else {
+                None
+            };
         if let Some(crate::autonomy::AutonomyDecision::Skip(value)) = autonomy {
             return Ok(value);
         }
-        if !matches!(
-            autonomy,
-            Some(crate::autonomy::AutonomyDecision::AllowApproved)
-        ) {
-            crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+        if enforce_contract {
+            if !matches!(
+                autonomy,
+                Some(crate::autonomy::AutonomyDecision::AllowApproved)
+            ) {
+                crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+            }
+            self.record_builtin_contract_effects(name, &args);
         }
-        self.record_builtin_contract_effects(name, &args);
         crate::typecheck::validate_builtin_call(name, &args, None)?;
 
         if let Some(id) = direct_id {
@@ -749,7 +800,9 @@ impl Vm {
             self.call_builtin_entry(name, VmBuiltinDispatch::Async(async_builtin), args)
                 .await
         } else if let Some(bridge) = &self.bridge {
-            crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
+            if enforce_contract {
+                crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
+            }
             let args_json: Vec<serde_json::Value> =
                 args.iter().map(crate::llm::vm_value_to_json).collect();
             let result = bridge

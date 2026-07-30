@@ -175,7 +175,7 @@ pub type LlmCallOptions = {
  * host plumbing channels. The accepted-key list comes from the canonical
  * registry builtin — there is no hand-maintained list in stdlib.
  *
- * @effects: [llm.call]
+ * @effects: []
  * @errors: []
  */
 pub fn llm_call_options(options = nil) {

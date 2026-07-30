@@ -16,13 +16,20 @@ pipeline default(harness: Harness) {
   harness.testing.clock_set(1000)
   const opts = {session_id: "fleet-test", from: {agent: "lane-a"}}
   const claim = fleet_claim(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     "repo#1",
     opts + {id: "claim-1", requires_ack: true, lease_ms: 100, worktree: "/tmp/work"},
   )
   const proposed = fleet_project(
-    coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
+    coord_read(
+      harness.runtime,
+      harness.channels,
+      "session",
+      "ops",
+      {session_id: "fleet-test", include_events: true},
+    ),
     {now_ms: 1000, grace_ms: 20},
   )
   harness.stdio.println(proposed.schema)
@@ -30,7 +37,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(fleet_snapshot_report(proposed).ok)
   harness.stdio.println(proposed.claims[0]?.state)
   const _ = fleet_ack(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     claim.id,
     "accepted",
@@ -38,26 +46,35 @@ pipeline default(harness: Harness) {
   )
   harness.testing.clock_advance(50)
   const _ = fleet_heartbeat(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     "busy",
     opts
       + {id: "heartbeat-1", lease_ms: 100, expected_silence_ms: 300, current_claim_ids: [claim.id]},
   )
   const _ = fleet_finding(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     "overturned",
     opts + {id: "finding-1", subject: "Premise changed", refs: [{kind: "log", ref: "receipt-1"}]},
   )
   const _ = fleet_checkin(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     {shipped: "typed records", grade: "A", next: "project", learnings: "reuse channels"},
     opts + {id: "checkin-1"},
   )
   const active = fleet_project(
-    coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
+    coord_read(
+      harness.runtime,
+      harness.channels,
+      "session",
+      "ops",
+      {session_id: "fleet-test", include_events: true},
+    ),
     {now_ms: 1200, grace_ms: 20},
   )
   harness.stdio.println(active.claims[0]?.state)
@@ -65,20 +82,28 @@ pipeline default(harness: Harness) {
   harness.stdio.println(len(active.pending_findings))
   harness.stdio.println(active.latest_checkins[0]?.verification)
   const _ = fleet_ack(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     "finding-1",
     "accepted",
     {id: "ack-finding", session_id: "fleet-test", from: {agent: "control"}},
   )
   const cleared = fleet_project(
-    coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
+    coord_read(
+      harness.runtime,
+      harness.channels,
+      "session",
+      "ops",
+      {session_id: "fleet-test", include_events: true},
+    ),
     {now_ms: 1360, grace_ms: 20},
   )
   harness.stdio.println(cleared.actors[1]?.liveness?.status)
   harness.stdio.println(len(cleared.pending_findings))
   const _ = fleet_done(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     claim.id,
     "repo#1",
@@ -86,7 +111,13 @@ pipeline default(harness: Harness) {
     opts + {id: "done-1", counts: {tests: 7}},
   )
   const finished = fleet_project(
-    coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
+    coord_read(
+      harness.runtime,
+      harness.channels,
+      "session",
+      "ops",
+      {session_id: "fleet-test", include_events: true},
+    ),
     {now_ms: 1360, grace_ms: 20},
   )
   harness.stdio.println(finished.claims[0]?.state)
@@ -96,7 +127,15 @@ pipeline default(harness: Harness) {
   }
   harness.stdio.println(!is_ok(bad_time))
   const missing_projection_time = try {
-    fleet_project(coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}))
+    fleet_project(
+      coord_read(
+        harness.runtime,
+        harness.channels,
+        "session",
+        "ops",
+        {session_id: "fleet-test", include_events: true},
+      ),
+    )
   }
   harness.stdio.println(!is_ok(missing_projection_time))
   harness.testing.clock_reset()

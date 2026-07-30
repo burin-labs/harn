@@ -267,8 +267,8 @@ pub fn agent_chat_route_input(line, state = nil, handlers = nil) {
   }
 }
 
-fn __chat_default_user_input(harness: Harness, opts, state) {
-  const line = harness.stdio.read_line()
+fn __chat_default_user_input(stdio: HarnessStdio, opts, state) {
+  const line = stdio.read_line()
   if !line.ok {
     return {kind: "exit", reason: "eof", state: state}
   }
@@ -376,7 +376,8 @@ fn __chat_after_model(callback: AgentModelTurnCallback?, result, state) {
  */
 const __CHAT_CAP_STOP_REASONS = ["max_turns", "input_exhausted"]
 
-fn __chat_finish(harness: Harness, 
+fn __chat_finish(
+  agent: HarnessAgent,
   session_id,
   state,
   turns,
@@ -391,7 +392,9 @@ fn __chat_finish(harness: Harness,
   // instead of reading as an agent that ran out of things to say.
   if __CHAT_CAP_STOP_REASONS.contains(stop_reason) {
     const _ = try {
-      agent_emit_event(harness, session_id,
+      agent_emit_event(
+        agent,
+        session_id,
         "boundary_failure",
         {
           boundary: "chat_turn_cap",
@@ -403,10 +406,10 @@ fn __chat_finish(harness: Harness,
       )
     }
   }
-  const transcript = harness.agent.snapshot(session_id)
+  const transcript = agent.snapshot(session_id)
   const final_state = __chat_state(state, session_id, turns, input_events, last_result)
   if close_session {
-    harness.agent.close(session_id, {reason: stop_reason})
+    agent.close(session_id, {reason: stop_reason})
   }
   return {
     session_id: session_id,
@@ -427,10 +430,7 @@ fn __chat_finish(harness: Harness,
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_chat_loop(
-  harness: Harness,
-  opts: AgentChatLoopOptions? = nil,
-) -> AgentChatLoopResult {
+pub fn agent_chat_loop(harness: Harness, opts: AgentChatLoopOptions? = nil) -> AgentChatLoopResult {
   const config = __chat_dict(opts)
   const session_id = harness.agent.open(config?.session_id)
   const max_turns = config?.max_turns ?? 0
@@ -446,7 +446,8 @@ pub fn agent_chat_loop(
   let state = __chat_state(config?.state ?? config?.initial_state, session_id, turns, input_events)
   while max_turns <= 0 || turns < max_turns {
     if max_input_events != nil && input_events >= max_input_events {
-      return __chat_finish(harness, 
+      return __chat_finish(
+        harness.agent,
         session_id,
         state,
         turns,
@@ -458,7 +459,7 @@ pub fn agent_chat_loop(
       )
     }
     const raw_decision = if user_input == nil {
-      __chat_default_user_input(harness, config, state)
+      __chat_default_user_input(harness.stdio, config, state)
     } else {
       user_input(state)
     }
@@ -466,7 +467,8 @@ pub fn agent_chat_loop(
     const decision = __chat_normalize_user_decision(raw_decision, state)
     state = __chat_state(decision.state, session_id, turns, input_events, last_result)
     if decision.kind == "exit" {
-      return __chat_finish(harness, 
+      return __chat_finish(
+        harness.agent,
         session_id,
         state,
         turns,
@@ -505,7 +507,8 @@ pub fn agent_chat_loop(
     state = __chat_after_model(config?.on_model_turn, result, state)
     last_result = result
   }
-  return __chat_finish(harness, 
+  return __chat_finish(
+    harness.agent,
     session_id,
     state,
     turns,

@@ -1,16 +1,14 @@
 import { triage_emit, triage_normalize, triage_start_my_day } from "std/triage"
 
-fn fixture(harness: Harness, name) {
-  const root = harness.fs.workspace_root()
-  return json_parse(
-    harness.fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")),
-  )
+fn fixture(fs: HarnessFs, name) {
+  const root = fs.workspace_root()
+  return json_parse(fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")))
 }
 
 pipeline default(harness: Harness) {
-  const github = fixture(harness, "github_issue")
-  const slack = fixture(harness, "slack_message")
-  const notion = fixture(harness, "notion_page")
+  const github = fixture(harness.fs, "github_issue")
+  const slack = fixture(harness.fs, "slack_message")
+  const notion = fixture(harness.fs, "notion_page")
   const github_retry = github
     + {
     dedupe_key: "github-delivery-1507-retry",
@@ -55,13 +53,13 @@ pipeline default(harness: Harness) {
   }
   harness.stdio.println(is_err(ungated_write))
   const feed = triage_start_my_day(
-    harness,
+    harness.obs,
     [github, slack, notion, github_retry],
     {emit: true, topic: "triage.inbox.test", generated_at: "fixture"},
   )
   harness.stdio.println(len(feed.events))
   harness.stdio.println(len(feed.receipts))
-  const receipt = triage_emit(harness, github_event, {topic: "triage.inbox.test.single"})
+  const receipt = triage_emit(harness.obs, github_event, {topic: "triage.inbox.test.single"})
   const stream = harness.obs.event_log_subscribe(
     {topic: "triage.inbox.test.single", from_cursor: receipt.event_log_id - 1},
   )

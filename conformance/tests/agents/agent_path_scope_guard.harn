@@ -18,9 +18,12 @@ fn path_tools() {
 
 fn run_read(harness: Harness, session, path) {
   return with_llm_script(
-    harness.llm, [{tool_calls: [{id: "call_Read", name: "Read", arguments: {path: path}}]}, llm_text("done")],
+    harness.llm,
+    [{tool_calls: [{id: "call_Read", name: "Read", arguments: {path: path}}]}, llm_text("done")],
     { ->
-      return agent_loop(harness, "Use Read",
+      return agent_loop(
+        harness,
+        "Use Read",
         nil,
         {
           session_id: session,

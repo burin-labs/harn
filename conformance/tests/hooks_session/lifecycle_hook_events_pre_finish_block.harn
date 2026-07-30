@@ -6,6 +6,9 @@
  */
 pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
-  harness.agent.register_session_hook("pre_finish", { _event -> return {block: true, reason: "not allowed"} })
+  harness.agent.register_session_hook(
+    "pre_finish",
+    { _hook_harness, _event -> return {block: true, reason: "not allowed"} },
+  )
   return 1
 }

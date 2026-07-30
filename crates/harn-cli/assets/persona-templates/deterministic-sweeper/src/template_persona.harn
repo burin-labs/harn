@@ -2,14 +2,14 @@ import { bounded_loop } from "std/personas/prelude"
 
 @persona(name: "template_persona", description: "Deterministic sweeper template persona.", tools: [github], capabilities: ["project.test_commands", "runtime.record_run", "workspace.read_text"], autonomy: "act_with_approval", receipts: "required")
 /** Run the deterministic sweeper template DAG. */
-pub fn template_persona(harness: Harness, task) {
-  return drain_queue(harness, task)
+pub fn template_persona(clock: HarnessClock, fs: HarnessFs, task) {
+  return drain_queue(clock, fs, task)
 }
 
 @step(name: "drain_queue", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
-fn drain_queue(harness: Harness, task) {
+fn drain_queue(clock: HarnessClock, fs: HarnessFs, task) {
   const fixture = task?.fixture ?? {items: []}
-  const prompt = harness.fs.render_prompt(
+  const prompt = fs.render_prompt(
     "../prompts/system.harn.prompt",
     {
       persona_name: "template_persona",
@@ -17,7 +17,9 @@ fn drain_queue(harness: Harness, task) {
       request: fixture?.request ?? "drain queued work",
     },
   )
-  return bounded_loop(harness, {remaining: fixture.items, processed: []},
+  return bounded_loop(
+    clock,
+    {remaining: fixture.items, processed: []},
     fn(state) {
       if len(state.remaining) == 0 {
         return {state: state, progress: false, done: true}
@@ -40,5 +42,5 @@ fn drain_queue(harness: Harness, task) {
 }
 
 pub pipeline run(harness: Harness, task) -> dict {
-  return template_persona(harness, task)
+  return template_persona(harness.clock, harness.fs, task)
 }

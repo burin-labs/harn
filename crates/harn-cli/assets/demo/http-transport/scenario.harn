@@ -38,7 +38,7 @@ fn fake_request() {
   }
 }
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   const req = fake_request()
   // 1. Content negotiation against a simulated `Accept` header.
   const chosen = http_choose(

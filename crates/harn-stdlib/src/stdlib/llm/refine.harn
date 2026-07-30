@@ -195,7 +195,7 @@ fn __cache_key(user_prompt, style, target_size) {
 }
 
 /**
- * refine_prompt(harness, opts) -> dict
+ * refine_prompt(harness.llm, opts) -> dict
  *
  * Required: opts.user_prompt
  * Optional: opts.model, opts.provider, opts.session, opts.target_size,
@@ -220,7 +220,7 @@ fn __cache_key(user_prompt, style, target_size) {
  * session dict through subsequent calls; Harn does not currently support
  * out-of-closure mutation of session state.
  */
-fn __refine_prompt_dict(harness: Harness, opts) {
+fn __refine_prompt_dict(llm: HarnessLlm, opts) {
   if type_of(opts) != "dict" {
     throw "refine_prompt: opts must be a dict"
   }
@@ -262,7 +262,7 @@ fn __refine_prompt_dict(harness: Harness, opts) {
   }
   // Force determinism on the meta-call so cached refinements stay stable.
   call_opts = call_opts + {temperature: 0.0}
-  const envelope = safe_call(harness, meta_prompt, "", call_opts)
+  const envelope = safe_call(llm, meta_prompt, "", call_opts)
   if !(envelope?.ok ?? false) {
     return {
       ok: false,
@@ -302,14 +302,14 @@ fn __refine_prompt_dict(harness: Harness, opts) {
 
 /**
  * refine_prompt accepts the newer dict API and the legacy
- * refine_prompt(harness, base_prompt, options?) form used by prompt optimization.
+ * refine_prompt(harness.llm, base_prompt, options?) form used by prompt optimization.
  *
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn refine_prompt(harness: Harness, input, options = nil) {
+pub fn refine_prompt(llm: HarnessLlm, input, options = nil) {
   if type_of(input) == "dict" {
-    return __refine_prompt_dict(harness, input)
+    return __refine_prompt_dict(llm, input)
   }
   if type_of(input) != "string" {
     throw "refine_prompt: base_prompt must be a string"
@@ -319,7 +319,7 @@ pub fn refine_prompt(harness: Harness, input, options = nil) {
     properties: {prompt: {type: "string"}, notes: {type: "string"}},
     required: ["prompt"],
   }
-  const result = harness.llm.call_structured_result(
+  const result = llm.call_structured_result(
     __legacy_refine_meta_prompt(input),
     schema,
     __llm_options(options),
@@ -341,7 +341,7 @@ pub fn refine_prompt(harness: Harness, input, options = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn propose_instructions(harness: Harness, base_prompt, options = nil) {
+pub fn propose_instructions(llm: HarnessLlm, base_prompt, options = nil) {
   if type_of(base_prompt) != "string" {
     throw "propose_instructions: base_prompt must be a string"
   }
@@ -366,7 +366,7 @@ pub fn propose_instructions(harness: Harness, base_prompt, options = nil) {
     + {
     system: opts?.system ?? "You improve prompts for reliable task execution.",
   }
-  const result = harness.llm.call_structured_result(
+  const result = llm.call_structured_result(
     __proposal_prompt(base_prompt, count),
     schema,
     call_opts,
@@ -382,7 +382,7 @@ pub fn propose_instructions(harness: Harness, base_prompt, options = nil) {
 }
 
 /**
- * refine_caller(harness, next, refine_opts) -> caller
+ * refine_caller(harness.llm, next, refine_opts) -> caller
  *
  * Returns a caller that runs refine_prompt on the FIRST visible prompt and
  * threads the refined text through every subsequent invocation. Caches the
@@ -397,7 +397,7 @@ pub fn propose_instructions(harness: Harness, base_prompt, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn refine_caller(harness: Harness, next, refine_opts = nil) {
+pub fn refine_caller(llm: HarnessLlm, next, refine_opts = nil) {
   const base_opts = if type_of(refine_opts) == "dict" {
     refine_opts
   } else {
@@ -408,7 +408,7 @@ pub fn refine_caller(harness: Harness, next, refine_opts = nil) {
     { prompt, system, opts ->
       const merged = base_opts + {user_prompt: to_string(prompt ?? "")}
       const refined = try {
-        __refine_prompt_dict(harness, merged)
+        __refine_prompt_dict(llm, merged)
       }
       if is_err(refined) {
         return {prompt: prompt, system: system, opts: opts}

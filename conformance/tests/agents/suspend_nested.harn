@@ -18,7 +18,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline main(harness: Harness) {
   // Stage worker A: park, then complete.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "park_a", name: "agent_await_resumption", arguments: {reason: "worker A parks"}},
@@ -33,11 +34,15 @@ pipeline main(harness: Harness) {
       llm_text("worker B completed"),
     ],
     { ->
-      const handle_a = sub_agent_run(harness, "Worker A: park until resumed.",
+      const handle_a = sub_agent_run(
+        harness,
+        "Worker A: park until resumed.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
       const suspended_a = wait_agent(harness.agent, handle_a)
-      const handle_b = sub_agent_run(harness, "Worker B: park until resumed.",
+      const handle_b = sub_agent_run(
+        harness,
+        "Worker B: park until resumed.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
       const suspended_b = wait_agent(harness.agent, handle_b)

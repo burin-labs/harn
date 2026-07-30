@@ -6,7 +6,8 @@ pipeline default(harness: Harness) {
   // options were removed). Retry policy is composed via `with_retry` from
   // std/llm/handlers — see llm_handlers_with_retry*.harn for that surface.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {error: {category: "server_error", message: "HTTP 503 Service Unavailable"}},
       llm_text("unreachable without a composed retry handler"),
     ],
@@ -25,7 +26,8 @@ pipeline default(harness: Harness) {
   // schema_retries budget only, and with schema_retries: 0 it surfaces on
   // the first call.
   with_llm_script(
-    harness.llm, [llm_text("{\"wrong\": true}")],
+    harness.llm,
+    [llm_text("{\"wrong\": true}")],
     { ->
       const schema_failure = try {
         harness.llm.call(
@@ -45,7 +47,8 @@ pipeline default(harness: Harness) {
   )
   // The schema-retry loop still re-prompts on invalid structured output.
   with_llm_script(
-    harness.llm, [llm_text("{\"wrong\": true}"), llm_text("{\"answer\": \"fixed\"}")],
+    harness.llm,
+    [llm_text("{\"wrong\": true}"), llm_text("{\"answer\": \"fixed\"}")],
     { ->
       const structured = harness.llm.call(
         "schema retry",

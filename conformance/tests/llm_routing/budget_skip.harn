@@ -9,7 +9,8 @@ import { with_llm_script } from "std/testing"
 pipeline test(harness: Harness, task) {
   // Only the cheap link should actually call the mock.
   with_llm_script(
-    harness.llm, [{text: "cheap won", model: "gpt-4o-mini", provider: "openai"}],
+    harness.llm,
+    [{text: "cheap won", model: "gpt-4o-mini", provider: "openai"}],
     { ->
       const policy = harness.llm.routing_policy(
         {

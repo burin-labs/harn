@@ -2,7 +2,7 @@ import { stream_validator } from "std/json"
 
 pipeline default(harness: Harness, task) {
   const validator = stream_validator(
-    harness,
+    harness.runtime,
     {
       type: "dict",
       required: ["name", "age"],

@@ -2,19 +2,14 @@ fn double(n) {
   return n * 2
 }
 
-// A script entrypoint is an ordinary function with explicit root authority.
+/** A script entrypoint is an ordinary function with explicit root authority. */
 fn main(harness: Harness) {
   const x = 1 + 2
-
   harness.stdio.println(x)
-
   harness.stdio.println(double(5))
-
   const items = [1, 2, 3]
-
   for item in items {
     harness.stdio.print("${item} ")
   }
-
   harness.stdio.println("")
 }

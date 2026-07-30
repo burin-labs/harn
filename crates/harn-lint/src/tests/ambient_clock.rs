@@ -58,12 +58,10 @@ fn ambient_clock_lint_without_harness_in_scope_emits_no_fix() {
         entries[0].fix
     );
     assert!(
-        entries[0]
-            .suggestion
-            .as_ref()
-            .is_some_and(|s| s.contains("--harness-threading thread-params")
-                && s.contains("VM-level `harness`")),
-        "suggestion should describe both Harness migration modes, got: {:?}",
+        entries[0].suggestion.as_ref().is_some_and(
+            |s| s.contains("--safety surface-changing") && s.contains("explicit capability")
+        ),
+        "suggestion should describe explicit capability threading, got: {:?}",
         entries[0].suggestion
     );
 }

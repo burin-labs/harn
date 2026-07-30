@@ -22,7 +22,7 @@ pipeline default(harness: Harness, task) {
   )
   harness.fs.write_text(
     path_join(failing_consumer_dir, "lib.harn"),
-    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> any {\n  throw(\"fail:\" + event.id)\n}\n",
+    "import \"std/triggers\"\n\npub fn on_task(harness: Harness, event: TriggerEvent) -> any {\n  throw(\"fail:\" + event.id)\n}\n",
   )
   harness.fs.write_text(
     path_join(ok_consumer_dir, "harn.toml"),
@@ -30,7 +30,7 @@ pipeline default(harness: Harness, task) {
   )
   harness.fs.write_text(
     path_join(ok_consumer_dir, "lib.harn"),
-    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, event_id: event.id}\n}\n",
+    "import \"std/triggers\"\n\npub fn on_task(harness: Harness, event: TriggerEvent) -> dict {\n  return {ok: true, event_id: event.id}\n}\n",
   )
   const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(

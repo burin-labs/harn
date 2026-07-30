@@ -24,10 +24,10 @@ pipeline main(harness: Harness) {
   const session = harness.agent.open("reminder-provider-user-defined")
   harness.agent.reset(session)
   const payload = {session: {id: session}, iteration: 1, wake_interval_ms: 0, note: "provider"}
-  const first = agent_reminder_providers_fire(harness, session, "session_idle", payload, {})
-  const second = agent_reminder_providers_fire(harness, session, "session_idle", payload, {})
+  const first = agent_reminder_providers_fire(harness.agent, session, "session_idle", payload, {})
+  const second = agent_reminder_providers_fire(harness.agent, session, "session_idle", payload, {})
   const before = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
-  const ttl = agent_session_apply_reminder_post_turn(harness, session, 2)
+  const ttl = agent_session_apply_reminder_post_turn(harness.agent, session, 2)
   const after = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   harness.stdio.println(first.fired_count)
   harness.stdio.println(second.reports[0].deduped_count)

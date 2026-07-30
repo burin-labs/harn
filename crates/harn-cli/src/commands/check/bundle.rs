@@ -273,6 +273,22 @@ fn scan_node_bundle(
             let children = args.iter().collect::<Vec<_>>();
             scan_children_bundle(&children, file_path, config, visited, manifest);
         }
+        Node::MethodCall { method, args, .. }
+            if method == "render_prompt" || method == "render_prompt_with_provenance" =>
+        {
+            if let Some(template_path) = args.first().and_then(literal_string) {
+                let candidates = resolve_preflight_target(file_path, &template_path, config);
+                manifest.add_asset(
+                    file_path,
+                    method,
+                    &template_path,
+                    &candidates,
+                    classify_bundle_asset(&template_path, method),
+                );
+            }
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
         Node::FunctionCall { name, args, .. } if name == "host_call" => {
             if let Some((cap, op, params_arg)) = parse_host_call_args(args) {
                 manifest.add_host_capability(&cap, &op);
@@ -302,8 +318,51 @@ fn scan_node_bundle(
             let children = args.iter().collect::<Vec<_>>();
             scan_children_bundle(&children, file_path, config, visited, manifest);
         }
+        Node::MethodCall {
+            object,
+            method,
+            args,
+        } if matches!(method.as_str(), "exec_at" | "shell_at")
+            && harness_handle_field(object) == Some("process") =>
+        {
+            if let Some(dir) = args.first().and_then(literal_string) {
+                manifest.execution_dirs.insert(crate::format::slash_path(
+                    &resolve_source_relative(file_path, &dir),
+                ));
+            }
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::MethodCall {
+            object,
+            method,
+            args,
+        } if method == "scan" && harness_handle_field(object) == Some("project") => {
+            manifest.add_host_capability("project", "scan");
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::MethodCall {
+            object,
+            method,
+            args,
+        }
+        | Node::OptionalMethodCall {
+            object,
+            method,
+            args,
+        } if harness_handle_field(object).is_some_and(|field| {
+            harn_parser::builtin_signatures::capability_method_entry(field, method).is_some()
+        }) =>
+        {
+            let field = harness_handle_field(object).expect("guarded capability field");
+            manifest.add_host_capability(field, method);
+            let mut children = vec![object.as_ref()];
+            children.extend(args.iter());
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
         Node::FunctionCall { name, args, .. } if name == "spawn_agent" => {
-            if let Some(config_node) = args.first() {
+            if let Some(config_node) = args.last() {
                 collect_spawn_agent_bundle(config_node, file_path, manifest);
             }
             let children = args.iter().collect::<Vec<_>>();
@@ -313,6 +372,20 @@ fn scan_node_bundle(
             let children = node_children_bundle(node);
             scan_children_bundle(&children, file_path, config, visited, manifest);
         }
+    }
+}
+
+fn harness_handle_field(node: &SNode) -> Option<&str> {
+    match &node.node {
+        Node::PropertyAccess { object, property } if matches!(&object.node, Node::Identifier(root) if root == "harness") => {
+            Some(property)
+        }
+        Node::Identifier(name)
+            if harn_builtin_meta::CapabilityId::from_field_name(name).is_some() =>
+        {
+            Some(name)
+        }
+        _ => None,
     }
 }
 

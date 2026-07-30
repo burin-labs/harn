@@ -12,9 +12,13 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(jq_first(api, ".users | type"))
   harness.stdio.println(json_stringify(jq_first(api, ".users | map(.name)")))
   harness.stdio.println(json_stringify(jq(api, ".users[] | select(.active == true) | .email")))
-  harness.stdio.println(json_stringify(jq(api, ".users[] | select(.score > 7 and .active == true) | .name")))
+  harness.stdio.println(
+    json_stringify(jq(api, ".users[] | select(.score > 7 and .active == true) | .name")),
+  )
   harness.stdio.println(json_stringify(jq(api, ".users[] | select(not .active) | .name")))
-  harness.stdio.println(json_stringify(jq_first(api, "{ name: .users[0].name, age: .users[0].age }")))
+  harness.stdio.println(
+    json_stringify(jq_first(api, "{ name: .users[0].name, age: .users[0].age }")),
+  )
   harness.stdio.println(json_stringify(jq(api, ".meta.count, .meta.next")))
   harness.stdio.println(
     json_stringify(jq(api, ".. | select(type == \"object\" and .email != null) | .email")),

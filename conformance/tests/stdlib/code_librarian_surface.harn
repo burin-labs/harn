@@ -5,17 +5,11 @@ import "std/code_librarian"
  * (crates/harn-hostlib/tests/harn_hostlib/code_index_graph_surface.rs) so canned
  * Cypher queries land on the same node shapes.
  */
-fn seed_corpus(harness: Harness, root: string) {
-  harness.fs.mkdir(root)
-  harness.fs.mkdir(path_join(root, "src"))
-  harness.fs.write_text(
-    path_join(root, "src/a.rs"),
-    "pub fn alpha() {}\npub fn beta() { alpha(); }\n",
-  )
-  harness.fs.write_text(
-    path_join(root, "src/b.rs"),
-    "pub fn gamma() {}\npub fn driver() { gamma(); }\n",
-  )
+fn seed_corpus(fs: HarnessFs, root: string) {
+  fs.mkdir(root)
+  fs.mkdir(path_join(root, "src"))
+  fs.write_text(path_join(root, "src/a.rs"), "pub fn alpha() {}\npub fn beta() { alpha(); }\n")
+  fs.write_text(path_join(root, "src/b.rs"), "pub fn gamma() {}\npub fn driver() { gamma(); }\n")
 }
 
 pipeline default(harness: Harness) {
@@ -23,11 +17,12 @@ pipeline default(harness: Harness) {
     harness.fs.workspace_temp_dir(),
     "harn_code_librarian_" + to_string(harness.random.range(100000, 999999)),
   )
-  seed_corpus(harness, root)
+  seed_corpus(harness.fs, root)
   const _ = harness.code_index.rebuild({root: root})
   // 1) Cypher pass-through returns rows + overlay nil on base.
   const cy: LibrarianCypherResult = code_librarian_query(
-    harness.code_index, "MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path",
+    harness.code_index,
+    "MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path",
   )
   harness.stdio.println(len(cy.rows) == 1 && cy.rows[0].path == "src/a.rs")
   harness.stdio.println(cy.overlay == nil)
@@ -39,7 +34,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(outline.known && outline.path == "src/a.rs")
   harness.stdio.println(len(outline.symbols) >= 2)
   // 3) outline on an unknown path returns known=false (not a throw).
-  const absent: LibrarianOutline = code_librarian_outline(harness.code_index, "src/does-not-exist.rs")
+  const absent: LibrarianOutline = code_librarian_outline(
+    harness.code_index,
+    "src/does-not-exist.rs",
+  )
   harness.stdio.println(!absent.known && len(absent.symbols) == 0)
   // 4) who_calls returns the CallSite list for the target symbol.
   const callers: list<LibrarianCallSite> = code_librarian_who_calls(harness.code_index, "alpha")
@@ -55,12 +53,16 @@ pipeline default(harness: Harness) {
   const fresh: LibrarianFreshness = code_librarian_freshness(harness.code_index, "src/a.rs")
   harness.stdio.println(fresh.known && !fresh.stale)
   // 8) freshness on an unknown path reports known=false.
-  const unknown_fresh: LibrarianFreshness = code_librarian_freshness(harness.code_index, "src/does-not-exist.rs")
+  const unknown_fresh: LibrarianFreshness = code_librarian_freshness(
+    harness.code_index,
+    "src/does-not-exist.rs",
+  )
   harness.stdio.println(!unknown_fresh.known)
   // 9) file_hash_snapshot returns the direct path->hash map expected by
   //    verification_diagnostic_classify plus missing-path metadata.
   const hash_snapshot: LibrarianFileHashSnapshot = code_librarian_file_hash_snapshot(
-    harness.code_index, ["src/a.rs", "src/does-not-exist.rs"],
+    harness.code_index,
+    ["src/a.rs", "src/does-not-exist.rs"],
   )
   harness.stdio.println(hash_snapshot.seq == 0)
   harness.stdio.println(hash_snapshot.snapshot["src/a.rs"] != nil)

@@ -31,8 +31,8 @@ pipeline default(harness: Harness) {
   harness.runtime.command_policy_push(policy)
   const denied = harness.process.run(
     {
-      mode: "argv",
-      argv: ["sh", "-c", "echo spawned > \"" + marker + "\"; echo policy-deny-marker"],
+      program: "sh",
+      args: ["-c", "echo spawned > \"" + marker + "\"; echo policy-deny-marker"],
       cwd: root,
     },
   )
@@ -51,9 +51,7 @@ pipeline default(harness: Harness) {
     "blocked hostlib command does not return a process handle",
   )
   assert(!harness.fs.exists(hostlib_marker), "blocked hostlib command must not spawn")
-  const rewritten = harness.process.run(
-    {mode: "argv", argv: ["printf", "original"], cwd: root},
-  )
+  const rewritten = harness.process.run({program: "printf", args: ["original"], cwd: root})
   assert(rewritten?.stdout == "rewritten", "pre-hook rewrite updates argv")
   assert(
     rewritten?.command_policy?.annotation?.annotations?.checked,
@@ -66,9 +64,7 @@ pipeline default(harness: Harness) {
     "post-hook annotation is recorded on the hostlib result",
   )
   harness.fs.write_text(path_join(root, ".env"), "TOKEN=secret\n")
-  const approval = harness.process.run(
-    {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root},
-  )
+  const approval = harness.process.run({program: "cat", args: [path_join(root, ".env")], cwd: root})
   assert(
     approval?.status == "blocked",
     "approval risk blocks before spawn without a host approval grant",
@@ -101,10 +97,11 @@ pipeline default(harness: Harness) {
     },
   )
   harness.runtime.command_policy_push(approve_policy)
-  const approved = harness.process.run(
-    {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root},
+  const approved = harness.process.run({program: "cat", args: [path_join(root, ".env")], cwd: root})
+  assert(
+    harness.runtime.atomic_get(consent_asks) == 1,
+    "consent ask fires for a require_approval command",
   )
-  assert(harness.runtime.atomic_get(consent_asks) == 1, "consent ask fires for a require_approval command")
   assert(approved?.status != "blocked", "consented command is not blocked")
   assert(approved?.status != "consent_denied", "consented command is not consent-denied")
   assert(contains(approved?.stdout ?? "", "TOKEN=secret"), "consented command actually runs")
@@ -121,12 +118,8 @@ pipeline default(harness: Harness) {
   harness.runtime.command_policy_push(deny_policy)
   const refused = harness.process.run(
     {
-      mode: "argv",
-      argv: [
-        "sh",
-        "-c",
-        "cat \"" + path_join(root, ".env") + "\"; echo x > \"" + deny_marker + "\"",
-      ],
+      program: "sh",
+      args: ["-c", "cat \"" + path_join(root, ".env") + "\"; echo x > \"" + deny_marker + "\""],
       cwd: root,
     },
   )
@@ -152,7 +145,7 @@ pipeline default(harness: Harness) {
   )
   harness.runtime.command_policy_push(bool_deny)
   const bool_refused = harness.process.run(
-    {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root},
+    {program: "cat", args: [path_join(root, ".env")], cwd: root},
   )
   assert(bool_refused?.status == "consent_denied", "bool-false consent blocks execution")
   harness.runtime.command_policy_pop()
@@ -175,9 +168,7 @@ pipeline default(harness: Harness) {
   harness.runtime.command_policy_push(floor_policy)
   // argv-mode catastrophe: `git reset --hard` is blocked even though a consent
   // closure would approve it.
-  const reset_blocked = harness.process.run(
-    {mode: "argv", argv: ["git", "reset", "--hard"], cwd: root},
-  )
+  const reset_blocked = harness.process.run({program: "git", args: ["reset", "--hard"], cwd: root})
   assert(reset_blocked?.status == "blocked", "catastrophic git reset --hard is hard-denied")
   assert(reset_blocked?.status != "consent_denied", "catastrophic is not a consent disposition")
   assert(
@@ -187,19 +178,22 @@ pipeline default(harness: Harness) {
   // Redirection onto a source file is catastrophic and must not spawn.
   const floor_marker = path_join(root, "floor_should_not_spawn.rs")
   const redirect_blocked = harness.process.run(
-    {mode: "argv", argv: ["sh", "-c", "echo pwned > \"" + floor_marker + "\""], cwd: root},
+    {program: "sh", args: ["-c", "echo pwned > \"" + floor_marker + "\""], cwd: root},
   )
   assert(redirect_blocked?.status == "blocked", "redirect onto a source file is hard-denied")
   assert(!harness.fs.exists(floor_marker), "catastrophic command must not spawn")
-  assert(harness.runtime.atomic_get(floor_asks) == 0, "catastrophic floor never consults the consent gate")
+  assert(
+    harness.runtime.atomic_get(floor_asks) == 0,
+    "catastrophic floor never consults the consent gate",
+  )
   // The canonical agent shape is argv mode with an `sh -c "<script>"` wrapper.
   // A token-based rule inside the wrapped script (`git reset --hard`) must still
   // hard-deny — the floor preserves argv argument boundaries.
   const wrapped_marker = path_join(root, "wrapped_should_not_spawn")
   const wrapped_blocked = harness.process.run(
     {
-      mode: "argv",
-      argv: ["sh", "-c", "git reset --hard; echo x > \"" + wrapped_marker + "\""],
+      program: "sh",
+      args: ["-c", "git reset --hard; echo x > \"" + wrapped_marker + "\""],
       cwd: root,
     },
   )
@@ -209,7 +203,10 @@ pipeline default(harness: Harness) {
     contains(wrapped_blocked?.stderr ?? "", "git reset --hard"),
     "wrapped catastrophic reason is surfaced",
   )
-  assert(harness.runtime.atomic_get(floor_asks) == 0, "wrapped catastrophic floor never consults the consent gate")
+  assert(
+    harness.runtime.atomic_get(floor_asks) == 0,
+    "wrapped catastrophic floor never consults the consent gate",
+  )
   harness.runtime.command_policy_pop()
   const background_marker = path_join(root, "background_should_not_spawn")
   const background_policy = command_policy(
@@ -249,7 +246,10 @@ pipeline default(harness: Harness) {
   } finally {
     harness.runtime.command_policy_pop()
   }
-  assert(harness.runtime.atomic_get(invalid_post_calls) == 1, "the invalid replacement reached command postflight")
+  assert(
+    harness.runtime.atomic_get(invalid_post_calls) == 1,
+    "the invalid replacement reached command postflight",
+  )
   assert(
     invalid_post_rejected,
     "a post hook cannot replace a command result with an invalid response",
@@ -263,17 +263,20 @@ pipeline default(harness: Harness) {
       parameters: {command: {type: "string"}},
       annotations: {kind: "execute", side_effect_level: "process_exec"},
       handler: { args ->
-        harness.process.run( {mode: "argv", argv: ["sh", "-c", args.command], cwd: root})
+        harness.process.run({program: "sh", args: ["-c", args.command], cwd: root})
       },
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "run_1", name: "run", arguments: {command: "echo agent-policy-deny"}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const loop = agent_loop(harness, "exercise command policy",
+      const loop = agent_loop(
+        harness,
+        "exercise command policy",
         nil,
         {
           provider: "mock",

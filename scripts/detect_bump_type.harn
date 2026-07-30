@@ -22,11 +22,8 @@ const CHANGELOG_PATH = "CHANGELOG.md"
  * Pull the workspace version literal from a Cargo.toml. Errors loudly
  * if no `version = "..."` line is at the top of the file.
  */
-pub fn read_cargo_version(harness: Harness) -> string {
-  const captures = regex_captures(
-    r"(?m)^version = \x22([^\x22]+)\x22",
-    harness.fs.read_text(CARGO_PATH),
-  )
+pub fn read_cargo_version(fs: HarnessFs) -> string {
+  const captures = regex_captures(r"(?m)^version = \x22([^\x22]+)\x22", fs.read_text(CARGO_PATH))
   if captures.count == 0 {
     throw "could not find workspace version in ${CARGO_PATH}"
   }
@@ -34,11 +31,8 @@ pub fn read_cargo_version(harness: Harness) -> string {
 }
 
 /** Pull the topmost `## vX.Y.Z` heading from CHANGELOG.md. */
-pub fn read_changelog_top_version(harness: Harness) -> string {
-  const captures = regex_captures(
-    r"(?m)^## v(\d+\.\d+\.\d+)\s*$",
-    harness.fs.read_text(CHANGELOG_PATH),
-  )
+pub fn read_changelog_top_version(fs: HarnessFs) -> string {
+  const captures = regex_captures(r"(?m)^## v(\d+\.\d+\.\d+)\s*$", fs.read_text(CHANGELOG_PATH))
   if captures.count == 0 {
     throw "no `## vX.Y.Z` heading found in ${CHANGELOG_PATH}"
   }
@@ -62,10 +56,12 @@ pub fn detect(current: string, target: string) -> BumpKind {
 
 pipeline main(harness: Harness, task) {
   try {
-    const current = read_cargo_version(harness)
-    const target = read_changelog_top_version(harness)
+    const current = read_cargo_version(harness.fs)
+    const target = read_changelog_top_version(harness.fs)
     if current == target {
-      harness.stdio.eprintln("warning: Cargo.toml and CHANGELOG.md both at ${current}; nothing to bump")
+      harness.stdio.eprintln(
+        "warning: Cargo.toml and CHANGELOG.md both at ${current}; nothing to bump",
+      )
       return 2
     }
     harness.stdio.println(detect(current, target))

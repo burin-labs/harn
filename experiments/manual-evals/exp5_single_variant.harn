@@ -75,7 +75,9 @@ pipeline main(harness: Harness, task) {
     harness.stdio.log("[exp5] iter=${iter} tools=${count} names=${names}")
     nil
   }
-  const result = agent_loop(harness, task_text,
+  const result = agent_loop(
+    harness,
+    task_text,
     system_prompt,
     {
       provider: "llamacpp",

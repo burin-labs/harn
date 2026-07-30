@@ -28,8 +28,12 @@ fn compass_tools() {
 
 pipeline default(harness: Harness) {
   const session = "compass-router-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_dispatch_tool_call(harness, {
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_dispatch_tool_call(
+      harness.tools,
+      {
         id: "edit-1",
         name: "str_replace",
         arguments: {path: "src/lib.rs", old_text: "let a = 1;", new_text: "let a = 2;"},

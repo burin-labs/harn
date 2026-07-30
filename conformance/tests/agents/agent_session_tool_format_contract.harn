@@ -3,10 +3,13 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("first ##DONE##")],
+    harness.llm,
+    [llm_text("first ##DONE##")],
     { ->
       const session = harness.agent.open("tool-format-contract-conformance")
-      const first = agent_loop(harness, "first turn",
+      const first = agent_loop(
+        harness,
+        "first turn",
         nil,
         {
           provider: "mock",
@@ -20,7 +23,9 @@ pipeline default(harness: Harness) {
       require harness.agent.tool_format(session) == "text",
         "session records the tool format contract"
       const switched = try {
-        agent_loop(harness, "second turn",
+        agent_loop(
+          harness,
+          "second turn",
           nil,
           {
             provider: "mock",

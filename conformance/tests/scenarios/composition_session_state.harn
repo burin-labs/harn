@@ -1,24 +1,24 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const manifest = composition_binding_manifest(
     [],
     {state: {max_value_bytes: 32, max_total_bytes: 64, max_keys: 2}},
   )
-  const first = composition_execute(
+  const first = harness.tools.composition_execute(
     "state.put(\"step\", {done: true})\nreturn state.list()",
     manifest,
     {session_id: "conformance-state-session", run_id: "conformance-state-first"},
   )
-  const second = composition_execute(
+  const second = harness.tools.composition_execute(
     "const value = state.get(\"step\")\nconst deleted = state.delete(\"step\")\nreturn {value: value, deleted: deleted}",
     manifest,
     {session_id: "conformance-state-session", run_id: "conformance-state-second"},
   )
-  __io_println(first.ok)
-  __io_println(first.run.result[0])
-  __io_println(first.child_calls[0].tool_name)
-  __io_println(second.ok)
-  __io_println(second.run.result.value.done)
-  __io_println(second.run.result.deleted)
-  __io_println(second.child_calls[0].tool_name)
-  __io_println(second.child_calls[1].tool_name)
+  harness.stdio.println(first.ok)
+  harness.stdio.println(first.run.result[0])
+  harness.stdio.println(first.child_calls[0].tool_name)
+  harness.stdio.println(second.ok)
+  harness.stdio.println(second.run.result.value.done)
+  harness.stdio.println(second.run.result.deleted)
+  harness.stdio.println(second.child_calls[0].tool_name)
+  harness.stdio.println(second.child_calls[1].tool_name)
 }

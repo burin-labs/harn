@@ -1,4 +1,3 @@
-import { agent_loop } from "std/agent/loop"
 /* Verifies the per-session cap on `verify_completion_judge` veto loops:
    - a judge that always vetoes stops firing once `max_invocations` is hit,
      finalizing as `verify_capped` with stop_reason `completion_judge_cap_reached`,
@@ -9,6 +8,7 @@ import { agent_loop } from "std/agent/loop"
      `max_verify_attempts` exhaustion path.
    Mocks interleave model turns with the judge's structured-output call. */
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn events_of(events, kind) {
@@ -26,7 +26,8 @@ fn checkpoint_of(events, schema) {
 
 fn run_capped(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Round one. ##DONE##"),
       llm_text(
         "{\"verdict\":\"continue\",\"reasoning\":\"veto one\",\"next_step\":\"keep going\"}",
@@ -39,8 +40,12 @@ fn run_capped(harness: Harness) {
     ],
     { ->
       const session_id = "verify-judge-cap-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session_id,
-        fn() { return agent_loop(harness, "Judge keeps vetoing.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { return agent_loop(
+          harness,
+          "Judge keeps vetoing.",
           nil,
           {
             provider: "mock",
@@ -61,7 +66,9 @@ fn run_capped(harness: Harness) {
       harness.stdio.println("capped.vetoes=${result.completion_judge.vetoes}")
       harness.stdio.println("capped.max_invocations=${result.completion_judge.max_invocations}")
       harness.stdio.println("capped.cap_reached=${result.completion_judge.cap_reached}")
-      harness.stdio.println("capped.judge_decisions=${len(events_of(captured.events, "judge_decision"))}")
+      harness.stdio.println(
+        "capped.judge_decisions=${len(events_of(captured.events, "judge_decision"))}",
+      )
       harness.stdio.println("capped.calls=${len(harness.llm.mock_calls())}")
       harness.stdio.println("capped.terminal_kind=${terminal.terminal.kind}")
       harness.stdio.println("capped.terminal_reason=${terminal.terminal.reason}")
@@ -71,13 +78,16 @@ fn run_capped(harness: Harness) {
 
 fn run_approved(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Final answer. ##DONE##"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"looks complete\"}"),
     ],
     { ->
       const session_id = "verify-judge-approve-" + harness.random.uuid()
-      const result = agent_loop(harness, "Judge approves on the first proposal.",
+      const result = agent_loop(
+        harness,
+        "Judge approves on the first proposal.",
         nil,
         {
           provider: "mock",
@@ -101,7 +111,8 @@ fn run_approved(harness: Harness) {
 
 fn run_cap_disabled(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Try one. ##DONE##"),
       llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto one\"}"),
       llm_text("Try two. ##DONE##"),
@@ -110,8 +121,12 @@ fn run_cap_disabled(harness: Harness) {
     ],
     { ->
       const session_id = "verify-judge-disabled-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session_id,
-        fn() { return agent_loop(harness, "Cap disabled; rely on max_verify_attempts.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { return agent_loop(
+          harness,
+          "Cap disabled; rely on max_verify_attempts.",
           nil,
           {
             provider: "mock",
@@ -130,14 +145,17 @@ fn run_cap_disabled(harness: Harness) {
       harness.stdio.println("disabled.stop_reason=${result.stop_reason}")
       harness.stdio.println("disabled.invocations=${result.completion_judge.invocations}")
       harness.stdio.println("disabled.cap_reached=${result.completion_judge.cap_reached}")
-      harness.stdio.println("disabled.judge_decisions=${len(events_of(captured.events, "judge_decision"))}")
+      harness.stdio.println(
+        "disabled.judge_decisions=${len(events_of(captured.events, "judge_decision"))}",
+      )
     },
   )
 }
 
 fn run_diagnosis_recovery(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Malformed tool-call loop. ##DONE##"),
       llm_text(
         "{\"verdict\":\"continue\",\"reasoning\":\"task remains incomplete\",\"diagnosis\":\"assistant is stuck in a loop sending malformed tool calls\",\"next_step\":\"use a different tool-call shape\"}",
@@ -147,8 +165,12 @@ fn run_diagnosis_recovery(harness: Harness) {
     ],
     { ->
       const session_id = "verify-judge-diagnosis-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session_id,
-        fn() { return agent_loop(harness, "Recover from malformed tool calls.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { return agent_loop(
+          harness,
+          "Recover from malformed tool calls.",
           nil,
           {
             provider: "mock",

@@ -19,13 +19,16 @@ fn lookup_tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
       llm_text("<user_response>Release notes are ready.</user_response>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"natural final text is complete\"}"),
     ],
     { ->
-      const result = agent_loop(harness, "Inspect evidence and finish.",
+      const result = agent_loop(
+        harness,
+        "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",
@@ -49,9 +52,12 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Plain final answer.")],
+    harness.llm,
+    [llm_text("Plain final answer.")],
     { ->
-      agent_loop(harness, "Finish without tools.",
+      agent_loop(
+        harness,
+        "Finish without tools.",
         nil,
         {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
       )

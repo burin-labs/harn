@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 pipeline default(harness: Harness) {
   const result = harness.llm.call("hello world", nil, {provider: "mock"})
   harness.stdio.println(result.transcript._type)

@@ -11,8 +11,10 @@ import {
   unified_detectors_post_turn,
 } from "std/agent/stall"
 
-fn cap(median, stddev, sigma, fallback) {
-  return to_string(token_runaway_resolve_cap(median, stddev, sigma, fallback))
+fn cap(median: float, stddev: float, sigma: float, fallback: float) {
+  return to_string(
+    token_runaway_resolve_cap({median: median, stddev: stddev, sigma: sigma, fallback: fallback}),
+  )
 }
 
 fn decide(config, tokens, making_progress) {
@@ -48,16 +50,21 @@ pipeline default(harness: Harness) {
   // Edit storm: successful edits, no verification result -> no progress.
   harness.stdio.println(
     token_runaway_made_progress(
+      harness.agent,
       {tool_results: [{ok: true, result: "wrote foo", tool_name: "edit"}]},
     ),
   )
   // A passing verification this turn (empty diagnostics list) -> progress.
   harness.stdio.println(
-    token_runaway_made_progress({tool_results: [{diagnostics: [], ok: true, tool_name: "run"}]}),
+    token_runaway_made_progress(
+      harness.agent,
+      {tool_results: [{diagnostics: [], ok: true, tool_name: "run"}]},
+    ),
   )
   // A still-failing verification -> gate-bearing failure, NOT progress.
   harness.stdio.println(
     token_runaway_made_progress(
+      harness.agent,
       {tool_results: [{diagnostics: [{code: "E1", message: "boom"}], ok: false, tool_name: "run"}]},
     ),
   )
@@ -78,6 +85,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(stall.stuck_same_diagnostic_after)
   harness.stdio.println(stall.hard_stop_after_trips)
   // token-runaway present -> overlay callback; absent -> nil.
-  harness.stdio.println(unified_detectors_post_turn(harness, spec) != nil)
-  harness.stdio.println(unified_detectors_post_turn(harness, {no_progress: {messages: 2}}) == nil)
+  harness.stdio.println(unified_detectors_post_turn(harness.agent, spec) != nil)
+  harness.stdio.println(
+    unified_detectors_post_turn(harness.agent, {no_progress: {messages: 2}}) == nil,
+  )
 }

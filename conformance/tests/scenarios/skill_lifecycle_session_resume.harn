@@ -17,10 +17,13 @@ pipeline test(harness: Harness, task) {
     prompt "Take a careful, confirmed approach."
   }
   with_llm_script(
-    harness.llm, [llm_text("First turn done."), llm_text("Resume done.")],
+    harness.llm,
+    [llm_text("First turn done."), llm_text("Resume done.")],
     { ->
       const sid = "skill-resume-test"
-      const r1 = agent_loop(harness, "please handle this task carefully",
+      const r1 = agent_loop(
+        harness,
+        "please handle this task carefully",
         nil,
         {
           provider: "mock",
@@ -31,7 +34,9 @@ pipeline test(harness: Harness, task) {
         },
       )
       assert(r1?.status == "done", "first run completes")
-      const r2 = agent_loop(harness, "continue",
+      const r2 = agent_loop(
+        harness,
+        "continue",
         nil,
         {
           provider: "mock",

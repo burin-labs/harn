@@ -2,8 +2,8 @@ import "./catalog"
 import "./support"
 import "./types"
 
-pub fn __provider_catalog_claim(route: ProviderToolProbeRoute) -> dict {
-  const caps = harness.llm.provider_capabilities(route.provider, route.model)
+pub fn __provider_catalog_claim(llm: HarnessLlm, route: ProviderToolProbeRoute) -> dict {
+  const caps = llm.provider_capabilities(route.provider, route.model)
   return {
     tools: caps?.tools,
     native_tools: caps?.native_tools,
@@ -21,7 +21,7 @@ pub fn __provider_catalog_claim(route: ProviderToolProbeRoute) -> dict {
   }
 }
 
-pub fn __tool_probe_command(
+pub type ProviderToolProbeCommandRequest = {
   harn_bin: string,
   route: ProviderToolProbeRoute,
   mode: string,
@@ -29,7 +29,16 @@ pub fn __tool_probe_command(
   format: string,
   repeat: int,
   timeout_secs: int,
-) -> list<string> {
+}
+
+pub fn __tool_probe_command(request: ProviderToolProbeCommandRequest) -> list<string> {
+  const harn_bin = request.harn_bin
+  const route = request.route
+  const mode = request.mode
+  const probe_case = request.probe_case
+  const format = request.format
+  const repeat = request.repeat
+  const timeout_secs = request.timeout_secs
   return [
     harn_bin,
     "provider",
@@ -60,7 +69,8 @@ pub fn __cell_id(
   return route.id + "/" + behavior.id + "/" + mode + "/" + format
 }
 
-pub fn __base_cell(
+pub type ProviderToolProbeBaseCellRequest = {
+  llm: HarnessLlm,
   route: ProviderToolProbeRoute,
   behavior: ProviderToolProbeBehavior,
   mode: string,
@@ -68,7 +78,17 @@ pub fn __base_cell(
   status: string,
   reason: string,
   observed: dict,
-) -> ProviderToolProbeCell {
+}
+
+pub fn __base_cell(request: ProviderToolProbeBaseCellRequest) -> ProviderToolProbeCell {
+  const llm = request.llm
+  const route = request.route
+  const behavior = request.behavior
+  const mode = request.mode
+  const format = request.format
+  const status = request.status
+  const reason = request.reason
+  const observed = request.observed
   return {
     id: __cell_id(route, behavior, mode, format),
     provider: route.provider,
@@ -82,11 +102,12 @@ pub fn __base_cell(
     status: status,
     reason: reason,
     observed: observed,
-    catalog: __provider_catalog_claim(route) + {route_metadata: route.metadata},
+    catalog: __provider_catalog_claim(llm, route) + {route_metadata: route.metadata},
   }
 }
 
 pub fn __planned_cell(
+  llm: HarnessLlm,
   route: ProviderToolProbeRoute,
   behavior: ProviderToolProbeBehavior,
   mode: string,
@@ -96,29 +117,34 @@ pub fn __planned_cell(
   timeout_secs: int,
 ) -> ProviderToolProbeCell {
   const cell = __base_cell(
-    route,
-    behavior,
-    mode,
-    format,
-    "planned",
-    if behavior.runner == "provider_tool_probe" {
-      "dry run; pass --live to execute harn provider tool-probe for the executable transport cells"
-    } else {
-      "behavior case is declared in the campaign matrix but does not yet have an executable runner"
+    {
+      llm: llm,
+      route: route,
+      behavior: behavior,
+      mode: mode,
+      format: format,
+      status: "planned",
+      reason: if behavior.runner == "provider_tool_probe" {
+        "dry run; pass --live to execute harn provider tool-probe for the executable transport cells"
+      } else {
+        "behavior case is declared in the campaign matrix but does not yet have an executable runner"
+      },
+      observed: {},
     },
-    {},
   )
   if behavior.runner == "provider_tool_probe" {
     return cell
       + {
       command: __tool_probe_command(
-        harn_bin,
-        route,
-        mode,
-        to_string(behavior.probe_case ?? "single_tool_call"),
-        format,
-        repeat,
-        timeout_secs,
+        {
+          harn_bin: harn_bin,
+          route: route,
+          mode: mode,
+          probe_case: to_string(behavior.probe_case ?? "single_tool_call"),
+          format: format,
+          repeat: repeat,
+          timeout_secs: timeout_secs,
+        },
       ),
     }
   }
@@ -126,13 +152,22 @@ pub fn __planned_cell(
 }
 
 pub fn provider_tool_probe_campaign_planned_cells(
+  llm: HarnessLlm,
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
 ) -> list<ProviderToolProbeCell> {
-  return provider_tool_probe_campaign_planned_cells_with_options(routes, behaviors, "harn", 1, 60)
+  return provider_tool_probe_campaign_planned_cells_with_options(
+    llm,
+    routes,
+    behaviors,
+    "harn",
+    1,
+    60,
+  )
 }
 
 pub fn provider_tool_probe_campaign_planned_cells_with_options(
+  llm: HarnessLlm,
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
   harn_bin: string,
@@ -140,18 +175,22 @@ pub fn provider_tool_probe_campaign_planned_cells_with_options(
   timeout_secs: int,
 ) -> list<ProviderToolProbeCell> {
   return provider_tool_probe_campaign_planned_cells_sliced_with_options(
-    routes,
-    behaviors,
-    harn_bin,
-    repeat,
-    timeout_secs,
-    1,
-    0,
-    0,
+    {
+      llm: llm,
+      routes: routes,
+      behaviors: behaviors,
+      harn_bin: harn_bin,
+      repeat: repeat,
+      timeout_secs: timeout_secs,
+      shard_count: 1,
+      shard_index: 0,
+      max_probes: 0,
+    },
   ).cells
 }
 
-pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
+pub type ProviderToolProbePlanRequest = {
+  llm: HarnessLlm,
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
   harn_bin: string,
@@ -160,7 +199,20 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
   shard_count: int,
   shard_index: int,
   max_probes: int,
+}
+
+pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
+  request: ProviderToolProbePlanRequest,
 ) -> dict {
+  const llm = request.llm
+  const routes = request.routes
+  const behaviors = request.behaviors
+  const harn_bin = request.harn_bin
+  const repeat = request.repeat
+  const timeout_secs = request.timeout_secs
+  const shard_count = request.shard_count
+  const shard_index = request.shard_index
+  const max_probes = request.max_probes
   let cells: list<ProviderToolProbeCell> = []
   let probe_units_total = 0
   let probe_units_selected = 0
@@ -189,7 +241,7 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
         for format in behavior.tool_formats {
           cells = cells
             + [
-            __planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs),
+            __planned_cell(llm, route, behavior, mode, format, harn_bin, repeat, timeout_secs),
           ]
         }
       }
@@ -198,14 +250,16 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
   return {
     cells: cells,
     slice: __campaign_slice_receipt(
-      shard_count,
-      shard_index,
-      max_probes,
-      probe_units_total,
-      probe_units_selected,
-      executable_units_selected,
-      probe_units_excluded_by_shard,
-      probe_units_excluded_by_cap,
+      {
+        shard_count: shard_count,
+        shard_index: shard_index,
+        max_probes: max_probes,
+        probe_units_total: probe_units_total,
+        probe_units_selected: probe_units_selected,
+        executable_units_selected: executable_units_selected,
+        probe_units_excluded_by_shard: probe_units_excluded_by_shard,
+        probe_units_excluded_by_cap: probe_units_excluded_by_cap,
+      },
     ),
   }
 }

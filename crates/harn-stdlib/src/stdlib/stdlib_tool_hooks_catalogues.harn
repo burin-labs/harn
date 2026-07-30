@@ -161,11 +161,11 @@ fn __cat_pred_find_for_ext(extensions) {
  *   4. The escape-hatch env var HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH is not
  *      "1" / "true". Read via `env_or` so test contexts can opt out.
  */
-fn __cat_pred_force_push_main(harness: Harness, command, _context) -> bool {
+fn __cat_pred_force_push_main(env: HarnessEnv, command, _context) -> bool {
   if !__cat_re("^git push\\b", command) {
     return false
   }
-  const allow = harness.env.get_or("HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH", "")
+  const allow = env.get_or("HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH", "")
   if allow == "1" || allow == "true" {
     return false
   }
@@ -616,13 +616,13 @@ pub fn tool_hooks_catalogue_harn() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_universal(harness))
+ * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_universal(harness.env))
  */
-pub fn tool_hooks_catalogue_universal(harness: Harness) {
+pub fn tool_hooks_catalogue_universal(env: HarnessEnv) {
   const force_push_rule = tool_rule(
     {
       id: "universal.git_push_force_main",
-      pattern: { command, context -> __cat_pred_force_push_main(harness, command, context) },
+      pattern: { command, context -> __cat_pred_force_push_main(env, command, context) },
       severity: "error",
       explanation:
         "Force-pushing to main/master rewrites history for every downstream clone. Set HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH=1 only after coordinating with the team, or use `--force-with-lease` (which fails safely on remote drift).",
@@ -693,16 +693,13 @@ fn __cat_for_stack(stack) {
  * @api_stability: experimental
  * @example: tool_hooks_seed_registry(harness, ["rust", "python"])
  */
-pub fn tool_hooks_seed_registry(harness: Harness, stacks = nil) {
+pub fn tool_hooks_seed_registry(env: HarnessEnv, tools: HarnessTools, stacks = nil) {
   const opt_in = if type_of(stacks) == "list" {
     stacks
   } else {
     []
   }
-  const registry = harness.tools.hooks_register(
-    harness.tools.hooks_registry(),
-    tool_hooks_catalogue_universal(harness),
-  )
+  const registry = tools.hooks_register(tools.hooks_registry(), tool_hooks_catalogue_universal(env))
   let seen = {}
   let acc = registry
   for stack in opt_in {
@@ -717,7 +714,7 @@ pub fn tool_hooks_seed_registry(harness: Harness, stacks = nil) {
     if cat == nil {
       continue
     }
-    acc = harness.tools.hooks_register(acc, cat)
+    acc = tools.hooks_register(acc, cat)
   }
   return acc
 }

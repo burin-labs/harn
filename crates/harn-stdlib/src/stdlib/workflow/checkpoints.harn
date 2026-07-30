@@ -8,6 +8,14 @@ import { typed_output_checkpoint } from "std/checkpoint"
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_typed_output_checkpoint(harness: Harness, name, prompt, schema, options = nil, validator = nil) {
-  return typed_output_checkpoint(harness, name, prompt, schema, options, validator)
+pub fn workflow_typed_output_checkpoint(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  name,
+  prompt,
+  schema,
+  options = nil,
+  validator = nil,
+) {
+  return typed_output_checkpoint(agent, llm, name, prompt, schema, options, validator)
 }

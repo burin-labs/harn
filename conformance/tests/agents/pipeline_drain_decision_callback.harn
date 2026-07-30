@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "on_drain_decision",
-    { event ->
+    { _hook_harness, event ->
       harness.runtime.atomic_add(observed, 1)
       if event.action == "resume" {
         harness.runtime.atomic_add(observed_action_resume, 1)
@@ -71,7 +71,7 @@ pipeline default(harness: Harness) {
           reason: "ordering decision",
         },
       )
-      const audits = lifecycle_audit_log_take(harness)
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("receipt_status=" + receipt.status)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)

@@ -124,10 +124,15 @@ fn __agent_recurring_category(
   return "unknown"
 }
 
-fn __agent_recurring_facts(harness: Harness, current: dict, categories: DiagnosticCategories, options: dict) -> list {
+fn __agent_recurring_facts(
+  agent: HarnessAgent,
+  current: dict,
+  categories: DiagnosticCategories,
+  options: dict,
+) -> list {
   let facts = []
   for entry in __agent_recurring_entries(current) {
-    const delta = verification_diagnostic_delta(harness, nil, {diagnostics: [entry]}, options)
+    const delta = verification_diagnostic_delta(agent, nil, {diagnostics: [entry]}, options)
     const signatures = delta.current.signatures
     if len(signatures) == 0 {
       continue
@@ -172,7 +177,8 @@ fn __agent_recurring_candidate(facts: list, previous: RecurringDiagnosticState?)
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_unheeded_recurring_diagnostic(harness: Harness, 
+pub fn agent_unheeded_recurring_diagnostic(
+  agent: HarnessAgent,
   previous: RecurringDiagnosticState?,
   current: dict,
   attempt: int,
@@ -180,12 +186,12 @@ pub fn agent_unheeded_recurring_diagnostic(harness: Harness,
   normalization: dict = {},
 ) -> RecurringDiagnosticObservation {
   const options = normalization + {include_path: true, strip_locations: true}
-  const delta = verification_diagnostic_delta(harness, nil, current, options)
+  const delta = verification_diagnostic_delta(agent, nil, current, options)
   const signatures = delta.current.signatures
   if !delta.feedsGates || len(signatures) == 0 {
     return {state: nil, signal: nil}
   }
-  const facts = __agent_recurring_facts(harness, current, categories, options)
+  const facts = __agent_recurring_facts(agent, current, categories, options)
   const candidate = __agent_recurring_candidate(facts, previous)
   if candidate == nil {
     return {state: nil, signal: nil}

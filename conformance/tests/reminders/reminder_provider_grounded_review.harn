@@ -16,7 +16,9 @@ pipeline main(harness: Harness) {
   }
   const session = harness.agent.open("reminder-provider-grounded-review")
   harness.agent.reset(session)
-  const report = agent_reminder_providers_fire(harness, session,
+  const report = agent_reminder_providers_fire(
+    harness.agent,
+    session,
     "post_tool_use",
     {
       session: {id: session},
@@ -43,7 +45,9 @@ pipeline main(harness: Harness) {
   harness.stdio.println(contains(reminder.body, "command=cargo check -p demo"))
   const verifier_session = harness.agent.open("reminder-provider-grounded-review-verifier")
   harness.agent.reset(verifier_session)
-  const verifier = agent_reminder_providers_fire(harness, verifier_session,
+  const verifier = agent_reminder_providers_fire(
+    harness.agent,
+    verifier_session,
     "post_agent_turn",
     {
       session: {id: verifier_session},
@@ -69,7 +73,9 @@ pipeline main(harness: Harness) {
   harness.stdio.println(contains(verifier_reminder.body, "typecheck verifier returned accept"))
   const clean_session = harness.agent.open("reminder-provider-grounded-review-clean")
   harness.agent.reset(clean_session)
-  const clean = agent_reminder_providers_fire(harness, clean_session,
+  const clean = agent_reminder_providers_fire(
+    harness.agent,
+    clean_session,
     "post_tool_use",
     {
       session: {id: clean_session},

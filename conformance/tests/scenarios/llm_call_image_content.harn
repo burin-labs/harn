@@ -12,7 +12,8 @@ pipeline test(harness: Harness, task) {
   const image_base64 = bytes_to_base64(png)
   harness.fs.delete(png_path)
   with_llm_script(
-    harness.llm, [llm_text("seen")],
+    harness.llm,
+    [llm_text("seen")],
     { ->
       const result = harness.llm.call(
         "",

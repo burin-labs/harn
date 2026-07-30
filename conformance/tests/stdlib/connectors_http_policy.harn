@@ -12,7 +12,10 @@ pipeline test(harness: Harness, task) {
     "https://api.example.com/connector/get-retry",
     {responses: [{status: 503, body: "busy"}, {status: 200, body: "ok"}]},
   )
-  const get_retry = connector_http_request(harness, "GET",
+  const get_retry = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
     "https://api.example.com/connector/get-retry",
     {retry: {max_attempts: 2, base_ms: 0, cap_ms: 1}},
   )
@@ -20,14 +23,19 @@ pipeline test(harness: Harness, task) {
   assert_eq(get_retry.ok, true)
   assert_eq(get_retry.status, 200)
   assert_eq(len(get_calls), 2)
-  harness.stdio.println("get_retry:" + to_string(get_retry.status) + ":" + to_string(len(get_calls)))
+  harness.stdio.println(
+    "get_retry:" + to_string(get_retry.status) + ":" + to_string(len(get_calls)),
+  )
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "POST",
     "https://api.example.com/connector/post-no-idempotency",
     {responses: [{status: 503, body: "busy"}, {status: 201, body: "created"}]},
   )
-  const post_no_idem = connector_http_request(harness, "POST",
+  const post_no_idem = connector_http_request(
+    harness.clock,
+    harness.net,
+    "POST",
     "https://api.example.com/connector/post-no-idempotency",
     {body: "{}", retry: {max_attempts: 2, base_ms: 0, cap_ms: 1}},
   )
@@ -44,7 +52,10 @@ pipeline test(harness: Harness, task) {
     "https://api.example.com/connector/post-idempotency",
     {responses: [{status: 503, body: "busy"}, {status: 201, body: "created"}]},
   )
-  const post_idem = connector_http_request(harness, "POST",
+  const post_idem = connector_http_request(
+    harness.clock,
+    harness.net,
+    "POST",
     "https://api.example.com/connector/post-idempotency",
     {body: "{}", idempotency_key: "idem-1", retry: {max_attempts: 2, base_ms: 0, cap_ms: 1}},
   )
@@ -67,7 +78,10 @@ pipeline test(harness: Harness, task) {
     "https://api.example.com/connector/post-preserve-idempotency",
     {status: 200, body: "ok"},
   )
-  const preserved = connector_http_request(harness, "POST",
+  const preserved = connector_http_request(
+    harness.clock,
+    harness.net,
+    "POST",
     "https://api.example.com/connector/post-preserve-idempotency",
     {
       body: "{}",
@@ -91,7 +105,10 @@ pipeline test(harness: Harness, task) {
       ],
     },
   )
-  const capped = connector_http_request(harness, "GET",
+  const capped = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
     "https://api.example.com/connector/retry-after-cap",
     {retry: {max_attempts: 2, base_ms: 0, cap_ms: 1}},
   )
@@ -110,7 +127,10 @@ pipeline test(harness: Harness, task) {
     "https://api.example.com/connector/json-invalid",
     {status: 200, body: "not json"},
   )
-  const invalid_json = connector_http_json(harness, "GET",
+  const invalid_json = connector_http_json(
+    harness.clock,
+    harness.net,
+    "GET",
     "https://api.example.com/connector/json-invalid",
     {provider: "example", operation: "parse"},
   )
@@ -118,10 +138,21 @@ pipeline test(harness: Harness, task) {
   assert_eq(invalid_json.error.category, "invalid_json")
   assert_eq(invalid_json.error.status, 200)
   assert_eq(invalid_json.error.provider, "example")
-  harness.stdio.println("invalid_json:" + invalid_json.error.category + ":" + invalid_json.error.provider)
+  harness.stdio.println(
+    "invalid_json:" + invalid_json.error.category + ":" + invalid_json.error.provider,
+  )
   harness.testing.http_mock_clear()
-  harness.testing.http_mock("GET", "https://api.example.com/connector/json-empty", {status: 204, body: ""})
-  const empty_json = connector_http_json(harness, "GET", "https://api.example.com/connector/json-empty")
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/connector/json-empty",
+    {status: 204, body: ""},
+  )
+  const empty_json = connector_http_json(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://api.example.com/connector/json-empty",
+  )
   assert_eq(empty_json.ok, true)
   assert_eq(empty_json.body, "")
   assert_eq(empty_json.json, nil)
@@ -134,9 +165,11 @@ pipeline test(harness: Harness, task) {
     "X-RateLimit-Remaining": "0",
     "X-RateLimit-Reset": "4102444800",
   }
-  const rate = connector_http_rate_limit(harness, {headers: headers})
+  const rate = connector_http_rate_limit(harness.clock, {headers: headers})
   harness.testing.clock_set(0)
-  const http_date_rate = connector_http_rate_limit(harness, {headers: {"Retry-After": "Thu, 01 Jan 1970 00:00:03 GMT"}},
+  const http_date_rate = connector_http_rate_limit(
+    harness.clock,
+    {headers: {"Retry-After": "Thu, 01 Jan 1970 00:00:03 GMT"}},
   )
   harness.testing.clock_reset()
   assert_eq(connector_http_header(headers, "retry-after"), "2")
@@ -160,7 +193,10 @@ pipeline test(harness: Harness, task) {
     "https://api.example.com/connector/redacted-error",
     {status: 500, body: "provider secret payload"},
   )
-  const redacted = connector_http_request(harness, "GET",
+  const redacted = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
     "https://api.example.com/connector/redacted-error",
     {provider: "example", operation: "list", redact_error_body: true},
   )

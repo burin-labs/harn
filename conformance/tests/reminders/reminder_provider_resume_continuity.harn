@@ -22,8 +22,10 @@ pipeline main(harness: Harness) {
     digest: "Prior digest",
     turn: 0,
   }
-  const first = agent_reminder_providers_fire(harness, session, "worker_resumed", payload, {})
-  const second = agent_reminder_providers_fire(harness, session,
+  const first = agent_reminder_providers_fire(harness.agent, session, "worker_resumed", payload, {})
+  const second = agent_reminder_providers_fire(
+    harness.agent,
+    session,
     "worker_resumed",
     payload
       + {
@@ -35,7 +37,9 @@ pipeline main(harness: Harness) {
   const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   const disabled_session = harness.agent.open("reminder-provider-resume-continuity-disabled")
   harness.agent.reset(disabled_session)
-  const disabled = agent_reminder_providers_fire(harness, disabled_session,
+  const disabled = agent_reminder_providers_fire(
+    harness.agent,
+    disabled_session,
     "worker_resumed",
     payload + {session: {id: disabled_session}, session_id: disabled_session},
     {reminders: {providers: ["-resume_continuity"]}},
@@ -50,8 +54,12 @@ pipeline main(harness: Harness) {
   harness.stdio.println(reminders[0].reminder.propagate)
   harness.stdio.println(reminders[0].reminder.source)
   harness.stdio.println(contains(reminders[0].reminder.body, "You were suspended at turn 2"))
-  harness.stdio.println(contains(reminders[0].reminder.body, "You have been resumed by the operator"))
-  harness.stdio.println(contains(reminders[0].reminder.body, "The resumer provided input: approved again"))
+  harness.stdio.println(
+    contains(reminders[0].reminder.body, "You have been resumed by the operator"),
+  )
+  harness.stdio.println(
+    contains(reminders[0].reminder.body, "The resumer provided input: approved again"),
+  )
   harness.stdio.println(
     contains(reminders[0].reminder.body, "Pre-suspend conversation digest: Prior digest"),
   )

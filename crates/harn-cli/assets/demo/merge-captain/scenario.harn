@@ -84,7 +84,10 @@ pipeline default(harness: Harness, _task) {
   let blocked = 0
   for pr in prs {
     const prompt = render_pr_prompt(harness.fs, pr)
-    const llm_envelope = harness.llm.call(prompt, "You are merge_captain, a senior release engineer.")
+    const llm_envelope = harness.llm.call(
+      prompt,
+      "You are merge_captain, a senior release engineer.",
+    )
     const llm_response = llm_envelope.text
     const decision = classify(pr)
     if decision == "merge" {

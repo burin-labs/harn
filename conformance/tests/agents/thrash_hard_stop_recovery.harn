@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -49,7 +49,8 @@ fn events_of(events, kind) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       run_call("r1"),
       run_call("r2"),
       look_call("look_recovery"),
@@ -75,7 +76,9 @@ pipeline default(harness: Harness) {
           max_feedback: 2,
         },
       }
-      let captured = agent_capture_events(harness, session,
+      let captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Write tests after inspecting the target model.", nil, opts) },
       )
       let receipts = events_of(captured.events, "typed_checkpoint").filter(

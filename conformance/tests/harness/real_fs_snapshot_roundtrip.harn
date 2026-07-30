@@ -13,20 +13,36 @@ fn main(harness: Harness) {
     harness.fs.delete(path)
   }
   harness.fs.write_text(path, "original")
-  const snap = fs_snapshot(harness, harness.fs, harness.random, [path], {session_id: session, snapshot_id: "attempt-1"})
+  const snap = fs_snapshot(
+    harness.agent,
+    harness.fs,
+    harness.random,
+    [path],
+    {session_id: session, snapshot_id: "attempt-1"},
+  )
   harness.stdio.println(snap.snapshot_id)
   harness.stdio.println(len(snap.captured_paths))
   // List sees exactly the one snapshot we took.
-  harness.stdio.println(len(fs_list_snapshots(harness, harness.fs, {session_id: session})))
+  harness.stdio.println(len(fs_list_snapshots(harness.agent, harness.fs, {session_id: session})))
   // Mutate the workspace, then restore the captured pre-image.
   harness.fs.write_text(path, "clobbered")
   harness.stdio.println(harness.fs.read_text(path))
-  const restored = fs_restore(harness, harness.fs, snap.snapshot_id, [], {session_id: session})
+  const restored = fs_restore(
+    harness.agent,
+    harness.fs,
+    snap.snapshot_id,
+    [],
+    {session_id: session},
+  )
   harness.stdio.println(len(restored.restored_paths))
   harness.stdio.println(harness.fs.read_text(path))
   // Drop releases the checkpoint and is idempotent.
-  harness.stdio.println(fs_drop_snapshot(harness, harness.fs, snap.snapshot_id, {session_id: session}).dropped)
-  harness.stdio.println(fs_drop_snapshot(harness, harness.fs, snap.snapshot_id, {session_id: session}).dropped)
-  harness.stdio.println(len(fs_list_snapshots(harness, harness.fs, {session_id: session})))
+  harness.stdio.println(
+    fs_drop_snapshot(harness.agent, harness.fs, snap.snapshot_id, {session_id: session}).dropped,
+  )
+  harness.stdio.println(
+    fs_drop_snapshot(harness.agent, harness.fs, snap.snapshot_id, {session_id: session}).dropped,
+  )
+  harness.stdio.println(len(fs_list_snapshots(harness.agent, harness.fs, {session_id: session})))
   harness.fs.delete(path)
 }

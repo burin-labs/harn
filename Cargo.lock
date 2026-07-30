@@ -3439,6 +3439,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-capability-contracts"
+version = "0.10.45"
+dependencies = [
+ "harn-builtin-macros",
+ "harn-builtin-meta",
+ "harn-builtin-registry",
+ "linkme",
+]
+
+[[package]]
 name = "harn-cli"
 version = "0.10.46"
 dependencies = [
@@ -3809,6 +3819,7 @@ version = "0.10.46"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
+ "harn-capability-contracts",
  "harn-lexer",
  "serde",
  "serde_json",
@@ -3988,6 +3999,7 @@ dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
  "harn-builtin-registry",
+ "harn-capability-contracts",
  "harn-clock",
  "harn-flock",
  "harn-glob",

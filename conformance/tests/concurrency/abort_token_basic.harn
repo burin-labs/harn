@@ -4,18 +4,18 @@
 import { abort_reason, abort_requested, abort_token, request_abort } from "std/abort"
 
 pipeline default(harness: Harness) {
-  const token = abort_token(harness)
-  harness.stdio.println(to_string(abort_requested(harness, token)))
-  harness.stdio.println(to_string(abort_reason(harness, token)))
+  const token = abort_token(harness.random, harness.runtime)
+  harness.stdio.println(to_string(abort_requested(harness.runtime, token)))
+  harness.stdio.println(to_string(abort_reason(harness.runtime, token)))
   harness.stdio.println(
-    to_string(request_abort(harness, token, {code: "first", message: "won the race"})),
+    to_string(request_abort(harness.runtime, token, {code: "first", message: "won the race"})),
   )
   harness.stdio.println(
-    to_string(request_abort(harness, token, {code: "second", message: "lost the race"})),
+    to_string(request_abort(harness.runtime, token, {code: "second", message: "lost the race"})),
   )
-  harness.stdio.println(to_string(abort_requested(harness, token)))
-  harness.stdio.println(abort_reason(harness, token)?.code)
-  harness.stdio.println(abort_reason(harness, token)?.message)
-  const other = abort_token(harness)
-  harness.stdio.println(to_string(abort_requested(harness, other)))
+  harness.stdio.println(to_string(abort_requested(harness.runtime, token)))
+  harness.stdio.println(abort_reason(harness.runtime, token)?.code)
+  harness.stdio.println(abort_reason(harness.runtime, token)?.message)
+  const other = abort_token(harness.random, harness.runtime)
+  harness.stdio.println(to_string(abort_requested(harness.runtime, other)))
 }

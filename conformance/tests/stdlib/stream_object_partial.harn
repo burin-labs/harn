@@ -8,7 +8,7 @@ import { stream_object } from "std/json"
 pipeline default(harness: Harness) {
   const chunks = ["{\"name\":\"A", "da\",\"age\"", ":30,\"tags\":[\"x", "\",\"y\"]}"]
   let partials = []
-  for obj in stream_object(harness, chunks) {
+  for obj in stream_object(harness.runtime, chunks) {
     partials = partials.appending(obj)
   }
   // More than one partial was emitted as the object filled in.
@@ -34,7 +34,7 @@ pipeline default(harness: Harness) {
   // A truncated stream still yields its best-effort final partial (no throw):
   // the complete `a` member survives, the half-typed `b` key is dropped.
   let truncated = nil
-  for obj in stream_object(harness, ["{\"a\":1,\"b"]) {
+  for obj in stream_object(harness.runtime, ["{\"a\":1,\"b"]) {
     truncated = obj
   }
   harness.stdio.println(truncated.a)

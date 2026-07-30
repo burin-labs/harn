@@ -74,7 +74,9 @@ pipeline default(harness: Harness, _task) {
     harness.stdio.println("selected: ${envelope.routing.selected}")
     harness.stdio.println("attempts: ${len(attempts)}")
     for a in attempts {
-      harness.stdio.println("  - label=${a.label} status=${a.status} verifier=${a.verifier_outcome}")
+      harness.stdio.println(
+        "  - label=${a.label} status=${a.status} verifier=${a.verifier_outcome}",
+      )
     }
     harness.stdio.println("")
     const row = {

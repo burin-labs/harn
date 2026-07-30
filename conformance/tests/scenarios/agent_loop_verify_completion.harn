@@ -14,7 +14,8 @@ import { llm_text, with_llm_script } from "std/testing"
  */
 fn scenario_veto_then_confirm(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("Round 1. ##DONE##"), llm_text("Round 2. ##DONE##")],
+    harness.llm,
+    [llm_text("Round 1. ##DONE##"), llm_text("Round 2. ##DONE##")],
     { ->
       const cb = { info ->
         if info.iteration == 0 {
@@ -22,7 +23,9 @@ fn scenario_veto_then_confirm(harness: Harness) {
         }
         nil
       }
-      const result = agent_loop(harness, "do work",
+      const result = agent_loop(
+        harness,
+        "do work",
         "you are an agent.",
         {
           provider: "mock",
@@ -41,7 +44,8 @@ fn scenario_veto_then_confirm(harness: Harness) {
 
 fn scenario_max_verify_exhausted(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Trying. ##DONE##"),
       llm_text("Trying. ##DONE##"),
       llm_text("Trying. ##DONE##"),
@@ -50,7 +54,9 @@ fn scenario_max_verify_exhausted(harness: Harness) {
     ],
     { ->
       const always_veto = { _info -> "still not good enough" }
-      const result = agent_loop(harness, "do work",
+      const result = agent_loop(
+        harness,
+        "do work",
         "you are an agent.",
         {
           provider: "mock",
@@ -69,10 +75,13 @@ fn scenario_max_verify_exhausted(harness: Harness) {
 
 fn scenario_confirm_immediately(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("First and final. ##DONE##")],
+    harness.llm,
+    [llm_text("First and final. ##DONE##")],
     { ->
       const always_confirm = { _info -> nil }
-      const result = agent_loop(harness, "do work",
+      const result = agent_loop(
+        harness,
+        "do work",
         "you are an agent.",
         {
           provider: "mock",

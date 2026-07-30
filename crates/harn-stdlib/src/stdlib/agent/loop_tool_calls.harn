@@ -59,7 +59,7 @@ pub fn __tool_resource_annotations(entry, policy, tool_name) {
   return agent_tool_annotations(entry, policy, tool_name)
 }
 
-pub fn __tool_envelope(harness: Harness, call, tools, options) {
+pub fn __tool_envelope(random: HarnessRandom, call, tools, options) {
   const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
   const tool_args_raw = call?.arguments ?? call?.tool_args
   const tool_args = if type_of(tool_args_raw) == "dict" {
@@ -69,7 +69,7 @@ pub fn __tool_envelope(harness: Harness, call, tools, options) {
   }
   const raw_call_id = to_string(call?.id ?? call?.tool_call_id ?? "")
   const call_id = if raw_call_id == "" {
-    "tool_call_" + harness.random.uuid()
+    "tool_call_" + random.uuid()
   } else {
     raw_call_id
   }
@@ -131,7 +131,13 @@ pub fn __tool_envelope(harness: Harness, call, tools, options) {
   }
 }
 
-pub fn __default_invoke_tool(harness: Harness, envelope, original_call, tools, options) {
+pub fn __default_invoke_tool(
+  tool_runtime: HarnessTools,
+  envelope,
+  original_call,
+  registry,
+  options,
+) {
   const next_call = original_call
     + {
     id: envelope.call_id,
@@ -140,7 +146,7 @@ pub fn __default_invoke_tool(harness: Harness, envelope, original_call, tools, o
     tool_name: envelope.tool_name,
     arguments: envelope.tool_args,
   }
-  return agent_dispatch_tool_call(harness, next_call, tools, options)
+  return agent_dispatch_tool_call(tool_runtime, next_call, registry, options)
 }
 
 pub fn __validate_tool_caller_result(r) {
@@ -285,12 +291,14 @@ pub fn __tool_lifecycle_session_id(envelope) -> string {
   return to_string(envelope?.turn?.session_id ?? "")
 }
 
-pub fn __emit_tool_lifecycle_start(harness: Harness, envelope) {
+pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope) {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
   }
-  let _ = agent_emit_event(harness, session_id,
+  let _ = agent_emit_event(
+    agent,
+    session_id,
     "tool_call",
     {
       tool_call_id: envelope.call_id,
@@ -299,7 +307,9 @@ pub fn __emit_tool_lifecycle_start(harness: Harness, envelope) {
       raw_input: envelope.tool_args,
     },
   )
-  let _ = agent_emit_event(harness, session_id,
+  let _ = agent_emit_event(
+    agent,
+    session_id,
     "tool_call_update",
     {
       tool_call_id: envelope.call_id,
@@ -325,7 +335,7 @@ pub fn __tool_terminal_status(result) -> string {
   return "failed"
 }
 
-pub fn __emit_tool_lifecycle_finish(harness: Harness, envelope, result) {
+pub fn __emit_tool_lifecycle_finish(agent: HarnessAgent, envelope, result) {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
@@ -372,12 +382,19 @@ pub fn __emit_tool_lifecycle_finish(harness: Harness, envelope, result) {
   if result?.data != nil {
     payload = payload + {data: result.data}
   }
-  let _ = agent_emit_event(harness, session_id, "tool_call_update", payload)
+  let _ = agent_emit_event(agent, session_id, "tool_call_update", payload)
 }
 
-pub fn __emit_synthetic_tool_lifecycle_finish(harness: Harness, call, result, tools, options) {
-  const envelope = __tool_envelope(harness, call, tools, options)
-  __emit_tool_lifecycle_finish(harness, envelope, result)
+pub fn __emit_synthetic_tool_lifecycle_finish(
+  agent: HarnessAgent,
+  random: HarnessRandom,
+  call,
+  result,
+  tools,
+  options,
+) {
+  const envelope = __tool_envelope(random, call, tools, options)
+  __emit_tool_lifecycle_finish(agent, envelope, result)
 }
 
 /**
@@ -401,17 +418,19 @@ pub fn __agent_error_must_propagate(err) -> bool {
 
 pub fn __invoke_tool(harness: Harness, call, tools, options) {
   const caller = options?._tool_caller
-  const envelope = __tool_envelope(harness, call, tools, options)
-  __emit_tool_lifecycle_start(harness, envelope)
+  const envelope = __tool_envelope(harness.random, call, tools, options)
+  __emit_tool_lifecycle_start(harness.agent, envelope)
   if caller == nil {
-    const direct = agent_dispatch_tool_call(harness, call + {id: envelope.call_id, tool_call_id: envelope.call_id},
+    const direct = agent_dispatch_tool_call(
+      harness.tools,
+      call + {id: envelope.call_id, tool_call_id: envelope.call_id},
       tools,
       options,
     )
-    __emit_tool_lifecycle_finish(harness, envelope, direct)
+    __emit_tool_lifecycle_finish(harness.agent, envelope, direct)
     return direct
   }
-  const next = { env_in -> __default_invoke_tool(harness, env_in, call, tools, options) }
+  const next = { env_in -> __default_invoke_tool(harness.tools, env_in, call, tools, options) }
   const outcome = try {
     caller(envelope, next)
   }
@@ -420,23 +439,24 @@ pub fn __invoke_tool(harness: Harness, call, tools, options) {
     if __agent_error_must_propagate(err) {
       throw err
     }
-    __maybe_emit_tool_audit(harness,
+    __maybe_emit_tool_audit(
+      harness.agent,
       envelope.turn.session_id,
       envelope,
       {layer: "tool_caller", status: "exception", error: to_string(err)},
     )
     const result = __middleware_exception_result(envelope, err)
-    __emit_tool_lifecycle_finish(harness, envelope, result)
+    __emit_tool_lifecycle_finish(harness.agent, envelope, result)
     return result
   }
   const r = unwrap(outcome)
   __validate_tool_caller_result(r)
-  __maybe_emit_tool_audit(harness, envelope.turn.session_id, envelope, r?.audit, r?.receipt)
-  __emit_tool_lifecycle_finish(harness, envelope, r)
+  __maybe_emit_tool_audit(harness.agent, envelope.turn.session_id, envelope, r?.audit, r?.receipt)
+  __emit_tool_lifecycle_finish(harness.agent, envelope, r)
   return r
 }
 
-pub fn __maybe_emit_tool_audit(harness: Harness, session_id, envelope, audit, receipt = nil) {
+pub fn __maybe_emit_tool_audit(agent: HarnessAgent, session_id, envelope, audit, receipt = nil) {
   if audit == nil && receipt == nil {
     return
   }
@@ -454,7 +474,7 @@ pub fn __maybe_emit_tool_audit(harness: Harness, session_id, envelope, audit, re
     }
   }
   let _ = try {
-    agent_emit_event(harness, session_id, "tool_call_audit", payload)
+    agent_emit_event(agent, session_id, "tool_call_audit", payload)
   }
 }
 
@@ -555,11 +575,7 @@ pub fn __agent_await_resumption_call(tool_calls) {
 
 pub fn __agent_await_resumption_args(agents: HarnessAgent, call) {
   const args = __tool_call_args(call)
-  return agent_await_resumption(agents,
-    args?.reason ?? "",
-    args?.conditions,
-    args?.resume_by,
-  )
+  return agent_await_resumption(agents, args?.reason ?? "", args?.conditions, args?.resume_by)
 }
 
 /**
@@ -572,13 +588,21 @@ pub fn __agent_await_resumption_args(agents: HarnessAgent, call) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_record_await_tool_results(harness: Harness, session, await_call, tool_calls, reason) {
+pub fn __agent_loop_record_await_tool_results(
+  agent: HarnessAgent,
+  session,
+  await_call,
+  tool_calls,
+  reason,
+) {
   const await_reason = if type_of(reason) == "string" && reason != "" {
     "agent suspended awaiting resumption: " + reason
   } else {
     "agent suspended awaiting resumption"
   }
-  agent_session_record_undispatched_tool_results(harness, session.session_id,
+  agent_session_record_undispatched_tool_results(
+    agent,
+    session.session_id,
     [await_call],
     "awaiting_resumption",
     await_reason,
@@ -590,19 +614,31 @@ pub fn __agent_loop_record_await_tool_results(harness: Harness, session, await_c
       siblings = siblings.appending(call)
     }
   }
-  agent_session_record_undispatched_tool_results(harness, session.session_id,
+  agent_session_record_undispatched_tool_results(
+    agent,
+    session.session_id,
     siblings,
     "skipped",
     "not dispatched: the agent suspended (agent_await_resumption) before this call ran",
   )
 }
 
-pub fn __agent_loop_await_resumption(harness: Harness, session, iteration, call, parsed, opts) {
-  const worker = __agent_loop_current_worker(harness.agent, harness.runtime)
+pub fn __agent_loop_await_resumption(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  session,
+  iteration,
+  call,
+  parsed,
+  opts,
+) {
+  const worker = __agent_loop_current_worker(agent, runtime)
   if worker == nil {
-    return __agent_loop_await_resumption_top_level(harness, session, iteration, call, parsed, opts)
+    return __agent_loop_await_resumption_top_level(agent, session, iteration, call, parsed, opts)
   }
-  agent_emit_event(harness, session.session_id,
+  agent_emit_event(
+    agent,
+    session.session_id,
     "tool_call_audit",
     {
       tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
@@ -617,20 +653,23 @@ pub fn __agent_loop_await_resumption(harness: Harness, session, iteration, call,
       },
     },
   )
-  suspend_agent(harness.agent,
-    worker,
-    parsed.reason,
-    {initiator: "self", conditions: parsed.conditions},
-  )
-  let checkpoint = __agent_loop_suspend_checkpoint(harness, session, iteration)
+  suspend_agent(agent, worker, parsed.reason, {initiator: "self", conditions: parsed.conditions})
+  let checkpoint = __agent_loop_suspend_checkpoint(agent, runtime, session, iteration)
   if checkpoint == nil {
     throw "agent_await_resumption: suspend checkpoint did not yield"
   }
   return checkpoint
 }
 
-pub fn __agent_loop_await_resumption_top_level(harness: Harness, session, iteration, call, parsed, opts) {
-  harness.agent.inject(
+pub fn __agent_loop_await_resumption_top_level(
+  agent: HarnessAgent,
+  session,
+  iteration,
+  call,
+  parsed,
+  opts,
+) {
+  agent.inject(
     session.session_id,
     transcript_reminder_event(
       {
@@ -652,7 +691,9 @@ pub fn __agent_loop_await_resumption_top_level(harness: Harness, session, iterat
     parsed.conditions,
     iteration,
   )
-  agent_emit_event(harness, session.session_id,
+  agent_emit_event(
+    agent,
+    session.session_id,
     "tool_call_audit",
     {
       tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
@@ -689,8 +730,8 @@ pub fn __agent_loop_invalid_await_resumption_feedback(error) {
     + "use `conditions.on_event` for an event-topic string."
 }
 
-pub fn __native_fallback_feedback(harness: Harness, policy, fallback_index) {
-  return native_tool_contract_feedback_prompt(harness, {policy: policy, fallback_index: fallback_index})
+pub fn __native_fallback_feedback(fs: HarnessFs, policy, fallback_index) {
+  return native_tool_contract_feedback_prompt(fs, {policy: policy, fallback_index: fallback_index})
 }
 
 /**
@@ -712,7 +753,8 @@ pub fn __native_fallback_feedback(harness: Harness, policy, fallback_index) {
  * @effects: []
  * @errors: []
  */
-pub fn __inject_feedback_with_tool_repair(harness: Harness,
+pub fn __inject_feedback_with_tool_repair(
+  agent: HarnessAgent,
   session_id,
   kind,
   content,
@@ -720,8 +762,10 @@ pub fn __inject_feedback_with_tool_repair(harness: Harness,
   reason = nil,
   context = nil,
 ) {
-  let _ = agent_session_pair_orphaned_tool_use(harness, session_id, content)
-  return agent_feedback_emit(harness, session_id,
+  let _ = agent_session_pair_orphaned_tool_use(agent, session_id, content)
+  return agent_feedback_emit(
+    agent,
+    session_id,
     [
       {
         kind: kind,
@@ -785,8 +829,8 @@ pub fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn __parse_feedback_protocol_violations(harness: Harness, parsed, turn_opts) {
-  if agent_tool_call_paradigm(harness, turn_opts).kind != "text"
+pub fn __parse_feedback_protocol_violations(llm: HarnessLlm, parsed, turn_opts) {
+  if agent_tool_call_paradigm(llm, turn_opts).kind != "text"
     || !__parse_feedback_has_non_structural_tools(
     turn_opts,
   ) {
@@ -795,9 +839,9 @@ pub fn __parse_feedback_protocol_violations(harness: Harness, parsed, turn_opts)
   return parsed?.protocol_violations ?? []
 }
 
-pub fn __parse_feedback_diagnostics(harness: Harness, parsed, turn_opts) {
+pub fn __parse_feedback_diagnostics(llm: HarnessLlm, parsed, turn_opts) {
   const parse_errors = parsed?.tool_parse_errors ?? []
-  const protocol_violations = __parse_feedback_protocol_violations(harness, parsed, turn_opts)
+  const protocol_violations = __parse_feedback_protocol_violations(llm, parsed, turn_opts)
   return parse_errors + protocol_violation_messages(protocol_violations)
 }
 
@@ -805,8 +849,8 @@ pub fn __recovered_text_call_dispatch_cap(_turn_opts) -> int {
   return 1
 }
 
-pub fn __unsafe_recovered_text_batch_feedback(harness: Harness, parsed, tool_calls, turn_opts) {
-  if agent_tool_call_paradigm(harness, turn_opts).kind != "text" {
+pub fn __unsafe_recovered_text_batch_feedback(llm: HarnessLlm, parsed, tool_calls, turn_opts) {
+  if agent_tool_call_paradigm(llm, turn_opts).kind != "text" {
     return nil
   }
   const recovered_count = to_int(parsed?.recovered_from_stray_count ?? 0) ?? 0
@@ -814,7 +858,7 @@ pub fn __unsafe_recovered_text_batch_feedback(harness: Harness, parsed, tool_cal
   if recovered_count <= cap || len(tool_calls) == 0 {
     return nil
   }
-  const protocol_violations = __parse_feedback_protocol_violations(harness, parsed, turn_opts)
+  const protocol_violations = __parse_feedback_protocol_violations(llm, parsed, turn_opts)
   if len(protocol_violations) == 0 {
     return nil
   }
@@ -827,8 +871,8 @@ pub fn __unsafe_recovered_text_batch_feedback(harness: Harness, parsed, tool_cal
   }
 }
 
-pub fn __drop_unsafe_recovered_text_batch(harness: Harness, parsed, tool_calls, turn_opts) {
-  const feedback = __unsafe_recovered_text_batch_feedback(harness, parsed, tool_calls, turn_opts)
+pub fn __drop_unsafe_recovered_text_batch(llm: HarnessLlm, parsed, tool_calls, turn_opts) {
+  const feedback = __unsafe_recovered_text_batch_feedback(llm, parsed, tool_calls, turn_opts)
   if feedback == nil {
     return {tool_calls: tool_calls, feedback: nil}
   }
@@ -850,7 +894,7 @@ pub fn __drop_unsafe_recovered_text_batch(harness: Harness, parsed, tool_calls, 
  * @effects: [agent]
  * @errors: []
  */
-fn __report_parse_boundary_loss(harness: Harness, session_id, parsed, turn_opts) {
+fn __report_parse_boundary_loss(agent: HarnessAgent, session_id, parsed, turn_opts) {
   if to_string(session_id) == "" {
     return
   }
@@ -864,7 +908,9 @@ fn __report_parse_boundary_loss(harness: Harness, session_id, parsed, turn_opts)
   }
   const excerpt = to_string(declared[0]?.excerpt ?? declared[0].message)
   const _ = try {
-    agent_emit_event(harness, session_id,
+    agent_emit_event(
+      agent,
+      session_id,
       "boundary_failure",
       {
         boundary: "text_tool_parse",
@@ -891,8 +937,8 @@ pub fn __maybe_inject_parse_error_feedback(
   turn_opts,
   feedback_override = nil,
 ) -> bool {
-  __report_parse_boundary_loss(harness, session_id, parsed, turn_opts)
-  const diagnostics = __parse_feedback_diagnostics(harness, parsed, turn_opts)
+  __report_parse_boundary_loss(harness.agent, session_id, parsed, turn_opts)
+  const diagnostics = __parse_feedback_diagnostics(harness.llm, parsed, turn_opts)
   const override_summary = to_string(feedback_override?.error_summary ?? "")
   if len(diagnostics) == 0 && override_summary == "" {
     return false
@@ -907,17 +953,20 @@ pub fn __maybe_inject_parse_error_feedback(
   } else {
     to_string(diagnostics[0])
   }
-  const feedback = parse_guidance_prompt(harness, {
+  const feedback = parse_guidance_prompt(
+    harness.fs,
+    {
       error_summary: error_summary,
       has_partial_success: has_partial_success,
       parsed_call_count: parsed_count,
-      body_hint: agent_tool_call_paradigm(harness, turn_opts).body_hint,
-      is_native_format: agent_tool_format(harness, turn_opts) == "native",
-      is_json_format: agent_tool_format(harness, turn_opts) == "json",
+      body_hint: agent_tool_call_paradigm(harness.llm, turn_opts).body_hint,
+      is_native_format: agent_tool_format(harness.llm, turn_opts) == "native",
+      is_json_format: agent_tool_format(harness.llm, turn_opts) == "json",
     },
     turn_opts,
   )
-  __inject_feedback_with_tool_repair(harness,
+  __inject_feedback_with_tool_repair(
+    harness.agent,
     session_id,
     "parse_guidance",
     feedback,
@@ -972,26 +1021,31 @@ pub fn __maybe_inject_blank_name_feedback(
     return false
   }
   const has_partial_success = dispatched_count > 0
-  const feedback = parse_guidance_prompt(harness, {
+  const feedback = parse_guidance_prompt(
+    harness.fs,
+    {
       error_summary: "Dropped "
         + to_string(dropped)
         + " tool call(s) with an empty/blank name — every tool call must name a tool.",
       has_partial_success: has_partial_success,
       parsed_call_count: dispatched_count,
-      body_hint: agent_tool_call_paradigm(harness, turn_opts).body_hint,
-      is_native_format: agent_tool_format(harness, turn_opts) == "native",
-      is_json_format: agent_tool_format(harness, turn_opts) == "json",
+      body_hint: agent_tool_call_paradigm(harness.llm, turn_opts).body_hint,
+      is_native_format: agent_tool_format(harness.llm, turn_opts) == "native",
+      is_json_format: agent_tool_format(harness.llm, turn_opts) == "json",
     },
     turn_opts,
   )
-  __inject_feedback_with_tool_repair(harness,
+  __inject_feedback_with_tool_repair(
+    harness.agent,
     session_id,
     "parse_guidance",
     feedback,
     "tool_parser",
     "blank_tool_name",
   )
-  agent_emit_event(harness, session_id,
+  agent_emit_event(
+    harness.agent,
+    session_id,
     "tool_call_blank_name_dropped",
     {
       dropped_count: dropped,
@@ -1026,7 +1080,7 @@ pub fn __agent_loop_record_parse_feedback(
   } else {
     normalized + {tool_calls: tool_calls}
   }
-  agent_session_record_assistant(harness, session_id, recorded_assistant)
+  agent_session_record_assistant(harness.agent, session_id, recorded_assistant)
   const parse_dropped = __maybe_inject_parse_error_feedback(
     harness,
     session_id,
@@ -1055,7 +1109,8 @@ pub fn __agent_loop_record_parse_feedback(
 }
 
 pub fn __detect_native_fallback(
-  harness: Harness,
+  agent: HarnessAgent,
+  fs: HarnessFs,
   llm_result,
   parsed,
   turn_opts,
@@ -1078,7 +1133,9 @@ pub fn __detect_native_fallback(
   } else {
     false
   }
-  agent_record_native_tool_fallback(harness, session_id,
+  agent_record_native_tool_fallback(
+    agent,
+    session_id,
     {
       iteration: iteration_index + 1,
       accepted: accepted,
@@ -1088,10 +1145,11 @@ pub fn __detect_native_fallback(
     },
   )
   if !accepted {
-    __inject_feedback_with_tool_repair(harness,
+    __inject_feedback_with_tool_repair(
+      agent,
       session_id,
       "native_tool_contract",
-      __native_fallback_feedback(harness, policy, new_index),
+      __native_fallback_feedback(fs, policy, new_index),
     )
   }
   const resolved_calls = if accepted {

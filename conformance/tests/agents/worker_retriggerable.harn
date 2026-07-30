@@ -11,30 +11,31 @@ fn current_worker(agents: HarnessAgent, handle) {
   return nil
 }
 
-fn wait_for_status(harness: Harness, handle, status) {
+fn wait_for_status(agent: HarnessAgent, clock: HarnessClock, handle, status) {
   let attempts = 0
-  let worker = current_worker(harness.agent, handle)
+  let worker = current_worker(agent, handle)
   while attempts < 200 && worker?.status != status {
-    harness.clock.sleep_ms(10ms)
-    worker = current_worker(harness.agent, handle)
+    clock.sleep_ms(10ms)
+    worker = current_worker(agent, handle)
     attempts = attempts + 1
   }
   return worker
 }
 
-fn worker_snapshot(harness: Harness, handle) {
-  const worker = current_worker(harness.agent, handle)
-  return json_parse(harness.fs.read_text(worker?.snapshot_path))
+fn worker_snapshot(agent: HarnessAgent, fs: HarnessFs, handle) {
+  const worker = current_worker(agent, handle)
+  return json_parse(fs.read_text(worker?.snapshot_path))
 }
 
-fn worker_snapshot_text(harness: Harness, handle) {
-  const worker = current_worker(harness.agent, handle)
-  return harness.fs.read_text(worker?.snapshot_path)
+fn worker_snapshot_text(agent: HarnessAgent, fs: HarnessFs, handle) {
+  const worker = current_worker(agent, handle)
+  return fs.read_text(worker?.snapshot_path)
 }
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("one-shot summary")],
+    harness.llm,
+    [llm_text("one-shot summary")],
     { ->
       const one_shot = sub_agent_run(harness, "Answer once.", {provider: "mock", background: true})
       const one_shot_done = wait_agent(harness.agent, one_shot)
@@ -49,16 +50,19 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("first answer"), llm_text("follow-up answer")],
+    harness.llm,
+    [llm_text("first answer"), llm_text("follow-up answer")],
     { ->
-      const loop = sub_agent_run(harness, "Answer the first question.",
+      const loop = sub_agent_run(
+        harness,
+        "Answer the first question.",
         {provider: "mock", background: true, carry: {retriggerable: true}},
       )
-      const first = wait_for_status(harness, loop, "awaiting")
+      const first = wait_for_status(harness.agent, harness.clock, loop, "awaiting")
       harness.stdio.println(first?.status == "awaiting")
       harness.stdio.println(contains(worker_result(first)?.summary ?? "", "first answer"))
-      const first_snapshot = worker_snapshot(harness, loop)
-      const first_snapshot_text = worker_snapshot_text(harness, loop)
+      const first_snapshot = worker_snapshot(harness.agent, harness.fs, loop)
+      const first_snapshot_text = worker_snapshot_text(harness.agent, harness.fs, loop)
       const first_messages = first_snapshot?.transcript?.messages ?? []
       harness.stdio.println(len(first_messages) >= 2)
       harness.stdio.println(contains(first_snapshot_text, "Answer the first question."))
@@ -71,7 +75,7 @@ pipeline main(harness: Harness) {
       harness.stdio.println(harness.runtime.try_receive(waiter) == nil)
       const retriggered = worker_trigger(harness.agent, loop, {follow_up: "Need one more detail"})
       harness.stdio.println(retriggered?.status == "running")
-      const second = wait_for_status(harness, loop, "awaiting")
+      const second = wait_for_status(harness.agent, harness.clock, loop, "awaiting")
       harness.stdio.println(second?.status == "awaiting")
       harness.stdio.println(contains(worker_result(second)?.summary ?? "", "follow-up answer"))
       harness.stdio.println(worker_request(second)?.task == "Answer the first question.")

@@ -52,8 +52,8 @@ pub fn page(opts: PageOptions) -> PageResult {
  * @effects: []
  * @errors: []
  */
-pub fn terminal_width(harness: Harness, default_width = 80) -> int {
-  return harness.term.terminal_width(default_width)
+pub fn terminal_width(term: HarnessTerm, default_width = 80) -> int {
+  return term.terminal_width(default_width)
 }
 
 /**
@@ -62,13 +62,13 @@ pub fn terminal_width(harness: Harness, default_width = 80) -> int {
  * @effects: []
  * @errors: []
  */
-pub fn rule(harness: Harness, char = "─", width = nil) -> string {
+pub fn rule(term: HarnessTerm, char = "─", width = nil) -> string {
   const mark = if type_of(char) == "string" && len(char) > 0 {
     substring(char, 0, 1)
   } else {
     "─"
   }
-  const resolved_width = width ?? terminal_width(harness)
+  const resolved_width = width ?? terminal_width(term)
   if resolved_width <= 0 {
     return ""
   }
@@ -81,8 +81,8 @@ pub fn rule(harness: Harness, char = "─", width = nil) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn clear(harness: Harness) {
-  harness.term.clear()
+pub fn clear(term: HarnessTerm) {
+  term.clear()
 }
 
 const __TUI_CANCEL_TOKENS = ["q", "quit", "/quit", "exit", "/exit", "/cancel"]
@@ -156,9 +156,9 @@ fn __tui_error(opts, message: string) -> dict {
   return {ok: false, value: opts?.cancel_value, status: "error", error: message}
 }
 
-fn __tui_probe(harness: Harness, binary: string) -> bool {
+fn __tui_probe(tools: HarnessTools, binary: string) -> bool {
   const probed = try {
-    command_run(harness.tools, {argv: [binary, "--version"]}, {capture: {max_inline_bytes: 256}})
+    command_run(tools, {argv: [binary, "--version"]}, {capture: {max_inline_bytes: 256}})
   }
   if !is_ok(probed) {
     return false
@@ -167,20 +167,20 @@ fn __tui_probe(harness: Harness, binary: string) -> bool {
   return result?.exit_code == 0
 }
 
-fn __tui_pick_backend(harness: Harness, prefer: string) -> string {
+fn __tui_pick_backend(term: HarnessTerm, tools: HarnessTools, prefer: string) -> string {
   if prefer == "fzf" || prefer == "gum" || prefer == "none" {
     return prefer
   }
   // "auto": only consider external pickers when stdout is a real
   // terminal — they draw their UI over /dev/tty and can't render into
   // captured pipes. Tests can force a backend via `prefer_external`.
-  if !harness.term.is_tty("stdout") {
+  if !term.is_tty("stdout") {
     return "numbered"
   }
-  if __tui_probe(harness, "fzf") {
+  if __tui_probe(tools, "fzf") {
     return "fzf"
   }
-  if __tui_probe(harness, "gum") {
+  if __tui_probe(tools, "gum") {
     return "gum"
   }
   return "numbered"
@@ -326,12 +326,12 @@ fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
   return {dir: dir, args: ["--preview", reader + " " + dir + "/{1}.txt"]}
 }
 
-fn __tui_preview_cleanup(harness: Harness, dir) {
+fn __tui_preview_cleanup(fs: HarnessFs, dir) {
   if dir == nil {
     return
   }
   const _ = try {
-    harness.fs.delete(dir)
+    fs.delete(dir)
   }
 }
 
@@ -390,8 +390,12 @@ fn __tui_fzf_pick(harness: Harness, items, labels, opts) -> dict {
   }
   const preview = __tui_preview_setup(harness, items, opts?.preview)
   argv = argv + preview.args
-  const result = command_run(harness.tools, {argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
-  __tui_preview_cleanup(harness, preview.dir)
+  const result = command_run(
+    harness.tools,
+    {argv: argv},
+    {stdin: stdin, capture: {max_inline_bytes: 1048576}},
+  )
+  __tui_preview_cleanup(harness.fs, preview.dir)
   if result.exit_code == 130 {
     return __tui_cancelled(opts)
   }
@@ -405,14 +409,18 @@ fn __tui_fzf_pick(harness: Harness, items, labels, opts) -> dict {
   return __tui_fzf_decode(items, body, multi, opts)
 }
 
-fn __tui_gum_pick(harness: Harness, items, labels, opts) -> dict {
+fn __tui_gum_pick(tools: HarnessTools, items, labels, opts) -> dict {
   const stdin = join(labels, "\n") + "\n"
   const header = __tui_to_string(opts?.header ?? opts?.prompt ?? "Select")
   let argv = ["gum", "choose", "--header", header]
   if opts?.multi ?? false {
     argv = argv + ["--no-limit"]
   }
-  const result = command_run(harness.tools, {argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
+  const result = command_run(
+    tools,
+    {argv: argv},
+    {stdin: stdin, capture: {max_inline_bytes: 1048576}},
+  )
   if !result.success {
     return __tui_cancelled(opts)
   }
@@ -497,13 +505,13 @@ pub fn select_from(harness: Harness, items: list, opts: SelectFromOptions = {}) 
   const backend = if prefer == "none" {
     "numbered"
   } else {
-    __tui_pick_backend(harness, prefer)
+    __tui_pick_backend(harness.term, harness.tools, prefer)
   }
   if backend == "fzf" {
     return __tui_fzf_pick(harness, items, labels, options)
   }
   if backend == "gum" {
-    return __tui_gum_pick(harness, items, labels, options)
+    return __tui_gum_pick(harness.tools, items, labels, options)
   }
   return __tui_numbered_pick(harness.stdio, items, labels, options)
 }

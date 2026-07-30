@@ -1,4 +1,3 @@
-import { agent_loop } from "std/agent/loop"
 /**
  * Effect-phased tool batches: one inference response may fan out independent
  * calls inside its first structural effect phase, but later phases must return
@@ -9,19 +8,20 @@ import {
   agent_event_report,
   agent_tool_batch_disposition_event_schema,
 } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { with_llm_script } from "std/testing"
 
-fn reset_counts(harness: Harness, counters) {
-  harness.runtime.atomic_set(counters.read, 0)
-  harness.runtime.atomic_set(counters.edit, 0)
-  harness.runtime.atomic_set(counters.delete, 0)
-  harness.runtime.atomic_set(counters.search, 0)
-  harness.runtime.atomic_set(counters.verify, 0)
-  harness.runtime.atomic_set(counters.done, 0)
+fn reset_counts(runtime: HarnessRuntime, counters) {
+  runtime.atomic_set(counters.read, 0)
+  runtime.atomic_set(counters.edit, 0)
+  runtime.atomic_set(counters.delete, 0)
+  runtime.atomic_set(counters.search, 0)
+  runtime.atomic_set(counters.verify, 0)
+  runtime.atomic_set(counters.done, 0)
 }
 
-fn phase_tools(harness: Harness, counters) {
+fn phase_tools(runtime: HarnessRuntime, counters) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -29,7 +29,7 @@ fn phase_tools(harness: Harness, counters) {
     "Observe current state.",
     {
       handler: { _args ->
-        harness.runtime.atomic_add(counters.read, 1)
+        runtime.atomic_add(counters.read, 1)
         return "observed"
       },
       parameters: {},
@@ -42,7 +42,7 @@ fn phase_tools(harness: Harness, counters) {
     "Apply one atomic edit operation.",
     {
       handler: { args ->
-        harness.runtime.atomic_add(counters.edit, 1)
+        runtime.atomic_add(counters.edit, 1)
         if args?.fail ?? false {
           throw "mutation rejected"
         }
@@ -66,7 +66,7 @@ fn phase_tools(harness: Harness, counters) {
     "Delete one resource.",
     {
       handler: { _args ->
-        harness.runtime.atomic_add(counters.delete, 1)
+        runtime.atomic_add(counters.delete, 1)
         return "deleted"
       },
       parameters: {},
@@ -79,7 +79,7 @@ fn phase_tools(harness: Harness, counters) {
     "Observe the post-mutation state.",
     {
       handler: { _args ->
-        harness.runtime.atomic_add(counters.search, 1)
+        runtime.atomic_add(counters.search, 1)
         return "searched"
       },
       parameters: {},
@@ -92,7 +92,7 @@ fn phase_tools(harness: Harness, counters) {
     "Verify the resulting state.",
     {
       handler: { _args ->
-        harness.runtime.atomic_add(counters.verify, 1)
+        runtime.atomic_add(counters.verify, 1)
         return "verified"
       },
       parameters: {},
@@ -105,7 +105,7 @@ fn phase_tools(harness: Harness, counters) {
     "Certify terminal completion.",
     {
       handler: { _args ->
-        harness.runtime.atomic_add(counters.done, 1)
+        runtime.atomic_add(counters.done, 1)
         return "done"
       },
       parameters: {},
@@ -198,10 +198,10 @@ fn receipt_counts(events) {
 }
 
 fn run_phased(harness: Harness, counters) {
-  reset_counts(harness, counters)
+  reset_counts(harness.runtime, counters)
   const session = "effect-phases-" + harness.random.uuid()
   const captured = agent_capture_events(
-    harness,
+    harness.agent,
     session,
     { ->
       return with_llm_script(
@@ -235,7 +235,7 @@ fn run_phased(harness: Harness, counters) {
         { ->
           const opts: AgentLoopOptions = {
             provider: "mock",
-            tools: phase_tools(harness, counters),
+            tools: phase_tools(harness.runtime, counters),
             tool_format: "native",
             loop_until_done: true,
             max_iterations: 7,
@@ -256,10 +256,10 @@ fn run_phased(harness: Harness, counters) {
 }
 
 fn run_blocked_then_recovered(harness: Harness, counters) {
-  reset_counts(harness, counters)
+  reset_counts(harness.runtime, counters)
   const session = "effect-phases-blocked-" + harness.random.uuid()
   const captured = agent_capture_events(
-    harness,
+    harness.agent,
     session,
     { ->
       return with_llm_script(
@@ -286,7 +286,7 @@ fn run_blocked_then_recovered(harness: Harness, counters) {
         { ->
           const opts: AgentLoopOptions = {
             provider: "mock",
-            tools: phase_tools(harness, counters),
+            tools: phase_tools(harness.runtime, counters),
             tool_format: "native",
             loop_until_done: true,
             max_iterations: 7,
@@ -353,5 +353,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(
     "blocked.counters.verify=" + to_string(harness.runtime.atomic_get(counters.verify)),
   )
-  harness.stdio.println("blocked.counters.done=" + to_string(harness.runtime.atomic_get(counters.done)))
+  harness.stdio.println(
+    "blocked.counters.done=" + to_string(harness.runtime.atomic_get(counters.done)),
+  )
 }

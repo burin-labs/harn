@@ -4,9 +4,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.runtime.host_has("process", "list_shells"))
   harness.stdio.println(caps?.process?.description != nil)
   const default_shell = harness.process.default_shell()
-  const result = harness.process.run(
-    {mode: "shell", command: "printf hi", shell_id: default_shell?.id},
+  const invocation = harness.process.shell_invocation(
+    {command: "printf hi", shell_id: default_shell?.id},
   )
+  const result = harness.process.run({program: invocation.program, args: invocation.args})
   harness.stdio.println(result?.success)
   harness.stdio.println(result?.combined)
 }

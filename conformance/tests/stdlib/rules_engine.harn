@@ -15,28 +15,38 @@ pipeline default(harness: Harness) {
   harness.stdio.println(r.matches[0].captures.FN == "foo")
   harness.stdio.println(r.matches[1].captures.FN == "bar")
   // 2) Report-only mode yields a data table with a per-match summary.
-  const rep = rules_report(harness.rules, {rule: finder, source: src, language: "typescript", path: "a.ts"})
+  const rep = rules_report(
+    harness.rules,
+    {rule: finder, source: src, language: "typescript", path: "a.ts"},
+  )
   harness.stdio.println(rep.summary.total_rows == 2)
   harness.stdio.println(rep.rule_id == "find-calls")
   // 3) A codemod in dry-run previews without writing; the
   //    `behavior-preserving` safety makes it machine-applicable.
   const codemod =
     "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n"
-  const ap = rules_apply(harness.rules, {rule: codemod, source: "foo();\n", language: "typescript", dry_run: true})
+  const ap = rules_apply(
+    harness.rules,
+    {rule: codemod, source: "foo();\n", language: "typescript", dry_run: true},
+  )
   harness.stdio.println(ap.ok && ap.files[0].changed && !ap.files[0].applied)
   harness.stdio.println(ap.files[0].preview == "bar();\n")
   harness.stdio.println(ap.auto_applicable)
   // 4) A declarative lint rule (a `message`, no `fix`) emits diagnostics.
   const lint =
     "id = \"calls\"\nlanguage = \"typescript\"\nmessage = \"function call\"\n[rule]\npattern = \"$FN()\"\n"
-  const decl = rules_diagnostics(harness.rules, {rule: lint, source: src, language: "typescript", path: "a.ts"})
+  const decl = rules_diagnostics(
+    harness.rules,
+    {rule: lint, source: src, language: "typescript", path: "a.ts"},
+  )
   harness.stdio.println(decl.ok && decl.diagnostic_count == 2)
   harness.stdio.println(decl.diagnostics[0].message == "function call")
   // 5) An imperative visitor over the *same matcher* returning the *same*
   //    static message produces IDENTICAL diagnostics (the #2878 acceptance):
   //    same message, severity, applicability, and spans.
   const imp = rules_visit(
-    harness.rules, {
+    harness.rules,
+    {
       rule: finder,
       source: src,
       language: "typescript",
@@ -53,7 +63,8 @@ pipeline default(harness: Harness) {
   // 6) Imperative-only power: compute a message from the captured metavar —
   //    something a declarative rule (with only a static message) cannot.
   const computed = rules_visit(
-    harness.rules, {
+    harness.rules,
+    {
       rule: finder,
       source: src,
       language: "typescript",
@@ -64,7 +75,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(computed.diagnostics[1].message == "call to bar")
   // 7) The visitor controls flow: returning nil skips a match.
   const filtered = rules_visit(
-    harness.rules, {
+    harness.rules,
+    {
       rule: finder,
       source: src,
       language: "typescript",

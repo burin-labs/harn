@@ -11,8 +11,8 @@ fn __app_segment(app_name: string) -> string {
   return name
 }
 
-fn __absolute_env_dir(harness: Harness, name: string) {
-  const raw = harness.env.get(name)
+fn __absolute_env_dir(env: HarnessEnv, name: string) {
+  const raw = env.get(name)
   if raw == nil {
     return nil
   }
@@ -23,12 +23,12 @@ fn __absolute_env_dir(harness: Harness, name: string) {
   return value
 }
 
-fn __home_dir(harness: Harness) -> string {
-  const home = __absolute_env_dir(harness, "HOME")
+fn __home_dir(env: HarnessEnv) -> string {
+  const home = __absolute_env_dir(env, "HOME")
   if home != nil {
     return home
   }
-  const user_profile = __absolute_env_dir(harness, "USERPROFILE")
+  const user_profile = __absolute_env_dir(env, "USERPROFILE")
   if user_profile != nil {
     return user_profile
   }
@@ -47,23 +47,25 @@ fn __join_segments(segments: list<string>) -> string {
   return out
 }
 
-fn __resolve_app_home(harness: Harness, 
+fn __resolve_app_home(
+  env: HarnessEnv,
+  system: HarnessSystem,
   app_name: string,
   env_key: string,
   xdg_segments: list<string>,
   macos_segments: list<string>,
 ) -> string {
   const app = __app_segment(app_name)
-  const env_root = __absolute_env_dir(harness, env_key)
+  const env_root = __absolute_env_dir(env, env_key)
   if env_root != nil {
     return path_join(env_root, app)
   }
-  const root_segments = if harness.system.platform().os == "darwin" {
+  const root_segments = if system.platform().os == "darwin" {
     macos_segments
   } else {
     xdg_segments
   }
-  return __join_segments([__home_dir(harness)] + root_segments + [app])
+  return __join_segments([__home_dir(env)] + root_segments + [app])
 }
 
 /**
@@ -74,10 +76,12 @@ fn __resolve_app_home(harness: Harness,
  *
  * @effects: [env.read]
  * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
- * @example: xdg_config_home(harness, "harn")
+ * @example: xdg_config_home(harness.env, harness.system, "harn")
  */
-pub fn xdg_config_home(harness: Harness, app_name: string) -> string {
-  return __resolve_app_home(harness, 
+pub fn xdg_config_home(env: HarnessEnv, system: HarnessSystem, app_name: string) -> string {
+  return __resolve_app_home(
+    env,
+    system,
     app_name,
     "XDG_CONFIG_HOME",
     [".config"],
@@ -93,10 +97,12 @@ pub fn xdg_config_home(harness: Harness, app_name: string) -> string {
  *
  * @effects: [env.read]
  * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
- * @example: xdg_data_home(harness, "harn")
+ * @example: xdg_data_home(harness.env, harness.system, "harn")
  */
-pub fn xdg_data_home(harness: Harness, app_name: string) -> string {
-  return __resolve_app_home(harness, 
+pub fn xdg_data_home(env: HarnessEnv, system: HarnessSystem, app_name: string) -> string {
+  return __resolve_app_home(
+    env,
+    system,
     app_name,
     "XDG_DATA_HOME",
     [".local", "share"],
@@ -112,8 +118,15 @@ pub fn xdg_data_home(harness: Harness, app_name: string) -> string {
  *
  * @effects: [env.read]
  * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
- * @example: xdg_cache_home(harness, "harn")
+ * @example: xdg_cache_home(harness.env, harness.system, "harn")
  */
-pub fn xdg_cache_home(harness: Harness, app_name: string) -> string {
-  return __resolve_app_home(harness, app_name, "XDG_CACHE_HOME", [".cache"], ["Library", "Caches"])
+pub fn xdg_cache_home(env: HarnessEnv, system: HarnessSystem, app_name: string) -> string {
+  return __resolve_app_home(
+    env,
+    system,
+    app_name,
+    "XDG_CACHE_HOME",
+    [".cache"],
+    ["Library", "Caches"],
+  )
 }

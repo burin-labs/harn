@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 /**
  * Caller returns a malformed result → agent_loop throws a friendly
  * diagnostic from __validate_caller_result.

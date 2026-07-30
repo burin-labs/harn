@@ -37,9 +37,9 @@ impl Point {
 }
 
 const p = Point { x: 3, y: 4 }
-log(p.distance())           // 5.0
+harness.obs.log(p.distance())           // 5.0
 const p2 = p.translate(10, 20)
-log(p2.x)                   // 13
+harness.obs.log(p2.x)                   // 13
 ```
 
 When `instance.method(args)` is called, the VM looks up methods registered

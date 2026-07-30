@@ -2,7 +2,8 @@ import { verification_affected_targets } from "std/verification"
 
 pipeline test(harness: Harness, task) {
   const fact = verification_affected_targets(
-    harness, ["crates/app/src/lib.rs", "apps/web/src/index.ts", "plugins/a/file.foo"],
+    harness,
+    ["crates/app/src/lib.rs", "apps/web/src/index.ts", "plugins/a/file.foo"],
     [
       {
         id: "cargo",
@@ -51,7 +52,8 @@ pipeline test(harness: Harness, task) {
   assert_eq(fact.adapters[2]?.target_count, 1)
   assert_eq(fact.fallback.enabled, false)
   const templated = verification_affected_targets(
-    harness, ["x/a.txt", "y/b.txt"],
+    harness,
+    ["x/a.txt", "y/b.txt"],
     [
       {
         id: "lines",

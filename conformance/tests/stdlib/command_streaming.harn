@@ -1,14 +1,14 @@
 import { command_run, command_run_streaming, command_wait } from "std/command"
 
-fn mixed_command(harness: Harness) {
-  if harness.system.platform().os == "windows" {
+fn mixed_command(system: HarnessSystem) {
+  if system.platform().os == "windows" {
     return ["cmd", "/C", "echo out&&echo err 1>&2"]
   }
   return ["sh", "-c", "printf out; printf err >&2"]
 }
 
-fn timeout_command(harness: Harness) {
-  if harness.system.platform().os == "windows" {
+fn timeout_command(system: HarnessSystem) {
+  if system.platform().os == "windows" {
     return ["cmd", "/C", "echo before & ping -n 30 127.0.0.1 >NUL"]
   }
   return ["sh", "-c", "printf before; sleep 30 & wait"]
@@ -27,7 +27,11 @@ fn expect_true(actual, label: string) {
 }
 
 pipeline default(harness: Harness) {
-  const started = command_run(harness.tools, mixed_command(harness), {background: true, capture: {max_inline_bytes: 100}})
+  const started = command_run(
+    harness.tools,
+    mixed_command(harness.system),
+    {background: true, capture: {max_inline_bytes: 100}},
+  )
   const waited = command_wait(harness.tools, started, {timeout_ms: 5000})
   expect_eq(waited.status, "completed", "waited.status")
   expect_eq(waited.exit_code, 0, "waited.exit_code")
@@ -36,7 +40,7 @@ pipeline default(harness: Harness) {
   const streamed = command_run_streaming(
     harness.tools,
     harness.stdio,
-    mixed_command(harness),
+    mixed_command(harness.system),
     {tee: false, poll_interval_ms: 10, capture: {max_inline_bytes: 100}},
   )
   expect_eq(streamed.status, "completed", "streamed.status")
@@ -46,7 +50,7 @@ pipeline default(harness: Harness) {
   const timed = command_run_streaming(
     harness.tools,
     harness.stdio,
-    timeout_command(harness),
+    timeout_command(harness.system),
     {tee: false, timeout_ms: 200, poll_interval_ms: 50, capture: {max_inline_bytes: 100}},
   )
   expect_eq(timed.status, "timed_out", "timed.status")
@@ -54,7 +58,8 @@ pipeline default(harness: Harness) {
   expect_true(len(timed.stdout) > 0, "timed.stdout")
   if harness.system.platform().os != "windows" && timed?.process_group_id != nil {
     const probe = command_run(
-      harness.tools, ["sh", "-c", "kill -0 -" + to_string(timed.process_group_id) + " 2>/dev/null"],
+      harness.tools,
+      ["sh", "-c", "kill -0 -" + to_string(timed.process_group_id) + " 2>/dev/null"],
       {capture: {max_inline_bytes: 100}},
     )
     expect_eq(probe.success, false, "timeout process group alive")

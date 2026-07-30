@@ -6,7 +6,8 @@ pipeline default(harness: Harness) {
   // agent_loop defaults direct callers to bounded transport retry. A single
   // transient provider error is absorbed and the second attempt succeeds.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {error: {category: "rate_limit", message: "429 transient"}},
       llm_text("recovered by default retry. ##DONE##"),
     ],
@@ -20,7 +21,8 @@ pipeline default(harness: Harness) {
   )
   // Explicit opt-out remains available for fail-fast fixtures and callers.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {error: {category: "rate_limit", message: "429 transient"}},
       llm_text("unreachable with retry disabled. ##DONE##"),
     ],

@@ -29,7 +29,11 @@ pipeline default(harness: Harness) {
   const url = wait_for_log_match(harness, log_path, "MCP workflow server ready on (http://[^\\s]+)")
   require url != nil, "timed out waiting for MCP server readiness"
   harness.testing.clear()
-  harness.testing.respond("mcp", "elicit", {action: "accept", content: {env: "staging", confirm: true}})
+  harness.testing.respond(
+    "mcp",
+    "elicit",
+    {action: "accept", content: {env: "staging", confirm: true}},
+  )
   with_llm_script(
     harness.llm,
     [

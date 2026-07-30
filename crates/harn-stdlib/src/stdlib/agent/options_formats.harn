@@ -28,11 +28,11 @@ pub fn __profile_defaults(profile) {
   throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
 }
 
-pub fn __completion_judge_defaults(harness: Harness, value, opts) {
+pub fn __completion_judge_defaults(fs: HarnessFs, value, opts) {
   if type_of(value) == "bool" && value {
     return {
-      system: completion_judge_system_prompt(harness, opts),
-      feedback_fallback: completion_judge_feedback_prompt(harness, opts),
+      system: completion_judge_system_prompt(fs, opts),
+      feedback_fallback: completion_judge_feedback_prompt(fs, opts),
     }
   }
   return value
@@ -96,9 +96,9 @@ fn __explicit_provider(opts) {
   return provider
 }
 
-fn __resolved_model_id(harness: Harness, model) -> string {
+fn __resolved_model_id(llm: HarnessLlm, model) -> string {
   const resolved = try {
-    harness.llm.resolve_model(model)
+    llm.resolve_model(model)
   }
   if is_err(resolved) {
     return to_string(model)
@@ -106,17 +106,17 @@ fn __resolved_model_id(harness: Harness, model) -> string {
   return to_string(unwrap(resolved)?.id ?? model)
 }
 
-fn __tool_format_pair(harness: Harness, opts) -> {provider: string, model: string}? {
+fn __tool_format_pair(llm: HarnessLlm, opts) -> {provider: string, model: string}? {
   const raw_model = opts?.model
   if raw_model == nil || trim(to_string(raw_model)) == "" {
     return nil
   }
   const provider = __explicit_provider(opts)
   if provider != nil {
-    return {provider: provider, model: __resolved_model_id(harness, raw_model)}
+    return {provider: provider, model: __resolved_model_id(llm, raw_model)}
   }
   const resolved = try {
-    harness.llm.resolve_model(raw_model)
+    llm.resolve_model(raw_model)
   }
   if is_err(resolved) {
     return nil
@@ -401,17 +401,17 @@ fn __capability_gap_event(pair, requested, fallback) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_format_resolution(harness: Harness, options = nil) {
+pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
   const opts = options ?? {}
   const explicit = __explicit_tool_format(opts)
   if explicit != nil {
     __validate_explicit_tool_format(explicit)
-    const pair = __tool_format_pair(harness, opts)
+    const pair = __tool_format_pair(llm, opts)
     let preferred = nil
     let parity = nil
     if pair != nil {
       const caps = try {
-        harness.llm.provider_capabilities(pair.provider, pair.model)
+        llm.provider_capabilities(pair.provider, pair.model)
       }
       if !is_err(caps) {
         const resolved_caps = unwrap(caps)
@@ -464,10 +464,10 @@ pub fn agent_tool_format_resolution(harness: Harness, options = nil) {
       tool_format_override_event: override_event,
     }
   }
-  const pair = __tool_format_pair(harness, opts)
+  const pair = __tool_format_pair(llm, opts)
   if pair != nil {
     const caps = try {
-      harness.llm.provider_capabilities(pair.provider, pair.model)
+      llm.provider_capabilities(pair.provider, pair.model)
     }
     if !is_err(caps) {
       const preferred = __valid_tool_format(unwrap(caps)?.preferred_tool_format)
@@ -519,8 +519,8 @@ pub fn agent_tool_format_resolution(harness: Harness, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_format(harness: Harness, options = nil) {
-  const resolved = agent_tool_format_resolution(harness, options)
+pub fn agent_tool_format(llm: HarnessLlm, options = nil) {
+  const resolved = agent_tool_format_resolution(llm, options)
   if resolved.tool_format != nil {
     return resolved.tool_format
   }

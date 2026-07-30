@@ -2,7 +2,10 @@ import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {
-  const path = path_join(harness.fs.workspace_temp_dir(), "harn-seed-" + harness.random.uuid() + ".jsonl")
+  const path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-seed-" + harness.random.uuid() + ".jsonl",
+  )
   harness.fs.write_text(
     path,
     join(
@@ -68,7 +71,10 @@ pipeline main(harness: Harness) {
   harness.stdio.println(snap.messages[0].role)
   harness.stdio.println(snap.messages[1].content)
   harness.stdio.println(snap.messages[1].tool_calls == nil)
-  const legacy_path = path_join(harness.fs.workspace_temp_dir(), "harn-legacy-seed-" + harness.random.uuid() + ".jsonl")
+  const legacy_path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-legacy-seed-" + harness.random.uuid() + ".jsonl",
+  )
   harness.fs.write_text(
     legacy_path,
     join(
@@ -96,11 +102,17 @@ pipeline main(harness: Harness) {
   harness.stdio.println(len(legacy_snap.messages))
   harness.stdio.println(legacy_snap.messages[1].content)
   with_llm_script(
-    harness.llm, [llm_text("recorded assistant")],
+    harness.llm,
+    [llm_text("recorded assistant")],
     { ->
-      const transcript_dir = path_join(harness.fs.workspace_temp_dir(), "harn-seed-sidecar-" + harness.random.uuid())
+      const transcript_dir = path_join(
+        harness.fs.workspace_temp_dir(),
+        "harn-seed-sidecar-" + harness.random.uuid(),
+      )
       const source_session = harness.agent.open()
-      agent_loop(harness, "record this",
+      agent_loop(
+        harness,
+        "record this",
         nil,
         {
           provider: "mock",

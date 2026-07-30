@@ -37,14 +37,17 @@ const issues = graphql_operation(
   {root_field: "issues"},
 )
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const envelope = graphql_execute_operation(
-    {endpoint: "https://api.linear.app/graphql", auth: {access_token: secret_get("linear/token")}},
+    {
+      endpoint: "https://api.linear.app/graphql",
+      auth: {access_token: harness.secrets.read("linear/token")},
+    },
     issues,
     {first: 25},
   )
   const page = graphql_page_info(envelope.result)
-  log(page.end_cursor)
+  harness.stdio.log(page.end_cursor)
 }
 ```
 

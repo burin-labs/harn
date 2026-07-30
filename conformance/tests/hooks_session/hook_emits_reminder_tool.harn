@@ -16,10 +16,10 @@ pipeline main(harness: Harness) {
   harness.tools.register_hook(
     {
       pattern: "hooked_tool",
-      pre: { _event ->
+      pre: { _hook_harness, _event ->
         return {reminder: {body: "pre tool reminder", tags: ["tool"], role_hint: "developer"}}
       },
-      post: { event ->
+      post: { _hook_harness, event ->
         return {
           reminder: {body: "post tool reminder", tags: ["tool"], dedupe_key: "post-tool"},
           then: {result: event.result.text + ":post-hook"},
@@ -28,12 +28,15 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "tool_1", name: "hooked_tool", arguments: {}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "call the hooked tool",
+      const result = agent_loop(
+        harness,
+        "call the hooked tool",
         nil,
         {
           provider: "mock",

@@ -3,13 +3,21 @@
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(harness: Harness, task) {
-  const r = pack_for(harness, {model: "claude-sonnet-4-5", reasoning_task: "judge", temperature: 0.42})
+  const r = pack_for(
+    harness.agent,
+    harness.llm,
+    {model: "claude-sonnet-4-5", reasoning_task: "judge", temperature: 0.42},
+  )
   assert_eq(r.temperature, 0.42)
   assert_eq(r.reasoning_task, "judge")
   // Canonical low-level pins are request fields, not pack policy aliases.
-  const direct_effort = pack_for(harness, {model: "gpt-5", effort: "high"})
+  const direct_effort = pack_for(harness.agent, harness.llm, {model: "gpt-5", effort: "high"})
   assert_eq(direct_effort.effort, "high")
-  const direct_thinking = pack_for(harness, {model: "claude-sonnet-4-5", thinking: {budget_tokens: 2048}})
+  const direct_thinking = pack_for(
+    harness.agent,
+    harness.llm,
+    {model: "claude-sonnet-4-5", thinking: {budget_tokens: 2048}},
+  )
   assert_eq(direct_thinking.thinking.budget_tokens, 2048)
   harness.stdio.log("llm_defaults_pack_user_wins passed")
 }

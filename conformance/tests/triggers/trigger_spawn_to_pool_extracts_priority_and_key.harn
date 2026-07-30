@@ -17,7 +17,10 @@ pipeline test(harness: Harness, task) {
     harness.random.range(100000, 999999),
   )
   const pool_name = "spawn-to-pool-extractor-demo-" + unique
-  const _ = pool_create({name: pool_name, max_concurrent: 1, queue: fair_round_robin("key")})
+  const _ = pool_create(
+    harness.agent,
+    {name: pool_name, max_concurrent: 1, queue: fair_round_robin("key")},
+  )
   const trigger_id = "trigger-spawn-to-pool-extract-" + unique
   const handle: TriggerHandle = harness.runtime.trigger_register(
     {
@@ -68,7 +71,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(fallback.status == "dispatched")
   harness.stdio.println(fallback.result?.priority == 0)
   harness.stdio.println(fallback.result?.key == nil)
-  const results = pool_wait([fired.result, fallback.result])
+  const results = pool_wait(harness.agent, [fired.result, fallback.result])
   harness.stdio.println(len(results) == 2)
   harness.stdio.println(results[0].result == "seed")
   harness.stdio.println(results[1].result == "seed")

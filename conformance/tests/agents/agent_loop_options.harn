@@ -8,24 +8,31 @@ pipeline default(harness: Harness) {
   harness.stdio.println(no_tools.tool_format)
   harness.stdio.println(contains(no_tools.keys(), "done_judge"))
   harness.stdio.println(contains(no_tools.keys(), "verify_completion_judge"))
-  const judged = agent_loop_options(harness, {provider: "mock", tools: tool_registry(), done_judge: true})
+  const judged = agent_loop_options(
+    harness,
+    {provider: "mock", tools: tool_registry(), done_judge: true},
+  )
   harness.stdio.println(judged.done_sentinel)
   harness.stdio.println(type_of(judged.done_judge))
   const client_search = agent_loop_options(
-    harness, {provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}},
+    harness,
+    {provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}},
   )
   harness.stdio.println(client_search.tool_format)
   const explicit_native = agent_loop_options(
-    harness, {provider: "mock", tools: tool_registry(), tool_format: "native"},
+    harness,
+    {provider: "mock", tools: tool_registry(), tool_format: "native"},
   )
   harness.stdio.println(explicit_native.tool_format)
   harness.stdio.println(contains(explicit_native.keys(), "done_sentinel"))
   const persistent_native = agent_loop_options(
-    harness, {provider: "mock", tools: tool_registry(), tool_format: "native", loop_until_done: true},
+    harness,
+    {provider: "mock", tools: tool_registry(), tool_format: "native", loop_until_done: true},
   )
   harness.stdio.println(persistent_native.done_sentinel == nil)
   const judged_native = agent_loop_options(
-    harness, {
+    harness,
+    {
       provider: "mock",
       tools: tool_registry(),
       tool_format: "native",
@@ -36,7 +43,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(judged_native.done_sentinel == nil)
   harness.stdio.println(contains(no_tools.keys(), "task_ledger"))
   const shorthand = agent_loop_options(
-    harness, {provider: "mock", root_task: " Build feature ", deliverables: ["Write code", "", "Run tests"]},
+    harness,
+    {provider: "mock", root_task: " Build feature ", deliverables: ["Write code", "", "Run tests"]},
   )
   harness.stdio.println(shorthand.task_ledger.root_task)
   harness.stdio.println(len(shorthand.task_ledger.deliverables))
@@ -44,7 +52,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(shorthand.task_ledger.deliverables[0].status)
   harness.stdio.println(shorthand.task_ledger.deliverables[1].id)
   const explicit_ledger = agent_loop_options(
-    harness, {
+    harness,
+    {
       provider: "mock",
       root_task: "ignored",
       deliverables: ["ignored"],
@@ -61,12 +70,14 @@ pipeline default(harness: Harness) {
   const default_transport = agent_loop_options(harness, {provider: "mock"})
   assert_eq(default_transport._llm_caller_transport, {forwards_assistant_prefill: false})
   const prefill_transport = agent_loop_options(
-    harness, {provider: "mock", llm_caller_transport: {forwards_assistant_prefill: true}},
+    harness,
+    {provider: "mock", llm_caller_transport: {forwards_assistant_prefill: true}},
   )
   assert_eq(prefill_transport._llm_caller_transport, {forwards_assistant_prefill: true})
   const invalid_prefill = try {
     agent_loop_options(
-      harness, {provider: "mock", llm_caller_transport: {forwards_assistant_prefill: "yes"}},
+      harness,
+      {provider: "mock", llm_caller_transport: {forwards_assistant_prefill: "yes"}},
     )
   }
   assert_eq(is_err(invalid_prefill), true)
@@ -84,9 +95,12 @@ pipeline default(harness: Harness) {
   )
   const invalid_expose_decisions = try {
     agent_loop_options(
-      harness, {provider: "mock", iteration_budget: {mode: "adaptive", expose_decisions: "yes"}},
+      harness,
+      {provider: "mock", iteration_budget: {mode: "adaptive", expose_decisions: "yes"}},
     )
   }
   harness.stdio.println(is_err(invalid_expose_decisions))
-  harness.stdio.println(contains(to_string(unwrap_err(invalid_expose_decisions)), "expose_decisions"))
+  harness.stdio.println(
+    contains(to_string(unwrap_err(invalid_expose_decisions)), "expose_decisions"),
+  )
 }

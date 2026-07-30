@@ -38,7 +38,7 @@ fn plan_reports_repairable_diagnostics_without_writing() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("repair_demo.harn");
     let source =
-        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n";
+        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
     fs::write(&script, source).unwrap();
     let before = fs::read(&script).unwrap();
 
@@ -73,7 +73,7 @@ fn plan_skips_invalid_files_and_keeps_repairing_valid_files() {
     let invalid = temp.path().join("invalid.harn");
     fs::write(
         &valid,
-        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n",
+        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
     )
     .unwrap();
     fs::write(&invalid, "fn bad() {\n").unwrap();
@@ -106,7 +106,7 @@ fn apply_writes_clean_repairs_and_reports_post_check_count() {
     let script = temp.path().join("repair_demo.harn");
     fs::write(
         &script,
-        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n",
+        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
     )
     .unwrap();
 
@@ -127,7 +127,7 @@ fn apply_directory_skips_invalid_files_after_applying_valid_files() {
     let invalid = temp.path().join("invalid.harn");
     fs::write(
         &valid,
-        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n",
+        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
     )
     .unwrap();
     fs::write(&invalid, "fn bad() {\n").unwrap();
@@ -151,7 +151,7 @@ fn apply_dry_run_reports_without_writing() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("repair_demo.harn");
     let source =
-        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n";
+        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
     fs::write(&script, source).unwrap();
 
     let result = apply_repairs(&script, RepairSafety::BehaviorPreserving, true).unwrap();
@@ -170,7 +170,6 @@ fn run_returns_error_after_reporting_skipped_files() {
         apply: false,
         dry_run: false,
         safety: None,
-        harness_threading: HarnessThreadingMode::default(),
         capability_migrations_only: false,
         json: false,
         path: temp.path().to_path_buf(),
@@ -191,7 +190,7 @@ fn apply_skips_repairs_above_safety_ceiling() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("repair_demo.harn");
     let source =
-        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n";
+        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
     fs::write(&script, source).unwrap();
 
     let result = apply_repairs(&script, RepairSafety::FormatOnly, false).unwrap();
@@ -214,7 +213,6 @@ fn apply_rejects_needs_human_safety_ceiling() {
         apply: true,
         dry_run: false,
         safety: Some(RepairSafety::NeedsHuman),
-        harness_threading: HarnessThreadingMode::default(),
         capability_migrations_only: false,
         json: false,
         path: PathBuf::from("repair_demo.harn"),
@@ -230,7 +228,7 @@ fn apply_rejects_needs_human_safety_ceiling() {
 }
 
 #[test]
-fn plan_uses_global_harness_for_stdio_repairs_by_default() {
+fn plan_threads_explicit_harness_for_stdio_repairs() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("stdio_threading.harn");
     fs::write(
@@ -246,10 +244,10 @@ fn plan_uses_global_harness_for_stdio_repairs_by_default() {
         .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
         .expect("ambient stdio repair should be present");
 
-    assert_eq!(repair.repair.id, "bindings/use-enclosing-harness-global");
+    assert_eq!(repair.repair.id, "bindings/thread-harness");
     assert_eq!(repair.repair.safety, "scope-local");
-    assert_eq!(repair.impact.classification, "local-ambient-rewrite");
-    assert!(repair.impact.signature_changes.is_empty());
+    assert_eq!(repair.impact.classification, "local-signature-threading");
+    assert!(!repair.impact.signature_changes.is_empty());
     let replacements = repair
         .edits
         .iter()
@@ -260,10 +258,10 @@ fn plan_uses_global_harness_for_stdio_repairs_by_default() {
         "expected direct call rewrite in edits: {replacements:?}"
     );
     assert!(
-        !replacements
+        replacements
             .iter()
-            .any(|replacement| replacement.contains("Harness")),
-        "default repair should not change helper signatures: {replacements:?}"
+            .any(|replacement| replacement.contains("harness: Harness")),
+        "repair should thread an explicit root Harness: {replacements:?}"
     );
 }
 
@@ -277,7 +275,6 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
         &script,
         None,
         FixOptions {
-            harness_threading: HarnessThreadingMode::ThreadParams,
             capability_migrations_only: false,
         },
     )
@@ -332,7 +329,6 @@ fn capability_only_plan_excludes_unrelated_repairs() {
         &script,
         None,
         FixOptions {
-            harness_threading: HarnessThreadingMode::ThreadParams,
             capability_migrations_only: true,
         },
     )
@@ -364,7 +360,6 @@ fn plan_json_reports_cross_module_public_signature_impact() {
         temp.path(),
         None,
         FixOptions {
-            harness_threading: HarnessThreadingMode::ThreadParams,
             capability_migrations_only: false,
         },
     )
@@ -381,8 +376,6 @@ fn plan_json_reports_cross_module_public_signature_impact() {
         })
         .expect("public fs repair should be present");
     let repair = &plan.repairs[repair_index];
-
-    assert_eq!(plan.harness_threading, "thread-params");
     assert_eq!(repair.impact.classification, "public-signature-change");
     assert!(repair.impact.requires_cross_module_caller_updates);
     assert_eq!(
@@ -424,7 +417,6 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
         RepairSafety::SurfaceChanging,
         false,
         FixOptions {
-            harness_threading: HarnessThreadingMode::ThreadParams,
             capability_migrations_only: false,
         },
     )
@@ -477,7 +469,7 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
             "random_apply.harn",
             Code::LintAmbientRandomBuiltin,
             "const value = random_int(0, 10)",
-            "harness.random.gen_range(0, 10)",
+            "harness.random.range(0, 10)",
         ),
         (
             "net_apply.harn",
@@ -503,7 +495,6 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
             RepairSafety::SurfaceChanging,
             false,
             FixOptions {
-                harness_threading: HarnessThreadingMode::ThreadParams,
                 capability_migrations_only: false,
             },
         )
@@ -538,7 +529,7 @@ fn apply_scope_local_rewrites_ambient_calls_inside_pipeline() {
     let script = temp.path().join("pipeline_direct.harn");
     fs::write(
         &script,
-        "pipeline default() {\n  println(\"hi\")\n  const home = env_or(\"HOME\", \"\")\n}\n",
+        "pipeline default(harness: Harness) {\n  println(\"hi\")\n  const home = env_or(\"HOME\", \"\")\n}\n",
     )
     .unwrap();
 
@@ -560,16 +551,16 @@ fn apply_scope_local_rewrites_ambient_calls_inside_pipeline() {
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains("pipeline default()"),
+        updated.contains("pipeline default(harness: Harness)"),
         "pipeline signature should remain stable: {updated}"
     );
     assert!(
         updated.contains("harness.stdio.println(\"hi\")"),
-        "expected stdio call to use the pipeline harness global: {updated}"
+        "expected stdio call to use the pipeline harness argument: {updated}"
     );
     assert!(
         updated.contains("harness.env.get_or(\"HOME\", \"\")"),
-        "expected env call to use the pipeline harness global: {updated}"
+        "expected env call to use the pipeline harness argument: {updated}"
     );
 }
 
@@ -579,7 +570,7 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
     let script = temp.path().join("pipeline_helper.harn");
     fs::write(
         &script,
-        "pub fn helper() {\n  println(\"hi\")\n}\n\npipeline default() {\n  helper()\n}\n",
+        "pub fn helper() {\n  println(\"hi\")\n}\n\npipeline default(harness: Harness) {\n  helper()\n}\n",
     )
     .unwrap();
 
@@ -588,7 +579,6 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
         RepairSafety::SurfaceChanging,
         false,
         FixOptions {
-            harness_threading: HarnessThreadingMode::ThreadParams,
             capability_migrations_only: false,
         },
     )
@@ -608,7 +598,7 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
     );
     assert!(
         updated.contains("helper(harness)"),
-        "expected pipeline to pass its harness global into helper: {updated}"
+        "expected pipeline to pass its harness argument into helper: {updated}"
     );
     assert!(
         updated.contains("harness.stdio.println(\"hi\")"),
@@ -617,57 +607,50 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
 }
 
 #[test]
-fn apply_scope_local_preserves_stdlib_public_signature_with_global_harness() {
+fn apply_scope_local_does_not_hide_stdlib_effects_behind_ambient_harness() {
     let temp = tempfile::TempDir::new().unwrap();
     let stdlib_dir = temp.path().join("crates/harn-stdlib/src/stdlib");
     fs::create_dir_all(&stdlib_dir).unwrap();
     let script = stdlib_dir.join("public_helper.harn");
     fs::write(
             &script,
-            "/**\n * Public API.\n *\n * @effects: []\n * @errors: []\n */\npub fn helper(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  helper(\"notes.txt\")\n}\n",
+            "/**\n * Public API.\n *\n * @effects: []\n * @errors: []\n */\npub fn helper(path: string) {\n  return read_file(path)\n}\n\npipeline default(harness: Harness) {\n  helper(\"notes.txt\")\n}\n",
         )
         .unwrap();
 
     let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
     assert!(
-        result.applied.iter().any(|repair| {
-            repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
-                && repair.repair_id == "bindings/use-enclosing-harness-global"
-        }),
+        result
+            .applied
+            .iter()
+            .all(|repair| { repair.diagnostic_code != Code::LintAmbientFsBuiltin.to_string() }),
         "{result:#?}"
     );
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
         updated.contains("pub fn helper(path: string)"),
-        "public signature should remain stable: {updated}"
+        "surface-changing migration should remain unapplied: {updated}"
     );
-    assert!(
-        updated.contains("return harness.fs.read_text(path)"),
-        "public function internals should use the VM harness global: {updated}"
-    );
-    assert!(
-        updated.contains("helper(\"notes.txt\")"),
-        "callers should not receive an inserted harness argument: {updated}"
-    );
+    assert!(updated.contains("return read_file(path)"), "{updated}");
 }
 
 #[test]
-fn apply_default_preserves_non_stdlib_public_signature_with_global_harness() {
+fn apply_scope_local_does_not_hide_private_effects_behind_ambient_harness() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("public_calls_private.harn");
     fs::write(
             &script,
-            "/** Public API. */\npub fn load(path: string) {\n  return load_inner(path)\n}\n\nfn load_inner(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  load(\"notes.txt\")\n}\n",
+            "/** Public API. */\npub fn load(path: string) {\n  return load_inner(path)\n}\n\nfn load_inner(path: string) {\n  return read_file(path)\n}\n\npipeline default(harness: Harness) {\n  load(\"notes.txt\")\n}\n",
         )
         .unwrap();
 
     let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
     assert!(
-        result.applied.iter().any(|repair| {
-            repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
-                && repair.repair_id == "bindings/use-enclosing-harness-global"
-        }),
+        result
+            .applied
+            .iter()
+            .all(|repair| { repair.diagnostic_code != Code::LintAmbientFsBuiltin.to_string() }),
         "{result:#?}"
     );
 
@@ -678,16 +661,9 @@ fn apply_default_preserves_non_stdlib_public_signature_with_global_harness() {
     );
     assert!(
         updated.contains("fn load_inner(path: string)"),
-        "private helper signature should remain stable in local-global mode: {updated}"
+        "surface-changing migration should remain unapplied: {updated}"
     );
-    assert!(
-        updated.contains("return harness.fs.read_text(path)"),
-        "private helper should use the VM harness global: {updated}"
-    );
-    assert!(
-        updated.contains("load(\"notes.txt\")"),
-        "callers should not receive an inserted harness argument: {updated}"
-    );
+    assert!(updated.contains("return read_file(path)"), "{updated}");
 }
 
 #[test]
@@ -696,7 +672,7 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
     let script = temp.path().join("public_calls_private.harn");
     fs::write(
             &script,
-            "/** Public API. */\npub fn load(path: string) {\n  return load_inner(path)\n}\n\nfn load_inner(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  load(\"notes.txt\")\n}\n",
+            "/** Public API. */\npub fn load(path: string) {\n  return load_inner(path)\n}\n\nfn load_inner(path: string) {\n  return read_file(path)\n}\n\npipeline default(harness: Harness) {\n  load(\"notes.txt\")\n}\n",
         )
         .unwrap();
 
@@ -705,7 +681,6 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
         RepairSafety::SurfaceChanging,
         false,
         FixOptions {
-            harness_threading: HarnessThreadingMode::ThreadParams,
             capability_migrations_only: false,
         },
     )
@@ -756,7 +731,6 @@ fn apply_dedupes_shared_stdio_threading_edits() {
         RepairSafety::SurfaceChanging,
         false,
         FixOptions {
-            harness_threading: HarnessThreadingMode::ThreadParams,
             capability_migrations_only: false,
         },
     )

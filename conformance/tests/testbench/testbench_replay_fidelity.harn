@@ -26,7 +26,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [{text: "fidelity-response", input_tokens: 5, output_tokens: 3, model: "mock"}],
+    harness.llm,
+    [{text: "fidelity-response", input_tokens: 5, output_tokens: 3, model: "mock"}],
     { ->
       harness.testing.clock_set(1767225600000)
       const before = harness.clock.now_ms()

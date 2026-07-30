@@ -5,7 +5,8 @@ review summaries backed by hostlib tree-sitter parsing.
 
 ## `changeset_summary` — symbol-level review header
 
-`changeset_summary(files)` accepts bounded explicit file images shaped as
+`changeset_summary(ast, files)` accepts the narrow `HarnessAst` handle and
+bounded explicit file images shaped as
 `{path, before?, after?}` and returns `harn.review_changeset.v1`. The result
 names added, removed, moved, renamed, and signature-changed symbols; separates
 structural files from reshaped-only files; and labels name-matched candidate
@@ -14,9 +15,11 @@ structural files from reshaped-only files; and labels name-matched candidate
 ```harn,ignore
 import { changeset_summary } from "std/diff"
 
-const summary = changeset_summary([
+fn summarize(ast: HarnessAst, old_source: string, new_source: string) {
+  const summary = changeset_summary(ast, [
   {path: "src/lib.rs", before: old_source, after: new_source},
-])
+  ])
+}
 ```
 
 Unsupported languages, parse failures, and resource limits produce explicit
@@ -24,7 +27,7 @@ degraded file entries instead of semantic guesses.
 
 ## `structural_diff` — syntax-aware review diff
 
-`structural_diff(path_a, path_b, options?)` compares two source files by
+`structural_diff(ast, path_a, path_b, options?)` compares two source files by
 syntax tree and returns a human-consumable structure. It is not a patch
 format; apply and staging flows should keep using unified line diffs.
 
@@ -33,17 +36,22 @@ format; apply and staging flows should keep using unified line diffs.
 ```harn,ignore
 import { structural_diff } from "std/diff"
 
-const result = structural_diff("before.rs", "after.rs", "rust")
+fn compare(ast: HarnessAst) {
+  const result = structural_diff(ast, "before.rs", "after.rs", "rust")
+}
 ```
 
 or a dict:
 
 ```harn,ignore
-const result = structural_diff(
-  "before.rs",
-  "after.rs",
-  {language: "rust", max_bytes: 1048576, max_nodes: 20000, max_graph_edges: 20000000},
-)
+fn compare_bounded(ast: HarnessAst) {
+  const result = structural_diff(
+    ast,
+    "before.rs",
+    "after.rs",
+    {language: "rust", max_bytes: 1048576, max_nodes: 20000, max_graph_edges: 20000000},
+  )
+}
 ```
 
 When both files parse and stay under the limits, the result has

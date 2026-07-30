@@ -14,7 +14,8 @@ pipeline default(harness: Harness) {
     },
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "Here is the JSON:\n```json\n{\"decision\":\"merge\",\"confidence\":0.2,\"evidence\":[]}\n```",
       ),
@@ -22,8 +23,13 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session_id = "typed-checkpoint-session"
-      const captured = agent_capture_events(harness, session_id,
-        fn() { typed_output_checkpoint(harness, "merge_captain.next_action",
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { typed_output_checkpoint(
+          harness.agent,
+          harness.llm,
+          "merge_captain.next_action",
           "Choose the next Merge Captain action.",
           schema,
           {
@@ -52,7 +58,10 @@ pipeline default(harness: Harness) {
       harness.stdio.println(checkpoint.extracted_json)
       harness.stdio.println(len(checkpoint.validator_failures))
       harness.stdio.println(
-        contains(harness.llm.mock_calls()[1].messages[0].content, "confidence must be at least 0.7"),
+        contains(
+          harness.llm.mock_calls()[1].messages[0].content,
+          "confidence must be at least 0.7",
+        ),
       )
       harness.stdio.println(captured.events[0].type)
       harness.stdio.println(captured.events[0].checkpoint.final_accepted)

@@ -13,7 +13,7 @@ pipeline default(harness: Harness) {
   harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const result = preset(harness, return_value)
-      const audits = lifecycle_audit_log_take(harness)
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("result=" + to_string(result))
       harness.stdio.println("kind=" + audits[0].kind)
       harness.stdio.println("reason=" + audits[0].payload.reason)

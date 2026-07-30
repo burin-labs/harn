@@ -16,13 +16,13 @@ pub fn count_substring(haystack: string, needle: string) -> int {
  * conformance test source, and docs/fixtures may legitimately reference
  * the literal `@xfail:` string when describing the convention.
  */
-pub fn count_xfail_markers(harness: Harness, root: string) -> int {
-  const entries = harness.fs.walk(root)
+pub fn count_xfail_markers(fs: HarnessFs, root: string) -> int {
+  const entries = fs.walk(root)
   let total = 0
   for entry in entries {
     if entry.is_file && entry.path.ends_with(".harn") {
       const text = try {
-        harness.fs.read_text(entry.path)
+        fs.read_text(entry.path)
       } catch (_) {
         ""
       }
@@ -44,7 +44,7 @@ pipeline main(harness: Harness, task) {
     harness.stdio.eprintln("${threshold_file} must contain a non-negative integer")
     return 1
   }
-  const count = count_xfail_markers(harness, "conformance")
+  const count = count_xfail_markers(harness.fs, "conformance")
   if count > threshold {
     harness.stdio.eprintln("::error::xfail count went up: ${count} > ${threshold}")
     return 1

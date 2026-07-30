@@ -1,20 +1,29 @@
-fn run_matrix(harness: Harness, args) {
-  const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
-  return shell_at(root, "bash scripts/release_runner_matrix.sh " + args)
+fn run_matrix(fs: HarnessFs, process: HarnessProcess, args) {
+  const root = dirname(dirname(fs.runtime_paths().asset_root))
+  return process.shell_at(root, "bash scripts/release_runner_matrix.sh " + args)
 }
 
-fn run_matrix_with_policy(harness: Harness, policy, args) {
-  const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
-  const path = path_join(harness.fs.workspace_temp_dir(), "release-runner-policy-" + harness.random.uuid_v7() + ".json")
-  harness.fs.write_text(path, json_stringify(policy))
-  return shell_at(
+fn run_matrix_with_policy(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  random: HarnessRandom,
+  policy,
+  args,
+) {
+  const root = dirname(dirname(fs.runtime_paths().asset_root))
+  const path = path_join(
+    fs.workspace_temp_dir(),
+    "release-runner-policy-" + random.uuid_v7() + ".json",
+  )
+  fs.write_text(path, json_stringify(policy))
+  return process.shell_at(
     root,
     "HARN_RELEASE_RUNNER_POLICY=" + path + " bash scripts/release_runner_matrix.sh " + args,
   )
 }
 
-fn matrix(harness: Harness, args) {
-  const result = run_matrix(harness, args)
+fn matrix(fs: HarnessFs, process: HarnessProcess, args) {
+  const result = run_matrix(fs, process, args)
   if !result.success {
     throw result.stderr
   }
@@ -37,11 +46,11 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
     "aarch64-unknown-linux-gnu=ubuntu-24.04-arm",
     "x86_64-pc-windows-msvc=windows-latest",
   ]
-  assert_eq(runners(matrix(harness, "--mode warm")), standard)
-  assert_eq(runners(matrix(harness, "--mode primary")), standard)
-  assert_eq(runners(matrix(harness, "--mode recovery")), standard)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), standard)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), standard)
   assert_eq(
-    cache_prefixes(matrix(harness, "--mode primary")),
+    cache_prefixes(matrix(harness.fs, harness.process, "--mode primary")),
     [
       "x86_64-apple-darwin=v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
       "aarch64-apple-darwin=v0-rust-release-aarch64-apple-darwin-Darwin-arm64-",
@@ -54,7 +63,11 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
 
 pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harness, task) {
   assert_eq(
-    matrix(harness, "--mode benchmark --profile fast --targets x86_64-apple-darwin"),
+    matrix(
+      harness.fs,
+      harness.process,
+      "--mode benchmark --profile fast --targets x86_64-apple-darwin",
+    ),
     [
       {
         target: "x86_64-apple-darwin",
@@ -66,23 +79,50 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harn
     ],
   )
   assert_eq(
-    runners(matrix(harness, "--mode recovery --profile fast --targets aarch64-apple-darwin")),
+    runners(
+      matrix(
+        harness.fs,
+        harness.process,
+        "--mode recovery --profile fast --targets aarch64-apple-darwin",
+      ),
+    ),
     ["aarch64-apple-darwin=macos-15-xlarge"],
   )
 }
 
 pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, task) {
-  assert_eq(run_matrix(harness, "--mode benchmark --profile policy").success, false)
-  assert_eq(run_matrix(harness, "--mode benchmark --profile fast").success, false)
-  assert_eq(run_matrix(harness, "--mode warm --profile fast").success, false)
-  assert_eq(run_matrix(harness, "--mode recovery --targets unknown-target").success, false)
+  assert_eq(
+    run_matrix(harness.fs, harness.process, "--mode benchmark --profile policy").success,
+    false,
+  )
+  assert_eq(
+    run_matrix(harness.fs, harness.process, "--mode benchmark --profile fast").success,
+    false,
+  )
+  assert_eq(run_matrix(harness.fs, harness.process, "--mode warm --profile fast").success, false)
+  assert_eq(
+    run_matrix(harness.fs, harness.process, "--mode recovery --targets unknown-target").success,
+    false,
+  )
   const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
   const policy = json_parse(
     harness.fs.read_text(path_join(root, ".github", "release-runner-policy.json")),
   )
-  assert_eq(run_matrix_with_policy(harness, {...policy, typo: true}, "--mode primary").success, false)
   assert_eq(
-    run_matrix_with_policy(harness, 
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {...policy, typo: true},
+      "--mode primary",
+    ).success,
+    false,
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
       {
         ...policy,
         targets: [{...policy.targets[0], runners: {...policy.targets[0].runners, typo: "runner"}}],

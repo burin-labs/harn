@@ -69,7 +69,9 @@ fn envelope(name, call_id, session_id) {
 
 pipeline default(harness: Harness) {
   // (1) Callable sink receives the standardized span shape.
-  const mw = with_telemetry(harness, { s ->
+  const mw = with_telemetry(
+    harness,
+    { s ->
       harness.stdio.println(s.name)
       harness.stdio.println(s.kind)
       harness.stdio.println(s.span_id)
@@ -97,7 +99,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(ok.ok)
   harness.stdio.println(ok.status)
   // (2) Scope-violation errors raise a tool_call.scope_violation event.
-  const scope_mw = with_telemetry(harness, { s ->
+  const scope_mw = with_telemetry(
+    harness,
+    { s ->
       harness.stdio.println(s.status)
       harness.stdio.println(s.attributes.error_category)
       harness.stdio.println(len(s.events))
@@ -112,7 +116,9 @@ pipeline default(harness: Harness) {
   const traceless_mw = with_telemetry(harness, { s -> harness.stdio.println(s.trace_id) })
   const _ = traceless_mw(envelope("read", "call_3", ""), ok_next())
   // (4) Dict config: persona + mode + extra_attributes ride along.
-  const attr_mw = with_telemetry(harness, {
+  const attr_mw = with_telemetry(
+    harness,
+    {
       sink: { s ->
         harness.stdio.println(s.attributes.persona)
         harness.stdio.println(s.attributes.mode)
@@ -127,7 +133,9 @@ pipeline default(harness: Harness) {
   // (5) Fan-out: `sinks: [..]` invokes every sink.
   const left = harness.runtime.atomic(0)
   const right = harness.runtime.atomic(0)
-  const fanout = with_telemetry(harness, {
+  const fanout = with_telemetry(
+    harness,
+    {
       sinks: [
         { _s ->
           let _ = harness.runtime.atomic_add(left, 1)

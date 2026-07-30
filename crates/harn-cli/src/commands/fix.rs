@@ -12,7 +12,7 @@ use harn_parser::{
 };
 use serde::Serialize;
 
-use crate::cli::{FixArgs, HarnessThreadingMode};
+use crate::cli::FixArgs;
 use crate::commands;
 use crate::commands::check::collect_preflight_diagnostics_with_module_graph as preflight_diagnostics;
 use crate::package::{self, CheckConfig, PreflightSeverity};
@@ -61,8 +61,6 @@ pub(crate) struct RepairPlan {
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
     pub path: String,
-    #[serde(rename = "harnessThreading")]
-    pub harness_threading: String,
     pub diagnostics: Vec<DiagnosticWire>,
     pub repairs: Vec<RepairWire>,
     #[serde(rename = "skippedFiles")]
@@ -228,12 +226,10 @@ struct AmbientCapabilityCall {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct FixOptions {
-    harness_threading: HarnessThreadingMode,
     capability_migrations_only: bool,
 }
 
 struct AmbientRepairContext {
-    harness_threading: HarnessThreadingMode,
     cross_module_importer_count: usize,
 }
 
@@ -313,7 +309,6 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
             safety,
             args.dry_run,
             FixOptions {
-                harness_threading: args.harness_threading,
                 capability_migrations_only: args.capability_migrations_only,
             },
         )?;
@@ -343,7 +338,6 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
         &args.path,
         args.safety,
         FixOptions {
-            harness_threading: args.harness_threading,
             capability_migrations_only: args.capability_migrations_only,
         },
     )?;
@@ -456,7 +450,6 @@ fn build_plan_with_options(
     Ok(RepairPlan {
         schema_version: FIX_PLAN_SCHEMA_VERSION,
         path: target_string,
-        harness_threading: options.harness_threading.as_str().to_string(),
         diagnostics,
         repairs,
         skipped_files,
@@ -683,7 +676,6 @@ fn collect_file_candidates(
         .into_iter()
         .collect::<BTreeSet<_>>();
     let ambient_context = AmbientRepairContext {
-        harness_threading: options.harness_threading,
         cross_module_importer_count: module_graph.importers_of(file).len(),
     };
 
@@ -753,7 +745,7 @@ fn collect_file_candidates(
     );
     for diag in &lint_diagnostics {
         let Some((repair, edits, impact)) =
-            lint_candidate_repair(diag, file, &source, &program, module_graph, options)
+            lint_candidate_repair(diag, file, &source, &program, module_graph)
         else {
             continue;
         };
@@ -859,9 +851,7 @@ fn is_capability_migration_repair(repair: &Repair) -> bool {
     id.starts_with("bindings/thread-harness")
         || matches!(
             id,
-            "bindings/thread-missing-harness"
-                | "bindings/prepend-capability-argument"
-                | "bindings/use-enclosing-harness-global"
+            "bindings/thread-missing-harness" | "bindings/prepend-capability-argument"
         )
 }
 
@@ -871,7 +861,6 @@ fn lint_candidate_repair(
     source: &str,
     program: &[SNode],
     module_graph: &harn_modules::ModuleGraph,
-    options: FixOptions,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     if ambient_capability_handle(diag.code).is_some() {
         let exported_names = module_graph
@@ -879,7 +868,6 @@ fn lint_candidate_repair(
             .into_iter()
             .collect::<BTreeSet<_>>();
         let context = AmbientRepairContext {
-            harness_threading: options.harness_threading,
             cross_module_importer_count: module_graph.importers_of(file).len(),
         };
         return synthesize_ambient_capability_repair(
@@ -921,18 +909,10 @@ fn synthesize_ambient_capability_repair(
             && call.span.start == diag.span.start
             && call.span.end == diag.span.end
     })?;
-    let owner_uses_global_harness = should_use_global_harness(owner, context);
-    let replacement_binding = if owner_uses_global_harness {
-        Some("harness".to_string())
-    } else {
-        None
-    }
-    .or_else(|| {
-        owner
-            .harness_binding
-            .clone()
-            .or_else(|| harness_param_name_for_insert(owner).map(str::to_string))
-    });
+    let replacement_binding = owner
+        .harness_binding
+        .clone()
+        .or_else(|| harness_param_name_for_insert(owner).map(str::to_string));
     let replacement =
         ambient_replacement(diag.code, &ambient.name, replacement_binding.as_deref())?;
     let mut edits =
@@ -945,15 +925,7 @@ fn synthesize_ambient_capability_repair(
             RepairImpactWire::local_ambient("existing-harness-binding"),
         ));
     }
-    if owner_uses_global_harness {
-        return Some((
-            use_enclosing_harness_global_repair(diag.code)?,
-            edits,
-            RepairImpactWire::local_ambient("use-enclosing-harness-global"),
-        ));
-    }
-
-    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx, context);
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
     let primary_call_start = owner
         .ambient_capability_calls
         .iter()
@@ -985,7 +957,6 @@ fn synthesize_ambient_capability_repair(
             let caller = &infos[caller_idx];
             let arg_name = match caller.harness_binding.as_deref() {
                 Some(binding) => binding,
-                None if should_use_global_harness(caller, context) => "harness",
                 None if needed.contains(&caller_idx) => harness_param_name_for_insert(caller)?,
                 None => continue,
             };
@@ -1042,16 +1013,6 @@ fn synthesize_missing_capability_argument_repair(
     ))
 }
 
-fn should_use_global_harness(info: &CallableInfo, context: &AmbientRepairContext) -> bool {
-    if info.bound_names.contains("harness") {
-        return false;
-    }
-    match context.harness_threading {
-        HarnessThreadingMode::LocalGlobal => true,
-        HarnessThreadingMode::ThreadParams => false,
-    }
-}
-
 fn synthesize_missing_harness_repair(
     span: Span,
     source: &str,
@@ -1059,9 +1020,6 @@ fn synthesize_missing_harness_repair(
     exported_names: &BTreeSet<String>,
     context: &AmbientRepairContext,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    if context.harness_threading != HarnessThreadingMode::ThreadParams {
-        return None;
-    }
     let infos = collect_callable_infos(program, source, exported_names);
     let owner_idx = infos
         .iter()
@@ -1073,7 +1031,7 @@ fn synthesize_missing_harness_repair(
         return None;
     }
     let reverse_callers = build_reverse_callers(&infos);
-    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx, context);
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
     let mut edits = Vec::new();
     for &idx in &needed {
         edits.push(add_harness_param_edit(&infos[idx])?);
@@ -1107,19 +1065,6 @@ fn synthesize_missing_harness_repair(
         dedupe_edits(edits),
         repair_impact_for_signature_threading(&infos, &needed, context.cross_module_importer_count),
     ))
-}
-
-fn use_enclosing_harness_global_repair(code: Code) -> Option<Repair> {
-    let capability = ambient_capability_handle(code)?;
-    Some(Repair {
-        id: harn_parser::RepairId::from_owned(
-            "bindings/use-enclosing-harness-global".to_string(),
-        ),
-        summary: format!(
-            "Use the VM-level `harness` binding for ambient {capability} calls without changing helper signatures"
-        ),
-        safety: RepairSafety::ScopeLocal,
-    })
 }
 
 fn repair_impact_for_signature_threading(
@@ -1452,7 +1397,6 @@ fn propagate_harness_requirements(
     infos: &[CallableInfo],
     reverse_callers: &[Vec<(usize, usize)>],
     owner_idx: usize,
-    context: &AmbientRepairContext,
 ) -> BTreeSet<usize> {
     let mut needed = BTreeSet::from([owner_idx]);
     let mut changed = true;
@@ -1462,7 +1406,6 @@ fn propagate_harness_requirements(
         for callee_idx in snapshot {
             for &(caller_idx, _) in &reverse_callers[callee_idx] {
                 if infos[caller_idx].harness_binding.is_none()
-                    && !should_use_global_harness(&infos[caller_idx], context)
                     && infos[caller_idx].can_add_harness_param
                     && needed.insert(caller_idx)
                 {

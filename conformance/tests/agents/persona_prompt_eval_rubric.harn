@@ -70,27 +70,33 @@ fn trial_rows(
 
 fn comparison(baseline: list, treatment: list, split: string = "meter-holdout") -> dict {
   return persona_prompt_eval_comparison(
-    baseline,
-    treatment,
-    "baseline",
-    "treatment",
-    "mock",
-    split,
-    EXPECTED_CASE_FINGERPRINTS,
-    EXPECTED_HARNESS_FINGERPRINT,
+    {
+      baseline_rows: baseline,
+      treatment_rows: treatment,
+      baseline_commit: "baseline",
+      treatment_commit: "treatment",
+      model: "mock",
+      split: split,
+      expected_case_fingerprints: EXPECTED_CASE_FINGERPRINTS,
+      expected_harness_fingerprint: EXPECTED_HARNESS_FINGERPRINT,
+    },
   )
 }
 
 @test
 pipeline test_persona_prompt_eval_rubric(harness: Harness, _task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up work.\",\"goal\":\"Surface replies every four hours.\",\"template\":\"deterministic-sweeper\",\"source\":{\"kind\":\"cron\",\"cron\":\"0 */4 * * *\",\"timezone\":\"UTC\"}}",
       ),
     ],
     { ->
-      const receipt = persona_compile_prompt(harness, "Create a reply digest every four hours in UTC.",
+      const receipt = persona_compile_prompt(
+        harness.agent,
+        harness.llm,
+        "Create a reply digest every four hours in UTC.",
         {provider: "mock", name_override: "reply_digest"},
         PROVIDERS,
       )
@@ -149,7 +155,9 @@ pipeline test_persona_prompt_eval_rubric(harness: Harness, _task) {
   assert_eq(len(pack.split["meter-tune"]), 6)
   assert_eq(len(pack.split["meter-holdout"]), 6)
   assert_eq(len(unique(pack.split["meter-tune"] + pack.split["meter-holdout"])), 12)
-  const projected = persona_prompt_eval_manifest(harness, pack,
+  const projected = persona_prompt_eval_manifest(
+    harness.fs,
+    pack,
     "meter-holdout",
     5,
     "mock",

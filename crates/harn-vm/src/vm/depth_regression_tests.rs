@@ -45,7 +45,7 @@ fn non_tail_recursion_fails_with_bounded_vm_stack_trace() {
     let limits = limits_with_max_frames(16);
     let (vm, result) = execute_with_limits(
         r"
-pipeline main() {
+pipeline main(harness: Harness) {
   fn dive(n: int) -> int {
     if n <= 0 {
       return 0
@@ -78,14 +78,14 @@ pipeline main() {
 fn tail_recursive_countdown_runs_beyond_frame_limit() {
     let (vm, result) = execute_with_limits(
         r"
-pipeline main() {
+pipeline main(harness: Harness) {
   fn countdown(n: int, acc: int) -> int {
     if n <= 0 {
       return acc
     }
     return countdown(n - 1, acc + 1)
   }
-  log(countdown(200, 0))
+  harness.stdio.log(countdown(200, 0))
 }
 ",
         limits_with_max_frames(8),
@@ -107,7 +107,7 @@ fn tracked_countdown(n: int) -> int {
   return tracked_countdown(n - 1)
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   tracked_countdown(64)
 }
 "#,
@@ -129,7 +129,7 @@ pipeline main() {
 fn callback_methods_do_not_accumulate_frames_per_item() {
     let (vm, result) = execute_with_limits(
         r"
-pipeline main() {
+pipeline main(harness: Harness) {
   const xs = range(0, 256).to_list()
   const mapped = xs.map({ x -> x + 1 })
   const filtered = mapped.filter({ x -> x % 64 == 0 })
@@ -140,10 +140,10 @@ pipeline main() {
     .map({ x -> x % 11 })
     .filter({ x -> x < 3 })
 
-  log(len(mapped))
-  log(filtered[0])
-  log(dict.count())
-  log(set_out.count())
+  harness.stdio.log(len(mapped))
+  harness.stdio.log(filtered[0])
+  harness.stdio.log(dict.count())
+  harness.stdio.log(set_out.count())
 }
 ",
         limits_with_max_frames(8),
@@ -160,7 +160,7 @@ pipeline main() {
 fn recursive_callback_body_uses_same_frame_budget() {
     let (_vm, result) = execute_with_limits(
         r"
-pipeline main() {
+pipeline main(harness: Harness) {
   fn recurse(n: int) -> int {
     if n <= 0 {
       return 0

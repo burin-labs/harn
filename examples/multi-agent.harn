@@ -23,7 +23,9 @@ pipeline main(harness: Harness, task) {
   const workers = []
   for sub in subtasks {
     const worker_session = harness.agent.fork(parent_session)
-    const worker = spawn_agent(harness.agent, {
+    const worker = spawn_agent(
+      harness.agent,
+      {
         name: sub.name,
         task: sub.prompt,
         node: {
@@ -48,7 +50,9 @@ pipeline main(harness: Harness, task) {
   harness.stdio.log("")
   harness.stdio.log("=== Aggregated Results ===")
   for r in results {
-    harness.stdio.log("${r?.name}: artifacts=${r?.artifact_count}, has_transcript=${r?.has_transcript}")
+    harness.stdio.log(
+      "${r?.name}: artifacts=${r?.artifact_count}, has_transcript=${r?.has_transcript}",
+    )
   }
   harness.stdio.log("Total agents completed: ${len(results)}")
   // Clean up

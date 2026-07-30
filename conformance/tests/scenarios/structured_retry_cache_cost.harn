@@ -8,7 +8,8 @@ pipeline test_structured_retry_cache_cost(harness: Harness) {
     properties: {decision: {type: "string", enum: ["merge", "wait"]}},
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "{\"decision\":42}",
         provider: "anthropic",

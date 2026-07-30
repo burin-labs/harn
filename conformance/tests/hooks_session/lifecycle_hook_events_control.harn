@@ -12,7 +12,10 @@
 pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   // PreSuspend Block.
-  harness.agent.register_session_hook("pre_suspend", { _event -> return {block: true, reason: "operator hold"} })
+  harness.agent.register_session_hook(
+    "pre_suspend",
+    { _hook_harness, _event -> return {block: true, reason: "operator hold"} },
+  )
   const pre_suspend = __host_fire_session_hook(
     "pre_suspend",
     {worker: {id: "w1"}, reason: "self-park"},
@@ -21,7 +24,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println("pre_suspend.reason=" + pre_suspend.reason)
   harness.agent.clear_session_hooks()
   // PreResume Modify rewrites resume_input.
-  harness.agent.register_session_hook("pre_resume", { _event -> return {modify: {resume_input: "amended task"}} })
+  harness.agent.register_session_hook(
+    "pre_resume",
+    { _hook_harness, _event -> return {modify: {resume_input: "amended task"}} },
+  )
   const pre_resume = __host_fire_session_hook(
     "pre_resume",
     {worker: {id: "w1"}, resume_input: "original task"},
@@ -32,7 +38,7 @@ pipeline default(harness: Harness) {
   // OnDrainDecision Block short-circuits the tool call.
   harness.agent.register_session_hook(
     "on_drain_decision",
-    { _event -> return {block: true, reason: "policy violation"} },
+    { _hook_harness, _event -> return {block: true, reason: "policy violation"} },
   )
   const drain = __host_fire_session_hook(
     "on_drain_decision",
@@ -44,7 +50,7 @@ pipeline default(harness: Harness) {
   // OnUnsettledDetected Block prevents finish until settled.
   harness.agent.register_session_hook(
     "on_unsettled_detected",
-    { _event -> return {block: true, reason: "settle before exit"} },
+    { _hook_harness, _event -> return {block: true, reason: "settle before exit"} },
   )
   const unsettled = __host_fire_session_hook(
     "on_unsettled_detected",

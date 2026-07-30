@@ -1,4 +1,5 @@
-import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
 // Deterministic pre-approval tool-deny seam (harn pre-approval deny seam).
 //
 // Regression for the 2026-07-18 Burin dogfood repro: a `run` command that the
@@ -50,7 +51,9 @@ pipeline default(harness: Harness) {
   const asking_policy = {require_approval: ["run"]}
   // 1. Precheck denies BEFORE the approval prompt: the gate is the precheck,
   //    not any approval outcome, so no permission request was emitted.
-  const denied = agent_dispatch_tool_call(harness, {id: "c1", name: "run", arguments: {command: "ls src"}},
+  const denied = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c1", name: "run", arguments: {command: "ls src"}},
     tools,
     {approval_policy: asking_policy, tool_precheck: ls_precheck()},
   )
@@ -78,7 +81,9 @@ pipeline default(harness: Harness) {
   //    the precheck gate (it either reaches the approval prompt or, under an
   //    auto-approving host, succeeds), confirming the precheck — not some other
   //    gate — is what suppressed the prompt in case 1.
-  const asked = agent_dispatch_tool_call(harness, {id: "c2", name: "run", arguments: {command: "ls src"}},
+  const asked = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c2", name: "run", arguments: {command: "ls src"}},
     tools,
     {approval_policy: asking_policy},
   )
@@ -88,7 +93,9 @@ pipeline default(harness: Harness) {
   )
   // 3. A precheck that returns nil (allows) does NOT block: the call falls
   //    through to the normal gates exactly as without a precheck.
-  const allowed = agent_dispatch_tool_call(harness, {id: "c3", name: "run", arguments: {command: "cargo build"}},
+  const allowed = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c3", name: "run", arguments: {command: "cargo build"}},
     tools,
     {approval_policy: asking_policy, tool_precheck: ls_precheck()},
   )

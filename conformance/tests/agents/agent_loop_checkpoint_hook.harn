@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 /**
  * Verifies `harness.agent.register_checkpoint_hook(kinds, handler)` fires for every
  * agent-loop seam declared in the kinds list and ignores seams outside
@@ -7,10 +8,12 @@ import { agent_loop } from "std/agent/loop"
  */
 pipeline main(harness: Harness) {
   harness.agent.clear_session_hooks()
-  const observed = harness.runtime.shared_cell({scope: "task_group", key: "checkpoint-kinds", initial: ""})
+  const observed = harness.runtime.shared_cell(
+    {scope: "task_group", key: "checkpoint-kinds", initial: ""},
+  )
   harness.agent.register_checkpoint_hook(
     ["iteration_start", "pre_tool_dispatch", "loop_exit"],
-    { event ->
+    { _hook_harness, event ->
       const snap = harness.runtime.shared_snapshot(observed)
       harness.runtime.shared_set(observed, snap.value + event.kind + ",")
       return nil
@@ -22,7 +25,9 @@ pipeline main(harness: Harness) {
       value: {text: "ack ##DONE##", tool_calls: [], provider: "mock", model: "mock"},
     }
   }
-  const result = agent_loop(harness, "hi",
+  const result = agent_loop(
+    harness,
+    "hi",
     nil,
     {
       provider: "mock",

@@ -11,7 +11,7 @@ import { cache_clear, mem_cache, with_cache, with_cache_envelope } from "std/cac
 
 pipeline default(harness: Harness) {
   const store = mem_cache({namespace: "with-cache-basic-" + harness.random.uuid(), ttl: "5s"})
-  cache_clear(harness, {store: store})
+  cache_clear(harness.llm, {store: store})
   const compute_count = harness.runtime.atomic(0)
   const opts = {store: store}
   const first = with_cache_envelope(
@@ -44,7 +44,7 @@ pipeline default(harness: Harness) {
   harness.testing.clock_set(1000000000000)
   const ttl_store = mem_cache({namespace: "with-cache-ttl-" + harness.random.uuid(), ttl: "5s"})
   const ttl_opts = {store: ttl_store}
-  cache_clear(harness, ttl_opts)
+  cache_clear(harness.llm, ttl_opts)
   with_cache_envelope(harness, "ttl-key", fn() { return "stored-once" }, ttl_opts)
   const fresh = with_cache_envelope(harness, "ttl-key", fn() { return "would-recompute" }, ttl_opts)
   harness.stdio.println("fresh.hit=" + to_string(fresh.hit))

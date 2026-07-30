@@ -1,5 +1,5 @@
-import { sub_agent_request, sub_agent_run, wait_agent } from "std/agent/workers"
 import { agent_loop } from "std/agent/loop"
+import { sub_agent_run } from "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn child_tools() {
@@ -35,7 +35,9 @@ fn parent_tools(harness: Harness) {
     "Run a sub-agent",
     {
       handler: { args ->
-        sub_agent_run(harness, args.task,
+        sub_agent_run(
+          harness,
+          args.task,
           {
             provider: "mock",
             tools: child_tools(),
@@ -54,7 +56,8 @@ fn parent_tools(harness: Harness) {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "parent_1", name: "delegate", arguments: {task: "Find the config path"}}]},
       {tool_calls: [{id: "child_1", name: "search", arguments: {query: "config path"}}]},
       {tool_calls: [{id: "child_2", name: "read", arguments: {path: "crates/harn-vm/src/lib.rs"}}]},
@@ -62,7 +65,9 @@ pipeline main(harness: Harness) {
       llm_text("Delegation complete."),
     ],
     { ->
-      const result = agent_loop(harness, "Investigate the config path",
+      const result = agent_loop(
+        harness,
+        "Investigate the config path",
         "You are helpful.",
         {provider: "mock", tools: parent_tools(harness), tool_format: "native", max_iterations: 2},
       )

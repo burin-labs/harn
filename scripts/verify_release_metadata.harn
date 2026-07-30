@@ -299,14 +299,14 @@ pub fn success_message(version: string, effective_version: string) -> string {
  * only failure mode is a missing/empty `## v<version>` section, which
  * `extract_section` throws on — mirroring the non-zero subprocess exit.
  */
-fn verify_release_notes(harness: Harness, version: string) {
-  const changelog = harness.fs.read_text(CHANGELOG_PATH)
+fn verify_release_notes(fs: HarnessFs, stdio: HarnessStdio, version: string) {
+  const changelog = fs.read_text(CHANGELOG_PATH)
   const normalized = normalize_version(version)
   const section = try {
     extract_section(changelog, normalized)
   } catch (err) {
-    harness.stdio.eprintln("error: failed to render release notes for current version")
-    harness.stdio.eprintln("${err}")
+    stdio.eprintln("error: failed to render release notes for current version")
+    stdio.eprintln("${err}")
     throw "release-notes-failed"
   }
   // render_notes is total given a valid section; exercising it confirms the
@@ -320,32 +320,28 @@ fn verify_release_notes(harness: Harness, version: string) {
  * Passes when the tag is absent, HEAD is at/descends from the tagged
  * commit, or HEAD carries an equivalent `Release vX.Y.Z` commit.
  */
-fn verify_tag_state(harness: Harness, version: string) {
+fn verify_tag_state(process: HarnessProcess, version: string) {
   const tag = "v" + version
-  const tag_lookup = harness.process.run(
-    {cmd: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]},
+  const tag_lookup = process.run(
+    {program: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]},
   )
   if !tag_lookup.success {
     return
   }
-  const head = harness.process.run({cmd: "git", args: ["rev-parse", "HEAD"]}).stdout
-    .trim()
-  const tag_commit = harness.process.run(
-    {cmd: "git", args: ["rev-list", "-n", "1", tag]},
-  ).stdout
-    .trim()
+  const head = process.run({program: "git", args: ["rev-parse", "HEAD"]}).stdout.trim()
+  const tag_commit = process.run({program: "git", args: ["rev-list", "-n", "1", tag]}).stdout.trim()
   if head == tag_commit {
     return
   }
-  const is_descendant = harness.process.run(
-    {cmd: "git", args: ["merge-base", "--is-ancestor", tag_commit, head]},
+  const is_descendant = process.run(
+    {program: "git", args: ["merge-base", "--is-ancestor", tag_commit, head]},
   )
   if is_descendant.success {
     return
   }
-  const rebrand = harness.process.run(
+  const rebrand = process.run(
     {
-      cmd: "git",
+      program: "git",
       args: [
         "log",
         "--format=%H",
@@ -390,8 +386,8 @@ pipeline main(harness: Harness, task) {
     }
     const acp_manifest_text = harness.fs.read_text(ACP_AGENT_MANIFEST_PATH)
     check_acp_agent_manifest(acp_manifest_text, version)
-    verify_release_notes(harness, effective_version)
-    verify_tag_state(harness, effective_version)
+    verify_release_notes(harness.fs, harness.stdio, effective_version)
+    verify_tag_state(harness.process, effective_version)
     harness.stdio.println(success_message(version, effective_version))
     return 0
   } catch (e) {

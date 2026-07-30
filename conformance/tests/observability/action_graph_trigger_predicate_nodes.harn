@@ -1,4 +1,5 @@
 import { workflow_execute } from "std/workflow/execute"
+
 pipeline main(harness: Harness) {
   const flow = workflow_graph(
     {
@@ -38,7 +39,9 @@ pipeline main(harness: Harness) {
     },
     signature_status: {state: "unsigned"},
   }
-  const result = workflow_execute(harness, "Handle a scheduled review",
+  const result = workflow_execute(
+    harness,
+    "Handle a scheduled review",
     flow,
     [artifact({kind: "plan", text: "go inspect the repo"})],
     {

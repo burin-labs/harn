@@ -5,9 +5,9 @@ import { edit_inline, edit_move_decl } from "std/edit"
  * Inline covers the zero-parameter / single-return safe subset plus its
  * unsupported gates; move_decl exercises a two-file atomic transaction.
  */
-fn write_fixture(harness: Harness, dir: string, name: string, body: string) -> string {
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
-  harness.fs.write_text(path, body)
+  fs.write_text(path, body)
   return path
 }
 
@@ -19,7 +19,7 @@ pipeline default(harness: Harness) {
   harness.fs.mkdir(root)
   // 1) Rust inline: replace both calls with the body expr, delete the def.
   const rs_path = write_fixture(
-    harness,
+    harness.fs,
     root,
     "answer.rs",
     "fn answer() -> i64 {\n    return 42\n}\nfn user() {\n    let a = answer();\n    let b = answer();\n}\n",
@@ -37,7 +37,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(!contains(rs_after, "fn answer"))
   // 2) Python inline.
   const py_path = write_fixture(
-    harness,
+    harness.fs,
     root,
     "answer.py",
     "def answer():\n    return 42\n\nx = answer()\n",
@@ -53,7 +53,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(!contains(harness.fs.read_text(py_path), "def answer"))
   // 3) Unsupported: parameterized function.
   const inc_path = write_fixture(
-    harness,
+    harness.fs,
     root,
     "inc.py",
     "def inc(n):\n    return n + 1\n\ny = inc(1)\n",
@@ -63,19 +63,24 @@ pipeline default(harness: Harness) {
       .result,
   )
   // 4) Unsupported: multi-statement body.
-  const two_path = write_fixture(harness, root, "two.py", "def two():\n    a = 1\n    return a\n")
+  const two_path = write_fixture(
+    harness.fs,
+    root,
+    "two.py",
+    "def two():\n    a = 1\n    return a\n",
+  )
   harness.stdio.println(
     edit_inline(harness.fs, harness.random, harness.ast, {path: two_path, symbol: {name: "two"}})
       .result,
   )
   // 5) move_decl: lift `helper` from a.py into b.py atomically (two files).
   const a_path = write_fixture(
-    harness,
+    harness.fs,
     root,
     "a.py",
     "import os\n\ndef helper(x):\n    return x + 1\n\ndef main():\n    return helper(2)\n",
   )
-  const b_path = write_fixture(harness, root, "b.py", "# target\n")
+  const b_path = write_fixture(harness.fs, root, "b.py", "# target\n")
   const mv = edit_move_decl(
     harness.fs,
     harness.random,

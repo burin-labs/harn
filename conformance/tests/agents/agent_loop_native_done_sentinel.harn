@@ -19,13 +19,16 @@ fn tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "", tool_calls: [{id: "lookup1", name: "lookup", arguments: {}}]},
       llm_text("Final answer without sentinel."),
       llm_text("##DONE##"),
     ],
     { ->
-      const result = agent_loop(harness, "Use the tool, then finish.",
+      const result = agent_loop(
+        harness,
+        "Use the tool, then finish.",
         nil,
         {
           provider: "mock",

@@ -23,7 +23,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("passthrough_kind=" + passthrough.kind)
       harness.stdio.println("passthrough_consumed=" + to_string(passthrough.consumed_tokens))
       harness.stdio.println("same_keys=" + to_string(len(keys(passthrough)) == len(keys(state))))
-      const audits = lifecycle_audit_log_take(harness)
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind_0=" + audits[0].kind)
       harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)

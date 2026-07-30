@@ -1,7 +1,7 @@
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn tools(harness: Harness) {
+fn tools(stdio: HarnessStdio) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -17,16 +17,16 @@ fn tools(harness: Harness) {
             reason: "Verifying propagate=none is dropped at handoff",
           },
         )
-        harness.stdio.println(len(record.reminder_propagation))
-        harness.stdio.println(record.reminder_propagation[0].body)
-        harness.stdio.println(record.reminder_propagation[0].source)
+        stdio.println(len(record.reminder_propagation))
+        stdio.println(record.reminder_propagation[0].body)
+        stdio.println(record.reminder_propagation[0].source)
         let saw_none = false
         for entry in record.reminder_propagation {
           if entry.body == "dropped at handoff" {
             saw_none = true
           }
         }
-        harness.stdio.println(saw_none)
+        stdio.println(saw_none)
         record
       },
       parameters: {},
@@ -64,7 +64,7 @@ pipeline main(harness: Harness) {
         {
           provider: "mock",
           session_id: parent,
-          tools: tools(harness),
+          tools: tools(harness.stdio),
           tool_format: "native",
           max_iterations: 2,
           done_judge: nil,

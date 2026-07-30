@@ -131,20 +131,27 @@ pub fn payload_schema() -> dict
 Optional lifecycle exports:
 
 ```harn,ignore
-pub fn init(ctx)
-pub fn activate(bindings)
-pub fn shutdown()
-pub fn call(method, args)
-pub fn poll_tick(ctx)
+pub fn init(harness: Harness, ctx)
+pub fn activate(harness: Harness, bindings)
+pub fn shutdown(harness: Harness)
+pub fn call(harness: Harness, method, args)
+pub fn poll_tick(harness: Harness, ctx)
 ```
 
 Inbound providers must also export:
 
 ```harn,ignore
-pub fn normalize_inbound(raw) -> dict
+pub fn normalize_inbound(harness: Harness, raw) -> dict
 ```
 
-`normalize_inbound(raw)` returns a dict with:
+Static metadata exports are pure. Every runtime export is an execution
+boundary and must declare `harness: Harness` as its first parameter; contract
+loading rejects an untyped or ambient entrypoint before activation. Inside an
+export, pass only the narrow nominal handle a helper needs—for example,
+`verify_signature(harness.secrets, raw)` or
+`record_delivery(harness.obs, event)`.
+
+`normalize_inbound(harness, raw)` returns a dict with:
 
 - `type`: one of `"event"`, `"batch"`, `"immediate_response"`, or `"reject"`
 
@@ -218,26 +225,28 @@ Each event dict contains:
 - `batch?`: optional list payload for batched deliveries
 - `signature_status?`: optional `{ state = "verified" | "unsigned" | "failed", ... }`
 
-Harn-side connectors get three connector-only builtins during connector export
-execution:
+Connector-local effects use the same Harness capabilities as every other Harn
+program:
 
-- `secret_get(secret_id)` reads from the orchestrator secret providers
-- `event_log_emit(topic, kind, payload, headers?)` appends to the active event log
-- `metrics_inc(name, amount?)` increments a Prometheus counter rendered as `connector_custom_<name>_total`
+- `harness.secrets.read(secret_id)` reads from the orchestrator secret providers
+- `harness.obs.event_log_emit(topic, kind, payload, headers?)` appends to the active event log
+- `harness.obs.metrics_inc(name, amount?)` increments a Prometheus counter rendered as `connector_custom_<name>_total`
 
-Connector exports run under a default effect policy. `normalize_inbound(raw)` is
-the ingress hot path, so its default policy allows deterministic local work plus
-`secret_get`, `event_log_emit`, and `metrics_inc`, while rejecting outbound
+Connector exports run under a default effect policy.
+`normalize_inbound(harness, raw)` is the ingress hot path, so its default policy
+allows deterministic local work plus secret reads, observability emission,
+clock reads, and connector-state reads, while rejecting outbound
 network calls, LLM calls, process execution, connector client calls, host calls,
-MCP calls, and ambient filesystem/project access. This keeps webhook ack paths
+MCP calls, and filesystem/project access. This keeps webhook ack paths
 fast and testable without external dependencies.
 
-`poll_tick(ctx)` and `call(method, args)` use the connector-outbound class:
-they may use `connector_call` and normal network builtins, but still reject
-ambient filesystem/project access, process execution, LLM calls, host calls, and
-MCP calls unless a trusted host overrides the policy. `activate(bindings)` uses
-the activation class, which permits connector/network setup work under the same
-filesystem/process/LLM restrictions.
+`poll_tick(harness, ctx)` and `call(harness, method, args)` use the
+connector-outbound class: they may use `harness.net.connector_call` and normal
+`harness.net` methods, but still reject filesystem/project access, process
+execution, LLM calls, host calls, and MCP calls unless a trusted host overrides
+the policy. `activate(harness, bindings)` uses the activation class, which
+permits connector/network setup work under the same filesystem/process/LLM
+restrictions.
 
 Hosts embedding `HarnConnector` can override defaults for trusted private
 connectors with `HarnConnector::load_with_effect_policies` and
@@ -276,12 +285,12 @@ v1:
 | `provider_id()` | Yes | Returns a non-empty string matching the manifest provider id |
 | `kinds()` | Yes | Returns at least one non-empty trigger kind string |
 | `payload_schema()` | Yes | Returns `{harn_schema_name, json_schema?}` compatible with `ProviderPayloadSchema` |
-| `normalize_inbound(raw)` | For inbound fixtures | Returns a supported `NormalizeResult` v1 shape |
-| `init(ctx)` | No | Runs with in-memory event log, secrets, metrics, inbox, and rate-limit handles |
-| `activate(bindings)` | No | Accepts deterministic bindings for non-poll kinds |
-| `shutdown()` | No | Runs after checks so connector cleanup paths are exercised |
-| `call(method, args)` | No | May return data or throw `method_not_found:<method>` for an unknown probe method |
-| `poll_tick(ctx)` | Required for `poll` kind | Presence is checked by default; pass `--run-poll-tick` to execute the first tick |
+| `normalize_inbound(harness, raw)` | For inbound fixtures | Returns a supported `NormalizeResult` v1 shape |
+| `init(harness, ctx)` | No | Runs with an isolated Harness backed by in-memory connector services |
+| `activate(harness, bindings)` | No | Accepts deterministic bindings for non-poll kinds |
+| `shutdown(harness)` | No | Runs after checks so connector cleanup paths are exercised |
+| `call(harness, method, args)` | No | May return data or throw `method_not_found:<method>` for an unknown probe method |
+| `poll_tick(harness, ctx)` | Required for `poll` kind | Presence is checked by default; pass `--run-poll-tick` to execute the first tick |
 
 The harness catches common drift such as returning a raw schema object with a
 `name` field instead of `harn_schema_name`, or returning an ack wrapper like
@@ -391,11 +400,11 @@ pub fn payload_schema() {
   }
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
-  const token = secret_get("echo/api-token")
-  metrics_inc("echo_normalize_calls")
-  event_log_emit("connectors.echo.lifecycle", "normalize", {
+  const token = harness.secrets.read("echo/api-token")
+  harness.obs.metrics_inc("echo_normalize_calls")
+  harness.obs.event_log_emit("connectors.echo.lifecycle", "normalize", {
     binding_id: raw.binding_id,
   })
   return {
@@ -413,7 +422,7 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, args) {
+pub fn call(_harness: Harness, method, args) {
   if method == "ping" {
     return { message: args.message }
   }
@@ -426,8 +435,8 @@ pub fn call(method, args) {
 `binding_id`, `binding_version`, and `binding_path`.
 
 Poll-based Harn connectors declare a manifest `kind = "poll"` trigger and
-export `poll_tick(ctx)`. The orchestrator calls `poll_tick` on the configured
-interval and passes:
+export `poll_tick(harness, ctx)`. The orchestrator calls `poll_tick` on the
+configured interval and passes:
 
 - `binding`: the activated trigger binding, including its connector config
 - `binding_id`: the trigger binding id
@@ -444,7 +453,7 @@ The `poll` config accepts `interval`, `interval_ms`, or `interval_secs`;
 `cursor_state_key`); `tenant_id`; `lease_id`; and `max_batch_size`.
 Durations use `ms`, `s`, `m`, or `h` suffixes when supplied as strings.
 
-`poll_tick(ctx)` returns either a list of normalized event dicts or:
+`poll_tick(harness, ctx)` returns either a list of normalized event dicts or:
 
 ```harn
 {
@@ -526,11 +535,16 @@ import {
   git_forge_pull_request_topic,
 } from "std/connectors/shared"
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
   const forge = git_forge_pull_request_event("github", body)
   if forge != nil {
-    event_log_emit(git_forge_pull_request_topic(), forge.kind, forge, {provider: "github"})
+    harness.obs.event_log_emit(
+      git_forge_pull_request_topic(),
+      forge.kind,
+      forge,
+      {provider: "github"},
+    )
   }
   const kind = if body.action == nil {
     "pull_request"

@@ -11,13 +11,17 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   harness.obs.pipeline_lifecycle_audit_log_take()
   harness.channels.guardrail_clear()
-  const id = llm_risk_classifier(harness, {model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"},
+  const id = llm_risk_classifier(
+    harness.channels,
+    harness.llm,
+    {model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"},
   )
   harness.stdio.println(id)
   /* Confident block — adversarial payload, classifier returns
    * verdict=block with confidence=0.95. */
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"verdict\": \"block\", \"confidence\": 0.95,"
           + " \"reason\": \"exfiltration attempt\","
@@ -33,7 +37,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"verdict\": \"block\", \"confidence\": 0.4,"
           + " \"reason\": \"maybe spammy\", \"category\": \"social_engineering\"}",
@@ -46,7 +51,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"verdict\": \"allow\", \"confidence\": 0.99,"
           + " \"reason\": \"safe\", \"category\": \"none\"}",

@@ -3,7 +3,9 @@ import { agent_capture_events } from "std/agent/events"
 pipeline main(harness: Harness) {
   const session = harness.agent.open("artifact-emit-conformance")
   harness.agent.reset(session)
-  const captured = agent_capture_events(harness, session,
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
     fn() {
       let mermaid = harness.agent.artifact_emit(
         "mermaid",
@@ -70,7 +72,11 @@ pipeline main(harness: Harness) {
   harness.stdio.println(imported_events[2].metadata.kind)
   harness.stdio.println(imported_events[3].metadata.mimeType)
   const svg_rejected = try {
-    harness.agent.artifact_emit("mermaid", "flowchart TD\n  A[<svg onload=alert(1)>]", {session_id: session})
+    harness.agent.artifact_emit(
+      "mermaid",
+      "flowchart TD\n  A[<svg onload=alert(1)>]",
+      {session_id: session},
+    )
     false
   } catch (e) {
     contains(json_stringify(e), "unsafe payload marker")

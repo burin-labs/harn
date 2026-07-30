@@ -4,12 +4,19 @@ import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
 pipeline default(harness: Harness) {
   const session_id = "agent-progress-replace-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session_id,
+  const captured = agent_capture_events(
+    harness.agent,
+    session_id,
     fn() {
-      let session = agent_session_init(harness, "progress replace", nil, {session_id: session_id})
-      agent_progress(harness, {message: "initial"})
-      agent_progress(harness, {message: "append", replace: false})
-      agent_session_finalize(harness, session.session_id, "done")
+      let session = agent_session_init(
+        harness.agent,
+        "progress replace",
+        nil,
+        {session_id: session_id},
+      )
+      agent_progress(harness.agent, {message: "initial"})
+      agent_progress(harness.agent, {message: "append", replace: false})
+      agent_session_finalize(harness.agent, session.session_id, "done")
       return nil
     },
   )

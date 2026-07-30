@@ -11,7 +11,7 @@
 //! Phase deferrals: `harn time` and `harn bench` (the other two W13
 //! commands) stay Rust-only in this PR — both depend on in-process VM
 //! thread-locals (LLM trace summary, profile spans, `getrusage` CPU
-//! samples) that don't survive a `spawn_captured` subprocess boundary
+//! samples) that don't survive a `harness.process.run` subprocess boundary
 //! without inventing a new child-binary emit protocol. The W13 ticket
 //! description presumed an `--internal-phase-emit` protocol on `harn
 //! run` that doesn't actually exist in the current codebase; the

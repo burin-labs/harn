@@ -186,9 +186,11 @@ When you graduate a rule from per-package to harn-canon:
   custom rules.
 - **One sentence per `explanation`.** Audit consumers render it inline.
   Multi-sentence rationales belong in `references` (link to the docs).
-- **Don't depend on `now()`, `random()`, or `shell()` in predicates.**
+- **Don't depend on `harness.clock.now()`, `harness.random.f64()`, or
+  `harness.process.shell()` in predicates.**
   Predicates run during the linear sweep on every dispatch and must
-  be pure. Side effects belong in the mode callback.
+  be pure and therefore receive no capability handle. Side effects belong in
+  the mode callback.
 
 ## Reviewing a rule PR
 

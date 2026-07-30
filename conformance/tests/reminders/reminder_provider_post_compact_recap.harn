@@ -14,10 +14,10 @@ pipeline main(harness: Harness) {
     remaining_messages: 2,
     summary: "compact recap",
   }
-  const first = agent_reminder_providers_fire(harness, session, "post_compact", payload, {})
-  const second = agent_reminder_providers_fire(harness, session, "post_compact", payload, {})
+  const first = agent_reminder_providers_fire(harness.agent, session, "post_compact", payload, {})
+  const second = agent_reminder_providers_fire(harness.agent, session, "post_compact", payload, {})
   const before = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
-  const ttl = agent_session_apply_reminder_post_turn(harness, session, 9)
+  const ttl = agent_session_apply_reminder_post_turn(harness.agent, session, 9)
   const after = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   harness.stdio.println(first.fired_count)
   harness.stdio.println(second.reports[0].deduped_count)

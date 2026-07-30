@@ -1,6 +1,6 @@
-import { sub_agent_request, sub_agent_run, wait_agent } from "std/agent/workers"
-import { workflow_execute } from "std/workflow/execute"
+import { sub_agent_run } from "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
+import { workflow_execute } from "std/workflow/execute"
 
 fn child_tools() {
   let tools = tool_registry()
@@ -36,7 +36,9 @@ fn workflow_tools(harness: Harness) {
     {
       parameters: {task: {type: "string"}},
       handler: { args ->
-        sub_agent_run(harness, args.task,
+        sub_agent_run(
+          harness,
+          args.task,
           {provider: "mock", tools: child_tools(), tool_format: "native", max_iterations: 1},
         )
       },
@@ -68,7 +70,8 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "stage_1", name: "delegate_readonly", arguments: {task: "Inspect the config file"}},
@@ -78,7 +81,9 @@ pipeline test(harness: Harness, task) {
       llm_text("Delegation finished."),
     ],
     { ->
-      const result = workflow_execute(harness, "Inspect the config file",
+      const result = workflow_execute(
+        harness,
+        "Inspect the config file",
         flow,
         [],
         {max_steps: 2, skills: only_look, skill_match: {strategy: "metadata"}},

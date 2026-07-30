@@ -3,12 +3,15 @@ import { with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "done", input_tokens: 80, output_tokens: 0, model: "mock"},
       {text: "done", input_tokens: 80, output_tokens: 0, model: "mock"},
     ],
     { ->
-      const enabled = agent_loop(harness, "token pressure default",
+      const enabled = agent_loop(
+        harness,
+        "token pressure default",
         nil,
         {
           provider: "mock",
@@ -18,7 +21,9 @@ pipeline main(harness: Harness) {
         },
       )
       const enabled_reminders = transcript_events_by_kind(enabled.transcript, "system_reminder")
-      const disabled = agent_loop(harness, "token pressure disabled",
+      const disabled = agent_loop(
+        harness,
+        "token pressure disabled",
         nil,
         {
           provider: "mock",

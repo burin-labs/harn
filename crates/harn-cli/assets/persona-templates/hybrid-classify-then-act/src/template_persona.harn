@@ -4,7 +4,7 @@ import { cheap_classify_then_escalate, with_audit_receipt } from "std/personas/p
 /** Run the hybrid classify-then-act template DAG. */
 pub fn template_persona(harness: Harness, task) {
   const classified = classify_request(harness, task)
-  return act_on_classification(harness, classified)
+  return act_on_classification(harness.clock, classified)
 }
 
 @step(name: "classify_request", model: "mock", receipt: audit, error_boundary: escalate, budget: {max_tokens: 2000})
@@ -18,7 +18,10 @@ fn classify_request(harness: Harness, task) {
       request: fixture?.request ?? "classify requested work",
     },
   )
-  return cheap_classify_then_escalate(harness, fixture,
+  return cheap_classify_then_escalate(
+    harness.clock,
+    harness.llm,
+    fixture,
     fn(input) { return {label: "needs_plan", confidence: 0.62, item_count: len(input?.items ?? [])} },
     fn(input) { return {label: "draft_plan", confidence: 0.91, item_count: len(input?.items ?? [])} },
     fn(result) { return result.confidence < 0.7 || result.label == "needs_plan" },
@@ -32,8 +35,10 @@ fn classify_request(harness: Harness, task) {
 }
 
 @step(name: "act_on_classification", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
-fn act_on_classification(harness: Harness, classified) {
-  const wrapped = with_audit_receipt(harness, fn() { return {
+fn act_on_classification(clock: HarnessClock, classified) {
+  const wrapped = with_audit_receipt(
+    clock,
+    fn() { return {
       action: classified.result.label,
       escalated: classified.escalated,
       confidence: classified.result.confidence,

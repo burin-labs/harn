@@ -6,7 +6,8 @@ import { llm_text, with_llm_script } from "std/testing"
  */
 pipeline default(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       const r = harness.llm.call_safe("hello", nil, {provider: "mock"})
       harness.stdio.println(r.ok)

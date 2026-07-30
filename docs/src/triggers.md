@@ -81,14 +81,15 @@ handler = "handlers::triage_outage"
 budget = { daily_cost_usd = 1.00, max_concurrent = 10 }
 ```
 
-The predicate must resolve to `fn(event: TriggerEvent) -> bool` or
-`fn(event: TriggerEvent) -> Result<bool, _>`.
+The predicate is a governed runtime entrypoint and must resolve to
+`fn(harness: Harness, event: TriggerEvent) -> bool` or
+`fn(harness: Harness, event: TriggerEvent) -> Result<bool, _>`.
 
 Typical pattern:
 
 ```harn
-pub fn about_outages(event: TriggerEvent) -> bool {
-  const result = llm_call(
+pub fn about_outages(harness: Harness, event: TriggerEvent) -> bool {
+  const result = harness.llm.call(
     "Is this Slack message about a production outage?",
     nil,
     {provider: "openai", model: "gpt-4o-mini"},
@@ -109,7 +110,7 @@ Predicate evaluation is safety-defaulted:
 - if a predicate budget is exceeded, the predicate short-circuits to `false`;
   if aggregate trigger spend is already exhausted before a handler starts, the
   dispatcher applies `budget.on_budget_exhausted`
-- replay caches predicate `llm_call(...)` responses so `trigger_replay(...)`
+- replay caches predicate `harness.llm.call(...)` responses so `trigger_replay(...)`
   can deterministically re-evaluate the predicate without hitting a live
   provider
 

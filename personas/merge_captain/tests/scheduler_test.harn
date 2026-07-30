@@ -59,16 +59,16 @@ fn _fail_check() {
   return [{name: "ci", status: "completed", conclusion: "failure"}]
 }
 
-fn _open_handle(harness: Harness, suffix) {
+fn _open_handle(agent: HarnessAgent, suffix) {
   // Unique per invocation so re-running tests does not see stale state.
   const session = "scheduler-test-${suffix}-${to_string(harness.clock.now_ms())}"
-  return open_checkpoints(harness.agent, ".harn/test/merge-captain", session, "merge_captain_test")
+  return open_checkpoints(agent, ".harn/test/merge-captain", session, "merge_captain_test")
 }
 
 pipeline test_sweep_classifies_clean_pr(harness: Harness, task) {
   const snapshot = _snapshot([_pr(1, {})], {"1": _ok_check()})
   const adapter = fixture_adapter(snapshot)
-  const handle = _open_handle(harness, "classify-clean")
+  const handle = _open_handle(harness.agent, "classify-clean")
   const summary = sweep(
     harness,
     harness,
@@ -91,7 +91,7 @@ pipeline test_sweep_persists_checkpoints(harness: Harness, task) {
     {"1": _ok_check()},
   )
   const adapter = fixture_adapter(snapshot)
-  const handle = _open_handle(harness, "persist")
+  const handle = _open_handle(harness.agent, "persist")
   sweep(
     harness,
     harness,
@@ -113,7 +113,7 @@ pipeline test_resume_picks_up_new_pr(harness: Harness, task) {
   const policy = _policy_for(_default_repo(), true)
   const snapshot1 = _snapshot([_pr(1, {})], {"1": _ok_check()})
   const snapshot2 = _snapshot([_pr(1, {}), _pr(2, {})], {"1": _ok_check(), "2": _ok_check()})
-  const handle = _open_handle(harness, "resume-add")
+  const handle = _open_handle(harness.agent, "resume-add")
   // First sweep tracks PR 1 only.
   sweep(
     harness,
@@ -148,7 +148,7 @@ pipeline test_disappeared_pr_gets_terminal_receipt(harness: Harness, task) {
   const policy = _policy_for(_default_repo(), true)
   const snapshot1 = _snapshot([_pr(1, {})], {"1": _ok_check()})
   const snapshot2 = _snapshot([], {})
-  const handle = _open_handle(harness, "disappear")
+  const handle = _open_handle(harness.agent, "disappear")
   sweep(
     harness,
     harness,
@@ -189,7 +189,7 @@ pipeline test_failing_ci_with_local_verify_runs_dry(harness: Harness, task) {
     },
   )
   const snapshot = _snapshot([_pr(1, {})], {"1": _fail_check()})
-  const handle = _open_handle(harness, "local-verify")
+  const handle = _open_handle(harness.agent, "local-verify")
   const summary = sweep(
     harness,
     harness,
@@ -250,7 +250,7 @@ pipeline test_repair_worker_dispatch_attaches_run_to_receipt(harness: Harness, t
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  const handle = _open_handle(harness, "repair-worker-attach")
+  const handle = _open_handle(harness.agent, "repair-worker-attach")
   const summary = sweep(
     harness,
     harness,
@@ -302,7 +302,7 @@ pipeline test_repair_worker_blocked_when_human_required(harness: Harness, task) 
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  const handle = _open_handle(harness, "repair-worker-blocked")
+  const handle = _open_handle(harness.agent, "repair-worker-blocked")
   let executor_calls = 0
   const executor = { _bundle, _options ->
     executor_calls = executor_calls + 1
@@ -340,7 +340,7 @@ pipeline test_repair_worker_disabled_falls_back_to_local_verify(harness: Harness
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  const handle = _open_handle(harness, "repair-worker-disabled")
+  const handle = _open_handle(harness.agent, "repair-worker-disabled")
   const summary = sweep(
     harness,
     harness,
@@ -374,7 +374,7 @@ pipeline test_repair_worker_validators_fail_writes_outside_scope(harness: Harnes
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  const handle = _open_handle(harness, "repair-worker-violations")
+  const handle = _open_handle(harness.agent, "repair-worker-violations")
   const bad_output = _ok_repair_output()
     + {
     files_changed: [{path: "secrets/key.pem", action: "created"}],

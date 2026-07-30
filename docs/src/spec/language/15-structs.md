@@ -46,7 +46,7 @@ Struct fields are accessed with dot syntax, the same as dict property
 access:
 
 ```harn
-log(p.x)    // 3
-log(u.name) // "Alice"
+harness.obs.log(p.x)    // 3
+harness.obs.log(u.name) // "Alice"
 ```
 

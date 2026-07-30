@@ -8,7 +8,7 @@ pipeline test(harness: Harness, task) {
   const actor_id = "trust-namespace-" + unique
   const trace_id = "trace-" + unique
   const entry_id: TrustEntryId = record(
-    harness,
+    harness.runtime,
     {
       actor_id: actor_id,
       action: "merge_pr",
@@ -20,7 +20,7 @@ pipeline test(harness: Harness, task) {
     },
   )
   const records: list<TrustGraphRecord> = query(
-    harness,
+    harness.runtime,
     {actor: actor_id, action: "merge_pr", outcome: "success"},
   )
   const namespaced: list<TrustGraphRecord> = harness.runtime.trust_query_alias(

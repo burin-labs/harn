@@ -32,7 +32,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("result_kind=" + result.kind)
       harness.stdio.println("result_consumed=" + to_string(result.consumed_tokens))
       harness.stdio.println("result_custom_observed=" + to_string(result.custom_observed))
-      const audits = lifecycle_audit_log_take(harness)
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_0=" + audits[0].kind)
       harness.stdio.println("audit_0_strategy=" + audits[0].payload.strategy)

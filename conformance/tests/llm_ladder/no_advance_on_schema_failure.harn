@@ -10,7 +10,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "not json at all", model: "mock", provider: "mock"},
       {text: "{\"answer\": \"forty-two\"}", model: "mock", provider: "mock"},
     ],

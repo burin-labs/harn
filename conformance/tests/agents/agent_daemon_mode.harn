@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
@@ -7,7 +8,9 @@ pipeline test(harness: Harness, task) {
   const dir = path_join(harness.fs.workspace_temp_dir(), "harn-agent-daemon-" + unique)
   harness.fs.mkdir(dir)
   const snapshot = path_join(dir, "daemon.json")
-  const result = agent_loop(harness, "Poll for background work",
+  const result = agent_loop(
+    harness,
+    "Poll for background work",
     "You are helpful",
     {
       provider: "mock",

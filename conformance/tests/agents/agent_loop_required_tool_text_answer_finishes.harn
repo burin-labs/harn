@@ -19,12 +19,15 @@ fn tools() {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("```tool\n{\"name\":\"lookup\",\"args\":{\"query\":\"x\"}}\n```"),
       llm_text("evidence"),
     ],
     { ->
-      const result = agent_loop(harness, "Use lookup.",
+      const result = agent_loop(
+        harness,
+        "Use lookup.",
         nil,
         {
           provider: "mock",

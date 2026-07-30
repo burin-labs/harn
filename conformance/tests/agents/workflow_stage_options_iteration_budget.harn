@@ -52,7 +52,8 @@ pipeline default(harness: Harness) {
       host: {default_tool_format: "native"},
     },
   )
-  print_budget_error(harness,
+  print_budget_error(
+    harness,
     invalid_mode.agent_loop_options,
     "agent_loop: iteration_budget.mode must be \"fixed\" or \"adaptive\"",
   )
@@ -64,7 +65,8 @@ pipeline default(harness: Harness) {
       host: {default_tool_format: "native"},
     },
   )
-  print_budget_error(harness,
+  print_budget_error(
+    harness,
     invalid_max.agent_loop_options,
     "agent_loop: `iteration_budget.max` must be a positive integer; got 0",
   )

@@ -418,11 +418,10 @@ mod tests {
                         r#"
 import {{ verdict_disposition, verdict_from_run }} from "std/agent/verdict"
 
-pipeline default(_task) {{
-  hostlib_enable("tools:deterministic")
-  const run = hostlib_tools_run_test({{cwd: "{}", timeout_ms: 120000}})
+pipeline default(harness: Harness, _task) {{
+  const run = harness.tools.run_test({{cwd: "{}", timeout_ms: 120000}})
   __test_overlap()
-  return verdict_disposition(verdict_from_run(harness, run))
+  return verdict_disposition(verdict_from_run(harness.verdict, run))
 }}
 "#,
                         harn_string(cwd)

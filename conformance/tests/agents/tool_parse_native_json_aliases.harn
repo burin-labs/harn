@@ -44,7 +44,10 @@ const ALIAS_TARGETS = {
 
 pipeline main(harness: Harness) {
   // The generic `tool` wrapper: unwrap to the inner name and args.
-  probe(harness, "generic tool wrapper unwraps to the real call",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "generic tool wrapper unwraps to the real call",
     "{\"name\":\"tool\",\"arguments\":{\"name\":\"look\",\"args\":{\"intent\":\"read\",\"file\":\"src/storage/page_cache.h\"}}}",
     LOOK_RUN,
   )
@@ -54,30 +57,48 @@ pipeline main(harness: Harness) {
   // marker — but through the public entry point they never run: the tagged
   // scanner consumes the marker as framing first and hands the native lane a
   // name with a hole in it. These pin that reachability, not the repair.
-  probe(harness, "harmony channel suffix on the name",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "harmony channel suffix on the name",
     "{\"name\":\"run<|channel|>commentary\",\"arguments\":{\"command\":\"cargo test\"}}",
     LOOK_RUN,
   )
-  probe(harness, "constrain marker with a command argument",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "constrain marker with a command argument",
     "{\"name\":\"<|constrain|>json\",\"arguments\":{\"command\":\"cargo test\"}}",
     LOOK_RUN,
   )
-  probe(harness, "constrain marker with a read intent",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "constrain marker with a read intent",
     "{\"name\":\"<|constrain|>json\",\"arguments\":{\"intent\":\"read\",\"path\":\"src/main.zig\"}}",
     LOOK_RUN_SEARCH,
   )
   // `tool_call` is not a marker, so the wrapper does reach the native lane and
   // the intent inference lands on `search`.
-  probe(harness, "tool_call wrapper with a search intent",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "tool_call wrapper with a search intent",
     "{\"name\":\"tool_call\",\"arguments\":{\"intent\":\"search\",\"path\":\"src\",\"query\":\"fn parse\"}}",
     LOOK_RUN_SEARCH,
   )
   // `read` is aliased to `look`, `apply_patch` to `edit`, rather than denied.
-  probe(harness, "read is aliased to look",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "read is aliased to look",
     "[{\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]",
     ALIAS_TARGETS,
   )
-  probe(harness, "apply_patch is aliased to edit",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "apply_patch is aliased to edit",
     "[{\"function\":{\"name\":\"apply_patch\",\"arguments\":\"{}\"}}]",
     ALIAS_TARGETS,
   )
@@ -86,7 +107,10 @@ pipeline main(harness: Harness) {
   // mid-codepoint; the preview must truncate on a char boundary instead.
   const long_bad = "x" + repeat("a", 197) + "€" + " trailing"
   harness.stdio.println("raw_argument_bytes=${len(long_bad)}")
-  probe(harness, "malformed arguments preview truncates on a char boundary",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "malformed arguments preview truncates on a char boundary",
     "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":${json_stringify(long_bad)}}}]",
     ALIAS_TARGETS,
   )

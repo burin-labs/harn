@@ -10,7 +10,7 @@ import "std/triggers"
  * the registry was empty, which is success rather than failure.
  */
 pipeline test(harness: Harness, task) {
-  const _ = lifecycle_audit_log_take(harness)
+  const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.range(100000, 999999),
@@ -43,7 +43,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(dispatch.result?.suspended_count)
   harness.stdio.println(dispatch.result?.skipped_count)
   harness.stdio.println(dispatch.result?.reason == "build_storm")
-  const audits = lifecycle_audit_log_take(harness)
+  const audits = lifecycle_audit_log_take(harness.obs)
   let audit_count = 0
   let outcome = ""
   let scope_kind = ""

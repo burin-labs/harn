@@ -213,7 +213,8 @@ pipeline test(harness: Harness, task) {
   assert(deepseek_r1.native_tools, "OpenRouter DeepSeek R1 exposes native tools")
   assert(deepseek_r1.thinking_modes[0] == "enabled", "OpenRouter DeepSeek R1 exposes reasoning")
   assert(
-    !harness.llm.provider_capabilities("openrouter", "deepseek/deepseek-r1-distill-qwen-32b").native_tools,
+    !harness.llm.provider_capabilities("openrouter", "deepseek/deepseek-r1-distill-qwen-32b")
+      .native_tools,
     "OpenRouter DeepSeek R1 distill does not advertise native tools",
   )
   const qwen_coder = harness.llm.provider_capabilities("openrouter", "qwen/qwen3-coder-flash")

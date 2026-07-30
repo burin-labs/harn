@@ -533,11 +533,11 @@ fn __tool_using_defaults(kind) {
   }
 }
 
-fn __apply_tool_format(harness: Harness, opts, kind) {
+fn __apply_tool_format(llm: HarnessLlm, opts, kind) {
   if kind == "summary" || kind == "verify" {
     return opts
   }
-  const resolved = agent_tool_format_resolution(harness, opts)
+  const resolved = agent_tool_format_resolution(llm, opts)
   if resolved?.tool_format == nil {
     return opts
   }
@@ -652,7 +652,7 @@ fn __captain_tool_layers(harness: Harness, kind, opts) {
   let layers = []
   const audit_sink = __captain_layer_value(opts, "audit_sink", nil)
   if audit_sink != nil {
-    layers = layers.appending(with_audit_log(harness, audit_sink))
+    layers = layers.appending(with_audit_log(harness.clock, harness.fs, audit_sink))
   }
   const telemetry = __captain_layer_value(opts, "telemetry", nil)
   if telemetry != nil {
@@ -661,13 +661,13 @@ fn __captain_tool_layers(harness: Harness, kind, opts) {
   if kind == "merge_captain" {
     const consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
     if consent_fn != nil {
-      layers = layers.appending(with_consent(harness, consent_fn))
+      layers = layers.appending(with_consent(harness.clock, consent_fn))
     }
   }
   if kind == "oncall_captain" {
     const rate_limit = __captain_layer_value(opts, "rate_limit", __captain_rate_limit_default(kind))
     if rate_limit != nil {
-      layers = layers.appending(with_rate_limit(harness, rate_limit))
+      layers = layers.appending(with_rate_limit(harness.runtime, rate_limit))
     }
   }
   if kind == "release_captain" {
@@ -701,7 +701,7 @@ fn __apply_captain_tool_caller(harness: Harness, opts, kind) {
   if len(layers) == 0 {
     return opts
   }
-  return opts + {tool_caller: compose_tool_callers(harness, layers)}
+  return opts + {tool_caller: compose_tool_callers(harness.clock, layers)}
 }
 
 fn __captain_handler_layers(harness: Harness, opts) {
@@ -738,9 +738,9 @@ fn __apply_captain_llm_caller(harness: Harness, opts, kind) {
     } else {
       []
     }
-    with_routing(harness, {default: cheap, routes: routes})
+    with_routing(harness.agent, {default: cheap, routes: routes})
   } else {
-    default_llm_caller(harness)
+    default_llm_caller(harness.agent, harness.llm)
   }
   const composed = if len(logging_layers) > 0 {
     const wrap = compose(logging_layers)
@@ -893,11 +893,7 @@ pub fn agent_preset(harness: Harness, kind, options = nil) {
   opts = __apply_captain_tool_caller(harness, opts, resolved_kind)
   opts = __apply_captain_llm_caller(harness, opts, resolved_kind)
   opts = __apply_preset_pack(opts, resolved_kind)
-  opts = agent_apply_default_retry(
-    harness,
-    opts,
-    {wrap_existing: !caller_supplied_llm_caller},
-  )
-  opts = __apply_tool_format(harness, opts, resolved_kind)
+  opts = agent_apply_default_retry(harness, opts, {wrap_existing: !caller_supplied_llm_caller})
+  opts = __apply_tool_format(harness.llm, opts, resolved_kind)
   return opts + {_preset_kind: resolved_kind}
 }

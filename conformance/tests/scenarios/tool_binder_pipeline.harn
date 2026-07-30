@@ -71,7 +71,9 @@ pipeline default(harness: Harness) {
   const next = synthetic_next()
   const schema = file_schema()
   // (1) Args already validate → binder is skipped, no hop, status="skipped".
-  const mw_skip = with_natural_language_executor(harness, {
+  const mw_skip = with_natural_language_executor(
+    harness,
+    {
       provider: "cerebras",
       model: "gpt-oss-120b",
       timeout_ms: 100,
@@ -106,7 +108,9 @@ pipeline default(harness: Harness) {
       output_tokens: 0,
     }
   }
-  const mw_ok = with_natural_language_executor(harness, {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
+  const mw_ok = with_natural_language_executor(
+    harness,
+    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
   const _ = harness.testing.clock_set(0)
   const r3 = mw_ok(
@@ -141,7 +145,9 @@ pipeline default(harness: Harness) {
       output_tokens: 0,
     }
   }
-  const mw_defaults = with_natural_language_executor(harness, {provider: "cerebras", model: "gpt-oss-120b", binder_fn: default_binder},
+  const mw_defaults = with_natural_language_executor(
+    harness,
+    {provider: "cerebras", model: "gpt-oss-120b", binder_fn: default_binder},
   )
   const _ = harness.testing.clock_set(0)
   const r_defaults = mw_defaults(
@@ -163,7 +169,9 @@ pipeline default(harness: Harness) {
       output_tokens: 0,
     }
   }
-  const mw_timeout = with_natural_language_executor(harness, {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: slow_binder},
+  const mw_timeout = with_natural_language_executor(
+    harness,
+    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: slow_binder},
   )
   const _ = harness.testing.clock_set(0)
   const r4 = mw_timeout(envelope("file_read", {_nl_intent: "do something slow"}, schema), next)
@@ -188,7 +196,9 @@ pipeline default(harness: Harness) {
     let _ = harness.runtime.atomic_set(was_dispatched, 1)
     return next(call)
   }
-  const mw_reject = with_natural_language_executor(harness, {
+  const mw_reject = with_natural_language_executor(
+    harness,
+    {
       provider: "cerebras",
       model: "gpt-oss-120b",
       timeout_ms: 100,
@@ -202,7 +212,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(r5.audit.binder.status)
   harness.stdio.println(harness.runtime.atomic_get(was_dispatched) == 0)
   // (7) compose_tool_callers stacks cleanly with the binder.
-  const composed = compose_tool_callers(harness, [mw_ok])
+  const composed = compose_tool_callers(harness.clock, [mw_ok])
   const _ = harness.testing.clock_set(0)
   const r6 = composed(
     envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
@@ -226,7 +236,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(transformed.parameters.properties.keys(), "_nl_intent"))
   harness.stdio.println(contains(transformed.parameters.required, "_nl_intent"))
   harness.stdio.println(transformed.parameters.properties._nl_intent.required)
-  const paired = natural_language_executor_middleware(harness, {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
+  const paired = natural_language_executor_middleware(
+    harness,
+    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
   const paired_entry = paired.schema_transform(tools.tools[0])
   harness.stdio.println(contains(paired_entry.parameters.properties.keys(), "_nl_intent"))
@@ -246,22 +258,31 @@ pipeline default(harness: Harness) {
   }
   harness.stdio.println(error_contains(missing_provider, "provider"))
   let bad_timeout = try {
-    with_natural_language_executor(harness, {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 0, binder_fn: mock_binder},
+    with_natural_language_executor(
+      harness,
+      {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 0, binder_fn: mock_binder},
     )
   }
   harness.stdio.println(error_contains(bad_timeout, "timeout_ms"))
   let bad_intent_field = try {
-    with_natural_language_executor(harness, {provider: "cerebras", model: "gpt-oss-120b", intent_field: "   ", binder_fn: mock_binder},
+    with_natural_language_executor(
+      harness,
+      {provider: "cerebras", model: "gpt-oss-120b", intent_field: "   ", binder_fn: mock_binder},
     )
   }
   harness.stdio.println(error_contains(bad_intent_field, "intent_field"))
   let bad_failure_mode = try {
-    with_natural_language_executor(harness, {provider: "cerebras", model: "gpt-oss-120b", on_failure: "retry", binder_fn: mock_binder},
+    with_natural_language_executor(
+      harness,
+      {provider: "cerebras", model: "gpt-oss-120b", on_failure: "retry", binder_fn: mock_binder},
     )
   }
   harness.stdio.println(error_contains(bad_failure_mode, "on_failure"))
   let bad_binder_fn = try {
-    with_natural_language_executor(harness, {provider: "cerebras", model: "gpt-oss-120b", binder_fn: "nope"})
+    with_natural_language_executor(
+      harness,
+      {provider: "cerebras", model: "gpt-oss-120b", binder_fn: "nope"},
+    )
   }
   harness.stdio.println(error_contains(bad_binder_fn, "binder_fn"))
 }

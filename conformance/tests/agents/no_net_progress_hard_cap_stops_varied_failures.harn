@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
 /**
@@ -43,7 +43,8 @@ fn verify_call(id, name) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       verify_call("a", "verify_a"),
       verify_call("b", "verify_b"),
       verify_call("c", "verify_c"),
@@ -51,8 +52,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "no-net-hard-cap-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Make the failing verification pass.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the failing verification pass.",
           nil,
           {
             provider: "mock",

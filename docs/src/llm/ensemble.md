@@ -30,7 +30,7 @@ const result = tree_of_thoughts({
 })
 
 if result.ok {
-  log(result.best_path.last().steps)
+  harness.stdio.log(result.best_path.last().steps)
 }
 ```
 

@@ -6,8 +6,8 @@ local, portable relational store without running a database server.
 ```harn
 import "std/sqlite"
 
-pipeline default() {
-  const db = sqlite_open(".harn/events.sqlite", {
+pipeline default(harness: Harness) {
+  const db = harness.sqlite.open(".harn/events.sqlite", {
     create: true,
     busy_timeout_ms: 5000,
     journal_mode: "wal",
@@ -20,7 +20,7 @@ pipeline default() {
     ["agent_events", 50],
   )
 
-  log(json_stringify(rows))
+  harness.stdio.log(json_stringify(rows))
   sqlite_close(db)
 }
 ```
@@ -29,7 +29,7 @@ pipeline default() {
 
 | Function | Returns | Notes |
 |---|---|---|
-| `sqlite_open(path, options?)` | `SqliteDb` | Open `:memory:` or a file-backed database. |
+| `harness.sqlite.open(path, options?)` | `SqliteDb` | Open `:memory:` or a file-backed database. |
 | `sqlite_query(handle, sql, params?)` | `list<dict>` | Run a parameterized query and return decoded rows. |
 | `sqlite_query_one(handle, sql, params?)` | `dict` or `nil` | Return the first row, or `nil` when no rows match. |
 | `sqlite_execute(handle, sql, params?)` | `SqliteExecuteResult` | Run one statement and return `{rows_affected}`. |
@@ -44,7 +44,7 @@ pipeline default() {
 
 ## Open Options
 
-`sqlite_open(":memory:")` creates a private in-memory database. File paths use
+`harness.sqlite.open(":memory:")` creates a private in-memory database. File paths use
 the same filesystem path policy as other stdlib file operations.
 
 Options:

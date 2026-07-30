@@ -20,7 +20,7 @@ const event = dashboard_job_event(
 )
 
 const view = dashboard_jobs_view([event])
-log(view.jobs[0].status)
+harness.stdio.log(view.jobs[0].status)
 ```
 
 ## Event envelope
@@ -90,7 +90,7 @@ const events = [
 ]
 const view = dashboard_jobs_view(events, {emit: true, topic: "dashboard.jobs.events"})
 for job in view.jobs {
-  log(job.job_id + ": " + job.status)
+  harness.stdio.log(job.job_id + ": " + job.status)
 }
 ```
 

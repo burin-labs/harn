@@ -28,7 +28,7 @@ async fn run_mock_llm_prompt(
                 "sessionId": session_id,
                 "prompt": [{
                     "type": "text",
-                    "text": "llm_mock_clear()\nllm_mock({text: \"ok\", input_tokens: 1, output_tokens: 1, model: \"mock\", provider: \"mock\"})\nlet r = llm_call(\"hello\", nil, {provider: \"mock\", model: \"mock\"})\n__io_println(r.text)",
+                    "text": "harness.llm.mock_clear()\nharness.llm.mock_enqueue({text: \"ok\", input_tokens: 1, output_tokens: 1, model: \"mock\", provider: \"mock\"})\nlet r = harness.llm.call(\"hello\", nil, {provider: \"mock\", model: \"mock\"})\nharness.stdio.println(r.text)",
                 }],
             },
         }))
@@ -148,7 +148,7 @@ async fn acp_authenticate_uses_shared_auth_policy() {
                     "method": "session/prompt",
                     "params": {
                         "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": "__io_println(\"allowed\")"}],
+                        "prompt": [{"type": "text", "text": "harness.stdio.println(\"allowed\")"}],
                     },
                 }))
                 .expect("send authenticated prompt");
@@ -791,7 +791,7 @@ async fn acp_set_mode_validates_inputs() {
 
 /// `architect` mode pushes a read-only capability ceiling for the
 /// duration of `session/prompt`, so a script that calls
-/// `write_file()` in plan mode is rejected by the VM policy gate
+/// `harness.fs.write_text()` in plan mode is rejected by the VM policy gate
 /// instead of mutating the workspace. Doubles as the conformance
 /// case for "client switches mode mid-session, agent's behavior
 /// changes" (#897 acceptance).
@@ -846,7 +846,8 @@ async fn acp_architect_mode_blocks_destructive_writes_in_prompt() {
             );
             assert_eq!(mode_notification["params"]["update"]["modeId"], "architect");
 
-            let prompt_source = format!("write_file(\"{target_str}\", \"should not be written\")");
+            let prompt_source =
+                format!("harness.fs.write_text(\"{target_str}\", \"should not be written\")");
             request_tx
                 .send(serde_json::json!({
                     "jsonrpc": "2.0",
@@ -881,7 +882,8 @@ async fn acp_architect_mode_blocks_destructive_writes_in_prompt() {
                     );
                     let message_text = error["message"].as_str().unwrap_or_default();
                     assert!(
-                        message_text.contains("workspace write ceiling"),
+                        message_text.contains("active effect ceiling")
+                            && message_text.contains("fs:write"),
                         "unexpected error message: {message_text}"
                     );
                     saw_error = true;
@@ -949,7 +951,8 @@ async fn acp_code_mode_allows_writes_in_prompt() {
             let _ack = recv_json(&mut response_rx).await;
             let _notification = recv_json(&mut response_rx).await;
 
-            let prompt_source = format!("write_file(\"{target_str}\", \"hello from code mode\")");
+            let prompt_source =
+                format!("harness.fs.write_text(\"{target_str}\", \"hello from code mode\")");
             request_tx
                 .send(serde_json::json!({
                     "jsonrpc": "2.0",

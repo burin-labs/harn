@@ -223,7 +223,7 @@ diagnostic_codes! {
     UnknownDeclaration, "HARN-NAM-010", Nam, "declaration reference cannot be resolved";
     InvalidAttributeTarget, "HARN-NAM-011", Nam, "attribute is attached to an unsupported declaration";
     InvalidAttributeArgument, "HARN-NAM-012", Nam, "attribute argument is invalid";
-    InvalidMainSignature, "HARN-NAM-101", Nam, "entrypoints and pipelines must take an explicit `harness: Harness` parameter";
+    InvalidMainSignature, "HARN-NAM-101", Nam, "`fn main` must take an explicit `harness: Harness` parameter";
     CapabilityPayloadInvalid, "HARN-CAP-001", Cap, "capability payload is invalid";
     HitlMissingApprovalPolicy, "HARN-CAP-002", Cap, "human approval construct is missing policy";
     HitlInvalidApprovalArgument, "HARN-CAP-003", Cap, "human approval argument is invalid";

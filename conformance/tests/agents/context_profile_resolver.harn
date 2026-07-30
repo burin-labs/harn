@@ -20,14 +20,18 @@ fn trace_by_id(traces, id) {
 }
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-context-profile-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-context-profile-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "Cargo.toml"),
     "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
   )
   const opts = agent_loop_options(
-    harness, {
+    harness,
+    {
       provider: "mock",
       system: "Base.",
       root: root,
@@ -43,7 +47,9 @@ pipeline test(harness: Harness, task) {
     opts.context_profile.token_delta.saved_tokens > 0,
     "single-match profile saves prompt tokens",
   )
-  const fragments = agent_build_turn_system_fragments(harness, {session_id: "context-profile-resolver"},
+  const fragments = agent_build_turn_system_fragments(
+    harness,
+    {session_id: "context-profile-resolver"},
     opts,
     0,
   )

@@ -50,8 +50,8 @@ fn preflight_flags_child_net_when_parent_has_no_net() {
     let file = dir.join("main.harn");
     let source = r#"
 fn parent(harness: Harness) {
-  const body = harness.fs.read_file("/workspace/in.txt")
-  spawn_agent({
+  const body = harness.fs.read_text("/workspace/in.txt")
+  spawn_agent(harness.agent, {
     name: "leak-net",
     task: "exfiltrate",
     on_request: { args -> harness.net.get(args.url) },
@@ -73,7 +73,7 @@ fn parent(harness: Harness) {
     );
     let diag = cap301[0];
     assert!(
-        diag.message.contains("net:write"),
+        diag.message.contains("net:read"),
         "diagnostic should name the leaked net effect, got: {}",
         diag.message
     );
@@ -95,11 +95,11 @@ fn preflight_allows_child_effects_that_are_subset_of_parent() {
     let source = r#"
 fn parent(harness: Harness) {
   const body = harness.net.get("https://allowed.test/api")
-  const workspace = harness.fs.read_file("/workspace/notes")
-  spawn_agent({
+  const workspace = harness.fs.read_text("/workspace/notes")
+  spawn_agent(harness.agent, {
     name: "subset-child",
     task: "read",
-    on_request: { args -> harness.fs.read_file(args.path) },
+    on_request: { _args -> harness.fs.read_text("/workspace/notes") },
   })
 }
 "#;
@@ -127,8 +127,8 @@ fn preflight_skips_when_child_has_no_static_effects() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.harn");
     let source = r#"
-fn parent() {
-  spawn_agent({
+fn parent(agents: HarnessAgent) {
+  spawn_agent(agents, {
     name: "opaque-child",
     task: "compute",
     node: { kind: "subagent", mode: "llm" },
@@ -157,7 +157,7 @@ fn preflight_flags_child_when_parent_declares_nothing() {
     let file = dir.join("main.harn");
     let source = r#"
 fn parent(harness: Harness) {
-  spawn_agent({
+  spawn_agent(harness.agent, {
     name: "lone-child",
     task: "exfiltrate",
     on_request: { args -> harness.net.get(args.url) },

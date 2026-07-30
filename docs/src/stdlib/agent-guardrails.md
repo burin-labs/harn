@@ -30,7 +30,7 @@ const guardrail_opts = agent_input_guardrail(
   {confidence_threshold: 0.8},
 )
 
-agent_loop(task, nil, base_opts + guardrail_opts)
+agent_loop(harness, task, nil, base_opts + guardrail_opts)
 ```
 
 The classifier receives `{session_id, task, user_message, messages,

@@ -6,7 +6,10 @@ import "std/session-store"
  * after cutover.
  */
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-session-import-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-session-import-" + harness.random.uuid(),
+  )
   const sid = "legacy.public"
   const legacy_dir = path_join(root, ".harn", "session-store")
   const legacy_path = path_join(legacy_dir, sid + ".jsonl")
@@ -33,26 +36,26 @@ pipeline default(harness: Harness) {
   }
   harness.fs.write_text(legacy_path, json_stringify(legacy_event) + "\n")
   const legacy_before = harness.fs.read_text(legacy_path)
-  const first = session_store_events(harness, sid, {root: root})
+  const first = session_store_events(harness.agent, sid, {root: root})
   harness.stdio.println(len(first))
   const imported = first[0]
   if imported == nil {
     throw "legacy import did not produce an event"
   }
   harness.stdio.println(imported.payload.record.title)
-  harness.stdio.println(len(session_store_events(harness, sid, {root: root})))
+  harness.stdio.println(len(session_store_events(harness.agent, sid, {root: root})))
   session_store_append(
-    harness,
+    harness.agent,
     sid,
     {operation: "upsert", record: {id: "canonical", title: "new"}},
     {root: root, tenant_id: "tenant-a"},
   )
-  harness.stdio.println(len(session_store_events(harness, sid, {root: root})))
+  harness.stdio.println(len(session_store_events(harness.agent, sid, {root: root})))
   harness.stdio.println(harness.fs.read_text(legacy_path) == legacy_before)
   harness.stdio.println(
-    ends_with(session_store_path(harness, sid, {root: root}), legacy_path)
+    ends_with(session_store_path(harness.agent, sid, {root: root}), legacy_path)
       && ends_with(
-      session_store_database_path(harness, {root: root}),
+      session_store_database_path(harness.agent, {root: root}),
       "/.harn/session-store.sqlite",
     ),
   )

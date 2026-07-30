@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { agent_session_messages } from "std/agent/state"
 import "std/collections"
 import { llm_text, with_llm_script } from "std/testing"
@@ -44,7 +44,8 @@ fn run_test_call(id) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       run_test_call("r1"),
       run_test_call("r2"),
       run_test_call("r3"),
@@ -54,8 +55,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "repair-strategy-shift-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Make the failing test pass.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the failing test pass.",
           nil,
           {
             provider: "mock",
@@ -81,7 +86,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(repair_stalls[0].warning.pattern)
       harness.stdio.println(repair_stalls[0].warning.count)
       harness.stdio.println(count_where(stalls, { s -> s.warning.pattern == "repeated_error" }))
-      const messages = json_stringify(agent_session_messages(harness, session))
+      const messages = json_stringify(agent_session_messages(harness.agent, session))
       harness.stdio.println(contains(messages, "AssertionError: expected 5 got 4"))
       harness.stdio.println(contains(messages, "Repair diagnostic"))
     },

@@ -9,8 +9,17 @@
 import { probe, sample_registry } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
-  probe(harness, "plain object arg, omitted paren", "run({ command: \"go build ./...\" }", sample_registry())
-  probe(harness, "heredoc edit, omitted paren",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "plain object arg, omitted paren",
+    "run({ command: \"go build ./...\" }",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc edit, omitted paren",
     """edit({
   "action": "create",
   "path": "a.scala",
@@ -25,7 +34,10 @@ EOF
   // blocks that each close their object with a bare `}` and omit the call's
   // `)`, followed by a `run`. Before the implicit-close recovery only `run`
   // parsed and the three authored edits were dropped as "missing closing `)`".
-  probe(harness, "multiblock turn lands every call when the paren is omitted",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "multiblock turn lands every call when the paren is omitted",
     """<tool_call>
 edit({
   "action": "create",

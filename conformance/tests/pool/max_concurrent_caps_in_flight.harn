@@ -9,7 +9,7 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
  * instead of completing serially.
  */
 pipeline default(harness: Harness) {
-  const pool = pool_create({name: "cap-demo", max_concurrent: 2})
+  const pool = pool_create(harness.agent, {name: "cap-demo", max_concurrent: 2})
   const in_flight = harness.runtime.atomic(0)
   const peak = harness.runtime.atomic(0)
   const gate = harness.runtime.channel(nil, 8)
@@ -29,7 +29,7 @@ pipeline default(harness: Harness) {
   for _i in 0 to 6 exclusive {
     harness.runtime.send(gate, "go")
   }
-  pool_wait(handles)
+  pool_wait(harness.agent, handles)
   harness.stdio.println(harness.runtime.atomic_get(peak) <= 2)
   harness.stdio.println(harness.runtime.atomic_get(in_flight))
   harness.stdio.log(pool.size())

@@ -200,7 +200,12 @@ pub fn composition_mcp_execute(harness: Harness, snippet, tools = nil, options =
   )
   const dispatch_opts = opts?.dispatch_options ?? opts
   const dispatch = { name, input ->
-    let result = agent_dispatch_tool_call(harness, {name: name, arguments: input}, registry, dispatch_opts)
+    let result = agent_dispatch_tool_call(
+      harness.tools,
+      {name: name, arguments: input},
+      registry,
+      dispatch_opts,
+    )
     return __composition_dispatch_value(result, name)
   }
   const report = harness.tools.composition_execute(
@@ -292,7 +297,8 @@ pub fn composition_mcp_tools(harness: Harness, registry = nil, options = nil) {
       handler: { args ->
         const call_args = args ?? {}
         if call_args?.tools != nil || opts?.tools != nil {
-          return composition_mcp_execute(harness,
+          return composition_mcp_execute(
+            harness,
             call_args.snippet,
             call_args?.tools ?? opts?.tools,
             opts + call_args,

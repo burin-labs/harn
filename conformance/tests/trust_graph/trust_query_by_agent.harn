@@ -7,13 +7,29 @@ pipeline test(harness: Harness, task) {
   )
   const agent_a = "trust-alpha-" + unique
   const agent_b = "trust-beta-" + unique
-  const first = harness.runtime.trust_record(agent_a, "issue.label", "reviewer-1", "success", "suggest")
-  const second = harness.runtime.trust_record(agent_a, "deploy.prod", nil, "failure", "act_with_approval")
+  const first = harness.runtime.trust_record(
+    agent_a,
+    "issue.label",
+    "reviewer-1",
+    "success",
+    "suggest",
+  )
+  const second = harness.runtime.trust_record(
+    agent_a,
+    "deploy.prod",
+    nil,
+    "failure",
+    "act_with_approval",
+  )
   const third = harness.runtime.trust_record(agent_b, "pr.merge", "reviewer-2", "denied", "shadow")
   const alpha_records: list<TrustRecord> = harness.runtime.trust_query({agent: agent_a})
-  const failures: list<TrustRecord> = harness.runtime.trust_query({agent: agent_a, outcome: "failure"})
+  const failures: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: agent_a, outcome: "failure"},
+  )
   const denied: list<TrustRecord> = harness.runtime.trust_query({agent: agent_b, outcome: "denied"})
-  const suggest_records: list<TrustRecord> = harness.runtime.trust_query({agent: agent_a, tier: "suggest"})
+  const suggest_records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: agent_a, tier: "suggest"},
+  )
   harness.stdio.println(first.schema == "opentrustgraph/v0.1")
   harness.stdio.println(second.outcome == "failure")
   harness.stdio.println(third.autonomy_tier == "shadow")

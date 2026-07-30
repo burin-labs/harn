@@ -9,7 +9,8 @@ import { agent_preset } from "std/agent/presets"
 
 pipeline default(harness: Harness) {
   const opts = agent_preset(
-    harness, "release_captain",
+    harness,
+    "release_captain",
     {provider: "anthropic", timeout_ms: 600000, max_nudges: 5},
   )
   // Caller overrides win over the pack / captain defaults.

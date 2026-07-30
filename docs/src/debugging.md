@@ -32,13 +32,15 @@ automatically. The equivalent `launch.json` entry is:
 This supports line breakpoints, variable inspection, stack traces, and step
 in / over / out against `.harn` files.
 
-### Host-call bridge (`harnHostCall`)
+### Privileged host-call bridge (`harnHostCall`)
 
 The debug adapter advertises `supportsHarnHostCall: true` in its
-`Capabilities` response. When a script calls `host_call(capability,
-operation, params)` and the VM has no built-in handler for the op, the
-adapter forwards it to the DAP client as a **reverse request** named
-`harnHostCall` — mirroring the DAP `runInTerminal` pattern:
+`Capabilities` response. Trusted, provenance-stamped host bridge modules may
+use the privileged `host_call(capability, operation, params)` wire; it is not a
+general script API and cannot be imported or re-exported by ordinary modules.
+When such a bridge call has no built-in handler, the adapter forwards it to the
+DAP client as a **reverse request** named `harnHostCall` — mirroring the DAP
+`runInTerminal` pattern:
 
 ```json
 {"seq": 17, "type": "request", "command": "harnHostCall",
@@ -76,7 +78,7 @@ debug session.
 
 ## Run views
 
-Every `agent_loop()` or `workflow_execute()` call can produce a persisted run
+Every `agent_loop(harness, ...)` or `workflow_execute()` call can produce a persisted run
 under `.harn-runs/`. Inspect it through the stable `harn.run_view.v1` /
 `harn.session_view.v1` projections rather than depending on private record
 fields.
@@ -161,9 +163,9 @@ These metrics appear in run records and are aggregated by `harn eval`.
 Track LLM costs during a run:
 
 ```harn
-const usage = llm_usage()
-log("Tokens used: ${usage.input_tokens + usage.output_tokens}")
-log("LLM calls: ${usage.total_calls}")
+const usage = harness.obs.llm_usage()
+harness.stdio.log("Tokens used: ${usage.input_tokens + usage.output_tokens}")
+harness.stdio.log("LLM calls: ${usage.total_calls}")
 ```
 
 ## Portal

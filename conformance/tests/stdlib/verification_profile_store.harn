@@ -26,7 +26,9 @@ pipeline test(harness: Harness, task) {
     {path: "src/a.tx", language: "toolchainx", task: "post_edit"},
   )
   assert_eq(edit_row.id, "tx/edit")
-  const file_row = harness.runtime.verification_profile_resolve({path: "src/a.tx", language: "toolchainx"})
+  const file_row = harness.runtime.verification_profile_resolve(
+    {path: "src/a.tx", language: "toolchainx"},
+  )
   assert_eq(file_row.id, "tx/file")
   // The unscoped row is the fallback for everything else.
   const fallback = harness.runtime.verification_profile_resolve({path: "docs/readme.md"})

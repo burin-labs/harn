@@ -1,4 +1,5 @@
 import { workflow_execute } from "std/workflow/execute"
+
 pipeline main(harness: Harness) {
   const flow = workflow_graph(
     {
@@ -16,12 +17,16 @@ pipeline main(harness: Harness) {
       edges: [{from: "act", to: "verify"}],
     },
   )
-  const first = workflow_execute(harness, "Write a note",
+  const first = workflow_execute(
+    harness,
+    "Write a note",
     flow,
     [],
     {max_steps: 4, persist_path: "/tmp/harn-workflow-replay-source.json"},
   )
-  const replayed = workflow_execute(harness, "Write a note",
+  const replayed = workflow_execute(
+    harness,
+    "Write a note",
     flow,
     [],
     {

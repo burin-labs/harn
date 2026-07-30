@@ -272,7 +272,7 @@ pub fn cwd_has_shell_metacharacters(cwd) {
  * any output, the worker left the tree dirty — fail closed. Skipped
  * when `enabled` is false (tests, dry-run sweeps).
  */
-pub fn harness_validate(harness: Harness, bundle, output, options) {
+pub fn harness_validate(process: HarnessProcess, bundle, output, options) {
   if !(options.enabled ?? false) {
     return _err([])
   }
@@ -282,7 +282,8 @@ pub fn harness_validate(harness: Harness, bundle, output, options) {
   }
   const result = try {
     process_run(
-      harness.process, ["git", "-C", cwd, "status", "--porcelain"],
+      process,
+      ["git", "-C", cwd, "status", "--porcelain"],
       {timeout_ms: options.timeout_ms ?? 30000},
     )
   }

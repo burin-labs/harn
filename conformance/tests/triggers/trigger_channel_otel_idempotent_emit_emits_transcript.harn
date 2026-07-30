@@ -9,7 +9,7 @@ import "std/triggers"
  * gives auditors a visible trail of attempts without re-firing
  * downstream handlers.
  */
-fn handle_event(event) {
+fn handle_event(harness: Harness, event) {
   // no-op — the test asserts on the transcript stream, not handler effects
   const _ = event
 }

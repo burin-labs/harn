@@ -9,8 +9,7 @@ fn first_group(pattern, text) {
 }
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-orchestrator-cli-" + harness.random.uuid())
-  harness.fs.mkdir(root)
+  const root = harness.fs.mkdtemp("harn-orchestrator-cli-")
   const replay_marker = path_join(root, "replay-ready.marker")
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -20,7 +19,7 @@ pipeline test(harness: Harness, task) {
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\nlet replay_marker = \""
       + replay_marker
-      + "\"\n\npub fn on_tick(event: TriggerEvent) {\n  harness.stdio.log(event.kind)\n}\n\npub fn flaky_issue(event: TriggerEvent) -> dict {\n  if !file_exists(replay_marker) {\n    throw \"replay-me:\" + event.kind\n  }\n  return {kind: event.kind, event_id: event.id}\n}\n\npub fn always_fail(event: TriggerEvent) -> any {\n  throw \"discard-me:\" + event.kind\n}\n",
+      + "\"\n\npub fn on_tick(harness: Harness, event: TriggerEvent) {\n  harness.stdio.log(event.kind)\n}\n\npub fn flaky_issue(harness: Harness, event: TriggerEvent) -> dict {\n  if !harness.fs.exists(replay_marker) {\n    throw \"replay-me:\" + event.kind\n  }\n  return {kind: event.kind, event_id: event.id}\n}\n\npub fn always_fail(harness: Harness, event: TriggerEvent) -> any {\n  throw \"discard-me:\" + event.kind\n}\n",
   )
   const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = resolve_harn_bin(harness, repo_root)
@@ -37,14 +36,15 @@ pipeline test(harness: Harness, task) {
   const url = wait_for_listener_url(harness, path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
   assert(
-    wait_for_log_contains(harness,
+    wait_for_log_contains(
+      harness,
       path_join(root, "orchestrator.log"),
       "activated connectors: a2a-push(2), cron(1)",
     ),
     "connectors did not activate",
   )
   const _ = harness.process.shell("kill -TERM " + pid)
-  assert(wait_for_exit(harness, pid), "orchestrator did not exit")
+  assert(wait_for_exit(harness.clock, harness.process, pid), "orchestrator did not exit")
   const state_dir = path_join(root, "state")
   const config_path = path_join(root, "harn.toml")
   const inspect = harness.process.exec(
@@ -247,6 +247,10 @@ pipeline test(harness: Harness, task) {
       "inferred_pending_retries=0",
     ),
   )
-  harness.stdio.println(len(regex_captures("inbox_claims_written=([1-9][0-9]*)", queue.stdout)) == 1)
-  harness.stdio.println(len(regex_captures("inbox_active_entries=([1-9][0-9]*)", queue.stdout)) == 1)
+  harness.stdio.println(
+    len(regex_captures("inbox_claims_written=([1-9][0-9]*)", queue.stdout)) == 1,
+  )
+  harness.stdio.println(
+    len(regex_captures("inbox_active_entries=([1-9][0-9]*)", queue.stdout)) == 1,
+  )
 }

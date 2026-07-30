@@ -9,10 +9,10 @@ import { llm_text, with_llm_script } from "std/testing"
  * projected prefix omits the failure while the raw transcript keeps
  * both turns intact.
  */
-fn flaky_tool(harness: Harness, flaky_calls) {
+fn flaky_tool(runtime: HarnessRuntime, flaky_calls) {
   let tools = tool_registry()
   const handler = fn(_args) {
-    const previous_calls = harness.runtime.atomic_add(flaky_calls, 1)
+    const previous_calls = runtime.atomic_add(flaky_calls, 1)
     if previous_calls == 0 {
       throw "tool error: first try"
     }
@@ -83,7 +83,7 @@ pipeline default(harness: Harness) {
         "You are a test agent.",
         {
           provider: "mock",
-          tools: flaky_tool(harness, flaky_calls),
+          tools: flaky_tool(harness.runtime, flaky_calls),
           tool_format: "native",
           max_iterations: 6,
           loop_until_done: true,

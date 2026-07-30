@@ -39,19 +39,18 @@ import {
   events_take,
   gauge,
   histogram,
-  log,
   request_id,
   reset,
   start_span,
 } from "std/observability"
 
-fn record_session_put(harness: Harness) {
-  const handle = start_span(harness.obs, "harn.session.put", {"harn.session.id": "sess_demo"})
-  counter(harness.obs, "harn.session.put_total", 1, {"harn.session.op": "put"})
-  histogram(harness.obs, "harn.session.duration_ms", 12, {"harn.session.op": "put"})
-  gauge(harness.obs, "harn.session.bytes", 256, {"harn.session.op": "put"})
-  harness.stdio.log("session_put_complete", "info", {"harn.session.outcome": "ok"})
-  end_span(harness.obs, handle)
+fn record_session_put(obs: HarnessObs) {
+  const handle = start_span(obs, "harn.session.put", {"harn.session.id": "sess_demo"})
+  counter(obs, "harn.session.put_total", 1, {"harn.session.op": "put"})
+  histogram(obs, "harn.session.duration_ms", 12, {"harn.session.op": "put"})
+  gauge(obs, "harn.session.bytes", 256, {"harn.session.op": "put"})
+  obs.log("session_put_complete", "info", {"harn.session.outcome": "ok"})
+  end_span(obs, handle)
 }
 
 fn count_by_kind(events) {
@@ -75,15 +74,15 @@ fn count_by_kind(events) {
   return {span_end: span_end, metric: metric, log: log_count, other: other}
 }
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   // Route through the `test` backend so the scenario is fully offline
   // and the in-process buffer is the source of truth.
-  reset()
+  reset(harness.obs)
   configure(harness.obs, {backend: backends().test()})
-  record_session_put(harness, _harness)
-  const events = events_take()
+  record_session_put(harness.obs)
+  const events = events_take(harness.obs)
   const counts = count_by_kind(events)
-  const req_id = request_id() ?? "<unbound>"
+  const req_id = request_id(harness.obs) ?? "<unbound>"
   harness.stdio.println("obs_primitive_receipt={")
   harness.stdio.println("  span_end_count: " + to_string_lossy(counts.span_end))
   harness.stdio.println("  metric_count: " + to_string_lossy(counts.metric))

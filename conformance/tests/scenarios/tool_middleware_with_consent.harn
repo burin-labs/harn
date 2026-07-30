@@ -43,7 +43,7 @@ pipeline default(harness: Harness) {
     }
     return {decision: "approved", decided_by: "test"}
   }
-  const mw = with_consent(harness, prompt)
+  const mw = with_consent(harness.clock, prompt)
   // approved
   const r1 = mw(envelope("read"), next)
   harness.stdio.println(r1.ok)
@@ -56,8 +56,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(r2.error)
   harness.stdio.println(r2.audit.consent.decision)
   // bool-shorthand: returning bool is also accepted
-  const approve_all = with_consent(harness, { _call -> true })
-  const deny_all = with_consent(harness, { _call -> false })
+  const approve_all = with_consent(harness.clock, { _call -> true })
+  const deny_all = with_consent(harness.clock, { _call -> false })
   const r3 = approve_all(envelope("any"), next)
   const r4 = deny_all(envelope("any"), next)
   harness.stdio.println(r3.ok)

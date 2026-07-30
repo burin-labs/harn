@@ -8,7 +8,7 @@ import { prompt_injection_scanner } from "std/channel_guardrails"
 pipeline default(harness: Harness) {
   harness.obs.pipeline_lifecycle_audit_log_take()
   harness.channels.guardrail_clear()
-  const _ = prompt_injection_scanner(harness, {})
+  const _ = prompt_injection_scanner(harness.channels, {})
   const receipt = harness.channels.append("ch.guardrail.allow", {value: 42})
   harness.stdio.println(receipt?.inserted)
   harness.stdio.println(receipt?.blocked ?? false)

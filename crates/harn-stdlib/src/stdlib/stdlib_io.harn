@@ -38,7 +38,11 @@ pub fn read_line(stdio: HarnessStdio, opts: ReadLineOptions = {}) -> ReadLineRes
  * @effects: []
  * @errors: []
  */
-pub fn read_password(stdio: HarnessStdio, prompt: string = "", timeout_ms: int? = nil) -> ReadLineResult {
+pub fn read_password(
+  stdio: HarnessStdio,
+  prompt: string = "",
+  timeout_ms: int? = nil,
+) -> ReadLineResult {
   if timeout_ms == nil {
     return stdio.read_line({prompt: prompt, echo: false})
   }

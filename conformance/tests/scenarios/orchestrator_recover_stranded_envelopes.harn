@@ -19,7 +19,10 @@ fn wait_for_readyz(harness: Harness, url, pid) {
 }
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-orchestrator-recover-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-orchestrator-recover-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -27,7 +30,7 @@ pipeline test(harness: Harness, task) {
   )
   harness.fs.write_text(
     path_join(root, "lib.harn"),
-    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> string {\n  return event.kind\n}\n",
+    "import \"std/triggers\"\n\npub fn on_task(harness: Harness, event: TriggerEvent) -> string {\n  return event.kind\n}\n",
   )
   const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = resolve_harn_bin(harness, repo_root)
@@ -51,7 +54,7 @@ pipeline test(harness: Harness, task) {
       headers: {"Content-Type": "application/json", Authorization: "Bearer test-key"},
     },
   )
-  const crash_exited = wait_for_exit(harness, crash_pid)
+  const crash_exited = wait_for_exit(harness.clock, harness.process, crash_pid)
   if !crash_exited && process_alive(harness.process, crash_pid) {
     // Under heavy CI load the dispatcher can be scheduling-starved past
     // the wait_for_exit timeout. Force-kill so the restart orchestrator
@@ -59,7 +62,7 @@ pipeline test(harness: Harness, task) {
     // assertion below still reflects whether the crash happened
     // naturally under HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX.
     const _ = harness.process.shell("kill -KILL " + crash_pid)
-    wait_for_exit(harness, crash_pid)
+    wait_for_exit(harness.clock, harness.process, crash_pid)
   }
   harness.stdio.println(response.status == 200 && crash_exited)
   const restart = harness.process.shell_at(
@@ -110,6 +113,6 @@ pipeline test(harness: Harness, task) {
       && recover.stdout.contains("event_id=trigger_evt_"),
   )
   const _ = harness.process.shell("kill -TERM " + restart_pid)
-  wait_for_exit(harness, restart_pid)
+  wait_for_exit(harness.clock, harness.process, restart_pid)
   harness.fs.delete(root)
 }

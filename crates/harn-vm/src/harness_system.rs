@@ -208,13 +208,23 @@ pub fn temperature_snapshot() -> Value {
 /// Snapshot of the host platform: os, arch, version, kernel.
 pub fn platform_snapshot() -> Value {
     json!({
-        "os": System::name(),
+        // Stable API identifier rather than sysinfo's display name (`Darwin`,
+        // `Linux`, ...), whose casing and vocabulary vary by host.
+        "os": canonical_os(),
         "arch": std::env::consts::ARCH,
         "version": System::os_version(),
         "kernel": System::kernel_version(),
         "long_os_version": System::long_os_version(),
         "hostname": System::host_name(),
     })
+}
+
+fn canonical_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        std::env::consts::OS
+    }
 }
 
 /// Minimal identity exposed to explicitly authorized scripts.

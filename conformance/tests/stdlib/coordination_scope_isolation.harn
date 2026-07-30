@@ -1,31 +1,65 @@
 import { coord_post, coord_read } from "std/coordination"
 
 pipeline default(harness: Harness) {
-  const _ = coord_post(harness.runtime, harness.channels, harness.random, "session",
+  const _ = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "session",
     "ops",
     {kind: "status", subject: "A"},
     {id: "coord-A", session_id: "sess-A"},
   )
-  const _ = coord_post(harness.runtime, harness.channels, harness.random, "session",
+  const _ = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "session",
     "ops",
     {kind: "status", subject: "B"},
     {id: "coord-B", session_id: "sess-B"},
   )
-  const _ = coord_post(harness.runtime, harness.channels, harness.random, "workspace",
+  const _ = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "workspace",
     "ops",
     {kind: "status", subject: "workspace"},
     {id: "coord-W", tenant_id: "tenant-1", workspace_id: "workspace-1"},
   )
-  const sess_a = coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "sess-A"})
-  const sess_b = coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "sess-B"})
-  const sess_c = coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "sess-C"})
-  const workspace = coord_read(harness.runtime,
-    harness.channels, "workspace",
+  const sess_a = coord_read(
+    harness.runtime,
+    harness.channels,
+    "session",
+    "ops",
+    {session_id: "sess-A"},
+  )
+  const sess_b = coord_read(
+    harness.runtime,
+    harness.channels,
+    "session",
+    "ops",
+    {session_id: "sess-B"},
+  )
+  const sess_c = coord_read(
+    harness.runtime,
+    harness.channels,
+    "session",
+    "ops",
+    {session_id: "sess-C"},
+  )
+  const workspace = coord_read(
+    harness.runtime,
+    harness.channels,
+    "workspace",
     "ops",
     {tenant_id: "tenant-1", workspace_id: "workspace-1"},
   )
-  const other_tenant_workspace = coord_read(harness.runtime,
-    harness.channels, "workspace",
+  const other_tenant_workspace = coord_read(
+    harness.runtime,
+    harness.channels,
+    "workspace",
     "ops",
     {tenant_id: "tenant-2", workspace_id: "workspace-1"},
   )

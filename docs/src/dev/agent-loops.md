@@ -4,7 +4,7 @@
 
 `done_judge` and `verify_completion_judge` run on a transcript projection. The
 judge prompt includes the worker transcript, but the judge's own LLM request and
-structured response are not appended to `agent_session_messages(session_id)`.
+structured response are not appended to `harness.agent.messages(session_id)`.
 Only legitimate worker turns and explicit runtime feedback injections mutate the
 worker session transcript.
 

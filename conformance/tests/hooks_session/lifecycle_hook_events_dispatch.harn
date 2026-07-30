@@ -10,28 +10,55 @@
  * The events also round-trip through `parse_session_event` so they can
  * be registered via the snake_case names exposed in user scripts.
  */
-fn record(harness: Harness, observed, _payload) {
-  harness.runtime.atomic_add(observed, 1)
+fn record(runtime: HarnessRuntime, observed, _payload) {
+  runtime.atomic_add(observed, 1)
   return nil
 }
 
 pipeline default(harness: Harness) {
   const observed = harness.runtime.atomic(0)
   harness.agent.clear_session_hooks()
-  harness.agent.register_session_hook("pre_suspend", { _event -> record(harness, observed, _event) })
-  harness.agent.register_session_hook("post_suspend", { _event -> record(harness, observed, _event) })
-  harness.agent.register_session_hook("pre_resume", { _event -> record(harness, observed, _event) })
-  harness.agent.register_session_hook("post_resume", { _event -> record(harness, observed, _event) })
-  harness.agent.register_session_hook("pre_drain", { _event -> record(harness, observed, _event) })
-  harness.agent.register_session_hook("post_drain", { _event -> record(harness, observed, _event) })
-  harness.agent.register_session_hook("on_drain_decision", { _event -> record(harness, observed, _event) })
+  harness.agent.register_session_hook(
+    "pre_suspend",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
+  harness.agent.register_session_hook(
+    "post_suspend",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
+  harness.agent.register_session_hook(
+    "pre_resume",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
+  harness.agent.register_session_hook(
+    "post_resume",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
+  harness.agent.register_session_hook(
+    "pre_drain",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
+  harness.agent.register_session_hook(
+    "post_drain",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
+  harness.agent.register_session_hook(
+    "on_drain_decision",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
   // Re-register the existing finish events so the full lifecycle map
   // is exercised by a single fixture.
-  harness.agent.register_session_hook("pre_finish", { _event -> record(harness, observed, _event) })
-  harness.agent.register_session_hook("post_finish", { _event -> record(harness, observed, _event) })
+  harness.agent.register_session_hook(
+    "pre_finish",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
+  harness.agent.register_session_hook(
+    "post_finish",
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
+  )
   harness.agent.register_session_hook(
     "on_unsettled_detected",
-    { _event -> record(harness, observed, _event) },
+    { _hook_harness, _event -> record(harness.runtime, observed, _event) },
   )
   // Each call fires the registered hook through the shared dispatcher.
   // The runtime parses the snake_case name and returns control allow.

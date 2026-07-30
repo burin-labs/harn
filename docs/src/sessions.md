@@ -5,7 +5,7 @@ given conversational agent run:
 
 1. Its **transcript history** (`messages`, `events`, `summary`, …).
 2. The **closure subscribers** registered against it via
-   `agent_subscribe(session_id, cb)`.
+   `harness.agent.subscribe(session_id, cb)`.
 3. Its **lifecycle** — create, reset, fork, trim, compact, close.
 4. Its **live-client ownership** — observers, the active controller, prompt
    injection rights, and permission-routing responsibility.
@@ -18,39 +18,39 @@ explicit, imperative builtins. Unknown inputs are hard errors.
 ## Quick tour
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   // Open (or resume) a session. `nil` mints a UUIDv7.
-  const s = agent_session_open()
+  const s = harness.agent.open()
 
   // Seed the conversation.
-  agent_session_inject(s, {role: "user", content: "Hello!"})
+  harness.agent.inject(s, {role: "user", content: "Hello!"})
 
   // Run an agent loop against the session — prior messages are
   // automatically loaded as prefix, the final transcript is persisted
   // back under `s`.
-  const first = agent_loop("continue the greeting", nil, {
+  const first = agent_loop(harness, "continue the greeting", nil, {
     session_id: s,
     provider: "mock",
   })
 
   // A second call sees `first`'s assistant reply as prior history.
-  const second = agent_loop("what do you remember?", nil, {
+  const second = agent_loop(harness, "what do you remember?", nil, {
     session_id: s,
     provider: "mock",
   })
 
   // Fork to explore a counterfactual without touching `s`.
-  const branch = agent_session_fork(s)
-  agent_session_inject(branch, {role: "user", content: "what if …"})
+  const branch = harness.agent.fork(s)
+  harness.agent.inject(branch, {role: "user", content: "what if …"})
 
   // Or branch from a scrubber-rebuilt prefix.
-  const replay_branch = agent_session_fork_at(s, 1)
-  const ancestry = agent_session_ancestry(replay_branch)
+  const replay_branch = harness.agent.fork_at(s, 1)
+  const ancestry = harness.agent.ancestry(replay_branch)
   assert(ancestry["root_id"] == s, "fork ancestry resolves back to the root session")
 
   // Release a session immediately.
-  agent_session_close(branch)
-  agent_session_close(replay_branch)
+  harness.agent.close(branch)
+  harness.agent.close(replay_branch)
 }
 ```
 
@@ -62,44 +62,44 @@ the "one-shot" call shape.
 
 | Function | Returns | Notes |
 |---|---|---|
-| `agent_session_open(id?: string, opts?: dict)` | `string` | Idempotent. `nil` mints a UUIDv7. `opts` may include `workspace_anchor` and `workspace_policy: {default_mount_mode}`. |
-| `agent_session_exists(id)` | `bool` | Safe on unknown ids. |
-| `agent_session_current_id()` | `string` or `nil` | Returns the innermost active session id for the current thread, or `nil` outside any active session. |
-| `agent_session_length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
-| `agent_session_snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
-| `agent_session_ancestry(id)` | `dict` or `nil` | Returns `{parent_id, child_ids, root_id}` for the in-VM session graph. |
-| `agent_session_actor_chain(id?)` | `dict` or `nil` | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted. |
+| `harness.agent.open(id?: string, opts?: dict)` | `string` | Idempotent. `nil` mints a UUIDv7. `opts` may include `workspace_anchor` and `workspace_policy: {default_mount_mode}`. |
+| `harness.agent.exists(id)` | `bool` | Safe on unknown ids. |
+| `harness.agent.current_id()` | `string` or `nil` | Returns the innermost active session id for the current execution, or `nil` outside any active session. |
+| `harness.agent.length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
+| `harness.agent.snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
+| `harness.agent.ancestry(id)` | `dict` or `nil` | Returns `{parent_id, child_ids, root_id}` for the in-VM session graph. |
+| `harness.agent.actor_chain(id?)` | `dict` or `nil` | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted. |
 | `actor_chain_validate_scope_attenuation(chain, opts?)` | `dict` | Validates monotonic actor-chain scopes. `opts` accepts `policy`, `raise`, `alert`, and `trace_id`. |
-| `agent_session_reset(id)` | `nil` | Wipes history; preserves id and subscribers. |
-| `agent_session_fork(src, dst?)` | `string` | Copies transcript, sets parent/child lineage, and does NOT copy subscribers. |
-| `agent_session_fork_at(src, keep_first, dst?)` | `string` | Forks then keeps only the first `keep_first` messages on the child. Records `branched_at_event_index`. |
-| `agent_session_scratchpad(id)` | `dict` or `nil` | Returns the small session-local agent scratchpad. Errors if `id` does not exist. |
-| `agent_session_set_scratchpad(id, scratchpad, opts?)` | `dict` | Stores a dict scratchpad and returns `{ok, version, scratchpad}`. `opts` may include `source`, `reason`, and `metadata`. |
-| `agent_session_clear_scratchpad(id, opts?)` | `dict` | Clears the scratchpad and returns `{ok, version, scratchpad: nil}`. |
-| `agent_session_trim(id, keep_last)` | `int` | Retains last `keep_last` messages. Returns kept count. |
-| `agent_session_compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
-| `agent_session_attach(id, client_id, opts?)` | `dict` | Attaches a live client. `opts.mode` is `"observer"` or `"controller"`; a second controller requires `takeover: true` or `agent_session_takeover`. |
-| `agent_session_takeover(id, client_id, opts?)` | `dict` | Attaches `client_id` as the controller and demotes any prior controller to observer. |
-| `agent_session_detach(id, client_id, opts?)` | `dict` | Detaches a live client. If it was the controller, control is released. |
-| `agent_session_heartbeat(id, client_id, opts?)` | `dict` | Refreshes an attached client's last-seen marker and optional metadata. |
-| `agent_session_live_clients(id)` | `list` | Returns the attached live clients. `agent_session_snapshot` also includes `live_clients` and `live_controller_id`. |
-| `agent_session_client_inject_prompt(id, client_id, content, opts?)` | `nil` | Appends a user prompt only when `client_id` is the active controller with prompt-injection rights. |
-| `agent_session_route_permission(id, client_id, request, opts?)` | `dict` | Records that the active controller owns routing for a permission request. |
-| `agent_session_inject(id, message)` | `nil` | Appends a `{role, content, …}` message. Missing `role` errors. |
-| `agent_session_seed_from_jsonl(jsonl_path, opts?)` | `dict` | Creates a new session from a replayable `llm_transcript.jsonl` sidecar. |
-| `agent_session_workspace_anchor(id)` / `agent_session_set_workspace_anchor(id, anchor)` | `dict` / `bool` | Read or replace the typed workspace anchor. |
-| `agent_session_workspace_policy(id)` / `agent_session_set_workspace_policy(id, policy)` | `dict` / `bool` | Read or update workspace defaults, including the `default_mount_mode` used for mounted roots that omit `mount_mode`. |
-| `agent_session_add_root(id, root, opts?)` / `agent_session_remove_root(id, root)` | `dict` | Mount or unmount additional workspace roots. `add_root` returns `{ok, mounted_at?, error?}` and defaults `mount_mode` from the session workspace policy. |
-| `agent_session_list_roots(id)` | `dict` | Returns `{primary, additional}` for the session's current mounted roots. |
-| `agent_session_close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
+| `harness.agent.reset(id)` | `nil` | Wipes history; preserves id and subscribers. |
+| `harness.agent.fork(src, dst?)` | `string` | Copies transcript, sets parent/child lineage, and does NOT copy subscribers. |
+| `harness.agent.fork_at(src, keep_first, dst?)` | `string` | Forks then keeps only the first `keep_first` messages on the child. Records `branched_at_event_index`. |
+| `harness.agent.scratchpad(id)` | `dict` or `nil` | Returns the small session-local agent scratchpad. Errors if `id` does not exist. |
+| `harness.agent.set_scratchpad(id, scratchpad, opts?)` | `dict` | Stores a dict scratchpad and returns `{ok, version, scratchpad}`. `opts` may include `source`, `reason`, and `metadata`. |
+| `harness.agent.clear_scratchpad(id, opts?)` | `dict` | Clears the scratchpad and returns `{ok, version, scratchpad: nil}`. |
+| `harness.agent.trim(id, keep_last)` | `int` | Retains last `keep_last` messages. Returns kept count. |
+| `harness.agent.compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
+| `harness.agent.attach(id, client_id, opts?)` | `dict` | Attaches a live client. `opts.mode` is `"observer"` or `"controller"`; a second controller requires `takeover: true` or `harness.agent.takeover`. |
+| `harness.agent.takeover(id, client_id, opts?)` | `dict` | Attaches `client_id` as the controller and demotes any prior controller to observer. |
+| `harness.agent.detach(id, client_id, opts?)` | `dict` | Detaches a live client. If it was the controller, control is released. |
+| `harness.agent.heartbeat(id, client_id, opts?)` | `dict` | Refreshes an attached client's last-seen marker and optional metadata. |
+| `harness.agent.live_clients(id)` | `list` | Returns the attached live clients. `harness.agent.snapshot` also includes `live_clients` and `live_controller_id`. |
+| `harness.agent.client_inject_prompt(id, client_id, content, opts?)` | `nil` | Appends a user prompt only when `client_id` is the active controller with prompt-injection rights. |
+| `harness.agent.route_permission(id, client_id, request, opts?)` | `dict` | Records that the active controller owns routing for a permission request. |
+| `harness.agent.inject(id, message)` | `nil` | Appends a `{role, content, …}` message. Missing `role` errors. |
+| `harness.agent.seed_from_jsonl(jsonl_path, opts?)` | `dict` | Creates a new session from a replayable `llm_transcript.jsonl` sidecar. |
+| `harness.agent.workspace_anchor(id)` / `harness.agent.set_workspace_anchor(id, anchor)` | `dict` / `bool` | Read or replace the typed workspace anchor. |
+| `harness.agent.workspace_policy(id)` / `harness.agent.set_workspace_policy(id, policy)` | `dict` / `bool` | Read or update workspace defaults, including the `default_mount_mode` used for mounted roots that omit `mount_mode`. |
+| `harness.agent.add_root(id, root, opts?)` / `harness.agent.remove_root(id, root)` | `dict` | Mount or unmount additional workspace roots. `add_root` returns `{ok, mounted_at?, error?}` and defaults `mount_mode` from the session workspace policy. |
+| `harness.agent.list_roots(id)` | `dict` | Returns `{primary, additional}` for the session's current mounted roots. |
+| `harness.agent.close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
 
 ### Live session clients
 
 Live attach state belongs to the Harn session, not to a particular UI. A
 session can have many observers and at most one controller. Observers can
 attach, heartbeat, detach, and read the stream. Only the active controller can
-inject a user prompt through `agent_session_client_inject_prompt` or claim a
-permission route through `agent_session_route_permission`.
+inject a user prompt through `harness.agent.client_inject_prompt` or claim a
+permission route through `harness.agent.route_permission`.
 
 Attach, takeover, detach, and heartbeat each append a `live_session_client`
 transcript event. Permission routing appends
@@ -108,17 +108,19 @@ message whose metadata contains `live_session.client_id`, so transcript replay
 preserves the fact that an attached controller supplied the prompt.
 
 ```harn
-const s = agent_session_open("incident-debug")
-agent_session_attach(s, "portal", {mode: "observer"})
-agent_session_attach(s, "tui", {mode: "controller"})
+fn manage_clients(agent: HarnessAgent) {
+  const s = agent.open("incident-debug")
+  agent.attach(s, "portal", {mode: "observer"})
+  agent.attach(s, "tui", {mode: "controller"})
 
-// A second controller must make takeover explicit.
-agent_session_takeover(s, "mobile", {metadata: {reason: "operator handoff"}})
-agent_session_client_inject_prompt(s, "mobile", "continue from the failing test")
-agent_session_detach(s, "mobile", {reason: "client_exit"})
+  // A second controller must make takeover explicit.
+  agent.takeover(s, "mobile", {metadata: {reason: "operator handoff"}})
+  agent.client_inject_prompt(s, "mobile", "continue from the failing test")
+  agent.detach(s, "mobile", {reason: "client_exit"})
+}
 ```
 
-### `agent_session_compact` options
+### `harness.agent.compact` options
 
 Accepts any subset of these keys; anything else is a hard error:
 
@@ -137,14 +139,15 @@ compaction scheme completely. `mask_callback` and `compress_callback` customize
 the built-in observation-mask path without changing the rest of the session
 lifecycle.
 
-### `agent_session_seed_from_jsonl`
+### `harness.agent.seed_from_jsonl`
 
-`agent_session_seed_from_jsonl(path, opts?)` imports prompt-visible history
+`harness.agent.seed_from_jsonl(path, opts?)` imports prompt-visible history
 from an LLM transcript sidecar and creates a new session preloaded with those
 messages:
 
 ```harn
-const seeded = agent_session_seed_from_jsonl(
+fn resume_seeded(harness: Harness) {
+  const seeded = harness.agent.seed_from_jsonl(
   ".harn-runs/audit/agent-llm/llm_transcript.jsonl",
   {
     truncate_to_last: 40,
@@ -155,14 +158,15 @@ const seeded = agent_session_seed_from_jsonl(
   },
 )
 
-if seeded.ok {
-  if seeded.recommend_compaction {
-    agent_session_compact(seeded.session_id, {compact_strategy: "llm"})
+  if seeded.ok {
+    if seeded.recommend_compaction {
+      harness.agent.compact(seeded.session_id, {compact_strategy: "llm"})
+    }
+    agent_loop(harness, "Continue from the failed release step.", nil, {
+      session_id: seeded.session_id,
+      provider: seeded.provider,
+    })
   }
-  agent_loop("Continue from the failed release step.", nil, {
-    session_id: seeded.session_id,
-    provider: seeded.provider,
-  })
 }
 ```
 
@@ -194,7 +198,7 @@ The result shape is `{ok, session_id?, turns_loaded?, messages_loaded?,
 source_records?, source_format?, partial?, truncated?, provider?, model?,
 tool_format?, source?, recommend_compaction?, error?}`. `source` has schema
 `harn.session_seed_source.v1` and is also stored under
-`agent_session_snapshot(session_id).metadata.seeded_from_jsonl.source`.
+`harness.agent.snapshot(session_id).metadata.seeded_from_jsonl.source`.
 `source_format` is `message_events`, `request_snapshots`, or
 `provider_responses_only`; the last is available only with `validate: false`
 and is assistant-response best effort, not prefix-cache equivalent replay.
@@ -235,11 +239,11 @@ events through every subscriber for that session id. Subscribers are
 not copied by `agent_session_fork` — a fork is a conversation branch,
 not an event fanout.
 
-Inside those callbacks, `agent_session_current_id()` resolves to the
+Inside those callbacks, `harness.agent.current_id()` resolves to the
 session currently being driven by the agent loop. Outside any active
 session, it returns `nil`.
 
-`agent_session_actor_chain(id?)` returns the session's RFC 8693 actor chain.
+`harness.agent.actor_chain(id?)` returns the session's RFC 8693 actor chain.
 When `id` is omitted, it reads the current active session. Hosts bind the
 originating principal at session entry, and child agent sessions push their
 own deterministic actor name onto the chain. Snapshots also expose the same
@@ -257,9 +261,9 @@ trust record carrying `metadata.actor_chain` and `metadata.actor_chain_alert`.
 
 Forks now populate a small in-memory ancestry graph:
 
-- `agent_session_fork(src, dst?)` sets the child's `parent_id` and appends the child id to the parent's `child_ids`.
-- `agent_session_fork_at(src, keep_first, dst?)` does the same and also records `branched_at_event_index` on the child snapshot.
-- `agent_session_ancestry(id)` walks parent links up to the reachable root and returns `{parent_id, child_ids, root_id}`.
+- `harness.agent.fork(src, dst?)` sets the child's `parent_id` and appends the child id to the parent's `child_ids`.
+- `harness.agent.fork_at(src, keep_first, dst?)` does the same and also records `branched_at_event_index` on the child snapshot.
+- `harness.agent.ancestry(id)` walks parent links up to the reachable root and returns `{parent_id, child_ids, root_id}`.
 
 This lineage stays VM-local. It is meant for host UIs and replay tools
 that want to render branching conversation trees without re-deriving

@@ -40,7 +40,7 @@ impl Dispatcher {
             AgentScope::Concrete(ids) => ids.clone(),
             AgentScope::Closure(closure) => {
                 let value = self
-                    .invoke_vm_callable(
+                    .invoke_vm_event_callable(
                         &crate::value::VmCallable::Eager(Arc::clone(closure)),
                         &binding.binding_key(),
                         event,

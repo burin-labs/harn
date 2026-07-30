@@ -26,10 +26,10 @@ pipeline main(harness: Harness) {
     tool: {name: "search", args: {}},
     result: {text: "snipped", truncated: true, original_size: 4096, final_size: 64},
   }
-  const first = agent_reminder_providers_fire(harness, session, "post_tool_use", payload, {})
-  const second = agent_reminder_providers_fire(harness, session, "post_tool_use", payload, {})
+  const first = agent_reminder_providers_fire(harness.agent, session, "post_tool_use", payload, {})
+  const second = agent_reminder_providers_fire(harness.agent, session, "post_tool_use", payload, {})
   const before = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
-  const ttl = agent_session_apply_reminder_post_turn(harness, session, 2)
+  const ttl = agent_session_apply_reminder_post_turn(harness.agent, session, 2)
   const after = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   harness.stdio.println(first.fired_count)
   harness.stdio.println(second.reports[0].deduped_count)
@@ -43,7 +43,9 @@ pipeline main(harness: Harness) {
   harness.tools.register_hook({pattern: "large_output", max_output: 200})
   const dispatch_session = harness.agent.open("reminder-provider-tool-output-dispatch")
   harness.agent.reset(dispatch_session)
-  const dispatch = agent_dispatch_tool_call(harness, {id: "large_1", name: "large_output", arguments: {}},
+  const dispatch = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "large_1", name: "large_output", arguments: {}},
     truncating_tools(),
     {session_id: dispatch_session, _iteration: 1},
   )
@@ -51,7 +53,7 @@ pipeline main(harness: Harness) {
     harness.agent.snapshot(dispatch_session),
     "system_reminder",
   )
-  const same_turn_ttl = agent_session_apply_reminder_post_turn(harness, dispatch_session, 0)
+  const same_turn_ttl = agent_session_apply_reminder_post_turn(harness.agent, dispatch_session, 0)
   const same_turn_reminders = transcript_events_by_kind(
     harness.agent.snapshot(dispatch_session),
     "system_reminder",
@@ -65,12 +67,15 @@ pipeline main(harness: Harness) {
   harness.stdio.println(len(same_turn_reminders))
   harness.stdio.println(same_turn_reminders[0].reminder.ttl_turns)
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "large_loop_1", name: "large_output", arguments: {}}]},
       {tool_calls: [{id: "large_loop_2", name: "large_output", arguments: {}}]},
     ],
     { ->
-      const loop_enabled = agent_loop(harness, "call a large tool",
+      const loop_enabled = agent_loop(
+        harness,
+        "call a large tool",
         nil,
         {
           provider: "mock",
@@ -85,7 +90,9 @@ pipeline main(harness: Harness) {
         loop_enabled.transcript,
         "system_reminder",
       )
-      const loop_disabled = agent_loop(harness, "call a large tool",
+      const loop_disabled = agent_loop(
+        harness,
+        "call a large tool",
         nil,
         {
           provider: "mock",

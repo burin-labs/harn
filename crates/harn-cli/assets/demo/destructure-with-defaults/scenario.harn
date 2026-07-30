@@ -45,7 +45,9 @@ pipeline default(harness: Harness, _task) {
   // their defaults.
   const {namespace = nil, path = ".", retries = 0, verbose = false} = pipeline_input() ?? {}
   harness.stdio.println("after — 1 line, source named once:")
-  harness.stdio.println("  path=${path} namespace=${namespace} retries=${retries} verbose=${verbose}")
+  harness.stdio.println(
+    "  path=${path} namespace=${namespace} retries=${retries} verbose=${verbose}",
+  )
   harness.stdio.println("")
   // Defaults apply per-key from an empty source, too.
   const {host = "0.0.0.0", port = 8080} = {}

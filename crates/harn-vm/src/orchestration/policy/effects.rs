@@ -173,6 +173,30 @@ fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<EffectRecord> {
     // contract manifest. Keeping name tables here would create a competing
     // semantic owner and let static ceilings drift from runtime receipts.
     if let CallClassification::Capabilities(capability_effects) = &call.classification {
+        let contract = call
+            .name
+            .strip_prefix("harness.")
+            .and_then(|path| path.split_once('.'))
+            .and_then(|(field, method)| {
+                let capability = harn_builtin_meta::CapabilityId::from_field_name(field)?;
+                crate::stdlib::all_builtin_manifest().iter().find(|entry| {
+                    matches!(
+                        entry.contract.exposure,
+                        harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                            capability: candidate,
+                            method: candidate_method,
+                        } if candidate == capability && candidate_method == method
+                    )
+                })
+            })
+            .or_else(|| {
+                crate::stdlib::all_builtin_manifest()
+                    .iter()
+                    .find(|entry| entry.name == call.name)
+            });
+        if let Some(entry) = contract {
+            return effect_specs_to_records(entry.contract.effects, &call.literal_args);
+        }
         return capability_effects
             .iter()
             .filter_map(capability_effect_to_record)
@@ -186,7 +210,37 @@ pub(crate) fn runtime_effects_from_contract(
     args: &[VmValue],
 ) -> Vec<EffectRecord> {
     let mut records = Vec::new();
+    let llm_specs = specs
+        .iter()
+        .filter(|spec| spec.kind == harn_builtin_meta::EffectKind::Llm)
+        .collect::<Vec<_>>();
+    if let Some(first) = llm_specs.first() {
+        let mut provider = None;
+        let mut model = None;
+        for spec in &llm_specs {
+            for selector in spec.resources {
+                let harn_builtin_meta::ResourceSelector::Field { path, .. } = selector else {
+                    continue;
+                };
+                let value = resolve_runtime_resources(*selector, args)
+                    .into_iter()
+                    .next();
+                match path.last().copied() {
+                    Some("provider") => provider = value,
+                    Some("model") => model = value,
+                    _ => {}
+                }
+            }
+        }
+        records.push(EffectRecord::new(
+            EffectKind::Llm { provider, model },
+            effect_scope_from_contract(first.access),
+        ));
+    }
     for spec in specs {
+        if spec.kind == harn_builtin_meta::EffectKind::Llm {
+            continue;
+        }
         let kind = effect_kind_from_contract(spec.kind);
         let scope = effect_scope_from_contract(spec.access);
         let resources = spec
@@ -329,7 +383,37 @@ fn effect_specs_to_records(
     args: &[LiteralValue],
 ) -> Vec<EffectRecord> {
     let mut records = Vec::new();
+    let llm_specs = specs
+        .iter()
+        .filter(|spec| spec.kind == harn_builtin_meta::EffectKind::Llm)
+        .collect::<Vec<_>>();
+    if let Some(first) = llm_specs.first() {
+        let mut provider = None;
+        let mut model = None;
+        for spec in &llm_specs {
+            for selector in spec.resources {
+                let harn_builtin_meta::ResourceSelector::Field { path, .. } = selector else {
+                    continue;
+                };
+                let value = resolve_contract_resources(*selector, args)
+                    .into_iter()
+                    .next();
+                match path.last().copied() {
+                    Some("provider") => provider = value,
+                    Some("model") => model = value,
+                    _ => {}
+                }
+            }
+        }
+        records.push(EffectRecord::new(
+            EffectKind::Llm { provider, model },
+            effect_scope_from_contract(first.access),
+        ));
+    }
     for spec in specs {
+        if spec.kind == harn_builtin_meta::EffectKind::Llm {
+            continue;
+        }
         let kind = effect_kind_from_contract(spec.kind);
         let scope = effect_scope_from_contract(spec.access);
         let resources = spec
@@ -516,7 +600,7 @@ fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<Eff
             },
             EffectScope::Write,
         ),
-        Capability::NetworkAccess => (EffectKind::Net, EffectScope::Write),
+        Capability::NetworkAccess => (EffectKind::Net, contract_scope),
         Capability::ConnectorAccess => (
             EffectKind::Hostcall {
                 name: if effect.operation.is_empty() {
@@ -532,7 +616,7 @@ fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<Eff
                 provider: None,
                 model: None,
             },
-            EffectScope::Write,
+            contract_scope,
         ),
         Capability::WorkerDispatch => (EffectKind::Spawn, EffectScope::Write),
         Capability::Stdio => (EffectKind::Stdio, contract_scope),
@@ -674,7 +758,7 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
     harn_parser::visit::immediate_children(node)
 }
 
-pub(super) fn effect_allowed_by_ceiling(effect: &EffectRecord, ceiling: &CapabilityPolicy) -> bool {
+pub(crate) fn effect_allowed_by_ceiling(effect: &EffectRecord, ceiling: &CapabilityPolicy) -> bool {
     if ceiling.capabilities_are_restricted() {
         let (capability, op) = effect_capability_op(effect);
         let allowed = ceiling
@@ -966,56 +1050,35 @@ mod tests {
 
     #[test]
     fn http_get_builtin_yields_net_effect_with_resource() {
-        let source = r#"fn main() { http_get("https://example.test/api") }"#;
+        let source = r#"fn main(harness: Harness) { harness.net.get("https://example.test/api") }"#;
         let effects = compute_handoff_effects(source, None);
         let net = effects
             .iter()
             .find(|effect| matches!(effect.kind, EffectKind::Net))
             .expect("net effect");
-        assert_eq!(net.scope, EffectScope::Write);
+        assert_eq!(net.scope, EffectScope::Read);
         assert_eq!(net.resource.as_deref(), Some("https://example.test/api"));
     }
 
     #[test]
     fn unix_socket_json_request_yields_net_effect_with_resource() {
-        let source = r#"fn main() { __net_unix_socket_json_request("/tmp/harn.sock", {}) }"#;
+        let source = r#"fn main(harness: Harness) {
+            harness.net.unix_socket_json_request("/tmp/harn.sock", {})
+        }"#;
         let effects = compute_handoff_effects(source, None);
         let net = effects
             .iter()
             .find(|effect| matches!(effect.kind, EffectKind::Net))
             .expect("net effect");
-        assert_eq!(net.scope, EffectScope::Write);
+        assert_eq!(net.scope, EffectScope::Mutate);
         assert_eq!(net.resource.as_deref(), Some("/tmp/harn.sock"));
     }
 
     #[test]
     fn files_upload_yields_fs_read_and_net_write_effects() {
-        let source = r#"fn main() { __files_upload("/tmp/input.pdf", "gemini") }"#;
-        let effects = compute_handoff_effects(source, None);
-        assert!(
-            effects.iter().any(|effect| {
-                matches!(effect.kind, EffectKind::Fs)
-                    && effect.scope == EffectScope::Read
-                    && effect.resource.as_deref() == Some("/tmp/input.pdf")
-            }),
-            "expected Fs read effect, got {effects:?}"
-        );
-        assert!(
-            effects.iter().any(|effect| {
-                matches!(effect.kind, EffectKind::Net)
-                    && effect.scope == EffectScope::Write
-                    && effect.resource.as_deref() == Some("gemini")
-            }),
-            "expected Net write effect, got {effects:?}"
-        );
-    }
-
-    #[test]
-    fn std_files_upload_wrapper_yields_fs_read_and_net_write_effects() {
-        let source = r#"
-import { upload } from "std/files"
-fn main() { upload("/tmp/input.pdf", "gemini") }
-"#;
+        let source = r#"fn main(harness: Harness) {
+            harness.llm.upload_file("/tmp/input.pdf", "gemini")
+        }"#;
         let effects = compute_handoff_effects(source, None);
         assert!(
             effects.iter().any(|effect| {
@@ -1162,8 +1225,12 @@ fn main(harness: Harness) {
 
     #[test]
     fn llm_call_emits_llm_effect_with_provider_and_model() {
-        let source = r#"fn main() {
-            llm_call("summarize", { provider: "anthropic", model: "claude-3-5-sonnet" })
+        let source = r#"fn main(harness: Harness) {
+            harness.llm.call(
+                "summarize",
+                nil,
+                { provider: "anthropic", model: "claude-3-5-sonnet" },
+            )
         }"#;
         let effects = compute_handoff_effects(source, None);
         let llm = effects
@@ -1175,6 +1242,28 @@ fn main(harness: Harness) {
         };
         assert_eq!(provider.as_deref(), Some("anthropic"));
         assert_eq!(model.as_deref(), Some("claude-3-5-sonnet"));
+    }
+
+    #[test]
+    fn runtime_llm_contract_combines_provider_and_model_resources() {
+        let entry = crate::stdlib::all_builtin_manifest()
+            .iter()
+            .find(|entry| entry.name == "__cap_llm_call")
+            .expect("LLM capability manifest entry");
+        let options = VmValue::dict(crate::value::DictMap::from_iter([
+            ("provider", VmValue::String("anthropic".into())),
+            ("model", VmValue::String("claude-sonnet-4".into())),
+        ]));
+        let effects = runtime_effects_from_contract(
+            entry.contract.effects,
+            &[VmValue::Nil, VmValue::Nil, options],
+        );
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0].kind,
+            EffectKind::Llm { provider: Some(provider), model: Some(model) }
+                if provider == "anthropic" && model == "claude-sonnet-4"
+        ));
     }
 
     #[test]
@@ -1222,7 +1311,7 @@ fn main(harness: Harness) {
     fn ceiling_side_effect_level_clamps_writes() {
         let source = r#"fn main(harness: Harness) {
             harness.net.get("https://example.test")
-            __io_println("hi")
+            harness.stdio.println("hi")
         }"#;
         let ceiling = CapabilityPolicy {
             side_effect_level: Some("read_only".to_string()),
@@ -1390,10 +1479,10 @@ fn main(harness: Harness) {
 
     #[test]
     fn deduplicates_repeated_effects() {
-        let source = r#"fn main() {
-            http_get("https://example.test")
-            http_get("https://example.test")
-            http_get("https://example.test")
+        let source = r#"fn main(harness: Harness) {
+            harness.net.get("https://example.test")
+            harness.net.get("https://example.test")
+            harness.net.get("https://example.test")
         }"#;
         let effects = compute_handoff_effects(source, None);
         let net_count = effects

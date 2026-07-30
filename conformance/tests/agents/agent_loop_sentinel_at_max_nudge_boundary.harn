@@ -3,9 +3,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("Still checking."), llm_text("finished ##DONE##")],
+    harness.llm,
+    [llm_text("Still checking."), llm_text("finished ##DONE##")],
     { ->
-      const result = agent_loop(harness, "Finish with the sentinel after one retry.",
+      const result = agent_loop(
+        harness,
+        "Finish with the sentinel after one retry.",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 3, max_nudges: 1},
       )

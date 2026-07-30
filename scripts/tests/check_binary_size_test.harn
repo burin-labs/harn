@@ -22,7 +22,7 @@ type ReleaseWorkflow = {
   },
 }
 
-fn release_workflow(harness: Harness) -> ReleaseWorkflow {
+fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
   const step_schema = schema_object(
     {
       name: schema_field(schema_string(), false),
@@ -71,7 +71,7 @@ fn release_workflow(harness: Harness) -> ReleaseWorkflow {
     },
   )
   const path = "../../.github/workflows/build-release-binaries.yml"
-  return unwrap(get_typed_result(yaml_parse(harness.fs.read_text(path)), schema))
+  return unwrap(get_typed_result(yaml_parse(fs.read_text(path)), schema))
 }
 
 fn release_workflow_step(steps: list<ReleaseWorkflowStep>, name: string) -> ReleaseWorkflowStep {
@@ -170,7 +170,7 @@ pipeline test_budget_bytes_rounding(harness: Harness, task) {
 
 @test
 pipeline test_workflow_budget_matches_helper_default(harness: Harness, task) {
-  assert_eq(release_workflow(harness).env.BINARY_SIZE_BUDGET_MB, default_binary_size_budget_mb())
+  assert_eq(release_workflow(harness.fs).env.BINARY_SIZE_BUDGET_MB, default_binary_size_budget_mb())
 }
 
 @test
@@ -178,7 +178,7 @@ pipeline test_workflow_preserves_bloat_after_failed_budget_gate(harness: Harness
   const diagnostic_mode =
     "matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))"
   const diagnostics = "always() && " + diagnostic_mode
-  const steps = release_workflow(harness).jobs.build.steps
+  const steps = release_workflow(harness.fs).jobs.build.steps
   const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
   assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, diagnostic_mode)
   assert_eq(bloat.if, diagnostics)
@@ -197,7 +197,7 @@ pipeline test_workflow_preserves_bloat_after_failed_budget_gate(harness: Harness
 @test
 pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(harness: Harness, task) {
   const resolve = release_workflow_step(
-    release_workflow(harness).jobs.setup.steps,
+    release_workflow(harness.fs).jobs.setup.steps,
     "Resolve release context",
   )
   assert(
@@ -207,8 +207,11 @@ pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(harness: Harn
 }
 
 @test
-pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targets(harness: Harness, task) {
-  const workflow = release_workflow(harness)
+pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targets(
+  harness: Harness,
+  task,
+) {
+  const workflow = release_workflow(harness.fs)
   const checkout = workflow.jobs.prepare_cli_aot.steps[0]
   const generator = release_workflow_step(
     workflow.jobs.prepare_cli_aot.steps,

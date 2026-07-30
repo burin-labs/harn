@@ -1,8 +1,8 @@
 import { xdg_config_home } from "std/cli/paths"
 
-fn config_error(harness: Harness, name: string) -> string {
+fn config_error(env: HarnessEnv, system: HarnessSystem, name: string) -> string {
   return try {
-    xdg_config_home(harness, name)
+    xdg_config_home(env, system, name)
     "ok"
   } catch (e) {
     to_string(e)
@@ -11,10 +11,10 @@ fn config_error(harness: Harness, name: string) -> string {
 
 fn main(harness: Harness) {
   const message = "std/cli/paths: app_name must be a single path segment"
-  harness.stdio.println(config_error(harness, "") == message)
-  harness.stdio.println(config_error(harness, ".") == message)
-  harness.stdio.println(config_error(harness, "..") == message)
-  harness.stdio.println(config_error(harness, "harn/config") == message)
-  harness.stdio.println(config_error(harness, "harn\\config") == message)
-  harness.stdio.println(config_error(harness, "harn") == "ok")
+  harness.stdio.println(config_error(harness.env, harness.system, "") == message)
+  harness.stdio.println(config_error(harness.env, harness.system, ".") == message)
+  harness.stdio.println(config_error(harness.env, harness.system, "..") == message)
+  harness.stdio.println(config_error(harness.env, harness.system, "harn/config") == message)
+  harness.stdio.println(config_error(harness.env, harness.system, "harn\\config") == message)
+  harness.stdio.println(config_error(harness.env, harness.system, "harn") == "ok")
 }

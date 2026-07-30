@@ -1,8 +1,8 @@
 import { host_conditions_sample } from "std/host_conditions"
 
-fn sample_with_injected_host_facts(harness: Harness) {
-  const snapshot = host_conditions_sample(harness.system)
-  const calls = harness.testing.calls()
+fn sample_with_injected_host_facts(system: HarnessSystem, testing: HarnessTesting) {
+  const snapshot = host_conditions_sample(system)
+  const calls = testing.calls()
   require len(calls) == 1
   require calls[0].capability == "system"
   require calls[0].method == "host_conditions"
@@ -37,7 +37,7 @@ pipeline test_host_conditions_observability(harness: Harness, task) {
       ],
     },
   )
-  const snapshot = sample_with_injected_host_facts(harness)
+  const snapshot = sample_with_injected_host_facts(harness.system, harness.testing)
   assert_eq(snapshot.questions[0]?.status, "observed")
   assert_eq(snapshot.questions[0]?.contention, 0.0)
   assert_eq(snapshot.questions[1]?.status, "not_observable")

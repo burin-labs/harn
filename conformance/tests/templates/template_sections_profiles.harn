@@ -28,7 +28,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println("--- gpt-markdown ---")
   harness.agent.push_llm_render_context("openai", "gpt-5.4")
   harness.stdio.println(harness.fs.render_template(template, bindings))
-  harness.stdio.println(harness.fs.render_prompt("fixtures/template/section_partial.prompt", {name: "Alice"}))
+  harness.stdio.println(
+    harness.fs.render_prompt("fixtures/template/section_partial.prompt", {name: "Alice"}),
+  )
   harness.agent.pop_llm_render_context()
   harness.stdio.println("--- qwen-text-tools ---")
   harness.agent.push_llm_render_context("ollama", "qwen3.6:35b-a3b-coding-nvfp4")

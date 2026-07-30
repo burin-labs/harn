@@ -16,7 +16,8 @@ pipeline default(harness: Harness) {
    * confidence (0.4) < threshold (0.8) so the wrapper falls through to
    * `inner` with the original command. */
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"kind\": \"rewrite\", \"confidence\": 0.4,"
           + " \"rewritten\": \"never-applied\", \"explanation\": \"low confidence\"}",
@@ -25,7 +26,9 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(harness, {
+      const wrapper = preset_run_command(
+        harness,
+        {
           llm_classifier: {
             model: "haiku",
             provider: "mock",

@@ -319,7 +319,7 @@ fn __tool_parse_tool_fence_info(marker: string, info: string) -> dict {
 
 /**
  * Split a response into JSON tool-fence bodies, visible prose, and drift warnings.
- * @effects: [host]
+ * @effects: []
  * @errors: []
  */
 pub fn json_chunks(text: string) -> dict {

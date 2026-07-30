@@ -24,42 +24,41 @@ fn mutation_status_code(status) -> int {
   return 0
 }
 
-fn observe_lifecycle(harness: Harness, session_id: string, expected_msg: string) -> dict {
-  const pending = harness.runtime.atomic(0)
-  const in_progress = harness.runtime.atomic(0)
-  const completed = harness.runtime.atomic(0)
-  const failed = harness.runtime.atomic(0)
-  const saw_error_category = harness.runtime.atomic(0)
-  const saw_args = harness.runtime.atomic(0)
-  const mutation_status = harness.runtime.atomic(0)
-  harness.agent.subscribe(
+fn observe_lifecycle(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  session_id: string,
+  expected_msg: string,
+) -> dict {
+  const pending = runtime.atomic(0)
+  const in_progress = runtime.atomic(0)
+  const completed = runtime.atomic(0)
+  const failed = runtime.atomic(0)
+  const saw_error_category = runtime.atomic(0)
+  const saw_args = runtime.atomic(0)
+  const mutation_status = runtime.atomic(0)
+  agent.subscribe(
     session_id,
     { ev ->
       if ev?.type == "tool_call" && ev?.tool_name == "echo" && ev?.status == "pending" {
-        const _ = harness.runtime.atomic_add(pending, 1)
+        const _ = runtime.atomic_add(pending, 1)
         if ev?.raw_input?.msg == expected_msg {
-          const _ = harness.runtime.atomic_set(saw_args, 1)
+          const _ = runtime.atomic_set(saw_args, 1)
         }
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "in_progress" {
-        const _ = harness.runtime.atomic_add(in_progress, 1)
+        const _ = runtime.atomic_add(in_progress, 1)
         assert(ev?.mutation_status == "unknown", "nonterminal mutation status is unknown")
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "completed" {
-        const _ = harness.runtime.atomic_add(completed, 1)
-        const _ = harness.runtime.atomic_set(
-          mutation_status,
-          mutation_status_code(ev?.mutation_status),
-        )
+        const _ = runtime.atomic_add(completed, 1)
+        const _ = runtime.atomic_set(mutation_status, mutation_status_code(ev?.mutation_status))
       }
       if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "failed" {
-        const _ = harness.runtime.atomic_add(failed, 1)
-        const _ = harness.runtime.atomic_set(
-          mutation_status,
-          mutation_status_code(ev?.mutation_status),
-        )
+        const _ = runtime.atomic_add(failed, 1)
+        const _ = runtime.atomic_set(mutation_status, mutation_status_code(ev?.mutation_status))
         if ev?.error_category == "tool_error" {
-          const _ = harness.runtime.atomic_set(saw_error_category, 1)
+          const _ = runtime.atomic_set(saw_error_category, 1)
         }
       }
     },
@@ -75,16 +74,16 @@ fn observe_lifecycle(harness: Harness, session_id: string, expected_msg: string)
   }
 }
 
-fn assert_counts(harness: Harness, label: string, counters: dict) {
-  assert(harness.runtime.atomic_get(counters.pending) == 1, label + " pending event")
-  assert(harness.runtime.atomic_get(counters.in_progress) == 1, label + " in-progress event")
-  assert(harness.runtime.atomic_get(counters.completed) == 1, label + " completed event")
-  assert(harness.runtime.atomic_get(counters.saw_args) == 1, label + " raw input")
+fn assert_counts(runtime: HarnessRuntime, label: string, counters: dict) {
+  assert(runtime.atomic_get(counters.pending) == 1, label + " pending event")
+  assert(runtime.atomic_get(counters.in_progress) == 1, label + " in-progress event")
+  assert(runtime.atomic_get(counters.completed) == 1, label + " completed event")
+  assert(runtime.atomic_get(counters.saw_args) == 1, label + " raw input")
 }
 
 pipeline test(harness: Harness, task) {
   const text_session = "tool-lifecycle-text-" + harness.random.uuid()
-  const text_events = observe_lifecycle(harness, text_session, "text")
+  const text_events = observe_lifecycle(harness.agent, harness.runtime, text_session, "text")
   with_llm_script(
     harness.llm,
     [llm_text("<tool_call>\necho({ msg: \"text\" })\n</tool_call>"), llm_text("##DONE##")],
@@ -106,13 +105,18 @@ pipeline test(harness: Harness, task) {
       assert(result.status == "done", "text loop completes")
     },
   )
-  assert_counts(harness, "text tool", text_events)
+  assert_counts(harness.runtime, "text tool", text_events)
   assert(
     harness.runtime.atomic_get(text_events.mutation_status) == 0,
     "opaque result mutation status",
   )
   const middleware_session = "tool-lifecycle-middleware-" + harness.random.uuid()
-  const middleware_events = observe_lifecycle(harness, middleware_session, "short")
+  const middleware_events = observe_lifecycle(
+    harness.agent,
+    harness.runtime,
+    middleware_session,
+    "short",
+  )
   with_llm_script(
     harness.llm,
     [
@@ -152,13 +156,13 @@ pipeline test(harness: Harness, task) {
       assert(result.status == "done", "middleware loop completes")
     },
   )
-  assert_counts(harness, "middleware short-circuit", middleware_events)
+  assert_counts(harness.runtime, "middleware short-circuit", middleware_events)
   assert(
     harness.runtime.atomic_get(middleware_events.mutation_status) == 1,
     "structured applied outcome",
   )
   const failed_session = "tool-lifecycle-failed-" + harness.random.uuid()
-  const failed_events = observe_lifecycle(harness, failed_session, "failed")
+  const failed_events = observe_lifecycle(harness.agent, harness.runtime, failed_session, "failed")
   with_llm_script(
     harness.llm,
     [

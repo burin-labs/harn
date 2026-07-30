@@ -27,7 +27,7 @@ use crate::{BuiltinSignature, Param, Ty, TY_ANY, TY_DICT, TY_DICT_OR_NIL, TY_LIS
 /// type-check as `Schema<T>` but compile to JSON-Schema dicts at runtime.
 const TY_SCHEMA_VALUE: Ty = Ty::Union(&[TY_DICT, Ty::Apply("Schema", &[TY_ANY])]);
 
-/// `llm_call(prompt, system?, options?) -> LlmCallResult`
+/// `harness.llm.call(prompt, system?, options?) -> LlmCallResult`
 pub const LLM_CALL: BuiltinSignature = BuiltinSignature::simple(
     "llm_call",
     &[
@@ -38,7 +38,7 @@ pub const LLM_CALL: BuiltinSignature = BuiltinSignature::simple(
     LLM_CALL_RESULT,
 );
 
-/// `llm_call_safe(prompt, system?, options?) -> LlmCallSafeResult`
+/// `harness.llm.call_safe(prompt, system?, options?) -> LlmCallSafeResult`
 pub const LLM_CALL_SAFE: BuiltinSignature = BuiltinSignature::simple(
     "llm_call_safe",
     &[
@@ -49,7 +49,7 @@ pub const LLM_CALL_SAFE: BuiltinSignature = BuiltinSignature::simple(
     LLM_CALL_SAFE_RESULT,
 );
 
-/// `llm_completion(prefix, suffix?, system?, options?) -> LlmCallResult`
+/// `harness.llm.completion(prefix, suffix?, system?, options?) -> LlmCallResult`
 pub const LLM_COMPLETION: BuiltinSignature = BuiltinSignature::simple(
     "llm_completion",
     &[
@@ -61,7 +61,7 @@ pub const LLM_COMPLETION: BuiltinSignature = BuiltinSignature::simple(
     LLM_CALL_RESULT,
 );
 
-/// `llm_call_structured(prompt, schema, options?) -> any`
+/// `harness.llm.call_structured(prompt, schema, options?) -> any`
 pub const LLM_CALL_STRUCTURED: BuiltinSignature = BuiltinSignature::simple(
     "llm_call_structured",
     &[
@@ -72,7 +72,7 @@ pub const LLM_CALL_STRUCTURED: BuiltinSignature = BuiltinSignature::simple(
     TY_ANY,
 );
 
-/// `llm_call_structured_safe(prompt, schema, options?) -> dict`
+/// `harness.llm.call_structured_safe(prompt, schema, options?) -> dict`
 pub const LLM_CALL_STRUCTURED_SAFE: BuiltinSignature = BuiltinSignature::simple(
     "llm_call_structured_safe",
     &[
@@ -83,7 +83,7 @@ pub const LLM_CALL_STRUCTURED_SAFE: BuiltinSignature = BuiltinSignature::simple(
     TY_DICT,
 );
 
-/// `llm_call_structured_result(prompt, schema, options?) -> any`
+/// `harness.llm.call_structured_result(prompt, schema, options?) -> any`
 pub const LLM_CALL_STRUCTURED_RESULT: BuiltinSignature = BuiltinSignature::simple(
     "llm_call_structured_result",
     &[
@@ -94,23 +94,21 @@ pub const LLM_CALL_STRUCTURED_RESULT: BuiltinSignature = BuiltinSignature::simpl
     TY_ANY,
 );
 
-/// `llm_catalog() -> list`. Reachable from the parser as `harness.llm.catalog`.
+/// `harness.llm.catalog() -> list`.
 pub const LLM_CATALOG: BuiltinSignature = BuiltinSignature::simple("llm_catalog", &[], TY_LIST);
 
-/// `llm_catalog_refresh(options?) -> dict`. Reachable from the parser as
-/// `harness.llm.catalog_refresh`.
+/// `harness.llm.catalog_refresh(options?) -> dict`.
 pub const LLM_CATALOG_REFRESH: BuiltinSignature = BuiltinSignature::simple(
     "llm_catalog_refresh",
     &[Param::optional("options", TY_DICT_OR_NIL)],
     TY_DICT,
 );
 
-/// `llm_provider_status() -> list`. Reachable from the parser as
-/// `harness.llm.providers`.
+/// `harness.llm.providers() -> list`.
 pub const LLM_PROVIDER_STATUS: BuiltinSignature =
     BuiltinSignature::simple("llm_provider_status", &[], TY_LIST);
 
-/// `<T> schema_recover(text, schema: Schema<T>, options?) -> SchemaRecoverEnvelope`.
+/// `<T> harness.llm.recover_schema(text, schema: Schema<T>, options?) -> SchemaRecoverEnvelope`.
 /// When `schema: Schema<T>`, the envelope's `data` narrows to `T | nil`.
 pub const SCHEMA_RECOVER: BuiltinSignature = BuiltinSignature::generic(
     "schema_recover",

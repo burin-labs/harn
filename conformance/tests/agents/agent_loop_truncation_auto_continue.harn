@@ -42,13 +42,16 @@ pipeline default(harness: Harness) {
   // loop finishes. The continuation must NOT carry parse-guidance — the whole
   // point is that we did not burn the turn.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       truncated_turn(),
       llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Write a.txt.",
+      const result = agent_loop(
+        harness,
+        "Write a.txt.",
         nil,
         {
           provider: "mock",
@@ -70,7 +73,8 @@ pipeline default(harness: Harness) {
   // infinite loop. Two continuations are allowed (default cap), so the third
   // truncated result falls through; its successor call carries parse-guidance.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       truncated_turn(),
       truncated_turn(),
       truncated_turn(),
@@ -78,7 +82,9 @@ pipeline default(harness: Harness) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Write a.txt.",
+      const result = agent_loop(
+        harness,
+        "Write a.txt.",
         nil,
         {
           provider: "mock",
@@ -98,13 +104,16 @@ pipeline default(harness: Harness) {
   // body but with `stop_reason: "stop"` is the #3137/#3142 domain: parse-guidance
   // fires immediately on the next call and the continuation count is not inflated.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "<tool_call>\nwrite_note({ path: \"a.txt\", body: <<EOF\nhello", stop_reason: "stop"},
       llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Write a.txt.",
+      const result = agent_loop(
+        harness,
+        "Write a.txt.",
         nil,
         {
           provider: "mock",
@@ -125,9 +134,12 @@ pipeline default(harness: Harness) {
   // calls is still budget exhaustion. Retry with a raised cap instead of
   // feeding an empty turn into parse/stall accounting.
   with_llm_script(
-    harness.llm, [{text: "", output_tokens: 342, stop_reason: "length"}, llm_text("<done>##DONE##</done>")],
+    harness.llm,
+    [{text: "", output_tokens: 342, stop_reason: "length"}, llm_text("<done>##DONE##</done>")],
     { ->
-      const result = agent_loop(harness, "Think briefly, then finish.",
+      const result = agent_loop(
+        harness,
+        "Think briefly, then finish.",
         nil,
         {
           provider: "mock",

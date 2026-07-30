@@ -30,9 +30,12 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Nothing to do.")],
+    harness.llm,
+    [llm_text("Nothing to do.")],
     { ->
-      const result = agent_loop(harness, "Please rotate the staging credentials for me",
+      const result = agent_loop(
+        harness,
+        "Please rotate the staging credentials for me",
         nil,
         {provider: "mock", max_iterations: 1, skills: guarded, skill_match: {strategy: "metadata"}},
       )

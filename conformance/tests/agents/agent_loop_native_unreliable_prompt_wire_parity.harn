@@ -50,12 +50,15 @@ tool_mode_parity = "native_unreliable"
     harness.llm.provider_capabilities_clear()
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<tool_call>\nemit_judgment({ verdict: \"complete\" })\n</tool_call>"),
       llm_text("<user_response>graded</user_response>"),
     ],
     { ->
-      const result = agent_loop(harness, "Judge the candidate and call emit_judgment.",
+      const result = agent_loop(
+        harness,
+        "Judge the candidate and call emit_judgment.",
         "You are a judge.",
         {
           provider: "testcatalog",

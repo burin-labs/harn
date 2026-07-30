@@ -6,13 +6,20 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const judged = parallel_judge("Prompt", [{id: "one"}], { _ctx -> 0.5 })
   harness.stdio.println(judged.best.score == 0.5)
-  const explicit = propose_instructions(harness, "Base", {instruction_proposals: "Tighten the answer."})
+  const explicit = propose_instructions(
+    harness.llm,
+    "Base",
+    {instruction_proposals: "Tighten the answer."},
+  )
   harness.stdio.println(explicit[0] == "Base")
   harness.stdio.println(explicit[1] == "Tighten the answer.")
   with_llm_script(
-    harness.llm, [llm_text("{\"instructions\":[\"Plan first.\",\"Plan first.\"]}")],
+    harness.llm,
+    [llm_text("{\"instructions\":[\"Plan first.\",\"Plan first.\"]}")],
     { ->
-      const proposed = propose_instructions(harness, "Base",
+      const proposed = propose_instructions(
+        harness.llm,
+        "Base",
         {
           provider: "mock",
           proposal_count: 2,
@@ -26,7 +33,8 @@ pipeline default(harness: Harness) {
       harness.stdio.println(len(proposed) == 2)
       harness.stdio.println(harness.llm.mock_calls()[0].system == "Proposal sys")
       const result = optimize_prompt(
-        harness, {
+        harness.llm,
+        {
           base_prompt: "Answer the question.",
           eval_set: [
             {id: "add", input: "2 + 2", expected: "4"},

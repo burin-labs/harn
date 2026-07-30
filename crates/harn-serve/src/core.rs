@@ -787,8 +787,7 @@ fn build_vm_args(
     // top-level `fn main(harness: Harness)` does. The dispatch surface
     // hands JSON in, so the host fills the slot from
     // `vm.set_harness(...)` instead of asking the caller to encode a
-    // Harness through CallArguments. Only the first positional slot
-    // qualifies (matches the language convention).
+    // Harness through CallArguments; only the first positional slot qualifies.
     if first_param_is_harness(function) {
         let harness = vm
             .root_harness_value()
@@ -1210,8 +1209,9 @@ pub fn stage_triage(
             r#"
 import { command_run } from "std/command"
 
-pub fn run_help(binary: string) -> int {
+pub fn run_help(harness: Harness, binary: string) -> int {
   const result = command_run(
+    harness.tools,
     {argv: [binary, "--help"]},
     {capture: {max_inline_bytes: 256}, timeout_ms: 5000},
   )
@@ -1262,8 +1262,8 @@ pub fn run_help(binary: string) -> int {
         std::fs::write(
             &script,
             r"
-pipeline default(task) {
-  __io_println(json_stringify({task: task}))
+pipeline default(harness: Harness, task) {
+  harness.stdio.println(json_stringify({task: task}))
 }
 ",
         )

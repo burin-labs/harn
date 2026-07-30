@@ -156,7 +156,7 @@ pub fn scope_alert_reminder(
             .join("\n")
     };
     let body = format!(
-        "<scope-alert>\nTool call '{tool_name}' targeted path '{path}', which is outside the current workspace anchor ({reason}).\n\nCurrent anchor: {anchor}\nMounted roots:\n{mounted_roots}\n\nThree options:\n  - add_root: mount the path's containing repo into this session — `agent_session_add_root(session_id, root, {{mount_mode}})`\n  - reanchor: switch the session's primary anchor to that repo — `agent_session_reanchor(session_id, new_anchor)`\n  - fork: spawn a sub-agent against the target repo — `spawn_agent({{anchor: new_anchor, ...}})`\n\nPick one, or surface the choice to the user.\n</scope-alert>",
+        "<scope-alert>\nTool call '{tool_name}' targeted path '{path}', which is outside the current workspace anchor ({reason}).\n\nCurrent anchor: {anchor}\nMounted roots:\n{mounted_roots}\n\nThree options:\n  - add_root: mount the path's containing repo into this session — `harness.agent.add_root(session_id, root, {{mount_mode}})`\n  - reanchor: switch the session's primary anchor to that repo — `agent_session_reanchor(session_id, new_anchor)`\n  - fork: spawn a sub-agent against the target repo — `spawn_agent({{anchor: new_anchor, ...}})`\n\nPick one, or surface the choice to the user.\n</scope-alert>",
         anchor = anchor.primary.display(),
     );
     SystemReminder {

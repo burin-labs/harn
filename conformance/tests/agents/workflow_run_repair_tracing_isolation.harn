@@ -19,10 +19,10 @@ import { workflow_run_repair } from "std/workflow/repair"
  */
 pipeline default(harness: Harness) {
   // A sibling timing span that completes BEFORE the workflow runs.
-  const sib = timed(harness, "sibling-span", {}, { -> 1 })
+  const sib = timed(harness.clock, "sibling-span", {}, { -> 1 })
   harness.stdio.println(sib.timing.status)
   // Run-level span held OPEN across the whole workflow (bump-fleet shape).
-  const run_span = start_timing(harness, "runlevel-span")
+  const run_span = start_timing(harness.clock, "runlevel-span")
   const token = "GOTOKEN"
   const out = workflow_run_repair(
     harness,
@@ -47,7 +47,7 @@ pipeline default(harness: Harness) {
   // The workflow's own pipeline span was collected into the run record.
   harness.stdio.println(len(out.run.trace_spans) > 0)
   // The enclosing OPEN span still resolves — no "unknown timing handle".
-  const run_seg = end_timing(harness, run_span, {status: "ok"})
+  const run_seg = end_timing(harness.clock, run_span, {status: "ok"})
   harness.stdio.println(run_seg.status)
   // The sibling that completed before the workflow was NOT erased, and the
   // enclosing run-level span is present too: both survive among the

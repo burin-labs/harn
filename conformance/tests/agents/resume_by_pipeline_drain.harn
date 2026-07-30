@@ -17,7 +17,7 @@ pipeline default(harness: Harness) {
         harness,
         {handle: "worker://triage/drain", reason: "deferred to drain"},
       )
-      const audits = lifecycle_audit_log_take(harness)
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("handled=" + to_string(result.handled))
       harness.stdio.println("mechanism=" + result.mechanism)
       harness.stdio.println("audit_kind=" + audits[0].kind)

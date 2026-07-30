@@ -61,13 +61,20 @@ pipeline test(harness: Harness, task) {
       replacement_range: {location: 42, length: 0},
     },
   )
-  const shown = completion_shown_event(harness, proposal,
+  const shown = completion_shown_event(
+    harness.clock,
+    proposal,
     context,
     {input_tokens: 100, output_tokens: 4, cost_usd: 0.0},
     {record_id: "rec-1", session_id: "session-1", prompt: "private prompt", policy: policy},
   )
-  const decision = completion_decision_event(harness, shown, "accepted", {decision_latency_ms: 120})
-  const trust = completion_trust_record(harness, decision)
+  const decision = completion_decision_event(
+    harness.clock,
+    shown,
+    "accepted",
+    {decision_latency_ms: 120},
+  )
+  const trust = completion_trust_record(harness.clock, harness.random, decision)
   const usage = completion_usage_record(shown, {recorded_at_ms: 12345})
   harness.stdio.log(context.schema)
   harness.stdio.log(context.language)

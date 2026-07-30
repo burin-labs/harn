@@ -3,12 +3,15 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<user_response>The answer is 4.</user_response>\n<done>##DONE##</done>"),
       {error: {category: "generic", message: "structured output is unavailable"}},
     ],
     { ->
-      const result = agent_loop(harness, "What is 2 + 2?",
+      const result = agent_loop(
+        harness,
+        "What is 2 + 2?",
         nil,
         {
           provider: "mock",

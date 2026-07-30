@@ -17,7 +17,6 @@ use crate::event_log::{
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema::schema_expect_value;
-use crate::stdlib::host::dispatch_mock_host_call;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
 use crate::stdlib::options::{duration_from_value, ErrorKind};
 use crate::stdlib::waitpoint::{
@@ -28,6 +27,9 @@ use crate::stdlib::waitpoint::{
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
+
+mod fixtures;
+use fixtures::{maybe_apply_mock_response, maybe_apply_mock_response_with_harness};
 
 const HITL_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const HITL_APPROVAL_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
@@ -309,7 +311,7 @@ async fn request_approval_builtin(
     ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    request_approval_impl(Some(&ctx), &args).await
+    request_approval_impl(Some(&ctx), None, &args).await
 }
 
 #[harn_builtin(
@@ -530,6 +532,7 @@ async fn ask_user_impl(
 
 async fn request_approval_impl(
     ctx: Option<&AsyncBuiltinCtx>,
+    harness: Option<&crate::harness::VmHarness>,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
     let action = required_string_arg(args, 0, "request_approval")?;
@@ -604,8 +607,9 @@ async fn request_approval_impl(
     append_request(&log, &request).await?;
     maybe_notify_host(ctx, &request);
     emit_hitl_requested(&request);
-    maybe_apply_mock_response(
+    maybe_apply_mock_response_with_harness(
         ctx,
+        harness,
         HitlRequestKind::Approval,
         &request_id,
         &request.payload,
@@ -633,6 +637,7 @@ async fn request_approval_impl(
 }
 
 pub(crate) async fn request_approval_for_side_effect(
+    harness: Option<&crate::harness::VmHarness>,
     action: &str,
     detail: JsonValue,
     principal: String,
@@ -671,7 +676,7 @@ pub(crate) async fn request_approval_for_side_effect(
         VmValue::String(arcstr::ArcStr::from(action.to_string())),
         VmValue::dict(options),
     ];
-    request_approval_impl(None, &args).await
+    request_approval_impl(None, harness, &args).await
 }
 
 async fn dual_control_impl(ctx: &AsyncBuiltinCtx, args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -1421,65 +1426,6 @@ async fn append_timeout(
     .await
 }
 
-async fn maybe_apply_mock_response(
-    ctx: Option<&AsyncBuiltinCtx>,
-    kind: HitlRequestKind,
-    request_id: &str,
-    request_payload: &JsonValue,
-) -> Result<(), VmError> {
-    let mut params = request_payload
-        .as_object()
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(key, value)| {
-            (
-                crate::value::intern_key(&key),
-                crate::stdlib::json_to_vm_value(&value),
-            )
-        })
-        .collect::<crate::value::DictMap>();
-    params.put_str("request_id", request_id);
-    let fixture_method = match kind {
-        HitlRequestKind::Question => "question_response",
-        HitlRequestKind::Approval => "approval_response",
-        HitlRequestKind::DualControl => "dual_control_response",
-        HitlRequestKind::Escalation => "escalation_response",
-    };
-    let fixture_result = ctx
-        .and_then(|ctx| ctx.child_vm().root_harness_value())
-        .and_then(|root| match root {
-            VmValue::Harness(root) => root.inner().fixtures().dispatch(
-                harn_builtin_meta::CapabilityId::Interaction,
-                fixture_method,
-                &[VmValue::dict(params.clone())],
-            ),
-            _ => None,
-        });
-    let result = fixture_result.or_else(|| dispatch_mock_host_call("hitl", kind.as_str(), &params));
-    let Some(result) = result else {
-        return Ok(());
-    };
-    let value = result?;
-    let responses = match value {
-        VmValue::List(items) => items.iter().cloned().collect::<Vec<_>>(),
-        other => vec![other],
-    };
-    for response in responses {
-        let response_dict = response.as_dict().ok_or_else(|| {
-            VmError::Runtime(format!(
-                "mocked HITL {} response must be a dict or list<dict>",
-                kind.as_str()
-            ))
-        })?;
-        let hitl_response = parse_hitl_response_dict(request_id, response_dict)?;
-        append_hitl_response(None, hitl_response)
-            .await
-            .map_err(VmError::Runtime)?;
-    }
-    Ok(())
-}
-
 fn parse_hitl_response_dict(
     request_id: &str,
     response_dict: &crate::value::DictMap,
@@ -1935,11 +1881,19 @@ mod tests {
     use crate::event_log::{
         install_active_event_log, install_memory_for_current_thread, EventLog, Topic,
     };
-    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm, VmError};
+    use crate::{register_vm_stdlib, reset_thread_local_state, Vm, VmError};
 
     fn hitl_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn compile_hitl_fixture(source: &str) -> crate::Chunk {
+        let program =
+            harn_parser::parse_source(source).expect("trusted HITL test fixture should parse");
+        crate::Compiler::with_options(crate::CompilerOptions::privileged_wire())
+            .compile(&program)
+            .expect("trusted HITL test fixture should compile")
     }
 
     async fn execute_hitl_script(
@@ -1948,7 +1902,7 @@ mod tests {
     ) -> Result<(String, Vec<String>, Vec<String>, Vec<String>, Vec<String>), VmError> {
         reset_thread_local_state();
         let log = install_memory_for_current_thread(super::HITL_EVENT_LOG_QUEUE_DEPTH);
-        let chunk = compile_source(source).expect("compile source");
+        let chunk = compile_hitl_fixture(source);
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);
         vm.set_source_dir(base_dir);
@@ -1997,10 +1951,10 @@ mod tests {
             .run_until(async {
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   host_mock("hitl", "question", {answer: "9"})
-  const answer: int = ask_user("Pick a number", {default: 0})
-  __io_println(answer)
+  const answer: int = harness.interaction.ask_user("Pick a number", {default: 0})
+  harness.stdio.println(answer)
 }
 "#;
                 let (
@@ -2035,19 +1989,19 @@ pipeline test(task) {
                 reset_thread_local_state();
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   host_mock("hitl", "approval", [
     {approved: true, reviewer: "alice", reason: "ok"},
     {approved: true, reviewer: "bob", reason: "ship it"},
   ])
-  const record = request_approval(
+  const record = harness.interaction.request_approval(
     "deploy production",
     {quorum: 2, reviewers: ["alice", "bob", "carol"]},
   )
-  __io_println(record.approved)
-  __io_println(len(record.reviewers))
-  __io_println(record.reviewers[0])
-  __io_println(record.reviewers[1])
+  harness.stdio.println(record.approved)
+  harness.stdio.println(len(record.reviewers))
+  harness.stdio.println(record.reviewers[0])
+  harness.stdio.println(record.reviewers[1])
 }
 "#;
                 let (_, _, approval_events, _, _) = execute_hitl_script(dir.path(), source)
@@ -2075,9 +2029,9 @@ pipeline test(task) {
                 let dir = tempfile::tempdir().expect("tempdir");
                 let log = install_memory_for_current_thread(super::HITL_EVENT_LOG_QUEUE_DEPTH);
                 let source = r#"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   host_mock("hitl", "approval", {approved: true, reviewer: "alice", reason: "ok"})
-  request_approval("deploy production", {
+  harness.interaction.request_approval("deploy production", {
     args: {environment: "prod"},
     quorum: 1,
     reviewers: ["alice"],
@@ -2087,7 +2041,7 @@ pipeline test(task) {
   })
 }
 "#;
-                let chunk = compile_source(source).expect("compile source");
+                let chunk = compile_hitl_fixture(source);
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
@@ -2120,14 +2074,14 @@ pipeline test(task) {
                 reset_thread_local_state();
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   host_mock("hitl", "approval", {approved: false, reviewer: "alice", reason: "unsafe"})
   const denied = try {
-    request_approval("drop table", {reviewers: ["alice"]})
+    harness.interaction.request_approval("drop table", {reviewers: ["alice"]})
   }
-  __io_println(is_err(denied))
-  __io_println(unwrap_err(denied).name)
-  __io_println(unwrap_err(denied).reason)
+  harness.stdio.println(is_err(denied))
+  harness.stdio.println(unwrap_err(denied).name)
+  harness.stdio.println(unwrap_err(denied).reason)
 }
 "#;
                 let (output, _, approval_events, _, _) = execute_hitl_script(dir.path(), source)
@@ -2152,13 +2106,18 @@ pipeline test(task) {
             .run_until(async {
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   host_mock("hitl", "dual_control", [
     {approved: true, reviewer: "alice"},
     {approved: true, reviewer: "bob"},
   ])
-  const result = dual_control(2, 3, { -> "launched" }, ["alice", "bob", "carol"])
-  __io_println(result)
+  const result = harness.interaction.dual_control(
+    2,
+    3,
+    { -> "launched" },
+    ["alice", "bob", "carol"],
+  )
+  harness.stdio.println(result)
 }
 "#;
                 let (output, _, _, dual_control_events, _) =
@@ -2186,11 +2145,11 @@ pipeline test(task) {
             .run_until(async {
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   host_mock("hitl", "escalation", {accepted: true, reviewer: "lead", reason: "taking over"})
-  const handle = escalate_to("admin", "need override")
-  __io_println(handle.status)
-  __io_println(handle.reviewer)
+  const handle = harness.interaction.escalate_to("admin", "need override")
+  harness.stdio.println(handle.status)
+  harness.stdio.println(handle.reviewer)
 }
 "#;
                 let (output, _, _, _, escalation_events) = execute_hitl_script(dir.path(), source)
@@ -2250,13 +2209,13 @@ pipeline test(task) {
                 let _guard = crate::agent_sessions::enter_current_session(session_id.clone());
 
                 let source = r#"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   host_mock("hitl", "question", {answer: "ok"})
-  const answer: string = ask_user("Are you sure?", {default: "no"})
-  __io_println(answer)
+  const answer: string = harness.interaction.ask_user("Are you sure?", {default: "no"})
+  harness.stdio.println(answer)
 }
 "#;
-                let chunk = crate::compile_source(source).expect("compile source");
+                let chunk = compile_hitl_fixture(source);
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());

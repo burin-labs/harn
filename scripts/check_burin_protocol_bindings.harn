@@ -7,31 +7,31 @@ const TARGETS = [
   {source: "harn-protocol.ts", destination: "server/src/generated/harn-protocol.ts"},
 ]
 
-fn repo_root(harness: Harness) -> string {
-  return path_normalize(path_join(harness.fs.source_dir(), ".."))
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
 }
 
-fn effective_repo_root(harness: Harness, root: string = "") -> string {
+fn effective_repo_root(fs: HarnessFs, root: string = "") -> string {
   if root != "" {
     return path_normalize(root)
   }
-  return repo_root(harness)
+  return repo_root(fs)
 }
 
-fn artifact_root(harness: Harness, root: string = "") -> string {
-  return path_join(effective_repo_root(harness, root), ARTIFACTS_REL)
+fn artifact_root(fs: HarnessFs, root: string = "") -> string {
+  return path_join(effective_repo_root(fs, root), ARTIFACTS_REL)
 }
 
 pub fn normalize_protocol_text(text: string) -> string {
   return text.replace("\r\n", "\n").replace("\r", "\n")
 }
 
-fn expand_user(harness: Harness, path: string) -> string {
+fn expand_user(env: HarnessEnv, path: string) -> string {
   if path == "~" {
-    return harness.env.get("HOME") ?? path
+    return env.get("HOME") ?? path
   }
   if path.starts_with("~/") {
-    const home = harness.env.get("HOME") ?? ""
+    const home = env.get("HOME") ?? ""
     if home != "" {
       return path_join(home, path.substring(2, path.len()))
     }
@@ -39,51 +39,55 @@ fn expand_user(harness: Harness, path: string) -> string {
   return path
 }
 
-fn is_dir(harness: Harness, path: string) -> bool {
-  if path == "" || !harness.fs.exists(path) {
+fn is_dir(fs: HarnessFs, path: string) -> bool {
+  if path == "" || !fs.exists(path) {
     return false
   }
-  return harness.fs.stat(path).is_dir
+  return fs.stat(path).is_dir
 }
 
-fn is_file(harness: Harness, path: string) -> bool {
-  if path == "" || !harness.fs.exists(path) {
+fn is_file(fs: HarnessFs, path: string) -> bool {
+  if path == "" || !fs.exists(path) {
     return false
   }
-  return harness.fs.stat(path).is_file
+  return fs.stat(path).is_file
 }
 
-pub fn discover_burin_root(harness: Harness, explicit_root: string = "") -> string {
+pub fn discover_burin_root(env: HarnessEnv, fs: HarnessFs, explicit_root: string = "") -> string {
   if explicit_root != "" {
-    return path_normalize(expand_user(harness, explicit_root))
+    return path_normalize(expand_user(env, explicit_root))
   }
-  const env_root = harness.env.get("BURIN_CODE_ROOT") ?? ""
+  const env_root = env.get("BURIN_CODE_ROOT") ?? ""
   if env_root != "" {
-    return path_normalize(expand_user(harness, env_root))
+    return path_normalize(expand_user(env, env_root))
   }
-  const home = harness.env.get("HOME") ?? ""
+  const home = env.get("HOME") ?? ""
   if home != "" {
     const candidate = path_join(home, "projects", "burin-code")
-    if is_dir(harness, candidate) {
+    if is_dir(fs, candidate) {
       return candidate
     }
   }
   return ""
 }
 
-pub fn stale_burin_protocol_bindings(harness: Harness, burin_root: string, harn_root: string = "") -> list<string> {
+pub fn stale_burin_protocol_bindings(
+  fs: HarnessFs,
+  burin_root: string,
+  harn_root: string = "",
+) -> list<string> {
   let stale: list<string> = []
-  const source_root = artifact_root(harness, harn_root)
+  const source_root = artifact_root(fs, harn_root)
   for target in TARGETS {
     const source = path_join(source_root, to_string(target.source))
     const destination_rel = to_string(target.destination)
     const destination = path_join(burin_root, destination_rel)
-    if !is_file(harness, destination) {
+    if !is_file(fs, destination) {
       stale = stale + [destination_rel + " (missing)"]
       continue
     }
-    const source_text = normalize_protocol_text(harness.fs.read_text(source))
-    const destination_text = normalize_protocol_text(harness.fs.read_text(destination))
+    const source_text = normalize_protocol_text(fs.read_text(source))
+    const destination_text = normalize_protocol_text(fs.read_text(destination))
     if source_text != destination_text {
       stale = stale + [destination_rel]
     }
@@ -91,14 +95,16 @@ pub fn stale_burin_protocol_bindings(harness: Harness, burin_root: string, harn_
   return stale
 }
 
-pub fn check_burin_protocol_bindings(harness: Harness, 
+pub fn check_burin_protocol_bindings(
+  env: HarnessEnv,
+  fs: HarnessFs,
   burin_root_arg: string = "",
   required: bool = false,
   harn_root: string = "",
 ) -> dict {
-  const burin_root = discover_burin_root(harness, burin_root_arg)
-  const artifacts = artifact_root(harness, harn_root)
-  if !is_dir(harness, burin_root) {
+  const burin_root = discover_burin_root(env, fs, burin_root_arg)
+  const artifacts = artifact_root(fs, harn_root)
+  if !is_dir(fs, burin_root) {
     return {
       ok: !required,
       skipped: !required,
@@ -109,7 +115,7 @@ pub fn check_burin_protocol_bindings(harness: Harness,
       stale_count: 0,
     }
   }
-  const stale = stale_burin_protocol_bindings(harness, burin_root, harn_root)
+  const stale = stale_burin_protocol_bindings(fs, burin_root, harn_root)
   return {
     ok: len(stale) == 0,
     skipped: false,
@@ -150,7 +156,9 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_burin_protocol_bindings(harness, 
+  const report = check_burin_protocol_bindings(
+    harness.env,
+    harness.fs,
     to_string(parsed?.burin_root ?? ""),
     parsed?.required ?? false,
   )

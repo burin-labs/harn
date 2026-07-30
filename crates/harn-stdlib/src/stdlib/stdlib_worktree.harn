@@ -301,7 +301,15 @@ pub fn worktree_default_path(repo: string, name: string) -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_create(fs: HarnessFs, process: HarnessProcess, repo, name, base_ref, path, options = {}) {
+pub fn worktree_create(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  repo,
+  name,
+  base_ref,
+  path,
+  options = {},
+) {
   const layout = runtime_state_paths_under(repo)
   const target = if path == nil || path == "" {
     worktree_default_path(repo, name)
@@ -310,7 +318,12 @@ pub fn worktree_create(fs: HarnessFs, process: HarnessProcess, repo, name, base_
   }
   fs.mkdir(layout.state_root)
   fs.mkdir(layout.worktree_root)
-  const result = __worktree_git(process, repo, ["worktree", "add", "-B", name, target, base_ref], options)
+  const result = __worktree_git(
+    process,
+    repo,
+    ["worktree", "add", "-B", name, target, base_ref],
+    options,
+  )
   return {
     repo: repo,
     name: name,

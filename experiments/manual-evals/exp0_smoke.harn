@@ -8,7 +8,9 @@ pipeline main(harness: Harness, task) {
     {parameters: {expr: {type: "string"}}, handler: { _args -> "396" }},
   )
   harness.stdio.log("Smoke test: calling agent_loop against llamacpp provider")
-  const result = agent_loop(harness, "What is 17 * 23 + 5? Use the calc tool.",
+  const result = agent_loop(
+    harness,
+    "What is 17 * 23 + 5? Use the calc tool.",
     "/no_think You are a math assistant. Always use the calc tool for arithmetic.",
     {
       provider: "llamacpp",

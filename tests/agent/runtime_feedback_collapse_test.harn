@@ -1,22 +1,48 @@
 import { agent_build_turn_messages } from "std/agent/preflight"
 import { agent_session_inject_feedback } from "std/agent/state"
 
-fn feedback_session(harness: Harness) {
-  const session = harness.agent.open("runtime-feedback-collapse-" + harness.random.uuid())
-  harness.agent.inject(session, {role: "user", content: "Fix the failing test."})
+fn feedback_session(agent: HarnessAgent, random: HarnessRandom) {
+  const session = agent.open("runtime-feedback-collapse-" + random.uuid())
+  agent.inject(session, {role: "user", content: "Fix the failing test."})
   return session
 }
 
 pipeline test_repeated_runtime_feedback_keeps_latest_with_count(harness: Harness, task) {
-  const session = feedback_session(harness)
-  agent_session_inject_feedback(harness, session, "verify_completion", "same verify residual\nline two")
+  const session = feedback_session(harness.agent, harness.random)
+  agent_session_inject_feedback(
+    harness.agent,
+    session,
+    "verify_completion",
+    "same verify residual\nline two",
+  )
   harness.agent.inject(session, {role: "assistant", content: "Trying another repair."})
-  agent_session_inject_feedback(harness, session, "verify_completion", " same verify residual   line two ")
-  agent_session_inject_feedback(harness, session, "step_judge", "same verify residual line two")
-  agent_session_inject_feedback(harness, session, "verify_completion", "same verify residual line two")
-  agent_session_inject_feedback(harness, session, "verify_completion", "different residual")
+  agent_session_inject_feedback(
+    harness.agent,
+    session,
+    "verify_completion",
+    " same verify residual   line two ",
+  )
+  agent_session_inject_feedback(
+    harness.agent,
+    session,
+    "step_judge",
+    "same verify residual line two",
+  )
+  agent_session_inject_feedback(
+    harness.agent,
+    session,
+    "verify_completion",
+    "same verify residual line two",
+  )
+  agent_session_inject_feedback(harness.agent, session, "verify_completion", "different residual")
   const raw = harness.agent.snapshot(session).messages
-  const collapsed = agent_build_turn_messages(harness, {session_id: session}, {}, 0)
+  const collapsed = agent_build_turn_messages(
+    harness.agent,
+    harness.clock,
+    {session_id: session},
+    {},
+    0,
+  )
   assert_eq(len(raw), 7, "the audit transcript retains every injected copy")
   assert_eq(len(collapsed), 5, "two earlier equivalent copies are removed from the prompt")
   assert_eq(collapsed[0].content, "Fix the failing test.")
@@ -30,11 +56,14 @@ pipeline test_repeated_runtime_feedback_keeps_latest_with_count(harness: Harness
 }
 
 pipeline test_unique_and_non_feedback_messages_are_unchanged(harness: Harness, task) {
-  const session = feedback_session(harness)
+  const session = feedback_session(harness.agent, harness.random)
   harness.agent.inject(session, {role: "assistant", content: "working"})
-  agent_session_inject_feedback(harness, session, "parse_guidance", "emit valid JSON")
+  agent_session_inject_feedback(harness.agent, session, "parse_guidance", "emit valid JSON")
   harness.agent.inject(session, {role: "tool", content: "ok"})
   const raw = harness.agent.snapshot(session).messages
-  assert_eq(agent_build_turn_messages(harness, {session_id: session}, {}, 0), raw)
+  assert_eq(
+    agent_build_turn_messages(harness.agent, harness.clock, {session_id: session}, {}, 0),
+    raw,
+  )
   harness.agent.close(session)
 }

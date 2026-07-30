@@ -366,6 +366,7 @@ async fn build_probe_closure(script: &str) -> Result<(harn_vm::Vm, Arc<VmClosure
     let chunk = compile_source(script).map_err(|error| format!("compile: {error}"))?;
     let mut vm = harn_vm::Vm::new();
     register_vm_stdlib(&mut vm);
+    vm.set_harness(harn_vm::Harness::real());
     let value = vm
         .execute(&chunk)
         .await
@@ -418,7 +419,7 @@ fn worker_script(pool_expr: &str, query: &str) -> String {
     // registered in thread-local state for the closure's lifetime.
     format!(
         r#"import "std/postgres"
-pipeline main(task) {{
+pipeline main(harness: Harness, task) {{
   let db = {pool_expr}
   return {{ id -> pg_query_one(db, {query}, [id]) }}
 }}
@@ -575,7 +576,7 @@ mod tests {
     fn probe_loop_drives_mock_pool() {
         let query = "select payload from probe where id = $1";
         let pool_expr = format!(
-            "pg_mock_pool([{{sql: {sql}, rows: [{{payload: 1}}]}}])",
+            "harness.testing.pg_mock_pool([{{sql: {sql}, rows: [{{payload: 1}}]}}])",
             sql = harn_string_literal(query)
         );
         let script = worker_script(&pool_expr, query);

@@ -58,7 +58,8 @@ pipeline default(harness: Harness) {
     let _ = harness.runtime.atomic_add(log_records, 1)
   }
   // Default route: cheap caller handles the call without escalation.
-  const cheap_run = preset_agent(harness,
+  const cheap_run = preset_agent(
+    harness,
     "release_captain",
     "Cheap path.",
     {
@@ -77,7 +78,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.runtime.atomic_get(frontier_calls))
   harness.stdio.println(harness.runtime.atomic_get(log_records))
   // Escalated route: the predicate classifies the prompt before dispatch.
-  const frontier_run = preset_agent(harness,
+  const frontier_run = preset_agent(
+    harness,
     "release_captain",
     "Frontier path.",
     {

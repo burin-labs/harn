@@ -13,23 +13,44 @@ pipeline main(harness: Harness) {
   // advances one byte at a time, so a multi-byte scalar pushed per byte used to
   // land as one Latin-1 char per byte — mojibake in quoted and template values
   // while heredocs and `\u{...}` escapes decoded correctly.
-  probe(harness, "nonascii quoted value", "run({ command: \"café ☕ 日本\" })", sample_registry())
-  probe(harness, "nonascii template value", "run({ command: `café ☕ 日本` })", sample_registry())
-  probe(harness, "nonascii tagged value",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nonascii quoted value",
+    "run({ command: \"café ☕ 日本\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nonascii template value",
+    "run({ command: `café ☕ 日本` })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nonascii tagged value",
     """<tool_call>
 run({ command: "café ☕ 日本" })
 </tool_call>""",
     sample_registry(),
   )
   // A plain object literal surrounded by prose.
-  probe(harness, "object literal between prose lines",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "object literal between prose lines",
     """I'll write the scaffold now.
 edit({ action: "create", path: "a.go", content: "package a\n" })
 That should work.""",
     sample_registry(),
   )
   // A backtick template literal carrying a multi-line body.
-  probe(harness, "multiline template literal body",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "multiline template literal body",
     """edit({
   action: "replace_body",
   path: "a.go",
@@ -42,12 +63,18 @@ func Foo() {
     sample_registry(),
   )
   // Inside a template literal, `\`` is a literal backtick and `\\` a backslash.
-  probe(harness, "escaped backtick inside template literal",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "escaped backtick inside template literal",
     "edit({ action: \"create\", path: \"a.md\", content: `line with a \\` backtick` })",
     sample_registry(),
   )
   // A single-line template literal in a fully multi-line call.
-  probe(harness, "single line template literal",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "single line template literal",
     """edit({
     action: "create",
     path: "simple.txt",
@@ -55,7 +82,10 @@ func Foo() {
 })""",
     sample_registry(),
   )
-  probe(harness, "multiline template literal as whole value",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "multiline template literal as whole value",
     """edit({ action: "create", path: "a.go", content: `package main
 
 func main() {}
@@ -63,14 +93,20 @@ func main() {}
     sample_registry(),
   )
   // `+` between two quoted strings folds to one value.
-  probe(harness, "folds string concatenation",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "folds string concatenation",
     "edit({ action: \"create\", path: \"a.txt\", content: \"hello \" + \"world\" })",
     sample_registry(),
   )
   // The dominant corpus shape: a Go body whose backtick struct tag forces the
   // model into template + quoted + template concatenation. The fragments must
   // collapse into one string with the literal backtick tag preserved.
-  probe(harness, "folds go backtick struct tag concatenation",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "folds go backtick struct tag concatenation",
     """edit({ action: "create", path: "status.go", content: `package main
 
 type S struct {
@@ -81,11 +117,17 @@ type S struct {
   )
   // A `+` whose right operand is not a string is malformed concatenation. The
   // parser must reject loudly rather than guess at the intended value.
-  probe(harness, "rejects non-string concatenation operand",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "rejects non-string concatenation operand",
     "edit({ action: \"create\", path: \"a.txt\", content: \"x\" + 1 })",
     sample_registry(),
   )
-  probe(harness, "nested object and array literals",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested object and array literals",
     """edit({
     action: "create",
     path: "a.go",
@@ -94,7 +136,10 @@ type S struct {
 })""",
     sample_registry(),
   )
-  probe(harness, "trailing commas",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "trailing commas",
     """edit({
     action: "create",
     path: "a.go",
@@ -102,7 +147,10 @@ type S struct {
 })""",
     sample_registry(),
   )
-  probe(harness, "line and block comments",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "line and block comments",
     """edit({
     // Create a new file
     action: "create", /* must be a valid action */
@@ -111,21 +159,33 @@ type S struct {
 })""",
     sample_registry(),
   )
-  probe(harness, "single quoted string literals",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "single quoted string literals",
     "edit({ action: 'create', path: 'a.go' })",
     sample_registry(),
   )
-  probe(harness, "double quoted string value",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "double quoted string value",
     "run({ command: \"go test ./internal/manifest/\" })",
     sample_registry(),
   )
   // `=` is accepted as a synonym for `:` as the key/value separator, before a
   // scalar, before a template body, and before a heredoc opener.
-  probe(harness, "equals as key value separator",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "equals as key value separator",
     "edit({ action= \"create\", path: \"a.go\", content= `x` })",
     sample_registry(),
   )
-  probe(harness, "equals before heredoc value",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "equals before heredoc value",
     """edit({
     action: "create",
     path: "a.go",
@@ -137,7 +197,10 @@ EOF
   )
   // Shape 3 from the DeepSeek forensics: a leading-dot float. Recovering
   // `.100` to `0.100` keeps the whole call rather than dropping it over a char.
-  probe(harness, "leading dot floats",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "leading dot floats",
     """<tool_call>
 run({ command: "x", limit: .100, weight: -.5 })
 </tool_call>""",

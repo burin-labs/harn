@@ -1,7 +1,10 @@
 import "std/prompt_library"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-prompt-library-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-prompt-library-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(root)
   const catalog_path = path_join(root, "prompt_library_catalog.toml")
   const front_path = path_join(root, "prompt_library_front.harn.prompt")
@@ -26,15 +29,15 @@ pipeline test(harness: Harness, task) {
   )
   const library = prompt_library_load(harness, [catalog_path, front_path])
   assert_eq(
-    prompt_library_inject(harness, library, "rust-repo-conventions-v1", {crate: "harn-vm"}),
+    prompt_library_inject(harness.fs, library, "rust-repo-conventions-v1", {crate: "harn-vm"}),
     "Use nextest for harn-vm and keep sccache warm.",
   )
   assert_eq(prompt_library_list(library, {tag: "ops"})[0].id, "ops-prefix")
   assert_eq(
-    prompt_library_payload(harness, library, "ops-prefix", {env: "prod"}).cache_control.type,
+    prompt_library_payload(harness.fs, library, "ops-prefix", {env: "prod"}).cache_control.type,
     "ephemeral",
   )
-  const api = prompt_library_api(harness, library)
+  const api = prompt_library_api(harness.fs, library)
   assert_eq(
     api.inject("ops-prefix", {env: "staging"}),
     "Operate in staging with low-noise status updates.",
@@ -46,7 +49,12 @@ pipeline test(harness: Harness, task) {
   )
   assert(
     contains(
-      prompt_library_inject_cluster(harness, library, {tag: "rust", max_tokens: 20}, {crate: "parser"}),
+      prompt_library_inject_cluster(
+        harness.fs,
+        library,
+        {tag: "rust", max_tokens: 20},
+        {crate: "parser"},
+      ),
       "parser",
     ),
   )

@@ -208,14 +208,19 @@ pipeline test_validate_all_passes_clean(harness: Harness, task) {
 
 pipeline test_harness_validate_skipped_when_disabled(harness: Harness, task) {
   const bundle = _bundle({})
-  const v = harness_validate(harness, bundle, _good_output(), {enabled: false})
+  const v = harness_validate(harness.process, bundle, _good_output(), {enabled: false})
   assert(v.ok)
   assert_eq(len(v.errors), 0)
 }
 
 pipeline test_harness_validate_rejects_unsafe_cwd(harness: Harness, task) {
   const bundle = _bundle({})
-  const v = harness_validate(harness, bundle, _good_output(), {enabled: true, cwd: "/tmp; rm -rf /"})
+  const v = harness_validate(
+    harness.process,
+    bundle,
+    _good_output(),
+    {enabled: true, cwd: "/tmp; rm -rf /"},
+  )
   assert(!v.ok)
   assert(v.errors[0].contains("shell metacharacters"))
 }

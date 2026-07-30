@@ -52,11 +52,11 @@ type WaitpointCancelledError = {
  * @effects: [state.mutate]
  * @errors: []
  */
-pub fn create(harness: Harness, id_or_options: WaitpointCreateInput = nil) -> Waitpoint {
+pub fn create(runtime: HarnessRuntime, id_or_options: WaitpointCreateInput = nil) -> Waitpoint {
   if id_or_options == nil {
-    return harness.runtime.waitpoint_create()
+    return runtime.waitpoint_create()
   }
-  return harness.runtime.waitpoint_create(id_or_options)
+  return runtime.waitpoint_create(id_or_options)
 }
 
 /**
@@ -65,20 +65,21 @@ pub fn create(harness: Harness, id_or_options: WaitpointCreateInput = nil) -> Wa
  * @effects: [state.observe]
  * @errors: []
  */
-pub fn wait(harness: Harness, 
+pub fn wait(
+  runtime: HarnessRuntime,
   waitpoints: string | dict | list,
   options: WaitpointWaitOptions = nil,
 ) -> Waitpoint | list<Waitpoint> {
   if type_of(waitpoints) == "list" {
     if options == nil {
-      return harness.runtime.waitpoint_wait(waitpoints)
+      return runtime.waitpoint_wait(waitpoints)
     }
-    return harness.runtime.waitpoint_wait(waitpoints, options ?? {})
+    return runtime.waitpoint_wait(waitpoints, options ?? {})
   }
   if options == nil {
-    return harness.runtime.waitpoint_wait(waitpoints)
+    return runtime.waitpoint_wait(waitpoints)
   }
-  return harness.runtime.waitpoint_wait(waitpoints, options ?? {})
+  return runtime.waitpoint_wait(waitpoints, options ?? {})
 }
 
 /**
@@ -87,15 +88,16 @@ pub fn wait(harness: Harness,
  * @effects: [state.mutate]
  * @errors: []
  */
-pub fn complete(harness: Harness, 
+pub fn complete(
+  runtime: HarnessRuntime,
   waitpoint: WaitpointHandle,
   value,
   options: WaitpointTerminalOptions = nil,
 ) -> Waitpoint {
   if options == nil {
-    return harness.runtime.waitpoint_complete(waitpoint, value)
+    return runtime.waitpoint_complete(waitpoint, value)
   }
-  return harness.runtime.waitpoint_complete(waitpoint, value, options ?? {})
+  return runtime.waitpoint_complete(waitpoint, value, options ?? {})
 }
 
 /**
@@ -104,9 +106,13 @@ pub fn complete(harness: Harness,
  * @effects: [state.mutate]
  * @errors: []
  */
-pub fn cancel(harness: Harness, waitpoint: WaitpointHandle, options: WaitpointTerminalOptions = nil) -> Waitpoint {
+pub fn cancel(
+  runtime: HarnessRuntime,
+  waitpoint: WaitpointHandle,
+  options: WaitpointTerminalOptions = nil,
+) -> Waitpoint {
   if options == nil {
-    return harness.runtime.waitpoint_cancel(waitpoint)
+    return runtime.waitpoint_cancel(waitpoint)
   }
-  return harness.runtime.waitpoint_cancel(waitpoint, options ?? {})
+  return runtime.waitpoint_cancel(waitpoint, options ?? {})
 }

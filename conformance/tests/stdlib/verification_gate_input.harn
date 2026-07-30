@@ -21,7 +21,7 @@ pipeline test(harness: Harness, task) {
   }
   const hashes = {"src/writer.zig": "new"}
   const normalization = {row: {diagnosticDelta: {include_path: true}}}
-  const stale_current = verification_gate_input(harness, nil, old_red, hashes, normalization)
+  const stale_current = verification_gate_input(harness.agent, nil, old_red, hashes, normalization)
   assert_eq(stale_current.schema, "harn.verification.gate_input.v1")
   assert_eq(stale_current.status, "advisory")
   assert_eq(stale_current.feedsGates, false)
@@ -29,21 +29,39 @@ pipeline test(harness: Harness, task) {
   assert_eq(stale_current.blocks_completion, false)
   assert_eq(stale_current.delta.status, "advisory")
   assert_eq(stale_current.current.classification.staleFiles, ["src/writer.zig"])
-  const hashes_unavailable = verification_gate_input(harness, nil, old_red, nil, normalization)
+  const hashes_unavailable = verification_gate_input(
+    harness.agent,
+    nil,
+    old_red,
+    nil,
+    normalization,
+  )
   assert_eq(hashes_unavailable.current.classification.status, "unclassified")
   assert_eq(hashes_unavailable.feedsGates, true)
   assert_eq(hashes_unavailable.status, "initialized")
-  const unbound = verification_gate_input(harness, nil, {diagnostics: ["missing writeEscaped"]}, hashes)
+  const unbound = verification_gate_input(
+    harness.agent,
+    nil,
+    {diagnostics: ["missing writeEscaped"]},
+    hashes,
+  )
   assert_eq(unbound.status, "advisory")
   assert_eq(unbound.current.classification.status, "unbound")
   assert_eq(unbound.gate_bearing_failure, false)
-  const unchanged = verification_gate_input(harness, fresh_red, fresh_red, hashes, normalization)
+  const unchanged = verification_gate_input(
+    harness.agent,
+    fresh_red,
+    fresh_red,
+    hashes,
+    normalization,
+  )
   assert_eq(unchanged.status, "unchanged")
   assert_eq(unchanged.no_progress, true)
   assert_eq(unchanged.progress_credit, false)
   assert_eq(unchanged.blocks_completion, true)
   const advanced = verification_gate_input(
-    harness, fresh_red + {diagnostics: ["A", "B"]},
+    harness.agent,
+    fresh_red + {diagnostics: ["A", "B"]},
     fresh_red + {diagnostics: ["B"]},
     hashes,
   )
@@ -51,7 +69,8 @@ pipeline test(harness: Harness, task) {
   assert_eq(advanced.progress_credit, true)
   assert_eq(advanced.delta.removed, ["a"])
   const green = verification_gate_input(
-    harness, old_red,
+    harness.agent,
+    old_red,
     {rung: "R2", rowId: "zig/test", at: "2026-07-03T00:02:00Z", snapshot: hashes, success: true},
     hashes,
   )
@@ -60,7 +79,8 @@ pipeline test(harness: Harness, task) {
   assert_eq(green.blocks_completion, false)
   assert_eq(green.previous.classification.status, "bound_stale")
   const newer_green_supersedes_red = verification_gate_input(
-    harness, fresh_red,
+    harness.agent,
+    fresh_red,
     {rung: "R3", rowId: "zig/test", at: "2026-07-03T00:02:00Z", snapshot: hashes, success: true},
     hashes,
     normalization,
@@ -71,7 +91,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(newer_green_supersedes_red.previous.classification.status, "bound_fresh")
   assert_eq(newer_green_supersedes_red.current.classification.status, "bound_fresh")
   const late_background_red = verification_gate_input(
-    harness,
+    harness.agent,
     newer_green_supersedes_red.current.value,
     old_red + {source: "background", at: "2026-07-03T00:03:00Z"},
     hashes,
@@ -84,7 +104,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(late_background_red.current.classification.status, "bound_stale")
   assert_eq(late_background_red.current.value.source, "background")
   const stale_previous_not_baseline = verification_gate_input(
-    harness,
+    harness.agent,
     old_red,
     fresh_red + {diagnostics: ["B"]},
     hashes,

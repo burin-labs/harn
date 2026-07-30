@@ -10,7 +10,7 @@ pipeline test(harness: Harness, task) {
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "receiver.harn"),
-    "pipeline default(task) {\n  let envelope = json_parse(task)\n  harness.stdio.println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
+    "pipeline default(harness: Harness, task) {\n  let envelope = json_parse(task)\n  harness.stdio.println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
   const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
@@ -66,6 +66,6 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(fire.result?.trace_id == trace_id)
   harness.stdio.println(fire.result?.target_agent == "triage")
   const _ = harness.process.shell("kill -TERM " + pid)
-  wait_for_exit(harness, pid)
+  wait_for_exit(harness.clock, harness.process, pid)
   harness.fs.delete(root)
 }

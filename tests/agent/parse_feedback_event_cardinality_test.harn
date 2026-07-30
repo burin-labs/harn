@@ -7,6 +7,7 @@ import {
   agent_event_value,
   agent_feedback_injected_event_schema,
 } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -31,7 +32,8 @@ fn parse_feedback_tools() {
 
 pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("<tool_call>\nadd({ left: })\n</tool_call>"), llm_text("<done>##DONE##</done>")],
+    harness.llm,
+    [llm_text("<tool_call>\nadd({ left: })\n</tool_call>"), llm_text("<done>##DONE##</done>")],
     { ->
       const session = "parse-feedback-cardinality-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
@@ -44,7 +46,9 @@ pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
         done_judge: nil,
         max_iterations: 3,
       }
-      const captured = agent_capture_events(harness, session,
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Add the two numbers, then finish.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
@@ -76,7 +80,8 @@ pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
 pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(harness: Harness, task) {
   const malformed = llm_text("<tool_call>\nadd({ left: })\n</tool_call>")
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       malformed,
       malformed,
       llm_text("<tool_call>\nadd({ left: 1, right: 2 })\n</tool_call>"),
@@ -101,7 +106,9 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(harness: Har
           hard_stop_after_trips: 3,
         },
       }
-      const captured = agent_capture_events(harness, session,
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Add one and two, then finish.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")

@@ -9,7 +9,9 @@ import { pack_agent } from "std/llm/defaults"
 
 pipeline default(harness: Harness) {
   const opts = pack_agent(
-    harness, "claude-sonnet-4-5",
+    harness.agent,
+    harness.llm,
+    "claude-sonnet-4-5",
     {prompt: "Build a TODO list", system: "You are precise."},
   )
   harness.stdio.println("model = " + to_string(opts?.model))

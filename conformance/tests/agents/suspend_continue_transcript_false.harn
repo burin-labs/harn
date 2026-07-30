@@ -24,7 +24,8 @@ fn resume_tools() {
 pipeline main(harness: Harness) {
   // First worker: continue_transcript=true (default).
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "park_keep", name: "agent_await_resumption", arguments: {reason: "keep transcript"}},
@@ -44,7 +45,9 @@ pipeline main(harness: Harness) {
     ],
     { ->
       const session_keep = "continue-true-" + harness.random.uuid()
-      const handle_keep = sub_agent_run(harness, "Park then resume with continue_transcript=true.",
+      const handle_keep = sub_agent_run(
+        harness,
+        "Park then resume with continue_transcript=true.",
         {
           provider: "mock",
           background: true,
@@ -72,7 +75,9 @@ pipeline main(harness: Harness) {
         ),
       )
       const session_reset = "continue-false-" + harness.random.uuid()
-      const handle_reset = sub_agent_run(harness, "Park then resume with continue_transcript=false.",
+      const handle_reset = sub_agent_run(
+        harness,
+        "Park then resume with continue_transcript=false.",
         {
           provider: "mock",
           background: true,

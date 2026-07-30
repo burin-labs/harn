@@ -97,7 +97,7 @@ pipeline main(harness: Harness, task) {
   }
   let changed_files = 0
   let changed_values = 0
-  for path in sorted_json_files(harness, FIXTURE_ROOT) {
+  for path in sorted_json_files(harness.fs, FIXTURE_ROOT) {
     const text = harness.fs.read_text(path)
     const data = json_parse(text)
     const count = count_old_values(data, old)
@@ -171,9 +171,9 @@ fn parse_args() -> any {
  * Recursively glob `*.json` beneath `root`, sorted, matching Python's
  * `sorted(FIXTURE_ROOT.rglob("*.json"))`.
  */
-fn sorted_json_files(harness: Harness, root: string) -> list<string> {
+fn sorted_json_files(fs: HarnessFs, root: string) -> list<string> {
   let paths: list<string> = []
-  for path in harness.fs.glob("${root}/**/*.json") {
+  for path in fs.glob("${root}/**/*.json") {
     paths = paths + [path]
   }
   return paths.sorted()

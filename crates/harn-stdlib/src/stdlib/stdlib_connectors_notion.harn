@@ -12,37 +12,46 @@ pub fn reset() {
   notion_connector_config = {}
 }
 
-fn __call(harness: Harness, method, params = {}) {
-  return harness.net.connector_call("notion", method, filter_nil(merge(notion_connector_config, params ?? {})))
+fn __call(net: HarnessNet, method, params = {}) {
+  return net.connector_call(
+    "notion",
+    method,
+    filter_nil(merge(notion_connector_config, params ?? {})),
+  )
 }
 
-pub fn get_page(harness: Harness, id, options = nil) {
-  return __call(harness, "get_page", (options ?? {}) + {id: id})
+pub fn get_page(net: HarnessNet, id, options = nil) {
+  return __call(net, "get_page", (options ?? {}) + {id: id})
 }
 
-pub fn update_page(harness: Harness, id, properties, options = nil) {
-  return __call(harness, "update_page", (options ?? {}) + {id: id, properties: properties})
+pub fn update_page(net: HarnessNet, id, properties, options = nil) {
+  return __call(net, "update_page", (options ?? {}) + {id: id, properties: properties})
 }
 
-pub fn append_blocks(harness: Harness, page_id, blocks, options = nil) {
-  return __call(harness, "append_blocks", (options ?? {}) + {page_id: page_id, blocks: blocks})
+pub fn append_blocks(net: HarnessNet, page_id, blocks, options = nil) {
+  return __call(net, "append_blocks", (options ?? {}) + {page_id: page_id, blocks: blocks})
 }
 
-pub fn query_database(harness: Harness, id, filter = nil, sorts = nil, options = nil) {
-  return __call(harness, 
+pub fn query_database(net: HarnessNet, id, filter = nil, sorts = nil, options = nil) {
+  return __call(
+    net,
     "query_database",
     filter_nil((options ?? {}) + {id: id, filter: filter, sorts: sorts}),
   )
 }
 
-pub fn search(harness: Harness, query, options = nil) {
-  return __call(harness, "search", (options ?? {}) + {query: query})
+pub fn search(net: HarnessNet, query, options = nil) {
+  return __call(net, "search", (options ?? {}) + {query: query})
 }
 
-pub fn create_comment(harness: Harness, page_id, rich_text, options = nil) {
-  return __call(harness, "create_comment", (options ?? {}) + {page_id: page_id, rich_text: rich_text})
+pub fn create_comment(net: HarnessNet, page_id, rich_text, options = nil) {
+  return __call(net, "create_comment", (options ?? {}) + {page_id: page_id, rich_text: rich_text})
 }
 
-pub fn api_call(harness: Harness, path, method, body = nil, options = nil) {
-  return __call(harness, "api_call", filter_nil((options ?? {}) + {path: path, method: method, body: body}))
+pub fn api_call(net: HarnessNet, path, method, body = nil, options = nil) {
+  return __call(
+    net,
+    "api_call",
+    filter_nil((options ?? {}) + {path: path, method: method, body: body}),
+  )
 }

@@ -151,7 +151,7 @@ pipeline main(harness: Harness, task) {
   }
   const section = result
   const prev = previous_version(versions, version)
-  const repo = detect_repo(harness, flag_value(argv, "--repo"))
+  const repo = detect_repo(harness.env, harness.process, flag_value(argv, "--repo"))
   const output = render_notes(section, repo, prev, version)
   const out_path = flag_value(argv, "--output")
   if out_path != nil {
@@ -166,15 +166,15 @@ pipeline main(harness: Harness, task) {
  * Resolve the repo slug: explicit --repo, else $GITHUB_REPOSITORY, else
  * the GitHub `owner/name` parsed from `git remote get-url origin`.
  */
-fn detect_repo(harness: Harness, explicit: string?) -> string? {
+fn detect_repo(env: HarnessEnv, process: HarnessProcess, explicit: string?) -> string? {
   if explicit != nil {
     return explicit
   }
-  const env_repo = harness.env.get("GITHUB_REPOSITORY")
+  const env_repo = env.get("GITHUB_REPOSITORY")
   if env_repo != nil && (env_repo ?? "") != "" {
     return env_repo
   }
-  const remote = harness.process.run({cmd: "git", args: ["remote", "get-url", "origin"]})
+  const remote = process.run({program: "git", args: ["remote", "get-url", "origin"]})
   if !remote.success {
     return nil
   }

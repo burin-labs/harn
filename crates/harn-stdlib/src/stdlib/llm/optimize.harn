@@ -67,8 +67,8 @@ fn __render_prompt(base_prompt, instruction, demos) {
   return join(parts, "\n\n")
 }
 
-fn __candidate_space(harness: Harness, config) {
-  const instructions = propose_instructions(harness, config.base_prompt, config)
+fn __candidate_space(llm: HarnessLlm, config) {
+  const instructions = propose_instructions(llm, config.base_prompt, config)
   const demo_sets = __demo_sets(config)
   let candidates = []
   let idx = 0
@@ -247,9 +247,9 @@ fn __rank_observations(observations) {
  * @effects: []
  * @errors: []
  */
-pub fn optimize_prompt(harness: Harness, config) {
+pub fn optimize_prompt(llm: HarnessLlm, config) {
   const cfg = __require_config(config)
-  const candidates = __candidate_space(harness, cfg)
+  const candidates = __candidate_space(llm, cfg)
   require len(candidates) > 0, "optimize_prompt: no candidate prompts generated"
   const trials = __trial_limit(cfg, len(candidates))
   const exploration = __exploration(cfg)

@@ -14,14 +14,17 @@ pipeline default(harness: Harness) {
   harness.stdio.println(len(limited))
   const lenient = parse_jsonl("{\"ok\":1}\nNOT JSON\n{\"ok\":2}\n")
   harness.stdio.println(len(lenient))
-  const path = path_join(harness.fs.workspace_temp_dir(), "harn-jsonl-roundtrip-" + harness.random.uuid() + ".jsonl")
-  const written = write_jsonl(harness, path, [{x: 1}, {x: 2}, {x: 3}])
+  const path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-jsonl-roundtrip-" + harness.random.uuid() + ".jsonl",
+  )
+  const written = write_jsonl(harness.fs, path, [{x: 1}, {x: 2}, {x: 3}])
   harness.stdio.println(written)
-  const reread = read_jsonl(harness, path)
+  const reread = read_jsonl(harness.fs, path)
   harness.stdio.println(len(reread))
   harness.stdio.println(reread[2].x)
-  append_jsonl(harness, path, {x: 4})
-  const after_append = read_jsonl(harness, path)
+  append_jsonl(harness.fs, path, {x: 4})
+  const after_append = read_jsonl(harness.fs, path)
   harness.stdio.println(len(after_append))
   harness.stdio.println(after_append[3].x)
   const total = fold_jsonl(

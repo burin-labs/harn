@@ -7,7 +7,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [{text: "should never run", model: "mock", provider: "mock"}],
+    harness.llm,
+    [{text: "should never run", model: "mock", provider: "mock"}],
     { ->
       const out = try {
         harness.llm.call("hi", nil, {models: ["mock-a", "mock-b"], model: "pinned"})

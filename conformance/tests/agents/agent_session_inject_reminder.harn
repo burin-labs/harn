@@ -10,7 +10,9 @@ import {
 pipeline main(harness: Harness, task) {
   const s = harness.agent.open()
   harness.agent.reset(s)
-  const id = agent_session_inject_reminder(harness, s,
+  const id = agent_session_inject_reminder(
+    harness.agent,
+    s,
     {
       body: "re-read auth.go",
       ttl_turns: 1,
@@ -27,17 +29,17 @@ pipeline main(harness: Harness, task) {
   require before[0].reminder.body == "re-read auth.go", "reminder carries the body"
   // One turn boundary later the ttl=1 reminder expires and is removed — so a note
   // injected at turn N is absent from the turn N+2 payload.
-  const report = agent_session_apply_reminder_post_turn(harness, s, 1)
+  const report = agent_session_apply_reminder_post_turn(harness.agent, s, 1)
   require report.expired_count == 1, "the ttl=1 reminder expires after exactly one turn"
   require report.remaining_count == 0, "nothing is carried to the next turn"
   const after = transcript_events_by_kind(harness.agent.snapshot(s), "system_reminder")
   require len(after) == 0, "the reminder is dropped from carried history"
   // Idempotent: a later post-turn pass finds nothing to evict.
-  const second = agent_session_apply_reminder_post_turn(harness, s, 2)
+  const second = agent_session_apply_reminder_post_turn(harness.agent, s, 2)
   require second.expired_count == 0, "no double-eviction"
   // dedupe_key collapses a re-injected same-kind reminder to one pending entry.
-  agent_session_inject_reminder(harness, s, {body: "first", ttl_turns: 1, dedupe_key: "k"})
-  agent_session_inject_reminder(harness, s, {body: "second", ttl_turns: 1, dedupe_key: "k"})
+  agent_session_inject_reminder(harness.agent, s, {body: "first", ttl_turns: 1, dedupe_key: "k"})
+  agent_session_inject_reminder(harness.agent, s, {body: "second", ttl_turns: 1, dedupe_key: "k"})
   const deduped = transcript_events_by_kind(harness.agent.snapshot(s), "system_reminder")
   require len(deduped) == 1, "same dedupe_key replaces the prior reminder"
   require deduped[0].reminder.body == "second", "the latest reminder wins"

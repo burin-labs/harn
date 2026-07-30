@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 /**
  * S-11 (#1847): the daemon-loop suspend path (S-07) produces the
  * same persisted snapshot shape that the agent_loop suspend path
@@ -20,7 +21,9 @@ pipeline main(harness: Harness) {
   const dir = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-parity-" + unique)
   harness.fs.mkdir(dir)
   const snapshot_path = path_join(dir, "daemon.json")
-  const result = agent_loop(harness, "Poll for background work",
+  const result = agent_loop(
+    harness,
+    "Poll for background work",
     "You are helpful",
     {
       provider: "mock",
@@ -42,7 +45,9 @@ pipeline main(harness: Harness) {
   // Loop-level shape parity (matches the existing daemon test).
   harness.stdio.println("loop_status=" + result.status)
   harness.stdio.println("loop_daemon_state=" + result.daemon_state)
-  harness.stdio.println("loop_snapshot_matches=" + to_string(result.daemon_snapshot_path == snapshot_path))
+  harness.stdio.println(
+    "loop_snapshot_matches=" + to_string(result.daemon_snapshot_path == snapshot_path),
+  )
   // Snapshot-level field-set parity: each of these fields must be
   // populated by the post-S-07 writer the same way the pre-refactor
   // writer populated them. Any add/remove/rename trips this fixture.

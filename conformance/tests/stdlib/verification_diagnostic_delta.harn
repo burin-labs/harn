@@ -12,7 +12,8 @@ pipeline test(harness: Harness, task) {
     ],
   }
   const same = verification_diagnostic_delta(
-    harness, prior_shifted,
+    harness.agent,
+    prior_shifted,
     current_shifted,
     {row: {diagnosticDelta: {include_path: true}}},
   )
@@ -20,7 +21,8 @@ pipeline test(harness: Harness, task) {
   assert_eq(same.progress_credit, false)
   assert_eq(same.same_signature_set, true)
   const different_path = verification_diagnostic_delta(
-    harness, prior_shifted,
+    harness.agent,
+    prior_shifted,
     {
       diagnostics: [
         {path: "src/b.tx", line: 99, column: 7, code: "E1", message: "error E1: missing Foo"},
@@ -31,7 +33,8 @@ pipeline test(harness: Harness, task) {
   assert_eq(different_path.status, "advanced")
   assert_eq(different_path.progress_credit, true)
   const location_sensitive = verification_diagnostic_delta(
-    harness, prior_shifted,
+    harness.agent,
+    prior_shifted,
     current_shifted,
     {row: {diagnosticDelta: {include_path: true, strip_locations: false}}},
   )
@@ -39,42 +42,57 @@ pipeline test(harness: Harness, task) {
   assert_eq(location_sensitive.progress_credit, true)
   assert_eq(len(location_sensitive.removed), 1)
   assert_eq(len(location_sensitive.added), 1)
-  const removed_one = verification_diagnostic_delta(harness, {diagnostics: ["A", "B"]}, {diagnostics: ["B"]})
+  const removed_one = verification_diagnostic_delta(
+    harness.agent,
+    {diagnostics: ["A", "B"]},
+    {diagnostics: ["B"]},
+  )
   assert_eq(removed_one.status, "advanced")
   assert_eq(removed_one.progress_credit, true)
   assert_eq(removed_one.removed, ["a"])
   assert_eq(removed_one.added, [])
   assert_eq(removed_one.persisted, ["b"])
-  const changed = verification_diagnostic_delta(harness, "A", "C")
+  const changed = verification_diagnostic_delta(harness.agent, "A", "C")
   assert_eq(changed.status, "advanced")
   assert_eq(changed.progress_credit, true)
   assert_eq(changed.removed, ["a"])
   assert_eq(changed.added, ["c"])
-  const cleared = verification_diagnostic_delta(harness, {diagnostics: ["A"]}, {success: true})
+  const cleared = verification_diagnostic_delta(
+    harness.agent,
+    {diagnostics: ["A"]},
+    {success: true},
+  )
   assert_eq(cleared.status, "cleared")
   assert_eq(cleared.progress_credit, true)
   assert_eq(cleared.current.signatures, [])
   const advisory = verification_diagnostic_delta(
-    harness, {diagnostics: ["A"]},
+    harness.agent,
+    {diagnostics: ["A"]},
     {diagnostics: [], feedsGates: false},
   )
   assert_eq(advisory.status, "advisory")
   assert_eq(advisory.progress_credit, false)
   assert_eq(advisory.feedsGates, false)
   const previous_advisory = verification_diagnostic_delta(
-    harness, {failureSignature: "A", feedsGates: false},
+    harness.agent,
+    {failureSignature: "A", feedsGates: false},
     {failureSignature: "B"},
   )
   assert_eq(previous_advisory.status, "initialized")
   assert_eq(previous_advisory.progress_credit, false)
   const replaced = verification_diagnostic_delta(
-    harness, "ERR123 value",
+    harness.agent,
+    "ERR123 value",
     "ERR999 value",
     {row: {diagnosticDelta: {replacements: [{pattern: "ERR[0-9]+", replacement: "ERRX"}]}}},
   )
   assert_eq(replaced.status, "unchanged")
   assert_eq(replaced.progress_credit, false)
-  const regressed = verification_diagnostic_delta(harness, {diagnostics: ["A"]}, {diagnostics: ["A", "C"]})
+  const regressed = verification_diagnostic_delta(
+    harness.agent,
+    {diagnostics: ["A"]},
+    {diagnostics: ["A", "C"]},
+  )
   assert_eq(regressed.status, "regressed")
   assert_eq(regressed.progress_credit, false)
   assert_eq(regressed.persisted, ["a"])

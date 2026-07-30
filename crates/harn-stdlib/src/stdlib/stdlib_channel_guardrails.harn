@@ -19,7 +19,7 @@
  *   * `prompt_injection_scanner(opts)` — register the built-in
  *     heuristic scanner with optional `on_hit`, `applies_to`, and `id`
  *     knobs.
- *   * `llm_risk_classifier(harness, opts)` — register a custom guardrail backed
+ *   * `llm_risk_classifier(harness.channels, harness.llm, opts)` — register a custom guardrail backed
  *     by an LLM classifier. Mirrors the TH-05 #2017 pattern: the
  *     model gets a JSON-verdict meta-prompt and the closure parses +
  *     thresholds the response. Caches per-(scope, payload-hash) and
@@ -181,7 +181,7 @@ fn __guardrails_parse_verdict(text) {
  * @errors: ["channel_guardrail_register: ..."]
  * @example: prompt_injection_scanner({on_hit: "warn"})
  */
-pub fn prompt_injection_scanner(harness: Harness, opts) -> string {
+pub fn prompt_injection_scanner(channels: HarnessChannels, opts) -> string {
   const resolved = opts ?? {}
   if type_of(resolved) != "dict" {
     throw "prompt_injection_scanner: opts must be a dict or nil"
@@ -196,7 +196,7 @@ pub fn prompt_injection_scanner(harness: Harness, opts) -> string {
   } else {
     config + {id: to_string(resolved.id)}
   }
-  return harness.channels.guardrail_register(with_id)
+  return channels.guardrail_register(with_id)
 }
 
 /**
@@ -226,13 +226,13 @@ pub fn prompt_injection_scanner(harness: Harness, opts) -> string {
  *
  * @effects: ["channel.middleware", "llm.call"]
  * @errors: ["llm_risk_classifier: ..."]
- * @example: llm_risk_classifier(harness, {model: "haiku", threshold: 0.8})
+ * @example: llm_risk_classifier(harness.channels, harness.llm, {model: "haiku", threshold: 0.8})
  */
-pub fn llm_risk_classifier(harness: Harness, opts) -> string {
+pub fn llm_risk_classifier(channels: HarnessChannels, llm: HarnessLlm, opts) -> string {
   const cfg = __guardrails_validate_llm_config(opts ?? {})
   const scan_fn = { payload, context ->
     const payload_text = json_stringify(payload)
-    const envelope = harness.llm.call_safe(
+    const envelope = llm.call_safe(
       payload_text,
       cfg.meta_prompt,
       __guardrails_classifier_options(cfg),
@@ -272,7 +272,7 @@ pub fn llm_risk_classifier(harness: Harness, opts) -> string {
   } else {
     config + {id: to_string(resolved.id)}
   }
-  return harness.channels.guardrail_register(with_id)
+  return channels.guardrail_register(with_id)
 }
 
 /* Transport / parse errors → allow + warn-only audit. We never
@@ -291,7 +291,7 @@ pub fn llm_risk_classifier(harness: Harness, opts) -> string {
  * @errors: ["channel_guardrail_register: ..."]
  * @example: register_guardrail({scan_fn: my_scanner})
  */
-pub fn register_guardrail(harness: Harness, opts) -> string {
+pub fn register_guardrail(channels: HarnessChannels, opts) -> string {
   const resolved = opts ?? {}
   if type_of(resolved) != "dict" {
     throw "register_guardrail: opts must be a dict"
@@ -306,5 +306,5 @@ pub fn register_guardrail(harness: Harness, opts) -> string {
   } else {
     config + {id: to_string(resolved.id)}
   }
-  return harness.channels.guardrail_register(with_id)
+  return channels.guardrail_register(with_id)
 }

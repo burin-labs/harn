@@ -12,7 +12,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "file_edited",
-    { event ->
+    { _hook_harness, event ->
       const op = to_string(event?.metadata?.operation ?? "")
       if op == "write" || op == "append" {
         harness.runtime.atomic_add(edits_seen, 1)
@@ -20,12 +20,16 @@ pipeline default(harness: Harness) {
       return nil
     },
   )
-  const tmp = path_join(harness.fs.workspace_temp_dir(), "hooks_session_file_edited-" + harness.random.uuid() + ".txt")
+  const tmp = path_join(
+    harness.fs.workspace_temp_dir(),
+    "hooks_session_file_edited-" + harness.random.uuid() + ".txt",
+  )
   harness.fs.write_text(tmp, "hello")
   harness.fs.append(tmp, " world")
   harness.agent.notify_file_edited(tmp, {operation: "append", bytes: 11})
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       const result = agent_loop(harness, "touch some files", nil, {provider: "mock"})
       harness.stdio.println(result.status)

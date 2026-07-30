@@ -103,7 +103,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(matches[8].row.id, "tx/r1-fast")
   assert_eq(matches[9].row.id, "any/full")
   const plan = verification_ladder_plan(
-    harness,
+    harness.runtime,
     query,
     {resource_classes: ["cheap", "moderate"], allow_stale_prone: false},
   )
@@ -134,11 +134,11 @@ pipeline test(harness: Harness, task) {
   assert_eq(plan.skipped[3].reason, "stale_prone_filtered")
   assert_eq(plan.skipped[4].row_id, "any/full")
   assert_eq(plan.skipped[4].reason, "resource_class_filtered")
-  const bounded = verification_ladder_plan(harness, query, {max_rung: "R1"})
+  const bounded = verification_ladder_plan(harness.runtime, query, {max_rung: "R1"})
   assert_eq(len(bounded.selected), 5)
   assert_eq(bounded.selected[0].row_id, "tx/parse")
   const numeric_bounded = verification_ladder_plan(
-    harness,
+    harness.runtime,
     query,
     {min_rung: 1, max_rung: 2, resource_classes: ["cheap", "moderate"], allow_stale_prone: false},
   )
@@ -146,14 +146,14 @@ pipeline test(harness: Harness, task) {
   assert_eq(numeric_bounded.selected[0].row_id, "tx/r1-fast")
   assert_eq(numeric_bounded.selected[1].row_id, "tx/unit")
   const limited = verification_ladder_plan(
-    harness,
+    harness.runtime,
     query,
     {resource_classes: ["cheap", "moderate"], allow_stale_prone: false, limit: 3},
   )
   assert_eq(len(limited.selected), 3)
   assert_eq(limited.selected[2].row_id, "tx/r0-fast-moderate")
   harness.runtime.verification_profiles_set({rows: []})
-  const empty = verification_ladder_plan(harness, query)
+  const empty = verification_ladder_plan(harness.runtime, query)
   assert_eq(empty.fallback, true)
   assert_eq(empty.reason, "no_profile_rows")
   harness.stdio.println("verification ladder plan ok")

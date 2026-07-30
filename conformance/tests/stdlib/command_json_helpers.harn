@@ -20,8 +20,8 @@ fn fail_runner(code, stderr) {
   return { _spec, _options -> return command_result_fail(code, stderr, {cwd: "/workspace"}) }
 }
 
-fn no_newline_echo(harness: Harness, text) {
-  if harness.system.platform().os == "windows" {
+fn no_newline_echo(system: HarnessSystem, text) {
+  if system.platform().os == "windows" {
     return ["cmd", "/C", "echo|set /p=" + text]
   }
   return ["printf", text]
@@ -45,15 +45,15 @@ pipeline default(harness: Harness) {
   require command_audit.execution[0].name == "probe", "portable command step name"
   require command_audit.execution[0].adapter == "mock", "portable command step adapter fields"
   const direct = command_json(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
-    no_newline_echo(harness, "{\"direct\":true}"),
+    no_newline_echo(harness.system, "{\"direct\":true}"),
     {capture: {max_inline_bytes: 100}},
   )
   assert_eq(direct.direct, true)
   const parsed = command_json(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     ["fake-json"],
@@ -62,7 +62,7 @@ pipeline default(harness: Harness) {
   assert_eq(parsed.name, "harn")
   assert_eq(parsed.count, 2)
   const empty = command_json(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     ["empty"],
@@ -70,7 +70,7 @@ pipeline default(harness: Harness) {
   )
   assert_eq(empty, nil)
   const empty_record = command_json(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     ["empty"],
@@ -80,7 +80,7 @@ pipeline default(harness: Harness) {
   assert_eq(empty_record.error.category, "empty_output")
   assert_eq(empty_record.step.status, "empty_output")
   const failed_record = command_json(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     ["fail"],
@@ -91,10 +91,10 @@ pipeline default(harness: Harness) {
   assert_eq(failed_record.step.exit_code, 7)
   assert_eq(failed_record.error.cwd, "/workspace")
   assert_eq(failed_record.step.cwd, "/workspace")
-  assert(contains(command_failure_text(harness, failed_record.step), "cwd=/workspace"))
+  assert(contains(command_failure_text(harness.agent, failed_record.step), "cwd=/workspace"))
   assert(contains(failed_record.error.message, "denied"))
   const malformed = command_json(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     ["bad-json"],
@@ -105,11 +105,19 @@ pipeline default(harness: Harness) {
   assert_eq(malformed.step.status, "invalid_json")
   assert(contains(malformed.error.message, "invalid JSON"))
   assert_error_contains(
-    { -> command_json(harness, harness.tools, harness.clock, ["bad-json"], {runner: json_runner("{ nope")}) },
+    { ->
+      command_json(
+        harness.agent,
+        harness.tools,
+        harness.clock,
+        ["bad-json"],
+        {runner: json_runner("{ nope")},
+      )
+    },
     "invalid JSON",
   )
   const step = command_json_step(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     "structured probe",
@@ -130,7 +138,7 @@ pipeline default(harness: Harness) {
   assert_eq(len(step.json.items), 3)
   assert_eq(step.classification.kind, "clean")
   const fallback = command_try(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     [
@@ -148,7 +156,7 @@ pipeline default(harness: Harness) {
   assert_eq(fallback.value.source, "cli")
   assert_eq(fallback.value.count, 2)
   const spec_fallback = command_try(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     [
@@ -163,7 +171,7 @@ pipeline default(harness: Harness) {
   assert_eq(spec_fallback.value.ok, false)
   assert_eq(spec_fallback.value.payload, 42)
   const exhausted = command_try(
-    harness,
+    harness.agent,
     harness.tools,
     harness.clock,
     [

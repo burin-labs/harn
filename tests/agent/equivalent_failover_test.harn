@@ -1,4 +1,5 @@
 // Run: harn test tests/agent/equivalent_failover_test.harn
+import { agent_loop } from "std/agent/loop"
 import { omit } from "std/json"
 
 fn run_with_options(harness: Harness, key, options) {
@@ -7,7 +8,9 @@ fn run_with_options(harness: Harness, key, options) {
     harness.runtime.shared_set(observed, call.opts)
     return {ok: true, value: {text: "DONE", tool_calls: [], provider: "mock", model: "model"}}
   }
-  agent_loop(harness, "finish",
+  agent_loop(
+    harness,
+    "finish",
     nil,
     options
       + {
@@ -33,7 +36,11 @@ pipeline test_agent_loop_preserves_equivalent_failover_opt_out(harness: Harness,
 }
 
 pipeline test_agent_loop_preserves_explicit_route_owner(harness: Harness, _task) {
-  const opts = run_with_options(harness, "equivalent-route-owner", {fallback_chain: ["backup:model"]})
+  const opts = run_with_options(
+    harness,
+    "equivalent-route-owner",
+    {fallback_chain: ["backup:model"]},
+  )
   assert_eq(opts?.equivalent_failover, nil)
   assert_eq(opts.fallback_chain, ["backup:model"])
 }

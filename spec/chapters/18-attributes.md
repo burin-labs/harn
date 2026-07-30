@@ -55,7 +55,7 @@ into the warning message.
 
 ```harn,ignore
 @test
-pipeline test_smoke(task) { ... }
+pipeline test_smoke(harness: Harness, task) { ... }
 ```
 
 Marks a pipeline as a test entry point. The conformance / `harn test`
@@ -71,13 +71,15 @@ import "std/triggers"
 @retry(max: 3, backoff: "exponential")
 @schedule("0 * * * *", "UTC")
 @queue("scan-jobs")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   return {status: "ok", request: event.provider_payload.raw}
 }
 ```
 
 `@job` marks an exported function as a trigger-dispatched background
-entrypoint. `harn run --as-job file.harn --job scan --request req.json`
+entrypoint. Its first two parameters are the root `Harness` and the normalized
+`TriggerEvent`; ordinary helpers called from the job should accept narrower
+capability handles. `harn run --as-job file.harn --job scan --request req.json`
 runs that job once, delivering the request JSON as
 `event.provider_payload.raw` and printing the returned value as JSON.
 `harn serve worker file.harn` activates every `@schedule`d job in the
@@ -144,7 +146,7 @@ legacy helpers with `[lint].persona_step_allowlist`.
 
 ```harn,ignore
 @command(name: "review", description: "Review the diff", hint: "(optional focus area)")
-pipeline review_branch(task) { ... }
+pipeline review_branch(harness: Harness, task) { ... }
 ```
 
 Marks a top-level pipeline as an ACP slash-command. The Harn ACP adapter
@@ -227,7 +229,7 @@ change.
 ```harn,ignore
 @invariant("fs.writes", "src/**")
 tool write_patch() {
-  write_file("src/out.txt", "ok")
+  harness.fs.write_text("src/out.txt", "ok")
 }
 ```
 
@@ -242,7 +244,7 @@ then the selected invariant checks run against that IR.
 |---|---|---|
 | `@invariant("fs.writes", "src/**")` | One or more allowed globs, passed positionally or as `path_glob:` / `glob:` / `allow:` | Every reachable file-system write must target a literal path proven to stay within one of the declared globs. |
 | `@invariant("budget.remaining", target: "remaining")` | Optional `target:` variable name, default `budget.remaining` | Assignments to the tracked budget value may only preserve it, decrement it, or refresh it from `llm_budget_remaining()`. |
-| `@invariant("approval.reachability")` | No extra args | Every reachable side-effecting call must be gated by a prior `request_approval(...)` or enclosed inside a `dual_control(...)` approval scope. |
+| `@invariant("approval.reachability")` | No extra args | Every reachable side-effecting call must be gated by a prior `harness.interaction.request_approval(...)` or enclosed inside a `harness.interaction.dual_control(...)` approval scope. |
 | `@invariant("capability.policy", allow: "fs.write,llm.model", ...)` | `allow:` capability list; optional `workspace:` globs; optional `require_approval:`, `require_budget:`, `require_autonomy:`, `require_execution_policy:`, `require_command_policy:`, `require_egress_policy:`, and `require_approval_policy:` capability lists | Every reachable capability effect must be declared, and selected capabilities must be guarded by the requested policy/gate on every path. |
 
 The capability-policy lattice recognizes these canonical capabilities:
@@ -250,13 +252,16 @@ The capability-policy lattice recognizes these canonical capabilities:
 `llm.model`, `worker.dispatch`, `human.approval`, and
 `autonomy.policy`. Common aliases such as `workspace.write`, `command`,
 `connector`, `llm`, and `worker` normalize to those names. The checker
-classifies direct builtins plus bridge calls such as `mcp_call(...)`,
-`host_tool_call(...)`, and `host_call("capability.operation", ...)`.
+classifies nominal capability methods such as `harness.mcp.call(...)`,
+`harness.tools.invoke(...)`, and `harness.process.exec(...)`. The privileged
+`host_call("capability.operation", ...)` wire is additionally classified when
+it appears in a trusted provenance-stamped host module; ordinary modules cannot
+invoke or re-export that wire.
 Calls like `with_execution_policy(...)`, `with_command_policy(...)`,
 `with_approval_policy(...)`, `with_autonomy_policy(...)`,
-`with_dynamic_permissions(...)`, `egress_policy(...)`,
-`request_approval(...)`, `dual_control(...)`, and budget-bearing
-`llm_call(..., {budget: ...})` satisfy the corresponding gates.
+`with_dynamic_permissions(...)`, `harness.net.egress_policy(...)`,
+`harness.interaction.request_approval(...)`, `harness.interaction.dual_control(...)`, and budget-bearing
+`harness.llm.call(..., {budget: ...})` satisfy the corresponding gates.
 
 Invariant violations surface through `harn check --invariants`,
 `harn explain --invariant <name> <handler> <file>`, and the LSP. Each
@@ -268,4 +273,3 @@ how the violating call or assignment is reached.
 Unknown attribute names produce a type-checker warning so that
 misspellings surface at check time. The attribute itself is otherwise
 ignored — code still compiles.
-

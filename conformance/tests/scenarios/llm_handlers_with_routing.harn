@@ -22,7 +22,8 @@ pipeline default(harness: Harness) {
     }
   }
   const router = with_routing(
-    harness, {
+    harness.agent,
+    {
       default: cheap,
       routes: [{name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: strong}],
     },

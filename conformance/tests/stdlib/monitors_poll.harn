@@ -2,7 +2,7 @@ import { wait_for } from "std/monitors"
 
 pipeline test(harness: Harness, task) {
   const result = wait_for(
-    harness,
+    harness.runtime,
     {
       wait_id: "conformance-monitor-poll",
       timeout: 1ms,

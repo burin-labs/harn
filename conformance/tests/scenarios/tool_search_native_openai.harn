@@ -50,7 +50,8 @@ pipeline test(harness: Harness, task) {
   // we just need a response that lets the call return so we can
   // inspect `harness.llm.mock_calls()`.
   with_llm_script(
-    harness.llm, [llm_text("ack")],
+    harness.llm,
+    [llm_text("ack")],
     { ->
       harness.llm.call(
         "do a thing",

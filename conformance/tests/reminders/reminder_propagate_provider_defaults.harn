@@ -3,7 +3,9 @@ import { agent_reminder_providers_fire } from "std/agent/state"
 pipeline main(harness: Harness) {
   const token_session = harness.agent.open("reminder-propagate-provider-token")
   harness.agent.reset(token_session)
-  agent_reminder_providers_fire(harness, token_session,
+  agent_reminder_providers_fire(
+    harness.agent,
+    token_session,
     "on_budget_threshold",
     {session: {id: token_session}, tokens_used: 80, context_window: 100},
     {},
@@ -13,7 +15,9 @@ pipeline main(harness: Harness) {
     .reminder
   const idle_session = harness.agent.open("reminder-propagate-provider-idle")
   harness.agent.reset(idle_session)
-  agent_reminder_providers_fire(harness, idle_session,
+  agent_reminder_providers_fire(
+    harness.agent,
+    idle_session,
     "session_idle",
     {session: {id: idle_session}, wake_interval_ms: 60000},
     {},
@@ -22,7 +26,9 @@ pipeline main(harness: Harness) {
     .reminder
   const tool_session = harness.agent.open("reminder-propagate-provider-tool")
   harness.agent.reset(tool_session)
-  agent_reminder_providers_fire(harness, tool_session,
+  agent_reminder_providers_fire(
+    harness.agent,
+    tool_session,
     "post_tool_use",
     {session: {id: tool_session}, tool_name: "read_file", truncated: true, original_size: 4096},
     {},
@@ -33,7 +39,9 @@ pipeline main(harness: Harness) {
   )[0].reminder
   const recap_session = harness.agent.open("reminder-propagate-provider-recap")
   harness.agent.reset(recap_session)
-  agent_reminder_providers_fire(harness, recap_session,
+  agent_reminder_providers_fire(
+    harness.agent,
+    recap_session,
     "post_compact",
     {session: {id: recap_session}, archived_messages: 3, summary: "recap"},
     {},

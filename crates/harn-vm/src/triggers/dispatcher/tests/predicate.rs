@@ -9,12 +9,12 @@ async fn predicate_budget_exceeded_short_circuits_and_emits_lifecycle() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return "handled:" + event.kind
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
-  let result = llm_call(
+pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
+  let result = harness.llm.call(
     "budget gate " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -102,12 +102,12 @@ async fn predicate_daily_budget_exceeded_short_circuits_subsequent_events() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return "handled:" + event.kind
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
-  let result = llm_call(
+pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
+  let result = harness.llm.call(
     "daily gate " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -206,12 +206,12 @@ async fn predicate_budget_warn_strategy_proceeds_without_llm_spend() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return "handled:" + event.kind
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
-  let result = llm_call(
+pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
+  let result = harness.llm.call(
     "warn gate " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -264,11 +264,11 @@ async fn predicate_budget_fail_strategy_moves_to_dlq() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return "handled:" + event.kind
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
+pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return true
 }
 "#,
@@ -313,11 +313,11 @@ async fn predicate_budget_retry_later_strategy_defers_event() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return "handled:" + event.kind
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
+pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return true
 }
 "#,
@@ -362,12 +362,12 @@ async fn predicate_replay_uses_event_cache_without_hitting_provider() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return "handled:" + event.kind
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
-  let result = llm_call(
+pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
+  let result = harness.llm.call(
     "replay gate " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -449,11 +449,11 @@ async fn predicate_circuit_breaker_opens_after_three_failures() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return "handled:" + event.kind
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
+pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   throw "predicate failed"
 }
 "#,
@@ -529,7 +529,7 @@ async fn autonomy_budget_routes_act_auto_to_approval() {
         r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> dict {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> dict {
   return {ok: true, event_id: event.id}
 }
 "#,
@@ -637,8 +637,11 @@ async fn handler_tier_is_enforced_through_capability_policy() {
         r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) {
-  write_file(path_join(temp_dir(), "blocked.txt"), "blocked")
+pub fn local_fn(harness: Harness, event: TriggerEvent) {
+  harness.fs.write_text(
+    path_join(harness.fs.workspace_temp_dir(), "blocked.txt"),
+    "blocked",
+  )
 }
 "#,
     )

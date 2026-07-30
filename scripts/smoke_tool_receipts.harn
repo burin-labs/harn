@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { read_jsonl } from "std/jsonl"
 import {
   compose_tool_callers,
@@ -21,7 +22,11 @@ fn smoke_tools() {
 
 pipeline default(harness: Harness) {
   const session = "smoke-tool-receipts-" + harness.random.uuid()
-  const receipt_path = path_join(harness.fs.runtime_paths().state_root, "receipts", session + ".jsonl")
+  const receipt_path = path_join(
+    harness.fs.runtime_paths().state_root,
+    "receipts",
+    session + ".jsonl",
+  )
   if harness.fs.exists(receipt_path) {
     harness.fs.delete(receipt_path)
   }
@@ -40,7 +45,9 @@ pipeline default(harness: Harness) {
   harness.llm.mock_enqueue({text: "Done. ##DONE##"})
   const reason = with_required_reason({schema_required: false})
   const tools = tools_use_middleware(smoke_tools(), reason.schema_transform)
-  const caller = compose_tool_callers(harness, [with_audit_log(harness, {sink: "local", redact: ["token"]}), reason.caller],
+  const caller = compose_tool_callers(
+    harness.clock,
+    [with_audit_log(harness.clock, harness.fs, {sink: "local", redact: ["token"]}), reason.caller],
   )
   const agent_options = {
     provider: "mock",
@@ -53,7 +60,7 @@ pipeline default(harness: Harness) {
     tool_caller: caller,
   }
   const result = agent_loop(harness, "smoke tool receipts", nil, agent_options)
-  const records = read_jsonl(harness, receipt_path, {strict: true})
+  const records = read_jsonl(harness.fs, harness, receipt_path, {strict: true})
   harness.stdio.println("status=" + result.status)
   harness.stdio.println("receipt_path=" + receipt_path)
   harness.stdio.println("records=" + to_string(len(records)))

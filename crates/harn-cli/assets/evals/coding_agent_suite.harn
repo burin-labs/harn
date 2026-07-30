@@ -41,92 +41,82 @@ fn __workspace_path(root: string, path: string) -> string {
   return path_join(root, __safe_relative_path(path))
 }
 
-fn __seed_python_add(harness: Harness, root: string) {
-  harness.fs.mkdir(path_join(root, "tests"))
-  harness.fs
-    .write_text(path_join(root, "math_utils.py"), "def add(a, b):\n    return a - b\n")
-  harness.fs
-    .write_text(
+fn __seed_python_add(fs: HarnessFs, root: string) {
+  fs.mkdir(path_join(root, "tests"))
+  fs.write_text(path_join(root, "math_utils.py"), "def add(a, b):\n    return a - b\n")
+  fs.write_text(
     path_join(root, "tests", "test_math_utils.py"),
     "import unittest\n\nfrom math_utils import add\n\n\nclass MathUtilsTest(unittest.TestCase):\n    def test_adds_two_numbers(self):\n        self.assertEqual(add(2, 3), 5)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
   )
-  harness.fs
-    .write_text(
+  fs.write_text(
     path_join(root, "README.md"),
     "# Mini coding-agent fixture\n\nThe `add` helper is intentionally broken.\n",
   )
 }
 
-fn __seed_cli_help_flag(harness: Harness, root: string) {
-  harness.fs
-    .write_text(
+fn __seed_cli_help_flag(fs: HarnessFs, root: string) {
+  fs.write_text(
     path_join(root, "app.py"),
     "import argparse\n\n\ndef build_parser():\n    parser = argparse.ArgumentParser(description=\"Print a greeting.\")\n    parser.add_argument(\"name\", help=\"Name to greet.\")\n    return parser\n\n\ndef main(argv=None):\n    args = build_parser().parse_args(argv)\n    print(f\"Hello, {args.name}!\")\n\n\nif __name__ == \"__main__\":\n    main()\n",
   )
-  harness.fs
-    .write_text(
+  fs.write_text(
     path_join(root, "README.md"),
     "# Greeting CLI\n\nRun `python app.py Ada` to print `Hello, Ada!`.\n",
   )
 }
 
-fn __seed_test_output_first(harness: Harness, root: string) {
-  harness.fs.mkdir(path_join(root, "tests"))
-  harness.fs
-    .write_text(
+fn __seed_test_output_first(fs: HarnessFs, root: string) {
+  fs.mkdir(path_join(root, "tests"))
+  fs.write_text(
     path_join(root, "stats_utils.py"),
     "def median(values):\n    ordered = sorted(values)\n    mid = len(ordered) // 2\n    return ordered[mid]\n",
   )
-  harness.fs
-    .write_text(
+  fs.write_text(
     path_join(root, "tests", "test_stats_utils.py"),
     "import unittest\n\nfrom stats_utils import median\n\n\nclass StatsUtilsTest(unittest.TestCase):\n    def test_even_count_uses_average_of_middle_pair(self):\n        self.assertEqual(median([10, 2, 4, 6]), 5)\n\n    def test_odd_count_uses_middle_value(self):\n        self.assertEqual(median([9, 1, 4]), 4)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
   )
 }
 
-fn __seed_docs_symbol_rename(harness: Harness, root: string) {
-  harness.fs
-    .write_text(
+fn __seed_docs_symbol_rename(fs: HarnessFs, root: string) {
+  fs.write_text(
     path_join(root, "greeter.py"),
     "def format_greeting(name):\n    return f\"Hello, {name}!\"\n",
   )
-  harness.fs
-    .write_text(
+  fs.write_text(
     path_join(root, "example.py"),
     "from greeter import make_greeting\n\n\nprint(make_greeting(\"Ada\"))\n",
   )
-  harness.fs
-    .write_text(
+  fs.write_text(
     path_join(root, "README.md"),
     "# Greeter\n\nUse `make_greeting(name)` to build the greeting shown in `example.py`.\n",
   )
 }
 
-fn __seed_read_only_audit(harness: Harness, root: string) {
-  harness.fs.write_text(path_join(root, "settings.py"), __READ_ONLY_AUDIT_SETTINGS)
-  harness.fs.write_text(path_join(root, "README.md"), __READ_ONLY_AUDIT_README)
+fn __seed_read_only_audit(fs: HarnessFs, root: string) {
+  fs.write_text(path_join(root, "settings.py"), __READ_ONLY_AUDIT_SETTINGS)
+  fs.write_text(path_join(root, "README.md"), __READ_ONLY_AUDIT_README)
 }
 
-fn __seed_workspace(harness: Harness, root: string, fixture: string) {
-  harness.fs.mkdir(root)
+fn __seed_workspace(fs: HarnessFs, root: string, fixture: string) {
+  fs.mkdir(root)
   if fixture == "python-add" {
-    __seed_python_add(harness, root)
+    __seed_python_add(fs, root)
     return
   }
   if fixture == "cli-help-flag" {
-    __seed_cli_help_flag(harness, root)
+    __seed_cli_help_flag(fs, root)
     return
   }
   if fixture == "test-output-first" {
-    __seed_test_output_first(harness, root)
+    __seed_test_output_first(fs, root)
     return
   }
   if fixture == "docs-symbol-rename" {
-    __seed_docs_symbol_rename(harness, root)
+    __seed_docs_symbol_rename(fs, root)
     return
   }
   if fixture == "read-only-audit" {
-    __seed_read_only_audit(harness, root)
+    __seed_read_only_audit(fs, root)
     return
   }
   if fixture == "no-tool-diagnosis" {
@@ -135,7 +125,7 @@ fn __seed_workspace(harness: Harness, root: string, fixture: string) {
   throw "unknown fixture: " + fixture
 }
 
-fn __replace_tool(harness: Harness, registry, root: string) {
+fn __replace_tool(fs: HarnessFs, registry, root: string) {
   return tool_define(
     registry,
     "replace_in_file",
@@ -146,7 +136,7 @@ fn __replace_tool(harness: Harness, registry, root: string) {
       annotations: {kind: "edit", side_effect_level: "workspace_write"},
       handler: { args ->
         const path = __workspace_path(root, args.path)
-        const before = harness.fs.read_text(path)
+        const before = fs.read_text(path)
         const patch = edit_apply_old_new_patch(
           before,
           args.old_text,
@@ -154,7 +144,7 @@ fn __replace_tool(harness: Harness, registry, root: string) {
           {strip_line_numbers: true, structural_require_anchored_lines: "either"},
         )
         if patch.ok {
-          harness.fs.write_text(path, patch.patched)
+          fs.write_text(path, patch.patched)
         }
         return json_stringify(
           {
@@ -178,9 +168,15 @@ fn __fixture_tools(harness: Harness, root: string, python: string, fixture: stri
     return nil
   }
   if fixture == "read-only-audit" {
-    return agent_host_tools(harness, nil, {root: root, cwd: root, max_inline_bytes: 4000, enabled_tools: ["read_file"]})
+    return agent_host_tools(
+      harness,
+      nil,
+      {root: root, cwd: root, max_inline_bytes: 4000, enabled_tools: ["read_file"]},
+    )
   }
-  const tools = agent_host_tools(harness, nil,
+  const tools = agent_host_tools(
+    harness,
+    nil,
     {
       root: root,
       cwd: root,
@@ -190,14 +186,17 @@ fn __fixture_tools(harness: Harness, root: string, python: string, fixture: stri
       search_exclude_globs: ["__pycache__/**"],
     },
   )
-  return __replace_tool(harness, tools, root)
+  return __replace_tool(harness.fs, tools, root)
 }
 
-fn __seed_python_add_native_mock(harness: Harness, python: string) {
-  harness.llm.mock_enqueue(
-    {text: "", tool_calls: [{id: "read_math", name: "read_file", arguments: {path: "math_utils.py"}}]},
+fn __seed_python_add_native_mock(llm: HarnessLlm, python: string) {
+  llm.mock_enqueue(
+    {
+      text: "",
+      tool_calls: [{id: "read_math", name: "read_file", arguments: {path: "math_utils.py"}}],
+    },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
@@ -213,46 +212,53 @@ fn __seed_python_add_native_mock(harness: Harness, python: string) {
       ],
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
         {
           id: "run_tests",
           name: "run_command",
-          arguments: {argv: [python, "-m", "unittest", "discover", "-s", "tests"], capture: {max_inline_bytes: 4000}},
+          arguments: {
+            argv: [python, "-m", "unittest", "discover", "-s", "tests"],
+            capture: {max_inline_bytes: 4000},
+          },
         },
       ],
     },
   )
-  harness.llm.mock_enqueue({text: "Fixed add and verified the unittest suite passes."})
+  llm.mock_enqueue({text: "Fixed add and verified the unittest suite passes."})
 }
 
-fn __seed_python_add_text_mock(harness: Harness, python: string) {
+fn __seed_python_add_text_mock(llm: HarnessLlm, python: string) {
   const python_literal = json_stringify(python)
-  harness.llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"math_utils.py\" })\n</tool_call>"})
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"math_utils.py\" })\n</tool_call>"})
+  llm.mock_enqueue(
     {
-      text: "<tool_call>\nreplace_in_file({ path: \"math_utils.py\", old_text: \"def add(a, b):\\n    return a - b\\n\", new_text: \"def add(a, b):\\n    return a + b\\n\" })\n</tool_call>",
+      text:
+        "<tool_call>\nreplace_in_file({ path: \"math_utils.py\", old_text: \"def add(a, b):\\n    return a - b\\n\", new_text: \"def add(a, b):\\n    return a + b\\n\" })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "<tool_call>\nrun_command({ argv: ["
         + python_literal
         + ", \"-m\", \"unittest\", \"discover\", \"-s\", \"tests\"], capture: { max_inline_bytes: 4000 } })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
-      text: "<user_response>Fixed add and verified the unittest suite passes.</user_response>\n<done>##DONE##</done>",
+      text:
+        "<user_response>Fixed add and verified the unittest suite passes.</user_response>\n<done>##DONE##</done>",
     },
   )
 }
 
-fn __seed_cli_help_flag_native_mock(harness: Harness, python: string) {
-  harness.llm.mock_enqueue({text: "", tool_calls: [{id: "read_app", name: "read_file", arguments: {path: "app.py"}}]})
-  harness.llm.mock_enqueue(
+fn __seed_cli_help_flag_native_mock(llm: HarnessLlm, python: string) {
+  llm.mock_enqueue(
+    {text: "", tool_calls: [{id: "read_app", name: "read_file", arguments: {path: "app.py"}}]},
+  )
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
@@ -261,14 +267,16 @@ fn __seed_cli_help_flag_native_mock(harness: Harness, python: string) {
           name: "replace_in_file",
           arguments: {
             path: "app.py",
-            old_text: "def build_parser():\n    parser = argparse.ArgumentParser(description=\"Print a greeting.\")\n    parser.add_argument(\"name\", help=\"Name to greet.\")\n    return parser\n\n\ndef main(argv=None):\n    args = build_parser().parse_args(argv)\n    print(f\"Hello, {args.name}!\")\n",
-            new_text: "def build_parser():\n    parser = argparse.ArgumentParser(description=\"Print a greeting.\")\n    parser.add_argument(\"--shout\", action=\"store_true\", help=\"Print the greeting in uppercase.\")\n    parser.add_argument(\"name\", help=\"Name to greet.\")\n    return parser\n\n\ndef main(argv=None):\n    args = build_parser().parse_args(argv)\n    greeting = f\"Hello, {args.name}!\"\n    if args.shout:\n        greeting = greeting.upper()\n    print(greeting)\n",
+            old_text:
+              "def build_parser():\n    parser = argparse.ArgumentParser(description=\"Print a greeting.\")\n    parser.add_argument(\"name\", help=\"Name to greet.\")\n    return parser\n\n\ndef main(argv=None):\n    args = build_parser().parse_args(argv)\n    print(f\"Hello, {args.name}!\")\n",
+            new_text:
+              "def build_parser():\n    parser = argparse.ArgumentParser(description=\"Print a greeting.\")\n    parser.add_argument(\"--shout\", action=\"store_true\", help=\"Print the greeting in uppercase.\")\n    parser.add_argument(\"name\", help=\"Name to greet.\")\n    return parser\n\n\ndef main(argv=None):\n    args = build_parser().parse_args(argv)\n    greeting = f\"Hello, {args.name}!\"\n    if args.shout:\n        greeting = greeting.upper()\n    print(greeting)\n",
           },
         },
       ],
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
@@ -278,70 +286,83 @@ fn __seed_cli_help_flag_native_mock(harness: Harness, python: string) {
           arguments: {
             path: "README.md",
             old_text: "# Greeting CLI\n\nRun `python app.py Ada` to print `Hello, Ada!`.\n",
-            new_text: "# Greeting CLI\n\nRun `python app.py Ada` to print `Hello, Ada!`.\nRun `python app.py --shout Ada` to print `HELLO, ADA!`.\n",
+            new_text:
+              "# Greeting CLI\n\nRun `python app.py Ada` to print `Hello, Ada!`.\nRun `python app.py --shout Ada` to print `HELLO, ADA!`.\n",
           },
         },
       ],
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
         {
           id: "run_shout",
           name: "run_command",
-          arguments: {argv: [python, "app.py", "--shout", "Ada"], capture: {max_inline_bytes: 4000}},
+          arguments: {
+            argv: [python, "app.py", "--shout", "Ada"],
+            capture: {max_inline_bytes: 4000},
+          },
         },
       ],
     },
   )
-  harness.llm.mock_enqueue({text: "Added --shout, documented it, and verified uppercase output."})
+  llm.mock_enqueue({text: "Added --shout, documented it, and verified uppercase output."})
 }
 
-fn __seed_cli_help_flag_text_mock(harness: Harness, python: string) {
+fn __seed_cli_help_flag_text_mock(llm: HarnessLlm, python: string) {
   const python_literal = json_stringify(python)
-  harness.llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"app.py\" })\n</tool_call>"})
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"app.py\" })\n</tool_call>"})
+  llm.mock_enqueue(
     {
-      text: "<tool_call>\nreplace_in_file({ path: \"app.py\", old_text: \"def build_parser():\\n    parser = argparse.ArgumentParser(description=\\\"Print a greeting.\\\")\\n    parser.add_argument(\\\"name\\\", help=\\\"Name to greet.\\\")\\n    return parser\\n\\n\\ndef main(argv=None):\\n    args = build_parser().parse_args(argv)\\n    print(f\\\"Hello, {args.name}!\\\")\\n\", new_text: \"def build_parser():\\n    parser = argparse.ArgumentParser(description=\\\"Print a greeting.\\\")\\n    parser.add_argument(\\\"--shout\\\", action=\\\"store_true\\\", help=\\\"Print the greeting in uppercase.\\\")\\n    parser.add_argument(\\\"name\\\", help=\\\"Name to greet.\\\")\\n    return parser\\n\\n\\ndef main(argv=None):\\n    args = build_parser().parse_args(argv)\\n    greeting = f\\\"Hello, {args.name}!\\\"\\n    if args.shout:\\n        greeting = greeting.upper()\\n    print(greeting)\\n\" })\n</tool_call>",
+      text:
+        "<tool_call>\nreplace_in_file({ path: \"app.py\", old_text: \"def build_parser():\\n    parser = argparse.ArgumentParser(description=\\\"Print a greeting.\\\")\\n    parser.add_argument(\\\"name\\\", help=\\\"Name to greet.\\\")\\n    return parser\\n\\n\\ndef main(argv=None):\\n    args = build_parser().parse_args(argv)\\n    print(f\\\"Hello, {args.name}!\\\")\\n\", new_text: \"def build_parser():\\n    parser = argparse.ArgumentParser(description=\\\"Print a greeting.\\\")\\n    parser.add_argument(\\\"--shout\\\", action=\\\"store_true\\\", help=\\\"Print the greeting in uppercase.\\\")\\n    parser.add_argument(\\\"name\\\", help=\\\"Name to greet.\\\")\\n    return parser\\n\\n\\ndef main(argv=None):\\n    args = build_parser().parse_args(argv)\\n    greeting = f\\\"Hello, {args.name}!\\\"\\n    if args.shout:\\n        greeting = greeting.upper()\\n    print(greeting)\\n\" })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
-      text: "<tool_call>\nreplace_in_file({ path: \"README.md\", old_text: \"# Greeting CLI\\n\\nRun `python app.py Ada` to print `Hello, Ada!`.\\n\", new_text: \"# Greeting CLI\\n\\nRun `python app.py Ada` to print `Hello, Ada!`.\\nRun `python app.py --shout Ada` to print `HELLO, ADA!`.\\n\" })\n</tool_call>",
+      text:
+        "<tool_call>\nreplace_in_file({ path: \"README.md\", old_text: \"# Greeting CLI\\n\\nRun `python app.py Ada` to print `Hello, Ada!`.\\n\", new_text: \"# Greeting CLI\\n\\nRun `python app.py Ada` to print `Hello, Ada!`.\\nRun `python app.py --shout Ada` to print `HELLO, ADA!`.\\n\" })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "<tool_call>\nrun_command({ argv: [" + python_literal
         + ", \"app.py\", \"--shout\", \"Ada\"], capture: { max_inline_bytes: 4000 } })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
-      text: "<user_response>Added --shout, documented it, and verified uppercase output.</user_response>\n<done>##DONE##</done>",
+      text:
+        "<user_response>Added --shout, documented it, and verified uppercase output.</user_response>\n<done>##DONE##</done>",
     },
   )
 }
 
-fn __seed_test_output_first_native_mock(harness: Harness, python: string) {
-  harness.llm.mock_enqueue(
+fn __seed_test_output_first_native_mock(llm: HarnessLlm, python: string) {
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
         {
           id: "run_failing_tests",
           name: "run_command",
-          arguments: {argv: [python, "-m", "unittest", "discover", "-s", "tests"], capture: {max_inline_bytes: 4000}},
+          arguments: {
+            argv: [python, "-m", "unittest", "discover", "-s", "tests"],
+            capture: {max_inline_bytes: 4000},
+          },
         },
       ],
     },
   )
-  harness.llm.mock_enqueue(
-    {text: "", tool_calls: [{id: "read_stats", name: "read_file", arguments: {path: "stats_utils.py"}}]},
+  llm.mock_enqueue(
+    {
+      text: "",
+      tool_calls: [{id: "read_stats", name: "read_file", arguments: {path: "stats_utils.py"}}],
+    },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
@@ -350,55 +371,68 @@ fn __seed_test_output_first_native_mock(harness: Harness, python: string) {
           name: "replace_in_file",
           arguments: {
             path: "stats_utils.py",
-            old_text: "def median(values):\n    ordered = sorted(values)\n    mid = len(ordered) // 2\n    return ordered[mid]\n",
-            new_text: "def median(values):\n    ordered = sorted(values)\n    mid = len(ordered) // 2\n    if len(ordered) % 2 == 0:\n        return (ordered[mid - 1] + ordered[mid]) / 2\n    return ordered[mid]\n",
+            old_text:
+              "def median(values):\n    ordered = sorted(values)\n    mid = len(ordered) // 2\n    return ordered[mid]\n",
+            new_text:
+              "def median(values):\n    ordered = sorted(values)\n    mid = len(ordered) // 2\n    if len(ordered) % 2 == 0:\n        return (ordered[mid - 1] + ordered[mid]) / 2\n    return ordered[mid]\n",
           },
         },
       ],
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
         {
           id: "run_passing_tests",
           name: "run_command",
-          arguments: {argv: [python, "-m", "unittest", "discover", "-s", "tests"], capture: {max_inline_bytes: 4000}},
+          arguments: {
+            argv: [python, "-m", "unittest", "discover", "-s", "tests"],
+            capture: {max_inline_bytes: 4000},
+          },
         },
       ],
     },
   )
-  harness.llm.mock_enqueue({text: "Used the failing test output, fixed median, and re-ran the suite."})
+  llm.mock_enqueue({text: "Used the failing test output, fixed median, and re-ran the suite."})
 }
 
-fn __seed_test_output_first_text_mock(harness: Harness, python: string) {
+fn __seed_test_output_first_text_mock(llm: HarnessLlm, python: string) {
   const python_literal = json_stringify(python)
   const run_tests = "<tool_call>\nrun_command({ argv: [" + python_literal
     + ", \"-m\", \"unittest\", \"discover\", \"-s\", \"tests\"], capture: { max_inline_bytes: 4000 } })\n</tool_call>"
-  harness.llm.mock_enqueue({text: run_tests})
-  harness.llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"stats_utils.py\" })\n</tool_call>"})
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue({text: run_tests})
+  llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"stats_utils.py\" })\n</tool_call>"})
+  llm.mock_enqueue(
     {
-      text: "<tool_call>\nreplace_in_file({ path: \"stats_utils.py\", old_text: \"def median(values):\\n    ordered = sorted(values)\\n    mid = len(ordered) // 2\\n    return ordered[mid]\\n\", new_text: \"def median(values):\\n    ordered = sorted(values)\\n    mid = len(ordered) // 2\\n    if len(ordered) % 2 == 0:\\n        return (ordered[mid - 1] + ordered[mid]) / 2\\n    return ordered[mid]\\n\" })\n</tool_call>",
+      text:
+        "<tool_call>\nreplace_in_file({ path: \"stats_utils.py\", old_text: \"def median(values):\\n    ordered = sorted(values)\\n    mid = len(ordered) // 2\\n    return ordered[mid]\\n\", new_text: \"def median(values):\\n    ordered = sorted(values)\\n    mid = len(ordered) // 2\\n    if len(ordered) % 2 == 0:\\n        return (ordered[mid - 1] + ordered[mid]) / 2\\n    return ordered[mid]\\n\" })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue({text: run_tests})
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue({text: run_tests})
+  llm.mock_enqueue(
     {
-      text: "<user_response>Used the failing test output, fixed median, and re-ran the suite.</user_response>\n<done>##DONE##</done>",
+      text:
+        "<user_response>Used the failing test output, fixed median, and re-ran the suite.</user_response>\n<done>##DONE##</done>",
     },
   )
 }
 
-fn __seed_docs_symbol_rename_native_mock(harness: Harness, python: string) {
-  harness.llm.mock_enqueue(
-    {text: "", tool_calls: [{id: "read_greeter", name: "read_file", arguments: {path: "greeter.py"}}]},
+fn __seed_docs_symbol_rename_native_mock(llm: HarnessLlm, python: string) {
+  llm.mock_enqueue(
+    {
+      text: "",
+      tool_calls: [{id: "read_greeter", name: "read_file", arguments: {path: "greeter.py"}}],
+    },
   )
-  harness.llm.mock_enqueue(
-    {text: "", tool_calls: [{id: "read_example", name: "read_file", arguments: {path: "example.py"}}]},
+  llm.mock_enqueue(
+    {
+      text: "",
+      tool_calls: [{id: "read_example", name: "read_file", arguments: {path: "example.py"}}],
+    },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
@@ -414,7 +448,7 @@ fn __seed_docs_symbol_rename_native_mock(harness: Harness, python: string) {
       ],
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
@@ -423,14 +457,16 @@ fn __seed_docs_symbol_rename_native_mock(harness: Harness, python: string) {
           name: "replace_in_file",
           arguments: {
             path: "README.md",
-            old_text: "# Greeter\n\nUse `make_greeting(name)` to build the greeting shown in `example.py`.\n",
-            new_text: "# Greeter\n\nUse `format_greeting(name)` to build the greeting shown in `example.py`.\n",
+            old_text:
+              "# Greeter\n\nUse `make_greeting(name)` to build the greeting shown in `example.py`.\n",
+            new_text:
+              "# Greeter\n\nUse `format_greeting(name)` to build the greeting shown in `example.py`.\n",
           },
         },
       ],
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "",
       tool_calls: [
@@ -442,121 +478,131 @@ fn __seed_docs_symbol_rename_native_mock(harness: Harness, python: string) {
       ],
     },
   )
-  harness.llm.mock_enqueue({text: "Updated the docs and example to use format_greeting."})
+  llm.mock_enqueue({text: "Updated the docs and example to use format_greeting."})
 }
 
-fn __seed_docs_symbol_rename_text_mock(harness: Harness, python: string) {
+fn __seed_docs_symbol_rename_text_mock(llm: HarnessLlm, python: string) {
   const python_literal = json_stringify(python)
-  harness.llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"greeter.py\" })\n</tool_call>"})
-  harness.llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"example.py\" })\n</tool_call>"})
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"greeter.py\" })\n</tool_call>"})
+  llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"example.py\" })\n</tool_call>"})
+  llm.mock_enqueue(
     {
-      text: "<tool_call>\nreplace_in_file({ path: \"example.py\", old_text: \"from greeter import make_greeting\\n\\n\\nprint(make_greeting(\\\"Ada\\\"))\\n\", new_text: \"from greeter import format_greeting\\n\\n\\nprint(format_greeting(\\\"Ada\\\"))\\n\" })\n</tool_call>",
+      text:
+        "<tool_call>\nreplace_in_file({ path: \"example.py\", old_text: \"from greeter import make_greeting\\n\\n\\nprint(make_greeting(\\\"Ada\\\"))\\n\", new_text: \"from greeter import format_greeting\\n\\n\\nprint(format_greeting(\\\"Ada\\\"))\\n\" })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
-      text: "<tool_call>\nreplace_in_file({ path: \"README.md\", old_text: \"# Greeter\\n\\nUse `make_greeting(name)` to build the greeting shown in `example.py`.\\n\", new_text: \"# Greeter\\n\\nUse `format_greeting(name)` to build the greeting shown in `example.py`.\\n\" })\n</tool_call>",
+      text:
+        "<tool_call>\nreplace_in_file({ path: \"README.md\", old_text: \"# Greeter\\n\\nUse `make_greeting(name)` to build the greeting shown in `example.py`.\\n\", new_text: \"# Greeter\\n\\nUse `format_greeting(name)` to build the greeting shown in `example.py`.\\n\" })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
       text: "<tool_call>\nrun_command({ argv: [" + python_literal
         + ", \"example.py\"], capture: { max_inline_bytes: 4000 } })\n</tool_call>",
     },
   )
-  harness.llm.mock_enqueue(
+  llm.mock_enqueue(
     {
-      text: "<user_response>Updated the docs and example to use format_greeting.</user_response>\n<done>##DONE##</done>",
+      text:
+        "<user_response>Updated the docs and example to use format_greeting.</user_response>\n<done>##DONE##</done>",
     },
   )
 }
 
-fn __seed_read_only_audit_native_mock(harness: Harness) {
-  harness.llm.mock_enqueue(
-    {text: "", tool_calls: [{id: "read_readme", name: "read_file", arguments: {path: "README.md"}}]},
-  )
-  harness.llm.mock_enqueue({text: "<user_response>AUDIT_OK</user_response>\n<done>##DONE##</done>"})
-}
-
-fn __seed_read_only_audit_text_mock(harness: Harness) {
-  harness.llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"README.md\" })\n</tool_call>"})
-  harness.llm.mock_enqueue({text: "AUDIT_OK"})
-}
-
-fn __seed_read_only_audit_json_mock(harness: Harness) {
-  harness.llm.mock_enqueue({text: "```tool\n{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\"}}\n```"})
-  harness.llm.mock_enqueue({text: "AUDIT_OK"})
-}
-
-fn __seed_no_tool_native_mock(harness: Harness) {
-  harness.llm.mock_enqueue(
+fn __seed_read_only_audit_native_mock(llm: HarnessLlm) {
+  llm.mock_enqueue(
     {
-      text: "<user_response>PATCH_HINT: change `return a - b` to `return a + b`.</user_response>\n<done>##DONE##</done>",
+      text: "",
+      tool_calls: [{id: "read_readme", name: "read_file", arguments: {path: "README.md"}}],
+    },
+  )
+  llm.mock_enqueue({text: "<user_response>AUDIT_OK</user_response>\n<done>##DONE##</done>"})
+}
+
+fn __seed_read_only_audit_text_mock(llm: HarnessLlm) {
+  llm.mock_enqueue({text: "<tool_call>\nread_file({ path: \"README.md\" })\n</tool_call>"})
+  llm.mock_enqueue({text: "AUDIT_OK"})
+}
+
+fn __seed_read_only_audit_json_mock(llm: HarnessLlm) {
+  llm.mock_enqueue(
+    {text: "```tool\n{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\"}}\n```"},
+  )
+  llm.mock_enqueue({text: "AUDIT_OK"})
+}
+
+fn __seed_no_tool_native_mock(llm: HarnessLlm) {
+  llm.mock_enqueue(
+    {
+      text:
+        "<user_response>PATCH_HINT: change `return a - b` to `return a + b`.</user_response>\n<done>##DONE##</done>",
     },
   )
 }
 
-fn __seed_no_tool_text_mock(harness: Harness) {
-  harness.llm.mock_enqueue(
+fn __seed_no_tool_text_mock(llm: HarnessLlm) {
+  llm.mock_enqueue(
     {
-      text: "<user_response>PATCH_HINT: change `return a - b` to `return a + b`.</user_response>\n<done>##DONE##</done>",
+      text:
+        "<user_response>PATCH_HINT: change `return a - b` to `return a + b`.</user_response>\n<done>##DONE##</done>",
     },
   )
 }
 
-fn __seed_mock(harness: Harness, fixture: string, tool_format: string, python: string) {
-  harness.llm.mock_clear()
+fn __seed_mock(llm: HarnessLlm, fixture: string, tool_format: string, python: string) {
+  llm.mock_clear()
   if fixture == "python-add" && tool_format == "native" {
-    __seed_python_add_native_mock(harness, python)
+    __seed_python_add_native_mock(llm, python)
     return
   }
   if fixture == "python-add" {
-    __seed_python_add_text_mock(harness, python)
+    __seed_python_add_text_mock(llm, python)
     return
   }
   if fixture == "cli-help-flag" && tool_format == "native" {
-    __seed_cli_help_flag_native_mock(harness, python)
+    __seed_cli_help_flag_native_mock(llm, python)
     return
   }
   if fixture == "cli-help-flag" {
-    __seed_cli_help_flag_text_mock(harness, python)
+    __seed_cli_help_flag_text_mock(llm, python)
     return
   }
   if fixture == "test-output-first" && tool_format == "native" {
-    __seed_test_output_first_native_mock(harness, python)
+    __seed_test_output_first_native_mock(llm, python)
     return
   }
   if fixture == "test-output-first" {
-    __seed_test_output_first_text_mock(harness, python)
+    __seed_test_output_first_text_mock(llm, python)
     return
   }
   if fixture == "docs-symbol-rename" && tool_format == "native" {
-    __seed_docs_symbol_rename_native_mock(harness, python)
+    __seed_docs_symbol_rename_native_mock(llm, python)
     return
   }
   if fixture == "docs-symbol-rename" {
-    __seed_docs_symbol_rename_text_mock(harness, python)
+    __seed_docs_symbol_rename_text_mock(llm, python)
     return
   }
   if fixture == "read-only-audit" && tool_format == "native" {
-    __seed_read_only_audit_native_mock(harness)
+    __seed_read_only_audit_native_mock(llm)
     return
   }
   if fixture == "read-only-audit" && tool_format == "json" {
-    __seed_read_only_audit_json_mock(harness)
+    __seed_read_only_audit_json_mock(llm)
     return
   }
   if fixture == "read-only-audit" {
-    __seed_read_only_audit_text_mock(harness)
+    __seed_read_only_audit_text_mock(llm)
     return
   }
   if fixture == "no-tool-diagnosis" && tool_format == "native" {
-    __seed_no_tool_native_mock(harness)
+    __seed_no_tool_native_mock(llm)
     return
   }
   if fixture == "no-tool-diagnosis" {
-    __seed_no_tool_text_mock(harness)
+    __seed_no_tool_text_mock(llm)
     return
   }
   throw "unknown fixture: " + fixture
@@ -579,16 +625,17 @@ fn __command_verification(
   }
 }
 
-fn __run_unittest(harness: Harness, root: string, python: string) {
+fn __run_unittest(tools: HarnessTools, root: string, python: string) {
   return command_run(
-    harness.tools, {argv: [python, "-m", "unittest", "discover", "-s", "tests"], cwd: root},
+    tools,
+    {argv: [python, "-m", "unittest", "discover", "-s", "tests"], cwd: root},
     {capture: {max_inline_bytes: 12000}, timeout_ms: 30000},
   )
 }
 
-fn __verify_python_add(harness: Harness, root: string, python: string) {
-  const verify = __run_unittest(harness, root, python)
-  const source = harness.fs.read_text(path_join(root, "math_utils.py"))
+fn __verify_python_add(fs: HarnessFs, tools: HarnessTools, root: string, python: string) {
+  const verify = __run_unittest(tools, root, python)
+  const source = fs.read_text(path_join(root, "math_utils.py"))
   return __command_verification(
     verify.success && contains(source, "return a + b"),
     verify.exit_code,
@@ -598,19 +645,24 @@ fn __verify_python_add(harness: Harness, root: string, python: string) {
   )
 }
 
-fn __verify_cli_help_flag(harness: Harness, root: string, python: string) {
+fn __verify_cli_help_flag(fs: HarnessFs, tools: HarnessTools, root: string, python: string) {
   const help = command_run(
-    harness.tools, {argv: [python, "app.py", "--help"], cwd: root},
+    tools,
+    {argv: [python, "app.py", "--help"], cwd: root},
     {capture: {max_inline_bytes: 12000}, timeout_ms: 30000},
   )
   const shout = command_run(
-    harness.tools, {argv: [python, "app.py", "--shout", "Ada"], cwd: root},
+    tools,
+    {argv: [python, "app.py", "--shout", "Ada"], cwd: root},
     {capture: {max_inline_bytes: 12000}, timeout_ms: 30000},
   )
-  const readme = harness.fs.read_text(path_join(root, "README.md"))
+  const readme = fs.read_text(path_join(root, "README.md"))
   return __command_verification(
     help.success && shout.success && contains(help.stdout, "--shout")
-      && contains(shout.stdout, "HELLO, ADA!")
+      && contains(
+      shout.stdout,
+      "HELLO, ADA!",
+    )
       && contains(readme, "--shout"),
     if shout.success {
       help.exit_code
@@ -623,9 +675,9 @@ fn __verify_cli_help_flag(harness: Harness, root: string, python: string) {
   )
 }
 
-fn __verify_test_output_first(harness: Harness, root: string, python: string) {
-  const verify = __run_unittest(harness, root, python)
-  const source = harness.fs.read_text(path_join(root, "stats_utils.py"))
+fn __verify_test_output_first(fs: HarnessFs, tools: HarnessTools, root: string, python: string) {
+  const verify = __run_unittest(tools, root, python)
+  const source = fs.read_text(path_join(root, "stats_utils.py"))
   return __command_verification(
     verify.success && contains(source, "return (ordered[mid - 1] + ordered[mid]) / 2"),
     verify.exit_code,
@@ -635,14 +687,15 @@ fn __verify_test_output_first(harness: Harness, root: string, python: string) {
   )
 }
 
-fn __verify_docs_symbol_rename(harness: Harness, root: string, python: string) {
+fn __verify_docs_symbol_rename(fs: HarnessFs, tools: HarnessTools, root: string, python: string) {
   const verify = command_run(
-    harness.tools, {argv: [python, "example.py"], cwd: root},
+    tools,
+    {argv: [python, "example.py"], cwd: root},
     {capture: {max_inline_bytes: 12000}, timeout_ms: 30000},
   )
-  const example = harness.fs.read_text(path_join(root, "example.py"))
-  const readme = harness.fs.read_text(path_join(root, "README.md"))
-  const implementation = harness.fs.read_text(path_join(root, "greeter.py"))
+  const example = fs.read_text(path_join(root, "example.py"))
+  const readme = fs.read_text(path_join(root, "README.md"))
+  const implementation = fs.read_text(path_join(root, "greeter.py"))
   return __command_verification(
     verify.success
       && contains(verify.stdout, "Hello, Ada!")
@@ -713,16 +766,20 @@ fn __final_text(result) -> string {
  * Accepts native providers that make redundant read calls, but still requires
  * a README read, no non-read tools, the final audit token, and unchanged files.
  */
-pub fn coding_agent_read_only_audit_verification_success(readme: string, settings: string, result) -> bool {
+pub fn coding_agent_read_only_audit_verification_success(
+  readme: string,
+  settings: string,
+  result,
+) -> bool {
   return __read_only_audit_tool_calls_are_valid(result)
     && contains(__final_text(result), "AUDIT_OK")
     && readme == __READ_ONLY_AUDIT_README
     && settings == __READ_ONLY_AUDIT_SETTINGS
 }
 
-fn __verify_read_only_audit(harness: Harness, root: string, result) {
-  const readme = harness.fs.read_text(path_join(root, "README.md"))
-  const settings = harness.fs.read_text(path_join(root, "settings.py"))
+fn __verify_read_only_audit(fs: HarnessFs, root: string, result) {
+  const readme = fs.read_text(path_join(root, "README.md"))
+  const settings = fs.read_text(path_join(root, "settings.py"))
   const final_text = __final_text(result)
   const success = coding_agent_read_only_audit_verification_success(readme, settings, result)
   return __command_verification(
@@ -742,7 +799,11 @@ fn __verify_no_tool_diagnosis(result) {
   const final_text = __final_text(result)
   const normalized = lowercase(final_text)
   const describes_change = contains(final_text, "return a + b")
-    || (contains(normalized, "subtraction") && contains(normalized, "addition"))
+    || (contains(normalized, "subtraction")
+    && contains(
+    normalized,
+    "addition",
+  ))
   const success = __tool_call_count(result) == 0
     && contains(final_text, "PATCH_HINT")
     && describes_change
@@ -759,21 +820,28 @@ fn __verify_no_tool_diagnosis(result) {
   )
 }
 
-fn __verify_fixture(harness: Harness, root: string, fixture: string, python: string, result) {
+fn __verify_fixture(
+  fs: HarnessFs,
+  tools: HarnessTools,
+  root: string,
+  fixture: string,
+  python: string,
+  result,
+) {
   if fixture == "python-add" {
-    return __verify_python_add(harness, root, python)
+    return __verify_python_add(fs, tools, root, python)
   }
   if fixture == "cli-help-flag" {
-    return __verify_cli_help_flag(harness, root, python)
+    return __verify_cli_help_flag(fs, tools, root, python)
   }
   if fixture == "test-output-first" {
-    return __verify_test_output_first(harness, root, python)
+    return __verify_test_output_first(fs, tools, root, python)
   }
   if fixture == "docs-symbol-rename" {
-    return __verify_docs_symbol_rename(harness, root, python)
+    return __verify_docs_symbol_rename(fs, tools, root, python)
   }
   if fixture == "read-only-audit" {
-    return __verify_read_only_audit(harness, root, result)
+    return __verify_read_only_audit(fs, root, result)
   }
   if fixture == "no-tool-diagnosis" {
     return __verify_no_tool_diagnosis(result)
@@ -826,7 +894,8 @@ fn __default_structural_validator() {
   }
 }
 
-fn __run_fixture_agent(harness: Harness,
+fn __run_fixture_agent(
+  harness: Harness,
   fixture: string,
   task: string,
   provider: string,
@@ -852,7 +921,10 @@ fn __run_fixture_agent(harness: Harness,
     tools: tools,
     max_iterations: max_iterations,
     iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
-    turn_policy: {allow_done_sentinel: tool_format == "text" || tool_format == "json", max_prose_chars: 30000},
+    turn_policy: {
+      allow_done_sentinel: tool_format == "text" || tool_format == "json",
+      max_prose_chars: 30000,
+    },
     llm_options: {temperature: 0, max_tokens: 2048},
   }
   if step_judge_config != nil {
@@ -863,17 +935,28 @@ fn __run_fixture_agent(harness: Harness,
   }
   if structural_validator_config != nil {
     options = options
-      + {structural_validator: with_structural_validator(structural_validator_config)}
+      + {
+      structural_validator: with_structural_validator(harness.agent, structural_validator_config),
+    }
   }
   if fixture == "read-only-audit" {
-    return __run_preset_agent(harness, "audit", task, options + {require_successful_tools: ["read_file"]})
+    return __run_preset_agent(
+      harness,
+      "audit",
+      task,
+      options + {require_successful_tools: ["read_file"]},
+    )
   }
   if fixture == "no-tool-diagnosis" {
-    return __run_preset_agent(harness,
+    return __run_preset_agent(
+      harness,
       "summary",
       task,
       options
-        + {max_iterations: 1, iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0}},
+        + {
+        max_iterations: 1,
+        iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0},
+      },
     )
   }
   return __run_preset_agent(harness, "repair", task, options)
@@ -884,37 +967,37 @@ fn __run_preset_agent(harness: Harness, kind: string, task: string, options) {
   return agent_loop(harness, task, opts?.system, opts)
 }
 
-fn __final_files(harness: Harness, root: string, fixture: string) {
+fn __final_files(fs: HarnessFs, root: string, fixture: string) {
   if fixture == "python-add" {
-    return {math_utils_py: harness.fs.read_text(path_join(root, "math_utils.py"))}
+    return {math_utils_py: fs.read_text(path_join(root, "math_utils.py"))}
   }
   if fixture == "cli-help-flag" {
     return {
-      app_py: harness.fs.read_text(path_join(root, "app.py")),
-      readme_md: harness.fs.read_text(path_join(root, "README.md")),
+      app_py: fs.read_text(path_join(root, "app.py")),
+      readme_md: fs.read_text(path_join(root, "README.md")),
     }
   }
   if fixture == "test-output-first" {
-    return {stats_utils_py: harness.fs.read_text(path_join(root, "stats_utils.py"))}
+    return {stats_utils_py: fs.read_text(path_join(root, "stats_utils.py"))}
   }
   if fixture == "docs-symbol-rename" {
     return {
-      greeter_py: harness.fs.read_text(path_join(root, "greeter.py")),
-      example_py: harness.fs.read_text(path_join(root, "example.py")),
-      readme_md: harness.fs.read_text(path_join(root, "README.md")),
+      greeter_py: fs.read_text(path_join(root, "greeter.py")),
+      example_py: fs.read_text(path_join(root, "example.py")),
+      readme_md: fs.read_text(path_join(root, "README.md")),
     }
   }
   if fixture == "read-only-audit" {
     return {
-      settings_py: harness.fs.read_text(path_join(root, "settings.py")),
-      readme_md: harness.fs.read_text(path_join(root, "README.md")),
+      settings_py: fs.read_text(path_join(root, "settings.py")),
+      readme_md: fs.read_text(path_join(root, "README.md")),
     }
   }
   return {}
 }
 
 fn __summary(
-  harness: Harness,
+  fs: HarnessFs,
   root: string,
   output_dir: string,
   fixture: string,
@@ -947,7 +1030,7 @@ fn __summary(
     transcript_event_count: len(events),
     transcript_event_kinds: events.map({ event -> event.kind }),
     verification: verify,
-    final_files: __final_files(harness, root, fixture),
+    final_files: __final_files(fs, root, fixture),
   }
 }
 
@@ -964,12 +1047,23 @@ fn main(harness: Harness) {
           {kind: "flag", name: "provider", long: "--provider", default: "mock"},
           {kind: "flag", name: "model", long: "--model", default: "mock"},
           {kind: "flag", name: "tool_format", long: "--tool-format", default: "native"},
-          {kind: "flag", name: "max_iterations", long: "--max-iterations", parse: "int", default: 8},
+          {
+            kind: "flag",
+            name: "max_iterations",
+            long: "--max-iterations",
+            parse: "int",
+            default: 8,
+          },
           {kind: "flag", name: "python", long: "--python", default: "python3"},
           {kind: "switch", name: "seed_mock", long: "--seed-mock"},
           {kind: "flag", name: "step_judge_json", long: "--step-judge-json", default: ""},
           {kind: "flag", name: "override_reason", long: "--override-reason", default: ""},
-          {kind: "flag", name: "structural_validator_json", long: "--structural-validator-json", default: ""},
+          {
+            kind: "flag",
+            name: "structural_validator_json",
+            long: "--structural-validator-json",
+            default: "",
+          },
         ],
       },
     ),
@@ -981,9 +1075,9 @@ fn main(harness: Harness) {
   const args = unwrap(parsed).options
   const output_dir = args.output_dir
   const root = args.workspace_root ?? path_join(output_dir, "workspace")
-  __seed_workspace(harness, root, args.fixture)
+  __seed_workspace(harness.fs, root, args.fixture)
   if args.seed_mock {
-    __seed_mock(harness, args.fixture, args.tool_format, args.python)
+    __seed_mock(harness.llm, args.fixture, args.tool_format, args.python)
   }
   const started_ms = harness.clock.now_ms()
   const step_judge_config = if args.step_judge_json == "" {
@@ -1006,7 +1100,8 @@ fn main(harness: Harness) {
   } else {
     args.task
   }
-  const result = __run_fixture_agent(harness,
+  const result = __run_fixture_agent(
+    harness,
     args.fixture,
     task,
     args.provider,
@@ -1018,14 +1113,23 @@ fn main(harness: Harness) {
     args.override_reason,
     structural_validator_config,
   )
-  const override_warning = agent_first_tool_format_override_warning_text(transcript_events(result?.transcript))
+  const override_warning = agent_first_tool_format_override_warning_text(
+    transcript_events(result?.transcript),
+  )
   if override_warning != nil {
     harness.stdio.eprintln(override_warning)
   }
   const duration_ms = harness.clock.now_ms() - started_ms
-  const verify = __verify_fixture(harness, root, args.fixture, args.python, result)
+  const verify = __verify_fixture(
+    harness.fs,
+    harness.tools,
+    root,
+    args.fixture,
+    args.python,
+    result,
+  )
   const summary = __summary(
-    harness,
+    harness.fs,
     root,
     output_dir,
     args.fixture,
@@ -1038,7 +1142,11 @@ fn main(harness: Harness) {
   )
   write_json(harness.fs, path_join(output_dir, "summary.json"), summary, {pretty: true})
   write_json(harness.fs, path_join(output_dir, "result.json"), result, {pretty: true})
-  write_jsonl(harness, path_join(output_dir, "transcript_events.jsonl"), transcript_events(result.transcript))
+  write_jsonl(
+    harness.fs,
+    path_join(output_dir, "transcript_events.jsonl"),
+    transcript_events(result.transcript),
+  )
   harness.stdio.println(json_stringify(summary))
   return if summary.passed {
     0

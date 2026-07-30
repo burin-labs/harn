@@ -18,11 +18,14 @@ pipeline test(harness: Harness, task) {
   )
   const pool_name = "spawn-to-pool-drop-newest-demo-" + unique
   const _ = pool_create(
+    harness.agent,
     {name: pool_name, max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
   )
   // Filter to drop receipts so the assertion ignores the `pool_submit`
   // and `pool_dequeue` receipts emitted on the same topic by PL-06.
-  const stream = harness.obs.event_log_subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
+  const stream = harness.obs.event_log_subscribe(
+    {topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"},
+  )
   const task_factory = { _event ->
     return { ->
       harness.runtime.receive(gate)
@@ -74,7 +77,7 @@ pipeline test(harness: Harness, task) {
   // Drain the gate so the two surviving tasks finish.
   harness.runtime.send(gate, "go")
   harness.runtime.send(gate, "go")
-  const results = pool_wait([warmup.result, queued.result])
+  const results = pool_wait(harness.agent, [warmup.result, queued.result])
   harness.stdio.println(results[0].status)
   harness.stdio.println(results[1].status)
 }

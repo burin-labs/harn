@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { with_structural_validator } from "std/llm/structural_validator"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -48,7 +48,7 @@ pipeline default(harness: Harness) {
     { ->
       const session = "structural-validator-" + harness.random.uuid()
       const captured = agent_capture_events(
-        harness,
+        harness.agent,
         session,
         fn() { return agent_loop(
           harness,
@@ -61,7 +61,7 @@ pipeline default(harness: Harness) {
             max_iterations: 4,
             session_id: session,
             tools: write_tools(),
-            structural_validator: with_structural_validator(harness),
+            structural_validator: with_structural_validator(harness.agent),
           },
         ) },
       )
@@ -94,7 +94,7 @@ pipeline default(harness: Harness) {
             loop_until_done: true,
             max_iterations: 2,
             tools: write_tools(),
-            structural_validator: with_structural_validator(harness, {on_failure: "raise"}),
+            structural_validator: with_structural_validator(harness.agent, {on_failure: "raise"}),
           },
         )
         harness.stdio.println("no-throw")
@@ -110,7 +110,7 @@ pipeline default(harness: Harness) {
     { ->
       const phantom_session = "structural-validator-phantom-" + harness.random.uuid()
       const phantom = agent_capture_events(
-        harness,
+        harness.agent,
         phantom_session,
         fn() { return try {
           agent_loop(
@@ -125,7 +125,7 @@ pipeline default(harness: Harness) {
               tools: write_tools(),
               session_id: phantom_session,
               structural_validator: with_structural_validator(
-                harness,
+                harness.agent,
                 {on_failure: "raise", rules: ["no_phantom_completion"]},
               ),
             },
@@ -150,7 +150,7 @@ pipeline default(harness: Harness) {
     { ->
       const post_write_session = "structural-validator-post-write-" + harness.random.uuid()
       const post_write = agent_capture_events(
-        harness,
+        harness.agent,
         post_write_session,
         fn() { return agent_loop(
           harness,
@@ -164,7 +164,7 @@ pipeline default(harness: Harness) {
             tools: write_tools(),
             session_id: post_write_session,
             structural_validator: with_structural_validator(
-              harness,
+              harness.agent,
               {rules: ["no_phantom_completion"]},
             ),
           },
@@ -187,7 +187,7 @@ pipeline default(harness: Harness) {
         .random
         .uuid()
       const post_write_non_empty = agent_capture_events(
-        harness,
+        harness.agent,
         post_write_non_empty_session,
         fn() { return agent_loop(
           harness,
@@ -199,7 +199,7 @@ pipeline default(harness: Harness) {
             max_iterations: 3,
             tools: write_tools(),
             session_id: post_write_non_empty_session,
-            structural_validator: with_structural_validator(harness),
+            structural_validator: with_structural_validator(harness.agent),
           },
         ) },
       )
@@ -217,7 +217,7 @@ pipeline default(harness: Harness) {
     { ->
       const lifecycle_only_session = "structural-validator-lifecycle-only-" + harness.random.uuid()
       const lifecycle_only = agent_capture_events(
-        harness,
+        harness.agent,
         lifecycle_only_session,
         fn() { return agent_loop(
           harness,
@@ -228,7 +228,7 @@ pipeline default(harness: Harness) {
             tool_format: "text",
             max_iterations: 1,
             session_id: lifecycle_only_session,
-            structural_validator: with_structural_validator(harness),
+            structural_validator: with_structural_validator(harness.agent),
           },
         ) },
       )
@@ -246,7 +246,7 @@ pipeline default(harness: Harness) {
     { ->
       const malformed_session = "structural-validator-malformed-" + harness.random.uuid()
       const malformed = agent_capture_events(
-        harness,
+        harness.agent,
         malformed_session,
         fn() { return try {
           agent_loop(
@@ -261,7 +261,7 @@ pipeline default(harness: Harness) {
               tools: write_tools(),
               session_id: malformed_session,
               structural_validator: with_structural_validator(
-                harness,
+                harness.agent,
                 {on_failure: "raise", rules: ["tool_calls_well_formed"]},
               ),
             },
@@ -284,7 +284,7 @@ pipeline default(harness: Harness) {
       const mixed_malformed_session = "structural-validator-mixed-malformed-"
         + harness.random.uuid()
       const mixed_malformed = agent_capture_events(
-        harness,
+        harness.agent,
         mixed_malformed_session,
         fn() { return try {
           agent_loop(
@@ -299,7 +299,7 @@ pipeline default(harness: Harness) {
               tools: write_tools(),
               session_id: mixed_malformed_session,
               structural_validator: with_structural_validator(
-                harness,
+                harness.agent,
                 {on_failure: "raise", rules: ["tool_calls_well_formed"]},
               ),
             },
@@ -329,7 +329,7 @@ pipeline default(harness: Harness) {
     { ->
       const well_formed_session = "structural-validator-well-formed-" + harness.random.uuid()
       const well_formed = agent_capture_events(
-        harness,
+        harness.agent,
         well_formed_session,
         fn() { return agent_loop(
           harness,
@@ -343,7 +343,7 @@ pipeline default(harness: Harness) {
             tools: write_tools(),
             session_id: well_formed_session,
             structural_validator: with_structural_validator(
-              harness,
+              harness.agent,
               {rules: ["tool_calls_well_formed"]},
             ),
           },
@@ -360,7 +360,7 @@ pipeline default(harness: Harness) {
     { ->
       const stray_call_session = "structural-validator-stray-prose-call-" + harness.random.uuid()
       const stray_call = agent_capture_events(
-        harness,
+        harness.agent,
         stray_call_session,
         fn() { return agent_loop(
           harness,
@@ -374,7 +374,7 @@ pipeline default(harness: Harness) {
             tools: write_tools(),
             session_id: stray_call_session,
             structural_validator: with_structural_validator(
-              harness,
+              harness.agent,
               {rules: ["tool_calls_well_formed"]},
             ),
           },
@@ -396,7 +396,7 @@ pipeline default(harness: Harness) {
     { ->
       const missing_arg_session = "structural-validator-native-missing-arg-" + harness.random.uuid()
       const missing_arg = agent_capture_events(
-        harness,
+        harness.agent,
         missing_arg_session,
         fn() { return agent_loop(
           harness,
@@ -410,7 +410,7 @@ pipeline default(harness: Harness) {
             tools: write_tools(),
             session_id: missing_arg_session,
             structural_validator: with_structural_validator(
-              harness,
+              harness.agent,
               {rules: ["tool_calls_well_formed"]},
             ),
           },
@@ -433,7 +433,7 @@ pipeline default(harness: Harness) {
     { ->
       const capped_session = "structural-validator-output-cap-" + harness.random.uuid()
       const capped = agent_capture_events(
-        harness,
+        harness.agent,
         capped_session,
         fn() { return try {
           agent_loop(
@@ -449,7 +449,7 @@ pipeline default(harness: Harness) {
               tools: write_tools(),
               session_id: capped_session,
               structural_validator: with_structural_validator(
-                harness,
+                harness.agent,
                 {on_failure: "raise", rules: ["output_token_cap_with_zero_calls"]},
               ),
             },
@@ -474,7 +474,7 @@ pipeline default(harness: Harness) {
     { ->
       const under_cap_session = "structural-validator-output-under-cap-" + harness.random.uuid()
       const under_cap = agent_capture_events(
-        harness,
+        harness.agent,
         under_cap_session,
         fn() { return agent_loop(
           harness,
@@ -489,7 +489,7 @@ pipeline default(harness: Harness) {
             tools: write_tools(),
             session_id: under_cap_session,
             structural_validator: with_structural_validator(
-              harness,
+              harness.agent,
               {rules: ["output_token_cap_with_zero_calls"]},
             ),
           },
@@ -506,7 +506,7 @@ pipeline default(harness: Harness) {
     { ->
       const warn_only_session = "structural-validator-warn-only-" + harness.random.uuid()
       const warn_only = agent_capture_events(
-        harness,
+        harness.agent,
         warn_only_session,
         fn() { return agent_loop(
           harness,
@@ -520,7 +520,7 @@ pipeline default(harness: Harness) {
             tools: write_tools(),
             session_id: warn_only_session,
             structural_validator: with_structural_validator(
-              harness,
+              harness.agent,
               {rules: [{name: "tool_calls_well_formed", warn_only: true}]},
             ),
           },
@@ -539,24 +539,24 @@ pipeline default(harness: Harness) {
   // Option validation is schema-backed: malformed public options fail at
   // construction time before any validator turn can run.
   const bad_options_type = try {
-    with_structural_validator(harness, "invalid")
+    with_structural_validator(harness.agent, "invalid")
   }
   harness.stdio.println(error_contains(bad_options_type, "dict"))
   const bad_on_failure = try {
-    with_structural_validator(harness, {on_failure: "passthrough"})
+    with_structural_validator(harness.agent, {on_failure: "passthrough"})
   }
   harness.stdio.println(error_contains(bad_on_failure, "on_failure"))
   const bad_max_attempts = try {
-    with_structural_validator(harness, {max_attempts: 0})
+    with_structural_validator(harness.agent, {max_attempts: 0})
   }
   harness.stdio.println(error_contains(bad_max_attempts, "max_attempts"))
   const bad_catalog = try {
-    with_structural_validator(harness, {no_phantom_completion_catalog: {en: "done"}})
+    with_structural_validator(harness.agent, {no_phantom_completion_catalog: {en: "done"}})
   }
   harness.stdio.println(error_contains(bad_catalog, "no_phantom_completion_catalog"))
   const bad_warn_only = try {
     with_structural_validator(
-      harness,
+      harness.agent,
       {rules: [{name: "tool_calls_well_formed", warn_only: "yes"}]},
     )
   }

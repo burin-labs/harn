@@ -9,5 +9,7 @@ pipeline default(harness: Harness) {
   ys = ys.appending(3.5)
   harness.stdio.println("xs len " + to_string(len(xs)))
   harness.stdio.println("ys len " + to_string(len(ys)))
-  harness.stdio.println("xs still all int: " + to_string((xs[0] ?? 0) + (xs[1] ?? 0) + (xs[2] ?? 0)))
+  harness.stdio.println(
+    "xs still all int: " + to_string((xs[0] ?? 0) + (xs[1] ?? 0) + (xs[2] ?? 0)),
+  )
 }

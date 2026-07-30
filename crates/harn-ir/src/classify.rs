@@ -27,25 +27,30 @@ pub(crate) fn literal_args(args: &[SNode]) -> Vec<LiteralValue> {
 
 /// Resolve a root Harness method to its manifest entry. No legacy builtin
 /// name is reconstructed: the typed contract is the semantic owner.
-pub(crate) fn harness_sub_handle_for(
+pub(crate) fn capability_method_for(
     object: &SNode,
     method: &str,
+    capability_handles: &BTreeMap<String, harn_builtin_meta::CapabilityId>,
 ) -> Option<(
     &'static str,
     &'static harn_builtin_registry::BuiltinManifestEntry,
 )> {
-    let (sub_handle, root) = match &object.node {
+    let capability = match &object.node {
         Node::PropertyAccess { object, property }
-        | Node::OptionalPropertyAccess { object, property } => (property.as_str(), object.as_ref()),
+        | Node::OptionalPropertyAccess { object, property } => {
+            let Node::Identifier(receiver) = &object.node else {
+                return None;
+            };
+            if receiver != "harness" && receiver != "_harness" {
+                return None;
+            }
+            harn_builtin_meta::CapabilityId::from_field_name(property)?
+        }
+        Node::Identifier(receiver) => *capability_handles.get(receiver)?,
         _ => return None,
     };
-    let Node::Identifier(receiver) = &root.node else {
-        return None;
-    };
-    if receiver != "harness" && receiver != "_harness" {
-        return None;
-    }
-    let entry = harn_parser::builtin_signatures::capability_method_entry(sub_handle, method)?;
+    let entry =
+        harn_parser::builtin_signatures::capability_method_entry(capability.field_name(), method)?;
     let harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, .. } =
         entry.contract.exposure
     else {

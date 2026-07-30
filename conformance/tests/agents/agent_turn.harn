@@ -6,12 +6,15 @@ pipeline default(harness: Harness) {
   // queue on entry and restores it on exit, replacing the imperative
   // harness.llm.mock_clear() + sequential harness.llm.mock_enqueue(...) form.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<user_response>Agent turn complete.</user_response>\n<done>##DONE##</done>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"),
     ],
     { ->
-      const result = agent_turn(harness, "Do the task",
+      const result = agent_turn(
+        harness,
+        "Do the task",
         {provider: "mock", system: "You are helpful.", max_iterations: 3},
       )
       harness.stdio.println(result.status)

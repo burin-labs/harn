@@ -55,7 +55,10 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(subagent_outcome.outcome)
   harness.stdio.println(subagent_outcome.branch)
-  const static_condition = workflow_prepare_static_stage(harness, 
+  const static_condition = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
     {
       node_id: "gate",
       node: {kind: "condition", metadata: {artifact_kind: "summary"}},
@@ -64,7 +67,10 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(static_condition.result.text)
   harness.stdio.println(static_condition.outcome)
-  const static_reduce = workflow_prepare_static_stage(harness, 
+  const static_reduce = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
     {
       node_id: "reduce",
       node: {
@@ -78,7 +84,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(static_reduce.result.text)
   harness.stdio.println(static_reduce.artifacts[0].kind)
   harness.stdio.println(json_stringify(static_reduce.artifacts[0].lineage))
-  const static_escalation = workflow_prepare_static_stage(harness, 
+  const static_escalation = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
     {
       node_id: "escalate",
       node: {
@@ -92,8 +101,15 @@ pipeline default(harness: Harness) {
   harness.stdio.println(static_escalation.artifacts[0].data.queue)
   harness.stdio.println(static_escalation.branch)
   harness.testing.clear()
-  harness.testing.respond("interaction", "approval_response", {approved: true, reviewer: "lead", reason: "ready"})
-  const static_gate = workflow_prepare_static_stage(harness, 
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    {approved: true, reviewer: "lead", reason: "ready"},
+  )
+  const static_gate = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
     {
       node_id: "gate",
       node: {
@@ -112,7 +128,10 @@ pipeline default(harness: Harness) {
   } else {
     ["printf", "command-ok"]
   }
-  const static_command = workflow_prepare_static_stage(harness, 
+  const static_command = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
     {
       node_id: "cmd",
       node: {kind: "stage", mode: "command", metadata: {command_tool: "run", command_args: argv}},
@@ -123,7 +142,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(static_command.result.ok)
   harness.stdio.println(contains(static_command.result.text, "command-ok"))
   harness.stdio.println(static_command.artifacts[0].kind)
-  const static_compact = workflow_prepare_static_stage(harness, 
+  const static_compact = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
     {
       node_id: "compact",
       node: {

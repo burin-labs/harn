@@ -11,7 +11,8 @@ pipeline default(harness: Harness, task) {
   // llm_call is fail-fast on transient errors, so a single injected error
   // surfaces as a throw on the first attempt.
   with_llm_script(
-    harness.llm, [{error: {category: "rate_limit", message: "429 Too Many Requests", retry_after_ms: 2500}}],
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 Too Many Requests", retry_after_ms: 2500}}],
     { ->
       try {
         harness.llm.call("hello", nil, {provider: "mock", model: "mock-model"})
@@ -28,7 +29,8 @@ pipeline default(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [{error: {category: "overloaded", message: "529 overloaded"}}],
+    harness.llm,
+    [{error: {category: "overloaded", message: "529 overloaded"}}],
     { ->
       try {
         harness.llm.call("hello again", nil, {provider: "mock"})

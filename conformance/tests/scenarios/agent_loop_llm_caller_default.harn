@@ -7,7 +7,8 @@ import { llm_text, with_llm_script } from "std/testing"
  */
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("all done")],
+    harness.llm,
+    [llm_text("all done")],
     { ->
       const result = agent_loop(harness, "hi", nil, {provider: "mock"})
       harness.stdio.println(result.status)

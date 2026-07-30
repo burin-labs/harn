@@ -19,13 +19,16 @@ fn tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "native turn"}}]},
       llm_text("<user_response>Native turn complete.</user_response>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"),
     ],
     { ->
-      const result = agent_turn(harness, "Use the lookup tool and finish.",
+      const result = agent_turn(
+        harness,
+        "Use the lookup tool and finish.",
         {provider: "mock", tools: tools(), tool_format: "native", max_iterations: 3},
       )
       const calls = harness.llm.mock_calls()

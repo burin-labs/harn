@@ -11,7 +11,7 @@ pipeline default(harness: Harness) {
       value: {text: "C-text", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  const caller = with_fallback(harness, [a, b, c])
+  const caller = with_fallback(harness.agent, [a, b, c])
   const env = caller(
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )

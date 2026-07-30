@@ -192,6 +192,19 @@ fn env_override(name: &str) -> Option<String> {
         .then(|| "1".to_string())
 }
 
+/// Runtime-owned environment projected into every child process.
+///
+/// These values are semantic execution context, not ambient host state. Keep
+/// their construction here so `harness.env` reads and every process-launch
+/// seam project the same values. Callers may still explicitly override or
+/// remove a key at the process boundary.
+pub(crate) fn runtime_child_env_overlay() -> Vec<(String, String)> {
+    env_override(HARN_REPLAY_ENV)
+        .map(|value| (HARN_REPLAY_ENV.to_string(), value))
+        .into_iter()
+        .collect()
+}
+
 pub(crate) fn read_env_value(name: &str) -> Option<String> {
     env_override(name)
         .or_else(|| current_execution_context().and_then(|context| context.env.get(name).cloned()))
@@ -577,15 +590,6 @@ fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::dict(paths))
 }
 
-#[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "spawn_captured(opts: dict) -> dict", category = "process"
-)]
-fn spawn_captured_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    run_process_value(args)
-}
-
 // `term_width()` / `term_height()` return the current terminal
 // dimensions in columns and rows. Reads `COLUMNS` / `LINES` env vars
 // first (so test harnesses can pin a value), falls back to the
@@ -634,115 +638,9 @@ const PROCESS_BUILTINS: &[&VmBuiltinDef] = &[
     &EXECUTION_ROOT_IMPL_DEF,
     &ASSET_ROOT_IMPL_DEF,
     &RUNTIME_PATHS_IMPL_DEF,
-    &SPAWN_CAPTURED_IMPL_DEF,
     &TERM_WIDTH_IMPL_DEF,
     &TERM_HEIGHT_IMPL_DEF,
 ];
-
-/// Run an external command synchronously and return captured output.
-///
-/// Shared by the hidden runtime primitive and `harness.process.run` so
-/// subprocess capture has one implementation and one result shape.
-pub(crate) fn run_process_value(args: &[VmValue]) -> Result<VmValue, VmError> {
-    let opts = match args.first() {
-        Some(VmValue::Dict(opts)) => opts.clone(),
-        _ => {
-            return Err(VmError::Runtime(
-                "HarnessProcess.run: command dict is required".to_string(),
-            ));
-        }
-    };
-    let cmd = match opts.get("program").map(|v| v.display()).unwrap_or_default() {
-        s if s.is_empty() => {
-            return Err(VmError::Runtime(
-                "HarnessProcess.run: command.program is required".to_string(),
-            ));
-        }
-        s => s,
-    };
-    let cmd_args: Vec<String> = match opts.get("args") {
-        Some(VmValue::List(items)) => items.iter().map(|v| v.display()).collect(),
-        None | Some(VmValue::Nil) => Vec::new(),
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "HarnessProcess.run: command.args must be a list of strings, got {}",
-                other.type_name()
-            )));
-        }
-    };
-    let cwd = opts
-        .get("cwd")
-        .map(|v| v.display())
-        .filter(|s| !s.is_empty());
-    let env_overrides: Vec<(String, String)> = match opts.get("env") {
-        Some(VmValue::Dict(env)) => env
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.display()))
-            .collect(),
-        None | Some(VmValue::Nil) => Vec::new(),
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "HarnessProcess.run: command.env must be a dict, got {}",
-                other.type_name()
-            )));
-        }
-    };
-    let stdin_bytes: Option<Vec<u8>> = match opts.get("stdin") {
-        Some(VmValue::Bytes(bytes)) => Some(bytes.as_slice().to_vec()),
-        Some(VmValue::String(s)) => Some(s.as_bytes().to_vec()),
-        None | Some(VmValue::Nil) => None,
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "HarnessProcess.run: command.stdin must be string or bytes, got {}",
-                other.type_name()
-            )));
-        }
-    };
-    let timeout = opts
-        .get("timeout_ms")
-        .and_then(|v| v.as_int())
-        .filter(|n| *n > 0)
-        .map(|n| Duration::from_millis(n as u64));
-
-    let spawn = CapturedSpawn {
-        label: "harness.process.run",
-        cmd: &cmd,
-        args: &cmd_args,
-        cwd: cwd.as_deref(),
-        env: &env_overrides,
-        // `harness.process.run` layers `env` over the ambient environment rather
-        // than replacing it. Under a session environment that ambient base is the
-        // resolver's allowlist + grants, not the raw parent env.
-        env_clear: false,
-        stdin: stdin_bytes,
-        timeout,
-    };
-    let CapturedRun {
-        output,
-        timed_out,
-        interrupted,
-        duration_ms,
-    } = run_captured_spawn(spawn)?;
-
-    let exit_code = if timed_out || interrupted {
-        -1
-    } else {
-        output.status.code().unwrap_or(-1) as i64
-    };
-    let success = if timed_out || interrupted {
-        false
-    } else {
-        output.status.success()
-    };
-    let mut result = BTreeMap::new();
-    result.insert("exit_code".to_string(), VmValue::Int(exit_code));
-    result.put_str("stdout", String::from_utf8_lossy(&output.stdout).as_ref());
-    result.put_str("stderr", String::from_utf8_lossy(&output.stderr).as_ref());
-    result.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
-    result.insert("success".to_string(), VmValue::Bool(success));
-    result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
-    Ok(VmValue::dict(result))
-}
 
 /// Parameters for [`run_captured_spawn`]: a single synchronous subprocess
 /// spawn that captures stdout/stderr, optionally feeds stdin, optionally
@@ -767,8 +665,8 @@ struct CapturedRun {
     duration_ms: i64,
 }
 
-/// Shared synchronous spawn-and-capture core used by `spawn_captured` and the
-/// `exec_opts`/`exec_at_opts` convenience builtins. Honors cwd, an env
+/// Shared synchronous spawn-and-capture core used by `harness.process.run` and
+/// the `exec_opts`/`exec_at_opts` internal builtins. Honors cwd, an env
 /// overlay (merge or replace via `env_clear`), the live session environment's
 /// closed environment, optional stdin, and an optional wall-clock timeout
 /// (after which the child is killed and `timed_out` is set).
@@ -1182,9 +1080,7 @@ fn process_command_config(
             config.env.extend(context.env);
         }
     }
-    if let Some(value) = env_override(HARN_REPLAY_ENV) {
-        config.env.push((HARN_REPLAY_ENV.to_string(), value));
-    }
+    config.env.extend(runtime_child_env_overlay());
     // `iter().cloned()`, not `drain(..)`: `Drain`'s destructor removes the
     // range even when the iterator is never consumed, so draining here would
     // silently empty `config.env` on the non-session path.

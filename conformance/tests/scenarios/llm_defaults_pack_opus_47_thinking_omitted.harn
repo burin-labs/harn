@@ -7,8 +7,12 @@ import { pack_for } from "std/llm/defaults"
 pipeline test(harness: Harness, task) {
   const model = "claude-opus-4-7-20260101"
   // Sanity: lineage_of must classify this id as the adaptive variant.
-  assert_eq(lineage_of(harness, model), "claude-opus-adaptive")
-  const r = pack_for(harness, {model: model, reasoning_policy: "medium", reasoning_task: "agent"})
+  assert_eq(lineage_of(harness.llm, model), "claude-opus-adaptive")
+  const r = pack_for(
+    harness.agent,
+    harness.llm,
+    {model: model, reasoning_policy: "medium", reasoning_task: "agent"},
+  )
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, model)
   assert_eq(r.provider, "anthropic")

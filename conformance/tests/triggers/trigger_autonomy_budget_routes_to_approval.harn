@@ -6,7 +6,7 @@ import "std/hitl"
 // autonomy-budget test for burin-labs/harn#928.
 import "std/triggers"
 
-fn handle_issue(event: TriggerEvent) -> dict {
+fn handle_issue(harness: Harness, event: TriggerEvent) -> dict {
   return {ok: true, kind: event.kind}
 }
 

@@ -38,7 +38,9 @@ pipeline default(harness: Harness, task) {
   let iteration = 0
   let total = 0
   while iteration < 500 {
-    const results = agent_dispatch_tool_batch(harness, calls,
+    const results = agent_dispatch_tool_batch(
+      harness.tools,
+      calls,
       tools,
       {session_id: "bench-agent-tool-dispatch", tool_retries: 0, tool_backoff_ms: 1},
     )

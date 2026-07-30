@@ -58,7 +58,7 @@ fn semantic_eval_system() {
     + "Return strict JSON only."
 }
 
-fn semantic_eval_prompt(report, run, reference, heuristic, task_root) {
+fn semantic_eval_prompt(harness: Harness, report, run, reference, heuristic, task_root) {
   return "[semantic_eval][task_id=${report?.task_id ?? ""}]\n"
     + "Task: ${report?.task ?? ""}\n\n"
     + "Ideal reference:\n${render_ideal_reference(reference)}\n\n"
@@ -79,11 +79,11 @@ fn semantic_eval_prompt(report, run, reference, heuristic, task_root) {
 
 fn semantic_eval_with_llm(harness: Harness, report, run, reference, heuristic, task_root) {
   const response = harness.llm.call(
-    semantic_eval_prompt(report, run, reference, heuristic, task_root),
+    semantic_eval_prompt(harness, report, run, reference, heuristic, task_root),
     semantic_eval_system(),
     {
       provider: semantic_eval_provider(harness),
-      model: semantic_eval_model(harness),
+      model: semantic_eval_model(harness.env),
       output: {schema: semantic_eval_schema(), validation: "error"},
       schema_retries: 2,
       temperature: 0,
@@ -104,11 +104,11 @@ fn semantic_eval_with_llm(harness: Harness, report, run, reference, heuristic, t
   }
 }
 
-fn load_run_record(harness: Harness, report, task_root) {
+fn load_run_record(fs: HarnessFs, report, task_root) {
   const reported = report?.run_path ?? ""
   if reported != "" {
     const loaded = try {
-      load_json_file(harness, reported)
+      load_json_file(fs, reported)
     } catch (e) {
       nil
     }
@@ -119,7 +119,7 @@ fn load_run_record(harness: Harness, report, task_root) {
   if task_root != "" {
     const fallback = path_join(task_root, "run_record.json")
     const loaded = try {
-      load_json_file(harness, fallback)
+      load_json_file(fs, fallback)
     } catch (e) {
       nil
     }
@@ -142,13 +142,13 @@ pipeline default(harness: Harness) {
     throw "Usage: harn run experiments/burin-mini/evaluator.harn -- <report.json> [output.json] [task-root]"
   }
   const report_path = argv[0]
-  const report = load_json_file(harness, report_path)
+  const report = load_json_file(harness.fs, report_path)
   const task_root = if len(argv) > 2 {
     argv[2]
   } else {
     ""
   }
-  const run = load_run_record(harness, report, task_root)
+  const run = load_run_record(harness.fs, report, task_root)
   const reference = task_reference(report?.task_id ?? "")
   const heuristic = heuristic_semantic_eval(report, run, reference)
   const result = if semantic_eval_mode(harness) == "heuristic" {
@@ -161,7 +161,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println("task_id=${report?.task_id ?? ""}")
   harness.stdio.println("semantic_eval_mode=${semantic_eval_mode(harness)}")
   harness.stdio.println("semantic_eval_provider=${semantic_eval_provider(harness)}")
-  harness.stdio.println("semantic_eval_model=${semantic_eval_model(harness)}")
+  harness.stdio.println("semantic_eval_model=${semantic_eval_model(harness.env)}")
   harness.stdio.println("overall_verdict=${result?.overall_verdict ?? "unknown"}")
   harness.stdio.println("overall_score=${result?.overall_score ?? 0}")
   harness.stdio.println("output=${destination}")

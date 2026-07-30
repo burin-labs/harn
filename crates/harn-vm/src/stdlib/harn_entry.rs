@@ -18,6 +18,19 @@ pub(crate) async fn call_harn_export_by_name(
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
     let mut vm = ctx.child_vm();
+    let result = call_harn_export_on_vm(&mut vm, import_path, export_name, label, args).await;
+    let output = vm.take_output();
+    ctx.forward_output(&output);
+    result
+}
+
+pub(crate) async fn call_harn_export_on_vm(
+    vm: &mut crate::vm::Vm,
+    import_path: &str,
+    export_name: &str,
+    label: &str,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     let saved_env = std::mem::take(&mut vm.env);
     let saved_imported_paths = std::mem::take(&mut vm.imported_paths);
     let saved_source_dir = vm.source_dir.clone();
@@ -31,10 +44,7 @@ pub(crate) async fn call_harn_export_by_name(
             "{label}: stdlib module {import_path} did not export `{export_name}`"
         ))
     })?;
-    let result = vm.call_closure_pub(&closure, args).await;
-    let output = vm.take_output();
-    ctx.forward_output(&output);
-    result
+    vm.call_closure_pub(&closure, args).await
 }
 
 pub(crate) async fn call_agent_loop(

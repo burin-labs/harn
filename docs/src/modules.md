@@ -44,9 +44,9 @@ When imported, these functions become available in the importing file's scope.
 ```harn,ignore
 import "lib/math"
 
-pipeline default(task) {
-  log(double(21))        // 42
-  log(clamp(150, 0, 100)) // 100
+pipeline default(harness: Harness, task) {
+  harness.stdio.log(double(21))        // 42
+  harness.stdio.log(clamp(150, 0, 100)) // 100
 }
 ```
 
@@ -56,15 +56,15 @@ Imported files can also contain pipelines, which are registered globally by name
 
 ```harn
 // lib/analysis.harn
-pipeline analyze(task) {
-  log("Analyzing: ${task}")
+pipeline analyze(harness: Harness, task) {
+  harness.stdio.log("Analyzing: ${task}")
 }
 ```
 
 ```harn,ignore
 import "lib/analysis"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // the "analyze" pipeline is now registered and available
 }
 ```
@@ -283,10 +283,10 @@ Pure helpers for agent-authored text patches:
 
 | Function | Description |
 |---|---|
-| `edit_apply_node(params)` | AST-precise replace via a Tree-Sitter query. Splices `replacement` in for each matched node, preserving leading indentation and trailing trivia; validates the post-edit source by re-parsing. Routes through staged-fs when `session_id` is supplied. See [Edit stdlib](./stdlib/edit.md). |
-| `edit_insert_at_anchor(params)` | AST-precise insert relative to a unique anchor node. `position` picks `before`/`after`/`first_child`/`last_child`; content is re-indented to the inferred target depth and validated by re-parsing. Routes through staged-fs when `session_id` is supplied. See [Edit stdlib](./stdlib/edit.md). |
-| `edit_safe_text_patch(params)` | Multi-hunk text patch with staged-fs collision rejection: reads the file through the overlay, hash-checks `expected_hash`, applies each `{old_text, new_text}` hunk through the same matcher as `edit_apply_old_new_patch`, and commits all-or-nothing through `hostlib_fs_safe_text_patch`. Returns `result ∈ {applied, no_op, stale_base, hunk_conflict}` plus per-call telemetry. See [Edit stdlib](./stdlib/edit.md). |
-| `edit_fast_apply(params)` / `fast_apply(path, intent, options?)` | Merge-model-assisted full-file apply. Reads the target file, calls the configured `merge` model role for complete updated bytes, validates and previews through `edit_dry_run`, then commits through hash-guarded `edit_safe_text_patch`. See [Edit stdlib](./stdlib/edit.md#edit_fast_apply--merge-model-assisted-full-file-apply). |
+| `edit_apply_node(harness.ast, params)` | AST-precise replace via a Tree-Sitter query. Splices `replacement` in for each matched node, preserving leading indentation and trailing trivia; validates the post-edit source by re-parsing. Routes through staged-fs when `session_id` is supplied. See [Edit stdlib](./stdlib/edit.md). |
+| `edit_insert_at_anchor(harness.ast, params)` | AST-precise insert relative to a unique anchor node. `position` picks `before`/`after`/`first_child`/`last_child`; content is re-indented to the inferred target depth and validated by re-parsing. Routes through staged-fs when `session_id` is supplied. See [Edit stdlib](./stdlib/edit.md). |
+| `edit_safe_text_patch(harness.fs, harness.random, params)` | Multi-hunk text patch with staged-fs collision rejection: reads the file through the overlay, hash-checks `expected_hash`, applies each `{old_text, new_text}` hunk through the same matcher as `edit_apply_old_new_patch`, and commits all-or-nothing through `harness.fs.safe_text_patch`. Returns `result ∈ {applied, no_op, stale_base, hunk_conflict}` plus per-call telemetry. See [Edit stdlib](./stdlib/edit.md). |
+| `edit_fast_apply(harness.fs, harness.random, harness.ast, harness.llm, params)` / `fast_apply(path, intent, options?)` | Merge-model-assisted full-file apply. Reads the target file, calls the configured `merge` model role for complete updated bytes, validates and previews through `edit_dry_run`, then commits through hash-guarded `edit_safe_text_patch`. See [Edit stdlib](./stdlib/edit.md#edit_fast_apply--merge-model-assisted-full-file-apply). |
 | `edit_dry_run(params)` | Render a multi-op edit plan (`apply_node`, `insert_at_anchor`, `safe_text_patch`, `rename_symbol`) as a per-file unified diff bundle without touching disk. Plan ops share a transient staged-fs session, so cumulative edits collapse to one diff per file. See [Edit stdlib](./stdlib/edit.md#edit_dry_run--preview-a-multi-op-plan). |
 | `edit_apply_old_new_patch(text, old_text, new_text, options?)` | Apply one anchored old/new patch with exact, line-normalized, and structural matching; returns hashes, match kind, line span, changed regions, errors, warnings, and provenance |
 | `edit_splice_lines(text, start_line, end_line_exclusive, new_text, options?)` | Replace a half-open 0-based line range and return the same patch metadata shape |
@@ -485,20 +485,20 @@ Extended math utilities:
 ```harn
 import "std/math"
 
-log(clamp(150, 0, 100))         // 100
-log(lerp(0, 10, 0.5))           // 5
-log(map_range(50, 0, 100, 0, 1)) // 0.5
-log(sum([1, 2, 3, 4]))          // 10
-log(sum([1, nil, 3]))            // 4
-log(avg([10, 20, 30]))          // 20
-log(percentile([1, 2, 3, 4], 75)) // 3.25
-log(top_k(["a", "bbbb", "cc"], 2, { x -> len(x) })) // ["bbbb", "cc"]
-log(softmax([1, 2, 3]))         // probabilities summing to 1
-log(cosine_similarity([1, 0], [1, 1])) // ~0.707
-log(moving_avg([1, 2, 3, 4, 5], 3)) // [2.0, 3.0, 4.0]
+harness.stdio.log(clamp(150, 0, 100))         // 100
+harness.stdio.log(lerp(0, 10, 0.5))           // 5
+harness.stdio.log(map_range(50, 0, 100, 0, 1)) // 0.5
+harness.stdio.log(sum([1, 2, 3, 4]))          // 10
+harness.stdio.log(sum([1, nil, 3]))            // 4
+harness.stdio.log(avg([10, 20, 30]))          // 20
+harness.stdio.log(percentile([1, 2, 3, 4], 75)) // 3.25
+harness.stdio.log(top_k(["a", "bbbb", "cc"], 2, { x -> len(x) })) // ["bbbb", "cc"]
+harness.stdio.log(softmax([1, 2, 3]))         // probabilities summing to 1
+harness.stdio.log(cosine_similarity([1, 0], [1, 1])) // ~0.707
+harness.stdio.log(moving_avg([1, 2, 3, 4, 5], 3)) // [2.0, 3.0, 4.0]
 
 const grouped = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
-log(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
+harness.stdio.log(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
 ```
 
 ### std/slug
@@ -545,7 +545,7 @@ surface adapters:
 ```harn
 import { actor_chain_format, actor_chain_report } from "std/identity"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const chain = {
     sub: "user:owner",
     scopes: ["repo:read", "repo:write"],
@@ -554,9 +554,9 @@ pipeline default() {
   const report = actor_chain_report(chain)
   const current = report.current
   require current != nil, "chain should have a current subject"
-  log(current.subject)                    // "agent:reviewer"
-  log(actor_chain_format(chain))          // "agent:reviewer for user:owner"
-  log(actor_chain_format(chain, {style: "arrow"})) // "agent:reviewer -> user:owner"
+  harness.stdio.log(current.subject)                    // "agent:reviewer"
+  harness.stdio.log(actor_chain_format(chain))          // "agent:reviewer for user:owner"
+  harness.stdio.log(actor_chain_format(chain, {style: "arrow"})) // "agent:reviewer -> user:owner"
 }
 ```
 
@@ -790,10 +790,10 @@ Path manipulation utilities:
 ```harn
 import "std/path"
 
-log(ext("main.harn"))          // "harn"
-log(stem("/src/main.harn"))    // "main"
-log(is_absolute("/usr/bin"))   // true
-log(workspace_normalize("/packages/app/SKILL.md", cwd())) // "packages/app/SKILL.md"
+harness.stdio.log(ext("main.harn"))          // "harn"
+harness.stdio.log(stem("/src/main.harn"))    // "main"
+harness.stdio.log(is_absolute("/usr/bin"))   // true
+harness.stdio.log(workspace_normalize("/packages/app/SKILL.md", harness.fs.cwd())) // "packages/app/SKILL.md"
 
 const files = list_files("src")
 const dirs = list_dirs(".")
@@ -812,9 +812,9 @@ builtin:
 import "std/vision"
 
 const structured = ocr("fixtures/ui.png")
-log(structured.text)
-log(structured.lines[0]?.text)
-log(structured.tokens[0]?.bbox?.left)
+harness.stdio.log(structured.text)
+harness.stdio.log(structured.lines[0]?.text)
+harness.stdio.log(structured.tokens[0]?.bbox?.left)
 ```
 
 ### std/json
@@ -876,7 +876,7 @@ escape output; otherwise let the auto policy decide.
 import { ansi_success, ansi_strip } from "std/ansi"
 
 const line = ansi_success("passed", {mode: "always"})
-log(ansi_strip(line)) // passed
+harness.stdio.log(ansi_strip(line)) // passed
 ```
 
 ### std/table
@@ -898,7 +898,7 @@ normalized, ANSI-aware for visible width, and optionally capped with
 ```harn
 import { render_table } from "std/table"
 
-log(render_table(
+harness.stdio.log(render_table(
   [{name: "harn", status: "ok"}, {name: "burin", status: "queued"}],
   {columns: ["name", "status"]},
 ))
@@ -916,8 +916,8 @@ syntax-aware source review:
 | `colorize_diff(diff_text, options?)` | Apply ANSI coloring to an existing unified diff |
 | `diff_summary(before, after)` | Return compact changed/insertions/deletions counts |
 | `render_diff_stat(entries, options?)` | Render per-file diff stats from `{path, before, after}` or stat dicts |
-| `structural_diff(path_a, path_b, options?)` | Host-backed tree-sitter review diff with line-diff fallback |
-| `changeset_summary(files)` | Symbol-level review summary over `{path, before?, after?}` file images |
+| `structural_diff(ast, path_a, path_b, options?)` | Host-backed tree-sitter review diff with line-diff fallback |
+| `changeset_summary(ast, files)` | Symbol-level review summary over `{path, before?, after?}` file images |
 
 The line helpers favor predictable, dependency-free rendering over competing
 with `git diff` for large repository diffs. For large file sets, call
@@ -937,7 +937,7 @@ heuristics.
 ```harn
 import { unified_diff } from "std/diff"
 
-log(unified_diff("one\ntwo", "one\nthree", {path: "example.txt"}))
+harness.stdio.log(unified_diff("one\ntwo", "one\nthree", {path: "example.txt"}))
 ```
 
 ### std/cache
@@ -1085,10 +1085,10 @@ later runs:
 
 | Function | Description |
 |---|---|
-| `memory_store(namespace, key, value, tags?, options?)` | Append a memory observation and return a `memory_record` dict |
-| `memory_recall(namespace, query, k?, options?)` | Return active records ranked by deterministic BM25-style lexical recall |
-| `memory_summarize(namespace, window?, options?)` | Return an extractive summary dict for a recent or query-filtered slice |
-| `memory_forget(namespace, predicate, options?)` | Append a soft-delete tombstone for matching records |
+| `harness.memory.store(namespace, key, value, tags?, options?)` | Append a memory observation and return a `memory_record` dict |
+| `harness.memory.recall(namespace, query, k?, options?)` | Return active records ranked by deterministic BM25-style lexical recall |
+| `harness.memory.summarize(namespace, window?, options?)` | Return an extractive summary dict for a recent or query-filtered slice |
+| `harness.memory.forget(namespace, predicate, options?)` | Append a soft-delete tombstone for matching records |
 
 The default backend writes JSONL events under `.harn/memory/<namespace>/`.
 Pass `{root: "path"}` in options to choose a different memory root. Forgetting
@@ -1104,8 +1104,8 @@ claims, and audit records:
 
 | Function | Description |
 |---|---|
-| `pg_pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
-| `pg_connect(source, options?)` | Open a single-connection pool |
+| `harness.postgres.pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
+| `harness.postgres.connect(source, options?)` | Open a single-connection pool |
 | `pg_query(handle, sql, params?)` | Run a parameterized query and return rows as dictionaries |
 | `pg_query_one(handle, sql, params?)` | Return the first row, or `nil` when no rows match |
 | `pg_execute(handle, sql, params?)` | Run a statement and return `{rows_affected}` |
@@ -1157,7 +1157,7 @@ inspection, and deterministic fixtures:
 
 | Function | Description |
 |---|---|
-| `sqlite_open(path, options?)` | Open `:memory:` or a file-backed SQLite database |
+| `harness.sqlite.open(path, options?)` | Open `:memory:` or a file-backed SQLite database |
 | `sqlite_query(handle, sql, params?)` | Run a parameterized query and return rows as dictionaries |
 | `sqlite_query_one(handle, sql, params?)` | Return the first row, or `nil` when no rows match |
 | `sqlite_execute(handle, sql, params?)` | Run a statement and return `{rows_affected}` |
@@ -1177,7 +1177,7 @@ shelling out to `bash`:
 | Function | Description |
 |---|---|
 | `is_tty(fd?)` | Return whether fd `0`, `1`, or `2` is attached to a terminal; defaults to stdin |
-| `read_line(opts?)` | Read one line from stdin and return `{ok, value?, status?, error?}`; supports `prompt`, `timeout_ms`, `trim`, `echo`, and `raw` options |
+| `harness.stdio.read_line(opts?)` | Read one line from stdin and return `{ok, value?, status?, error?}`; supports `prompt`, `timeout_ms`, `trim`, `echo`, and `raw` options |
 | `read_password(prompt?, timeout_ms?)` | Convenience wrapper around `read_line` with terminal echo disabled |
 | `write_stderr(text)` | Write text to stderr without appending a newline |
 
@@ -1214,7 +1214,7 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | Function | Description |
 |---|---|
 | `ensure_parent_dir(path)` | Create the parent directory for a file path when needed |
-| `read_lines_page_result(path, options?)` | Read a bounded page of complete UTF-8 lines and return a byte-and-line cursor or typed filesystem failure |
+| `harness.fs.read_lines_page_result(path, options?)` | Read a bounded page of complete UTF-8 lines and return a byte-and-line cursor or typed filesystem failure |
 | `read_json(path)` | Read required JSON, throwing `StructuredReadFailure` for absent, unreadable, malformed, or over-depth input |
 | `read_json_result(path)` | Read JSON as `Result<unknown, StructuredReadFailure>` without erasing failure kind, path, or parser location |
 | `read_json_typed<T>(path, schema: Schema<T>, apply_defaults?) -> T` | Read required JSON and validate it against a schema, throwing the typed read or schema failure |
@@ -1249,10 +1249,10 @@ schema, and rule failures.
 ```harn
 import { read_json, relative_path, write_json } from "std/fs"
 
-const path = path_join(temp_dir(), "report/data.json")
+const path = path_join(harness.fs.temp_dir(), "report/data.json")
 write_json(path, {status: "ok"}, {pretty: true})
-log(read_json(path).status)
-log(relative_path(temp_dir(), path))
+harness.stdio.log(read_json(path).status)
+harness.stdio.log(relative_path(harness.fs.temp_dir(), path))
 ```
 
 Evidence results expose caller labels rather than root paths, so persisted
@@ -1309,7 +1309,7 @@ while true {
 ### std/run_artifacts
 
 Directory-backed run artifact helpers for harness-local outputs. The default
-root is `runtime_paths().run_root`, so `HARN_RUN_DIR` and the active runtime
+root is `harness.fs.runtime_paths().run_root`, so `HARN_RUN_DIR` and the active runtime
 root keep working; pass `{root}` when a host owns a different artifact store.
 
 These helpers do not define a second run-record schema. Keep using
@@ -1374,9 +1374,9 @@ const facts: EvaluationFacts = run_artifact_read_json(run, facts_artifact)
 
 const transcript = run_artifact_transcript_path(run)
 const reopened = run_artifacts_from_dir("eval", run.dir)
-log(written.status + ":" + facts.status)
-log(reopened.paths.facts)
-log(transcript)
+harness.stdio.log(written.status + ":" + facts.status)
+harness.stdio.log(reopened.paths.facts)
+harness.stdio.log(transcript)
 ```
 
 ### std/artifacts/typed
@@ -1457,14 +1457,14 @@ compact recovery context:
 
 | Function | Description |
 |---|---|
-| `command_run(spec, options?)` | Run an argv-first command through `hostlib_tools_run_command` and return normalized success, status, output, artifact, and timing fields |
-| `command_json(spec, options?)` | Run a JSON-emitting command and parse stdout by default; use `allow_empty: true` for probe-style nil output or `result: "record"` for structured failures |
-| `command_json_step(name, spec, options?)` | Run a normal command step, preserving retry/classify/recovery hooks, and add `json` on success or `parse_error`/`error` on malformed output |
-| `command_try(attempts, options?)` | Try ordered equivalent probes until one returns an ok value, recording `attempts`, `fallback_index`, and `fallback_total` |
-| `command_wait_for_output(locator, pattern, options?)` | Wait without polling until selected background stdout, stderr, or combined output matches a literal or regex, the process exits, or `timeout_ms` expires |
-| `command_output_range(locator, options?)` | Range-read a command output artifact by command result, `command_id`, `handle_id`, or artifact path |
-| `command_output_tail(locator, options?)` | Read the last bytes of a command output artifact without calculating offsets |
-| `command_step(name, spec, options?)` | Run one named command and return a normalized step record with artifacts, tail text, optional classification, optional recovery hint, and attempts |
+| `command_run(harness.tools, spec, options?)` | Run an argv-first command through `harness.tools.run_command` and return normalized success, status, output, artifact, and timing fields |
+| `command_json(harness.agent, harness.tools, harness.clock, spec, options?)` | Run a JSON-emitting command and parse stdout by default; use `allow_empty: true` for probe-style nil output or `result: "record"` for structured failures |
+| `command_json_step(harness.agent, harness.tools, harness.clock, name, spec, options?)` | Run a normal command step, preserving retry/classify/recovery hooks, and add `json` on success or `parse_error`/`error` on malformed output |
+| `command_try(harness.agent, harness.tools, harness.clock, attempts, options?)` | Try ordered equivalent probes until one returns an ok value, recording `attempts`, `fallback_index`, and `fallback_total` |
+| `command_wait_for_output(harness.tools, locator, pattern, options?)` | Wait without polling until selected background stdout, stderr, or combined output matches a literal or regex, the process exits, or `timeout_ms` expires |
+| `command_output_range(harness.tools, locator, options?)` | Range-read a command output artifact by command result, `command_id`, `handle_id`, or artifact path |
+| `command_output_tail(harness.tools, locator, options?)` | Read the last bytes of a command output artifact without calculating offsets |
+| `command_step(harness.tools, harness.clock, name, spec, options?)` | Run one named command and return a normalized step record with artifacts, tail text, optional classification, optional recovery hint, and attempts |
 | `command_step_with_retry(name, spec, options?)` | Explicit alias for `command_step` with a retry policy in options |
 | `command_steps_append(steps, name, spec, options?)` | Run a step, append it to a step list, and return `{steps, step, success, status, exit_code}` |
 | `command_steps_failed(steps, options?)` | Return whether any step failed and was not caller-marked recovered |
@@ -1491,7 +1491,7 @@ exit results remain distinct.
 `CommandStepReceipt` names the portable command-step fields used by durable
 audit and recovery artifacts. Host-backed `CommandResult.cwd` records the
 canonical effective directory even when the caller did not pass `cwd`;
-structured `command_json(..., {result: "record"})` failures carry the same
+structured `command_json(harness.agent, harness.tools, harness.clock, ..., {result: "record"})` failures carry the same
 field. All preserve additional adapter-owned fields.
 
 Readiness checks start with `{background: true}`, wait on
@@ -1501,9 +1501,9 @@ group has one clear owner:
 ```harn,ignore
 import { command_cancel, command_run, command_wait_for_output } from "std/command"
 
-const server = command_run(["my-server"], {background: true})
+const server = command_run(harness.tools, ["my-server"], {background: true})
 defer { command_cancel(server, {wait_result_ms: 5000}) }
-const ready = command_wait_for_output(server, "ready", {timeout_ms: 10000})
+const ready = command_wait_for_output(harness.tools, server, "ready", {timeout_ms: 10000})
 if !ready.matched { throw "server exited or timed out before readiness" }
 ```
 
@@ -1525,7 +1525,7 @@ manager, or host:
 ```harn,ignore
 import { command_step } from "std/command"
 
-const step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
+const step = command_step(harness.tools, harness.clock, "verify package", ["cargo", "test", "-p", "harn-vm"], {
   cwd: repo_root,
   capture: {max_inline_bytes: 12000},
   tail_bytes: 8000,
@@ -1557,12 +1557,12 @@ delegates retries and recovery metadata to `command_json_step`:
 ```harn,ignore
 import { command_json, command_json_step } from "std/command"
 
-const repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"], {
   timeout_ms: 10000,
   capture: {max_inline_bytes: 65536},
 })
 
-const probe = command_json_step("read repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+const probe = command_json_step(harness.agent, harness.tools, harness.clock, "read repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
   retry: {max_attempts: 2, delay_ms: 0},
 })
 ```
@@ -1574,10 +1574,10 @@ know about providers:
 ```harn,ignore
 import { command_json, command_try } from "std/command"
 
-const repo = command_try(
+const repo = command_try(harness.agent, harness.tools, harness.clock,
   [
     {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
-    {source: "cli", run: fn() { return command_json(["gh", "api", "repos/burin-labs/harn"]) }},
+    {source: "cli", run: fn() { return command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"]) }},
   ],
   {normalize: { value, source -> return {source: source, name: value.name} }},
 )
@@ -1604,7 +1604,7 @@ path supplied by tests:
 ```harn
 import { gha_annotation, gha_write_output } from "std/gha"
 
-log(gha_annotation("warning", "line1\nline2", {
+harness.stdio.log(gha_annotation("warning", "line1\nline2", {
   file: "src/main.rs",
   line: 7,
   title: "Heads up",
@@ -1639,7 +1639,7 @@ const result = page({
   format: "markdown",
 })
 if !result.ok {
-  log(result.error ?? "pager failed")
+  harness.stdio.log(result.error ?? "pager failed")
 }
 ```
 
@@ -1678,7 +1678,7 @@ const runs = [
 ]
 const pick = select_from(runs, {prompt: "Pick a run", default_index: 0})
 if pick.ok {
-  log("operator chose " + pick.value.id)
+  harness.stdio.log("operator chose " + pick.value.id)
 }
 ```
 
@@ -1841,27 +1841,28 @@ Project metadata helpers plus deterministic project evidence scanning:
 
 | Function | Description |
 |---|---|
-| `metadata_namespace(dir, namespace)` | Read resolved metadata for a namespace, defaulting to `{}` |
-| `metadata_local_namespace(dir, namespace)` | Read only the namespace data stored directly on a directory |
-| `project_inventory(namespace?)` | Return `{entries, status}` for metadata-backed project state |
-| `project_root_package()` | Infer the repository's root package/module name from common manifests |
-| `project_fingerprint(path?)` | Return the normalized shallow repo profile used by higher-level personas |
-| `project_context_profile(path, options?)` | Resolve project signals into prompt fragments, skills, tool groups, MCP preset candidates, and token-delta metadata |
-| `project_scan(path, options?)` | Scan a directory for deterministic L0/L1 evidence |
-| `project_enrich(path, options)` | Run caller-owned L2 enrichment over bounded project context with schema validation and caching |
-| `project_scan_tree(path, options?)` | Walk subdirectories and return a `{rel_path: evidence}` map |
-| `project_enrich(path, options?)` | Run a structured per-directory L2 enrichment with caller-owned prompt/schema |
-| `project_deep_scan(path, options?)` | Build or refresh a cached per-directory evidence tree backed by metadata namespaces |
-| `project_deep_scan_status(namespace, path?)` | Return the last deep-scan status for a namespace/scope |
-| `project_catalog()` | Return the built-in anchor/lockfile catalog used by `project_scan(...)` |
-| `project_scan_paths(path, options?)` | Return only the keys from `project_scan_tree(...)` |
-| `project_stale(namespace?)` | Return the stale summary from `metadata_status(...)` |
-| `project_stale_dirs(namespace?)` | Return the tier1+tier2 stale directory list |
-| `project_requires_refresh(namespace?)` | Return `true` when stale or missing hashes require refresh |
+| `metadata_namespace(harness.project, dir, namespace)` | Read resolved metadata for a namespace, defaulting to `{}` |
+| `metadata_local_namespace(harness.project, dir, namespace)` | Read only the namespace data stored directly on a directory |
+| `project_inventory(harness.project, namespace?)` | Return `{entries, status}` for metadata-backed project state |
+| `project_root_package(harness.fs, harness.project)` | Infer the repository's root package/module name from common manifests |
+| `harness.project.fingerprint(path?)` | Return the normalized shallow repo profile used by higher-level personas |
+| `project_context_profile(harness.project, path, options?)` | Resolve project signals into prompt fragments, skills, tool groups, MCP preset candidates, and token-delta metadata |
+| `project_scan(harness.project, path, options?)` | Scan a directory for deterministic L0/L1 evidence |
+| `project_enrich(harness.project, path, options)` | Run caller-owned L2 enrichment over bounded project context with schema validation and caching |
+| `project_scan_tree(harness.project, path, options?)` | Walk subdirectories and return a `{rel_path: evidence}` map |
+| `project_enrich(harness.project, path, options?)` | Run a structured per-directory L2 enrichment with caller-owned prompt/schema |
+| `project_deep_scan(harness.project, harness.clock, path, options?)` | Build or refresh a cached per-directory evidence tree backed by metadata namespaces |
+| `project_deep_scan_status(harness.project, namespace, path?)` | Return the last deep-scan status for a namespace/scope |
+| `project_catalog(harness.project)` | Return the built-in anchor/lockfile catalog used by `project_scan(harness.project, ...)` |
+| `project_scan_paths(harness.project, path, options?)` | Return only the keys from `project_scan_tree(harness.project, ...)` |
+| `project_stale(harness.project, namespace?)` | Return the stale summary from `metadata_status(...)` |
+| `project_stale_dirs(harness.project, namespace?)` | Return the tier1+tier2 stale directory list |
+| `project_requires_refresh(harness.project, namespace?)` | Return `true` when stale or missing hashes require refresh |
 
 Host-specific editor, git, diagnostics, learning, and filesystem/edit helpers
-should live in host-side `.harn` libraries built on capability-aware
-`host_call(...)`, not in Harn's shared stdlib.
+should live in host-side `.harn` libraries whose public APIs accept nominal
+Harness handles. The host implements those registered capabilities; ordinary
+libraries do not call the privileged `host_call(...)` wire.
 
 ### std/agents
 
@@ -1971,7 +1972,7 @@ Live, session-local working memory for `agent_loop`:
 
 | Function | Description |
 |---|---|
-| `agent_scratchpad_options(opts?)` | Normalize the public `agent_loop(..., {scratchpad})` option |
+| `agent_scratchpad_options(opts?)` | Normalize the public `agent_loop(harness, ..., {scratchpad})` option |
 | `agent_scratchpad_init(session, opts)` | Initialize the session scratchpad from the task or `scratchpad.initial` |
 | `agent_scratchpad_recitation_fragment(session, opts)` | Return the prompt-tail `_system_fragments` entry that recites the current scratchpad |
 | `agent_scratchpad_reorganize(session, opts, iteration, context?)` | Run the structured reorganization pass, validate source refs, and persist the compacted scratchpad |
@@ -2014,7 +2015,7 @@ Typed fact envelopes over `std/memory` for cross-session assertions:
 | `fact_tags(fact, tags?)` | Return canonical fact memory tags, generic and kind-scoped evidence tags, and caller tags |
 | `store_fact(input, options?)` | Store a typed fact as `MemoryRecord.value`; `options.namespace` or `options.scope` selects the memory namespace |
 | `recall_facts(query, kind?, min_confidence?, scope?)` | Recall facts by memory query, kind, and minimum confidence |
-| `invalidate_facts(predicate, scope?)` | Append memory tombstones for matching facts by id, key, kind, claim/query, tags, or evidence |
+| `invalidate_facts(harness.memory, predicate, scope?)` | Append memory tombstones for matching facts by id, key, kind, claim/query, tags, or evidence |
 
 ### std/agent/probe
 
@@ -2042,17 +2043,17 @@ Harn-owned route policy for typed handoff artifacts:
 
 ### std/worktree
 
-Helpers for isolated git worktree execution built on `exec_at(...)` and
-`shell_at(...)`:
+Helpers for isolated git worktree execution built on explicit
+`HarnessProcess` authority:
 
 | Function | Description |
 |---|---|
 | `worktree_default_path(repo, name)` | Return the default Harn-owned worktree path beneath `repo` |
-| `worktree_create(repo, name, base_ref, path?)` | Create or reset a worktree branch at a target path |
-| `worktree_remove(repo, path, force)` | Remove a worktree from the parent repo |
-| `worktree_status(path)` | Run `git status --short --branch` in the worktree |
-| `worktree_diff(path, base_ref?)` | Render diff output for the worktree |
-| `worktree_shell(path, script)` | Run an arbitrary shell command inside the worktree |
+| `worktree_create(harness.process, repo, name, base_ref, path?)` | Create or reset a worktree branch at a target path |
+| `worktree_remove(harness.process, repo, path, force)` | Remove a worktree from the parent repo |
+| `worktree_status(harness.process, path)` | Run `git status --short --branch` in the worktree |
+| `worktree_diff(harness.process, path, base_ref?)` | Render diff output for the worktree |
+| `worktree_shell(harness.process, path, script)` | Run an arbitrary shell command inside the worktree |
 
 ### std/personas/bulletins
 
@@ -2106,7 +2107,7 @@ members into the caller scope:
 ```harn,ignore
 import * as text from "std/text"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   __io_println(text.truncate_middle(long_text, 80))
 }
 ```
@@ -2210,10 +2211,10 @@ pub enum Outcome {
 ```harn,ignore
 import { Outcome, Point } from "./shapes"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const point = Point {x: 3, y: 4}
   const outcome = Outcome.Found(point)
-  log(outcome.variant)
+  harness.stdio.log(outcome.variant)
 }
 ```
 
@@ -2226,7 +2227,7 @@ also be used in schema expression positions.
 
 ## Package-root prompt assets
 
-`render(...)`, `render_prompt(...)`, the `template.render` host
+`harness.fs.render_prompt(...)`, the `template.render` host
 capability, and `{{ include "..." }}` directives accept two
 package-root forms in addition to plain source-relative paths. They
 exist to keep prompt-asset references stable across pipeline file
@@ -2234,8 +2235,8 @@ moves — a refactor that relocates the caller no longer breaks the
 asset path.
 
 ```harn,ignore
-render_prompt("@/prompts/tool-examples.harn.prompt", bindings)
-render_prompt("@partials/tool-examples.harn.prompt", bindings)
+harness.fs.render_prompt("@/prompts/tool-examples.harn.prompt", bindings)
+harness.fs.render_prompt("@partials/tool-examples.harn.prompt", bindings)
 ```
 
 Resolution rules:
@@ -2264,7 +2265,7 @@ same stable name regardless of which entry pipeline rendered it.
 Stdlib prompt assets use `std/...harn.prompt` paths:
 
 ```harn,ignore
-render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+harness.fs.render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
 ```
 
 These assets are embedded alongside stdlib modules, cache by stable asset id
@@ -2282,7 +2283,7 @@ when:
 `harn contracts bundle` records every resolved `@`-path under
 `prompt_assets`, so packagers don't need to maintain a separate file
 list. The Harn LSP's go-to-definition jumps straight from a literal
-`render_prompt("@/...")` argument to the target prompt file.
+`harness.fs.render_prompt("@/...")` argument to the target prompt file.
 
 ## Import behavior
 
@@ -2382,7 +2383,7 @@ from the root project's `harn.toml` by default.
 3. Non-pipeline top-level statements (fn declarations, let bindings) are executed, making their values available
 4. Circular imports are detected and skipped (each file is imported at most once)
 5. The working directory is temporarily changed to the imported file's directory, so nested imports resolve correctly
-6. Source-relative builtins like `render(...)` inside imported functions resolve
+6. Source-relative builtins like `harness.fs.render_prompt(...)` inside imported functions resolve
    paths relative to the imported module's directory, not the entry pipeline
 
 ## Static cross-module checking
@@ -2431,15 +2432,15 @@ import { format_result } from "lib/b"
 Pipelines can extend other pipelines:
 
 ```harn
-pipeline base(task) {
-  log("Step 1: setup")
-  log("Step 2: execute")
-  log("Step 3: cleanup")
+pipeline base(harness: Harness, task) {
+  harness.stdio.log("Step 1: setup")
+  harness.stdio.log("Step 2: execute")
+  harness.stdio.log("Step 3: cleanup")
 }
 
-pipeline custom(task) extends base {
+pipeline custom(harness: Harness, task) extends base {
   override setup() {
-    log("Custom setup")
+    harness.stdio.log("Custom setup")
   }
 }
 ```
@@ -2467,7 +2468,7 @@ import "lib/context"
 import "lib/agent"
 import "lib/helpers"
 
-pipeline default(task, project) {
+pipeline default(harness: Harness, task, project) {
   const ctx = gather_context(task, project)
   const result = run_agent(ctx)
   finalize(result)

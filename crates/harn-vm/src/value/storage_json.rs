@@ -3,10 +3,10 @@
 //!
 //! This is deliberately narrower than [`crate::stdlib::json`]'s converters: it
 //! covers the scalar / list / dict shapes those persistence paths actually
-//! store and maps every other value kind (closures, handles, …) to `null`
-//! rather than to a display string, because a persisted record should not carry
-//! a stringified handle. Keep persistence callers on this shared conversion
-//! path so handle/closure treatment stays consistent.
+//! store. Ordinary non-data values become `null`, while nominal Harness values
+//! fail closed—even when nested—because runtime authority must never become
+//! domain state. Keep persistence callers on this shared conversion path so
+//! handle/closure treatment stays consistent.
 
 use crate::value::{VmError, VmValue};
 
@@ -44,4 +44,27 @@ pub(crate) fn vm_to_storage_json(val: &VmValue) -> Result<serde_json::Value, VmE
         }
         _ => serde_json::Value::Null,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn root_harness_cannot_be_persisted_directly_or_nested() {
+        let harness = crate::harness::Harness::null().into_vm_value();
+        let direct = vm_to_storage_json(&harness).unwrap_err().to_string();
+        assert!(
+            direct.contains("Harness is runtime authority")
+                && direct.contains("cannot be persisted as domain state"),
+            "{direct}"
+        );
+
+        let nested = VmValue::List(std::sync::Arc::new(vec![harness]));
+        let nested_error = vm_to_storage_json(&nested).unwrap_err().to_string();
+        assert!(
+            nested_error.contains("cannot be persisted as domain state"),
+            "{nested_error}"
+        );
+    }
 }

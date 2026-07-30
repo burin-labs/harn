@@ -884,7 +884,11 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
     vm.set_bridge(bridge.clone());
     let task_state = state.clone();
     let handle = tokio::task::spawn_local(async move {
+        let harness = vm.root_harness_value().ok_or_else(|| {
+            VmError::Runtime("daemon agent loop has no root Harness authority".to_string())
+        })?;
         let args = vec![
+            harness,
             VmValue::String(arcstr::ArcStr::from(prompt)),
             match system {
                 Some(text) => VmValue::String(arcstr::ArcStr::from(text)),
@@ -895,7 +899,13 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
 
         crate::llm::install_current_host_bridge(bridge);
         let mut bridge_cleared = false;
-        let mut future = Pin::from(Box::new(vm.call_named_builtin("agent_loop", args)));
+        let mut future = Pin::from(Box::new(crate::stdlib::harn_entry::call_harn_export_on_vm(
+            &mut vm,
+            "std/agent/loop",
+            "agent_loop",
+            "daemon agent loop",
+            &args,
+        )));
         let result = std::future::poll_fn(|cx| {
             let polled = Future::poll(future.as_mut(), cx);
             if !bridge_cleared {
@@ -1114,12 +1124,13 @@ mod tests {
     fn daemon_trigger_reports_queue_overflow() {
         let result = run_harn_result(
             r#"
-pipeline test(task) {
-  const unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  const root = path_join(temp_dir(), "harn-daemon-overflow-" + unique)
-  mkdir(root)
-  llm_mock({text: "daemon ready"})
-  const daemon = daemon_spawn({
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.range(100000, 999999))
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-overflow-" + unique)
+  harness.fs.mkdir(root)
+  harness.llm.mock_enqueue({text: "daemon ready"})
+  const daemon = harness.agent.daemon_spawn({
     name: "overflow",
     task: "Wait for daemon trigger messages.",
     provider: "mock",
@@ -1127,8 +1138,8 @@ pipeline test(task) {
     event_queue_capacity: 1,
     wake_interval_ms: 1000,
   })
-  daemon_trigger(daemon, {kind: "trigger", payload: {n: 1}})
-  daemon_trigger(daemon, {kind: "trigger", payload: {n: 2}})
+  harness.agent.daemon_trigger(daemon, {kind: "trigger", payload: {n: 1}})
+  harness.agent.daemon_trigger(daemon, {kind: "trigger", payload: {n: 2}})
 }
 "#,
         );
@@ -1143,43 +1154,44 @@ pipeline test(task) {
     fn daemon_resume_requeues_inflight_trigger_after_stop() {
         let (output, _) = run_harn_result(
             r#"
-fn wait_for_iterations(handle, min_iterations) {
+fn wait_for_iterations(agent: HarnessAgent, clock: HarnessClock, handle, min_iterations) {
   let attempts = 0
-  let snap = daemon_snapshot(handle)
+  let snap = agent.managed_daemon_snapshot(handle)
   while attempts < 200 && snap?.total_iterations ?? 0 < min_iterations {
-    sleep(10ms)
-    snap = daemon_snapshot(handle)
+    clock.sleep_ms(10ms)
+    snap = agent.managed_daemon_snapshot(handle)
     attempts = attempts + 1
   }
   return snap
 }
 
-pipeline test(task) {
-  const unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  const root = path_join(temp_dir(), "harn-daemon-requeue-" + unique)
-  mkdir(root)
-  llm_mock({text: "daemon ready"})
-  llm_mock({text: "handled alpha"})
-  const daemon = daemon_spawn({
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.range(100000, 999999))
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-requeue-" + unique)
+  harness.fs.mkdir(root)
+  harness.llm.mock_enqueue({text: "daemon ready"})
+  harness.llm.mock_enqueue({text: "handled alpha"})
+  const daemon = harness.agent.daemon_spawn({
     name: "requeue",
     task: "Wait for daemon trigger messages and echo the latest payload.",
     provider: "mock",
     persist_path: root,
     wake_interval_ms: 1000,
   })
-  daemon_trigger(daemon, {kind: "trigger", payload: {path: "alpha.txt"}})
-  const cancelled_stop = spawn { daemon_stop(daemon) }
-  sleep(10ms)
+  harness.agent.daemon_trigger(daemon, {kind: "trigger", payload: {path: "alpha.txt"}})
+  const cancelled_stop = spawn { harness.agent.daemon_stop(daemon) }
+  harness.clock.sleep_ms(10ms)
   cancel(cancelled_stop)
-  const stopped = parallel(2) { daemon_stop(daemon) }
-  __io_println(stopped[0]?.status == "stopped" && stopped[1]?.status == "stopped")
-  __io_println(stopped[0]?.queued_event_count == 1 && stopped[1]?.queued_event_count == 1)
-  const resumed = daemon_resume(root)
-  const final_snap = wait_for_iterations(resumed, 2)
-  __io_println(contains(json_stringify(final_snap?.recorded_messages ?? []), "alpha.txt"))
-  __io_println(final_snap?.queued_event_count == 0)
-  daemon_stop(resumed)
-  delete_file(root)
+  const stopped = parallel(2) { harness.agent.daemon_stop(daemon) }
+  harness.stdio.println(stopped[0]?.status == "stopped" && stopped[1]?.status == "stopped")
+  harness.stdio.println(stopped[0]?.queued_event_count == 1 && stopped[1]?.queued_event_count == 1)
+  const resumed = harness.agent.daemon_resume(root)
+  const final_snap = wait_for_iterations(harness.agent, harness.clock, resumed, 2)
+  harness.stdio.println(contains(json_stringify(final_snap?.recorded_messages ?? []), "alpha.txt"))
+  harness.stdio.println(final_snap?.queued_event_count == 0)
+  harness.agent.daemon_stop(resumed)
+  harness.fs.delete(root)
 }
 "#,
         )

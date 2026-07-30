@@ -106,14 +106,14 @@ fn paused_clock_advances_thirty_days_deterministically() {
         temp.path(),
         "cron.harn",
         r#"
-pipeline default() {
-  const start = now_ms()
+pipeline default(harness: Harness) {
+  const start = harness.clock.now_ms()
   // 30 simulated days, one tick per simulated hour.
   for _ in range(30 * 24) {
-    sleep(3600000)
+    harness.clock.sleep_ms(3600000)
   }
-  const advanced = now_ms() - start
-  __io_println("advanced_ms=${advanced}")
+  const advanced = harness.clock.now_ms() - start
+  harness.stdio.println("advanced_ms=${advanced}")
 }
 "#,
     );
@@ -144,10 +144,10 @@ fn fs_overlay_writes_do_not_touch_underlying_tree() {
         &workspace,
         "writer.harn",
         r#"
-pipeline default() {
-  __io_println(read_file("seed.txt"))
-  write_file("new-file.txt", "hello from overlay")
-  __io_println(read_file("new-file.txt"))
+pipeline default(harness: Harness) {
+  harness.stdio.println(harness.fs.read_text("seed.txt"))
+  harness.fs.write_text("new-file.txt", "hello from overlay")
+  harness.stdio.println(harness.fs.read_text("new-file.txt"))
 }
 "#,
     );
@@ -346,10 +346,10 @@ fn unified_tape_byte_identical_round_trip() {
         temp.path(),
         "tape.harn",
         r#"
-pipeline default() {
-  const start = now_ms()
-  sleep(50)
-  write_file("snapshot.txt", "checkpoint at ${now_ms() - start}ms")
+pipeline default(harness: Harness) {
+  const start = harness.clock.now_ms()
+  harness.clock.sleep_ms(50)
+  harness.fs.write_text("snapshot.txt", "checkpoint at ${harness.clock.now_ms() - start}ms")
 }
 "#,
     );
@@ -415,8 +415,8 @@ fn unified_tape_flags_unpinned_clock_divergence() {
         temp.path(),
         "drifty.harn",
         r#"
-pipeline default() {
-  __io_println("now=${now_ms()}")
+pipeline default(harness: Harness) {
+  harness.stdio.println("now=${harness.clock.now_ms()}")
 }
 "#,
     );
@@ -629,12 +629,12 @@ fn des_runtime_paused_sleep_returns_immediately() {
         temp.path(),
         "des_sleep.harn",
         r#"
-pipeline default() {
-  mock_time(1000000)
-  const start = now_ms()
-  sleep(86400000)
-  const delta = now_ms() - start
-  __io_println("delta=${delta}")
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1000000)
+  const start = harness.clock.now_ms()
+  harness.clock.sleep_ms(86400000)
+  const delta = harness.clock.now_ms() - start
+  harness.stdio.println("delta=${delta}")
 }
 "#,
     );
@@ -658,14 +658,14 @@ fn des_runtime_concurrent_agents_settle_byte_identical() {
         temp.path(),
         "des_settle.harn",
         r#"
-pipeline default() {
-  mock_time(1000000)
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1000000)
   const outcome = parallel settle [1, 2, 3, 4, 5] { item ->
-    sleep(item * 100)
+    harness.clock.sleep_ms(item * 100)
     item * item
   }
-  __io_println("succeeded=${outcome.succeeded}")
-  __io_println("failed=${outcome.failed}")
+  harness.stdio.println("succeeded=${outcome.succeeded}")
+  harness.stdio.println("failed=${outcome.failed}")
 }
 "#,
     );
@@ -716,12 +716,12 @@ fn des_runtime_output_matches_paused_tokio() {
         temp.path(),
         "fidelity_smoke.harn",
         r#"
-pipeline default() {
-  mock_time(1767225600000)
-  const t0 = now_ms()
-  advance_time(5000)
-  const t1 = now_ms()
-  __io_println("delta=${t1 - t0}")
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1767225600000)
+  const t0 = harness.clock.now_ms()
+  harness.testing.clock_advance(5000)
+  const t1 = harness.clock.now_ms()
+  harness.stdio.println("delta=${t1 - t0}")
 }
 "#,
     );
@@ -773,11 +773,11 @@ mod annotations {
             workspace,
             "seed.harn",
             r#"
-pipeline default() {
-  const start = now_ms()
-  sleep(500)
-  const after = now_ms()
-  __io_println("delta=${after - start}")
+pipeline default(harness: Harness) {
+  const start = harness.clock.now_ms()
+  harness.clock.sleep_ms(500)
+  const after = harness.clock.now_ms()
+  harness.stdio.println("delta=${after - start}")
 }
 "#,
         );

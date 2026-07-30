@@ -1,7 +1,7 @@
 # Tool hooks cookbook
 
 Copy-paste recipes for the [`preset_run_command`](../tool-hooks.md)
-wrapper. Drop one into a `pipeline default(task) { ... }` body, wire
+wrapper. Drop one into a `pipeline default(harness: Harness, task) { ... }` body, wire
 the returned closure into your `agent_loop`'s `run_command` handler,
 and you have working catalogue-driven command guards.
 
@@ -14,7 +14,7 @@ topologies (handler + dispatch + transcript wiring) that need an active
 session to type-check end-to-end. Each fragment matches a conformance
 fixture under `conformance/tests/stdlib/tool_hooks/tool_hooks_*.harn`.
 They intentionally wrap a command-string tool so the preset catalogues can
-rewrite or deny shell input. Prefer argv-style `exec(...)` calls for tools
+rewrite or deny shell input. Prefer argv-style `harness.process.exec(...)` calls for tools
 whose interface does not require shell syntax.
 
 ## Rust agent: safe `cargo`
@@ -27,12 +27,12 @@ to `stacks: ["rust"]` is enough.
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
     stacks: ["rust"],
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {
+  agent_loop(harness, task, {
     tools: {tools: [{name: "run_command", handler: run_command}]},
     system: "You are a Rust contributor. Run cargo commands through run_command.",
   })
@@ -61,12 +61,12 @@ output visible.
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
     stacks: ["python"],
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -79,13 +79,13 @@ strict-CI agent you can promote it to a deny by switching the mode:
 ```harn,ignore
 import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
     stacks: ["typescript"],
     mode: tool_hooks_mode_deny_with_explanation,
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -102,7 +102,7 @@ rules for project-specific extensions:
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const xcodebuild_no_destination = tool_rule({
     id: "swift.xcodebuild_no_destination",
     pattern: { command, _context ->
@@ -118,9 +118,9 @@ pipeline default(task) {
   const run_command = preset_run_command({
     stacks: ["swift"],
     custom_rules: [xcodebuild_no_destination],
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -134,7 +134,7 @@ priority override in a custom rule that matches first:
 ```harn,ignore
 import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const deny_unbounded_select_star = tool_rule({
     id: "harness.sql.unbounded_select_star",
     pattern: { command, _context ->
@@ -151,9 +151,9 @@ pipeline default(task) {
     stacks: ["sql"],
     custom_rules: [deny_unbounded_select_star],
     mode: tool_hooks_mode_deny_with_explanation,
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -169,12 +169,12 @@ guidance into the dispatcher itself. Opt-in is one line:
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
     stacks: ["harn"],
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -191,7 +191,7 @@ fallback for ad-hoc commands. The classifier is opt-in — leaving
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
     stacks: ["rust", "python", "typescript", "swift", "sql", "harn"],
     llm_classifier: {
@@ -200,9 +200,9 @@ pipeline default(task) {
       threshold: 0.85,
       cache: {ttl_seconds: 3600},
     },
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -231,20 +231,20 @@ false-positive rate is acceptable, switch to the default mode.
 ```harn,ignore
 import { preset_run_command, tool_hooks_mode_passthrough_only_audit } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
     stacks: ["python"],
     mode: tool_hooks_mode_passthrough_only_audit,
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  const result = agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
-  const audits = lifecycle_audit_log_take()
+  const result = agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  const audits = harness.obs.pipeline_lifecycle_audit_log_take()
   const warnings = audits |> filter({ a -> a.kind == "tool_rule_warning" })
-  log("matched (audit-only): " + to_string(len(warnings)))
+  harness.stdio.log("matched (audit-only): " + to_string(len(warnings)))
 }
 ```
 
-`lifecycle_audit_log_take()` drains the in-memory buffer; combine
+`harness.obs.pipeline_lifecycle_audit_log_take()` drains the in-memory buffer; combine
 with your transcript persistence to retain the rule-firings beyond
 the pipeline run.
 
@@ -257,18 +257,18 @@ different rule shapes:
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const preview = preset_run_command({stacks: ["rust"]})
   const envelope = preview("cargo build --release")
-  log(envelope.action)        // "rewrite"
-  log(envelope.command)       // "cargo build --release --target-dir target-shared"
-  log(envelope.rule_id)       // "rust.cargo.target_dir_conflict"
-  log(envelope.severity)      // "warning"
+  harness.stdio.log(envelope.action)        // "rewrite"
+  harness.stdio.log(envelope.command)       // "cargo build --release --target-dir target-shared"
+  harness.stdio.log(envelope.rule_id)       // "rust.cargo.target_dir_conflict"
+  harness.stdio.log(envelope.severity)      // "warning"
 }
 ```
 
 Audit + reminder side effects still fire in preview mode, so a
-test asserting on `lifecycle_audit_log_take()` sees the rule
+test asserting on `harness.obs.pipeline_lifecycle_audit_log_take()` sees the rule
 firings even though no command actually executed.
 
 ## Composing with `register_tool_hook`
@@ -284,14 +284,14 @@ around it:
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default(task) {
-  register_tool_hook({pattern: "*", max_output: 4000})
+pipeline default(harness: Harness, task) {
+  harness.tools.register_hook({pattern: "*", max_output: 4000})
 
   const run_command = preset_run_command({
     stacks: ["rust"],
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 

@@ -9,12 +9,12 @@ fn __budget_envelope(opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_budget_pre_call_blocked(harness: Harness, session, opts) {
+pub fn agent_budget_pre_call_blocked(agent: HarnessAgent, session, opts) {
   const envelope = __budget_envelope(opts)
   if envelope == nil {
     return false
   }
-  return harness.agent.budget_pre_call_blocked(session.session_id, envelope)
+  return agent.budget_pre_call_blocked(session.session_id, envelope)
 }
 
 /**

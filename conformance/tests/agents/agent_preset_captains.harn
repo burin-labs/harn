@@ -56,7 +56,8 @@ pipeline default(harness: Harness) {
   const audit_sink = { _record -> nil }
   const telemetry_sink = { _span -> nil }
   const merge_with_sinks = agent_preset(
-    harness, "merge_captain",
+    harness,
+    "merge_captain",
     {audit_sink: audit_sink, telemetry: telemetry_sink},
   )
   harness.stdio.println(merge_with_sinks?.tool_caller != nil)
@@ -76,14 +77,16 @@ pipeline default(harness: Harness) {
   }
   const escalate = { _call -> false }
   const routed = agent_preset(
-    harness, "release_captain",
+    harness,
+    "release_captain",
     {cheap_caller: cheap, frontier_caller: frontier, escalate_predicate: escalate},
   )
   harness.stdio.println(routed?.llm_caller != nil)
   // (7) Caller-supplied tool_caller wins outright over preset-built layers.
   const custom_caller = { call, next -> next(call) }
   const overridden = agent_preset(
-    harness, "merge_captain",
+    harness,
+    "merge_captain",
     {tool_caller: custom_caller, audit_sink: audit_sink},
   )
   harness.stdio.println(overridden.tool_caller == custom_caller)
@@ -112,7 +115,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "ok1", name: "lookup", arguments: {q: "x"}},
@@ -123,7 +127,8 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      const merge_run = preset_agent(harness,
+      const merge_run = preset_agent(
+        harness,
         "merge_captain",
         "Try one read and one write.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3},
@@ -134,14 +139,16 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "rl1", name: "lookup", arguments: {q: "1"}}]},
       {tool_calls: [{id: "rl2", name: "lookup", arguments: {q: "2"}}]},
       {tool_calls: [{id: "rl3", name: "lookup", arguments: {q: "3"}}]},
       llm_text("<user_response>Stopping.</user_response>"),
     ],
     { ->
-      const oncall_capped = preset_agent(harness,
+      const oncall_capped = preset_agent(
+        harness,
         "oncall_captain",
         "Hammer the same tool.",
         {
@@ -156,12 +163,14 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "dr1", name: "delete", arguments: {path: "/tmp/preview"}}]},
       llm_text("<user_response>Dry run preview.</user_response>"),
     ],
     { ->
-      const release_dry = preset_agent(harness,
+      const release_dry = preset_agent(
+        harness,
         "release_captain",
         "Preview the action.",
         {
@@ -177,12 +186,14 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "rv1", name: "lookup", arguments: {q: "review"}}]},
       llm_text("<user_response>Looks good.</user_response>"),
     ],
     { ->
-      const review_run = preset_agent(harness,
+      const review_run = preset_agent(
+        harness,
         "review_captain",
         "Review this PR.",
         {provider: "mock", tools: registry, tool_format: "native"},
@@ -191,12 +202,14 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "ow1", name: "delete", arguments: {path: "/tmp/yes"}}]},
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      const merge_no_consent = preset_agent(harness,
+      const merge_no_consent = preset_agent(
+        harness,
         "merge_captain",
         "Delete with consent disabled.",
         {

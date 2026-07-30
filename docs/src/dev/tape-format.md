@@ -62,11 +62,11 @@ fidelity checkers still produce a structured report.
 
 | Kind | Payload fields | Source |
 |---|---|---|
-| `clock_read` | `source` (`"wall"` or `"monotonic"`), `value_ms` | `now_ms()` / `monotonic_ms()` builtins |
-| `clock_sleep` | `duration_ms` | `sleep(...)` / `advance_time(...)` |
+| `clock_read` | `source` (`"wall"` or `"monotonic"`), `value_ms` | `harness.clock.now_ms()` / `harness.clock.monotonic_ms()` methods |
+| `clock_sleep` | `duration_ms` | `harness.clock.sleep_ms(...)` / `harness.testing.clock_advance(...)` |
 | `llm_call` | `request_digest`, `response` (inline or CAS) | LLM provider interception |
-| `file_read` | `path`, `content_hash`, `len_bytes` | `read_file(...)` builtins |
-| `file_write` | `path`, `content_hash`, `len_bytes` | `write_file(...)`, `append_file(...)`, `append_file_locked(...)` |
+| `file_read` | `path`, `content_hash`, `len_bytes` | `harness.fs.read_text(...)` builtins |
+| `file_write` | `path`, `content_hash`, `len_bytes` | `harness.fs.write_text(...)`, `harness.fs.append(...)`, `harness.fs.append_locked(...)` |
 | `file_delete` | `path` | `remove_file(...)` |
 | `process_spawn` | `program`, `args`, `cwd`, `exit_code`, `duration_ms`, `stdout_payload`, `stderr_payload` | Sandboxed subprocess invocation |
 

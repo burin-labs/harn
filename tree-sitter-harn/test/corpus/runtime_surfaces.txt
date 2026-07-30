@@ -108,14 +108,14 @@ pipeline main(task) {
             value: (identifier)))))))
 
 ==================
-HITL First-Class Primitives
+HITL Harness Capability Methods
 ==================
 
-pipeline test(task) {
-  let response = ask_user(prompt: "Pick a number", default: 0)
-  let result = dual_control(n: 2, m: 3, action: destructive_step, approvers: ["alice", "bob"])
-  let handle = escalate_to(role: "oncall", reason: "deploy failed")
-  let record = request_approval(action: "deploy", quorum: 2, reviewers: ["alice"])
+pipeline test(harness: Harness, task) {
+  let response = harness.interaction.ask_user("Pick a number", {default: 0})
+  let result = harness.interaction.dual_control(2, 3, destructive_step, ["alice", "bob"])
+  let handle = harness.interaction.escalate_to("oncall", "deploy failed")
+  let record = harness.interaction.request_approval("deploy", {quorum: 2, reviewers: ["alice"]})
 }
 
 ---
@@ -125,35 +125,42 @@ pipeline test(task) {
     name: (identifier)
     (parameter_list
       (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier)))
+      (typed_parameter
         name: (identifier)))
     (block
       (let_binding
         name: (identifier)
-        value: (hitl_expression
-          (hitl_arg
-            name: (identifier)
-            value: (string_literal
+        value: (call_expression
+          function: (property_access
+            object: (property_access
+              object: (identifier)
+              property: (identifier))
+            property: (identifier))
+          (argument_list
+            (string_literal
               (string_delimiter)
               (string_content)
-              (string_delimiter)))
-          (hitl_arg
-            name: (identifier)
-            value: (integer_literal))))
+              (string_delimiter))
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (integer_literal))))))
       (let_binding
         name: (identifier)
-        value: (hitl_expression
-          (hitl_arg
-            name: (identifier)
-            value: (integer_literal))
-          (hitl_arg
-            name: (identifier)
-            value: (integer_literal))
-          (hitl_arg
-            name: (identifier)
-            value: (identifier))
-          (hitl_arg
-            name: (identifier)
-            value: (list_literal
+        value: (call_expression
+          function: (property_access
+            object: (property_access
+              object: (identifier)
+              property: (identifier))
+            property: (identifier))
+          (argument_list
+            (integer_literal)
+            (integer_literal)
+            (identifier)
+            (list_literal
               (string_literal
                 (string_delimiter)
                 (string_content)
@@ -164,38 +171,45 @@ pipeline test(task) {
                 (string_delimiter))))))
       (let_binding
         name: (identifier)
-        value: (hitl_expression
-          (hitl_arg
-            name: (identifier)
-            value: (string_literal
+        value: (call_expression
+          function: (property_access
+            object: (property_access
+              object: (identifier)
+              property: (identifier))
+            property: (identifier))
+          (argument_list
+            (string_literal
               (string_delimiter)
               (string_content)
-              (string_delimiter)))
-          (hitl_arg
-            name: (identifier)
-            value: (string_literal
+              (string_delimiter))
+            (string_literal
               (string_delimiter)
               (string_content)
               (string_delimiter)))))
       (let_binding
         name: (identifier)
-        value: (hitl_expression
-          (hitl_arg
-            name: (identifier)
-            value: (string_literal
+        value: (call_expression
+          function: (property_access
+            object: (property_access
+              object: (identifier)
+              property: (identifier))
+            property: (identifier))
+          (argument_list
+            (string_literal
               (string_delimiter)
               (string_content)
-              (string_delimiter)))
-          (hitl_arg
-            name: (identifier)
-            value: (integer_literal))
-          (hitl_arg
-            name: (identifier)
-            value: (list_literal
-              (string_literal
-                (string_delimiter)
-                (string_content)
-                (string_delimiter)))))))))
+              (string_delimiter))
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (integer_literal))
+              (dict_entry
+                key: (identifier)
+                value: (list_literal
+                  (string_literal
+                    (string_delimiter)
+                    (string_content)
+                    (string_delimiter)))))))))))
 
 ==================
 Parallel Each As Stream

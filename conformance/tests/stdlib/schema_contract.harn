@@ -91,24 +91,33 @@ pipeline default(harness: Harness, task) {
     schema_contract_check({id: "v2-ready", version: 2, payload: {count: 1}}, broken),
   )
   harness.stdio.println(broken_failure.kind + ":" + broken_failure.issues[0].rule)
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-schema-contract-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-schema-contract-" + harness.random.uuid_v7(),
+  )
   const run = run_artifacts_open(harness, "contract", {root: root, run_id: "run-a"})
   const receipt_artifact = artifact_descriptor("receipt.json", contract)
   const written = unwrap(
     run_artifact_write_json_result(
-      harness, run,
+      harness.fs,
+      run,
       receipt_artifact,
       {id: "v2-stored", version: 2, payload: {count: 3}},
     ),
   )
-  const reread = unwrap(run_artifact_read_json_result(harness, run, receipt_artifact))
+  const reread = unwrap(run_artifact_read_json_result(harness.fs, run, receipt_artifact))
   harness.stdio.println(written.status + ":" + reread.mode + ":" + reread.id)
   const invalid_receipt: any = {id: "bad", version: 2, payload: {count: 3}}
-  const rejected = run_artifact_write_json_result(harness, run, receipt_artifact, invalid_receipt)
+  const rejected = run_artifact_write_json_result(
+    harness.fs,
+    run,
+    receipt_artifact,
+    invalid_receipt,
+  )
   harness.stdio.println(
     unwrap_err(rejected).kind
       + ":"
-      + run_artifact_read_json(harness, run, receipt_artifact).id,
+      + run_artifact_read_json(harness.fs, run, receipt_artifact).id,
   )
   harness.fs.delete(root)
 }

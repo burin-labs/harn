@@ -1,7 +1,8 @@
 import "std/agents"
 import "std/handoffs"
 
-fn review_captain_mock(envelope) {
+fn review_captain_mock(harness: Harness, envelope) {
+  let _ = harness
   return {
     persona: "review_captain",
     received_handoff_kind: envelope?.handoff?.kind,
@@ -30,7 +31,7 @@ pipeline main(harness: Harness) {
     requested_capabilities: ["review"],
     allowed_side_effects: ["comment_on_pr"],
   }
-  const routed = handoff_routed(harness, seed, routes, {})
+  const routed = handoff_routed(harness.clock, seed, routes, {})
   const dispatch = handoff_dispatch(
     harness,
     routed,
@@ -38,13 +39,13 @@ pipeline main(harness: Harness) {
     {dispatchers: {review_captain: review_captain_mock}},
   )
   const exhausted = handoff_routed(
-    harness,
+    harness.clock,
     seed + {budget_remaining: {tokens: 0, tool_calls: 0}},
     routes,
     {budget_exhausted: true},
   )
   const run = workflow_result_run(
-    harness,
+    harness.obs,
     "Route merge receipt handoff",
     "merge_captain",
     {visible_text: "handoff routed"},

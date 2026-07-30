@@ -21,29 +21,57 @@ pipeline default(harness: Harness) {
     },
   }
   const options = {project: false, env: false, config: config}
-  const trailers = git_trailers(harness, chain, options)
+  const trailers = git_trailers(harness.env, harness.fs, chain, options)
   require !contains(trailers, "Signed-off-by: Merge Captain"),
     "agent actor must not receive DCO sign-off"
   require contains(trailers, "Signed-off-by: Human Merge Captain"),
     "human sign-off must not be filtered by name substring"
   const suppressed_message = "Fix identity trailers\n"
-  require append_git_trailers(harness, suppressed_message, chain, options + {enabled: false})
+  require append_git_trailers(
+    harness.env,
+    harness.fs,
+    suppressed_message,
+    chain,
+    options + {enabled: false},
+  )
     == suppressed_message,
     "suppressed append must preserve the original message"
   harness.stdio.println(trailers)
   harness.stdio.println("--- default ---")
   harness.stdio.println(
-    git_trailers(harness, nested_chain,
+    git_trailers(
+      harness.env,
+      harness.fs,
+      nested_chain,
       {project: false, env: false, config: {identities: config.identities}},
     ),
   )
   harness.stdio.println("--- assembled ---")
-  harness.stdio.println(append_git_trailers(harness, "Fix identity trailers\n\nUse the actor chain.", chain, options))
+  harness.stdio.println(
+    append_git_trailers(
+      harness.env,
+      harness.fs,
+      "Fix identity trailers\n\nUse the actor chain.",
+      chain,
+      options,
+    ),
+  )
   harness.stdio.println("--- suppressed ---")
-  harness.stdio.println(append_git_trailers(harness, "Fix identity trailers", chain, options + {enabled: false}))
+  harness.stdio.println(
+    append_git_trailers(
+      harness.env,
+      harness.fs,
+      "Fix identity trailers",
+      chain,
+      options + {enabled: false},
+    ),
+  )
   harness.stdio.println("--- config suppressed ---")
   harness.stdio.println(
-    append_git_trailers(harness, "Fix identity trailers",
+    append_git_trailers(
+      harness.env,
+      harness.fs,
+      "Fix identity trailers",
       chain,
       {
         project: false,

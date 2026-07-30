@@ -116,17 +116,15 @@ fn harness_process_method_call_keeps_capability_identity() {
     let report = analyze(
         r#"
 fn main(harness: Harness) {
-  harness.process.spawn_captured({cmd: "printf", args: ["hi"]})
+  harness.process.run({program: "printf", args: ["hi"]})
 }
 "#,
     );
 
     let calls = handler_call_names(&report);
     assert!(
-        calls
-            .iter()
-            .any(|name| name == "harness.process.spawn_captured"),
-        "expected harness.process.spawn_captured to keep its capability identity, got: {calls:?}"
+        calls.iter().any(|name| name == "harness.process.run"),
+        "expected harness.process.run to keep its capability identity, got: {calls:?}"
     );
 }
 
@@ -174,8 +172,8 @@ fn fs_writes_within_glob_passes() {
     let report = analyze(
         r#"
 @invariant("fs.writes", "src/**")
-fn handler() {
-  write_file("src/main.rs", "ok")
+fn handler(harness: Harness) {
+  harness.fs.write_text("src/main.rs", "ok")
 }
 "#,
     );
@@ -192,8 +190,8 @@ fn fs_writes_outside_glob_fails() {
     let report = analyze(
         r#"
 @invariant("fs.writes", "src/**")
-fn handler() {
-  write_file("/tmp/main.rs", "nope")
+fn handler(harness: Harness) {
+  harness.fs.write_text("/tmp/main.rs", "nope")
 }
 "#,
     );
@@ -204,7 +202,27 @@ fn handler() {
     assert!(diags[0]
         .path
         .iter()
-        .any(|step| step.label.contains("write_file")));
+        .any(|step| step.label.contains("harness.fs.write_text")));
+}
+
+#[test]
+fn fs_writes_attributes_nominal_narrow_handle_calls() {
+    let report = analyze(
+        r#"
+@invariant("fs.writes", "src/**")
+fn write_output(fs: HarnessFs) {
+  fs.write_text("/tmp/main.rs", "nope")
+}
+"#,
+    );
+
+    let diags = diagnostics_by_invariant(&report, "fs.writes");
+    assert_eq!(diags.len(), 1, "{diags:#?}");
+    assert!(diags[0].message.contains("/tmp/main.rs"));
+    assert!(diags[0]
+        .path
+        .iter()
+        .any(|step| step.label.contains("harness.fs.write_text")));
 }
 
 #[test]
@@ -212,11 +230,11 @@ fn approval_requires_gate_on_all_paths() {
     let report = analyze(
         r#"
 @invariant("approval.reachability")
-fn handler() {
+fn handler(harness: Harness) {
   if true {
-request_approval("ship it")
+    harness.interaction.request_approval("ship it")
   }
-  write_file("src/main.rs", "unsafe")
+  harness.fs.write_text("src/main.rs", "unsafe")
 }
 "#,
     );
@@ -231,9 +249,9 @@ fn approval_inside_dual_control_closure_is_accepted() {
     let report = analyze(
         r#"
 @invariant("approval.reachability")
-fn handler() {
+fn handler(harness: Harness) {
   dual_control(2, 3, { ->
-write_file("src/main.rs", "safe")
+    harness.fs.write_text("src/main.rs", "safe")
   }, ["alice", "bob", "carol"])
 }
 "#,
@@ -287,8 +305,8 @@ fn capability_policy_rejects_undeclared_connector_access() {
     let report = analyze(
         r#"
 @invariant("capability.policy", allow: "fs.write")
-fn handler(client) {
-  mcp_call(client, "github.search", {})
+fn handler(harness: Harness, client) {
+  harness.tools.mcp_call(client, "github.search", {})
 }
 "#,
     );
@@ -301,7 +319,7 @@ fn handler(client) {
     assert!(diags[0]
         .path
         .iter()
-        .any(|step| step.label.contains("github.search")));
+        .any(|step| step.label.contains("harness.tools.mcp_call")));
 }
 
 #[test]
@@ -309,8 +327,8 @@ fn capability_policy_rejects_workspace_mutation_outside_allowed_glob() {
     let report = analyze(
         r#"
 @invariant("capability.policy", allow: "fs.write", workspace: "src/**")
-fn handler() {
-  write_file("/tmp/out.txt", "unsafe")
+fn handler(harness: Harness) {
+  harness.fs.write_text("/tmp/out.txt", "unsafe")
 }
 "#,
     );
@@ -331,10 +349,10 @@ fn capability_policy_accepts_approved_workspace_mutation_and_budgeted_llm() {
   workspace: "src/**",
   require_approval: "fs.write",
   require_budget: "llm.model")
-fn handler() {
-  request_approval("edit", {capabilities_requested: ["fs.write"]})
-  write_file("src/main.rs", "safe")
-  llm_call("summarize", nil, {budget: {max_output_tokens: 64}})
+fn handler(harness: Harness) {
+  harness.interaction.request_approval("edit", {capabilities_requested: ["fs.write"]})
+  harness.fs.write_text("src/main.rs", "safe")
+  harness.llm.call("summarize", nil, {budget: {max_output_tokens: 64}})
 }
 "#,
     );
@@ -353,8 +371,8 @@ fn capability_policy_requires_command_policy_for_exec() {
 @invariant("capability.policy",
   allow: "process.exec",
   require_command_policy: "process.exec")
-fn handler() {
-  exec("rm -rf /tmp/harn")
+fn handler(harness: Harness) {
+  harness.process.shell("rm -rf /tmp/harn")
 }
 "#,
     );
@@ -369,9 +387,9 @@ fn handler() {
 @invariant("capability.policy",
   allow: "process.exec",
   require_command_policy: "process.exec")
-fn handler() {
-  with_command_policy({deny: ["rm"]}, { ->
-exec("echo ok")
+fn handler(harness: Harness) {
+  harness.runtime.with_command_policy({deny: ["rm"]}, { ->
+    harness.process.shell("echo ok")
   })
 }
 "#,
@@ -391,10 +409,10 @@ fn capability_policy_tracks_command_policy_push_and_pop() {
 @invariant("capability.policy",
   allow: "process.exec",
   require_command_policy: "process.exec")
-fn handler() {
-  command_policy_push({deny: ["rm"]})
-  exec("echo ok")
-  command_policy_pop()
+fn handler(harness: Harness) {
+  harness.runtime.command_policy_push({deny: ["rm"]})
+  harness.process.shell("echo ok")
+  harness.runtime.command_policy_pop()
 }
 "#,
     );
@@ -410,10 +428,10 @@ fn handler() {
 @invariant("capability.policy",
   allow: "process.exec",
   require_command_policy: "process.exec")
-fn handler() {
-  command_policy_push({deny: ["rm"]})
-  command_policy_pop()
-  exec("echo unsafe")
+fn handler(harness: Harness) {
+  harness.runtime.command_policy_push({deny: ["rm"]})
+  harness.runtime.command_policy_pop()
+  harness.process.shell("echo unsafe")
 }
 "#,
     );
@@ -430,9 +448,9 @@ fn capability_policy_requires_egress_policy_for_network_and_connector_access() {
 @invariant("capability.policy",
   allow: "network.access,mcp.connector",
   require_egress_policy: "network.access,mcp.connector")
-fn handler(client) {
-  http_request("https://example.com")
-  mcp_call(client, "github.search", {})
+fn handler(harness: Harness, client) {
+  harness.net.request("GET", "https://example.com")
+  harness.tools.mcp_call(client, "github.search", {})
 }
 "#,
     );
@@ -451,10 +469,10 @@ fn handler(client) {
 @invariant("capability.policy",
   allow: "network.access,mcp.connector",
   require_egress_policy: "network.access,mcp.connector")
-fn handler(client) {
-  egress_policy({default: "deny", allow: ["example.com"]})
-  http_request("https://example.com")
-  mcp_call(client, "github.search", {})
+fn handler(harness: Harness, client) {
+  harness.net.egress_policy({default: "deny", allow: ["example.com"]})
+  harness.net.request("GET", "https://example.com")
+  harness.tools.mcp_call(client, "github.search", {})
 }
 "#,
     );
@@ -473,8 +491,8 @@ fn capability_policy_treats_unix_socket_json_request_as_network_access() {
 @invariant("capability.policy",
   allow: "network.access",
   require_egress_policy: "network.access")
-fn handler() {
-  unix_socket_json_request("/tmp/harn.sock", {})
+fn handler(harness: Harness) {
+  harness.net.unix_socket_json_request("/tmp/harn.sock", {})
 }
 "#,
     );
@@ -491,8 +509,8 @@ fn capability_policy_requires_autonomy_policy_for_worker_dispatch() {
 @invariant("capability.policy",
   allow: "worker.dispatch",
   require_autonomy: "worker.dispatch")
-fn handler() {
-  spawn_agent({task: "summarize"})
+fn handler(harness: Harness) {
+  harness.agent.worker_spawn({task: "summarize"})
 }
 "#,
     );
@@ -507,9 +525,9 @@ fn handler() {
 @invariant("capability.policy",
   allow: "worker.dispatch",
   require_autonomy: "worker.dispatch")
-fn handler() {
-  with_autonomy_policy({autonomy_tier: "act_with_approval"}, { ->
-spawn_agent({task: "summarize"})
+fn handler(harness: Harness) {
+  harness.runtime.with_autonomy_policy({autonomy_tier: "act_with_approval"}, { ->
+    harness.agent.worker_spawn({task: "summarize"})
   })
 }
 "#,
@@ -528,8 +546,8 @@ fn explain_returns_violation_path() {
         &parse_program(
             r#"
 @invariant("approval.reachability")
-fn handler() {
-  write_file("src/main.rs", "unsafe")
+fn handler(harness: Harness) {
+  harness.fs.write_text("src/main.rs", "unsafe")
 }
 "#,
         ),

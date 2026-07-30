@@ -38,14 +38,14 @@ fn out(source: &str) -> Vec<String> {
 #[test]
 fn check_defers_when_session_under_threshold() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
   compaction.policy({session_id: s, max_tokens: 10000, max_turns: 50})
   const decision = compaction.check(s)
-  log(decision["action"])
-  log(decision["message_count"])
-  log(decision["trigger"])
-  log(decision["policy_inherited"])
+  harness.stdio.log(decision["action"])
+  harness.stdio.log(decision["message_count"])
+  harness.stdio.log(decision["trigger"])
+  harness.stdio.log(decision["policy_inherited"])
 }
 "#);
     assert_eq!(lines, vec!["defer", "0", "manual", "false"], "{lines:?}");
@@ -54,15 +54,15 @@ pipeline main(task) {
 #[test]
 fn check_marks_compact_now_when_tokens_cross() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
   compaction.policy({session_id: s, max_tokens: 1, max_turns: 100})
-  agent_session_inject(s, {role: "user", content: "Investigate the parser regression in stdlib once more."})
-  agent_session_inject(s, {role: "assistant", content: "The root cause is in diagnostic recovery; we missed an EOF guard."})
+  harness.agent.inject(s, {role: "user", content: "Investigate the parser regression in stdlib once more."})
+  harness.agent.inject(s, {role: "assistant", content: "The root cause is in diagnostic recovery; we missed an EOF guard."})
   const decision = compaction.check(s)
-  log(decision["action"])
-  log(decision["trigger"])
-  log(decision["strategy"])
+  harness.stdio.log(decision["action"])
+  harness.stdio.log(decision["trigger"])
+  harness.stdio.log(decision["strategy"])
 }
 "#);
     assert_eq!(
@@ -75,17 +75,17 @@ pipeline main(task) {
 #[test]
 fn check_uses_default_policy_when_session_unscoped() {
     let lines = out(r#"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   // No session_id → registers the default policy.
   compaction.policy({max_turns: 2})
-  const s = agent_session_open()
-  agent_session_inject(s, {role: "user", content: "one"})
-  agent_session_inject(s, {role: "assistant", content: "two"})
-  agent_session_inject(s, {role: "user", content: "three"})
+  const s = harness.agent.open()
+  harness.agent.inject(s, {role: "user", content: "one"})
+  harness.agent.inject(s, {role: "assistant", content: "two"})
+  harness.agent.inject(s, {role: "user", content: "three"})
   const decision = compaction.check(s)
-  log(decision["action"])
-  log(decision["trigger"])
-  log(decision["policy_inherited"])
+  harness.stdio.log(decision["action"])
+  harness.stdio.log(decision["trigger"])
+  harness.stdio.log(decision["policy_inherited"])
 }
 "#);
     assert_eq!(lines, vec!["compact_now", "turns", "true"], "{lines:?}");
@@ -94,22 +94,22 @@ pipeline main(task) {
 #[test]
 fn run_compacts_session_via_lifecycle_with_custom_strategy() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
   compaction.policy({session_id: s, max_tokens: 1, keep_last: 1})
-  agent_session_inject(s, {role: "user", content: "Investigate the parser regression."})
-  agent_session_inject(s, {role: "assistant", content: "The root cause is in diagnostic recovery."})
-  agent_session_inject(s, {role: "user", content: "Capture the next command."})
+  harness.agent.inject(s, {role: "user", content: "Investigate the parser regression."})
+  harness.agent.inject(s, {role: "assistant", content: "The root cause is in diagnostic recovery."})
+  harness.agent.inject(s, {role: "user", content: "Capture the next command."})
 
   const outcome = compaction.run(s, {
     strategy: "custom",
     summarize_fn: { archived, _reminders -> {summary: "policy compacted " + to_string(len(archived))} },
   })
-  log(outcome["compacted"])
-  log(outcome["archived_messages"])
-  log(outcome["engine_strategy"])
-  log(outcome["strategy"])
-  log(transcript_summary(outcome["transcript"])?.contains("policy compacted"))
+  harness.stdio.log(outcome["compacted"])
+  harness.stdio.log(outcome["archived_messages"])
+  harness.stdio.log(outcome["engine_strategy"])
+  harness.stdio.log(outcome["strategy"])
+  harness.stdio.log(transcript_summary(outcome["transcript"])?.contains("policy compacted"))
 }
 "#);
     assert_eq!(
@@ -122,16 +122,16 @@ pipeline main(task) {
 #[test]
 fn policy_supports_safety_ratio_and_context_window() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
   const snapshot = compaction.policy({
     session_id: s,
     context_window: 100000,
     safety_ratio: 0.5,
     strategy: "window",
   })
-  log(snapshot["token_threshold"])
-  log(snapshot["strategy"])
+  harness.stdio.log(snapshot["token_threshold"])
+  harness.stdio.log(snapshot["strategy"])
 }
 "#);
     assert_eq!(lines, vec!["50000", "window"], "{lines:?}");
@@ -140,7 +140,7 @@ pipeline main(task) {
 #[test]
 fn check_rejects_unknown_strategy_during_policy() {
     let err = run(r#"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   compaction.policy({strategy: "not-a-strategy"})
 }
 "#)
@@ -158,7 +158,7 @@ fn run_without_session_id_uses_current_session() {
     // free-standing pipeline there is no current session, so we expect
     // an error — verifying the contract.
     let err = run(r"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   compaction.run()
 }
 ")

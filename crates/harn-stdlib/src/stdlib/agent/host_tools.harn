@@ -626,10 +626,10 @@ fn __agent_host_read_command_request(args, options) {
   return req
 }
 
-fn __agent_host_tail_command_request(harness: Harness, args, options) {
+fn __agent_host_tail_command_request(tool_runtime: HarnessTools, args, options) {
   const locator = __agent_host_reader_locator(args)
   const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
-  const meta = harness.tools.read_command_output(locator + {offset: 0, length: 0})
+  const meta = tool_runtime.read_command_output(locator + {offset: 0, length: 0})
   const offset = if meta.total_bytes > length {
     meta.total_bytes - length
   } else {
@@ -638,10 +638,10 @@ fn __agent_host_tail_command_request(harness: Harness, args, options) {
   return locator + {offset: offset, length: length}
 }
 
-fn __agent_host_tail_file_request(harness: Harness, args, options) {
+fn __agent_host_tail_file_request(fs: HarnessFs, args, options) {
   const path = __agent_host_resolve_path(args.path, options)
   const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
-  const info = harness.fs.stat(path)
+  const info = fs.stat(path)
   const offset = if info.size > length {
     info.size - length
   } else {
@@ -692,13 +692,13 @@ fn __agent_host_cancel_command_request(args) {
 }
 
 /**
- * agent_read_tools adds root-scoped read, directory, outline, search, and git inspection tools.
+ * agent_read_tools adds root-scoped read, directory, outline, search, and git inspection tool_runtime.
  *
  * @effects: [agent]
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_read_tools(harness: Harness, registry = nil, options = nil) {
+pub fn agent_read_tools(fs: HarnessFs, tool_runtime: HarnessTools, registry = nil, options = nil) {
   const opts = __agent_host_options(options)
   let tools = registry ?? tool_registry()
   if __agent_host_tool_enabled(opts, "read_file", "read") {
@@ -729,7 +729,7 @@ pub fn agent_read_tools(harness: Harness, registry = nil, options = nil) {
           ),
           handler: { args ->
             __agent_host_render(
-              harness.tools.read_file(__agent_host_read_file_request(args, opts)),
+              tool_runtime.read_file(__agent_host_read_file_request(args, opts)),
               opts,
               key,
             )
@@ -761,7 +761,7 @@ pub fn agent_read_tools(harness: Harness, registry = nil, options = nil) {
           ),
           handler: { args ->
             __agent_host_render(
-              harness.tools.read_file(__agent_host_tail_file_request(harness, args, opts)),
+              tool_runtime.read_file(__agent_host_tail_file_request(fs, args, opts)),
               opts,
               key,
             )
@@ -797,7 +797,7 @@ pub fn agent_read_tools(harness: Harness, registry = nil, options = nil) {
           ),
           handler: { args ->
             __agent_host_render(
-              harness.tools.list_directory(__agent_host_list_directory_request(args, opts)),
+              tool_runtime.list_directory(__agent_host_list_directory_request(args, opts)),
               opts,
               key,
             )
@@ -829,7 +829,7 @@ pub fn agent_read_tools(harness: Harness, registry = nil, options = nil) {
           ),
           handler: { args ->
             __agent_host_render(
-              harness.tools.get_file_outline(__agent_host_file_outline_request(args, opts)),
+              tool_runtime.get_file_outline(__agent_host_file_outline_request(args, opts)),
               opts,
               key,
             )
@@ -873,7 +873,7 @@ pub fn agent_read_tools(harness: Harness, registry = nil, options = nil) {
           ),
           handler: { args ->
             __agent_host_render(
-              harness.tools.search(__agent_host_search_request(args, opts)),
+              tool_runtime.search(__agent_host_search_request(args, opts)),
               opts,
               key,
             )
@@ -923,7 +923,7 @@ pub fn agent_read_tools(harness: Harness, registry = nil, options = nil) {
             {kind: "read", side_effect_level: "read_only"},
           ),
           handler: { args ->
-            __agent_host_render(harness.tools.git(__agent_host_git_request(args, opts)), opts, key)
+            __agent_host_render(tool_runtime.git(__agent_host_git_request(args, opts)), opts, key)
           },
         },
       ),
@@ -1006,7 +1006,7 @@ pub fn agent_command_tools(harness: Harness, registry = nil, options = nil) {
             const run_req = planned?.run_request ?? req
             const result = harness.tools.run_command(run_req)
             const final_result = if planned != nil {
-              command_capture_annotate(harness, result, planned.plan)
+              command_capture_annotate(harness.fs, result, planned.plan)
             } else {
               result
             }
@@ -1198,7 +1198,9 @@ pub fn agent_command_tools(harness: Harness, registry = nil, options = nil) {
           ),
           handler: { args ->
             __agent_host_render(
-              harness.tools.read_command_output(__agent_host_tail_command_request(harness, args, opts)),
+              harness.tools.read_command_output(
+                __agent_host_tail_command_request(harness.tools, args, opts),
+              ),
               opts,
               key,
             )
@@ -1300,7 +1302,7 @@ pub fn agent_composition_tools(registry = nil, options = nil) {
  * appear exactly once (unless `replace_all`); a missing or ambiguous match
  * is a hard error so the model never silently edits the wrong span.
  */
-fn __agent_host_edit_file_apply(harness: Harness, args, options) {
+fn __agent_host_edit_file_apply(tool_runtime: HarnessTools, args, options) {
   const opts = __agent_host_options(options)
   const path = __agent_host_resolve_path(args.path, opts)
   const old_string = args?.old_string
@@ -1312,7 +1314,7 @@ fn __agent_host_edit_file_apply(harness: Harness, args, options) {
   if old_string == new_string {
     throw "edit_file: old_string and new_string are identical; nothing to change"
   }
-  const current = harness.tools.read_file({path: path})
+  const current = tool_runtime.read_file({path: path})
   const content = current?.content ?? ""
   const occurrences = len(split(content, old_string)) - 1
   if occurrences == 0 {
@@ -1326,7 +1328,7 @@ fn __agent_host_edit_file_apply(harness: Harness, args, options) {
       + " matches); pass replace_all: true or include more surrounding context to disambiguate"
   }
   const updated = replace(content, old_string, new_string)
-  const write = harness.tools.write_file({path: path, content: updated, overwrite: true})
+  const write = tool_runtime.write_file({path: path, content: updated, overwrite: true})
   return {
     bytes_written: write?.bytes_written,
     path: write?.path ?? path,
@@ -1357,7 +1359,7 @@ fn __agent_host_edit_file_apply(harness: Harness, args, options) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_edit_tools(harness: Harness, registry = nil, options = nil) {
+pub fn agent_edit_tools(fs: HarnessFs, tool_runtime: HarnessTools, registry = nil, options = nil) {
   const opts = __agent_host_options(options)
   let tools = registry ?? tool_registry()
   if __agent_host_tool_enabled(opts, "write_file", "edit") {
@@ -1379,7 +1381,7 @@ pub fn agent_edit_tools(harness: Harness, registry = nil, options = nil) {
           annotations: __agent_host_file_annotations(opts, key, "edit"),
           handler: { args ->
             __agent_host_render(
-              harness.tools.write_file(
+              tool_runtime.write_file(
                 {path: __agent_host_resolve_path(args.path, opts), content: args.content},
               ),
               opts,
@@ -1413,7 +1415,7 @@ pub fn agent_edit_tools(harness: Harness, registry = nil, options = nil) {
           returns: {type: "object"},
           annotations: __agent_host_file_annotations(opts, key, "edit"),
           handler: { args ->
-            __agent_host_render(__agent_host_edit_file_apply(harness, args, opts), opts, key)
+            __agent_host_render(__agent_host_edit_file_apply(tool_runtime, args, opts), opts, key)
           },
         },
       ),
@@ -1438,7 +1440,7 @@ pub fn agent_edit_tools(harness: Harness, registry = nil, options = nil) {
           annotations: __agent_host_file_annotations(opts, key, "edit"),
           handler: { args ->
             const path = __agent_host_resolve_path(args.path, opts)
-            harness.fs.mkdir(path, true)
+            fs.mkdir(path, true)
             return __agent_host_render({created: true, path: path}, opts, key)
           },
         },
@@ -1464,7 +1466,7 @@ pub fn agent_edit_tools(harness: Harness, registry = nil, options = nil) {
           annotations: __agent_host_file_annotations(opts, key, "delete"),
           handler: { args ->
             __agent_host_render(
-              harness.tools.delete_file(
+              tool_runtime.delete_file(
                 {
                   path: __agent_host_resolve_path(args.path, opts),
                   recursive: args?.recursive ?? false,
@@ -1482,14 +1484,14 @@ pub fn agent_edit_tools(harness: Harness, registry = nil, options = nil) {
 }
 
 /**
- * agent_host_tools adds read/search/git inspection tools and argv-based command tools.
+ * agent_host_tools adds read/search/git inspection tools and argv-based command tool_runtime.
  *
  * @effects: []
  * @errors: []
  * @api_stability: stable
  */
 pub fn agent_host_tools(harness: Harness, registry = nil, options = nil) {
-  let tools = agent_read_tools(harness, registry, options)
+  let tools = agent_read_tools(harness.fs, harness.tools, registry, options)
   tools = agent_command_tools(harness, tools, options)
   tools = agent_composition_tools(tools, options)
   return tools

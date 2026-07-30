@@ -59,46 +59,49 @@ fn manifest_schema() -> Schema<Manifest> {
   )
 }
 
-fn read_structured_result(harness: Harness, 
+fn read_structured_result(
+  fs: HarnessFs,
   format: StructuredDataFormat,
   path: string,
 ) -> Result<unknown, StructuredReadFailure> {
   if format == "json" {
-    return read_json_result(harness.fs, path)
+    return read_json_result(fs, path)
   }
   if format == "yaml" {
-    return read_yaml_result(harness.fs, path)
+    return read_yaml_result(fs, path)
   }
-  return read_toml_result(harness.fs, path)
+  return read_toml_result(fs, path)
 }
 
-fn read_manifest_result(harness: Harness, 
+fn read_manifest_result(
+  fs: HarnessFs,
   format: StructuredDataFormat,
   path: string,
   schema: Schema<Manifest>,
   apply_defaults: bool = false,
 ) -> TypedReadResult<Manifest> {
   if format == "json" {
-    return read_json_typed_result(harness.fs, path, schema, apply_defaults)
+    return read_json_typed_result(fs, path, schema, apply_defaults)
   }
   if format == "yaml" {
-    return read_yaml_typed_result(harness.fs, path, schema, apply_defaults)
+    return read_yaml_typed_result(fs, path, schema, apply_defaults)
   }
-  return read_toml_typed_result(harness.fs, path, schema, apply_defaults)
+  return read_toml_typed_result(fs, path, schema, apply_defaults)
 }
 
-fn read_manifest_required(harness: Harness, 
+fn read_manifest_required(
+  fs: HarnessFs,
   format: StructuredDataFormat,
   path: string,
   schema: Schema<Manifest>,
 ) -> Manifest {
   if format == "json" {
-    return read_json_typed(harness.fs, path, schema)
+    return read_json_typed(fs, path, schema)
   }
   if format == "yaml" {
-    return read_yaml_typed(harness.fs, path, schema)
+    return read_yaml_typed(fs, path, schema)
   }
-  return read_toml_typed(harness.fs, path, schema)
+  return read_toml_typed(fs, path, schema)
 }
 
 fn format_typed_read_failure(failure: TypedReadFailure) -> string {
@@ -106,7 +109,10 @@ fn format_typed_read_failure(failure: TypedReadFailure) -> string {
 }
 
 pipeline default(harness: Harness, task) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-fs-structured-results-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-fs-structured-results-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   const object_path = path_join(root, "object.json")
   write_json(harness.fs, object_path, {})
@@ -206,7 +212,9 @@ pipeline default(harness: Harness, task) {
   for case in cases {
     const valid_path = path_join(root, "manifest-valid." + case.extension)
     harness.fs.write_text(valid_path, case.valid)
-    const manifest = unwrap(read_manifest_result(harness, case.format, valid_path, manifest_schema, true))
+    const manifest = unwrap(
+      read_manifest_result(harness.fs, case.format, valid_path, manifest_schema, true),
+    )
     harness.stdio.println(
       "${case.format}:"
         + manifest.name
@@ -224,7 +232,7 @@ pipeline default(harness: Harness, task) {
     const invalid_manifest_path = path_join(root, "manifest-invalid." + case.extension)
     harness.fs.write_text(invalid_manifest_path, case.invalid)
     const schema_failure = unwrap_err(
-      read_manifest_result(harness, case.format, invalid_manifest_path, manifest_schema),
+      read_manifest_result(harness.fs, case.format, invalid_manifest_path, manifest_schema),
     )
     const issue_json = json_stringify(schema_failure.issues)
     harness.stdio.println(
@@ -239,7 +247,7 @@ pipeline default(harness: Harness, task) {
         + to_string(contains(issue_json, "\"code\":\"schema.validation\"")),
     )
     const thrown_schema = try {
-      read_manifest_required(harness, case.format, invalid_manifest_path, manifest_schema)
+      read_manifest_required(harness.fs, case.format, invalid_manifest_path, manifest_schema)
     }
     const thrown_failure = unwrap_err(thrown_schema)
     harness.stdio.println(
@@ -250,14 +258,16 @@ pipeline default(harness: Harness, task) {
         + to_string(thrown_failure.path == invalid_manifest_path),
     )
     const absent_failure = unwrap_err(
-      read_structured_result(harness, case.format, path_join(root, "missing." + case.extension)),
+      read_structured_result(harness.fs, case.format, path_join(root, "missing." + case.extension)),
     )
     harness.stdio.println(absent_failure.format + ":" + absent_failure.kind)
-    const unreadable_failure = unwrap_err(read_structured_result(harness, case.format, root))
+    const unreadable_failure = unwrap_err(read_structured_result(harness.fs, case.format, root))
     harness.stdio.println(unreadable_failure.format + ":" + unreadable_failure.kind)
     const malformed_structured_path = path_join(root, "malformed." + case.extension)
     harness.fs.write_text(malformed_structured_path, case.malformed)
-    const parse_failure = unwrap_err(read_structured_result(harness, case.format, malformed_structured_path))
+    const parse_failure = unwrap_err(
+      read_structured_result(harness.fs, case.format, malformed_structured_path),
+    )
     harness.stdio.println(
       parse_failure.format
         + ":"

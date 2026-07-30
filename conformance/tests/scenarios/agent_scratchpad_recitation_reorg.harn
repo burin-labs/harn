@@ -22,7 +22,8 @@ fn observe_tools() {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "observe_1", name: "observe", arguments: {}}]},
       llm_text(
         "{\"schema\":\"harn.agent_scratchpad.v1\",\"goals\":[{\"text\":\"complete the scratchpad task\",\"source_ref\":\"user:initial\"}],\"open_items\":[],\"facts\":[{\"text\":\"observe returned observed-value-42\",\"source_ref\":\"turn:3\"}],\"refs\":[{\"id\":\"user:initial\",\"kind\":\"user_input\",\"label\":\"Initial task\"},{\"id\":\"turn:3\",\"kind\":\"tool\",\"label\":\"observed-value-42\"}]}",
@@ -30,7 +31,9 @@ pipeline default(harness: Harness) {
       llm_text("Finished with the observation. ##DONE##"),
     ],
     { ->
-      const result = agent_loop(harness, "complete the scratchpad task",
+      const result = agent_loop(
+        harness,
+        "complete the scratchpad task",
         "You are a test agent.",
         {
           provider: "mock",
@@ -69,7 +72,9 @@ pipeline default(harness: Harness) {
       harness.stdio.println(
         "second_has_source:" + to_string(contains(calls[2].system, "[source_ref: turn:3]")),
       )
-      harness.stdio.println("snapshot_fact:" + result.transcript.metadata.agent_scratchpad.facts[0].text)
+      harness.stdio.println(
+        "snapshot_fact:" + result.transcript.metadata.agent_scratchpad.facts[0].text,
+      )
     },
   )
   const manual_id = harness.agent.open("scratchpad-invalid-source")
@@ -84,18 +89,24 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"schema\":\"harn.agent_scratchpad.v1\",\"goals\":[{\"text\":\"manual task\",\"source_ref\":\"made-up\"}],\"open_items\":[],\"facts\":[{\"text\":\"uncited hallucination\",\"source_ref\":\"made-up\"}],\"refs\":[{\"id\":\"made-up\",\"kind\":\"unknown\",\"label\":\"not allowed\"}]}",
       ),
     ],
     { ->
-      const rejected = agent_scratchpad_reorganize(harness, {session_id: manual_id, task: "manual task"},
+      const rejected = agent_scratchpad_reorganize(
+        harness.agent,
+        harness.llm,
+        {session_id: manual_id, task: "manual task"},
         {provider: "mock", scratchpad: {enabled: true, reorganizer: {provider: "mock"}}},
         1,
       )
       harness.stdio.println("invalid_status:" + rejected.status)
-      harness.stdio.println("invalid_preserved:" + harness.agent.scratchpad(manual_id).facts[0].text)
+      harness.stdio.println(
+        "invalid_preserved:" + harness.agent.scratchpad(manual_id).facts[0].text,
+      )
     },
   )
 }

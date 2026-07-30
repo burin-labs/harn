@@ -13,9 +13,9 @@ pub fn payload_schema() {
   }
 }
 
-pub fn init(ctx) {
-  if !ctx.capabilities.metrics_inc {
-    throw "metrics_inc capability missing"
+pub fn init(_harness: Harness, ctx) {
+  if ctx.provider_id != "bitbucket" {
+    throw "unexpected provider id"
   }
 }
 
@@ -27,7 +27,7 @@ fn header(headers, name) {
   return headers[name] ?? headers[lowercase(name)] ?? ""
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(_harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
   const event = header(raw.headers, "X-Event-Key")
   const delivery = header(raw.headers, "X-Hook-UUID")
@@ -42,6 +42,6 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }

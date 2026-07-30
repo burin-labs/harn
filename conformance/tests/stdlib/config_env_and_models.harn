@@ -12,12 +12,12 @@ import {
 } from "std/config"
 
 pipeline default(harness: Harness) {
-  harness.stdio.println(env_str(harness, "HARN_TEST_UNSET_VAR_29X") == nil)
-  harness.stdio.println(env_int(harness, "HARN_TEST_UNSET_VAR_29X", 7))
-  harness.stdio.println(env_float(harness, "HARN_TEST_UNSET_VAR_29X", 1.5))
-  harness.stdio.println(env_bool(harness, "HARN_TEST_UNSET_VAR_29X", true))
-  harness.stdio.println(env_list(harness, "HARN_TEST_UNSET_VAR_29X"))
-  harness.stdio.println(model_from_env(harness, "HARN_TEST_UNSET_VAR_29X", "claude-sonnet-4-6"))
+  harness.stdio.println(env_str(harness.env, "HARN_TEST_UNSET_VAR_29X") == nil)
+  harness.stdio.println(env_int(harness.env, "HARN_TEST_UNSET_VAR_29X", 7))
+  harness.stdio.println(env_float(harness.env, "HARN_TEST_UNSET_VAR_29X", 1.5))
+  harness.stdio.println(env_bool(harness.env, "HARN_TEST_UNSET_VAR_29X", true))
+  harness.stdio.println(env_list(harness.env, "HARN_TEST_UNSET_VAR_29X"))
+  harness.stdio.println(model_from_env(harness.env, "HARN_TEST_UNSET_VAR_29X", "claude-sonnet-4-6"))
   const ollama = parse_model_id("ollama:qwen2.5:32b")
   harness.stdio.println(ollama.provider)
   harness.stdio.println(ollama.model)

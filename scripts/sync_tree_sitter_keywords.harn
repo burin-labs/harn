@@ -135,10 +135,14 @@ pipeline main(harness: Harness, task) {
       "error: tree-sitter keyword list is out of sync with the lexer (crates/harn-lexer/src/token.rs KEYWORDS):",
     )
     if missing.count > 0 {
-      harness.stdio.eprintln("  - missing from tree-sitter-harn/grammar/keywords.js: ${missing.join(", ")}")
+      harness.stdio.eprintln(
+        "  - missing from tree-sitter-harn/grammar/keywords.js: ${missing.join(", ")}",
+      )
     }
     if extra.count > 0 {
-      harness.stdio.eprintln("  - present in keywords.js but not a lexer keyword: ${extra.join(", ")}")
+      harness.stdio.eprintln(
+        "  - present in keywords.js but not a lexer keyword: ${extra.join(", ")}",
+      )
     }
     harness.stdio.eprintln(
       "\nhint: run `make gen-tree-sitter-keywords` to regenerate from the lexer, or reconcile the lists by hand.",

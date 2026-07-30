@@ -60,7 +60,7 @@ step log:
 
 ```harn,ignore
 const records = step.inspect({namespace: "order-123"})
-log(json_stringify(records))
+harness.stdio.log(json_stringify(records))
 ```
 
 Each record includes `event_id`, `namespace`, `key`, `sequence`,

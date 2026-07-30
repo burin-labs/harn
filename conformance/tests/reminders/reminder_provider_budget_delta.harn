@@ -16,8 +16,20 @@ pipeline main(harness: Harness) {
   const delta_session = harness.agent.open("reminder-provider-budget-delta")
   harness.agent.reset(delta_session)
   const payload = {session: {id: delta_session}, iteration: 1, wake_interval_ms: 0}
-  const first = agent_reminder_providers_fire(harness, delta_session, "session_idle", payload, {})
-  const second = agent_reminder_providers_fire(harness, delta_session, "session_idle", payload, {})
+  const first = agent_reminder_providers_fire(
+    harness.agent,
+    delta_session,
+    "session_idle",
+    payload,
+    {},
+  )
+  const second = agent_reminder_providers_fire(
+    harness.agent,
+    delta_session,
+    "session_idle",
+    payload,
+    {},
+  )
   const delta_events = transcript_events_by_kind(
     harness.agent.snapshot(delta_session),
     "system_reminder",
@@ -26,7 +38,9 @@ pipeline main(harness: Harness) {
   harness.stdio.println(first.reports[0].body_bytes == first.reports[0].original_body_bytes)
   harness.stdio.println(second.reports[0].delta_compressed)
   harness.stdio.println(second.reports[0].body_bytes < second.reports[0].original_body_bytes)
-  harness.stdio.println(delta_events[0].reminder.body.contains("unchanged from its previous full emission"))
+  harness.stdio.println(
+    delta_events[0].reminder.body.contains("unchanged from its previous full emission"),
+  )
   harness.stdio.println(delta_events[0].reminder.tags[1].contains("body_sha256:"))
   harness.agent.clear_reminder_providers()
   harness.agent.register_reminder_provider(
@@ -50,7 +64,9 @@ pipeline main(harness: Harness) {
   const budget_session = harness.agent.open("reminder-provider-budget-skip")
   harness.agent.reset(budget_session)
   const budget_payload = {session: {id: budget_session}, iteration: 1, wake_interval_ms: 0}
-  const budget = agent_reminder_providers_fire(harness, budget_session,
+  const budget = agent_reminder_providers_fire(
+    harness.agent,
+    budget_session,
     "session_idle",
     budget_payload,
     {reminders: {max_iteration_bytes: 300}},

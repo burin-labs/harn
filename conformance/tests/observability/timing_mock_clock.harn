@@ -4,7 +4,7 @@ pipeline default(harness: Harness) {
   // Pin the wall clock so wall-start aligns with our fixture.
   harness.testing.clock_set(1700000000000)
   const outcome = timed(
-    harness,
+    harness.clock,
     "clocked",
     {tier: "test"},
     { ->

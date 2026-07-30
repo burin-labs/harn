@@ -134,8 +134,8 @@ fn __judge_recovery_feedback(next_step, specific_gaps, recovery_details, fallbac
   return join(parts, "\n\n")
 }
 
-fn __judge_payload(harness: Harness, session, opts, stop_reason, text, iteration) {
-  const messages = agent_session_messages(harness, session.session_id)
+fn __judge_payload(agent: HarnessAgent, session, opts, stop_reason, text, iteration) {
+  const messages = agent_session_messages(agent, session.session_id)
   const tool_names = __session_tool_names(messages)
   return {
     session_id: session.session_id,
@@ -234,7 +234,7 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     required: ["verdict"],
   }
   const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
-  const user = completion_judge_user_prompt(harness, payload)
+  const user = completion_judge_user_prompt(harness.fs, payload)
   const ran = __judge_run_checkpoint(
     harness,
     judge_cfg,
@@ -382,9 +382,9 @@ pub fn agent_done_judge_cap(judge_cfg) {
   return __done_judge_cap(judge_cfg)
 }
 
-fn __emit_judge_decision(harness: Harness, session_id, iteration, verdict) {
+fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
   agent_emit_event(
-    harness,
+    agent,
     session_id,
     "judge_decision",
     {
@@ -502,11 +502,11 @@ pub fn agent_done_contract(options = {}) {
  * @api_stability: experimental
  */
 pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, text, iteration = 0) {
-  const payload = __judge_payload(harness, session, opts, stop_reason, text, iteration)
+  const payload = __judge_payload(harness.agent, session, opts, stop_reason, text, iteration)
   let verdict = {vetoed: false}
   if opts?.verify_completion != nil {
     verdict = __judge_invoke_closure(opts.verify_completion, payload)
-    __emit_judge_decision(harness, session.session_id, iteration, verdict)
+    __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
   }
   let completion_judge_invoked = false
   let completion_judge_cap_reached = false
@@ -524,7 +524,7 @@ pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, te
       verdict = __judge_invoke_structured(harness, opts.verify_completion_judge, opts, payload)
       verdict = verdict + {trigger: opts?._verify_completion_judge_trigger}
       completion_judge_invoked = true
-      __emit_judge_decision(harness, session.session_id, iteration, verdict)
+      __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
     }
   }
   const done_judge_due = opts?._done_judge_due ?? true
@@ -543,7 +543,7 @@ pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, te
     } else {
       verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
       verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger}
-      __emit_judge_decision(harness, session.session_id, iteration, verdict)
+      __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
     }
   }
   let feedback_composition = nil
@@ -552,7 +552,7 @@ pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, te
     && verdict.feedback != ""
     && !(opts?._defer_judge_feedback ?? false) {
     feedback_composition = agent_feedback_emit(
-      harness,
+      harness.agent,
       session.session_id,
       [
         {

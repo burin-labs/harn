@@ -11,7 +11,7 @@ surface-specific rendering policy.
 ```harn
 import { append_git_trailers, render, slack_message_disclosure } from "std/disclosure"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const chain = {
     sub: "user:kenneth",
     act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}},

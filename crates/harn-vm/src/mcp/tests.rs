@@ -4,6 +4,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 
+mod support;
+use support::execute_test_harn;
+
 #[derive(Debug)]
 struct RecordedHttpRequest {
     headers: BTreeMap<String, String>,
@@ -780,15 +783,6 @@ host_mock("mcp", "sample", {
 async fn clear_sampling_mock() {
     crate::llm::clear_cli_llm_mock_mode();
     execute_test_harn("host_mock_clear()").await;
-}
-
-async fn execute_test_harn(source: &str) {
-    let chunk = crate::compile_source(source).expect("test Harn source should compile");
-    let mut vm = crate::Vm::new();
-    crate::register_vm_stdlib(&mut vm);
-    vm.execute(&chunk)
-        .await
-        .expect("test Harn source should execute");
 }
 
 async fn modern_http_handle(base_url: &str) -> VmMcpClientHandle {
@@ -1593,6 +1587,7 @@ async fn test_parse_sse_jsonrpc_body_uses_matching_jsonrpc_response() {
         proxy_server_name: None,
         get_stream_task: None,
         tool_headers: BTreeMap::new(),
+        fixtures: None,
     };
     let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n\n";
     let parsed = parse_sse_jsonrpc_body(&inner, "mock", body, Some(1))
@@ -1721,6 +1716,7 @@ async fn roots_list_changed_notification_is_sent_once_per_snapshot() {
                     proxy_server_name: None,
                     get_stream_task: None,
                     tool_headers: BTreeMap::new(),
+                    fixtures: None,
                 })))),
                 last_roots: Arc::new(Mutex::new(Vec::new())),
                 initialize_result: Arc::new(Mutex::new(None)),

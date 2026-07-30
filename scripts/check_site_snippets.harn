@@ -41,7 +41,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
   }
   let target_dir = ""
   const meta = harness.process.run(
-    {cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
+    {program: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
   )
   if meta.success {
     const parsed = try {
@@ -60,9 +60,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process.run(
-      {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
-    )
+    const build = harness.process.run({program: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
       harness.stdio.eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
@@ -82,7 +80,7 @@ pipeline main(harness: Harness, task) {
   let failures = 0
   for snippet in site_snippets + GALLERY_SCENARIOS {
     checked = checked + 1
-    const res = harness.process.run({cmd: harn_bin, args: ["check", snippet]})
+    const res = harness.process.run({program: harn_bin, args: ["check", snippet]})
     harness.stdio.print(res.stdout)
     harness.stdio.eprint(res.stderr)
     if !res.success {

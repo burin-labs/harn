@@ -9,7 +9,8 @@ import { llm_text, with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       harness.llm.call(
         "say hi",
@@ -24,7 +25,8 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       harness.llm.call(
         "say hi",
@@ -39,7 +41,8 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       harness.llm.call(
         "say hi",
@@ -54,7 +57,8 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       harness.llm.call(
         "say hi",

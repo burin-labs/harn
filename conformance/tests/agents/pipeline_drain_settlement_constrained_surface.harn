@@ -17,7 +17,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "on_drain_decision",
-    { event ->
+    { _hook_harness, event ->
       if __host_settlement_agent_active() {
         harness.runtime.atomic_add(observed_active, 1)
       } else {
@@ -32,7 +32,7 @@ pipeline default(harness: Harness) {
       const pre = __host_settlement_agent_active()
       const result = on_finish_drain(harness, return_value)
       const post = __host_settlement_agent_active()
-      const _audits = lifecycle_audit_log_take(harness)
+      const _audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("pre_active=" + to_string(pre))
       harness.stdio.println("post_active=" + to_string(post))
       harness.stdio.println(

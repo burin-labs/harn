@@ -92,6 +92,12 @@ impl Compiler {
     }
 
     pub fn with_options(options: CompilerOptions) -> Self {
+        // Compiler construction is the boundary that owns source-callability.
+        // Install the canonical contract manifest here so every entry path
+        // (programs, modules, named callables, and schema initializers) sees
+        // the same typed builtin surface even before a VM exists.
+        harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+
         Self {
             options,
             chunk: Chunk::new(),

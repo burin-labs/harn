@@ -549,7 +549,7 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
 /// Build a first-class routing policy handle. Pass {chain: [{provider, model}, ...],
 /// failover: {on_status?, on_timeout_ms?, on_error_kinds?, max_attempts?},
 /// latency: {race_after_ms?, target_p95_ms?}, budget: {per_call_usd?, session_usd?, on_exceed?},
-/// observe: {emit_event?}} and pipe the result through `llm_call(... routing: policy ...)`
+/// observe: {emit_event?}} and pipe the result through `harness.llm.call(... routing: policy ...)`
 /// to drive the chain with failover, latency-aware racing, and budget caps. Tape events:
 /// <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.
 #[harn_builtin(
@@ -913,7 +913,10 @@ mod tests {
     #[test]
     fn llm_stack_registers_and_dispatches_through_full_stdlib() {
         mock::reset_llm_mock_state();
-        let chunk = crate::compile_source("llm_mock({text: \"ok\"})\n").expect("compile");
+        let chunk = crate::compile_source(
+            "fn main(harness: Harness) { harness.llm.mock_enqueue({text: \"ok\"}) }\n",
+        )
+        .expect("compile");
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

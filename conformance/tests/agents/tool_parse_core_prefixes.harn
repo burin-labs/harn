@@ -9,15 +9,60 @@
 import { probe, sample_registry } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
-  probe(harness, "gemma tool_code prefix", "tool_code: run({ command: \"ls\" })", sample_registry())
-  probe(harness, "qwen call colon brace marker",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "gemma tool_code prefix",
+    "tool_code: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "qwen call colon brace marker",
     "call:run{ command: \"git status --short\" }",
     sample_registry(),
   )
-  probe(harness, "tool_call prefix", "tool_call: run({ command: \"ls\" })", sample_registry())
-  probe(harness, "tool_output prefix", "tool_output: run({ command: \"ls\" })", sample_registry())
-  probe(harness, "python prefix", "python: run({ command: \"ls\" })", sample_registry())
-  probe(harness, "javascript prefix", "javascript: run({ command: \"ls\" })", sample_registry())
-  probe(harness, "shell prefix", "shell: run({ command: \"ls\" })", sample_registry())
-  probe(harness, "bash prefix", "bash: run({ command: \"ls\" })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "tool_call prefix",
+    "tool_call: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "tool_output prefix",
+    "tool_output: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "python prefix",
+    "python: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "javascript prefix",
+    "javascript: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "shell prefix",
+    "shell: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bash prefix",
+    "bash: run({ command: \"ls\" })",
+    sample_registry(),
+  )
 }

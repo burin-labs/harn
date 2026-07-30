@@ -11,9 +11,9 @@ pipeline default(harness: Harness) {
   harness.obs.enable_tracing(true)
   // Subscribe to the audit topic ahead of submit so both receipts land.
   const stream = harness.obs.event_log_subscribe({topic: "lifecycle.pool.audit"})
-  const pool = pool_create({name: "otel-demo", max_concurrent: 1})
+  const pool = pool_create(harness.agent, {name: "otel-demo", max_concurrent: 1})
   const h = pool.submit({ -> 42 }, {priority: 5, key: "alpha"})
-  const r = pool_wait(h)
+  const r = pool_wait(harness.agent, h)
   harness.stdio.println(r.status)
   harness.stdio.println(r.result)
   // Walk the audit stream: first event is the submit receipt, second

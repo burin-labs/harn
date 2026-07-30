@@ -11,7 +11,7 @@ use std::hint::black_box;
 use std::path::PathBuf;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use harn_hostlib::{ast::AstCapability, tools::permissions, BuiltinRegistry, HostlibCapability};
+use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 
 fn ast_registry() -> BuiltinRegistry {
@@ -111,7 +111,6 @@ fn large_source(language: &str) -> (String, &'static str, &'static str) {
 fn bench_apply_node_large(c: &mut Criterion) {
     use std::io::Write;
 
-    permissions::enable_for_test();
     let registry = ast_registry();
     let entry = registry
         .find("hostlib_ast_apply_node")

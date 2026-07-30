@@ -1,10 +1,13 @@
 #[test]
-fn stdlib_facades_and_host_primitives_are_discoverable() {
+fn stdlib_facades_are_imported_and_host_primitives_are_discoverable() {
     let metadata = harn_vm::stdlib::stdlib_builtin_metadata()
         .into_iter()
         .map(|entry| (entry.name().to_string(), entry))
         .collect::<std::collections::BTreeMap<_, _>>();
 
+    // These are Harn stdlib functions, not ambient runtime builtins. Keeping
+    // them out of the builtin registry makes imports pure and forces their
+    // effects to flow through the nominal handles in their signatures.
     for name in [
         "agent_loop",
         "agent_turn",
@@ -19,23 +22,13 @@ fn stdlib_facades_and_host_primitives_are_discoverable() {
         "close_agent",
         "resume_agent",
         "list_agents",
+        "workflow_execute",
     ] {
-        let entry = metadata
-            .get(name)
-            .unwrap_or_else(|| panic!("{name} must be registered"));
-        assert_eq!(entry.kind(), harn_vm::VmBuiltinKind::Async);
-        assert_eq!(entry.category(), Some("agent.stdlib"));
         assert!(
-            entry.signature().is_some(),
-            "{name} should carry registration metadata"
+            !metadata.contains_key(name),
+            "{name} must remain an imported stdlib facade, not ambient authority"
         );
     }
-
-    let workflow_execute = metadata
-        .get("workflow_execute")
-        .expect("workflow_execute must be registered");
-    assert_eq!(workflow_execute.kind(), harn_vm::VmBuiltinKind::Async);
-    assert_eq!(workflow_execute.category(), Some("workflow.stdlib"));
 
     for name in [
         "__host_agent_session_init",

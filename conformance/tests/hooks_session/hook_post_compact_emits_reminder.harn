@@ -8,7 +8,7 @@ pipeline main(harness: Harness) {
   harness.agent.inject(session, {role: "assistant", content: "four"})
   harness.agent.register_session_hook(
     "post_compact",
-    { _event ->
+    { _hook_harness, _event ->
       return {
         reminder: {
           body: "compaction observed",

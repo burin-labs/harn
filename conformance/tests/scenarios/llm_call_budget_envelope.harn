@@ -3,7 +3,8 @@ import { with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "should not be consumed",
         input_tokens: 1,
@@ -43,7 +44,8 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "still should not be consumed",
         input_tokens: 1,
@@ -52,7 +54,9 @@ pipeline test(harness: Harness, task) {
       },
     ],
     { ->
-      const loop_result = agent_loop(harness, "agent budget preflight",
+      const loop_result = agent_loop(
+        harness,
+        "agent budget preflight",
         nil,
         {
           provider: "mock",

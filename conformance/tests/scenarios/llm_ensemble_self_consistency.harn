@@ -5,9 +5,13 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("A"), llm_text("B"), llm_text("A"), llm_text("C"), llm_text("A")],
+    harness.llm,
+    [llm_text("A"), llm_text("B"), llm_text("A"), llm_text("C"), llm_text("A")],
     { ->
-      const result = self_consistency(harness, "Pick a letter",
+      const result = self_consistency(
+        harness.agent,
+        harness.llm,
+        "Pick a letter",
         "",
         {
           n: 5,

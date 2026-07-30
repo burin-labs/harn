@@ -19,9 +19,16 @@ pipeline main(harness: Harness) {
   const session = harness.agent.open("reminder-render-local-fallback")
   harness.agent.reset(session)
   harness.agent.inject(session, {role: "user", content: "hello"})
-  agent_reminder_providers_fire(harness, session, "session_idle", {session: {id: session}}, {})
+  agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "session_idle",
+    {session: {id: session}},
+    {},
+  )
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       harness.llm.call(
         "ignored",
@@ -29,7 +36,7 @@ pipeline main(harness: Harness) {
         {
           provider: "mock",
           model: "mock",
-          messages: agent_session_messages(harness, session),
+          messages: agent_session_messages(harness.agent, session),
           session_id: session,
         },
       )

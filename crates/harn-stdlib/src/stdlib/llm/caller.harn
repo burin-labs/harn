@@ -32,19 +32,19 @@ pub type LlmCaller = fn(LlmCallerRequest) -> dict
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn default_llm_caller(harness: Harness) -> LlmCaller {
+pub fn default_llm_caller(agent: HarnessAgent, llm: HarnessLlm) -> LlmCaller {
   return { call ->
     const provider = __default_caller_render_context_provider(call)
     const model = __default_caller_render_context_model(call)
-    const pushed = harness.agent.push_llm_render_context(provider, model)
+    const pushed = agent.push_llm_render_context(provider, model)
     defer {
       if pushed {
-        harness.agent.pop_llm_render_context()
+        agent.pop_llm_render_context()
       }
     }
     return __wrap_llm_result(
       try {
-        harness.llm.call(call.prompt, call.system, llm_call_options(call.opts))
+        llm.call(call.prompt, call.system, llm_call_options(call.opts))
       },
     )
   }
@@ -75,7 +75,7 @@ pub fn llm_caller(harness: Harness, opts = nil) -> LlmCaller {
   } else {
     {}
   }
-  return with_retry(harness, default_llm_caller(harness), cfg?.retry ?? {})
+  return with_retry(harness, default_llm_caller(harness.agent, harness.llm), cfg?.retry ?? {})
 }
 
 /**

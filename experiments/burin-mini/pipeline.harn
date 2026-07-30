@@ -28,7 +28,7 @@ import {
   write_workspace,
 } from "lib/workspace.harn"
 
-fn read_search_tools(harness: Harness) {
+fn read_search_tools(fs: HarnessFs, process: HarnessProcess) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -38,7 +38,7 @@ fn read_search_tools(harness: Harness) {
       policy: {kind: "search"},
       parameters: {query: {type: "string"}},
       returns: {type: "string"},
-      handler: { args -> search_workspace(harness, args.query) },
+      handler: { args -> search_workspace(fs, process, args.query) },
     },
   )
   tools = tool_define(
@@ -49,14 +49,14 @@ fn read_search_tools(harness: Harness) {
       policy: {kind: "read", path_params: ["path"]},
       parameters: {path: {type: "string"}},
       returns: {type: "string"},
-      handler: { args -> read_workspace(harness, args.path) },
+      handler: { args -> read_workspace(fs, args.path) },
     },
   )
   return tools
 }
 
-fn edit_tools(harness: Harness) {
-  let tools = read_search_tools(harness)
+fn edit_tools(fs: HarnessFs, process: HarnessProcess) {
+  let tools = read_search_tools(fs, process)
   tools = tool_define(
     tools,
     "write",
@@ -65,7 +65,7 @@ fn edit_tools(harness: Harness) {
       policy: {kind: "edit", path_params: ["path"]},
       parameters: {path: {type: "string"}, content: {type: "string"}},
       returns: {type: "string"},
-      handler: { args -> write_workspace(harness, args.path, args.content) },
+      handler: { args -> write_workspace(fs, args.path, args.content) },
     },
   )
   tools = tool_define(
@@ -76,14 +76,14 @@ fn edit_tools(harness: Harness) {
       policy: {kind: "execute"},
       parameters: {command: {type: "string"}},
       returns: {type: "object"},
-      handler: { args -> run_workspace(harness, args.command) },
+      handler: { args -> run_workspace(fs, process, args.command) },
     },
   )
   return tools
 }
 
-fn verify_tools(harness: Harness) {
-  return edit_tools(harness)
+fn verify_tools(fs: HarnessFs, process: HarnessProcess) {
+  return edit_tools(fs, process)
 }
 
 fn planner_prompt(task, workspace_root, profile, facts, round_no, force_ready) {
@@ -200,8 +200,10 @@ fn execute_system() {
 }
 
 fn run_planner(harness: Harness, task, workspace_root, profile, facts, round_no, force_ready) {
-  const result = sub_agent_run(harness, planner_prompt(task, workspace_root, profile, facts, round_no, force_ready),
-    generator_options(harness, planner_system(force_ready), tool_registry(), [])
+  const result = sub_agent_run(
+    harness,
+    planner_prompt(task, workspace_root, profile, facts, round_no, force_ready),
+    generator_options(harness.env, planner_system(force_ready), tool_registry(), [])
       + {
       output: "json",
       returns: {schema: planner_schema()},
@@ -228,8 +230,15 @@ fn run_planner(harness: Harness, task, workspace_root, profile, facts, round_no,
 }
 
 fn run_research(harness: Harness, workspace_root, profile, question) {
-  const result = sub_agent_run(harness, research_prompt(workspace_root, profile, question),
-    generator_options(harness, research_system(), read_search_tools(harness), question?.tools ?? [])
+  const result = sub_agent_run(
+    harness,
+    research_prompt(workspace_root, profile, question),
+    generator_options(
+      harness.env,
+      research_system(),
+      read_search_tools(harness.fs, harness.process),
+      question?.tools ?? [],
+    )
       + {
       output: "json",
       returns: {schema: research_schema()},
@@ -295,11 +304,13 @@ fn research_artifacts(facts, profile) {
 fn graph_research_template(harness: Harness) {
   return {
     mode: "agent",
-    tools: read_search_tools(harness),
+    tools: read_search_tools(harness.fs, harness.process),
     system: research_system(),
-    model_policy: apply_reasoning_policy(harness, {
-        provider: provider_name(harness),
-        model: generator_model(harness),
+    model_policy: apply_reasoning_policy(
+      harness.env,
+      {
+        provider: provider_name(harness.env),
+        model: generator_model(harness.env),
         temperature: 0,
         max_iterations: 6,
         turn_policy: {
@@ -317,11 +328,13 @@ fn graph_research_template(harness: Harness) {
 fn graph_execute_template(harness: Harness) {
   return {
     mode: "agent",
-    tools: edit_tools(harness),
+    tools: edit_tools(harness.fs, harness.process),
     system: execute_system(),
-    model_policy: apply_reasoning_policy(harness, {
-        provider: provider_name(harness),
-        model: generator_model(harness),
+    model_policy: apply_reasoning_policy(
+      harness.env,
+      {
+        provider: provider_name(harness.env),
+        model: generator_model(harness.env),
         temperature: 0,
         max_iterations: 8,
         turn_policy: {
@@ -356,6 +369,7 @@ fn graph_verify_template(profile) {
 fn execute_graph(harness: Harness, task, profile, facts, plan) {
   const graph = plan_to_action_graph(task, plan)
   return action_graph_run(
+    harness,
     task,
     graph,
     {
@@ -367,13 +381,28 @@ fn execute_graph(harness: Harness, task, profile, facts, plan) {
     {
       artifacts: research_artifacts(facts, profile),
       max_steps: 8,
-      persist_path: path_join(harness.fs.source_dir(), "evals", "generated", "${profile?.id}-run.json"),
+      persist_path: path_join(
+        harness.fs.source_dir(),
+        "evals",
+        "generated",
+        "${profile?.id}-run.json",
+      ),
     },
   )
 }
 
-fn run_read_only_evaluator(harness: Harness, task, workspace_root, profile, plan, facts, final_response) {
-  const result = sub_agent_run(harness, "[evaluator][task_id=${profile?.id}][token=final]\n"
+fn run_read_only_evaluator(
+  harness: Harness,
+  task,
+  workspace_root,
+  profile,
+  plan,
+  facts,
+  final_response,
+) {
+  const result = sub_agent_run(
+    harness,
+    "[evaluator][task_id=${profile?.id}][token=final]\n"
       + "Original task: ${task}\n"
       + "Workspace root: ${workspace_root}\n"
       + "Plan summary: ${plan?.plan_summary}\n"
@@ -381,12 +410,14 @@ fn run_read_only_evaluator(harness: Harness, task, workspace_root, profile, plan
       + "Research facts:\n${render_facts(facts)}\n"
       + "User-facing response draft:\n${final_response}\n"
       + "Return strict JSON only with keys: verdict, reason, strengths, gaps.",
-    evaluator_options(harness, "You are a separate evaluator model.\n"
+    evaluator_options(
+      harness.env,
+      "You are a separate evaluator model.\n"
         + "Grade the read-only answer against the success criteria.\n"
         + "Use read/search/run only if needed.\n"
         + "Pass only if the draft is grounded in the research facts or your own tool results.\n"
         + "Return a strict JSON verdict with concise strengths and gaps.",
-      verify_tools(harness),
+      verify_tools(harness.fs, harness.process),
     )
       + {output: "json"},
   )
@@ -491,9 +522,9 @@ fn write_report(
     task_id: profile?.id,
     task: task,
     workspace_root: workspace_root,
-    provider: provider_name(harness),
-    generator_model: generator_model(harness),
-    evaluator_model: evaluator_model(harness),
+    provider: provider_name(harness.env),
+    generator_model: generator_model(harness.env),
+    evaluator_model: evaluator_model(harness.env),
     timestamp: harness.clock.date_iso(),
     verify_command: effective_verify_command(profile),
     verification_contract: verification_contract(profile),
@@ -515,7 +546,7 @@ fn write_report(
 
 pipeline default(harness: Harness) {
   const request = harness.env.get_or("HARN_TASK", "")
-  const root = workspace_root(harness)
+  const root = workspace_root(harness.fs)
   const profile = profile_for_task(request)
   let facts = []
   let planning = run_planner(harness, request, root, profile, facts, 1, false)?.data ?? {}
@@ -528,7 +559,8 @@ pipeline default(harness: Harness) {
     if len(planning?.questions ?? []) == 0 {
       break
     }
-    const research_results = collect_research_batch(harness,
+    const research_results = collect_research_batch(
+      harness,
       root,
       profile,
       bounded_questions(profile, planning?.questions ?? []),
@@ -568,7 +600,8 @@ pipeline default(harness: Harness) {
       final_response = "Workflow finished with failed stages: ${join(failed, ", ")}"
     }
   } else if planning?.ready {
-    const evaluation = run_read_only_evaluator(harness,
+    const evaluation = run_read_only_evaluator(
+      harness,
       request,
       root,
       profile,

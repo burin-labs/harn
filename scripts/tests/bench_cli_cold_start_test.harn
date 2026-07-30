@@ -52,7 +52,9 @@ pipeline test_build_invocation_expands_trace_paths(harness: Harness, task) {
   defer {
     harness.fs.delete(dir)
   }
-  const args = build_invocation(harness, ["trace", "import", "{trace_input}", "--out", "{trace_output}"],
+  const args = build_invocation(
+    harness.fs,
+    ["trace", "import", "{trace_input}", "--out", "{trace_output}"],
     dir,
   )
   assert_eq(args[2], path_join(dir, "trace_input.jsonl"))
@@ -87,19 +89,21 @@ pipeline test_failure_reasons_cover_budget_and_baseline(harness: Harness, task) 
 pipeline test_merge_baseline_append_only_without_update(harness: Harness, task) {
   const merged = merge_baseline(
     {
-      sha: {
-        host: "old-host",
-        harn_version: "old-version",
-        captured_at: "old",
-        commands: {version: {cold_ms: 10.0}},
+      payload: {
+        sha: {
+          host: "old-host",
+          harn_version: "old-version",
+          captured_at: "old",
+          commands: {version: {cold_ms: 10.0}},
+        },
       },
+      sha: "sha",
+      measurements: {version: {cold_ms: 20.0}, "try --help": {cold_ms: 30.0}},
+      update_baseline: false,
+      host: "host",
+      version: "version",
+      captured_at: "now",
     },
-    "sha",
-    {version: {cold_ms: 20.0}, "try --help": {cold_ms: 30.0}},
-    false,
-    "host",
-    "version",
-    "now",
   )
   assert_eq(merged.sha.host, "old-host")
   assert_eq(merged.sha.harn_version, "old-version")
@@ -111,13 +115,15 @@ pipeline test_merge_baseline_append_only_without_update(harness: Harness, task) 
 @test
 pipeline test_merge_baseline_update_overwrites_current_slot(harness: Harness, task) {
   const merged = merge_baseline(
-    {sha: {commands: {version: {cold_ms: 10.0}}}},
-    "sha",
-    {version: {cold_ms: 20.0}},
-    true,
-    "host",
-    "version",
-    "now",
+    {
+      payload: {sha: {commands: {version: {cold_ms: 10.0}}}},
+      sha: "sha",
+      measurements: {version: {cold_ms: 20.0}},
+      update_baseline: true,
+      host: "host",
+      version: "version",
+      captured_at: "now",
+    },
   )
   assert_eq(merged.sha.commands.version.cold_ms, 20.0)
 }

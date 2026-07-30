@@ -45,7 +45,11 @@ pipeline test(harness: Harness, task) {
     {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
   )
   harness.testing.http_mock_clear()
-  harness.testing.http_mock("POST", "https://idp.example/revoke", {status: 200, body: "", headers: {}})
+  harness.testing.http_mock(
+    "POST",
+    "https://idp.example/revoke",
+    {status: 200, body: "", headers: {}},
+  )
   revoke(cli)
   const calls = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "exactly one POST to the revoke endpoint")

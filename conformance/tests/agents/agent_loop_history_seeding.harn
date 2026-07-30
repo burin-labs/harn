@@ -36,7 +36,9 @@ pipeline test(harness: Harness) {
     {role: "assistant", content: "Understood, the codeword is pixel."},
   ]
   const session = "agent-history-seed-conformance"
-  const result = agent_loop(harness, "What is the codeword?",
+  const result = agent_loop(
+    harness,
+    "What is the codeword?",
     nil,
     {
       session_id: session,
@@ -55,7 +57,7 @@ pipeline test(harness: Harness) {
     "first LLM call must include seeded history in order; saw: " + result.visible_text,
   )
   // The seeded turns are ordinary transcript turns.
-  const transcript = agent_session_messages(harness, session)
+  const transcript = agent_session_messages(harness.agent, session)
   assert(len(transcript) >= 3, "transcript should retain seeded turns plus the question")
   assert(transcript[0].role == "user", "seed turn 0 role")
   assert(transcript[0].content == "Remember this: the codeword is pixel.", "seed turn 0 content")
@@ -70,7 +72,9 @@ pipeline test(harness: Harness) {
     {role: "user", content: "What is the codeword?"},
   ]
   const blank_session = "agent-history-seed-blank-conformance"
-  const blank_result = agent_loop(harness, "",
+  const blank_result = agent_loop(
+    harness,
+    "",
     nil,
     {
       session_id: blank_session,
@@ -89,7 +93,7 @@ pipeline test(harness: Harness) {
   // No empty user turn was appended: the trailing `]` in the asserted SEEN
   // output above proves the seeded question was the last outbound turn. The
   // first three transcript turns are exactly the seeded history.
-  const blank_transcript = agent_session_messages(harness, blank_session)
+  const blank_transcript = agent_session_messages(harness.agent, blank_session)
   assert(blank_transcript[0].content == "Remember: the codeword is pixel.", "blank seed turn 0")
   assert(blank_transcript[2].role == "user", "blank seed question role")
   assert(blank_transcript[2].content == "What is the codeword?", "blank seed question content")

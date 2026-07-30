@@ -141,14 +141,58 @@ async fn prepare_static_stage(
         "node": node,
         "artifacts": artifacts,
     });
-    let planned: WorkflowStaticStagePlan = crate::stdlib::harn_entry::call_harn_export_typed(
+    let vm = ctx.child_vm();
+    let harness = vm.harness().ok_or_else(|| {
+        VmError::Runtime(
+            "workflow_prepare_static_stage: execution has no root Harness authority".to_string(),
+        )
+    })?;
+    let agent = harness
+        .sub_handle("agent")
+        .map(VmValue::harness)
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "workflow_prepare_static_stage: execution has no HarnessAgent authority"
+                    .to_string(),
+            )
+        })?;
+    let interaction = harness
+        .sub_handle("interaction")
+        .map(VmValue::harness)
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "workflow_prepare_static_stage: execution has no HarnessInteraction authority"
+                    .to_string(),
+            )
+        })?;
+    let tools = harness
+        .sub_handle("tools")
+        .map(VmValue::harness)
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "workflow_prepare_static_stage: execution has no HarnessTools authority"
+                    .to_string(),
+            )
+        })?;
+    let planned = crate::stdlib::harn_entry::call_harn_export_by_name(
         ctx,
         "std/workflow/stage",
         "workflow_prepare_static_stage",
         "workflow_prepare_static_stage",
-        payload,
+        &[
+            agent,
+            interaction,
+            tools,
+            crate::stdlib::json_to_vm_value(&payload),
+        ],
     )
     .await?;
+    let planned: WorkflowStaticStagePlan =
+        serde_json::from_value(crate::llm::vm_value_to_json(&planned)).map_err(|error| {
+            VmError::Runtime(format!(
+                "workflow_prepare_static_stage returned invalid shape: {error}"
+            ))
+        })?;
     if !planned.handled {
         return Ok(None);
     }
@@ -449,13 +493,19 @@ pub(super) async fn execute_stage_attempts(
     artifacts: &[ArtifactRecord],
     transcript: Option<VmValue>,
 ) -> Result<ExecutedStage, VmError> {
-    let harness = ctx.child_vm().root_harness_value().ok_or_else(|| {
-        VmError::Runtime(
-            "workflow_execute_stage_attempts: execution has no root Harness authority".to_string(),
-        )
-    })?;
+    let random = ctx
+        .child_vm()
+        .harness()
+        .and_then(|harness| harness.sub_handle("random"))
+        .map(VmValue::harness)
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "workflow_execute_stage_attempts: execution has no HarnessRandom authority"
+                    .to_string(),
+            )
+        })?;
     let args = vec![
-        harness,
+        random,
         VmValue::String(arcstr::ArcStr::from(task)),
         VmValue::String(arcstr::ArcStr::from(node_id)),
         node_to_vm_with_raw(node)?,

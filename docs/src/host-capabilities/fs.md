@@ -1,42 +1,43 @@
 # Filesystem Host Capabilities
 
 Filesystem access is exposed through the capability-aware `harness.fs`
-sub-handle. The legacy free filesystem builtins remain available for existing
-scripts, but new code should use `harness.fs.*` so `harn graph`, lint repairs,
-and host policy checks can attribute filesystem effects to the typed harness
-surface.
+sub-handle. Free filesystem globals do not exist in the script-facing
+language: the nominal handle is both the interface and the authority. This
+makes filesystem use visible in helper signatures and lets the contract
+registry, policy engine, graph, lint repairs, and runtime receipts agree on the
+same call.
 
-| Method | Backing builtin | Capability |
-|---|---|---|
-| `harness.fs.read_text(path)` | `read_file(path)` | `workspace.read_text` |
-| `harness.fs.read_text_result(path)` | `read_file_result(path)` | `workspace.read_text` |
-| `harness.fs.read_bytes(path)` | `read_file_bytes(path)` | `workspace.read_text` |
-| `harness.fs.write_text(path, content)` | `write_file(path, content)` | `workspace.write_text` |
-| `harness.fs.write_bytes(path, content)` | `write_file_bytes(path, content)` | `workspace.write_text` |
-| `harness.fs.replace_text(path, content, options?)` | `replace_file(path, content, options?)` | `workspace.write_text` |
-| `harness.fs.replace_text_result(path, content, options?)` | `replace_file_result(path, content, options?)` | `workspace.write_text` |
-| `harness.fs.replace_bytes(path, content, options?)` | `replace_file_bytes(path, content, options?)` | `workspace.write_text` |
-| `harness.fs.replace_bytes_result(path, content, options?)` | `replace_file_bytes_result(path, content, options?)` | `workspace.write_text` |
-| `harness.fs.exists(path)` | `file_exists(path)` | `workspace.exists` |
-| `harness.fs.status(path, access?)` | `path_status(path, access?)` | `workspace.exists` |
-| `harness.fs.delete(path)` | `delete_file(path)` | `workspace.delete` |
-| `harness.fs.append(path, content)` | `append_file(path, content)` | `workspace.write_text` |
-| `harness.fs.append_locked(path, content, options?)` | `append_file_locked(path, content, options?)` | `workspace.write_text` |
-| `harness.fs.list_dir(path?)` | `list_dir(path?)` | `workspace.list` |
-| `harness.fs.mkdir(path)` | `mkdir(path)` | `workspace.write_text` |
-| `harness.fs.copy(src, dst)` | `copy_file(src, dst)` | `workspace.write_text` |
-| `harness.fs.temp_dir()` | `temp_dir()` | none |
-| `harness.fs.workspace_temp_dir()` | `workspace_temp_dir()` | `workspace.write_text` |
-| `harness.fs.mkdtemp_in_workspace(prefix?)` | `mkdtemp_in_workspace(prefix?)` | `workspace.write_text` |
-| `harness.fs.mkdtemp(prefix?)` | `mkdtemp(prefix?)` | `workspace.write_text` |
-| `harness.fs.stat(path)` | `stat(path)` | `workspace.exists` |
-| `harness.fs.rename(src, dst)` | `move_file(src, dst)` | `workspace.write_text` |
-| `harness.fs.read_lines(path)` | `read_lines(path)` | `workspace.read_text` |
-| `harness.fs.read_lines_page_result(path, options?)` | `read_lines_page_result(path, options?)` | `workspace.read_text` |
-| `harness.fs.walk(path, options?)` | `walk_dir(path, options?)` | `workspace.list` |
-| `harness.fs.glob(pattern, base_or_options?, options?)` | `glob(pattern, base_or_options?, options?)` | `workspace.list` |
-| `harness.fs.find_text(root, pattern, options?)` | `find_text(root, pattern, options?)` | `workspace.list` + `workspace.read_text` |
-| `harness.fs.find_evidence(roots, patterns, options?)` | `find_evidence(roots, patterns, options?)` | `workspace.list` + `workspace.read_text` for every root |
+| Method | Static effect ceiling |
+|---|---|
+| `harness.fs.read_text(path)` | `workspace.read_text` |
+| `harness.fs.read_text_result(path)` | `workspace.read_text` |
+| `harness.fs.read_bytes(path)` | `workspace.read_text` |
+| `harness.fs.write_text(path, content)` | `workspace.write_text` |
+| `harness.fs.write_bytes(path, content)` | `workspace.write_text` |
+| `harness.fs.replace_text(path, content, options?)` | `workspace.write_text` |
+| `harness.fs.replace_text_result(path, content, options?)` | `workspace.write_text` |
+| `harness.fs.replace_bytes(path, content, options?)` | `workspace.write_text` |
+| `harness.fs.replace_bytes_result(path, content, options?)` | `workspace.write_text` |
+| `harness.fs.exists(path)` | `workspace.exists` |
+| `harness.fs.status(path, access?)` | `workspace.exists` |
+| `harness.fs.delete(path)` | `workspace.delete` |
+| `harness.fs.append(path, content)` | `workspace.write_text` |
+| `harness.fs.append_locked(path, content, options?)` | `workspace.write_text` |
+| `harness.fs.list_dir(path?)` | `workspace.list` |
+| `harness.fs.mkdir(path)` | `workspace.write_text` |
+| `harness.fs.copy(src, dst)` | `workspace.write_text` |
+| `harness.fs.temp_dir()` | none |
+| `harness.fs.workspace_temp_dir()` | `workspace.write_text` |
+| `harness.fs.mkdtemp_in_workspace(prefix?)` | `workspace.write_text` |
+| `harness.fs.mkdtemp(prefix?)` | `workspace.write_text` |
+| `harness.fs.stat(path)` | `workspace.exists` |
+| `harness.fs.rename(src, dst)` | `workspace.write_text` |
+| `harness.fs.read_lines(path)` | `workspace.read_text` |
+| `harness.fs.read_lines_page_result(path, options?)` | `workspace.read_text` |
+| `harness.fs.walk(path, options?)` | `workspace.list` |
+| `harness.fs.glob(pattern, base_or_options?, options?)` | `workspace.list` |
+| `harness.fs.find_text(root, pattern, options?)` | `workspace.list` + `workspace.read_text` |
+| `harness.fs.find_evidence(roots, patterns, options?)` | `workspace.list` + `workspace.read_text` for every root |
 
 `harness.fs.read_text_result(path)` returns a closed structured I/O failure
 with stable `kind` values such as `not_found`, `permission_denied`,
@@ -77,10 +78,10 @@ work that does not need to be visible through workspace sandbox rules. The
 directory is not automatically removed; callers own cleanup with
 `harness.fs.delete(path)`.
 
-`harness.fs.glob(pattern, base_or_options?, options?)` returns the same sorted
-matches as `glob(...)`. Patterns are matched against forward-slash paths
-relative to the base directory, and the `background` option returns
-a long-running operation handle.
+`harness.fs.glob(pattern, base_or_options?, options?)` returns sorted matches.
+Patterns are matched against forward-slash paths relative to the base
+directory, and the `background` option returns a long-running operation
+handle.
 
 Every filesystem walk — `glob`, `walk_dir`, `find_text`, `find_evidence`, and
 project scanning — shares one ignore stack, selected per call with
@@ -97,7 +98,7 @@ Defaults differ by surface, deliberately:
 | Surface | Default |
 | --- | --- |
 | `glob`, `walk_dir`, `find_text`, `find_evidence`, `project_scan`, hostlib `tools/search`, hostlib scanner | `"project"` |
-| `hostlib_fs_watch_subscribe` | `"builtin"` |
+| `harness.fs_watch.subscribe(request)` | `"builtin"` |
 
 Watching applies universal hygiene but not project ignore rules: a recursive
 watch over `node_modules` or `target` exhausts the OS watch budget and delivers
@@ -150,7 +151,7 @@ returns an empty list, check whether its pattern names an ignored directory
 that should be the `base` instead.
 
 Hidden-file filtering is a separate axis. `glob` and `walk_dir` always list
-dotfiles, so `glob(".github/workflows/*.yml")` works; `find_text` and
+dotfiles, so `harness.fs.glob(".github/workflows/*.yml")` works; `find_text` and
 `find_evidence` keep their `include_hidden: false` default.
 
 `harness.fs.find_text(root, pattern, options?)` walks with gitignore-aware
@@ -167,15 +168,15 @@ explicit overrides. Count mode is capped by `max_matches` (default 1000).
 Summary modes can set `parallel: true` and optional `threads` for a parallel
 walker.
 
-`harness.fs.find_evidence(roots, patterns, options?)` and its ambient builtin
-accept labeled `{id, path}` roots
-and labeled `{id, text}` literals. It walks each root once, matches all literals
-with one matcher, and returns deterministic path-relative hits plus settled
-per-root failures and match-budget receipts. Root paths are not copied into the
-receipt. Its `case_insensitive` option folds ASCII letters. Set `background`
-for the standard cancellable operation handle. Import
-`search_evidence` or `search_evidence_background` from `std/fs` for typed Harn
-options and results.
+`harness.fs.find_evidence(roots, patterns, options?)` accepts labeled
+`{id, path}` roots and labeled `{id, text}` literals. It walks each root once,
+matches all literals with one matcher, and returns deterministic path-relative
+hits plus settled per-root failures and match-budget receipts. Root paths are
+not copied into the receipt. Its `case_insensitive` option folds ASCII letters.
+Set `background` for the standard cancellable operation handle. The
+`search_evidence` and `search_evidence_background` helpers from `std/fs`
+require a `HarnessFs` argument and provide typed Harn options and results
+without recovering broader authority.
 
 For direct CLI runs, `harn run --write-root <path>` adds an external writable
 root to the same sandbox policy used for the primary workspace. Prefer it over

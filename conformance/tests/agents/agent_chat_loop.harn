@@ -10,7 +10,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(routed.kind)
   harness.stdio.println(contains(routed.message, "/runs"))
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "Need more info.",
         tool_calls: [{id: "wait-1", name: "wait_for_user", arguments: {question: "Which branch?"}}],

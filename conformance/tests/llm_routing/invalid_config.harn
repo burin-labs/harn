@@ -18,14 +18,18 @@ pipeline test(harness: Harness, task) {
   }
   harness.stdio.println(r2)
   const r3 = try {
-    harness.llm.routing_policy({chain: [{provider: "mock", model: "mock"}], failover: {on_status: [99]}})
+    harness.llm.routing_policy(
+      {chain: [{provider: "mock", model: "mock"}], failover: {on_status: [99]}},
+    )
     "no_error"
   } catch (e) {
     "bad_status"
   }
   harness.stdio.println(r3)
   const r4 = try {
-    harness.llm.routing_policy({chain: [{provider: "mock", model: "mock"}], budget: {on_exceed: "explode"}})
+    harness.llm.routing_policy(
+      {chain: [{provider: "mock", model: "mock"}], budget: {on_exceed: "explode"}},
+    )
     "no_error"
   } catch (e) {
     "bad_on_exceed"

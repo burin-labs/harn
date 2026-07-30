@@ -7,9 +7,12 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [{text: "hello from primary", model: "mock", provider: "mock"}],
+    harness.llm,
+    [{text: "hello from primary", model: "mock", provider: "mock"}],
     { ->
-      const policy = harness.llm.routing_policy({chain: [{provider: "mock", model: "mock"}], label: "smoke"})
+      const policy = harness.llm.routing_policy(
+        {chain: [{provider: "mock", model: "mock"}], label: "smoke"},
+      )
       const result = harness.llm.call("hi", nil, {routing: policy})
       harness.stdio.println(result.text)
       harness.stdio.println(result.routing.policy)

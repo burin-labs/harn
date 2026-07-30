@@ -1,7 +1,7 @@
 import { with_temp_dir } from "std/testing"
 import "../check_harn_syntax_sensitive_scans.harn"
 
-fn mkdirs(harness: Harness, path: string) -> nil {
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
   let current = if path.starts_with("/") {
     "/"
@@ -17,17 +17,17 @@ fn mkdirs(harness: Harness, path: string) -> nil {
     } else {
       path_join(current, part)
     }
-    if !harness.fs.exists(current) {
-      harness.fs.mkdir(current)
+    if !fs.exists(current) {
+      fs.mkdir(current)
     }
   }
   return nil
 }
 
-fn write_text(harness: Harness, root: string, rel: string, text: string) -> nil {
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(harness, dirname(path) ?? root)
-  harness.fs.write_text(path, text)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
   return nil
 }
 
@@ -93,27 +93,35 @@ pipeline test_scan_text_reports_all_issue_classes(harness: Harness, task) {
 
 @test
 pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, task) {
-  with_temp_dir(harness, { root ->
-      write_text(harness, root, "scripts/bad.harn", "const pattern = \"let\\\\s+name\"\n")
-      write_text(harness, root, "docs/bad.md", "```harn\n" + "var " + "reg = tool_registry()\n```\n")
-      write_text(harness, root, "docs/good.md", "```harn\nlet reg = tool_registry()\n```\n")
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_text(harness.fs, root, "scripts/bad.harn", "const pattern = \"let\\\\s+name\"\n")
+      write_text(
+        harness.fs,
+        root,
+        "docs/bad.md",
+        "```harn\n" + "var " + "reg = tool_registry()\n```\n",
+      )
+      write_text(harness.fs, root, "docs/good.md", "```harn\nlet reg = tool_registry()\n```\n")
       const retired = "long" + "_running"
-      write_text(harness, root, "schemas/bad.json", "{\"" + retired + "\":true}\n")
-      write_text(harness, root, "docs/dist/generated.md", "var " + "reg = tool_registry()\n")
-      write_text(harness,
+      write_text(harness.fs, root, "schemas/bad.json", "{\"" + retired + "\":true}\n")
+      write_text(harness.fs, root, "docs/dist/generated.md", "var " + "reg = tool_registry()\n")
+      write_text(
+        harness.fs,
         root,
         "harn-docs-snippets-AbCd/35_concurrency_8.harn",
         "var " + "reg = tool_registry()\n",
       )
-      write_text(harness, root, "target/generated.harn", "const pattern = \"let\\\\s+x\"\n")
-      const files = harn_syntax_sensitive_files(harness, root)
+      write_text(harness.fs, root, "target/generated.harn", "const pattern = \"let\\\\s+x\"\n")
+      const files = harn_syntax_sensitive_files(harness.fs, root)
       assert_eq(files.contains("scripts/bad.harn"), true)
       assert_eq(files.contains("docs/bad.md"), true)
       assert_eq(files.contains("schemas/bad.json"), true)
       assert_eq(files.contains("docs/dist/generated.md"), false)
       assert_eq(files.contains("harn-docs-snippets-AbCd/35_concurrency_8.harn"), false)
       assert_eq(files.contains("target/generated.harn"), false)
-      const report = check_harn_syntax_sensitive_scans(harness, root)
+      const report = check_harn_syntax_sensitive_scans(harness.fs, harness.process, root)
       assert_eq(report.violation_count, 3)
       assert_eq(
         report.findings.map({ row -> row.path }).to_list().sorted(),
@@ -125,18 +133,20 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, t
 
 @test
 pipeline test_git_fast_path_includes_untracked_source(harness: Harness, task) {
-  with_temp_dir(harness, { root ->
+  with_temp_dir(
+    harness.fs,
+    { root ->
       const initialized = harness.process.run(
-        {cmd: "git", args: ["-C", root, "init", "--quiet"]},
+        {program: "git", args: ["-C", root, "init", "--quiet"]},
       )
       assert_eq(initialized.exit_code, 0)
-      write_text(harness, root, "tracked.harn", "const pattern = \"let\\\\s+tracked\"\n")
+      write_text(harness.fs, root, "tracked.harn", "const pattern = \"let\\\\s+tracked\"\n")
       const staged = harness.process.run(
-        {cmd: "git", args: ["-C", root, "add", "tracked.harn"]},
+        {program: "git", args: ["-C", root, "add", "tracked.harn"]},
       )
       assert_eq(staged.exit_code, 0)
-      write_text(harness, root, "untracked.md", "var " + "reg = tool_registry()\n")
-      const report = check_harn_syntax_sensitive_scans(harness, root)
+      write_text(harness.fs, root, "untracked.md", "var " + "reg = tool_registry()\n")
+      const report = check_harn_syntax_sensitive_scans(harness.fs, harness.process, root)
       assert_eq(
         report.findings.map({ row -> row.path }).to_list().sorted(),
         ["tracked.harn", "untracked.md"],

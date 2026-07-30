@@ -9,14 +9,19 @@ import { abort_requested, decisive_error, request_abort, settle_with_abort } fro
 
 pipeline default(harness: Harness) {
   const outcome = settle_with_abort(
-    harness,
+    harness.random,
+    harness.runtime,
     [1, 2, 3, 4],
     { item, token ->
-      if abort_requested(harness, token) {
+      if abort_requested(harness.runtime, token) {
         return Err({code: "stopped_waiting", message: "gave up on lane ${item}"})
       }
       if item == 2 {
-        let _ = request_abort(harness, token, {code: "doomed", message: "lane 2 is terminal"})
+        let _ = request_abort(
+          harness.runtime,
+          token,
+          {code: "doomed", message: "lane 2 is terminal"},
+        )
         return Err({code: "terminal", message: "lane 2 failed"})
       }
       return item * 10

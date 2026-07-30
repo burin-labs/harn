@@ -25,9 +25,11 @@ pipeline default(harness: Harness) {
     i = i + 1
   }
   const short_max = recommend_max_output_tokens(
+    harness.llm,
     {prompt: short_prompt, model: model, task_kind: "chat"},
   )
   const long_max = recommend_max_output_tokens(
+    harness.llm,
     {prompt: long_prompt, model: model, task_kind: "summarize"},
   )
   harness.stdio.println("short prompt -> recommended max_output_tokens = " + to_string(short_max))

@@ -45,7 +45,7 @@ registries, MCP `tools/list`-style objects, provider-native tool arrays, and
 deferred tool entries:
 
 ```harn
-pipeline main() {
+pipeline main(harness: Harness) {
   const tools = [
     {
       name: "read_file",
@@ -80,10 +80,10 @@ should see why a binding is not callable.
 ## Read-only executor
 
 `composition_execute(snippet, manifest, options?)` runs a Harn snippet inside a
-generated `pipeline main()` with one wrapper function per manifest binding:
+generated `pipeline main(harness: Harness)` with one wrapper function per manifest binding:
 
 ```harn
-pipeline main() {
+pipeline main(harness: Harness) {
   const manifest = composition_binding_manifest([
     {
       name: "read_file",
@@ -94,7 +94,7 @@ pipeline main() {
   ])
 
   return composition_execute(
-    "const file = read_file({path: \"README.md\"})\nreturn file.text",
+    "const file = harness.fs.read_text({path: \"README.md\"})\nreturn file.text",
     manifest,
     {run_id: "docs-code-mode", max_operations: 8, timeout_ms: 1000},
   )
@@ -192,21 +192,27 @@ audits. Hosts that want real tool dispatch pass a `dispatcher` closure on the
 options dict:
 
 ```harn
-const dispatch = { binding_name, input ->
+fn dispatch_binding(fs: HarnessFs, binding_name: string, input: dict) {
   if binding_name == "read_file" {
-    return host_call("workspace.read_text", input)
+    return fs.read_text(input.path)
   }
   return {error: "unknown binding " + binding_name}
+}
+
+const dispatch = { binding_name, input ->
+  dispatch_binding(harness.fs, binding_name, input)
 }
 const report = composition_execute(snippet, manifest, {dispatcher: dispatch})
 ```
 
 The dispatcher receives `(binding_name: string, input: dict)` for each child
 call and may return any value or raise a runtime error to fail the child. The
-closure executes on a fresh clone of the outer VM, so host bridge builtins
-(`host_call`, MCP, pipeline imports) resolve normally. The inner composition VM
-still only sees manifest bindings plus the curated pure-helper list, so the
-snippet itself cannot bypass policy by reaching for those builtins directly.
+closure executes on a fresh clone of the outer VM and may capture explicit
+capability handles from that VM. The example deliberately attenuates the
+dispatcher to `HarnessFs`; it cannot reach process, network, or LLM authority.
+The inner composition VM still only sees manifest bindings plus the curated
+pure-helper list, so the snippet itself cannot bypass policy by recovering a
+capability handle.
 
 ## MCP profile
 
@@ -216,8 +222,8 @@ eagerly listing every endpoint:
 ```harn
 import { composition_mcp_tools } from "std/composition"
 
-pipeline main() {
-  mcp_tools(composition_mcp_tools())
+pipeline main(harness: Harness) {
+  harness.tools.mcp_tools(composition_mcp_tools())
 }
 ```
 

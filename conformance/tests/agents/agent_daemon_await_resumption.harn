@@ -1,14 +1,19 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
   const session_id = "daemon-await-resumption-" + harness.random.uuid()
   with_llm_script(
-    harness.llm, [llm_text("daemon idle")],
+    harness.llm,
+    [llm_text("daemon idle")],
     { ->
-      const captured = agent_capture_events(harness, session_id,
-        fn() { return agent_loop(harness, "Poll for background work",
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { return agent_loop(
+          harness,
+          "Poll for background work",
           nil,
           {
             provider: "mock",

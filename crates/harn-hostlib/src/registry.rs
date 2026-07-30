@@ -373,7 +373,7 @@ impl HostlibRegistry {
                             args,
                         )
                         .map_err(VmError::from)?;
-                        let validated_args = [request.clone()];
+                        let validated_args = [request];
                         handler(&validated_args).map_err(VmError::from)
                     },
                 );

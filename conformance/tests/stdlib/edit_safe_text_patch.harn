@@ -6,9 +6,9 @@ import { edit_safe_text_patch } from "std/edit"
  * against fresh and pre-existing files, with multi-hunk + stale-base
  * + hunk-conflict + dry-run + no-op + missing-pre-image scenarios.
  */
-fn write_fixture(harness: Harness, dir: string, name: string, body: string) -> string {
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
-  harness.fs.write_text(path, body)
+  fs.write_text(path, body)
   return path
 }
 
@@ -24,7 +24,7 @@ pipeline default(harness: Harness) {
   // 1) Two-hunk apply against an existing file commits atomically and
   //    bumps the after-image hash. Telemetry counts one applied edit.
   const multi_path = write_fixture(
-    harness,
+    harness.fs,
     root,
     "multi.txt",
     "fn alpha() { return 1 }\nfn beta() { return 2 }\nfn gamma() { return 3 }\n",
@@ -54,7 +54,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(multi_disk, "return 33"))
   // 2) Stale expected_hash rejects without writing. Telemetry attributes
   //    the failure to stale_base, not hunk_conflict.
-  const stale_path = write_fixture(harness, root, "stale.txt", "hello\nworld\n")
+  const stale_path = write_fixture(harness.fs, root, "stale.txt", "hello\nworld\n")
   const stale_before = harness.fs.read_text(stale_path)
   const stale_result = edit_safe_text_patch(
     harness.fs,
@@ -72,7 +72,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.fs.read_text(stale_path) == stale_before)
   // 3) Hunk conflict — the second hunk's old_text does not appear after the
   //    first hunk runs, so the patch is rejected with no bytes written.
-  const conflict_path = write_fixture(harness, root, "conflict.txt", "one\ntwo\nthree\n")
+  const conflict_path = write_fixture(harness.fs, root, "conflict.txt", "one\ntwo\nthree\n")
   const conflict_before = harness.fs.read_text(conflict_path)
   const conflict_pre = "sha256:" + sha256(conflict_before)
   const conflict_result = edit_safe_text_patch(
@@ -91,7 +91,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(conflict_result.telemetry.hunk_conflict)
   harness.stdio.println(harness.fs.read_text(conflict_path) == conflict_before)
   // 4) Dry run renders the post-image into `preview` without touching disk.
-  const preview_path = write_fixture(harness, root, "preview.txt", "alpha\nbeta\n")
+  const preview_path = write_fixture(harness.fs, root, "preview.txt", "alpha\nbeta\n")
   const preview_before = harness.fs.read_text(preview_path)
   const preview_pre = "sha256:" + sha256(preview_before)
   const preview_result = edit_safe_text_patch(
@@ -112,7 +112,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.fs.read_text(preview_path) == preview_before)
   // 5) Optional `expected_hash` — when omitted the call still applies and
   //    reports `current_hash` so callers can adopt the API incrementally.
-  const optional_path = write_fixture(harness, root, "optional.txt", "x = 1\n")
+  const optional_path = write_fixture(harness.fs, root, "optional.txt", "x = 1\n")
   const optional_result = edit_safe_text_patch(
     harness.fs,
     harness.random,
@@ -124,7 +124,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.fs.read_text(optional_path) == "x = 2\n")
   // 6) No-op when post-image equals pre-image — neither writes nor reports
   //    hunk_conflict.
-  const noop_path = write_fixture(harness, root, "noop.txt", "stay\nstay\n")
+  const noop_path = write_fixture(harness.fs, root, "noop.txt", "stay\nstay\n")
   const noop_result = edit_safe_text_patch(
     harness.fs,
     harness.random,
@@ -154,7 +154,7 @@ pipeline default(harness: Harness) {
   // 8) Lifecycle hooks are additive. They can reject before matching, rewrite
   //    the request, reject the final write, attach post-apply advisories, or
   //    restore the pre-image and call host-injected rollback invalidation.
-  const pre_reject_path = write_fixture(harness, root, "pre-reject.txt", "alpha\n")
+  const pre_reject_path = write_fixture(harness.fs, root, "pre-reject.txt", "alpha\n")
   const pre_reject_before = harness.fs.read_text(pre_reject_path)
   const pre_reject = edit_safe_text_patch(
     harness.fs,
@@ -168,7 +168,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(pre_reject.result)
   harness.stdio.println(pre_reject.errors[0].code)
   harness.stdio.println(harness.fs.read_text(pre_reject_path) == pre_reject_before)
-  const rewrite_path = write_fixture(harness, root, "rewrite.txt", "alpha\n")
+  const rewrite_path = write_fixture(harness.fs, root, "rewrite.txt", "alpha\n")
   const rewrite_result = edit_safe_text_patch(
     harness.fs,
     harness.random,
@@ -182,7 +182,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(rewrite_result.result)
   harness.stdio.println(harness.fs.read_text(rewrite_path) == "rewritten\n")
-  const policy_path = write_fixture(harness, root, "policy.txt", "safe\n")
+  const policy_path = write_fixture(harness.fs, root, "policy.txt", "safe\n")
   const policy_before = harness.fs.read_text(policy_path)
   const policy_result = edit_safe_text_patch(
     harness.fs,
@@ -201,7 +201,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(policy_result.result)
   harness.stdio.println(policy_result.errors[0].code)
   harness.stdio.println(harness.fs.read_text(policy_path) == policy_before)
-  const advisory_path = write_fixture(harness, root, "advisory.txt", "before\n")
+  const advisory_path = write_fixture(harness.fs, root, "advisory.txt", "before\n")
   const advisory_result = edit_safe_text_patch(
     harness.fs,
     harness.random,
@@ -219,7 +219,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(advisory_result.result)
   harness.stdio.println(advisory_result.warnings[0].code)
   harness.stdio.println(harness.fs.read_text(advisory_path) == "after\n")
-  const rollback_path = write_fixture(harness, root, "rollback.txt", "before\n")
+  const rollback_path = write_fixture(harness.fs, root, "rollback.txt", "before\n")
   const rollback_marker = path_join(root, "rollback-marker.txt")
   const rollback_result = edit_safe_text_patch(
     harness.fs,
@@ -248,12 +248,10 @@ pipeline default(harness: Harness) {
   //    pre-staged hash must reject as `stale_base` even though the disk
   //    still shows the original bytes. This is the load-bearing scenario
   //    the epic targets.
-  const staged_path = write_fixture(harness, root, "staged.txt", "v1\n")
+  const staged_path = write_fixture(harness.fs, root, "staged.txt", "v1\n")
   const staged_pre = "sha256:" + sha256("v1\n")
   const staged_session = "harn-edit-safe-text-patch-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   harness.fs.set_mode({session_id: staged_session, mode: "staged", root: root})
   // Sibling agent stages a competing write — overlay hash diverges from disk.
   harness.tools.write_file({session_id: staged_session, path: staged_path, content: "competing\n"})

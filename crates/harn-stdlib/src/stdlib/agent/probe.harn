@@ -103,13 +103,15 @@ fn __probe_body(body) -> string {
   return text
 }
 
-fn __probe_truncate(harness: Harness, value, limit) -> string {
+fn __probe_truncate(agent: HarnessAgent, value, limit) -> string {
   const text = __probe_text(value)
   if len(text) <= limit {
     return text
   }
   const retained = substring(text, 0, limit)
-  let _ = agent_report_truncation(harness, text,
+  let _ = agent_report_truncation(
+    agent,
+    text,
     retained,
     "probe evidence exceeded its model-visible byte budget",
   )
@@ -126,8 +128,8 @@ fn __probe_command_options(opts) -> dict {
   return out
 }
 
-fn __probe_temp_path(harness: Harness, suffix) -> string {
-  return path_join(harness.fs.workspace_temp_dir(), "harn-probe-" + harness.random.uuid() + suffix)
+fn __probe_temp_path(fs: HarnessFs, random: HarnessRandom, suffix) -> string {
+  return path_join(fs.workspace_temp_dir(), "harn-probe-" + random.uuid() + suffix)
 }
 
 fn __probe_harn_binary(opts) -> string {
@@ -143,7 +145,7 @@ fn __probe_eval(harness: Harness, body, opts) -> dict {
   const cmd_opts = __probe_command_options(opts)
   const started = harness.clock.monotonic_ms()
   const result = if lang == "harn" {
-    const path = __probe_temp_path(harness, ".harn")
+    const path = __probe_temp_path(harness.fs, harness.random, ".harn")
     harness.fs.write_text(path, body)
     const argv = [__probe_harn_binary(opts), "run", path]
     const res = command_run(harness.tools, argv, cmd_opts)
@@ -170,7 +172,7 @@ fn __probe_typecheck_diagnostics(stdout) -> dict {
 }
 
 fn __probe_typecheck(harness: Harness, body, opts) -> dict {
-  const path = __probe_temp_path(harness, ".harn")
+  const path = __probe_temp_path(harness.fs, harness.random, ".harn")
   harness.fs.write_text(path, body)
   const argv = [__probe_harn_binary(opts), "check", path, "--json"]
   const started = harness.clock.monotonic_ms()
@@ -236,17 +238,17 @@ fn __probe_typecheck_outcome(result, diagnostics, expected) -> ProbeOutcome {
   return errors == 0 ? "pass" : "fail"
 }
 
-fn __probe_observed_eval(harness: Harness, result, outcome) -> string {
+fn __probe_observed_eval(agent: HarnessAgent, result, outcome) -> string {
   const exit = result?.exit_code
   const exit_str = exit == nil ? "?" : to_string(exit)
   const stdout = trim(result?.stdout ?? "")
   const stderr = trim(result?.stderr ?? "")
   const summary = "eval exit=" + exit_str + " outcome=" + outcome
   if stdout != "" {
-    return summary + " stdout=" + __probe_truncate(harness, stdout, 240)
+    return summary + " stdout=" + __probe_truncate(agent, stdout, 240)
   }
   if stderr != "" {
-    return summary + " stderr=" + __probe_truncate(harness, stderr, 240)
+    return summary + " stderr=" + __probe_truncate(agent, stderr, 240)
   }
   return summary
 }
@@ -267,13 +269,29 @@ fn __probe_trace_id(kind, body, observed) -> string {
   return "probe_" + substring(sha256(seed), 0, 16)
 }
 
-fn __probe_evidence(harness: Harness, kind, body, command, observed, result, duration_ms) -> ProbeEvidence {
-  const stdout = result == nil ? nil : __probe_truncate(harness, result?.stdout ?? "", PROBE_CAPTURE_LIMIT)
-  const stderr = result == nil ? nil : __probe_truncate(harness, result?.stderr ?? "", PROBE_CAPTURE_LIMIT)
+fn __probe_evidence(
+  agent: HarnessAgent,
+  kind,
+  body,
+  command,
+  observed,
+  result,
+  duration_ms,
+) -> ProbeEvidence {
+  const stdout = result == nil ? nil : __probe_truncate(
+    agent,
+    result?.stdout ?? "",
+    PROBE_CAPTURE_LIMIT,
+  )
+  const stderr = result == nil ? nil : __probe_truncate(
+    agent,
+    result?.stderr ?? "",
+    PROBE_CAPTURE_LIMIT,
+  )
   return filter_nil(
     {
       trace_id: __probe_trace_id(kind, body, observed),
-      snippet: __probe_truncate(harness, body, PROBE_CAPTURE_LIMIT),
+      snippet: __probe_truncate(agent, body, PROBE_CAPTURE_LIMIT),
       command: command,
       stdout: stdout,
       stderr: stderr,
@@ -291,8 +309,8 @@ fn __probe_confidence(outcome) -> float {
   return 0.9
 }
 
-fn __probe_claim(harness: Harness, kind, outcome, snippet) -> string {
-  const trimmed = __probe_truncate(harness, trim(snippet), 120)
+fn __probe_claim(agent: HarnessAgent, kind, outcome, snippet) -> string {
+  const trimmed = __probe_truncate(agent, trim(snippet), 120)
   return "probe " + kind + " `" + replace(trimmed, "\n", " ") + "` → " + outcome
 }
 
@@ -318,10 +336,14 @@ fn __probe_store_fact(harness: Harness, kind, observed, outcome, evidence, opts)
   const provenance = __probe_provenance(kind, opts?.lang, evidence?.command, opts)
   const fact_input = {
     kind: "observation",
-    claim: __probe_claim(harness, kind, outcome, evidence?.snippet ?? ""),
+    claim: __probe_claim(harness.agent, kind, outcome, evidence?.snippet ?? ""),
     confidence: __probe_confidence(outcome),
     evidence: [
-      {kind: "tool_output", ref: evidence.trace_id, snippet: __probe_truncate(harness, observed, 1024)},
+      {
+        kind: "tool_output",
+        ref: evidence.trace_id,
+        snippet: __probe_truncate(harness.agent, observed, 1024),
+      },
     ],
     provenance: provenance,
   }
@@ -332,7 +354,7 @@ fn __probe_store_fact(harness: Harness, kind, observed, outcome, evidence, opts)
     }
   }
   const stored = try {
-    store_fact(harness, harness.memory, fact_input, fact_opts)
+    store_fact(harness.clock, harness.memory, fact_input, fact_opts)
   }
   if is_err(stored) {
     return nil
@@ -359,7 +381,7 @@ fn __probe_envelope(harness: Harness, kind, outcome, observed, evidence, opts) -
 
 fn __probe_unsupported(harness: Harness, kind, body, opts) -> ProbeResult {
   const observed = "probe kind `" + kind + "` is not supported (supported kinds: eval, typecheck)"
-  const evidence = __probe_evidence(harness, kind, body, nil, observed, nil, nil)
+  const evidence = __probe_evidence(harness.agent, kind, body, nil, observed, nil, nil)
   return __probe_envelope(harness, kind, "unknown", observed, evidence, opts)
 }
 
@@ -368,13 +390,21 @@ fn __probe_run_eval(harness: Harness, body, opts) -> ProbeResult {
   const ran = __probe_eval(harness, body, opts)
   const result = ran.result
   const outcome = __probe_eval_outcome(result, opts?.expected)
-  const observed = __probe_observed_eval(harness, result, outcome)
+  const observed = __probe_observed_eval(harness.agent, result, outcome)
   const command = if ran.lang == "harn" {
     join([__probe_harn_binary(opts), "run", "<snippet>"], " ")
   } else {
-    __probe_truncate(harness, body, 240)
+    __probe_truncate(harness.agent, body, 240)
   }
-  const evidence = __probe_evidence(harness, kind, body, command, observed, result, ran.duration_ms)
+  const evidence = __probe_evidence(
+    harness.agent,
+    kind,
+    body,
+    command,
+    observed,
+    result,
+    ran.duration_ms,
+  )
   return __probe_envelope(harness, kind, outcome, observed, evidence, opts + {lang: ran.lang})
 }
 
@@ -384,7 +414,15 @@ fn __probe_run_typecheck(harness: Harness, body, opts) -> ProbeResult {
   const outcome = __probe_typecheck_outcome(ran.result, ran.diagnostics, opts?.expected)
   const observed = __probe_observed_typecheck(ran.diagnostics, outcome)
   const command = join([__probe_harn_binary(opts), "check", "<snippet>", "--json"], " ")
-  const evidence = __probe_evidence(harness, kind, body, command, observed, ran.result, ran.duration_ms)
+  const evidence = __probe_evidence(
+    harness.agent,
+    kind,
+    body,
+    command,
+    observed,
+    ran.result,
+    ran.duration_ms,
+  )
   return __probe_envelope(harness, kind, outcome, observed, evidence, opts)
 }
 

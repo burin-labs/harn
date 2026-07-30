@@ -26,7 +26,8 @@ pipeline default(harness: Harness) {
   const observed = harness.runtime.atomic(0)
   // Two tool calls in turn 1, then a finishing turn.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "c1", name: "echo", arguments: {msg: "first", reason: "first call"}},
@@ -41,7 +42,9 @@ pipeline default(harness: Harness) {
         let _ = harness.runtime.atomic_add(observed, 1)
         return mw.caller(call, next)
       }
-      const result = agent_loop(harness, "do it",
+      const result = agent_loop(
+        harness,
+        "do it",
         nil,
         {
           provider: "mock",

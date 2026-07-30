@@ -17,6 +17,12 @@ use super::util::{
 };
 use super::TriggerEvent;
 
+#[derive(Clone, Copy)]
+enum TriggerCallableBoundary {
+    Handler,
+    EventOnly,
+}
+
 impl Dispatcher {
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn invoke_vm_callable(
@@ -31,29 +37,96 @@ impl Dispatcher {
         wait_lease: Option<DispatchWaitLease>,
         cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<VmValue, DispatchError> {
+        self.invoke_vm_callable_at_boundary(
+            callable,
+            binding_key,
+            event,
+            replay_of_event_id,
+            agent_id,
+            action,
+            autonomy_tier,
+            wait_lease,
+            cancel_rx,
+            TriggerCallableBoundary::Handler,
+        )
+        .await
+    }
+
+    /// Invoke an event projection that must not inherit the handler's root
+    /// authority. Routing selectors, flow-control expressions, and task
+    /// factories receive only the trigger event they transform.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn invoke_vm_event_callable(
+        &self,
+        callable: &crate::value::VmCallable,
+        binding_key: &str,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        agent_id: &str,
+        action: &str,
+        autonomy_tier: AutonomyTier,
+        wait_lease: Option<DispatchWaitLease>,
+        cancel_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<VmValue, DispatchError> {
+        self.invoke_vm_callable_at_boundary(
+            callable,
+            binding_key,
+            event,
+            replay_of_event_id,
+            agent_id,
+            action,
+            autonomy_tier,
+            wait_lease,
+            cancel_rx,
+            TriggerCallableBoundary::EventOnly,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn invoke_vm_callable_at_boundary(
+        &self,
+        callable: &crate::value::VmCallable,
+        binding_key: &str,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        agent_id: &str,
+        action: &str,
+        autonomy_tier: AutonomyTier,
+        wait_lease: Option<DispatchWaitLease>,
+        cancel_rx: &mut broadcast::Receiver<()>,
+        boundary: TriggerCallableBoundary,
+    ) -> Result<VmValue, DispatchError> {
         let callable_policy = match callable {
             crate::value::VmCallable::Pipeline(callable) => callable.execution_policy(),
             _ => None,
         };
         let autonomy_tier = callable.effective_autonomy_tier(autonomy_tier);
+        if self.state.shutting_down.load(Ordering::SeqCst) {
+            return Err(DispatchError::Cancelled(
+                "dispatcher shutdown cancelled local handler".to_string(),
+            ));
+        }
         let mut vm = self.base_vm.child_vm();
         let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        if self.state.shutting_down.load(Ordering::SeqCst) {
-            cancel_token.store(true, Ordering::SeqCst);
-        }
         self.state
             .cancel_tokens
             .lock()
             .expect("dispatcher cancel tokens poisoned")
             .push(cancel_token.clone());
         vm.install_cancel_token(cancel_token.clone());
-        let harness = vm.root_harness_value().ok_or_else(|| {
-            DispatchError::Local(
-                "trigger callable execution has no root Harness authority".to_string(),
-            )
-        })?;
         let handler_event = event_to_handler_value(event)?;
-        let args = [harness, handler_event];
+        let args = match boundary {
+            TriggerCallableBoundary::Handler => {
+                let harness = vm.root_harness_value().ok_or_else(|| {
+                    DispatchError::Local(
+                        "trigger handler execution has no root Harness authority".to_string(),
+                    )
+                })?;
+                vec![harness, handler_event]
+            }
+            TriggerCallableBoundary::EventOnly => vec![handler_event],
+        };
         let tier_policy = policy_for_autonomy_tier(autonomy_tier);
         let invocation_policy = match callable_policy {
             Some(policy) => tier_policy
@@ -162,7 +235,7 @@ impl Dispatcher {
         cancel_rx: &mut broadcast::Receiver<()>,
         timeout: Option<Duration>,
     ) -> Result<VmValue, DispatchError> {
-        let future = Box::pin(self.invoke_vm_callable(
+        let future = Box::pin(self.invoke_vm_callable_at_boundary(
             callable,
             binding_key,
             event,
@@ -172,6 +245,11 @@ impl Dispatcher {
             autonomy_tier,
             None,
             cancel_rx,
+            // Predicates are runtime entrypoints just like handlers: they may
+            // perform budgeted capability effects (for example an LLM-backed
+            // routing decision), so they receive root authority and should
+            // attenuate it when delegating to helpers.
+            TriggerCallableBoundary::Handler,
         ));
         if let Some(timeout) = timeout {
             match tokio::time::timeout(timeout, future).await {

@@ -30,7 +30,8 @@ pipeline main(harness: Harness) {
   // empty-name call is dropped with parse_guidance, and the loop continues to
   // the terminal done turn rather than stopping on the malformed sibling.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "",
         tool_calls: [
@@ -42,7 +43,9 @@ pipeline main(harness: Harness) {
       llm_text("##DONE##"),
     ],
     { ->
-      const result = agent_loop(harness, "Read the files, then finish.",
+      const result = agent_loop(
+        harness,
+        "Read the files, then finish.",
         nil,
         {
           provider: "mock",
@@ -69,9 +72,12 @@ pipeline main(harness: Harness) {
   // dispatches, but the loop still injects parse-guidance and keeps running
   // (does not silently terminate as INCOMPLETE).
   with_llm_script(
-    harness.llm, [{text: "", tool_calls: [{id: "blank_only", name: "  ", arguments: {}}]}, llm_text("##DONE##")],
+    harness.llm,
+    [{text: "", tool_calls: [{id: "blank_only", name: "  ", arguments: {}}]}, llm_text("##DONE##")],
     { ->
-      const result = agent_loop(harness, "Do the task, then finish.",
+      const result = agent_loop(
+        harness,
+        "Do the task, then finish.",
         nil,
         {
           provider: "mock",

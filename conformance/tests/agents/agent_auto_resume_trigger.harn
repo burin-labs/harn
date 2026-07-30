@@ -4,7 +4,8 @@ import "std/triggers"
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {
@@ -22,7 +23,9 @@ pipeline main(harness: Harness) {
       llm_text("resumed after review"),
     ],
     { ->
-      const handle = sub_agent_run(harness, "Park until review approval.",
+      const handle = sub_agent_run(
+        harness,
+        "Park until review approval.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
       const suspended = wait_agent(harness.agent, handle)

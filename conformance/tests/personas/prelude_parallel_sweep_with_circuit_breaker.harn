@@ -1,7 +1,9 @@
 import { parallel_sweep_with_circuit_breaker } from "std/personas/prelude"
 
 pipeline test(harness: Harness, task) {
-  const result = parallel_sweep_with_circuit_breaker(harness, [1, 2, 3, 4],
+  const result = parallel_sweep_with_circuit_breaker(
+    harness,
+    [1, 2, 3, 4],
     fn(item) {
       if item == 2 {
         throw "boom"

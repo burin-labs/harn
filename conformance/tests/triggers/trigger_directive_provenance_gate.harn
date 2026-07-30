@@ -37,7 +37,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(tampered.status)
   harness.stdio.println(tampered.trust)
   /* Benign result with no authority marker is never treated as a directive. */
-  const benign = harness.system.security_verify_directive("Subtask result: build passed. 3 tests ran, 0 failed.")
+  const benign = harness.system.security_verify_directive(
+    "Subtask result: build passed. 3 tests ran, 0 failed.",
+  )
   harness.stdio.println(benign.status)
   harness.stdio.println(benign.forged)
   harness.stdio.println(benign.trust)

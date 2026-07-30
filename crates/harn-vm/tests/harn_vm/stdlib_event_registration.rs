@@ -44,12 +44,14 @@ fn documented_stdlib_events_reach_subscribers_and_live_transcript() {
 import { agent_capture_events } from "std/agent/events"
 import { agent_emit_event } from "std/agent/state"
 
-pipeline main(task) {
-  const session = agent_session_open("stdlib-event-registration")
+pipeline main(harness: Harness, task) {
+  const session = harness.agent.open("stdlib-event-registration")
   const captured = agent_capture_events(
+    harness.agent,
     session,
     fn() {
       agent_emit_event(
+        harness.agent,
         session,
         "require_successful_tools_violation",
         {
@@ -67,6 +69,7 @@ pipeline main(task) {
         },
       )
       agent_emit_event(
+        harness.agent,
         session,
         "final_wrapup",
         {
@@ -78,11 +81,13 @@ pipeline main(task) {
         },
       )
       agent_emit_event(
+        harness.agent,
         session,
         "pack_thinking_stripped",
         {model: "claude-opus-adaptive", requested: "high", reason: "claude_opus_adaptive"},
       )
       agent_emit_event(
+        harness.agent,
         session,
         "self_consistency_tie",
         {
@@ -92,6 +97,7 @@ pipeline main(task) {
         },
       )
       agent_emit_event(
+        harness.agent,
         session,
         "code_librarian_query_nl_fallback",
         {
@@ -105,11 +111,11 @@ pipeline main(task) {
       return nil
     },
   )
-  log(len(captured.events))
+  harness.stdio.log(len(captured.events))
   for event in captured.events {
-    log(event.type)
+    harness.stdio.log(event.type)
   }
-  const transcript = agent_session_snapshot(session)
+  const transcript = harness.agent.snapshot(session)
   for event_type in [
     "require_successful_tools_violation",
     "final_wrapup",
@@ -117,7 +123,7 @@ pipeline main(task) {
     "self_consistency_tie",
     "code_librarian_query_nl_fallback",
   ] {
-    log(len(transcript_events_by_kind(transcript, event_type)))
+    harness.stdio.log(len(transcript_events_by_kind(transcript, event_type)))
   }
 }
 "#,

@@ -59,7 +59,9 @@ pipeline default(harness: Harness) {
       {disposable_paths: ["frontend/node_modules", "ios/Pods"]},
     ),
   )
-  harness.stdio.println(worktree_prune_status_has_real_edits(" M src/main.rs\n M target/debug/foo\n"))
+  harness.stdio.println(
+    worktree_prune_status_has_real_edits(" M src/main.rs\n M target/debug/foo\n"),
+  )
   harness.stdio.println(!worktree_prune_status_has_real_edits("R  old.rs -> target/old.rs\n"))
   harness.stdio.println(worktree_prune_status_has_real_edits("R  target/x -> src/x.rs\n"))
   harness.stdio.println(

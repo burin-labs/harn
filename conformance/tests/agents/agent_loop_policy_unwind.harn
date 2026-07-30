@@ -4,7 +4,9 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness, task) {
   const failed = try {
-    agent_loop(harness, "This loop should fail during bootstrap",
+    agent_loop(
+      harness,
+      "This loop should fail during bootstrap",
       nil,
       {
         provider: "mock",
@@ -16,15 +18,20 @@ pipeline main(harness: Harness, task) {
   }
   harness.stdio.println(is_err(failed))
   const stale_finalize = try {
-    agent_session_finalize(harness, "failed-bootstrap-cleanup",
+    agent_session_finalize(
+      harness.agent,
+      "failed-bootstrap-cleanup",
       {final_status: "done", stop_reason: "test", iterations: 0},
     )
   }
   harness.stdio.println(is_err(stale_finalize))
   with_llm_script(
-    harness.llm, [llm_text("<done>##DONE##</done>")],
+    harness.llm,
+    [llm_text("<done>##DONE##</done>")],
     { ->
-      const result = agent_loop(harness, "A later loop should not inherit failed-loop state",
+      const result = agent_loop(
+        harness,
+        "A later loop should not inherit failed-loop state",
         nil,
         {provider: "mock", max_iterations: 1},
       )

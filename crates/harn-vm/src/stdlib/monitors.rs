@@ -700,16 +700,16 @@ mod tests {
                 let source = r#"
 import { wait_for } from "std/monitors"
 
-pipeline test(task) {
-  const result = wait_for({
+pipeline test(harness: Harness, task) {
+  const result = wait_for(harness.runtime, {
     wait_id: "poll-demo",
     timeout: 500ms,
     poll_interval: 10ms,
     source: {label: "poll-demo", poll: { _ -> return {ready: true} }},
     condition: { state -> state.ready },
   })
-  __io_println(result.status)
-  __io_println(result.poll_count == 1)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.poll_count == 1)
 }
 "#;
                 let (output, log) = execute_monitor_script(dir.path(), source)
@@ -742,16 +742,16 @@ pipeline test(task) {
                 let live = r#"
 import { wait_for } from "std/monitors"
 
-pipeline test(task) {
-  const result = wait_for({
+pipeline test(harness: Harness, task) {
+  const result = wait_for(harness.runtime, {
     wait_id: "replay-demo",
     timeout: 500ms,
     poll_interval: 10ms,
     source: {poll: { _ -> return {ready: true, value: 42} }},
     condition: { state -> state.ready },
   })
-  __io_println(result.status)
-  __io_println(result.state.value)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.state.value)
 }
 "#;
                 let (live_output, log) = execute_monitor_script(dir.path(), live)
@@ -761,16 +761,16 @@ pipeline test(task) {
                 let replay = r#"
 import { wait_for } from "std/monitors"
 
-pipeline test(task) {
-  const result = wait_for({
+pipeline test(harness: Harness, task) {
+  const result = wait_for(harness.runtime, {
     wait_id: "replay-demo",
     timeout: 1ms,
     poll_interval: 1ms,
     source: {poll: { _ -> return {ready: false, value: 0} }},
     condition: { state -> state.ready },
   })
-  __io_println(result.status)
-  __io_println(result.state.value)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.state.value)
 }
 "#;
                 let (replay_output, _) =
@@ -813,8 +813,8 @@ pipeline test(task) {
                 let source = r#"
 import { wait_for } from "std/monitors"
 
-pipeline test(task) {
-  const result = wait_for({
+pipeline test(harness: Harness, task) {
+  const result = wait_for(harness.runtime, {
     wait_id: "push-demo",
     timeout: 500ms,
     poll_interval: 1h,
@@ -831,9 +831,9 @@ pipeline test(task) {
     },
     condition: { state -> state.ready },
   })
-  __io_println(result.status)
-  __io_println(result.poll_count)
-  __io_println(result.push_wake_count)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.poll_count)
+  harness.stdio.println(result.push_wake_count)
 }
 "#;
                 let chunk = compile_source(source).expect("compile source");

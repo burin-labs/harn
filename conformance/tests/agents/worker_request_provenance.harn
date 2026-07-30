@@ -3,9 +3,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("background summary")],
+    harness.llm,
+    [llm_text("background summary")],
     { ->
-      const handle = sub_agent_run(harness, "Investigate worker provenance",
+      const handle = sub_agent_run(
+        harness,
+        "Investigate worker provenance",
         {
           provider: "mock",
           background: true,
@@ -20,7 +23,9 @@ pipeline main(harness: Harness) {
       harness.stdio.println(len(worker_research_questions(handle)) == 1)
       harness.stdio.println(worker_action_items(handle)[0]?.id == "action_1")
       harness.stdio.println(worker_workflow_stages(handle)[1] == "implement")
-      harness.stdio.println(worker_verification_steps(handle)[0] == "cargo test -p harn-vm agents_workers")
+      harness.stdio.println(
+        worker_verification_steps(handle)[0] == "cargo test -p harn-vm agents_workers",
+      )
       const done = wait_agent(harness.agent, handle)
       harness.stdio.println(worker_request(done)?.task == "Investigate worker provenance")
       harness.stdio.println(worker_provenance(done)?.worker_id == done?.id)

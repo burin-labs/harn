@@ -27,7 +27,7 @@ fn __persist_batch_http_fixture_calls(harness: Harness) {
   if path == "" {
     return
   }
-  __mkdirp(harness, dirname(path) ?? ".")
+  __mkdirp(harness.fs, dirname(path) ?? ".")
   harness.fs.write_text(path, json_stringify_pretty(harness.testing.http_mock_calls()) + "\n")
 }
 
@@ -44,6 +44,30 @@ pub type BatchCreateRecovery = {
   mode: BatchCreateRecoveryMode,
   token_field?: string,
   retry_after_ambiguous_acceptance: bool,
+}
+
+pub type BedrockHttpInput = {
+  method: string,
+  url: string,
+  region: string,
+  service: string,
+  body: string,
+  max_response_bytes: int,
+}
+
+pub type FireworksDatasetUploadInput = {
+  account_id: string,
+  dataset_id: string,
+  api_key: string,
+  file_path: string,
+}
+
+pub type JsonlFileUploadInput = {
+  provider: string,
+  url: string,
+  credential_env: string,
+  api_key: string,
+  file_path: string,
 }
 
 /**
@@ -210,7 +234,7 @@ pub fn __live_batch_operation_error(operation: string, provider: string, wire: s
  * @effects: [fs.write]
  * @errors: []
  */
-pub fn __mkdirp(harness: Harness, path: string) -> nil {
+pub fn __mkdirp(fs: HarnessFs, path: string) -> nil {
   if trim(path) == "" {
     return
   }
@@ -230,7 +254,7 @@ pub fn __mkdirp(harness: Harness, path: string) -> nil {
       path_join(current, part)
     }
     try {
-      harness.fs.mkdir(current)
+      fs.mkdir(current)
     } catch (_e) {
       nil
     }
@@ -305,21 +329,18 @@ fn __provider_auth_env_candidates(provider: string) -> list {
  * @effects: [env.read]
  * @errors: []
  */
-pub fn __provider_base_url(harness: Harness, provider: string) -> string {
+pub fn __provider_base_url(env: HarnessEnv, provider: string) -> string {
   if provider == "openai" {
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_OPENAI_BASE_URL",
-        harness.env.get_or("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        env.get_or("OPENAI_BASE_URL", "https://api.openai.com/v1"),
       ),
     )
   }
   if provider == "azure_openai" {
     let endpoint = trim(
-      harness.env.get_or(
-        "HARN_BATCH_AZURE_OPENAI_BASE_URL",
-        harness.env.get_or("AZURE_OPENAI_ENDPOINT", ""),
-      ),
+      env.get_or("HARN_BATCH_AZURE_OPENAI_BASE_URL", env.get_or("AZURE_OPENAI_ENDPOINT", "")),
     )
     endpoint = regex_replace("/openai/v1/?$", "", endpoint) ?? endpoint
     endpoint = regex_replace("/openai/?$", "", endpoint) ?? endpoint
@@ -330,11 +351,9 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
     return endpoint + "/openai/v1"
   }
   if provider == "bedrock" {
-    const region = trim(
-      harness.env.get_or("HARN_BATCH_BEDROCK_REGION", harness.env.get_or("AWS_REGION", "")),
-    )
+    const region = trim(env.get_or("HARN_BATCH_BEDROCK_REGION", env.get_or("AWS_REGION", "")))
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_BEDROCK_BASE_URL",
         if region == "" {
           ""
@@ -346,35 +365,32 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "anthropic" {
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_ANTHROPIC_BASE_URL",
-        harness.env.get_or("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+        env.get_or("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
       ),
     )
   }
   if provider == "mistral" {
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_MISTRAL_BASE_URL",
-        harness.env.get_or("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
+        env.get_or("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
       ),
     )
   }
   if provider == "xai" {
     return trim(
-      harness.env.get_or(
-        "HARN_BATCH_XAI_BASE_URL",
-        harness.env.get_or("XAI_BASE_URL", "https://api.x.ai/v1"),
-      ),
+      env.get_or("HARN_BATCH_XAI_BASE_URL", env.get_or("XAI_BASE_URL", "https://api.x.ai/v1")),
     )
   }
   if provider == "gemini" {
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_GEMINI_BASE_URL",
-        harness.env.get_or(
+        env.get_or(
           "GEMINI_BASE_URL",
-          harness.env.get_or(
+          env.get_or(
             "GOOGLE_GENERATIVE_LANGUAGE_BASE_URL",
             "https://generativelanguage.googleapis.com",
           ),
@@ -384,36 +400,36 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "groq" {
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_GROQ_BASE_URL",
-        harness.env.get_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+        env.get_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
       ),
     )
   }
   if provider == "together" {
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_TOGETHER_BASE_URL",
-        harness.env.get_or(
+        env.get_or(
           "TOGETHER_AI_BASE_URL",
-          harness.env.get_or("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
+          env.get_or("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
         ),
       ),
     )
   }
   if provider == "fireworks" {
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_FIREWORKS_BASE_URL",
-        harness.env.get_or("FIREWORKS_BASE_URL", "https://api.fireworks.ai/v1"),
+        env.get_or("FIREWORKS_BASE_URL", "https://api.fireworks.ai/v1"),
       ),
     )
   }
   if provider == "parasail" {
     return trim(
-      harness.env.get_or(
+      env.get_or(
         "HARN_BATCH_PARASAIL_BASE_URL",
-        harness.env.get_or("PARASAIL_BASE_URL", "https://api.saas.parasail.io/v1"),
+        env.get_or("PARASAIL_BASE_URL", "https://api.saas.parasail.io/v1"),
       ),
     )
   }
@@ -487,18 +503,18 @@ pub fn __http_result(harness: Harness, method: string, url: string, options: dic
  * @effects: [fs.read]
  * @errors: [runtime]
  */
-pub fn __request_file_payload(harness: Harness, job: dict) -> dict {
+pub fn __request_file_payload(fs: HarnessFs, job: dict) -> dict {
   const path = safe_string(job["request_file"], "")
   if path == "" {
     return {ok: false, error: "job " + safe_string(job["id"], "") + " has no request_file"}
   }
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     return {
       ok: false,
       error: "request file not found for job " + safe_string(job["id"], "") + ": " + path,
     }
   }
-  const text = harness.fs.read_text(path)
+  const text = fs.read_text(path)
   const actual_sha = sha256(text)
   const expected_sha = safe_string(job["request_file_sha256"], "")
   if expected_sha != "" && expected_sha != actual_sha {
@@ -533,7 +549,7 @@ fn __redacted_job_operation(job: dict, base_url: string, credential_env: string)
  * @effects: [env.read]
  * @errors: []
  */
-pub fn __submission_job_base(harness: Harness, job: dict, payload: dict, dry_run: bool) -> dict {
+pub fn __submission_job_base(env: HarnessEnv, job: dict, payload: dict, dry_run: bool) -> dict {
   const provider = safe_string(job["provider"], "")
   const credential_env = __provider_auth_env(provider)
   return {
@@ -554,7 +570,7 @@ pub fn __submission_job_base(harness: Harness, job: dict, payload: dict, dry_run
     dry_run: dry_run,
     provider_operation: __redacted_job_operation(
       job,
-      __provider_base_url(harness, provider),
+      __provider_base_url(env, provider),
       credential_env,
     ),
   }
@@ -566,11 +582,11 @@ pub fn __submission_job_base(harness: Harness, job: dict, payload: dict, dry_run
  * @effects: [env.read]
  * @errors: []
  */
-pub fn __dry_run_submission(harness: Harness, job: dict, payload: dict) -> dict {
+pub fn __dry_run_submission(env: HarnessEnv, job: dict, payload: dict) -> dict {
   const policy = safe_dict(job["provider_policy"])
   return {
     ok: true,
-    job: __submission_job_base(harness, job, payload, true)
+    job: __submission_job_base(env, job, payload, true)
       + {
       status: "ready",
       provider_batch_id: nil,
@@ -589,10 +605,10 @@ pub fn __dry_run_submission(harness: Harness, job: dict, payload: dict) -> dict 
  * @effects: [env.read]
  * @errors: []
  */
-pub fn __api_key_for_job(harness: Harness, provider: string) -> dict {
+pub fn __api_key_for_job(env: HarnessEnv, provider: string) -> dict {
   const candidates = __provider_auth_env_candidates(provider)
   for env_name in candidates {
-    const value = trim(harness.env.get_or(env_name, ""))
+    const value = trim(env.get_or(env_name, ""))
     if value != "" {
       return {ok: true, env: env_name, value: value}
     }
@@ -625,25 +641,17 @@ pub fn __provider_auth_headers(provider: string, credential_env: string, value: 
  * @effects: [http.request, env.read]
  * @errors: []
  */
-pub fn __bedrock_http_result(
-  harness: Harness,
-  method: string,
-  url: string,
-  region: string,
-  service: string,
-  body: string,
-  max_response_bytes: int,
-) -> dict {
+pub fn __bedrock_http_result(harness: Harness, input: BedrockHttpInput) -> dict {
   let options = {
     headers: {"content-type": "application/json"},
-    aws_sigv4: {service: service, region: region},
+    aws_sigv4: {service: input.service, region: input.region},
     timeout_ms: 120000,
-    max_response_bytes: max_response_bytes,
+    max_response_bytes: input.max_response_bytes,
   }
-  if body != "" {
-    options = options + {body: body}
+  if input.body != "" {
+    options = options + {body: input.body}
   }
-  return __http_result(harness, method, url, options)
+  return __http_result(harness, input.method, input.url, options)
 }
 
 /**
@@ -652,7 +660,7 @@ pub fn __bedrock_http_result(
  * @effects: [env.read]
  * @errors: []
  */
-pub fn __s3_request_url(harness: Harness, s3_uri: string, region: string) -> string {
+pub fn __s3_request_url(env: HarnessEnv, s3_uri: string, region: string) -> string {
   const without_scheme = substring(s3_uri, 5)
   const separator = without_scheme.index_of("/")
   if separator < 1 || separator >= len(without_scheme) - 1 {
@@ -660,7 +668,7 @@ pub fn __s3_request_url(harness: Harness, s3_uri: string, region: string) -> str
   }
   const bucket = substring(without_scheme, 0, separator)
   const key = substring(without_scheme, separator + 1)
-  const base_override = trim(harness.env.get_or("HARN_BATCH_S3_BASE_URL", ""))
+  const base_override = trim(env.get_or("HARN_BATCH_S3_BASE_URL", ""))
   if base_override != "" {
     return __join_url(base_override, "/" + bucket + "/" + key)
   }
@@ -673,10 +681,10 @@ pub fn __s3_request_url(harness: Harness, s3_uri: string, region: string) -> str
  * @effects: [env.read]
  * @errors: []
  */
-pub fn __fireworks_account_id(harness: Harness) -> dict {
+pub fn __fireworks_account_id(env: HarnessEnv) -> dict {
   const candidates = ["HARN_BATCH_FIREWORKS_ACCOUNT_ID", "FIREWORKS_ACCOUNT_ID"]
   for env_name in candidates {
-    let value = trim(harness.env.get_or(env_name, ""))
+    let value = trim(env.get_or(env_name, ""))
     if starts_with(value, "accounts/") {
       value = value[9:len(value)]
     }
@@ -698,8 +706,8 @@ pub fn __fireworks_account_id(harness: Harness) -> dict {
  * @effects: [env.read]
  * @errors: []
  */
-pub fn __fireworks_account_id_or_placeholder(harness: Harness) -> string {
-  const account = __fireworks_account_id(harness)
+pub fn __fireworks_account_id_or_placeholder(env: HarnessEnv) -> string {
+  const account = __fireworks_account_id(env)
   if safe_bool(account["ok"], false) {
     return safe_string(account["value"], "")
   }
@@ -762,8 +770,13 @@ pub fn __fireworks_create_dataset(
   dataset_id: string,
   api_key: string,
 ) -> dict {
-  const response = __http_result(harness,  "POST",
-    __join_url(__provider_base_url(harness, "fireworks"), "/accounts/" + account_id + "/datasets"),
+  const response = __http_result(
+    harness,
+    "POST",
+    __join_url(
+      __provider_base_url(harness.env, "fireworks"),
+      "/accounts/" + account_id + "/datasets",
+    ),
     {
       headers: {Authorization: "Bearer " + api_key, "content-type": "application/json"},
       body: json_stringify(
@@ -799,25 +812,21 @@ pub fn __fireworks_create_dataset(
  * @effects: [fs.read, network]
  * @errors: [runtime]
  */
-pub fn __fireworks_upload_dataset(
-  harness: Harness,
-  account_id: string,
-  dataset_id: string,
-  api_key: string,
-  file_path: string,
-) -> dict {
-  const response = __http_result(harness,  "POST",
+pub fn __fireworks_upload_dataset(harness: Harness, input: FireworksDatasetUploadInput) -> dict {
+  const response = __http_result(
+    harness,
+    "POST",
     __join_url(
-      __provider_base_url(harness, "fireworks"),
-      "/accounts/" + account_id + "/datasets/" + dataset_id + ":upload",
+      __provider_base_url(harness.env, "fireworks"),
+      "/accounts/" + input.account_id + "/datasets/" + input.dataset_id + ":upload",
     ),
     {
-      headers: {Authorization: "Bearer " + api_key},
+      headers: {Authorization: "Bearer " + input.api_key},
       multipart: [
         {
           name: "file",
-          path: file_path,
-          filename: basename(file_path),
+          path: input.file_path,
+          filename: basename(input.file_path),
           content_type: "application/jsonl",
         },
       ],
@@ -829,12 +838,12 @@ pub fn __fireworks_upload_dataset(
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
-      error: "fireworks batch dataset upload failed for " + dataset_id,
+      error: "fireworks batch dataset upload failed for " + input.dataset_id,
       status: response["status"],
       response: body,
     }
   }
-  return {ok: true, dataset_id: dataset_id, status: response["status"], response: body}
+  return {ok: true, dataset_id: input.dataset_id, status: response["status"], response: body}
 }
 
 /**
@@ -843,29 +852,24 @@ pub fn __fireworks_upload_dataset(
  * @effects: [fs.read, network]
  * @errors: [runtime]
  */
-pub fn __upload_jsonl_file(
-  harness: Harness,
-  provider: string,
-  url: string,
-  credential_env: string,
-  api_key: string,
-  file_path: string,
-) -> dict {
-  const purpose = if provider == "together" {
+pub fn __upload_jsonl_file(harness: Harness, input: JsonlFileUploadInput) -> dict {
+  const purpose = if input.provider == "together" {
     "batch-api"
   } else {
     "batch"
   }
-  const response = __http_result(harness,  "POST",
-    url,
+  const response = __http_result(
+    harness,
+    "POST",
+    input.url,
     {
-      headers: __provider_auth_headers(provider, credential_env, api_key),
+      headers: __provider_auth_headers(input.provider, input.credential_env, input.api_key),
       multipart: [
         {name: "purpose", value: purpose},
         {
           name: "file",
-          path: file_path,
-          filename: basename(file_path),
+          path: input.file_path,
+          filename: basename(input.file_path),
           content_type: "application/jsonl",
         },
       ],
@@ -878,7 +882,7 @@ pub fn __upload_jsonl_file(
   if !safe_bool(response["ok"], false) || file_id == "" {
     return {
       ok: false,
-      error: provider + " batch file upload failed using " + credential_env,
+      error: input.provider + " batch file upload failed using " + input.credential_env,
       status: response["status"],
       response: body,
     }
@@ -893,8 +897,10 @@ pub fn __upload_jsonl_file(
  * @errors: [runtime]
  */
 pub fn __upload_xai_jsonl_file(harness: Harness, file_path: string, api_key: string) -> dict {
-  const response = __http_result(harness,  "POST",
-    __join_url(__provider_base_url(harness, "xai"), "/files"),
+  const response = __http_result(
+    harness,
+    "POST",
+    __join_url(__provider_base_url(harness.env, "xai"), "/files"),
     {
       headers: {Authorization: "Bearer " + api_key},
       multipart: [
@@ -955,9 +961,9 @@ pub fn __xai_provider_status(body: dict) -> string {
  * @effects: [env.read]
  * @errors: []
  */
-pub fn __xai_results_url(harness: Harness, batch_id: string, pagination_token: string) -> string {
+pub fn __xai_results_url(env: HarnessEnv, batch_id: string, pagination_token: string) -> string {
   let url = __join_url(
-    __provider_base_url(harness, "xai"),
+    __provider_base_url(env, "xai"),
     "/batches/" + batch_id + "/results?limit=100",
   )
   if trim(pagination_token) != "" {
@@ -1042,10 +1048,12 @@ pub fn __upload_gemini_jsonl_file(
   credential_env: string,
   api_key: string,
 ) -> dict {
-  const base = __provider_base_url(harness, "gemini")
+  const base = __provider_base_url(harness.env, "gemini")
   const file_path = safe_string(payload["path"], "")
   const text = safe_string(payload["text"], "")
-  const start = __http_result(harness,  "POST",
+  const start = __http_result(
+    harness,
+    "POST",
     __join_url(base, "/upload/v1beta/files"),
     {
       headers: {
@@ -1070,7 +1078,9 @@ pub fn __upload_gemini_jsonl_file(
       response: start["body"],
     }
   }
-  const upload = __http_result(harness,  "POST",
+  const upload = __http_result(
+    harness,
+    "POST",
     upload_url,
     {
       headers: {

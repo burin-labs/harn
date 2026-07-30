@@ -371,7 +371,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     let mut failed_start = CompositionRunEnvelope::read_only(
         "cmp-2",
         "harn",
-        composition_snippet_hash("harn", "write_file(\"src/lib.rs\", \"...\")"),
+        composition_snippet_hash("harn", "harness.fs.write_text(\"src/lib.rs\", \"...\")"),
         "sha256:manifest-write",
     );
     failed_start.requested_side_effect_ceiling = SideEffectLevel::WorkspaceWrite;

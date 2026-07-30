@@ -12,7 +12,9 @@ import { preset_run_command, tool_hooks_mode_passthrough_only_audit } from "std/
 pipeline default(harness: Harness) {
   harness.obs.pipeline_lifecycle_audit_log_take()
   const inner = { args -> {ok: true, ran: args.command} }
-  const wrapper = preset_run_command(harness, {stacks: ["python"], mode: tool_hooks_mode_passthrough_only_audit, inner: inner},
+  const wrapper = preset_run_command(
+    harness,
+    {stacks: ["python"], mode: tool_hooks_mode_passthrough_only_audit, inner: inner},
   )
   const result = wrapper({command: "find . -name '*.py'"})
   harness.stdio.println(result.action)

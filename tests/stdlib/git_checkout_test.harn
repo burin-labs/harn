@@ -70,7 +70,7 @@ fn runner(config: TestConfig = {}) -> fn(GitCheckoutStep) -> dict {
   }
 }
 
-fn run(harness: Harness, config: TestConfig = {}) {
+fn run(process: HarnessProcess, config: TestConfig = {}) {
   const dirty_policy: GitCheckoutDirtyPolicy = config.dirty_policy ?? "refuse"
   let options: GitCheckoutOptions = {
     repo: "/fixture",
@@ -82,7 +82,7 @@ fn run(harness: Harness, config: TestConfig = {}) {
   if config.stash_name != nil {
     options = options + {stash_name: config.stash_name}
   }
-  return git_checkout_sync(harness.process, options)
+  return git_checkout_sync(process, options)
 }
 
 fn checked_git(repo, args) {
@@ -119,7 +119,7 @@ pipeline test_checkout_plan_is_canonical(harness: Harness, task) {
 }
 
 pipeline test_clean_same_branch_sync(harness: Harness, task) {
-  const receipt = run()
+  const receipt = run(harness.process)
   assert(receipt.success)
   assert_eq(
     receipt.steps.map({ step -> step.kind }),
@@ -130,25 +130,28 @@ pipeline test_clean_same_branch_sync(harness: Harness, task) {
 }
 
 pipeline test_switches_or_creates_missing_base(harness: Harness, task) {
-  const switched = run(harness, {branch: "feature"})
+  const switched = run(harness.process, {branch: "feature"})
   assert(switched.success)
   assert(switched.steps.any({ step -> step.kind == "switch" }))
-  const created = run(harness, {branch: "feature", local_base: false})
+  const created = run(harness.process, {branch: "feature", local_base: false})
   assert(created.success)
   assert(created.steps.any({ step -> step.kind == "create" }))
   assert(!created.steps.any({ step -> step.kind == "switch" }))
 }
 
 pipeline test_dirty_policies_are_explicit(harness: Harness, task) {
-  const refused = run(harness, {dirty: true})
+  const refused = run(harness.process, {dirty: true})
   assert(!refused.success)
   assert_eq(refused.failure_kind, "dirty_refused")
   assert_eq(len(refused.steps), 1)
-  const preserved = run(harness, {dirty: true, dirty_policy: "preserve"})
+  const preserved = run(harness.process, {dirty: true, dirty_policy: "preserve"})
   assert(preserved.success && preserved.skipped)
   assert_eq(preserved.failure_kind, "dirty_preserved")
   assert_eq(len(preserved.steps), 1)
-  const stashed = run(harness, {dirty: true, dirty_policy: "stash", stash_name: "fixture-stash"})
+  const stashed = run(
+    harness.process,
+    {dirty: true, dirty_policy: "stash", stash_name: "fixture-stash"},
+  )
   assert(stashed.success && stashed.stashed)
   assert_eq(stashed.stash_name, "fixture-stash")
   assert(stashed.steps.any({ step -> step.kind == "stash" }))
@@ -167,7 +170,7 @@ pipeline test_failures_are_classified_with_recovery(harness: Harness, task) {
       expected: "stash_failed",
     },
   ] {
-    const receipt = run(harness, fixture)
+    const receipt = run(harness.process, fixture)
     assert(!receipt.success)
     assert_eq(receipt.failure_kind, fixture.expected)
     assert(receipt.recovery != "")
@@ -175,17 +178,20 @@ pipeline test_failures_are_classified_with_recovery(harness: Harness, task) {
 }
 
 pipeline test_postconditions_are_verified(harness: Harness, task) {
-  const branch = run(harness, {final_branch: "other"})
+  const branch = run(harness.process, {final_branch: "other"})
   assert(!branch.success)
   assert_eq(branch.failure_kind, "branch_postcondition_failed")
   assert_eq(branch.final_branch, "other")
-  const status = run(harness, {final_dirty: true})
+  const status = run(harness.process, {final_dirty: true})
   assert(!status.success)
   assert_eq(status.failure_kind, "status_postcondition_failed")
 }
 
 pipeline test_real_checkout_ignores_stale_fetch_configuration(harness: Harness, task) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-git-checkout-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-git-checkout-" + harness.random.uuid(),
+  )
   const seed = path_join(root, "seed")
   const remote = path_join(root, "remote.git")
   const consumer = path_join(root, "consumer")

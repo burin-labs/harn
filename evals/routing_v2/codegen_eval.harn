@@ -58,7 +58,7 @@ const TASKS = [
   },
 ]
 
-fn or_pricing_usd_per_m(harness: Harness, model: string) -> dict {
+fn or_pricing_usd_per_m(stdio: HarnessStdio, model: string) -> dict {
   if model == "mistralai/devstral-small" {
     return {input: 0.1, output: 0.3}
   }
@@ -70,14 +70,19 @@ fn or_pricing_usd_per_m(harness: Harness, model: string) -> dict {
   // past, and silently zero-pricing a routed candidate distorts the
   // cell totals beyond recognition. Warn loudly so eval operators can
   // extend the table rather than burying the discrepancy.
-  harness.stdio.println(
+  stdio.println(
     "warning: unknown model id `" + model + "`; pricing as zero — update or_pricing_usd_per_m",
   )
   return {input: 0.0, output: 0.0}
 }
 
-fn cost_for_tokens(harness: Harness, model: string, input_tokens: int, output_tokens: int) -> float {
-  const p = or_pricing_usd_per_m(harness, model)
+fn cost_for_tokens(
+  stdio: HarnessStdio,
+  model: string,
+  input_tokens: int,
+  output_tokens: int,
+) -> float {
+  const p = or_pricing_usd_per_m(stdio, model)
   return to_float(input_tokens) / 1000000.0 * to_float(p.input)
     + to_float(output_tokens) / 1000000.0
     * to_float(
@@ -111,10 +116,10 @@ fn extract_first_fenced_harn(text: string) -> string {
  * exception is printed verbatim so unrelated bugs can't silently inflate the
  * "escalate" bucket and disguise themselves as low baseline quality.
  */
-fn grade_outcome(harness: Harness, code: string) -> string {
-  harness.llm.mock_push_scope()
-  harness.llm.mock_enqueue({text: code, model: "mock", provider: "mock"})
-  const policy = harness.llm.routing_policy(
+fn grade_outcome(llm: HarnessLlm, stdio: HarnessStdio, code: string) -> string {
+  llm.mock_push_scope()
+  llm.mock_enqueue({text: code, model: "mock", provider: "mock"})
+  const policy = llm.routing_policy(
     {
       chain: [{provider: "mock", model: "mock"}],
       escalate_on: [{kind: "typecheck", extract_fenced: false, on_fail: "escalate"}],
@@ -122,7 +127,7 @@ fn grade_outcome(harness: Harness, code: string) -> string {
     },
   )
   const outcome = try {
-    const validation = harness.llm.call("validate", nil, {routing: policy, max_tokens: 1})
+    const validation = llm.call("validate", nil, {routing: policy, max_tokens: 1})
     const attempts = validation.routing.attempts
     if len(attempts) > 0 {
       attempts[0]?.verifier_outcome ?? "escalate"
@@ -141,29 +146,29 @@ fn grade_outcome(harness: Harness, code: string) -> string {
       || contains(err_text, "budget")
       || contains(err_text, "verifier")
     if !is_routing_shape {
-      harness.stdio.println("grade_outcome: unexpected exception (not routing-shaped): " + err_text)
+      stdio.println("grade_outcome: unexpected exception (not routing-shaped): " + err_text)
     }
     "escalate"
   }
-  harness.llm.mock_pop_scope()
+  llm.mock_pop_scope()
   return outcome
 }
 
-fn typechecks(harness: Harness, code: string) -> bool {
+fn typechecks(llm: HarnessLlm, stdio: HarnessStdio, code: string) -> bool {
   if trim(code) == "" {
     return false
   }
-  return grade_outcome(harness, code) == "accept"
+  return grade_outcome(llm, stdio, code) == "accept"
 }
 
-fn attempt_cost(harness: Harness, attempt: dict) -> float {
+fn attempt_cost(stdio: HarnessStdio, attempt: dict) -> float {
   const input = to_int(attempt?.input_tokens ?? 0)
   const output = to_int(attempt?.output_tokens ?? 0)
-  return cost_for_tokens(harness, attempt.model, input, output)
+  return cost_for_tokens(stdio, attempt.model, input, output)
 }
 
-fn run_one_baseline(harness: Harness, task: dict, system: dict) -> dict {
-  const result = harness.llm.call(
+fn run_one_baseline(llm: HarnessLlm, stdio: HarnessStdio, task: dict, system: dict) -> dict {
+  const result = llm.call(
     task.prompt,
     system.body,
     {
@@ -178,7 +183,8 @@ fn run_one_baseline(harness: Harness, task: dict, system: dict) -> dict {
     task_id: task.id,
     strategy: "baseline",
     context: system.label,
-    cost_usd: cost_for_tokens(harness, 
+    cost_usd: cost_for_tokens(
+      stdio,
       CHEAP_MODEL.model,
       result.usage.input_tokens,
       result.usage.output_tokens,
@@ -186,12 +192,12 @@ fn run_one_baseline(harness: Harness, task: dict, system: dict) -> dict {
     input_tokens: result.usage.input_tokens,
     output_tokens: result.usage.output_tokens,
     code: code,
-    looks_valid: typechecks(harness, code),
+    looks_valid: typechecks(llm, stdio, code),
   }
 }
 
-fn run_one_routed(harness: Harness, task: dict, system: dict) -> dict {
-  const policy = harness.llm.routing_policy(
+fn run_one_routed(llm: HarnessLlm, stdio: HarnessStdio, task: dict, system: dict) -> dict {
+  const policy = llm.routing_policy(
     {
       chain: [
         {provider: CHEAP_MODEL.provider, model: CHEAP_MODEL.model, label: "cheap"},
@@ -203,12 +209,12 @@ fn run_one_routed(harness: Harness, task: dict, system: dict) -> dict {
       label: "routing-v2",
     },
   )
-  const result = harness.llm.call(task.prompt, system.body, {routing: policy, max_tokens: MAX_TOKENS})
+  const result = llm.call(task.prompt, system.body, {routing: policy, max_tokens: MAX_TOKENS})
   const code = extract_first_fenced_harn(result.text)
   const attempts = result.routing.attempts
   const selected = result.routing.selected ?? 0
   const final_model = attempts[selected].model
-  const total_cost = sum_by(attempts, { a -> attempt_cost(harness, a) })
+  const total_cost = sum_by(attempts, { a -> attempt_cost(stdio, a) })
   const escalated = len(attempts) > 1
   return {
     task_id: task.id,
@@ -220,36 +226,36 @@ fn run_one_routed(harness: Harness, task: dict, system: dict) -> dict {
     selected: selected,
     final_model: final_model,
     code: code,
-    looks_valid: typechecks(harness, code),
+    looks_valid: typechecks(llm, stdio, code),
   }
 }
 
-fn run_task_quartet(harness: Harness, task: dict, skill_body: string) -> dict {
-  harness.stdio.println("=== task " + task.id + " ===")
+fn run_task_quartet(llm: HarnessLlm, stdio: HarnessStdio, task: dict, skill_body: string) -> dict {
+  stdio.println("=== task " + task.id + " ===")
   const bare = {label: "bare", body: nil}
   const with_skill = {label: "skill", body: skill_body}
-  const baseline_bare = run_one_baseline(harness, task, bare)
-  const baseline_skill = run_one_baseline(harness, task, with_skill)
-  const routed_bare = run_one_routed(harness, task, bare)
-  const routed_skill = run_one_routed(harness, task, with_skill)
-  harness.stdio.println(
+  const baseline_bare = run_one_baseline(llm, stdio, task, bare)
+  const baseline_skill = run_one_baseline(llm, stdio, task, with_skill)
+  const routed_bare = run_one_routed(llm, stdio, task, bare)
+  const routed_skill = run_one_routed(llm, stdio, task, with_skill)
+  stdio.println(
     "  baseline_bare  cost=" + to_string(baseline_bare.cost_usd)
       + " valid="
       + to_string(baseline_bare.looks_valid),
   )
-  harness.stdio.println(
+  stdio.println(
     "  baseline_skill cost=" + to_string(baseline_skill.cost_usd)
       + " valid="
       + to_string(baseline_skill.looks_valid),
   )
-  harness.stdio.println(
+  stdio.println(
     "  routed_bare    cost=" + to_string(routed_bare.cost_usd)
       + " valid="
       + to_string(routed_bare.looks_valid)
       + " escalated="
       + to_string(routed_bare.escalated),
   )
-  harness.stdio.println(
+  stdio.println(
     "  routed_skill   cost=" + to_string(routed_skill.cost_usd)
       + " valid="
       + to_string(routed_skill.looks_valid)
@@ -276,8 +282,8 @@ fn col_totals(rows: list, key: string) -> dict {
  * has shifted and every baseline output will silently be classified as
  * "escalate" — which would make the eval results meaningless.
  */
-fn smoke_check_grade_outcome(harness: Harness) {
-  const outcome = grade_outcome(harness, "let answer: int = 42\n")
+fn smoke_check_grade_outcome(llm: HarnessLlm, stdio: HarnessStdio) {
+  const outcome = grade_outcome(llm, stdio, "let answer: int = 42\n")
   if outcome != "accept" {
     throw "grade_outcome regression: known-good snippet returned `" + outcome
       + "` instead of `accept`"
@@ -285,9 +291,9 @@ fn smoke_check_grade_outcome(harness: Harness) {
 }
 
 fn main(harness: Harness) {
-  smoke_check_grade_outcome(harness)
+  smoke_check_grade_outcome(harness.llm, harness.stdio)
   const skill_body = harness.fs.read_text(SKILL_BODY_PATH)
-  const rows = TASKS.map({ task -> run_task_quartet(harness, task, skill_body) })
+  const rows = TASKS.map({ task -> run_task_quartet(harness.llm, harness.stdio, task, skill_body) })
   const bb = col_totals(rows, "baseline_bare")
   const bs = col_totals(rows, "baseline_skill")
   const rb = col_totals(rows, "routed_bare")

@@ -8,8 +8,8 @@ pub type ReleaseMetadataPlan = {
   package_names: list<string>,
 }
 
-fn default_root(harness: Harness) -> string {
-  return path_normalize(path_join(harness.fs.source_dir(), ".."))
+fn default_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
 }
 
 fn cargo_path(root: string) -> string {
@@ -38,12 +38,12 @@ pub fn workspace_version_from_doc(doc) -> string {
   return version
 }
 
-pub fn current_version(harness: Harness, root: string) -> string {
+pub fn current_version(fs: HarnessFs, root: string) -> string {
   const path = cargo_path(root)
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     throw "missing workspace manifest: " + path
   }
-  return workspace_version_from_doc(toml_parse(harness.fs.read_text(path)))
+  return workspace_version_from_doc(toml_parse(fs.read_text(path)))
 }
 
 fn workspace_entries(doc, key: string) -> list<string> {
@@ -64,34 +64,34 @@ fn workspace_entries(doc, key: string) -> list<string> {
   return entries
 }
 
-fn manifests_for_entry(harness: Harness, root: string, entry: string, owner: string) -> list<string> {
+fn manifests_for_entry(fs: HarnessFs, root: string, entry: string, owner: string) -> list<string> {
   const manifest_pattern = if entry.ends_with("Cargo.toml") {
     entry
   } else {
     entry + "/Cargo.toml"
   }
-  const matches = harness.fs.glob(manifest_pattern, {base: root}).sort()
+  const matches = fs.glob(manifest_pattern, {base: root}).sort()
   if matches.count == 0 {
     throw owner + " entry matched no package manifest: " + entry
   }
   return matches
 }
 
-pub fn workspace_package_manifests(harness: Harness, root: string) -> list<string> {
-  const doc = toml_parse(harness.fs.read_text(cargo_path(root)))
+pub fn workspace_package_manifests(fs: HarnessFs, root: string) -> list<string> {
+  const doc = toml_parse(fs.read_text(cargo_path(root)))
   let manifests: list<string> = []
   for key in ["members", "exclude"] {
     for entry in workspace_entries(doc, key) {
-      manifests = manifests + manifests_for_entry(harness, root, entry, "workspace." + key)
+      manifests = manifests + manifests_for_entry(fs, root, entry, "workspace." + key)
     }
   }
   return manifests.unique().sort()
 }
 
-pub fn package_names_for_manifests(harness: Harness, manifests: list<string>) -> list<string> {
+pub fn package_names_for_manifests(fs: HarnessFs, manifests: list<string>) -> list<string> {
   let names: list<string> = []
   for manifest in manifests {
-    const doc = toml_parse(harness.fs.read_text(manifest))
+    const doc = toml_parse(fs.read_text(manifest))
     const raw = doc?.package?.name
     if type_of(raw) != "string" || to_string(raw) == "" {
       throw "missing package.name in " + manifest
@@ -147,12 +147,12 @@ fn replace_workspace_version(text: string, current: string, next: string) -> str
   return regex_replace(pattern, "version = \"" + next + "\"", text)
 }
 
-fn rewrite_agent_manifest(harness: Harness, root: string, current: string, next: string) -> nil {
+fn rewrite_agent_manifest(fs: HarnessFs, root: string, current: string, next: string) -> nil {
   const path = path_join(root, "spec/acp-registry/harn/agent.json")
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     return nil
   }
-  const original = harness.fs.read_text(path)
+  const original = fs.read_text(path)
   const doc = json_parse(original)
   if to_string(doc?.version ?? "") != current {
     throw "agent manifest version does not match workspace version"
@@ -186,30 +186,31 @@ fn rewrite_agent_manifest(harness: Harness, root: string, current: string, next:
       throw "failed to update agent manifest archive for " + key
     }
   }
-  harness.fs.write_text(path, updated)
+  fs.write_text(path, updated)
   return nil
 }
 
-fn rewrite_embedding_tags(harness: Harness, root: string, next: string) -> nil {
+fn rewrite_embedding_tags(fs: HarnessFs, root: string, next: string) -> nil {
   const path = path_join(root, "docs/src/embedding-rust.md")
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     return nil
   }
-  const text = harness.fs.read_text(path)
+  const text = fs.read_text(path)
   const updated = regex_replace(r#"tag = "v\d+\.\d+\.\d+""#, "tag = \"v" + next + "\"", text)
   if updated != text {
-    harness.fs.write_text(path, updated)
+    fs.write_text(path, updated)
   }
   return nil
 }
 
-pub fn release_metadata_plan(harness: Harness, 
+pub fn release_metadata_plan(
+  fs: HarnessFs,
   root: string,
   bump: "major" | "minor" | "patch",
 ) -> ReleaseMetadataPlan {
-  const current = current_version(harness, root)
-  const manifests = workspace_package_manifests(harness, root)
-  const names = package_names_for_manifests(harness, manifests)
+  const current = current_version(fs, root)
+  const manifests = workspace_package_manifests(fs, root)
+  const names = package_names_for_manifests(fs, manifests)
   return {
     current_version: current,
     next_version: semver.next(current, bump),
@@ -218,9 +219,9 @@ pub fn release_metadata_plan(harness: Harness,
   }
 }
 
-pub fn apply_release_metadata(harness: Harness, root: string, version: string) -> ReleaseMetadataPlan {
-  const current = current_version(harness, root)
-  const plan = release_metadata_plan(harness, root, "patch")
+pub fn apply_release_metadata(fs: HarnessFs, root: string, version: string) -> ReleaseMetadataPlan {
+  const current = current_version(fs, root)
+  const plan = release_metadata_plan(fs, root, "patch")
     + {next_version: version}
   if regex_captures(r"^\d+\.\d+\.\d+$", version).count != 1 {
     throw "release version is not MAJOR.MINOR.PATCH: " + version
@@ -233,15 +234,15 @@ pub fn apply_release_metadata(harness: Harness, root: string, version: string) -
     + plan.manifests.map({ path -> path_join(root, path) })
     .to_list()
   for manifest in all_manifests.unique() {
-    let text = harness.fs.read_text(manifest)
+    let text = fs.read_text(manifest)
     if path_normalize(manifest) == path_normalize(root_manifest) {
       text = replace_workspace_version(text, current, version)
     }
     text = rewrite_local_dependency_versions(text, plan.package_names, version)
-    harness.fs.write_text(manifest, text)
+    fs.write_text(manifest, text)
   }
-  rewrite_agent_manifest(harness, root, current, version)
-  rewrite_embedding_tags(harness, root, version)
+  rewrite_agent_manifest(fs, root, current, version)
+  rewrite_embedding_tags(fs, root, version)
   return plan
 }
 
@@ -301,23 +302,23 @@ fn main(harness: Harness) -> int {
   const parsed = unwrap(parsed_result)
   const action = to_string(parsed.options?.action ?? "")
   const root_value = to_string(parsed.options?.root ?? "")
-  const root = path_normalize(root_value == "" ? default_root(harness) : root_value)
+  const root = path_normalize(root_value == "" ? default_root(harness.fs) : root_value)
   try {
     if action == "current" {
-      harness.stdio.println(current_version(harness, root))
+      harness.stdio.println(current_version(harness.fs, root))
     } else if action == "next" {
       const bump = to_string(parsed.options?.bump ?? "")
       if bump != "major" && bump != "minor" && bump != "patch" {
         throw "--bump must be major, minor, or patch"
       }
-      harness.stdio.println(semver.next(current_version(harness, root), bump))
+      harness.stdio.println(semver.next(current_version(harness.fs, root), bump))
     } else if action == "manifests" {
-      for path in workspace_package_manifests(harness, root) {
+      for path in workspace_package_manifests(harness.fs, root) {
         harness.stdio.println(normalized_rel(path, root))
       }
     } else if action == "apply" {
       const version = to_string(parsed.options?.version ?? "")
-      apply_release_metadata(harness, root, version)
+      apply_release_metadata(harness.fs, root, version)
     } else if action == "verify-changelog" {
       const version = to_string(parsed.options?.version ?? "")
       verify_changelog_top(harness.fs.read_text(path_join(root, "CHANGELOG.md")), version)

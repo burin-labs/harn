@@ -29,13 +29,13 @@ pipeline default(harness: Harness) {
   harness.stdio.println(explicit.model)
   harness.stdio.println(explicit.options.effort)
   const sanitized = agent_sanitize_model_options(
-    harness,
+    harness.llm,
     {provider: "mock", model: "gpt-4o", effort: "high", cache_control: {type: "ephemeral"}},
   )
   harness.stdio.println(sanitized.effort == nil)
   harness.stdio.println(sanitized.cache_control == nil)
   const direct_thinking = agent_sanitize_model_options(
-    harness,
+    harness.llm,
     {
       provider: "anthropic",
       model: "claude-sonnet-4-6",
@@ -44,7 +44,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(direct_thinking.thinking.mode)
   const proxied_thinking = agent_sanitize_model_options(
-    harness,
+    harness.llm,
     {
       provider: "openrouter",
       model: "anthropic/claude-sonnet-4-6",
@@ -53,12 +53,12 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(proxied_thinking.thinking == nil)
   const disabled_thinking = agent_sanitize_model_options(
-    harness,
+    harness.llm,
     {provider: "openrouter", model: "anthropic/claude-sonnet-4-6", thinking: {mode: "disabled"}},
   )
   harness.stdio.println(disabled_thinking.thinking.mode)
   const healthcheck = agent_sanitize_model_options(
-    harness,
+    harness.llm,
     {
       provider: "cerebras",
       model: "gpt-oss-120b",

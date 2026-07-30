@@ -3,9 +3,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("still working")],
+    harness.llm,
+    [llm_text("still working")],
     { ->
-      const result = agent_loop(harness, "Just keep replying",
+      const result = agent_loop(
+        harness,
+        "Just keep replying",
         "You are helpful",
         {
           provider: "mock",

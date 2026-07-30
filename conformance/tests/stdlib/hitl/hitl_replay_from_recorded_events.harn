@@ -9,7 +9,10 @@ pub fn hitl_handler(harness: Harness, event: TriggerEvent) -> dict {
     approved_at: string,
     reason: string?,
     signatures: list<{reviewer: string, signed_at: string, signature: string}>,
-  } = harness.interaction.request_approval("approve " + event.kind, {quorum: 2, reviewers: ["alice", "bob", "carol"]})
+  } = harness.interaction.request_approval(
+    "approve " + event.kind,
+    {quorum: 2, reviewers: ["alice", "bob", "carol"]},
+  )
   return {
     verdict: answer.verdict,
     event_id: event.id,
@@ -23,7 +26,8 @@ pipeline test(harness: Harness, task) {
   harness.testing.clear()
   harness.testing.respond("interaction", "question_response", {answer: {verdict: "approved"}})
   harness.testing.respond(
-    "interaction", "approval_response",
+    "interaction",
+    "approval_response",
     [
       {approved: true, reviewer: "alice", responded_at: "2026-04-20T12:00:00Z"},
       {approved: true, reviewer: "bob", responded_at: "2026-04-20T12:00:01Z"},

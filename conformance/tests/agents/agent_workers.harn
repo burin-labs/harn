@@ -1,7 +1,9 @@
 import "std/agents"
 
 pipeline main(harness: Harness) {
-  const stage_worker = spawn_agent(harness.agent, {
+  const stage_worker = spawn_agent(
+    harness.agent,
+    {
       name: "stage-worker",
       task: "Draft a short note",
       node: {
@@ -23,7 +25,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(resumed?.status)
   const resumed_done = wait_agent(harness.agent, stage_done)
   harness.stdio.println(resumed_done?.status)
-  harness.stdio.println(len(list_agents(harness.agent, )) >= 1)
+  harness.stdio.println(len(list_agents(harness.agent)) >= 1)
   const flow = workflow_graph(
     {
       name: "worker-flow",
@@ -39,7 +41,9 @@ pipeline main(harness: Harness) {
       edges: [],
     },
   )
-  const workflow_worker = spawn_agent(harness.agent, {name: "flow-worker", task: "Write a workflow summary", graph: flow, options: {max_steps: 2}},
+  const workflow_worker = spawn_agent(
+    harness.agent,
+    {name: "flow-worker", task: "Write a workflow summary", graph: flow, options: {max_steps: 2}},
   )
   harness.stdio.println(workflow_worker.mode)
   const workflow_done = wait_agent(harness.agent, workflow_worker)
@@ -50,7 +54,11 @@ pipeline main(harness: Harness) {
   harness.stdio.println(workflow_done?.snapshot_path != nil)
   const restored = resume_agent(harness.agent, workflow_done?.snapshot_path)
   harness.stdio.println(restored?.status == "completed")
-  const restored_resumed = send_input(harness.agent, restored, "Continue the workflow with one more update")
+  const restored_resumed = send_input(
+    harness.agent,
+    restored,
+    "Continue the workflow with one more update",
+  )
   harness.stdio.println(restored_resumed?.status)
   const restored_done = wait_agent(harness.agent, restored_resumed)
   harness.stdio.println(restored_done?.status == "completed")

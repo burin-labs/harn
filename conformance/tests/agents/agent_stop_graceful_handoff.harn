@@ -15,7 +15,9 @@ fn nested_tools(harness: Harness) {
     "Start a nested child agent.",
     {
       handler: { _args ->
-        const child = sub_agent_run(harness, "Leaf checks the migration guard.",
+        const child = sub_agent_run(
+          harness,
+          "Leaf checks the migration guard.",
           {
             provider: "mock",
             background: true,
@@ -37,7 +39,8 @@ fn nested_tools(harness: Harness) {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [{id: "spawn_nested_1", name: "spawn_nested", arguments: {}}],
         input_tokens: 5,
@@ -57,7 +60,9 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const middle = sub_agent_run(harness, "Middle should spawn a leaf then park.",
+      const middle = sub_agent_run(
+        harness,
+        "Middle should spawn a leaf then park.",
         {
           provider: "mock",
           background: true,
@@ -80,7 +85,9 @@ pipeline main(harness: Harness) {
       harness.stdio.println(
         "has_anchor=" + to_string(stopped.handoff.metadata.workspace_anchor.primary != nil),
       )
-      harness.stdio.println("has_budget=" + to_string(stopped.handoff.budget_remaining.tokens != nil))
+      harness.stdio.println(
+        "has_budget=" + to_string(stopped.handoff.budget_remaining.tokens != nil),
+      )
       harness.stdio.println("confidence=" + to_string(stopped.handoff.confidence > 0.0))
       harness.stdio.println("children=" + to_string(len(stopped.children)))
       harness.stdio.println(
@@ -96,13 +103,15 @@ pipeline main(harness: Harness) {
           + to_string(contains(stopped.handoff.metadata.outcome, "waiting for parent stop")),
       )
       let leaf_status = ""
-      for agent in list_agents(harness.agent, ) {
+      for agent in list_agents(harness.agent) {
         if agent.result?.session_id == "agent-stop-leaf" {
           leaf_status = agent.status
         }
       }
       harness.stdio.println("leaf_status=" + leaf_status)
-      const hard = sub_agent_run(harness, "Hard cancel stays lossy.",
+      const hard = sub_agent_run(
+        harness,
+        "Hard cancel stays lossy.",
         {
           provider: "mock",
           background: true,

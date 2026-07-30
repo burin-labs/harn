@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 /**
  * Caller returns {ok: false, status: "budget_exhausted"} → agent_loop
  * finalizes with status budget_exhausted (mirrors the default-caller path

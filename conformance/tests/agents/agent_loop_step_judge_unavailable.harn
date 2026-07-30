@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -30,14 +30,19 @@ fn judge_decisions(captured) {
 pipeline default(harness: Harness) {
   // --- Case 1: the judge model errors -> fail-open, but marked unavailable.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
       {error: {category: "generic", message: "judge backend 503"}},
     ],
     { ->
       const session = "step-judge-unavail-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "What is 2 + 2?",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "What is 2 + 2?",
           nil,
           {
             provider: "mock",
@@ -58,7 +63,8 @@ pipeline default(harness: Harness) {
   )
   // --- Case 2 (control): a genuine pass carries NO judge_error marker.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
       llm_text(
         "{\"verdict\":\"pass\",\"reasoning\":\"correct\",\"critique\":\"\",\"confidence\":0.95}",
@@ -66,8 +72,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "step-judge-pass-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "What is 2 + 2?",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "What is 2 + 2?",
           nil,
           {
             provider: "mock",

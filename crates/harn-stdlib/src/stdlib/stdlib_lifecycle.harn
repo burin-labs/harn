@@ -28,7 +28,7 @@
  * @effects: [host]
  * @errors: []
  */
-pub fn unsettled_state(harness) {
+pub fn unsettled_state(harness: Harness) {
   return harness.unsettled_state()
 }
 
@@ -106,7 +106,7 @@ pub fn summary(state) {
  * @errors: []
  * @example: harness.agent.pipeline_on_finish(on_finish_abandon)
  */
-pub fn on_finish_abandon(harness, return_value) {
+pub fn on_finish_abandon(harness: Harness, return_value) {
   const unsettled = harness.unsettled_state()
   if !is_empty(unsettled) {
     harness.emit_audit(
@@ -133,7 +133,7 @@ pub fn on_finish_abandon(harness, return_value) {
  * @errors: []
  * @example: harness.agent.pipeline_on_finish(on_finish_drain)
  */
-pub fn on_finish_drain(harness, return_value) {
+pub fn on_finish_drain(harness: Harness, return_value) {
   const unsettled = harness.unsettled_state()
   if is_empty(unsettled) {
     harness.emit_audit("pipeline_finalized", {reason: "no_unsettled"})
@@ -214,8 +214,8 @@ pub fn on_finish_handoff_to(target_pipeline, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn lifecycle_audit_log_take(harness: Harness) {
-  return harness.obs.pipeline_lifecycle_audit_log_take()
+pub fn lifecycle_audit_log_take(obs: HarnessObs) {
+  return obs.pipeline_lifecycle_audit_log_take()
 }
 
 /**
@@ -226,6 +226,6 @@ pub fn lifecycle_audit_log_take(harness: Harness) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn lifecycle_audit_log_snapshot(harness: Harness) {
-  return harness.obs.pipeline_lifecycle_audit_log_snapshot()
+pub fn lifecycle_audit_log_snapshot(obs: HarnessObs) {
+  return obs.pipeline_lifecycle_audit_log_snapshot()
 }

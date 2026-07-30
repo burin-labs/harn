@@ -5,8 +5,16 @@
  * `tenant_id` reads an entirely different topic.
  */
 pipeline default(harness: Harness) {
-  const _ = harness.channels.append("pr.merged", {who: "alice"}, {id: "ten-A-1", tenant_id: "tenant-A"})
-  const _ = harness.channels.append("pr.merged", {who: "bob"}, {id: "ten-B-1", tenant_id: "tenant-B"})
+  const _ = harness.channels.append(
+    "pr.merged",
+    {who: "alice"},
+    {id: "ten-A-1", tenant_id: "tenant-A"},
+  )
+  const _ = harness.channels.append(
+    "pr.merged",
+    {who: "bob"},
+    {id: "ten-B-1", tenant_id: "tenant-B"},
+  )
   const tenant_a = harness.channels.events("pr.merged", {tenant_id: "tenant-A"})
   const tenant_b = harness.channels.events("pr.merged", {tenant_id: "tenant-B"})
   const tenant_c = harness.channels.events("pr.merged", {tenant_id: "tenant-C"})

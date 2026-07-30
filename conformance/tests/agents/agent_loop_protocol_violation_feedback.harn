@@ -19,13 +19,16 @@ fn note_tools() {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("_call>_call>"),
       llm_text("<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"),
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Write notes.txt.",
+      const result = agent_loop(
+        harness,
+        "Write notes.txt.",
         nil,
         {
           provider: "mock",
@@ -49,9 +52,12 @@ pipeline default(harness: Harness) {
   // canonicalizes the call for history, dispatches it, and the next model turn
   // should not be polluted with parse_guidance.
   with_llm_script(
-    harness.llm, [llm_text("write_note({ path: \"notes.txt\" })"), llm_text("<done>##DONE##</done>")],
+    harness.llm,
+    [llm_text("write_note({ path: \"notes.txt\" })"), llm_text("<done>##DONE##</done>")],
     { ->
-      const result = agent_loop(harness, "Write notes.txt.",
+      const result = agent_loop(
+        harness,
+        "Write notes.txt.",
         nil,
         {
           provider: "mock",
@@ -71,9 +77,12 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("_call>_call>"), llm_text("##DONE##")],
+    harness.llm,
+    [llm_text("_call>_call>"), llm_text("##DONE##")],
     { ->
-      const result = agent_loop(harness, "Write notes.txt.",
+      const result = agent_loop(
+        harness,
+        "Write notes.txt.",
         nil,
         {
           provider: "mock",
@@ -98,7 +107,8 @@ pipeline default(harness: Harness) {
   // still reach the model as parse_guidance, flagged has_partial_success so the
   // model knows the good call landed and only re-emits the bad one.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>\n"
           + "<tool_call>\nnope({})\n</tool_call>",
@@ -106,7 +116,9 @@ pipeline default(harness: Harness) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Write a.txt.",
+      const result = agent_loop(
+        harness,
+        "Write a.txt.",
         nil,
         {
           provider: "mock",
@@ -130,7 +142,8 @@ pipeline default(harness: Harness) {
   // multiple calls recovered from top-level stray text are ambiguous, so the
   // loop should dispatch none of them and ask for one clean retry.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "<|assistant|>\n"
           + "write_note({ path: \"a.txt\" })\n"
@@ -141,7 +154,9 @@ pipeline default(harness: Harness) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Write one note.",
+      const result = agent_loop(
+        harness,
+        "Write one note.",
         nil,
         {
           provider: "mock",
@@ -165,9 +180,12 @@ pipeline default(harness: Harness) {
   // If the retry budget ends on a complete parse drop, terminal ownership is
   // the harness boundary rather than the model that emitted the lost bytes.
   with_llm_script(
-    harness.llm, [llm_text("```\n<perform_action>\nsearch({ query: \"lost.txt\" })\n</perform_action>\n```")],
+    harness.llm,
+    [llm_text("```\n<perform_action>\nsearch({ query: \"lost.txt\" })\n</perform_action>\n```")],
     { ->
-      const result = agent_loop(harness, "Write lost.txt.",
+      const result = agent_loop(
+        harness,
+        "Write lost.txt.",
         nil,
         {
           provider: "mock",

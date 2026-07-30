@@ -34,7 +34,8 @@ fn resume_tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {
@@ -51,7 +52,9 @@ pipeline main(harness: Harness) {
     ],
     { ->
       const session_id = "self-park-with-input-" + harness.random.uuid()
-      const handle = sub_agent_run(harness, "Park then wait for an operator brief.",
+      const handle = sub_agent_run(
+        harness,
+        "Park then wait for an operator brief.",
         {
           provider: "mock",
           background: true,

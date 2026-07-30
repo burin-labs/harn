@@ -8,7 +8,7 @@ pipeline default(harness: Harness) {
   harness.testing.clock_set(1700000000000)
   harness.runtime.store_set("probe_counter", 0)
   const value = poll_until(
-    harness,
+    harness.clock,
     fn() {
       let n = (harness.runtime.store_get("probe_counter") ?? 0) + 1
       harness.runtime.store_set("probe_counter", n)
@@ -42,11 +42,15 @@ pipeline default(harness: Harness) {
   harness.stdio.println(row.status)
   harness.stdio.println(row.url)
   harness.stdio.println(harness.runtime.store_get("status_counter"))
-  const timed_out = poll_until(harness, fn() { return nil }, {timeout_ms: 200, interval_ms: 50})
+  const timed_out = poll_until(
+    harness.clock,
+    fn() { return nil },
+    {timeout_ms: 200, interval_ms: 50},
+  )
   harness.stdio.println(timed_out == nil)
   harness.runtime.store_set("retry_counter", 0)
   const retry_report = retry_with_result(
-    harness,
+    harness.clock,
     fn(attempt) {
       let n = (harness.runtime.store_get("retry_counter") ?? 0) + 1
       harness.runtime.store_set("retry_counter", n)
@@ -61,7 +65,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(retry_report.attempts)
   harness.stdio.println(retry_report.value.attempt)
   const exhausted = retry_with_result(
-    harness,
+    harness.clock,
     fn(attempt) { return Err("permanent") },
     {max_attempts: 2, base_ms: 5},
   )

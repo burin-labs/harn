@@ -5,10 +5,16 @@ import {
 } from "std/agent/state"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-reminder-project-facts-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-reminder-project-facts-" + harness.random.uuid(),
+  )
   const namespace = "project/facts"
   const store_opts = {root: root, namespace: namespace}
-  store_fact(harness, harness.memory, {
+  store_fact(
+    harness.clock,
+    harness.memory,
+    {
       kind: "Decision",
       claim: "Memory module reuses the BM25 scorer for fact recall",
       confidence: 0.91,
@@ -16,7 +22,10 @@ pipeline default(harness: Harness) {
     },
     store_opts + {now: "2026-05-23T10:00:00Z"},
   )
-  store_fact(harness, harness.memory, {
+  store_fact(
+    harness.clock,
+    harness.memory,
+    {
       kind: "Constraint",
       claim: "Project facts reminder runs synchronously inside the provider",
       confidence: 0.74,
@@ -24,7 +33,10 @@ pipeline default(harness: Harness) {
     },
     store_opts + {now: "2026-05-23T10:00:01Z"},
   )
-  store_fact(harness, harness.memory, {
+  store_fact(
+    harness.clock,
+    harness.memory,
+    {
       kind: "Hypothesis",
       claim: "Low-confidence facts should not auto-inject",
       confidence: 0.2,
@@ -41,7 +53,9 @@ pipeline default(harness: Harness) {
   }
   const session = harness.agent.open("reminder-provider-project-facts")
   harness.agent.reset(session)
-  const first = agent_reminder_providers_fire(harness, session,
+  const first = agent_reminder_providers_fire(
+    harness.agent,
+    session,
     "session_start",
     {session: {id: session}, task: "project facts recall", iteration: 1},
     provider_opts,
@@ -57,7 +71,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(reminder.propagate)
   harness.stdio.println(reminder.source)
   harness.stdio.println(reminder.role_hint)
-  harness.stdio.println(contains(reminder.body, "Memory module reuses the BM25 scorer for fact recall"))
+  harness.stdio.println(
+    contains(reminder.body, "Memory module reuses the BM25 scorer for fact recall"),
+  )
   harness.stdio.println(
     contains(reminder.body, "Project facts reminder runs synchronously inside the provider"),
   )
@@ -68,7 +84,9 @@ pipeline default(harness: Harness) {
     + {
     reminders: provider_opts.reminders + {providers: ["-token_pressure"]},
   }
-  const below_refresh = agent_reminder_providers_fire(harness, session,
+  const below_refresh = agent_reminder_providers_fire(
+    harness.agent,
+    session,
     "on_budget_threshold",
     {
       session: {id: session},
@@ -80,7 +98,9 @@ pipeline default(harness: Harness) {
     refresh_opts,
   )
   harness.stdio.println(below_refresh.fired_count)
-  const refresh = agent_reminder_providers_fire(harness, session,
+  const refresh = agent_reminder_providers_fire(
+    harness.agent,
+    session,
     "on_budget_threshold",
     {
       session: {id: session},
@@ -94,13 +114,15 @@ pipeline default(harness: Harness) {
   harness.stdio.println(refresh.fired_count)
   harness.stdio.println(refresh.reports[0].deduped_count)
   harness.stdio.println(refresh.reports[0].provider)
-  const post_turn = agent_session_apply_reminder_post_turn(harness, session, 3)
+  const post_turn = agent_session_apply_reminder_post_turn(harness.agent, session, 3)
   const after_post = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   harness.stdio.println(post_turn.expired_count)
   harness.stdio.println(len(after_post))
   const kind_session = harness.agent.open("reminder-provider-project-facts-kind")
   harness.agent.reset(kind_session)
-  const kind_only = agent_reminder_providers_fire(harness, kind_session,
+  const kind_only = agent_reminder_providers_fire(
+    harness.agent,
+    kind_session,
     "session_start",
     {session: {id: kind_session}, task: "constraints only"},
     {
@@ -126,7 +148,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(kind_reminder.body, "Memory module reuses the BM25 scorer"))
   const disabled_session = harness.agent.open("reminder-provider-project-facts-disabled")
   harness.agent.reset(disabled_session)
-  const disabled = agent_reminder_providers_fire(harness, disabled_session,
+  const disabled = agent_reminder_providers_fire(
+    harness.agent,
+    disabled_session,
     "session_start",
     {session: {id: disabled_session}, task: "irrelevant"},
     {
@@ -137,10 +161,15 @@ pipeline default(harness: Harness) {
     },
   )
   harness.stdio.println(disabled.fired_count)
-  const empty_root = path_join(harness.fs.workspace_temp_dir(), "harn-reminder-project-facts-empty-" + harness.random.uuid())
+  const empty_root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-reminder-project-facts-empty-" + harness.random.uuid(),
+  )
   const empty_session = harness.agent.open("reminder-provider-project-facts-empty")
   harness.agent.reset(empty_session)
-  const empty = agent_reminder_providers_fire(harness, empty_session,
+  const empty = agent_reminder_providers_fire(
+    harness.agent,
+    empty_session,
     "session_start",
     {session: {id: empty_session}, task: "no facts yet"},
     {reminders: {config: {project_facts: {root: empty_root, namespace: namespace}}}},

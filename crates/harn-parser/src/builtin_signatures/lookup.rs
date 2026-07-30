@@ -66,6 +66,7 @@ pub fn capability_method_entry(
                 } if candidate == capability && candidate_method == method
             )
         })
+        .or_else(|| harn_capability_contracts::capability_method_entry(field, method))
 }
 
 /// Is `name` a builtin known to the parser?

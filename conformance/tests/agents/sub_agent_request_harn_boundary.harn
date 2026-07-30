@@ -1,4 +1,5 @@
-import { sub_agent_request, sub_agent_run, wait_agent } from "std/agent/workers"
+import { sub_agent_request } from "std/agent/workers"
+
 fn worker_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -19,7 +20,9 @@ fn worker_tools() {
 pipeline main(harness: Harness) {
   const tools = worker_tools()
   tool_bind(tools)
-  const request = sub_agent_request(harness, "Inspect notes.",
+  const request = sub_agent_request(
+    harness,
+    "Inspect notes.",
     {
       name: "note-reader",
       system: "Stay terse.",

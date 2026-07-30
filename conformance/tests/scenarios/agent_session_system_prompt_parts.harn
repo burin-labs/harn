@@ -12,7 +12,8 @@ fn events_by_kind(transcript, kind) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [],
+    harness.llm,
+    [],
     { ->
       const direct = harness.llm.call(
         "direct prompt",
@@ -22,12 +23,15 @@ pipeline default(harness: Harness) {
       harness.stdio.println(len(transcript_messages(direct.transcript)))
       harness.stdio.println(len(events_by_kind(direct.transcript, "system_prompt")))
       harness.stdio.println(transcript_events(direct.transcript)[0].kind == "system_prompt")
-      harness.stdio.println(direct.transcript.metadata.system_prompt.content.contains("Direct preamble."))
+      harness.stdio.println(
+        direct.transcript.metadata.system_prompt.content.contains("Direct preamble."),
+      )
       harness.stdio.println(occurrences(json_stringify(direct.transcript), "Direct preamble.") == 1)
     },
   )
   with_llm_script(
-    harness.llm, [],
+    harness.llm,
+    [],
     { ->
       // Durable session journals outlive a fixture process; isolate the
       // continuation scenario from prior runs with a fresh id.
@@ -41,7 +45,9 @@ pipeline default(harness: Harness) {
       )
       const first = agent_loop(harness, "hello", "Base system.", opts)
       const resumed = agent_loop(harness, "follow up", "Base system.", opts)
-      const resumed_without_prompt = agent_loop(harness, "resume without prompt options",
+      const resumed_without_prompt = agent_loop(
+        harness,
+        "resume without prompt options",
         nil,
         {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
       )
@@ -56,7 +62,9 @@ pipeline default(harness: Harness) {
       harness.stdio.println(!json_stringify(calls[2].messages).contains("Persistent contract."))
       harness.stdio.println(len(transcript_messages(resumed_without_prompt.transcript)))
       harness.stdio.println(len(events_by_kind(resumed_without_prompt.transcript, "system_prompt")))
-      harness.stdio.println(transcript_events(resumed_without_prompt.transcript)[0].kind == "system_prompt")
+      harness.stdio.println(
+        transcript_events(resumed_without_prompt.transcript)[0].kind == "system_prompt",
+      )
       harness.stdio.println(
         occurrences(json_stringify(resumed_without_prompt.transcript), "Persistent contract.") == 1,
       )

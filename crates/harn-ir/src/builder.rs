@@ -446,17 +446,39 @@ impl<'a> HandlerIrBuilder<'a> {
         args: &[SNode],
         incoming: Vec<NodeId>,
     ) -> Vec<NodeId> {
+        if let Some((sub_handle, _)) =
+            capability_method_for(object, method, &self.handler.capability_handles)
+        {
+            if sub_handle == "runtime" {
+                if let Some(scope) = scoped_policy_call(method) {
+                    return self.build_policy_scope_call(node, args, incoming, scope);
+                }
+            }
+        }
         let mut exits = self.build_expr(object, incoming);
         for arg in args {
             exits = self.build_expr(arg, exits);
         }
-        if let Some((sub_handle, entry)) = harness_sub_handle_for(object, method) {
+        if let Some((sub_handle, entry)) =
+            capability_method_for(object, method, &self.handler.capability_handles)
+        {
             let display_name = format!("harness.{sub_handle}.{method}");
             let literal_args = literal_args(args);
+            let classification = match (sub_handle, method) {
+                ("net", "egress_policy") => CallClassification::PolicyGate(PolicyScopeKind::Egress),
+                ("interaction", "request_approval") => CallClassification::ApprovalGate,
+                ("runtime", "command_policy_push") => {
+                    CallClassification::PolicyPush(PolicyScopeKind::Command)
+                }
+                ("runtime", "command_policy_pop") => {
+                    CallClassification::PolicyPop(PolicyScopeKind::Command)
+                }
+                _ => classify_contract(entry.name, &entry.contract, &literal_args),
+            };
             let call = CallSemantics {
                 name: display_name.clone(),
                 display_name,
-                classification: classify_contract(entry.name, &entry.contract, &literal_args),
+                classification,
                 literal_args,
             };
             let call_id = self.push_node(

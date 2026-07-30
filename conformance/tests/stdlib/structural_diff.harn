@@ -1,8 +1,8 @@
 import { changeset_summary, structural_diff } from "std/diff"
 
-fn write_fixture(harness: Harness, dir: string, name: string, body: string) -> string {
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
-  harness.fs.write_text(path, body)
+  fs.write_text(path, body)
   return path
 }
 
@@ -12,8 +12,14 @@ pipeline default(harness: Harness) {
     "harn_structural_diff_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
-  const reformat_a = write_fixture(harness, root, "reformat_before.rs", "fn add(a:i32,b:i32)->i32{a+b}\n")
-  const reformat_b = write_fixture(harness, 
+  const reformat_a = write_fixture(
+    harness.fs,
+    root,
+    "reformat_before.rs",
+    "fn add(a:i32,b:i32)->i32{a+b}\n",
+  )
+  const reformat_b = write_fixture(
+    harness.fs,
     root,
     "reformat_after.rs",
     "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
@@ -22,18 +28,32 @@ pipeline default(harness: Harness) {
   harness.stdio.println(reformat.result == "ok")
   harness.stdio.println(reformat.structural)
   harness.stdio.println(!reformat.changed && len(reformat.changes) == 0)
-  const rename_a = write_fixture(harness, root, "rename_before.rs", "fn value() -> i32 {\n    1\n}\n")
-  const rename_b = write_fixture(harness, root, "rename_after.rs", "fn total() -> i32 {\n    1\n}\n")
+  const rename_a = write_fixture(
+    harness.fs,
+    root,
+    "rename_before.rs",
+    "fn value() -> i32 {\n    1\n}\n",
+  )
+  const rename_b = write_fixture(
+    harness.fs,
+    root,
+    "rename_after.rs",
+    "fn total() -> i32 {\n    1\n}\n",
+  )
   const rename = structural_diff(harness.ast, rename_a, rename_b, {language: "rust"})
   harness.stdio.println(rename.summary.replacements == 1)
   harness.stdio.println(rename.changes[0].node_kind == "identifier")
-  harness.stdio.println(rename.changes[0].before_text == "value" && rename.changes[0].after_text == "total")
-  const move_a = write_fixture(harness, 
+  harness.stdio.println(
+    rename.changes[0].before_text == "value" && rename.changes[0].after_text == "total",
+  )
+  const move_a = write_fixture(
+    harness.fs,
     root,
     "move_before.rs",
     "fn first() -> i32 {\n    1\n}\n\nfn second() -> i32 {\n    2\n}\n",
   )
-  const move_b = write_fixture(harness, 
+  const move_b = write_fixture(
+    harness.fs,
     root,
     "move_after.rs",
     "fn second() -> i32 {\n    2\n}\n\nfn first() -> i32 {\n    1\n}\n",
@@ -41,8 +61,18 @@ pipeline default(harness: Harness) {
   const moved = structural_diff(harness.ast, move_a, move_b, "rust")
   harness.stdio.println(moved.summary.moves >= 1)
   harness.stdio.println(moved.changes[0].kind == "move")
-  const logic_a = write_fixture(harness, root, "logic_before.rs", "fn answer() -> i32 {\n    41\n}\n")
-  const logic_b = write_fixture(harness, root, "logic_after.rs", "fn answer() -> i32 {\n    42\n}\n")
+  const logic_a = write_fixture(
+    harness.fs,
+    root,
+    "logic_before.rs",
+    "fn answer() -> i32 {\n    41\n}\n",
+  )
+  const logic_b = write_fixture(
+    harness.fs,
+    root,
+    "logic_after.rs",
+    "fn answer() -> i32 {\n    42\n}\n",
+  )
   const logic = structural_diff(harness.ast, logic_a, logic_b, "rust")
   harness.stdio.println(logic.summary.replacements == 1)
   harness.stdio.println(logic.changes[0].node_kind == "integer_literal")
@@ -54,6 +84,7 @@ pipeline default(harness: Harness) {
     contains(fallback.line_diff.diff, "-    41") && contains(fallback.line_diff.diff, "+    42"),
   )
   const changeset = changeset_summary(
+    harness.ast,
     [
       {
         path: "src/lib.rs",
@@ -67,9 +98,11 @@ pipeline default(harness: Harness) {
       },
     ],
   )
-  __io_println(changeset.schema == "harn.review_changeset.v1")
-  __io_println(changeset.counts.signatures_changed == 1)
-  __io_println(changeset.counts.exported_signatures_changed == 1)
-  __io_println(changeset.counts.files_reshaped_only == 1)
-  __io_println(len(changeset.changes.filter({ change -> change.after?.name == "greet" })) == 1)
+  harness.stdio.println(changeset.schema == "harn.review_changeset.v1")
+  harness.stdio.println(changeset.counts.signatures_changed == 1)
+  harness.stdio.println(changeset.counts.exported_signatures_changed == 1)
+  harness.stdio.println(changeset.counts.files_reshaped_only == 1)
+  harness.stdio.println(
+    len(changeset.changes.filter({ change -> change.after?.name == "greet" })) == 1,
+  )
 }

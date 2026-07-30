@@ -2,7 +2,11 @@ import { coord_post, coord_read } from "std/coordination"
 
 pipeline default(harness: Harness) {
   harness.testing.clock_set(2000)
-  const receipt = coord_post(harness.runtime, harness.channels, harness.random, "session",
+  const receipt = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "session",
     "release",
     {
       kind: "claim",
@@ -14,7 +18,13 @@ pipeline default(harness: Harness) {
     },
     {id: "coord-release-1", session_id: "coord-session"},
   )
-  const messages = coord_read(harness.runtime, harness.channels, "session", "release", {session_id: "coord-session"})
+  const messages = coord_read(
+    harness.runtime,
+    harness.channels,
+    "session",
+    "release",
+    {session_id: "coord-session"},
+  )
   harness.stdio.println(receipt.schema)
   harness.stdio.println(receipt.id)
   harness.stdio.println(receipt.kind)
@@ -28,13 +38,25 @@ pipeline default(harness: Harness) {
   harness.stdio.println(messages[0].from.agent)
   harness.stdio.println(messages[0].data.repo)
   harness.stdio.println(messages[0].refs[0].ref)
-  const duplicate = coord_post(harness.runtime, harness.channels, harness.random, "session",
+  const duplicate = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "session",
     "release",
     {kind: "claim", subject: "ignored duplicate"},
     {id: "coord-release-1", session_id: "coord-session"},
   )
   harness.stdio.println(duplicate.event_id == receipt.event_id)
   harness.stdio.println(duplicate.duplicate)
-  harness.stdio.println(coord_read(harness.runtime, harness.channels, "session", "release", {session_id: "coord-session"})[0].subject)
+  harness.stdio.println(
+    coord_read(
+      harness.runtime,
+      harness.channels,
+      "session",
+      "release",
+      {session_id: "coord-session"},
+    )[0].subject,
+  )
   harness.testing.clock_reset()
 }

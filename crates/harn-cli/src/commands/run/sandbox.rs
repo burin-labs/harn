@@ -192,7 +192,7 @@ pub(super) fn install_run_sandbox_scope(
     };
     let egress_policy = Some(harn_vm::egress::require_explicit_egress_policy_for_host());
     // Default-on the SSRF private-address guard for outbound HTTP. Callers can
-    // opt out with `egress_policy({block_private:"off"})` /
+    // opt out with `harness.net.egress_policy({block_private:"off"})` /
     // `HARN_EGRESS_BLOCK_PRIVATE=off`.
     let ssrf_guard = Some(harn_vm::egress::require_ssrf_guard_for_host());
 

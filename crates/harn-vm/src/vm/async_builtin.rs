@@ -85,7 +85,7 @@ impl AsyncBuiltinCtx {
     /// context's output buffer. The dispatch loop drains that buffer back to the
     /// original parent VM after the async builtin returns.
     ///
-    /// Without this hook, `log()`/`__io_print()` calls inside
+    /// Without this hook, `harness.stdio.log()`/`__io_print()` calls inside
     /// `post_turn_callback` closures, tool handlers, and other VM-side closures
     /// invoked from async builtins would silently disappear because the transient
     /// child VM's output buffer is dropped on scope exit.

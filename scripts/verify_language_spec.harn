@@ -237,7 +237,7 @@ fn harn_command_argv(harness: Harness, subcommand: string) -> list<string> {
     return [harn_bin, subcommand]
   }
   const meta = harness.process.run(
-    {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
+    {program: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
   )
   if meta.success {
     const parsed = try {
@@ -269,20 +269,18 @@ pipeline main(harness: Harness, task) {
   /* The runtime sandbox only permits writes inside the workspace root,
    * so the scratch directory lives there (and is removed afterward)
    * rather than under the system temp dir the Python version used. */
-  const mk = harness.process.run(
-    {cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]},
-  )
+  const mk = harness.process.run({program: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]})
   if !mk.success {
     harness.stdio.eprintln("error: could not create temp directory")
     return 1
   }
   const tmpbase = mk.stdout.trim()
   /* Remove the scratch directory on every exit path — including an early
-   * return or a throw from `write_text`/`spawn_captured` below. Without this
+   * return or a throw from `write_text`/`harness.process.run` below. Without this
    * an interrupted run leaks a `harn-spec-verify-*` directory into the
    * workspace root, where it shows up as a confusing untracked entry. */
   defer {
-    harness.process.run({cmd: "rm", args: ["-rf", tmpbase]})
+    harness.process.run({program: "rm", args: ["-rf", tmpbase]})
   }
   let manifest_lines = []
   let failures = []
@@ -306,7 +304,7 @@ pipeline main(harness: Harness, task) {
     } else {
       argv_prefix.slice(1, argv_prefix.count) + [path]
     }
-    const result = harness.process.run({cmd: bin, args: args})
+    const result = harness.process.run({program: bin, args: args})
     if result.exit_code != 0 {
       failures = failures + [{name: name, result: result}]
     }

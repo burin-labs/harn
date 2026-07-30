@@ -1,11 +1,9 @@
-import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 import "std/git"
 import "std/triggers"
 
-fn run_git(harness: Harness, cwd, argv) {
-  const result = harness.process.run(
-    {mode: "argv", argv: argv, cwd: cwd},
-  )
+fn run_git(process: HarnessProcess, cwd, argv) {
+  const result = process.run({program: argv[0], args: argv[1:len(argv)], cwd: cwd})
   if !result.success {
     throw "git command failed: " + (result.stderr ?? result.stdout ?? "")
   }
@@ -18,13 +16,13 @@ pipeline default(harness: Harness) {
     "harn_git_stdlib_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
-  run_git(harness, root, ["git", "init", "-b", "main"])
-  run_git(harness, root, ["git", "config", "user.email", "harn@example.test"])
-  run_git(harness, root, ["git", "config", "user.name", "Harn Test"])
+  run_git(harness.process, root, ["git", "init", "-b", "main"])
+  run_git(harness.process, root, ["git", "config", "user.email", "harn@example.test"])
+  run_git(harness.process, root, ["git", "config", "user.name", "Harn Test"])
   harness.fs.write_text(path_join(root, "README.md"), "initial\n")
-  run_git(harness, root, ["git", "add", "README.md"])
-  run_git(harness, root, ["git", "commit", "-m", "initial"])
-  run_git(harness, root, ["git", "tag", "v1.0.0"])
+  run_git(harness.process, root, ["git", "add", "README.md"])
+  run_git(harness.process, root, ["git", "commit", "-m", "initial"])
+  run_git(harness.process, root, ["git", "tag", "v1.0.0"])
   harness.fs.write_text(path_join(root, "README.md"), "changed\n")
   const status: GitReceipt = harness.process.git_status(root)
   const status_fn: GitStatusReceipt = git_status(harness.process, root)
@@ -80,7 +78,7 @@ pipeline default(harness: Harness) {
       && described.data.distance == 0
       && described.data.dirty,
   )
-  run_git(harness, root, ["git", "checkout", "--", "README.md"])
+  run_git(harness.process, root, ["git", "checkout", "--", "README.md"])
   const switch_result = git_switch(harness.process, "feature/std-git", root, {create: true})
   harness.stdio.println(switch_result.success)
   harness.stdio.println(git_current_branch(harness.process, root).branch == "feature/std-git")
@@ -89,10 +87,10 @@ pipeline default(harness: Harness) {
     harness.fs.workspace_temp_dir(),
     "harn_git_remote_" + to_string(harness.random.range(100000, 999999)) + ".git",
   )
-  run_git(harness, root, ["git", "init", "--bare", remote])
-  run_git(harness, root, ["git", "remote", "add", "origin", remote])
-  run_git(harness, root, ["git", "push", "-u", "origin", "main"])
-  run_git(harness, root, ["git", "push", "origin", "v1.0.0"])
+  run_git(harness.process, root, ["git", "init", "--bare", remote])
+  run_git(harness.process, root, ["git", "remote", "add", "origin", remote])
+  run_git(harness.process, root, ["git", "push", "-u", "origin", "main"])
+  run_git(harness.process, root, ["git", "push", "origin", "v1.0.0"])
   const remote_refs: GitLsRemoteReceipt = git_ls_remote(
     harness.process,
     "origin",
@@ -110,7 +108,7 @@ pipeline default(harness: Harness) {
   const pull = git_pull_ff_only(harness.process, root, "origin", "main", {quiet: true})
   harness.stdio.println(pull.success)
   const read_tools = git_tools(
-    harness,
+    harness.process,
     nil,
     {repo: root, enabled_tools: ["git_status", "git_log"], names: {git_log: "release_git_log"}},
   )
@@ -119,24 +117,24 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(read_surface.valid)
   const status_call = agent_dispatch_tool_call(
-    harness,
+    harness.tools,
     {id: "status", name: "git_status", arguments: {}},
     read_tools,
   )
   harness.stdio.println(status_call.ok)
   const log_call = agent_dispatch_tool_call(
-    harness,
+    harness.tools,
     {id: "log", name: "release_git_log", arguments: {max_count: 1}},
     read_tools,
   )
   harness.stdio.println(log_call.ok)
-  const switch_tools = git_tools(harness, nil, {repo: root, enabled_tools: ["git_switch"]})
+  const switch_tools = git_tools(harness.process, nil, {repo: root, enabled_tools: ["git_switch"]})
   const switch_surface = tool_surface_validate(
     {tools: switch_tools, policy: {side_effect_level: "process_exec"}},
   )
   harness.stdio.println(switch_surface.valid)
   const deferred_tools = git_tools(
-    harness,
+    harness.process,
     nil,
     {repo: root, defer_loading: true, tool_config: {git_status: {defer_loading: false}}},
   )
@@ -145,22 +143,22 @@ pipeline default(harness: Harness) {
   const found = git_find_tool("recent commits", {})
   harness.stdio.println(found.operations[0] == "log")
   const blocked_switch = try {
-    git_run_tool(harness, "switch", {repo: root, branch: "main"})
+    git_run_tool(harness.process, "switch", {repo: root, branch: "main"})
   }
   harness.stdio.println(is_err(blocked_switch))
-  const toolbox = git_toolbox_tools(harness, nil, {repo: root, include_mutations: true})
+  const toolbox = git_toolbox_tools(harness.process, nil, {repo: root, include_mutations: true})
   const toolbox_surface = tool_surface_validate(
     {tools: toolbox, policy: {side_effect_level: "process_exec"}},
   )
   harness.stdio.println(toolbox_surface.valid)
   const find_call = agent_dispatch_tool_call(
-    harness,
+    harness.tools,
     {id: "find", name: "find_git_tool", arguments: {query: "what branch am I on"}},
     toolbox,
   )
   harness.stdio.println(find_call.ok)
   const run_call = agent_dispatch_tool_call(
-    harness,
+    harness.tools,
     {id: "run", name: "run_git_tool", arguments: {operation: "current_branch"}},
     toolbox,
   )

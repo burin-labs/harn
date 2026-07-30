@@ -12,7 +12,7 @@ import "std/triggers"
  * dispatch.
  */
 pipeline test(harness: Harness, task) {
-  const _ = lifecycle_audit_log_take(harness)
+  const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.range(100000, 999999),
@@ -55,7 +55,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(len(dispatch.result?.targets))
   harness.stdio.println(dispatch.result?.targets[0]?.outcome == "unknown")
   harness.stdio.println(dispatch.result?.targets[1]?.outcome == "unknown")
-  const audits = lifecycle_audit_log_take(harness)
+  const audits = lifecycle_audit_log_take(harness.obs)
   let summary_audits = 0
   let per_worker_audits = 0
   for audit in audits {

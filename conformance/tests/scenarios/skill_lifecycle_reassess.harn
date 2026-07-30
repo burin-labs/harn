@@ -37,14 +37,18 @@ pipeline test(harness: Harness, task) {
   // Turn 0: a tool call forces post_turn_callback to fire, giving
   // us a hook to inject a runtime user message that pivots intent.
   with_llm_script(
-    harness.llm, [{text: "Drafting.", tool_calls: [{id: "t0", name: "noop", arguments: {}}]}],
+    harness.llm,
+    [{text: "Drafting.", tool_calls: [{id: "t0", name: "noop", arguments: {}}]}],
     { ->
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Reviewing now.")],
+    harness.llm,
+    [llm_text("Reviewing now.")],
     { ->
-      const result = agent_loop(harness, "Please draft the launch memo",
+      const result = agent_loop(
+        harness,
+        "Please draft the launch memo",
         nil,
         {
           provider: "mock",

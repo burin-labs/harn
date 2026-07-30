@@ -1,7 +1,7 @@
 import { timed } from "std/timing"
 
 pipeline default(harness: Harness) {
-  const outcome = timed(harness, "work.compute", {phase: "warmup"}, { -> return 42 })
+  const outcome = timed(harness.clock, "work.compute", {phase: "warmup"}, { -> return 42 })
   harness.stdio.println(outcome.result)
   harness.stdio.println(outcome.timing.name)
   harness.stdio.println(outcome.timing.kind)

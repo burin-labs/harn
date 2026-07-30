@@ -54,7 +54,7 @@ import {{
   command_ledger_hold,
 }} from "std/agent/command_ledger"
 
-pipeline main() {{
+pipeline main(harness: Harness) {{
   const cw = command_wait_normalize({{max_awaited_wall_ms: {wall_ms}}})
   const running = {{
     status: "running",
@@ -67,12 +67,12 @@ pipeline main() {{
     stdout: "compiling",
   }}
   const ledger = command_ledger_ingest(command_ledger_new(), [running], 0, cw)
-  const r = command_ledger_hold("{session}", ledger, cw, {{reentries: {reentries}}})
-  log("OUTCOME=" + r.outcome)
-  log("HAS_DIGEST=" + to_string(r?.digest != nil))
-  log("LEDGER_LEN=" + to_string(len(r.ledger)))
+  const r = command_ledger_hold(harness, "{session}", ledger, cw, {{reentries: {reentries}}})
+  harness.stdio.log("OUTCOME=" + r.outcome)
+  harness.stdio.log("HAS_DIGEST=" + to_string(r?.digest != nil))
+  harness.stdio.log("LEDGER_LEN=" + to_string(len(r.ledger)))
   if r?.digest != nil {{
-    log("DIGEST=" + r.digest)
+    harness.stdio.log("DIGEST=" + r.digest)
   }}
 }}
 "#
@@ -100,16 +100,16 @@ fn _lease_of(ledger) {{
   return "none"
 }}
 
-pipeline main() {{
+pipeline main(harness: Harness) {{
   const cw = command_wait_normalize({{max_awaited_wall_ms: 100, auto_resolve: "{auto_resolve}"}})
   const running = {{status: "running", handle_id: "hto-1", command_or_op_descriptor: "svc", output_offset: 0, byte_count: 0, stderr_byte_count: 0, silence_ms: 0, stdout: ""}}
   const ledger = command_ledger_ingest(command_ledger_new(), [running], 0, cw)
-  const r1 = command_ledger_hold("{session}", ledger, cw, {{reentries: 0}})
-  log("R1_OUTCOME=" + r1.outcome)
-  const r2 = command_ledger_hold("{session}", r1.ledger, cw, r1.hold_state)
-  log("R2_OUTCOME=" + r2.outcome)
-  log("R2_LEN=" + to_string(len(r2.ledger)))
-  log("R2_LEASE=" + _lease_of(r2.ledger))
+  const r1 = command_ledger_hold(harness, "{session}", ledger, cw, {{reentries: 0}})
+  harness.stdio.log("R1_OUTCOME=" + r1.outcome)
+  const r2 = command_ledger_hold(harness, "{session}", r1.ledger, cw, r1.hold_state)
+  harness.stdio.log("R2_OUTCOME=" + r2.outcome)
+  harness.stdio.log("R2_LEN=" + to_string(len(r2.ledger)))
+  harness.stdio.log("R2_LEASE=" + _lease_of(r2.ledger))
 }}
 "#
     )

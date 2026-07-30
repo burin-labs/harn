@@ -36,7 +36,7 @@ type TokenSet = {
 ```harn
 import { memory } from "std/oauth/storage"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const store = memory()
   store.set(
     "github",
@@ -45,7 +45,7 @@ pipeline default() {
   )
   const token = store.get("github")              // -> TokenSet | nil
   if token != nil {
-    log("auth: Bearer " + token.access_token)
+    harness.stdio.log("auth: Bearer " + token.access_token)
   }
   store.delete("github")
 }
@@ -59,7 +59,7 @@ import { Providers } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
 const client = OAuth.client(Providers.github, {
-  client_id: env("GITHUB_OAUTH_CLIENT_ID"),
+  client_id: harness.env.get("GITHUB_OAUTH_CLIENT_ID"),
   scopes: ["repo"],
   storage: harn_cloud_org(),
 })
@@ -108,10 +108,11 @@ tenant-scoped storage (RLS), refresh metadata, and a backend-native lock
 lease so rotating refresh tokens are single-flight across every worker
 sharing the same cloud storage key.
 
-Tests can substitute the host with `host_mock("oauth_storage",
-"cloud_get", {result: ...})` and the matching refresh-lock operations.
-With no embedder and no mock, the missing `oauth_storage.cloud_*`
-operation raises a deterministic "not configured" signal.
+Tests substitute the host on the exact harness with
+`harness.testing.respond("oauth_storage", "cloud_get", ...)` and matching
+refresh-lock responses. With no embedder or fixture, a missing
+`oauth_storage.cloud_*` operation raises a deterministic "not configured"
+signal.
 
 ## Custom backend hook protocol
 

@@ -472,7 +472,7 @@ impl ModePolicyGuard {
         // public traffic (model APIs, web_search/web_fetch to public hosts)
         // ALLOWED. Local model servers on loopback are reached via the
         // documented `HARN_EGRESS_ALLOW_LOOPBACK=1` /
-        // `egress_policy({block_private:"off"})` hatch; the metadata endpoint
+        // `harness.net.egress_policy({block_private:"off"})` hatch; the metadata endpoint
         // stays blocked regardless. With no sandbox config we install nothing,
         // so egress is byte-identical to today's default.
         let ssrf_guard = sandbox
@@ -790,7 +790,7 @@ mod tests {
     fn policy_for_shadow_blocks_side_effects() {
         let policy =
             policy_for_mode("shadow", &AcpSandboxConfig::default()).expect("shadow has policy");
-        assert_eq!(policy.side_effect_level.as_deref(), Some("none"));
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
         assert_eq!(policy.recursion_limit, Some(0));
     }
 

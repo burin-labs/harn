@@ -12,7 +12,7 @@ pipeline test(harness: Harness, task) {
       kind: "issue.opened",
       provider: "webhook",
       autonomy_tier: "act_auto",
-      handler: { event ->
+      handler: { harness, event ->
         let _ = harness.runtime.trust_record(agent_id, "audit.note", nil, "success", "suggest")
         return harness.runtime.handler_context()
       },

@@ -1,23 +1,23 @@
 import "std/waitpoint"
 
 pipeline test(harness: Harness, task) {
-  const wp: Waitpoint = create(harness, "fan-in-" + harness.random.uuid())
+  const wp: Waitpoint = create(harness.runtime, "fan-in-" + harness.random.uuid())
   const first = spawn {
-    wait(harness, wp).value + "-1"
+    wait(harness.runtime, wp).value + "-1"
   }
   const second = spawn {
-    wait(harness, wp).value + "-2"
+    wait(harness.runtime, wp).value + "-2"
   }
   const third = spawn {
-    wait(harness, wp).value + "-3"
+    wait(harness.runtime, wp).value + "-3"
   }
   const fourth = spawn {
-    wait(harness, wp).value + "-4"
+    wait(harness.runtime, wp).value + "-4"
   }
   const fifth = spawn {
-    wait(harness, wp).value + "-5"
+    wait(harness.runtime, wp).value + "-5"
   }
-  complete(harness, wp, "go")
+  complete(harness.runtime, wp, "go")
   harness.stdio.println(await(first))
   harness.stdio.println(await(second))
   harness.stdio.println(await(third))

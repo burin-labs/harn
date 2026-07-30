@@ -10,7 +10,7 @@ builtin from anywhere inside the pipeline body.
 ```harn
 import { on_finish_drain } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_drain)
   return "ok"
 }
@@ -113,7 +113,7 @@ downstream cleanup is the host's responsibility.
 ```harn
 import { on_finish_abandon } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_abandon)
   return "ok"
 }
@@ -133,7 +133,7 @@ deterministically.
 ```harn
 import { on_finish_drain } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_drain)
   return "triage complete"
 }
@@ -151,7 +151,7 @@ itself be any callback, so chains compose cleanly.
 ```harn
 import { on_finish_block_until_settled } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_block_until_settled(30s))
   return "ok"
 }
@@ -170,7 +170,7 @@ need to run at all.
 ```harn
 import { on_finish_handoff_to } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
   return "triage complete"
 }
@@ -189,7 +189,7 @@ import {
   on_finish_handoff_to,
 } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(
     on_finish_block_until_settled(
       30s,
@@ -242,7 +242,7 @@ import {
 } from "std/lifecycle/combinators"
 import { on_finish_drain } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(
     if_unsettled(
       with_telemetry(with_timeout(on_finish_drain, 30000), "drain"),
@@ -302,7 +302,7 @@ Custom `on_finish` callbacks have full access to the harness:
 ```harn
 import { counts, summary } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(
     { harness, return_value ->
       const state = harness.unsettled_state()

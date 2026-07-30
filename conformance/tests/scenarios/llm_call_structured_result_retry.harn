@@ -12,7 +12,8 @@ pipeline default(harness: Harness) {
     properties: {verdict: {type: "string"}, note: {type: "string"}},
   }
   with_llm_script(
-    harness.llm, [llm_text("{\"note\": \"hmm\"}"), llm_text("{\"verdict\": \"PASS\", \"note\": \"\"}")],
+    harness.llm,
+    [llm_text("{\"note\": \"hmm\"}"), llm_text("{\"verdict\": \"PASS\", \"note\": \"\"}")],
     { ->
       const r = harness.llm.call_structured_result("Grade", schema, {provider: "mock"})
       harness.stdio.println(r.ok)

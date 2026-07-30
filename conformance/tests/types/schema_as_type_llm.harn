@@ -5,7 +5,8 @@ type GraderOut = {verdict: "pass" | "fail" | "unclear", summary: string}
 pipeline default(harness: Harness) {
   // First mock returns an invalid enum value; schema retry kicks in.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("{\"verdict\": \"maybe\", \"summary\": \"x\"}"),
       llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}"),
     ],

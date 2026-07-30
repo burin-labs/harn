@@ -75,7 +75,13 @@ fn build_tools() -> dict {
   return registry
 }
 
-fn run_variant(harness: Harness, label: string, mode: string, sentinel: string, registry: dict) -> dict {
+fn run_variant(
+  harness: Harness,
+  label: string,
+  mode: string,
+  sentinel: string,
+  registry: dict,
+) -> dict {
   harness.stdio.log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
   const task =
     "Investigate this small repo and tell me what the compute function does and how it is used in main."
@@ -131,6 +137,8 @@ pipeline main(harness: Harness, task) {
   ]
   harness.stdio.log("\n========== EXP2 SUMMARY ==========")
   for r in results {
-    harness.stdio.log("${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}")
+    harness.stdio.log(
+      "${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}",
+    )
   }
 }

@@ -152,7 +152,7 @@ pub fn web_fetch(harness: Harness, url: string, options = nil) -> dict {
     "miss"
   }
   if previous == nil && store_opts != nil {
-    const cached = cache_get(harness, cache_key, store_opts)
+    const cached = cache_get(harness.llm, cache_key, store_opts)
     if cached.hit {
       previous = cached.value
       cache_status = "refresh"
@@ -164,18 +164,22 @@ pub fn web_fetch(harness: Harness, url: string, options = nil) -> dict {
     opts?.conditional ?? true,
   )
   http_opts = http_opts + {headers: headers}
-  const response = harness.net.request(method, url, http_opts)
+  const response = if method == "GET" {
+    harness.net.get(url, http_opts)
+  } else {
+    harness.net.request(method, url, http_opts)
+  }
   const fetched_at = opts?.fetched_at ?? harness.clock.timestamp()
   if response.status == 304 && previous != nil {
     const not_modified = __web_not_modified(source_url, response, previous, fetched_at)
     if store_opts != nil {
-      cache_put(harness, cache_key, not_modified, store_opts)
+      cache_put(harness.llm, cache_key, not_modified, store_opts)
     }
     return not_modified
   }
   const envelope = __web_fetch_envelope(source_url, response, fetched_at, cache_status)
   if store_opts != nil && envelope.ok {
-    cache_put(harness, cache_key, envelope, store_opts)
+    cache_put(harness.llm, cache_key, envelope, store_opts)
   }
   return envelope
 }
@@ -280,7 +284,7 @@ fn __web_search_tool_options(base, args) {
   return merged + extra
 }
 
-fn __web_search_backend(harness: Harness, opts) {
+fn __web_search_backend(env: HarnessEnv, opts) {
   const explicit = opts?.backend
   if type_of(explicit) == "dict" {
     return explicit
@@ -311,10 +315,10 @@ fn __web_search_backend(harness: Harness, opts) {
       api: api,
     }
   }
-  const env_url = harness.env.get("HARN_WEB_SEARCH_URL")
+  const env_url = env.get("HARN_WEB_SEARCH_URL")
   if env_url != nil && env_url != "" {
     let headers = {}
-    const bearer = harness.env.get("HARN_WEB_SEARCH_BEARER_TOKEN")
+    const bearer = env.get("HARN_WEB_SEARCH_BEARER_TOKEN")
     if bearer != nil && bearer != "" {
       headers = {Authorization: "Bearer " + bearer}
     }
@@ -325,7 +329,7 @@ fn __web_search_backend(harness: Harness, opts) {
       evidence: "search_api",
       api: {
         url: env_url,
-        query_param: harness.env.get_or("HARN_WEB_SEARCH_QUERY_PARAM", "q"),
+        query_param: env.get_or("HARN_WEB_SEARCH_QUERY_PARAM", "q"),
         headers: headers,
       },
     }
@@ -531,7 +535,7 @@ fn __web_search_api(harness: Harness, query, opts, backend) {
  */
 pub fn web_search(harness: Harness, query: string, options = nil) -> dict {
   const opts = options ?? {}
-  const backend = __web_search_backend(harness, opts)
+  const backend = __web_search_backend(harness.env, opts)
   if backend.kind == "api" {
     return __web_search_api(harness, query, opts, backend)
   }
@@ -550,8 +554,8 @@ pub fn web_search(harness: Harness, query: string, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verify_imports(paths, options = nil) -> dict {
-  return __verify_imports(paths, options ?? {})
+pub fn verify_imports(fs: HarnessFs, paths, options = nil) -> dict {
+  return fs.verify_imports(paths, options ?? {})
 }
 
 /**
@@ -603,7 +607,7 @@ pub fn web_grounding_tools(harness: Harness, registry = nil, options = nil) {
       },
       annotations: {readOnlyHint: true},
       handler: { args ->
-        verify_imports(args.paths ?? [args.path], __web_search_tool_options(opts, args))
+        verify_imports(harness.fs, args.paths ?? [args.path], __web_search_tool_options(opts, args))
       },
       guidance:
         "After generating or editing code with imports, call verify_imports on the touched source files. Treat package_not_found and symbol_not_found as blockers. Treat fresh_package or low_trust_package warnings as a forced lookup trigger before proceeding.",

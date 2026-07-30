@@ -4,7 +4,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline test(harness: Harness, task) {
   const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "Load the unsigned instructions.",
         tool_calls: [
@@ -18,7 +19,9 @@ pipeline test(harness: Harness, task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Use the unsigned skill",
+      const result = agent_loop(
+        harness,
+        "Use the unsigned skill",
         catalog,
         {
           provider: "mock",

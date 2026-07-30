@@ -1257,7 +1257,11 @@ fn policy_from_score(
 pub fn policy_for_autonomy_tier(tier: AutonomyTier) -> CapabilityPolicy {
     use crate::tool_annotations::SideEffectLevel;
     let level = match tier {
-        AutonomyTier::Shadow => SideEffectLevel::None,
+        // Shadow handlers must be able to inspect inputs and compute a
+        // proposal; only their mutations are suppressed by the autonomy
+        // decision engine. A `none` ceiling would reject even `exists` and
+        // other observations before the engine could record the proposal.
+        AutonomyTier::Shadow => SideEffectLevel::ReadOnly,
         AutonomyTier::Suggest => SideEffectLevel::ReadOnly,
         AutonomyTier::ActWithApproval => SideEffectLevel::ReadOnly,
         // Full autonomy carries the outermost ceiling — the TOP of the ladder,

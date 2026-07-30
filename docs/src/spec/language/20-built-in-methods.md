@@ -161,8 +161,8 @@ const form = multipart_parse(fixture.body, fixture.content_type, {
 
 const title = multipart_field_text(form.fields[0])
 const uploaded = multipart_field_bytes(form.fields[1])
-log(title)
-log(bytes_to_hex(uploaded))
+harness.obs.log(title)
+harness.obs.log(bytes_to_hex(uploaded))
 ```
 
 `signed_url` is the canonical helper for short-lived Harn-hosted receipt and
@@ -268,16 +268,18 @@ provider integrations.
 
 | Function | Description |
 |---|---|
-| `connector_call(provider, method, params?)` | Invoke the active outbound connector client for `provider` and return JSON-like result data |
-| `egress_policy(config)` | Install an egress policy for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. The policy is process-scoped under `harn run` and isolated per pipeline under `harn test`. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. `block_private: "private"` blocks DNS-resolved loopback, private, link-local, metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `block_private: "off"` opts out, and `allow_loopback: true` opens only loopback. The same axes can be seeded with `HARN_EGRESS_BLOCK_PRIVATE` and `HARN_EGRESS_ALLOW_LOOPBACK`. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}` |
-| `secret_get(secret_id)` | Read a secret from the active connector context. Only available while executing a Harn-backed connector export such as `normalize_inbound` or `call` |
-| `event_log_emit(topic, kind, payload, headers?)` | Append an event to the active event log from a Harn-backed connector export |
-| `metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter from a Harn-backed connector export |
+| `harness.net.connector_call(provider, method, params?)` | Invoke the active outbound connector client for `provider` and return JSON-like result data |
+| `harness.net.egress_policy(config)` | Install a destination policy on this Harness for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. Hosts seed each root Harness from the run environment; `harn test` gives each pipeline an isolated root. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. `block_private: "private"` blocks DNS-resolved loopback, private, link-local, metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `block_private: "off"` opts out, and `allow_loopback: true` opens only loopback. The same axes can be seeded with `HARN_EGRESS_BLOCK_PRIVATE` and `HARN_EGRESS_ALLOW_LOOPBACK`. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}`. `harness.with_net_policy(policy)` derives an attenuated Harness without replacing the root destination policy. |
+| `harness.secrets.read(secret_id)` | Read a secret from the active connector context |
+| `harness.obs.event_log_emit(topic, kind, payload, headers?)` | Append an event to the active connector event log |
+| `harness.obs.metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter |
 
 Harn-backed connector modules are loaded through manifest `[[providers]]`
 entries and must export `provider_id()`, `kinds()`, and `payload_schema()`.
-Inbound providers also export `normalize_inbound(raw)`, which returns a
-`NormalizeResult` v1 dict. The top-level `type` field is one of:
+Those metadata exports are pure. Runtime exports declare a leading
+`harness: Harness`; inbound providers export
+`normalize_inbound(harness: Harness, raw)`, which returns a `NormalizeResult`
+v1 dict. The top-level `type` field is one of:
 
 - `"event"` with `event: {kind, dedupe_key, payload, ...}` for one normalized
   event.
@@ -329,8 +331,9 @@ fields may be omitted for compliant protected resources that advertise OAuth
 metadata. `client_id`, `client_secret`, and `token_endpoint_auth_method` are
 defaults only; CLI flags override them for a single connect run.
 
-Poll-capable providers export `poll_tick(ctx)`. The orchestrator invokes this
-hook for `kind = "poll"` bindings using the binding's `poll` configuration:
+Poll-capable providers export `poll_tick(harness: Harness, ctx)`. The
+orchestrator invokes this hook for `kind = "poll"` bindings using the binding's
+`poll` configuration:
 `interval`/`interval_ms`/`interval_secs`, optional
 `jitter`/`jitter_ms`/`jitter_secs`, `state_key` or `cursor_state_key`,
 `tenant_id`, `lease_id`, and `max_batch_size`. `ctx` contains the activated

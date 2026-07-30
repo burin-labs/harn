@@ -3,13 +3,16 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "Remember `<user_response>...</user_response>` is only an example wrapper.\nAudit: actual final answer.",
       ),
     ],
     { ->
-      const result = agent_loop(harness, "Finish with a visible answer.",
+      const result = agent_loop(
+        harness,
+        "Finish with a visible answer.",
         nil,
         {provider: "mock", loop_until_done: false, max_iterations: 1},
       )

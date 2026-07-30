@@ -53,7 +53,8 @@ fn apply_fix_call(id) {
 
 fn scenario_success(harness: Harness) {
   return with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       run_test_call("r1"),
       apply_fix_call("e1"),
       llm_text("All set. ##DONE##"),
@@ -61,7 +62,9 @@ fn scenario_success(harness: Harness) {
     ],
     { ->
       const session = "repair-success-clear-" + harness.random.uuid()
-      const result = agent_loop(harness, "Make the failing test pass, then finish.",
+      const result = agent_loop(
+        harness,
+        "Make the failing test pass, then finish.",
         nil,
         {
           provider: "mock",
@@ -81,7 +84,8 @@ fn scenario_success(harness: Harness) {
 
 fn scenario_stuck(harness: Harness) {
   return with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       run_test_call("r1"),
       run_test_call("r2"),
       run_test_call("r3"),
@@ -93,7 +97,9 @@ fn scenario_stuck(harness: Harness) {
     ],
     { ->
       const session = "repair-stuck-keeps-" + harness.random.uuid()
-      const result = agent_loop(harness, "Make the failing test pass.",
+      const result = agent_loop(
+        harness,
+        "Make the failing test pass.",
         nil,
         {
           provider: "mock",

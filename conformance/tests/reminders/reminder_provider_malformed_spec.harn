@@ -11,6 +11,12 @@ pipeline main(harness: Harness) {
   )
   const session = harness.agent.open("reminder-provider-malformed-spec")
   harness.agent.reset(session)
-  agent_reminder_providers_fire(harness, session, "session_idle", {session: {id: session}}, {})
+  agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "session_idle",
+    {session: {id: session}},
+    {},
+  )
   harness.agent.clear_reminder_providers()
 }

@@ -105,13 +105,12 @@ pub fn rules_visit(rules: HarnessRules, params) -> dict {
  * (`format-only` / `behavior-preserving`) or `allow_unsafe: true`. Each file
  * entry reports `{path, changed, applied, idempotent, safety, preview}`.
  *
- * Requires the deterministic-tools gate
  * Possession of `HarnessRules` is the authority to apply mutations.
  *
  * @effects: [host, fs]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: rules_apply({rule: src, paths: ["a.ts"], dry_run: false})
+ * @example: rules_apply(harness.rules, {rule: src, paths: ["a.ts"], dry_run: false})
  */
 pub fn rules_apply(rules: HarnessRules, params) -> dict {
   const payload = rules.apply(params ?? {}) ?? {}

@@ -6,7 +6,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline default(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [{error: {category: "rate_limit", message: "429 Too Many Requests"}}],
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 Too Many Requests"}}],
     { ->
       const r = harness.llm.call_safe("hello", nil, {provider: "mock"})
       harness.stdio.println(r.ok)

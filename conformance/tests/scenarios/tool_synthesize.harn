@@ -51,7 +51,10 @@ pipeline test(harness: Harness, task) {
     },
   )
   assert(type_of(host) == "closure", "host_bridge synthesis is callable")
-  assert(harness.tools.synthesis_cache()[0].executor == "host_bridge", "host_bridge executor is cached")
+  assert(
+    harness.tools.synthesis_cache()[0].executor == "host_bridge",
+    "host_bridge executor is cached",
+  )
   assert(harness.tools.synthesis_cache()[0].host_tool == "Ask", "host tool binding is cached")
   harness.stdio.log("tool_synthesize tests passed")
 }

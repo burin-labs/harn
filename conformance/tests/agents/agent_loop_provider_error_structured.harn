@@ -20,7 +20,8 @@ fn lookup_tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
       {
         error: {
@@ -58,7 +59,9 @@ pipeline main(harness: Harness) {
       harness.stdio.println(result.llm.iterations)
       harness.stdio.println(result.tools.successful[0])
       harness.stdio.println(result?.missing_required_tools == nil)
-      harness.stdio.println(contains(json_stringify(result.transcript), "agent_loop_terminal_error"))
+      harness.stdio.println(
+        contains(json_stringify(result.transcript), "agent_loop_terminal_error"),
+      )
       const sidecar = harness.fs.read_text(path_join(transcript_dir, "llm_transcript.jsonl"))
       harness.stdio.println(contains(sidecar, "\"type\":\"provider_call_error\""))
       harness.stdio.println(contains(sidecar, "\"category\":\"generic\""))

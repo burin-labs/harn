@@ -89,8 +89,7 @@ pub fn persona_prompt_eval_cohort(rows: list, minimum_trials: int = 5) -> dict {
   }
 }
 
-/** Compare two raw persona eval ledger cohorts with the frozen paired gate. */
-pub fn persona_prompt_eval_comparison(
+pub type PersonaPromptEvalComparisonRequest = {
   baseline_rows: list,
   treatment_rows: list,
   baseline_commit: string,
@@ -99,8 +98,20 @@ pub fn persona_prompt_eval_comparison(
   split: string,
   expected_case_fingerprints: dict<string, string>,
   expected_harness_fingerprint: string,
-  minimum_trials: int = 5,
-) -> dict {
+  minimum_trials?: int,
+}
+
+/** Compare two raw persona eval ledger cohorts with the frozen paired gate. */
+pub fn persona_prompt_eval_comparison(request: PersonaPromptEvalComparisonRequest) -> dict {
+  const baseline_rows = request.baseline_rows
+  const treatment_rows = request.treatment_rows
+  const baseline_commit = request.baseline_commit
+  const treatment_commit = request.treatment_commit
+  const model = request.model
+  const split = request.split
+  const expected_case_fingerprints = request.expected_case_fingerprints
+  const expected_harness_fingerprint = request.expected_harness_fingerprint
+  const minimum_trials = request.minimum_trials ?? 5
   const baseline = persona_prompt_eval_cohort(baseline_rows, minimum_trials)
   const treatment = persona_prompt_eval_cohort(treatment_rows, minimum_trials)
   const expected_cases = len(expected_case_fingerprints)
@@ -203,7 +214,9 @@ fn main(harness: Harness) -> int {
   const raw = eval_pack_manifest(
     toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: harness.fs.source_dir()},
   )
-  const manifest = persona_prompt_eval_manifest(harness, raw,
+  const manifest = persona_prompt_eval_manifest(
+    harness.fs,
+    raw,
     split,
     minimum_trials,
     provider,
@@ -215,15 +228,17 @@ fn main(harness: Harness) -> int {
     common + {commit: baseline_commit},
   )
   const report = persona_prompt_eval_comparison(
-    baseline_rows,
-    treatment_rows,
-    baseline_commit,
-    treatment_commit,
-    model,
-    split,
-    __case_fingerprints(manifest),
-    identity_plan.harness_config_fingerprint,
-    minimum_trials,
+    {
+      baseline_rows: baseline_rows,
+      treatment_rows: treatment_rows,
+      baseline_commit: baseline_commit,
+      treatment_commit: treatment_commit,
+      model: model,
+      split: split,
+      expected_case_fingerprints: __case_fingerprints(manifest),
+      expected_harness_fingerprint: identity_plan.harness_config_fingerprint,
+      minimum_trials: minimum_trials,
+    },
   )
   harness.stdio.println(json_stringify_pretty(report))
   return if report.confirmed_improvement {

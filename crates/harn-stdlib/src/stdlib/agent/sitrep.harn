@@ -6,9 +6,9 @@
 // reinvent it.
 //
 // Public surface:
-//   agent_sitrep(harness, transcript_or_messages, opts?)
+//   agent_sitrep(harness.fs, harness.llm, transcript_or_messages, opts?)
 //       -> {summary, lines, model_used, provider_used}
-//   agent_sitrep_append(harness, transcript_or_messages, opts?)
+//   agent_sitrep_append(harness.fs, harness.llm, transcript_or_messages, opts?)
 //       -> transcript with a system-role summary message appended
 //   agent_sitrep_preferred_routes()
 //       -> the default reverse-chronological route list (newest/best first)
@@ -46,8 +46,8 @@ const __SITREP_DEFAULT_MAX_TOKENS = 400
 
 const __SITREP_DEFAULT_TEMPERATURE = 0.2
 
-fn __sitrep_available_providers(harness: Harness) {
-  const status = harness.llm.providers()
+fn __sitrep_available_providers(llm: HarnessLlm) {
+  const status = llm.providers()
   let available = {}
   for entry in status {
     if entry?.available {
@@ -145,14 +145,14 @@ fn __sitrep_resolved_routes(opts) {
   return __SITREP_DEFAULT_ROUTES
 }
 
-fn __sitrep_pick_route(harness: Harness, opts) -> {provider: string, model: string}? {
+fn __sitrep_pick_route(llm: HarnessLlm, opts) -> {provider: string, model: string}? {
   if opts?.provider != nil && opts?.model != nil {
     return {provider: to_string(opts.provider), model: to_string(opts.model)}
   }
-  const available = __sitrep_available_providers(harness)
+  const available = __sitrep_available_providers(llm)
   for candidate in __sitrep_resolved_routes(opts) {
     if __sitrep_route_is_available(candidate, available) {
-      const resolved_model = candidate?.model ?? harness.llm.qc_default_model(candidate.provider)
+      const resolved_model = candidate?.model ?? llm.qc_default_model(candidate.provider)
       if resolved_model != nil && resolved_model != "" {
         return {provider: to_string(candidate.provider), model: to_string(resolved_model)}
       }
@@ -161,10 +161,10 @@ fn __sitrep_pick_route(harness: Harness, opts) -> {provider: string, model: stri
   return nil
 }
 
-fn __sitrep_user_prompt(harness: Harness, messages, opts) {
+fn __sitrep_user_prompt(fs: HarnessFs, messages, opts) {
   const max_chars_per_message = opts?.max_chars_per_message ?? 1200
   const formatted = __sitrep_format_messages(messages, max_chars_per_message)
-  return harness.fs.render_prompt(
+  return fs.render_prompt(
     "std/llm/prompts/sitrep_user.harn.prompt",
     {
       formatted: formatted,
@@ -219,16 +219,16 @@ fn __sitrep_empty_result(reason) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_sitrep(harness: Harness, input, opts = nil) {
+pub fn agent_sitrep(fs: HarnessFs, llm: HarnessLlm, input, opts = nil) {
   const messages = __sitrep_messages_from(input)
   if len(messages) == 0 {
     return __sitrep_empty_result("empty_transcript")
   }
-  const route = __sitrep_pick_route(harness, opts)
+  const route = __sitrep_pick_route(llm, opts)
   if route == nil {
     return __sitrep_empty_result("no_available_provider")
   }
-  const user_prompt = __sitrep_user_prompt(harness, messages, opts)
+  const user_prompt = __sitrep_user_prompt(fs, messages, opts)
   const llm_opts = {
     provider: route.provider,
     model: route.model,
@@ -237,7 +237,7 @@ pub fn agent_sitrep(harness: Harness, input, opts = nil) {
     stream: false,
   }
   const system = opts?.system ?? __SITREP_SYSTEM_PROMPT
-  const response = harness.llm.call(user_prompt, system, llm_opts)
+  const response = llm.call(user_prompt, system, llm_opts)
   const text = trim(response.text ?? "")
   return {
     summary: text,
@@ -263,8 +263,8 @@ pub fn agent_sitrep(harness: Harness, input, opts = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_sitrep_append(harness: Harness, input, opts = nil) {
-  const result = agent_sitrep(harness, input, opts)
+pub fn agent_sitrep_append(fs: HarnessFs, llm: HarnessLlm, input, opts = nil) {
+  const result = agent_sitrep(fs, llm, input, opts)
   if result.skipped || result.summary == "" {
     return input
   }

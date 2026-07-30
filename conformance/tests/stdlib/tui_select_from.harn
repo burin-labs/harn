@@ -5,7 +5,7 @@
 // under `mock_stdin`.
 import { select_from } from "std/tui"
 
-fn show(harness: Harness, result) {
+fn show(stdio: HarnessStdio, result) {
   const value_kind = type_of(result?.value)
   const value_repr = if value_kind == "dict" {
     result.value?.id ?? to_string(result.value)
@@ -23,44 +23,51 @@ fn show(harness: Harness, result) {
   } else {
     to_string(result.value)
   }
-  harness.stdio.println("ok=" + to_string(result.ok) + " status=" + result.status + " value=" + value_repr)
+  stdio.println("ok=" + to_string(result.ok) + " status=" + result.status + " value=" + value_repr)
 }
 
 pipeline default(harness: Harness) {
   const items = [{id: "alpha", label: "Alpha — recent"}, {id: "beta", title: "Beta"}, "gamma"]
   // 1) Pick the second item by typing "2".
   harness.testing.stdin_set("2\n")
-  show(harness, select_from(harness, items, {prefer_external: "none", prompt: "Pick"}))
+  show(harness.stdio, select_from(harness, items, {prefer_external: "none", prompt: "Pick"}))
   harness.testing.stdin_reset()
   // 2) Empty input + default_index falls through to the default.
   harness.testing.stdin_set("\n")
-  show(harness, select_from(harness, items, {prefer_external: "none", default_index: 0}))
+  show(harness.stdio, select_from(harness, items, {prefer_external: "none", default_index: 0}))
   harness.testing.stdin_reset()
   // 3) "/exit" cancels and returns the supplied cancel_value.
   harness.testing.stdin_set("/exit\n")
-  show(harness, select_from(harness, items, {prefer_external: "none", cancel_value: "ABORTED"}))
+  show(
+    harness.stdio,
+    select_from(harness, items, {prefer_external: "none", cancel_value: "ABORTED"}),
+  )
   harness.testing.stdin_reset()
   // 4) EOF (no input at all) maps to status "eof".
   harness.testing.stdin_set("")
-  show(harness, select_from(harness, items, {prefer_external: "none"}))
+  show(harness.stdio, select_from(harness, items, {prefer_external: "none"}))
   harness.testing.stdin_reset()
   // 5) Out-of-range token surfaces an error, not a panic.
   harness.testing.stdin_set("99\n")
-  show(harness, select_from(harness, items, {prefer_external: "none"}))
+  show(harness.stdio, select_from(harness, items, {prefer_external: "none"}))
   harness.testing.stdin_reset()
   // 6) Multi-select parses comma-separated 1-based indices.
   harness.testing.stdin_set("1,3\n")
-  show(harness, select_from(harness, items, {prefer_external: "none", multi: true}))
+  show(harness.stdio, select_from(harness, items, {prefer_external: "none", multi: true}))
   harness.testing.stdin_reset()
   // 7) Custom display function overrides the dict-key heuristic.
   harness.testing.stdin_set("1\n")
-  show(harness, select_from(harness, items,
+  show(
+    harness.stdio,
+    select_from(
+      harness,
+      items,
       {prefer_external: "none", display: { item -> "<" + (item?.id ?? to_string(item)) + ">" }},
     ),
   )
   harness.testing.stdin_reset()
   // 8) Empty items list is an error, not a hang.
-  show(harness, select_from(harness, [], {prefer_external: "none"}))
+  show(harness.stdio, select_from(harness, [], {prefer_external: "none"}))
   // 9) Invalid prefer_external is rejected up front.
-  show(harness, select_from(harness, items, {prefer_external: "rofi"}))
+  show(harness.stdio, select_from(harness, items, {prefer_external: "rofi"}))
 }

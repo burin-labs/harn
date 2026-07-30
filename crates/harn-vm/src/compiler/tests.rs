@@ -103,9 +103,9 @@ fn recursive_generic_alias_terminates_and_denies_cleanly() {
     let source = r"
 type Box<T> = {value: T}
 type Rec = Box<Rec>
-pipeline default() {
+pipeline default(harness: Harness) {
   let s = schema_of(Rec)
-  __io_println(s.type)
+  harness.stdio.println(s.type)
 }
 ";
     let err = try_compile(source).expect_err("recursive generic must be rejected");
@@ -155,9 +155,11 @@ fn oversized_function_chunk_is_a_compile_error_not_a_miscompile() {
     for i in 0..6000 {
         // Each iteration emits a conditional, so the chunk accumulates
         // patched jumps on both sides of the 64 KiB boundary.
-        body.push_str(&format!("  if task == {i} {{ log({i}) }}\n"));
+        body.push_str(&format!("  if task == {i} {{ harness.stdio.log({i}) }}\n"));
     }
-    let source = format!("fn huge(task: int) {{\n{body}}}\npipeline t(task) {{ huge(1) }}");
+    let source = format!(
+        "fn huge(task: int) {{\n{body}}}\npipeline t(harness: Harness, task) {{ huge(1) }}"
+    );
     let err = try_compile(&source).unwrap_err();
     assert!(
         err.message.contains("64 KiB") && err.message.contains("huge"),
@@ -169,7 +171,7 @@ fn oversized_function_chunk_is_a_compile_error_not_a_miscompile() {
 #[test]
 fn match_list_pattern_rest_must_be_last() {
     let err = try_compile(
-        r"pipeline t(task) { match [1, 2, 3] { [...rest, last] -> { log(last) } _ -> {} } }",
+        r"pipeline t(harness: Harness, task) { match [1, 2, 3] { [...rest, last] -> { harness.stdio.log(last) } _ -> {} } }",
     )
     .unwrap_err();
     assert!(err.message.contains("last element"), "{}", err.message);
@@ -178,7 +180,7 @@ fn match_list_pattern_rest_must_be_last() {
 #[test]
 fn match_list_pattern_rejects_two_rests() {
     let err = try_compile(
-        r"pipeline t(task) { match [1, 2, 3] { [a, ...x, ...y] -> { log(a) } _ -> {} } }",
+        r"pipeline t(harness: Harness, task) { match [1, 2, 3] { [a, ...x, ...y] -> { harness.stdio.log(a) } _ -> {} } }",
     )
     .unwrap_err();
     assert!(
@@ -209,7 +211,7 @@ fn string_constant_count(chunk: &Chunk, value: &str) -> usize {
 #[test]
 fn test_compile_arithmetic() {
     let chunk = compile_source_with_options(
-        "pipeline test(task) { const x = 2 + 3 }",
+        "pipeline test(harness: Harness, task) { const x = 2 + 3 }",
         CompilerOptions::without_optimizations(),
     );
     assert!(!chunk.code.is_empty());
@@ -220,7 +222,7 @@ fn test_compile_arithmetic() {
 #[test]
 fn test_compile_typed_int_loop_ops() {
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   let i = 0
   let total = 0
   while i < 10 {
@@ -239,11 +241,11 @@ fn test_compile_typed_int_loop_ops() {
 #[test]
 fn test_compile_typed_float_ops() {
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   const a = 1.0
   const b = 2.0
   const c = a + b
-  log(c < 4.0)
+  harness.stdio.log(c < 4.0)
 }",
     );
     let disasm = chunk.disassemble("test");
@@ -254,13 +256,13 @@ fn test_compile_typed_float_ops() {
 #[test]
 fn test_compile_typed_equality_ops() {
     let chunk = compile_source(
-        r#"pipeline test(task) {
+        r#"pipeline test(harness: Harness, task) {
   const a = true
   const b = false
   const left = "a"
   const right = "b"
-  log(a == b)
-  log(left != right)
+  harness.stdio.log(a == b)
+  harness.stdio.log(left != right)
 }"#,
     );
     let disasm = chunk.disassemble("test");
@@ -271,16 +273,16 @@ fn test_compile_typed_equality_ops() {
 #[test]
 fn test_compile_generic_ops_for_overloaded_or_mixed_cases() {
     let chunk = compile_source(
-        r#"pipeline test(task) {
+        r#"pipeline test(harness: Harness, task) {
   const left = "a"
   const right = "b"
   const one = 1
   const two = 2.0
   const xs = [1]
   const ys = [2]
-  log(left + right)
-  log(one + two)
-  log(xs + ys)
+  harness.stdio.log(left + right)
+  harness.stdio.log(one + two)
+  harness.stdio.log(xs + ys)
 }"#,
     );
     let disasm = chunk.disassemble("test");
@@ -295,11 +297,11 @@ fn monomorphic_var_keeps_typed_int_ops() {
     // monomorphic, so its arithmetic keeps the typed fast path even when the
     // use precedes the reassignment in source order.
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   let x = 0
   let i = 0
   while i < 3 {
-    log(x + 1)
+    harness.stdio.log(x + 1)
     x = x + 2
     i = i + 1
   }
@@ -321,11 +323,11 @@ fn polymorphic_var_reassigned_from_dynamic_falls_back_to_generic() {
     // must keep the generic adaptive ADD. (No int counter here, so ADD_INT
     // appearing at all would mean `x` was wrongly specialized.)
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   let x = 0
-  const cell = shared_cell(\"k\", 2.5)
-  log(x + 1)
-  x = shared_get(cell)
+  const cell = harness.runtime.shared_cell(\"k\", 2.5)
+  harness.stdio.log(x + 1)
+  x = harness.runtime.shared_get(cell)
 }",
     );
     let disasm = chunk.disassemble("test");
@@ -344,13 +346,13 @@ fn polymorphic_var_demotes_dependent_sibling() {
     // `sum` only ever takes `sum + x`, but `x` is polymorphic, so `sum`'s
     // primitive type is not provable either — the fixpoint must demote both.
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   let x = 0
   let sum = 0
-  const cell = shared_cell(\"k\", 2.5)
+  const cell = harness.runtime.shared_cell(\"k\", 2.5)
   sum = sum + x
-  x = shared_get(cell)
-  log(sum)
+  x = harness.runtime.shared_get(cell)
+  harness.stdio.log(sum)
 }",
     );
     let disasm = chunk.disassemble("test");
@@ -366,14 +368,14 @@ fn for_item_reassigned_from_dynamic_falls_back_to_generic() {
     // `any` value makes its primitive type unprovable, so arithmetic on it must
     // stay generic.
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   let sum = 0
-  const cell = shared_cell(\"k\", 2.5)
+  const cell = harness.runtime.shared_cell(\"k\", 2.5)
   for n in [1, 2, 3] {
     sum = sum + n
-    n = shared_get(cell)
+    n = harness.runtime.shared_get(cell)
   }
-  log(sum)
+  harness.stdio.log(sum)
 }",
     );
     let disasm = chunk.disassemble("test");
@@ -388,12 +390,12 @@ fn for_item_never_reassigned_keeps_typed_ops() {
     // The common case: a `for`-item that is never reassigned stays on the typed
     // fast path.
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   let sum = 0
   for n in [1, 2, 3] {
     sum = sum + n
   }
-  log(sum)
+  harness.stdio.log(sum)
 }",
     );
     let disasm = chunk.disassemble("test");
@@ -405,7 +407,8 @@ fn for_item_never_reassigned_keeps_typed_ops() {
 
 #[test]
 fn test_optimizer_folds_scalar_constants() {
-    let chunk = compile_source("pipeline test(task) { log(2 + 3 * 4) }");
+    let chunk =
+        compile_source("pipeline test(harness: Harness, task) { harness.stdio.log(2 + 3 * 4) }");
     let disasm = chunk.disassemble("test");
     let opcodes = disasm_opcodes(&disasm);
 
@@ -419,7 +422,7 @@ fn test_optimizer_folds_scalar_constants() {
 #[test]
 fn test_optimizer_escape_hatch_preserves_unoptimized_bytecode() {
     let chunk = compile_source_with_options(
-        "pipeline test(task) { log(2 + 3 * 4) }",
+        "pipeline test(harness: Harness, task) { harness.stdio.log(2 + 3 * 4) }",
         CompilerOptions::without_optimizations(),
     );
     let disasm = chunk.disassemble("test");
@@ -435,10 +438,10 @@ fn test_optimizer_escape_hatch_preserves_unoptimized_bytecode() {
 #[test]
 fn test_optimizer_folds_literal_collections_and_strings() {
     let chunk = compile_source(
-        r#"pipeline test(task) {
-  log("ha" * 2)
-  log([1] + [2, 3])
-  log({a: 1} + {b: 2})
+        r#"pipeline test(harness: Harness, task) {
+  harness.stdio.log("ha" * 2)
+  harness.stdio.log([1] + [2, 3])
+  harness.stdio.log({a: 1} + {b: 2})
 }"#,
     );
     let disasm = chunk.disassemble("test");
@@ -454,11 +457,11 @@ fn test_optimizer_folds_literal_collections_and_strings() {
 #[test]
 fn test_compiler_reuses_string_constants_within_chunk() {
     let chunk = compile_source(
-        r#"pipeline test(task) {
-  log("same")
-  log("same")
+        r#"pipeline test(harness: Harness, task) {
+  harness.stdio.log("same")
+  harness.stdio.log("same")
   const row = {status: "same"}
-  log(row.status)
+  harness.stdio.log(row.status)
 }"#,
     );
 
@@ -470,11 +473,11 @@ fn test_compiler_reuses_string_constants_within_chunk() {
 fn test_compiler_reuses_string_constants_per_nested_chunk() {
     let chunk = compile_source(
         r#"fn inner() {
-  log("nested")
-  log("nested")
+  harness.stdio.log("nested")
+  harness.stdio.log("nested")
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   inner()
 }"#,
     );
@@ -489,7 +492,8 @@ pipeline test(task) {
 
 #[test]
 fn test_optimizer_keeps_runtime_erroring_arithmetic_unfolded() {
-    let chunk = compile_source("pipeline test(task) { log(1 / 0) }");
+    let chunk =
+        compile_source("pipeline test(harness: Harness, task) { harness.stdio.log(1 / 0) }");
     let disasm = chunk.disassemble("test");
     let opcodes = disasm_opcodes(&disasm);
 
@@ -498,7 +502,9 @@ fn test_optimizer_keeps_runtime_erroring_arithmetic_unfolded() {
 
 #[test]
 fn test_optimizer_keeps_large_allocations_unfolded() {
-    let chunk = compile_source(r#"pipeline test(task) { log("x" * 1000000) }"#);
+    let chunk = compile_source(
+        r#"pipeline test(harness: Harness, task) { harness.stdio.log("x" * 1000000) }"#,
+    );
     let disasm = chunk.disassemble("test");
     let opcodes = disasm_opcodes(&disasm);
 
@@ -507,9 +513,9 @@ fn test_optimizer_keeps_large_allocations_unfolded() {
 
 #[test]
 fn test_compile_function_call() {
-    let chunk = compile_source("pipeline test(task) { log(42) }");
+    let chunk = compile_source("pipeline test(harness: Harness, task) { harness.stdio.log(42) }");
     let disasm = chunk.disassemble("test");
-    assert!(disasm.contains("CALL_BUILTIN"));
+    assert!(disasm.contains("METHOD_CALL"));
     assert!(disasm.contains("\"log\""));
 }
 
@@ -548,7 +554,7 @@ fn runtime_builtin_name_is_not_source_callable_without_a_binding() {
 #[test]
 fn legacy_signature_without_manifest_fails_closed() {
     harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
-    let error = try_compile("pipeline default(harness: Harness) { store_get(\"key\") }")
+    let error = try_compile("pipeline default(harness: Harness) { secret_get(\"key\") }")
         .expect_err("a parser-only legacy signature must not grant runtime authority");
     assert!(
         error.message.contains("no typed runtime contract"),
@@ -558,8 +564,9 @@ fn legacy_signature_without_manifest_fails_closed() {
 
 #[test]
 fn test_compile_if_else() {
-    let chunk =
-        compile_source(r#"pipeline test(task) { if true { log("yes") } else { log("no") } }"#);
+    let chunk = compile_source(
+        r#"pipeline test(harness: Harness, task) { if true { harness.stdio.log("yes") } else { harness.stdio.log("no") } }"#,
+    );
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("JUMP_IF_FALSE"));
     assert!(disasm.contains("JUMP"));
@@ -567,7 +574,9 @@ fn test_compile_if_else() {
 
 #[test]
 fn test_compile_while() {
-    let chunk = compile_source("pipeline test(task) { let i = 0\n while i < 5 { i = i + 1 } }");
+    let chunk = compile_source(
+        "pipeline test(harness: Harness, task) { let i = 0\n while i < 5 { i = i + 1 } }",
+    );
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("JUMP_IF_FALSE"));
     assert!(disasm.contains("JUMP"));
@@ -576,7 +585,7 @@ fn test_compile_while() {
 #[test]
 fn test_compile_locals_to_slots() {
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   const a = 1
   let i = 0
   while i < 3 {
@@ -616,7 +625,7 @@ fn assert_loop_guard_keeps_local_slots(source: &str) {
 #[test]
 fn loop_guard_break_keeps_later_bindings_in_local_slots() {
     assert_loop_guard_keeps_local_slots(
-        r#"pipeline test(task) {
+        r#"pipeline test(harness: Harness, task) {
   let index = 0
   while index < 1 {
     const name = "abc"
@@ -633,7 +642,7 @@ fn loop_guard_break_keeps_later_bindings_in_local_slots() {
 #[test]
 fn loop_guard_continue_keeps_later_bindings_in_local_slots() {
     assert_loop_guard_keeps_local_slots(
-        r#"pipeline test(task) {
+        r#"pipeline test(harness: Harness, task) {
   let index = 0
   while index < 1 {
     const name = "abc"
@@ -650,11 +659,11 @@ fn loop_guard_continue_keeps_later_bindings_in_local_slots() {
 #[test]
 fn test_compile_function_params_to_slots() {
     let chunk = compile_source(
-        "pipeline test(task) {
+        "pipeline test(harness: Harness, task) {
   fn add(a, b = 1) {
     return a + b
   }
-  log(add(2))
+  harness.stdio.log(add(2))
 }",
     );
     let disasm = chunk.functions[0].chunk.disassemble("add");
@@ -665,7 +674,8 @@ fn test_compile_function_params_to_slots() {
 
 #[test]
 fn test_compile_closure() {
-    let chunk = compile_source("pipeline test(task) { const f = { x -> x * 2 } }");
+    let chunk =
+        compile_source("pipeline test(harness: Harness, task) { const f = { x -> x * 2 } }");
     assert!(!chunk.functions.is_empty());
     assert_eq!(
         chunk.functions[0].param_names().collect::<Vec<_>>(),
@@ -675,14 +685,15 @@ fn test_compile_closure() {
 
 #[test]
 fn test_compile_list() {
-    let chunk = compile_source("pipeline test(task) { const a = [1, 2, 3] }");
+    let chunk = compile_source("pipeline test(harness: Harness, task) { const a = [1, 2, 3] }");
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("BUILD_LIST"));
 }
 
 #[test]
 fn test_compile_dict() {
-    let chunk = compile_source(r#"pipeline test(task) { const d = {name: "test"} }"#);
+    let chunk =
+        compile_source(r#"pipeline test(harness: Harness, task) { const d = {name: "test"} }"#);
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("BUILD_DICT"));
 }
@@ -690,7 +701,7 @@ fn test_compile_dict() {
 #[test]
 fn test_disassemble() {
     let chunk = compile_source_with_options(
-        "pipeline test(task) { log(2 + 3) }",
+        "pipeline test(harness: Harness, task) { harness.stdio.log(2 + 3) }",
         CompilerOptions::without_optimizations(),
     );
     let disasm = chunk.disassemble("test");
@@ -703,15 +714,15 @@ fn test_disassemble() {
 fn test_compile_discard_bindings_do_not_define_underscore() {
     let chunk = compile_source(
         r#"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const _ = 1
   const [_, keep, _] = [10, 20, 30]
   const {drop: _, keep_dict} = {drop: 1, keep_dict: 2}
   for (_, value) in [pair("left", "right")] {
-    log(value)
+    harness.stdio.log(value)
   }
-  log(keep)
-  log(keep_dict)
+  harness.stdio.log(keep)
+  harness.stdio.log(keep_dict)
 }
 "#,
     );
@@ -847,7 +858,7 @@ fn guarded_retry(body) {
   }
 }
 
-pipeline default() {}
+pipeline default(harness: Harness) {}
 ",
     );
 
@@ -895,7 +906,8 @@ fn inplace_list_concat_uses_fused_opcode() {
     // `CONCAT_ASSIGN_LOCAL` opcode. At runtime it takes the slot's value in
     // place before the concat so `Arc::try_unwrap` extends the existing
     // allocation rather than cloning it (O(n^2) -> O(1) amortized).
-    let chunk = compile_source("pipeline t(task) {\n  let x = []\n  x = x + [1]\n}");
+    let chunk =
+        compile_source("pipeline t(harness: Harness, task) {\n  let x = []\n  x = x + [1]\n}");
     let d = chunk.disassemble("t");
     assert!(
         d.contains("CONCAT_ASSIGN_LOCAL"),
@@ -912,7 +924,9 @@ fn list_appending_assign_uses_fused_concat_opcode() {
     // `x = x.appending(i)` is the method spelling of an immutable list append, so a
     // local list accumulator should use the same fused concat opcode as
     // `x = x + [i]` instead of dispatching through the cloning list method.
-    let chunk = compile_source("pipeline t(task) {\n  let x = []\n  x = x.appending(1)\n}");
+    let chunk = compile_source(
+        "pipeline t(harness: Harness, task) {\n  let x = []\n  x = x.appending(1)\n}",
+    );
     let d = chunk.disassemble("t");
     assert!(
         d.contains("CONCAT_ASSIGN_LOCAL"),
@@ -927,7 +941,7 @@ fn list_appending_assign_uses_fused_concat_opcode() {
 #[test]
 fn inplace_list_concat_compound_assign_form() {
     // `x += [i]` gets the same fused opcode as `x = x + [i]`.
-    let chunk = compile_source("pipeline t(task) {\n  let x = []\n  x += [1]\n}");
+    let chunk = compile_source("pipeline t(harness: Harness, task) {\n  let x = []\n  x += [1]\n}");
     let d = chunk.disassemble("t");
     assert!(
         d.contains("CONCAT_ASSIGN_LOCAL"),
@@ -941,7 +955,7 @@ fn inplace_concat_fires_for_untyped_local_accumulator() {
     // whose static type is unknown (`any`-returning helper) still gets the
     // in-place path — the gap the compile-time-typed peephole could not close.
     let chunk = compile_source(
-        "fn seed() -> any { return [] }\npipeline t(task) {\n  let x = seed()\n  x = x + [1]\n}",
+        "fn seed() -> any { return [] }\npipeline t(harness: Harness, task) {\n  let x = seed()\n  x = x + [1]\n}",
     );
     let d = chunk.disassemble("t");
     assert!(
@@ -954,7 +968,7 @@ fn inplace_concat_fires_for_untyped_local_accumulator() {
 fn inplace_concat_skips_scalar_compound_assign() {
     // `i = i + 1` must NOT take the list peephole: it keeps the specialized
     // ADD_INT fast path and a single store (no clear-binding doubling).
-    let chunk = compile_source("pipeline t(task) {\n  let i = 0\n  i = i + 1\n}");
+    let chunk = compile_source("pipeline t(harness: Harness, task) {\n  let i = 0\n  i = i + 1\n}");
     let d = chunk.disassemble("t");
     assert!(
         d.contains("ADD_INT"),
@@ -969,7 +983,8 @@ fn inplace_concat_skips_scalar_compound_assign() {
 
 #[test]
 fn local_property_assignment_uses_slot_opcode() {
-    let chunk = compile_source("pipeline t(task) {\n  let out = {}\n  out.a = 1\n}");
+    let chunk =
+        compile_source("pipeline t(harness: Harness, task) {\n  let out = {}\n  out.a = 1\n}");
     let d = chunk.disassemble("t");
     let opcodes = disasm_opcodes(&d);
     assert!(
@@ -984,7 +999,8 @@ fn local_property_assignment_uses_slot_opcode() {
 
 #[test]
 fn local_subscript_assignment_uses_slot_opcode() {
-    let chunk = compile_source("pipeline t(task) {\n  let out = {}\n  out[\"a\"] = 1\n}");
+    let chunk =
+        compile_source("pipeline t(harness: Harness, task) {\n  let out = {}\n  out[\"a\"] = 1\n}");
     let d = chunk.disassemble("t");
     let opcodes = disasm_opcodes(&d);
     assert!(
@@ -999,7 +1015,8 @@ fn local_subscript_assignment_uses_slot_opcode() {
 
 #[test]
 fn nonlocal_subscript_assignment_keeps_by_name_opcode() {
-    let chunk = compile_source("let out = {}\npipeline t(task) {\n  out[\"a\"] = 1\n}");
+    let chunk =
+        compile_source("let out = {}\npipeline t(harness: Harness, task) {\n  out[\"a\"] = 1\n}");
     let d = chunk.disassemble("t");
     let opcodes = disasm_opcodes(&d);
     assert!(

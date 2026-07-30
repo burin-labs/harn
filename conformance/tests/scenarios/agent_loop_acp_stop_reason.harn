@@ -11,37 +11,44 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   // Natural completion → end_turn.
   with_llm_script(
-    harness.llm, [llm_text("all done")],
+    harness.llm,
+    [llm_text("all done")],
     { ->
       const normal = agent_loop(harness, "hi", nil, {provider: "mock"})
       harness.stdio.println(normal.acp_stop_reason)
     },
   )
   with_llm_script(
-    harness.llm, [{text: "truncated", stop_reason: "max_tokens"}],
+    harness.llm,
+    [{text: "truncated", stop_reason: "max_tokens"}],
     { ->
       const truncated = agent_loop(harness, "hi", nil, {provider: "mock"})
       harness.stdio.println(truncated.acp_stop_reason)
     },
   )
   with_llm_script(
-    harness.llm, [{text: "truncated", stop_reason: "length"}],
+    harness.llm,
+    [{text: "truncated", stop_reason: "length"}],
     { ->
       const length = agent_loop(harness, "hi", nil, {provider: "mock"})
       harness.stdio.println(length.acp_stop_reason)
     },
   )
   with_llm_script(
-    harness.llm, [{text: "I cannot assist with that.", stop_reason: "refusal"}],
+    harness.llm,
+    [{text: "I cannot assist with that.", stop_reason: "refusal"}],
     { ->
       const refused = agent_loop(harness, "hi", nil, {provider: "mock"})
       harness.stdio.println(refused.acp_stop_reason)
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("still working"), llm_text("still working")],
+    harness.llm,
+    [llm_text("still working"), llm_text("still working")],
     { ->
-      const capped = agent_loop(harness, "hi",
+      const capped = agent_loop(
+        harness,
+        "hi",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 1},
       )

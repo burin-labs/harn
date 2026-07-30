@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 fn write_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -15,7 +16,9 @@ fn write_tools() {
 }
 
 pipeline main(harness: Harness) {
-  const denied = agent_loop(harness, "Try to run shell",
+  const denied = agent_loop(
+    harness,
+    "Try to run shell",
     "You are helpful",
     {
       provider: "mock",

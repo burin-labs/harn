@@ -30,14 +30,17 @@ pipeline default(harness: Harness) {
   harness.testing.clock_set(1700000000000)
   const start_ms = harness.clock.now_ms()
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "t1", name: "lookup", arguments: {q: "1"}}]},
       {tool_calls: [{id: "t2", name: "lookup", arguments: {q: "2"}}]},
       {tool_calls: [{id: "t3", name: "lookup", arguments: {q: "3"}}]},
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      const result = agent_loop(harness, "Inspect everything.",
+      const result = agent_loop(
+        harness,
+        "Inspect everything.",
         nil,
         {
           provider: "mock",

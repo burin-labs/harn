@@ -10,19 +10,21 @@ pipeline default(harness: Harness) {
   } else {
     ["printf", "ok"]
   }
-  const result = harness.process.run( {mode: "argv", argv: argv, sandbox_profile: "worktree"})
+  const result = harness.process.run(
+    {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "worktree"},
+  )
   harness.stdio.println(result?.success)
   harness.stdio.println(result?.stdout)
   const unrestricted = harness.process.run(
-    {mode: "argv", argv: argv, sandbox_profile: "unrestricted"},
+    {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "unrestricted"},
   )
   harness.stdio.println(unrestricted?.success)
   const workspace_paths = harness.process.run(
-    {mode: "argv", argv: argv, sandbox_profile: "workspace_paths"},
+    {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "workspace_paths"},
   )
   harness.stdio.println(workspace_paths?.success)
   const bad = try {
-    harness.process.run( {mode: "argv", argv: argv, sandbox_profile: "wide_open"})
+    harness.process.run({program: argv[0], args: argv[1:len(argv)], sandbox_profile: "wide_open"})
     nil
   } catch (e) {
     e

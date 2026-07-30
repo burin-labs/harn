@@ -4,7 +4,9 @@ import { with_temp_dir } from "std/testing"
 import { worktree_default_path, worktree_prune_default_disposable_paths } from "std/worktree"
 
 pipeline default(harness: Harness) {
-  with_temp_dir(harness, { root ->
+  with_temp_dir(
+    harness.fs,
+    { root ->
       const ambient = harness.fs.runtime_paths()
       const repo_a = path_join(root, "repo-a")
       const repo_b = path_join(root, "repo-b")
@@ -13,7 +15,9 @@ pipeline default(harness: Harness) {
       harness.stdio.println(path_is_absolute(ambient.state_root))
       harness.stdio.println(layout_a.state_root != ambient.state_root)
       harness.stdio.println(layout_a.state_root != layout_b.state_root)
-      harness.stdio.println(worktree_default_path(repo_a, "task") != worktree_default_path(repo_b, "task"))
+      harness.stdio.println(
+        worktree_default_path(repo_a, "task") != worktree_default_path(repo_b, "task"),
+      )
       harness.stdio.println(
         worktree_default_path(repo_a, "task") == path_join(layout_a.worktree_root, "task"),
       )
@@ -35,7 +39,10 @@ pipeline default(harness: Harness) {
         ),
       )
       const explicit_namespace = "runtime-state-layout-explicit-" + harness.random.uuid()
-      pattern_learning_ensure_migrated(harness, {project_root: repo_a, namespace: explicit_namespace})
+      pattern_learning_ensure_migrated(
+        harness,
+        {project_root: repo_a, namespace: explicit_namespace},
+      )
       harness.stdio.println(
         harness.fs.exists(
           path_join(

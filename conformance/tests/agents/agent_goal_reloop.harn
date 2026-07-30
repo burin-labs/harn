@@ -1,4 +1,3 @@
-import { agent_loop } from "std/agent/loop"
 // goal_reloop is a GENUINELY-LIVE bounded re-loop, not a passive struct: an
 // unmet goal vetoes the completion, threads the unmet criteria into the
 // transcript, and the agent RE-RUNS — driven through agent_loop's own
@@ -7,6 +6,7 @@ import { agent_loop } from "std/agent/loop"
 // LLM and no filesystem: a capturing mock caller fails the goal on attempt 1 and
 // satisfies it on attempt 2 only after seeing the injected findings.
 import { goal, goal_reloop } from "std/agent/goal"
+import { agent_loop } from "std/agent/loop"
 import { agent_session_messages } from "std/agent/state"
 
 pipeline test(harness: Harness) {
@@ -49,7 +49,9 @@ pipeline test(harness: Harness) {
   // Durable session journals outlive a fixture process; a fresh id keeps this
   // re-loop hermetic without depending on external store cleanup.
   const session = "agent-goal-reloop-conformance-" + harness.random.uuid()
-  const result = agent_loop(harness, "achieve the goal",
+  const result = agent_loop(
+    harness,
+    "achieve the goal",
     nil,
     goal_reloop(
       g,
@@ -67,7 +69,7 @@ pipeline test(harness: Harness) {
     result.stop_reason == "sentinel",
     "goal converged on completion; got " + to_string(result.stop_reason),
   )
-  const messages = agent_session_messages(harness, session)
+  const messages = agent_session_messages(harness.agent, session)
   let assistant_turns = 0
   for m in messages {
     if m?.role == "assistant" {

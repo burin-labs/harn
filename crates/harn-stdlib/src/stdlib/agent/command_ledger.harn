@@ -632,7 +632,8 @@ fn __cl_kill_handle(tools: HarnessTools, handle_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_apply_ceiling(harness: Harness, 
+pub fn command_ledger_apply_ceiling(
+  agent: HarnessAgent,
   tools: HarnessTools,
   ledger,
   now_ms,
@@ -659,7 +660,7 @@ pub fn command_ledger_apply_ceiling(harness: Harness,
           elapsed_ms: now_ms - row.started_at_ms,
         }
         receipts = receipts.appending(receipt)
-        agent_emit_event(harness, session_id, "typed_checkpoint", receipt)
+        agent_emit_event(agent, session_id, "typed_checkpoint", receipt)
       } else {
         let _ = __cl_kill_handle(tools, row.handle_id)
         out = command_ledger_retire(out, row.handle_id)
@@ -672,7 +673,7 @@ pub fn command_ledger_apply_ceiling(harness: Harness,
           elapsed_ms: now_ms - row.started_at_ms,
         }
         receipts = receipts.appending(receipt)
-        agent_emit_event(harness, session_id, "typed_checkpoint", receipt)
+        agent_emit_event(agent, session_id, "typed_checkpoint", receipt)
       }
     } else {
       escalated = true
@@ -695,8 +696,8 @@ pub fn command_ledger_apply_ceiling(harness: Harness,
 
 // -------------------------------------------------------------------------------------------------
 
-fn __cl_now_ms(harness: Harness) -> int {
-  return harness.clock.now_ms()
+fn __cl_now_ms(clock: HarnessClock) -> int {
+  return clock.now_ms()
 }
 
 /**
@@ -730,8 +731,15 @@ pub fn command_ledger_hold(harness: Harness, session_id, ledger, cw, hold_state)
     if len(__cl_awaited_running(live)) == 0 && !__cl_has_terminal_awaited(live) {
       return {ledger: live, outcome: "resolved", hold_state: state, receipts: receipts}
     }
-    const now = __cl_now_ms(harness)
-    const ceiling = command_ledger_apply_ceiling(harness, harness.tools, live, now, cw, session_id)
+    const now = __cl_now_ms(harness.clock)
+    const ceiling = command_ledger_apply_ceiling(
+      harness.agent,
+      harness.tools,
+      live,
+      now,
+      cw,
+      session_id,
+    )
     live = ceiling.ledger
     for receipt in ceiling.receipts {
       receipts = receipts.appending(receipt)
@@ -760,9 +768,9 @@ pub fn command_ledger_hold(harness: Harness, session_id, ledger, cw, hold_state)
     }
     const earliest = __cl_earliest_deadline(live, cw)
     const timeout = max(0, earliest - now)
-    const woke = agent_session_await_inbox(harness, session_id, timeout)
-    const entries = agent_session_drain_command_updates(harness, session_id)
-    const now2 = __cl_now_ms(harness)
+    const woke = agent_session_await_inbox(harness.agent, session_id, timeout)
+    const entries = agent_session_drain_command_updates(harness.agent, session_id)
+    const now2 = __cl_now_ms(harness.clock)
     if len(entries) > 0 {
       live = command_ledger_apply_updates(live, entries, now2, cw)
     }

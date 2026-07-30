@@ -18,7 +18,8 @@ fn search_tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [{id: "budget_1", name: "search", arguments: {query: "token budget"}}],
         input_tokens: 20,
@@ -26,7 +27,9 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const budgeted = sub_agent_run(harness, "Investigate under a tiny budget.",
+      const budgeted = sub_agent_run(
+        harness,
+        "Investigate under a tiny budget.",
         {
           provider: "mock",
           tools: search_tools(),
@@ -41,9 +44,12 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("background summary")],
+    harness.llm,
+    [llm_text("background summary")],
     { ->
-      const handle = sub_agent_run(harness, "Summarize in the background.",
+      const handle = sub_agent_run(
+        harness,
+        "Summarize in the background.",
         {provider: "mock", background: true},
       )
       harness.stdio.println(handle?.mode == "sub_agent")
@@ -54,12 +60,15 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "bg_search_1", name: "search", arguments: {query: "background tool"}}]},
       llm_text("background tool summary"),
     ],
     { ->
-      const tool_handle = sub_agent_run(harness, "Search in the background with a Harn-owned tool.",
+      const tool_handle = sub_agent_run(
+        harness,
+        "Search in the background with a Harn-owned tool.",
         {
           provider: "mock",
           background: true,

@@ -1,13 +1,13 @@
 import { parse, parser } from "std/cli/argparse"
 
-fn __load_cell_summaries(harness: Harness, results_dir: string) {
-  const entries = harness.fs.list_dir(results_dir)
+fn __load_cell_summaries(fs: HarnessFs, results_dir: string) {
+  const entries = fs.list_dir(results_dir)
   let summaries = []
   for entry in entries {
     const path = path_join(results_dir, entry)
     const summary_path = path_join(path, "summary.json")
-    if harness.fs.exists(summary_path) {
-      const parsed = json_parse(harness.fs.read_text(summary_path))
+    if fs.exists(summary_path) {
+      const parsed = json_parse(fs.read_text(summary_path))
       summaries = summaries.appending({label: entry, summary: parsed})
     }
   }
@@ -173,7 +173,7 @@ fn main(harness: Harness) {
     throw unwrap_err(parsed).message
   }
   const args = unwrap(parsed).options
-  const summaries = __load_cell_summaries(harness, args.results_dir)
+  const summaries = __load_cell_summaries(harness.fs, args.results_dir)
   if len(summaries) == 0 {
     throw "no summary.json files found under " + args.results_dir
   }

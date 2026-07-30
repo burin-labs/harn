@@ -1,7 +1,10 @@
 import "std/agent_state"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-agent-state-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-agent-state-" + harness.random.uuid(),
+  )
   const handle = agent_state_init(
     harness.agent,
     root,

@@ -14,8 +14,13 @@ import {
 
 pipeline test(harness: Harness, task) {
   const topic = "oauth.dynreg.audit"
-  const cursor = harness.obs.event_log_latest(topic) ?? 0
-  const store = dynamic_registration_store(harness)
+  const existing = harness.channels.events(topic)
+  const cursor = if len(existing) > 0 {
+    existing[len(existing) - 1].cursor
+  } else {
+    nil
+  }
+  const store = dynamic_registration_store(harness.auth, harness.channels)
   assert_eq(store.kind, "oauth_dynreg_store", "store handle kind")
   const metadata = {
     redirect_uris: ["https://app.example/callback"],
@@ -23,7 +28,7 @@ pipeline test(harness: Harness, task) {
     client_name: "Harn Conformance App",
     scope: "read write",
   }
-  const response = register_client(harness, store, metadata)
+  const response = register_client(harness.auth, harness.channels, store, metadata)
   const client_id = response.client_id
   assert(len(client_id) >= 32, "client_id length >= 32 (256-bit base64url)")
   const client_secret = response.client_secret
@@ -53,7 +58,10 @@ pipeline test(harness: Harness, task) {
   // Native clients register the effective OS-selected loopback port. The
   // server-side validator must accept any secure loopback port so a new
   // authorization can deliberately re-register after that port changes.
-  const loopback = register_client(harness, store,
+  const loopback = register_client(
+    harness.auth,
+    harness.channels,
+    store,
     {redirect_uris: ["http://127.0.0.1:54321/oauth/callback"], token_endpoint_auth_method: "none"},
   )
   assert_eq(
@@ -62,7 +70,12 @@ pipeline test(harness: Harness, task) {
     "arbitrary secure loopback port round-tripped",
   )
   // Defaults are applied on registration.
-  const defaulted = register_client(harness, store, {redirect_uris: ["https://app.example/cb-3"]})
+  const defaulted = register_client(
+    harness.auth,
+    harness.channels,
+    store,
+    {redirect_uris: ["https://app.example/cb-3"]},
+  )
   assert(defaulted.grant_types.contains("authorization_code"), "default grant_types applied")
   assert(defaulted.response_types.contains("code"), "default response_types applied")
   assert_eq(
@@ -71,8 +84,7 @@ pipeline test(harness: Harness, task) {
     "default auth method applied",
   )
   // Audit event records the shape, NOT the secret.
-  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
-  const first = stream.next().value
+  const first = harness.channels.events(topic, {from_cursor: cursor})[0].payload
   assert_eq(first.kind, "client_registered", "audit kind")
   assert_eq(first.payload.client_id, client_id, "audit records client_id")
   assert_eq(first.payload.redacted.has_client_secret, true, "audit records presence flag")

@@ -21,14 +21,14 @@ All three accept the same options: `namespace`, `ttl` (e.g. `"10m"`) or
 ```harn
 import { cache_clear, cache_get, cache_put, cache_stats, mem_cache } from "std/cache"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const store = mem_cache({namespace: "evals", ttl: "5m"})
   cache_put("k", {answer: 42}, {store: store})
   const hit = cache_get("k", {store: store})
   // -> {hit: true, value: {answer: 42}, backend: "mem", namespace: "evals"}
-  log(to_string(hit.hit))
+  harness.stdio.log(to_string(hit.hit))
   cache_clear({store: store})
-  log(json_stringify(cache_stats({store: store})))
+  harness.stdio.log(json_stringify(cache_stats({store: store})))
 }
 ```
 
@@ -50,10 +50,10 @@ fn deep_scan_repo() -> dict {
   return {files: 42}
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const store = mem_cache({namespace: "scan-results", ttl: "1h"})
   const scan = with_cache("repo:abc123", fn() { return deep_scan_repo() }, {store: store})
-  log(json_stringify(scan))
+  harness.stdio.log(json_stringify(scan))
 }
 ```
 

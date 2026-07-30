@@ -16,13 +16,16 @@ pipeline default(harness: Harness) {
     {parameters: {path: {type: "string"}}, handler: { args -> "original result " + args.path }},
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
       {tool_calls: [{id: "read_1", name: "read_note", arguments: {path: "notes.txt"}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Exercise manifest hooks",
+      const result = agent_loop(
+        harness,
+        "Exercise manifest hooks",
         nil,
         {
           provider: "mock",

@@ -27,12 +27,14 @@ pipeline default(harness: Harness) {
   // audit preset: native completion, no done sentinel; must complete on
   // final user_response text.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "i1", name: "inspect", arguments: {what: "release"}}]},
       llm_text("<user_response>Audit complete.</user_response>"),
     ],
     { ->
-      const audit = preset_agent(harness,
+      const audit = preset_agent(
+        harness,
         "audit",
         "Audit the release",
         {provider: "mock", tools: audit_tools(), tool_format: "native"},
@@ -45,7 +47,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Just a summary.")],
+    harness.llm,
+    [llm_text("Just a summary.")],
     { ->
       const summary = preset_agent(harness, "summary", "Summarize.", {provider: "mock"})
       harness.stdio.println(summary.status)
@@ -54,9 +57,11 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Local summary.")],
+    harness.llm,
+    [llm_text("Local summary.")],
     { ->
-      const local_summary = preset_agent(harness,
+      const local_summary = preset_agent(
+        harness,
         "summary",
         "Summarize locally.",
         {provider: "mock", model: "mystery-model-7b"},
@@ -68,12 +73,14 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "r1", name: "inspect", arguments: {what: "fix"}}]},
       llm_text("<user_response>Fixed.</user_response>"),
     ],
     { ->
-      const repair = preset_agent(harness,
+      const repair = preset_agent(
+        harness,
         "repair",
         "Repair the regression",
         {provider: "mock", tools: audit_tools(), tool_format: "native"},

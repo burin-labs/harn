@@ -40,7 +40,7 @@ pipeline test_caller_authored_evidence_is_never_a_pass(harness: Harness, _task) 
   const dir = harness.fs.mkdtemp_in_workspace("verdict-neg")
   const path = path_join(dir, "green.txt")
   harness.fs.write_text(path, PASSING)
-  const v = verdict_from_run(harness, {result_handle: path})
+  const v = verdict_from_run(harness.verdict, {result_handle: path})
   assert_eq(verdict_disposition(v), "indeterminate")
   assert_eq(verdict_is_pass(v), false)
 }
@@ -49,7 +49,7 @@ pipeline test_caller_authored_evidence_is_never_a_pass(harness: Harness, _task) 
 // never a pass. A caller cannot guess a handle into the host execution store.
 pipeline test_fabricated_handle_is_indeterminate(harness: Harness, _task) {
   enable_verdict()
-  const v = verdict_from_run(harness, {result_handle: "htr-deadbeef-999999"})
+  const v = verdict_from_run(harness.verdict, {result_handle: "htr-deadbeef-999999"})
   assert_eq(verdict_disposition(v), "indeterminate")
   assert_eq(verdict_is_pass(v), false)
 }
@@ -58,26 +58,29 @@ pipeline test_fabricated_handle_is_indeterminate(harness: Harness, _task) {
 // execution to attest, so the reference is empty and the verdict is undecided.
 pipeline test_run_result_without_handle_is_indeterminate(harness: Harness, _task) {
   enable_verdict()
-  const v = verdict_from_run(harness, {exit_code: 0, stdout: PASSING})
+  const v = verdict_from_run(harness.verdict, {exit_code: 0, stdout: PASSING})
   assert_eq(verdict_disposition(v), "indeterminate")
   assert_eq(verdict_evidence_ref(v), "")
 }
 
 // verdict_all: any fail dominates the aggregate (disposition == fail).
 pipeline test_verdict_all_with_a_fail_is_fail(harness: Harness, _task) {
-  const v = verdict_all(harness, [verdict_fail("evidence_red", ""), verdict_indeterminate("x", "")])
+  const v = verdict_all(
+    harness.verdict,
+    [verdict_fail("evidence_red", ""), verdict_indeterminate("x", "")],
+  )
   assert_eq(verdict_disposition(v), "fail")
 }
 
 // verdict_all: absent a fail, any indeterminate dominates — never a vacuous pass.
 pipeline test_verdict_all_with_an_indeterminate_is_indeterminate(harness: Harness, _task) {
-  const v = verdict_all(harness, [verdict_indeterminate("judge_unavailable", "")])
+  const v = verdict_all(harness.verdict, [verdict_indeterminate("judge_unavailable", "")])
   assert_eq(verdict_disposition(v), "indeterminate")
 }
 
 // verdict_all: an empty aggregate is indeterminate, never a vacuously combined
 // pass over zero host-issued receipts.
 pipeline test_verdict_all_empty_is_indeterminate(harness: Harness, _task) {
-  const v = verdict_all(harness, [])
+  const v = verdict_all(harness.verdict, [])
   assert_eq(verdict_disposition(v), "indeterminate")
 }

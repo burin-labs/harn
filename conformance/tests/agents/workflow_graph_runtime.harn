@@ -1,4 +1,5 @@
 import { workflow_execute } from "std/workflow/execute"
+
 pipeline main(harness: Harness) {
   const flow = workflow_graph(
     {
@@ -39,7 +40,9 @@ pipeline main(harness: Harness) {
     artifact({kind: "workspace_file", text: "alpha"}),
     artifact({kind: "workspace_file", text: "beta"}),
   ]
-  const result = workflow_execute(harness, "Assemble the report",
+  const result = workflow_execute(
+    harness,
+    "Assemble the report",
     flow,
     artifacts,
     {max_steps: 8, persist_path: "/tmp/harn-workflow-graph-runtime.json"},

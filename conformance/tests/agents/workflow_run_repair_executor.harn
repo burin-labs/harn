@@ -34,7 +34,9 @@ pipeline default(harness: Harness) {
   const verifier = { r ->
     return {ok: contains(to_string(r?.visible_text), token), findings: [token]}
   }
-  const out = workflow_run_repair(harness, {task: "Z", executor: executor, verify: verifier, max_attempts: 2},
+  const out = workflow_run_repair(
+    harness,
+    {task: "Z", executor: executor, verify: verifier, max_attempts: 2},
   )
   // Settled successfully after exactly two attempts (fail -> pass).
   harness.stdio.println(out.ok)
@@ -52,7 +54,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(out.text, "|FB"))
   // --- Attempt count is honored: a never-satisfiable verifier with
   //     max_attempts: 1 stops after exactly one inline attempt. ---
-  const capped = workflow_run_repair(harness, {
+  const capped = workflow_run_repair(
+    harness,
+    {
       task: "u",
       executor: { _ctx -> return {text: "x"} },
       verify: { r -> return {ok: false, findings: ["never satisfied"]} },
@@ -64,7 +68,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(json_stringify(capped.findings), "never satisfied"))
   // --- Containment: a THROWING executor is a failed attempt, not an aborted
   //     run. Two attempts still recorded and settled. ---
-  const boom = workflow_run_repair(harness, {
+  const boom = workflow_run_repair(
+    harness,
+    {
       task: "b",
       executor: { ctx ->
         throw "executor boom on attempt " + to_string(ctx.attempt)

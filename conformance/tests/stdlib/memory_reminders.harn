@@ -8,15 +8,24 @@ pipeline default(harness: Harness) {
   const root = path_join(harness.fs.workspace_temp_dir(), "harn-memrem-" + harness.random.uuid())
   const ns = "agent/notes"
   memory_store(
-    harness.memory, ns,
+    harness.memory,
+    ns,
     "n1",
     {text: "surface me"},
     nil,
     {root: root, id: "a1", now: "2026-04-29T00:00:00Z", flags: {auto_surface: true}},
   )
-  memory_store(harness.memory, ns, "n2", {text: "quiet"}, nil, {root: root, id: "b1", now: "2026-04-29T00:00:01Z"})
   memory_store(
-    harness.memory, ns,
+    harness.memory,
+    ns,
+    "n2",
+    {text: "quiet"},
+    nil,
+    {root: root, id: "b1", now: "2026-04-29T00:00:01Z"},
+  )
+  memory_store(
+    harness.memory,
+    ns,
     "n3",
     {text: "also surface"},
     nil,
@@ -27,7 +36,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(rem[0].id)
   harness.stdio.println(rem[1].id)
   memory_store(
-    harness.memory, ns,
+    harness.memory,
+    ns,
     "n4",
     {text: "pinned"},
     nil,

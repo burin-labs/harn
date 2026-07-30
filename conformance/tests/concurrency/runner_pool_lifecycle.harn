@@ -3,7 +3,8 @@ import { runner_pool_scale, runner_pool_start, runner_pool_state } from "std/run
 pipeline default(harness: Harness) {
   const starts = harness.runtime.atomic(0)
   const pool = runner_pool_start(
-    harness,
+    harness.random,
+    harness.runtime,
     {
       name: "fixture-runners",
       min_size: 1,
@@ -19,10 +20,10 @@ pipeline default(harness: Harness) {
     },
   )
   harness.runtime.supervisor_wait(pool.supervisor)
-  const first = runner_pool_state(harness, pool)
-  const scaled = runner_pool_scale(harness, pool, 2)
+  const first = runner_pool_state(harness.runtime, pool)
+  const scaled = runner_pool_scale(harness.runtime, pool, 2)
   harness.runtime.supervisor_wait(scaled.supervisor)
-  const second = runner_pool_state(harness, scaled)
+  const second = runner_pool_state(harness.runtime, scaled)
   harness.stdio.println(first.generation)
   harness.stdio.println(first.desired_size)
   harness.stdio.println(first.online)

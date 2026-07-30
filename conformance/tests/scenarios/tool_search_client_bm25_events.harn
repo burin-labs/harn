@@ -55,7 +55,8 @@ pipeline test(harness: Harness, task) {
   )
   // Turn 1: model calls the synthetic search tool with "deploy".
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "Looking up deploy tooling.",
         tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
@@ -67,7 +68,9 @@ pipeline test(harness: Harness, task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Ship the release",
+      const result = agent_loop(
+        harness,
+        "Ship the release",
         nil,
         {
           provider: "mock",

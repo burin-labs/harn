@@ -74,12 +74,12 @@ import "std/triggers"
 
 const marker = "{}"
 
-pub fn on_ok(event: TriggerEvent) -> dict {{
+pub fn on_ok(harness: Harness, event: TriggerEvent) -> dict {{
   write_file(marker, event.kind)
   return {{event_id: event.id, kind: event.kind}}
 }}
 
-pub fn on_fail(event: TriggerEvent) {{
+pub fn on_fail(harness: Harness, event: TriggerEvent) {{
   throw "intentional:" + event.kind
 }}
 "#,

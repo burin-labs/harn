@@ -1128,6 +1128,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn root_harness_cannot_be_serialized_directly_or_nested() {
+        let harness = crate::harness::Harness::null().into_vm_value();
+        let direct = reject_harness_serialization(&harness, "json_stringify")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            direct.contains("Harness is runtime authority")
+                && direct.contains("cannot be serialized"),
+            "{direct}"
+        );
+
+        let nested = VmValue::List(std::sync::Arc::new(vec![harness]));
+        let nested_error = reject_harness_serialization(&nested, "json_stringify")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            nested_error.contains("cannot be serialized"),
+            "{nested_error}"
+        );
+    }
+
+    #[test]
     fn extract_from_code_fence() {
         let text = "Here is the result:\n```json\n{\"key\": \"value\"}\n```\nDone.";
         assert_eq!(extract_json_from_text(text), "{\"key\": \"value\"}");

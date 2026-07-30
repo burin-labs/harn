@@ -9,7 +9,8 @@ import { with_llm_mocks } from "std/testing"
  */
 pipeline default(harness: Harness) {
   with_llm_mocks(
-    harness.llm, [
+    harness.llm,
+    [
       {
         match: "*atomic factual claims*",
         text:
@@ -26,7 +27,8 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const result = faithfulness_guard(
-        harness, "Paris is the capital of France and has 10 million residents.",
+        harness.llm,
+        "Paris is the capital of France and has 10 million residents.",
         ["France's capital is Paris."],
         {provider: "mock", max_concurrent: 1},
       )

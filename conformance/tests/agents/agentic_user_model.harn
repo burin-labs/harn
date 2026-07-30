@@ -27,7 +27,7 @@ pipeline main(harness: Harness) {
           context: "The package has no explicit test framework.",
         },
       )
-      const status = simulated_user_status(harness, answerer)
+      const status = simulated_user_status(harness.runtime, answerer)
       const calls = harness.llm.mock_calls()
       harness.stdio.println(decision.action)
       harness.stdio.println(decision.message)

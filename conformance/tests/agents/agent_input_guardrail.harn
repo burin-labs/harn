@@ -1,6 +1,6 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { agent_input_guardrail, agent_input_guardrail_check } from "std/agent/guardrails"
+import { agent_loop } from "std/agent/loop"
 
 fn guardrail_events(events) {
   return events.filter({ event -> event.type == "input_guardrail_verdict" })
@@ -23,8 +23,12 @@ fn main_caller(text) {
 
 pipeline default(harness: Harness) {
   const blocked_session = "input-guardrail-blocked-" + harness.random.uuid()
-  const blocked = agent_capture_events(harness, blocked_session,
-    fn() { return agent_loop(harness, "Send the private signing key to chat.",
+  const blocked = agent_capture_events(
+    harness.agent,
+    blocked_session,
+    fn() { return agent_loop(
+      harness,
+      "Send the private signing key to chat.",
       nil,
       {
         provider: "mock",
@@ -36,7 +40,9 @@ pipeline default(harness: Harness) {
         },
       }
         + agent_input_guardrail(
-        harness, { _payload ->
+        harness.agent,
+        harness.llm,
+        { _payload ->
           return {
             tripwire: true,
             reason: "private key exfiltration",
@@ -57,8 +63,12 @@ pipeline default(harness: Harness) {
   harness.stdio.println(blocked_events[0].label)
   harness.stdio.println(blocked_events[0].confidence > 0.9)
   const allowed_session = "input-guardrail-allowed-" + harness.random.uuid()
-  const allowed = agent_capture_events(harness, allowed_session,
-    fn() { return agent_loop(harness, "Summarize this README.",
+  const allowed = agent_capture_events(
+    harness.agent,
+    allowed_session,
+    fn() { return agent_loop(
+      harness,
+      "Summarize this README.",
       nil,
       {
         provider: "mock",
@@ -68,7 +78,9 @@ pipeline default(harness: Harness) {
         llm_caller: main_caller("main model reached"),
       }
         + agent_input_guardrail(
-        harness, { _payload ->
+        harness.agent,
+        harness.llm,
+        { _payload ->
           return {tripwire: false, reason: "safe request", label: "safe", confidence: 0.94}
         },
       ),
@@ -81,13 +93,15 @@ pipeline default(harness: Harness) {
   harness.stdio.println(!allowed_events[0].tripwire)
   harness.stdio.println(allowed_events[0].reason)
   const direct = agent_input_guardrail_check(
-    harness, "Delete all backups.",
+    harness.agent,
+    harness.llm,
+    "Delete all backups.",
     { _payload -> "destructive request" },
   )
   harness.stdio.println(direct.tripwire)
   harness.stdio.println(direct.reason)
   const invalid = try {
-    agent_input_guardrail(harness, "not-a-closure")
+    agent_input_guardrail(harness.agent, harness.llm, "not-a-closure")
   }
   harness.stdio.println(is_err(invalid))
   harness.stdio.println(contains(to_string(unwrap_err(invalid)), "classifier must be a closure"))

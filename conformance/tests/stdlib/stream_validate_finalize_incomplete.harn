@@ -1,7 +1,7 @@
 import { stream_validate_chunk, stream_validate_create, stream_validate_finalize } from "std/json"
 
 pipeline default(harness: Harness, task) {
-  const validator = stream_validate_create(harness, {type: "dict"})
+  const validator = stream_validate_create(harness.runtime, {type: "dict"})
   const r1 = stream_validate_chunk(validator, "{\"a\":")
   harness.stdio.println(r1.verdict)
   const r2 = stream_validate_finalize(validator)

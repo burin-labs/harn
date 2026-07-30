@@ -39,7 +39,7 @@ fn __tool_search_config(value) {
   }
 }
 
-fn __tool_search_provider_has_native(harness: Harness, opts, cfg) {
+fn __tool_search_provider_has_native(llm: HarnessLlm, opts, cfg) {
   if type_of(cfg?.strategy) != "string" {
     return false
   }
@@ -48,9 +48,9 @@ fn __tool_search_provider_has_native(harness: Harness, opts, cfg) {
   }
   const info = try {
     if opts?.model != nil {
-      harness.llm.model_info(opts.model)
+      llm.model_info(opts.model)
     } else if opts?.provider != nil {
-      harness.llm.model_info(opts.provider)
+      llm.model_info(opts.provider)
     } else {
       nil
     }
@@ -61,9 +61,9 @@ fn __tool_search_provider_has_native(harness: Harness, opts, cfg) {
     if info != nil && info?.capabilities != nil {
       info.capabilities
     } else if info != nil {
-      harness.llm.provider_capabilities(info.provider, info.id)
+      llm.provider_capabilities(info.provider, info.id)
     } else if opts?.provider != nil && opts?.model != nil {
-      harness.llm.provider_capabilities(opts.provider, opts.model)
+      llm.provider_capabilities(opts.provider, opts.model)
     } else {
       nil
     }
@@ -73,7 +73,7 @@ fn __tool_search_provider_has_native(harness: Harness, opts, cfg) {
   return caps != nil && caps?.defer_loading && len(caps?.tool_search ?? []) > 0
 }
 
-fn __tool_search_client_requested(harness: Harness, opts) {
+fn __tool_search_client_requested(llm: HarnessLlm, opts) {
   const cfg = __tool_search_config(opts?.tool_search)
   if cfg == nil {
     return false
@@ -84,7 +84,7 @@ fn __tool_search_client_requested(harness: Harness, opts) {
   if cfg.mode == "native" {
     return false
   }
-  return !__tool_search_provider_has_native(harness, opts, cfg)
+  return !__tool_search_provider_has_native(llm, opts, cfg)
 }
 
 fn __tool_search_tools(registry) {
@@ -304,8 +304,8 @@ fn __tool_search_build_tools(opts, state) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_search_inject_if_needed(harness: Harness, opts) {
-  if !__tool_search_client_requested(harness, opts) {
+pub fn agent_tool_search_inject_if_needed(llm: HarnessLlm, opts) {
+  if !__tool_search_client_requested(llm, opts) {
     return opts
   }
   const state = opts?._tool_search_client ?? __tool_search_initial_state(opts)
@@ -323,14 +323,16 @@ fn __tool_search_call_id(call) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_search_emit_queries(harness: Harness, session_id, tool_calls, opts) {
+pub fn agent_tool_search_emit_queries(agent: HarnessAgent, session_id, tool_calls, opts) {
   const state = opts?._tool_search_client
   if state == nil {
     return
   }
   for call in tool_calls {
     if call?.name == state.name {
-      agent_emit_event(harness, session_id,
+      agent_emit_event(
+        agent,
+        session_id,
         "tool_search_query",
         {
           tool_use_id: __tool_search_call_id(call),
@@ -410,7 +412,13 @@ fn __tool_search_promoted_names(state, names) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_search_record_results(harness: Harness, session_id, tool_calls, dispatch, opts) {
+pub fn agent_tool_search_record_results(
+  agent: HarnessAgent,
+  session_id,
+  tool_calls,
+  dispatch,
+  opts,
+) {
   let state = opts?._tool_search_client
   if state == nil {
     return opts
@@ -423,7 +431,9 @@ pub fn agent_tool_search_record_results(harness: Harness, session_id, tool_calls
     const names = result?.tool_names ?? []
     state = __tool_search_apply_budget(state, names)
     const promoted = __tool_search_promoted_names(state, names)
-    agent_emit_event(harness, session_id,
+    agent_emit_event(
+      agent,
+      session_id,
       "tool_search_result",
       {
         tool_use_id: __tool_search_call_id(call),

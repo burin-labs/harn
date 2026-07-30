@@ -54,10 +54,13 @@ pipeline default(harness: Harness) {
   // Nested LLM options override a top-level prefill, and the final wrap-up
   // receives neither persistent value after the first main request consumes it.
   with_llm_script(
-    harness.llm, [lookup_call(), llm_text("Final response.")],
+    harness.llm,
+    [lookup_call(), llm_text("Final response.")],
     { ->
       const session = "one-shot-prefill-wrapup-" + harness.random.uuid()
-      const result = agent_loop(harness, "Inspect evidence.",
+      const result = agent_loop(
+        harness,
+        "Inspect evidence.",
         nil,
         options(
           session,
@@ -78,10 +81,13 @@ pipeline default(harness: Harness) {
   // Truncation auto-continuation is a second physical request, and later
   // ordinary requests also stay clear.
   with_llm_script(
-    harness.llm, [truncated_turn(), lookup_call(), llm_text("Done. ##DONE##")],
+    harness.llm,
+    [truncated_turn(), lookup_call(), llm_text("Done. ##DONE##")],
     { ->
       const session = "one-shot-prefill-truncation-" + harness.random.uuid()
-      const result = agent_loop(harness, "Inspect evidence.",
+      const result = agent_loop(
+        harness,
+        "Inspect evidence.",
         nil,
         options(session, {prefill: "<tool_call>", tool_format: "text"}),
       )
@@ -94,14 +100,20 @@ pipeline default(harness: Harness) {
   )
   // The default transport retry wrapper clears only Harn's one-shot marker.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {error: {category: "rate_limit", message: "mock 429 transient"}},
       lookup_call(),
       llm_text("Done. ##DONE##"),
     ],
     { ->
       const session = "one-shot-prefill-retry-" + harness.random.uuid()
-      const result = agent_loop(harness, "Inspect evidence.", nil, options(session, {prefill: "retry-once"}))
+      const result = agent_loop(
+        harness,
+        "Inspect evidence.",
+        nil,
+        options(session, {prefill: "retry-once"}),
+      )
       const calls = harness.llm.mock_calls()
       harness.stdio.println(result.status)
       harness.stdio.println(calls[0].prefill == "retry-once")
@@ -113,7 +125,8 @@ pipeline default(harness: Harness) {
   // context recovery. The overflow retry must not replay the prefill.
   const tool_turns = harness.runtime.atomic(0)
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       lookup_call("a"),
       lookup_call("b"),
       lookup_call("c"),
@@ -124,7 +137,9 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "one-shot-prefill-overflow-" + harness.random.uuid()
-      const result = agent_loop(harness, "Inspect evidence.",
+      const result = agent_loop(
+        harness,
+        "Inspect evidence.",
         nil,
         options(
           session,

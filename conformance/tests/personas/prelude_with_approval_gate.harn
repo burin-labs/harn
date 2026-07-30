@@ -8,11 +8,20 @@ pipeline test(harness: Harness, task) {
     started_at: "2026-05-03T00:00:00Z",
     completed_at: "2026-05-03T00:00:00Z",
   }
-  const suspended_gate = with_approval_gate(harness, "merge", fn() { return "ran" }, opts)
+  const suspended_gate = with_approval_gate(
+    harness.clock,
+    harness.interaction,
+    "merge",
+    fn() { return "ran" },
+    opts,
+  )
   const suspended = suspended_gate()
   harness.stdio.println(suspended.status)
   harness.stdio.println(suspended.approval_required)
-  const approved_gate = with_approval_gate(harness, "merge",
+  const approved_gate = with_approval_gate(
+    harness.clock,
+    harness.interaction,
+    "merge",
     fn() { return "ran" },
     opts + {approval: {approved: true, reviewers: ["alice"], reason: "ok"}},
   )
@@ -21,7 +30,10 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(approved.result)
   harness.stdio.println(len(approved.receipt.approvals))
   harness.stdio.println(approved.receipt.status)
-  const denied_gate = with_approval_gate(harness, "merge",
+  const denied_gate = with_approval_gate(
+    harness.clock,
+    harness.interaction,
+    "merge",
     fn() { return "should-not-run" },
     opts + {approval: {approved: false, reviewers: ["alice"], reason: "unsafe"}},
   )

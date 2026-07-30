@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 /**
  * Passing a non-closure as `llm_caller` is rejected at option-normalization
  * time with a friendly diagnostic from __validate_llm_caller.

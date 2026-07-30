@@ -8,7 +8,7 @@ import "std/triggers"
  * entry recording the outcome.
  */
 pipeline test(harness: Harness, task) {
-  const _ = lifecycle_audit_log_take(harness)
+  const _ = lifecycle_audit_log_take(harness.obs)
   const target_session = harness.agent.open("trigger-reminder-inject-concrete")
   harness.agent.reset(target_session)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
@@ -58,7 +58,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(reminders[0].reminder.tags[0])
   harness.stdio.println(reminders[0].reminder.ttl_turns)
   harness.stdio.println(reminders[0].reminder.dedupe_key)
-  const audits = lifecycle_audit_log_take(harness)
+  const audits = lifecycle_audit_log_take(harness.obs)
   let inject_audit_count = 0
   let injected_outcome = ""
   for audit in audits {

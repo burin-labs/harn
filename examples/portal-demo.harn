@@ -46,12 +46,16 @@ pipeline main(harness: Harness) {
     artifact({kind: "workspace_file", title: "alpha.md", text: "alpha content", relevance: 0.8}),
     artifact({kind: "workspace_file", title: "beta.md", text: "beta content", relevance: 0.7}),
   ]
-  const success = workflow_execute(harness, "Assemble the report",
+  const success = workflow_execute(
+    harness,
+    "Assemble the report",
     graph_flow,
     graph_artifacts,
     {max_steps: 8, persist_path: path_join(dir, "portal-success.json")},
   )
-  const replayed = workflow_execute(harness, "Assemble the report",
+  const replayed = workflow_execute(
+    harness,
+    "Assemble the report",
     graph_flow,
     graph_artifacts,
     {
@@ -83,7 +87,9 @@ pipeline main(harness: Harness) {
       edges: [{from: "act", to: "verify"}],
     },
   )
-  const failed = workflow_execute(harness, "Write a note that will fail verification",
+  const failed = workflow_execute(
+    harness,
+    "Write a note that will fail verification",
     failing_flow,
     [artifact({kind: "summary", text: "seed note", relevance: 0.6})],
     {max_steps: 4, persist_path: path_join(dir, "portal-failed.json")},

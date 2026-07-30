@@ -12,7 +12,8 @@ pipeline default(harness: Harness) {
     properties: {verdict: {type: "string"}, improvement: {type: "string"}},
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("{\"improvement\": \"try again\"}"),
       llm_text("{\"verdict\": \"YES\", \"improvement\": \"\"}"),
     ],
@@ -23,7 +24,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("{\"improvement\": \"still broken\"}")],
+    harness.llm,
+    [llm_text("{\"improvement\": \"still broken\"}")],
     { ->
       const err = try {
         harness.llm.call_structured("Grade again", schema, {provider: "mock", retries: 0})

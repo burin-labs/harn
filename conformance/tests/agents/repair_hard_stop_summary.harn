@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -37,7 +37,8 @@ fn run_test_call(id) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       run_test_call("r1"),
       run_test_call("r2"),
       run_test_call("r3"),
@@ -47,8 +48,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "repair-hard-stop-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Make the failing test pass.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the failing test pass.",
           nil,
           {
             provider: "mock",
@@ -73,7 +78,9 @@ pipeline default(harness: Harness) {
       const cf = captured.result?.current_failure
       harness.stdio.println(cf != nil)
       harness.stdio.println(cf?.class)
-      harness.stdio.println(contains(to_string(cf?.snippet ?? ""), "FATAL: linker error in module X"))
+      harness.stdio.println(
+        contains(to_string(cf?.snippet ?? ""), "FATAL: linker error in module X"),
+      )
       harness.stdio.println(cf?.same_diagnostic_streak)
       const decisions = events_of(captured.events, "loop_control_decision").filter(
         { d -> d.reason == "thrash_hard_stop" },

@@ -120,10 +120,15 @@ The manifest loader rejects invalid trigger declarations before execution:
 - trigger ids must be unique across the loaded root manifest plus installed package manifests
 - `provider` must exist in the registered trigger provider catalog
 - `handler` must be a supported URI, and local handlers must resolve to exported functions
+- local handlers are runtime entrypoints with signature
+  `fn(Harness, TriggerEvent) -> _`; keep root authority at that boundary and
+  pass narrow handles such as `HarnessFs` into ordinary helpers
 - `allow_cleartext`, when present, must be a boolean and is only valid for
   `a2a://...` handlers
-- `when` must resolve to a function with signature `fn(TriggerEvent) -> bool`
-  or `fn(TriggerEvent) -> Result<bool, _>`
+- `when` is also a runtime entrypoint and must resolve to
+  `fn(Harness, TriggerEvent) -> bool` or
+  `fn(Harness, TriggerEvent) -> Result<bool, _>`; pass a narrow handle to any
+  reusable classifier helper
 - `when_budget` requires `when`, and its `max_cost_usd`, `tokens_max`, and
   `timeout` fields must all be valid when present
 - `dedupe_key` and `filter` must parse as JMESPath expressions
@@ -227,13 +232,13 @@ budget = { daily_cost_usd = 1.00, max_concurrent = 10 }
 
 Behavior:
 
-- the predicate may call `llm_call(...)`
+- the predicate may call `harness.llm.call(...)`
 - per-evaluation overruns emit `predicate.budget_exceeded` and short-circuit to
   `false`
 - `budget.daily_cost_usd` applies to aggregate predicate spend for the trigger
   over the current UTC day; once exceeded, the trigger keeps returning `false`
   until the next UTC midnight
-- replay reuses cached predicate `llm_call(...)` responses from the provider
+- replay reuses cached predicate `harness.llm.call(...)` responses from the provider
   request cache plus the event-scoped `trigger.inbox` record
 - three consecutive predicate failures open a five-minute circuit breaker that
   fails closed with operator-visible warnings

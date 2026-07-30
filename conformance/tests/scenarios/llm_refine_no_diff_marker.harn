@@ -6,9 +6,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("A short rewrite without a diff.")],
+    harness.llm,
+    [llm_text("A short rewrite without a diff.")],
     { ->
-      const result = refine_prompt(harness, {
+      const result = refine_prompt(
+        harness.llm,
+        {
           user_prompt: "ramble ramble ramble",
           style: "concise",
           model: "mock-model",

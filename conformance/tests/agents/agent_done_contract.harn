@@ -1,6 +1,6 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { agent_done_contract } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn events_of(events, kind) {
@@ -9,7 +9,8 @@ fn events_of(events, kind) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "Implemented two page-cache tests.\n\nDone claim:\n- requested work: add five page-cache tests\n- evidence: fetch and cached-fetch tests pass\n- files changed: tests/unit/page_cache_extra_test.cpp\n- not done: none\n##DONE##",
       ),
@@ -25,8 +26,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session_id = "done-contract-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session_id,
-        fn() { return agent_loop(harness, "Add page-cache tests for fetch, cached fetch, LRU eviction, dirty flush, and pinned-page prevention.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { return agent_loop(
+          harness,
+          "Add page-cache tests for fetch, cached fetch, LRU eviction, dirty flush, and pinned-page prevention.",
           nil,
           {
             provider: "mock",

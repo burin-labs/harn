@@ -4,7 +4,9 @@ pipeline test(harness: Harness, task) {
   assert_eq(plain.scheme, "http")
   assert_eq(plain.terminate_tls, false)
   assert_eq(harness.net.server_security_headers(plain), {})
-  const edge = harness.net.server_tls_edge({hsts_max_age_seconds: 300, hsts_include_subdomains: true})
+  const edge = harness.net.server_tls_edge(
+    {hsts_max_age_seconds: 300, hsts_include_subdomains: true},
+  )
   assert_eq(edge.mode, "edge")
   assert_eq(edge.scheme, "https")
   assert_eq(edge.terminate_tls, false)
@@ -18,7 +20,10 @@ pipeline test(harness: Harness, task) {
   assert(contains(dev.cert_pem, "BEGIN CERTIFICATE"))
   assert(contains(dev.key_pem, "BEGIN PRIVATE KEY"))
   assert_eq(harness.net.server_security_headers(dev), {})
-  const dir = path_join(harness.fs.workspace_temp_dir(), "harn-http-server-tls-" + harness.random.uuid())
+  const dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-http-server-tls-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(dir)
   const cert_path = path_join(dir, "cert.pem")
   const key_path = path_join(dir, "key.pem")
@@ -27,7 +32,9 @@ pipeline test(harness: Harness, task) {
   const pem = harness.net.server_tls_pem(cert_path, key_path)
   assert_eq(pem.mode, "pem")
   assert_eq(pem.cert_path, cert_path)
-  assert(contains(harness.net.server_security_headers(pem)["strict-transport-security"], "max-age="))
+  assert(
+    contains(harness.net.server_security_headers(pem)["strict-transport-security"], "max-age="),
+  )
   const missing = try {
     harness.net.server_tls_pem(path_join(dir, "missing.pem"), key_path)
   }

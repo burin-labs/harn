@@ -1,7 +1,9 @@
 import { parse_resume_conditions } from "std/agent/workers"
 
 pipeline main(harness: Harness) {
-  const trigger = parse_resume_conditions(harness.agent, {
+  const trigger = parse_resume_conditions(
+    harness.agent,
+    {
       trigger: {
         id: "resume-review",
         kind: "review.approved",
@@ -12,7 +14,9 @@ pipeline main(harness: Harness) {
   )
   harness.stdio.println(trigger?.trigger?.kind)
   harness.stdio.println(trigger?.trigger?.match?.events[0])
-  const timeout = parse_resume_conditions(harness.agent, {timeout: {duration_minutes: 15, on_timeout: "resume_with_input"}},
+  const timeout = parse_resume_conditions(
+    harness.agent,
+    {timeout: {duration_minutes: 15, on_timeout: "resume_with_input"}},
   )
   harness.stdio.println(timeout?.timeout?.duration_minutes)
   harness.stdio.println(timeout?.timeout?.on_timeout)

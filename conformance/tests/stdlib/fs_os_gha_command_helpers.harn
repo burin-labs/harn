@@ -10,7 +10,10 @@ import { env_bool } from "std/os"
 import { prefix_lines, single_line_or, truncate_middle, truncate_text } from "std/text"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-utility-helpers-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-utility-helpers-" + harness.random.uuid_v7(),
+  )
   const json_path = path_join(root, "nested/data.json")
   write_json(harness.fs, json_path, {name: "harn", count: 2}, {pretty: true})
   const parsed = read_json(harness.fs, json_path)
@@ -21,7 +24,7 @@ pipeline test(harness: Harness, task) {
   append_line(harness.fs, lines_path, "x")
   harness.stdio.println(harness.fs.read_text(lines_path))
   const output_path = path_join(root, "github-output.txt")
-  harness.stdio.println(gha_env_block(harness, "answer", "42", "EOF"))
+  harness.stdio.println(gha_env_block(harness.random, "answer", "42", "EOF"))
   harness.stdio.println(gha_write_output(harness, "name", "harn", output_path))
   const output_file = harness.fs.read_text(output_path)
   harness.stdio.println(contains(output_file, "name<<harn_"))
@@ -33,7 +36,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(argv_label(["git", "status", "--short"]))
   const failed = command_result_fail(2, "bad", {stdout: "out"})
   harness.stdio.println(command_output_text(failed, "stderr"))
-  harness.stdio.println(contains(command_failure_text(harness, failed), "exit=2"))
+  harness.stdio.println(contains(command_failure_text(harness.agent, failed), "exit=2"))
   harness.stdio.println(single_line_or(" a\n b\tc ", "fallback"))
   harness.stdio.println(prefix_lines("a\nb", "> "))
   harness.stdio.println(truncate_middle("abcdef", 5))

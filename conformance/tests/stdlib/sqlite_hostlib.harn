@@ -47,7 +47,10 @@ pipeline default(harness: Harness) {
     [3, 4],
   )
   harness.stdio.println("savepoint.count=" + to_string(savepoint_count.n))
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-sqlite-hostlib-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-sqlite-hostlib-" + harness.random.uuid(),
+  )
   const db_path = path_join(root, "state", "app.sqlite")
   const file_db = harness.sqlite.open(db_path, {create: true, journal_mode: "wal"})
   sqlite_execute(file_db, "create table persisted(id integer primary key, body text not null)")

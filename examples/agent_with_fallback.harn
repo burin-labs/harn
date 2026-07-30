@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
       },
     }
   }
-  const caller = with_fallback(harness, [primary, secondary])
+  const caller = with_fallback(harness.agent, [primary, secondary])
   const result = agent_loop(harness, "hi", nil, {provider: "mock", llm_caller: caller})
   harness.stdio.println("status      = " + result.status)
   harness.stdio.println("visible     = " + result.visible_text)

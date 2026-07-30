@@ -23,11 +23,11 @@ need the capability, don't reach for the layer.
 
 ## Layer by layer
 
-**LLM call.** One request to a model. The atom. `llm_call(prompt, system, opts)`
+**LLM call.** One request to a model. The atom. `harness.llm.call(prompt, system, opts)`
 returns a dict with `text`, `tool_calls`, token counts, and a transcript
 fragment. No looping, no completion detection.
 
-**Tool call.** The model emitted "please run `read_file(...)`". Tool calls
+**Tool call.** The model emitted "please run `harness.fs.read_text(...)`". Tool calls
 happen *inside* an iteration; one iteration can contain several. They're
 recorded in the transcript as their own events.
 
@@ -35,7 +35,7 @@ recorded in the transcript as their own events.
 dispatch happens before the next prompt-out. The agent loop counts iterations
 and stops when `max_iterations` is hit or the model signals completion.
 
-**Agent loop.** Run iterations until done. `agent_loop(prompt, system, opts)`
+**Agent loop.** Run iterations until done. `agent_loop(harness, prompt, system, opts)`
 owns completion detection, tool dispatch, budget enforcement, and the terminal
 `status` (`done`, `stuck`, `suspended`, `budget_exhausted`, `provider_error`,
 `idle`, `watchdog`, `failed`).

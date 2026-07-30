@@ -307,7 +307,10 @@ pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) 
 }
 
 @test
-pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(harness: Harness, task) {
+pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(
+  harness: Harness,
+  task,
+) {
   const invalid_action = {
     runs: {steps: [{uses: "useblacksmith/stickydisk@v1", with: {key: "shared", path: "target"}}]},
   }

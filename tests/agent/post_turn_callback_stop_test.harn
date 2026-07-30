@@ -3,11 +3,13 @@
 // Post-turn callbacks are host-policy decisions, not ordinary model completion
 // proposals. A stop verdict from a policy callback must terminate the loop
 // without letting `verify_completion` convert the stop into repair feedback.
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("I am still looping without making progress."),
       llm_text("This turn should be unreachable. ##DONE##"),
     ],
@@ -15,7 +17,9 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness,
       const verify_calls = harness.runtime.shared_cell(
         {scope: "task_group", key: "post-turn-stop-verify-calls", initial: 0},
       )
-      const result = agent_loop(harness, "Finish the task.",
+      const result = agent_loop(
+        harness,
+        "Finish the task.",
         nil,
         {
           provider: "mock",
@@ -57,12 +61,15 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness,
 
 pipeline test_post_turn_policy_stop_can_request_completion_verify(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("Policy wants an external completion check."), llm_text("Verified now. ##DONE##")],
+    harness.llm,
+    [llm_text("Policy wants an external completion check."), llm_text("Verified now. ##DONE##")],
     { ->
       const policy_verify_calls = harness.runtime.shared_cell(
         {scope: "task_group", key: "post-turn-stop-opt-in-verify-calls", initial: 0},
       )
-      const result = agent_loop(harness, "Finish the task.",
+      const result = agent_loop(
+        harness,
+        "Finish the task.",
         nil,
         {
           provider: "mock",

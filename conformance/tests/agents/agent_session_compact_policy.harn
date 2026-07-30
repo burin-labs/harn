@@ -28,7 +28,9 @@ pipeline test(harness: Harness, task) {
   const snapshot = harness.agent.snapshot(session)
   const events = transcript_events_by_kind(snapshot, "compaction")
   const event = events[0]
-  harness.stdio.println(transcript_summary(snapshot)?.contains("host compact bug_fix_resumption host 2"))
+  harness.stdio.println(
+    transcript_summary(snapshot)?.contains("host compact bug_fix_resumption host 2"),
+  )
   harness.stdio.println(event.metadata?.mode == "host")
   harness.stdio.println(event.metadata?.instruction_mode == "extend")
   harness.stdio.println(event.metadata?.instruction_source == "host")

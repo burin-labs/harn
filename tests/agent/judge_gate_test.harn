@@ -22,59 +22,65 @@ fn __verify() {
 
 pipeline test_noncallable_facts_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({facts: "nope"})
+    agent_completion_gate(harness.runtime, {facts: "nope"})
   }
   assert(is_err(outcome), "gate rejects a non-callable facts")
 }
 
 pipeline test_noncallable_classify_write_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({classify_write: 7, facts: __facts})
+    agent_completion_gate(harness.runtime, {classify_write: 7, facts: __facts})
   }
   assert(is_err(outcome), "gate rejects a non-callable classify_write")
 }
 
 pipeline test_noncallable_verify_command_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({verify_command: "x"})
+    agent_completion_gate(harness.runtime, {verify_command: "x"})
   }
   assert(is_err(outcome), "gate rejects a non-callable verify_command")
 }
 
 pipeline test_noncallable_veto_combine_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({facts: __facts, veto_combine: 3})
+    agent_completion_gate(harness.runtime, {facts: __facts, veto_combine: 3})
   }
   assert(is_err(outcome), "gate rejects a non-callable veto_combine")
 }
 
 pipeline test_classify_write_without_facts_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({classify_write: __classify})
+    agent_completion_gate(harness.runtime, {classify_write: __classify})
   }
   assert(is_err(outcome), "gate rejects classify_write set without facts")
 }
 
 pipeline test_classify_write_with_facts_ok(harness: Harness, task) {
-  const bundle = agent_completion_gate({classify_write: __classify, facts: __facts})
+  const bundle = agent_completion_gate(
+    harness.runtime,
+    {classify_write: __classify, facts: __facts},
+  )
   assert_eq(bundle._completion_gate.facts_available, true)
 }
 
 pipeline test_bad_judge_seam_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({facts: __facts, judge: true, judge_seam: "typo_seam"})
+    agent_completion_gate(harness.runtime, {facts: __facts, judge: true, judge_seam: "typo_seam"})
   }
   assert(is_err(outcome), "gate rejects an unknown judge_seam")
 }
 
 pipeline test_done_judge_seam_routes(harness: Harness, task) {
-  const bundle = agent_completion_gate({facts: __facts, judge: true, judge_seam: "done_judge"})
+  const bundle = agent_completion_gate(
+    harness.runtime,
+    {facts: __facts, judge: true, judge_seam: "done_judge"},
+  )
   assert(bundle?.done_judge != nil, "judge rides the done_judge seam")
   assert_eq(bundle?.verify_completion_judge, nil)
 }
 
 pipeline test_valid_config_builds(harness: Harness, task) {
-  const bundle = agent_completion_gate({facts: __facts, verify_command: __verify})
+  const bundle = agent_completion_gate(harness.runtime, {facts: __facts, verify_command: __verify})
   assert_eq(bundle._completion_gate.facts_available, true)
   assert(bundle?.verify_completion != nil, "gate wires the verify_completion seam")
 }
@@ -82,48 +88,54 @@ pipeline test_valid_config_builds(harness: Harness, task) {
 pipeline test_empty_config_degrades_not_throws(harness: Harness, task) {
   // A facts-free config is legal — it degrades to judge-only mode and surfaces
   // the degraded state on the bundle rather than throwing.
-  const bundle = agent_completion_gate({})
+  const bundle = agent_completion_gate(harness.runtime, {})
   assert_eq(bundle._completion_gate.facts_available, false)
 }
 
 pipeline test_feedback_templates_unknown_key_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({facts: __facts, feedback_templates: {bogus_key: "x"}})
+    agent_completion_gate(harness.runtime, {facts: __facts, feedback_templates: {bogus_key: "x"}})
   }
   assert(is_err(outcome), "gate rejects an unknown feedback_templates key")
 }
 
 pipeline test_feedback_templates_nonstring_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({facts: __facts, feedback_templates: {missing_verification: 7}})
+    agent_completion_gate(
+      harness.runtime,
+      {facts: __facts, feedback_templates: {missing_verification: 7}},
+    )
   }
   assert(is_err(outcome), "gate rejects a non-string feedback_templates value")
 }
 
 pipeline test_feedback_templates_valid_accepted(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({facts: __facts, feedback_templates: {missing_verification: "Custom."}})
+    agent_completion_gate(
+      harness.runtime,
+      {facts: __facts, feedback_templates: {missing_verification: "Custom."}},
+    )
   }
   assert(!is_err(outcome), "gate accepts a valid feedback_templates override")
 }
 
 pipeline test_noncallable_feedback_decorator_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({facts: __facts, feedback_decorator: "not callable"})
+    agent_completion_gate(harness.runtime, {facts: __facts, feedback_decorator: "not callable"})
   }
   assert(is_err(outcome), "gate rejects a non-callable feedback_decorator")
 }
 
 pipeline test_invalid_escalation_threshold_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({escalation_threshold: 0, facts: __facts})
+    agent_completion_gate(harness.runtime, {escalation_threshold: 0, facts: __facts})
   }
   assert(is_err(outcome), "gate rejects a non-positive escalation_threshold")
 }
 
 pipeline test_blank_escalation_target_throws(harness: Harness, task) {
   const outcome = try {
-    agent_completion_gate({escalation_target: " ", facts: __facts})
+    agent_completion_gate(harness.runtime, {escalation_target: " ", facts: __facts})
   }
   assert(is_err(outcome), "gate rejects a blank escalation_target")
 }
@@ -143,6 +155,7 @@ fn __decorate_escalation(reason, feedback, verdict) {
 
 pipeline test_feedback_decorator_receives_resolved_escalation_verdict(harness: Harness, task) {
   const gate = agent_completion_gate(
+    harness.runtime,
     {
       escalation_target: "frontier",
       facts: __escalating_facts,
@@ -163,6 +176,7 @@ fn __bad_decorator(_reason, _feedback, _verdict) {
 
 pipeline test_feedback_decorator_nonstring_result_throws(harness: Harness, task) {
   const gate = agent_completion_gate(
+    harness.runtime,
     {facts: __escalating_facts, feedback_decorator: __bad_decorator},
   ).verify_completion
   const outcome = try {
@@ -193,14 +207,15 @@ pipeline test_veto_counts_accumulate_per_class(harness: Harness, task) {
   // always charge.
   const sid = "gate6-classcount"
   const bundle = agent_completion_gate(
+    harness.runtime,
     {facts: __class_facts, max_vetoes: 0, verify_command: __red_verify},
   )
   const gate = bundle.verify_completion
-  const before = agent_completion_gate_veto_counts(sid)
+  const before = agent_completion_gate_veto_counts(harness.runtime, sid)
   gate({session_id: sid, text: "nowrite", transcript: "[]"})
   gate({session_id: sid, text: "nowrite", transcript: "[]"})
   gate({session_id: sid, text: "write", transcript: "[]"})
-  const after = agent_completion_gate_veto_counts(sid)
+  const after = agent_completion_gate_veto_counts(harness.runtime, sid)
   assert_eq(after.total - before.total, 3)
   assert_eq(after.by_class.no_source_write - before.by_class.no_source_write, 2)
   assert_eq(
@@ -219,7 +234,7 @@ pipeline test_veto_counts_accumulate_per_class(harness: Harness, task) {
 pipeline test_veto_counts_absent_without_session(harness: Harness, task) {
   // No session id: nothing is charged, and the reader reports a stable zeroed shape
   // (every chargeable class present) rather than throwing.
-  const counts = agent_completion_gate_veto_counts("")
+  const counts = agent_completion_gate_veto_counts(harness.runtime, "")
   assert_eq(counts.total, 0)
   assert_eq(counts.by_class.no_source_write, 0)
   assert_eq(counts.by_class.verification_after_write_red, 0)
@@ -231,7 +246,10 @@ pipeline test_veto_counts_absent_without_session(harness: Harness, task) {
 pipeline test_veto_count_keys_do_not_leak_into_bundle_projection(harness: Harness, task) {
   // The new per-class counts are read via the reader, NOT baked into the static
   // `_completion_gate` output projection — that block stays byte-identical.
-  const bundle = agent_completion_gate({facts: __class_facts, verify_command: __red_verify})
+  const bundle = agent_completion_gate(
+    harness.runtime,
+    {facts: __class_facts, verify_command: __red_verify},
+  )
   assert_eq(bundle._completion_gate?.by_class, nil)
   assert_eq(bundle._completion_gate?.veto_counts, nil)
   assert_eq(bundle._completion_gate?.total, nil)

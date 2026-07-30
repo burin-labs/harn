@@ -6,6 +6,7 @@
 // natural recovery one bounded chance instead of converting it into a final
 // wrapup whose tool call is silently dropped.
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -67,7 +68,8 @@ fn events_of(events, kind) {
 
 pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       run_call("r1"),
       run_call("r2"),
       look_call("look_recovery"),
@@ -93,7 +95,9 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, 
           max_feedback: 2,
         },
       }
-      let captured = agent_capture_events(harness, session,
+      let captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Write tests after inspecting the target model.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
@@ -126,7 +130,8 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, 
 
 pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("I should edit the target file after reading the Entry model."),
       llm_text("I still need to inspect app/Models/Entry.php before editing."),
       look_call("look_after_monologue"),
@@ -152,7 +157,9 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Ha
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(harness, session,
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Edit the target file after inspecting it.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
@@ -190,7 +197,8 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Ha
 
 pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [fail_call("f1"), fail_call("f2"), fail_call("f3")],
+    harness.llm,
+    [fail_call("f1"), fail_call("f2"), fail_call("f3")],
     { ->
       const session = "thrash-no-rung-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
@@ -211,7 +219,9 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(harness:
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(harness, session,
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Edit the target file.", nil, opts) },
       )
       assert_eq(captured.result.status, "stuck")
@@ -260,7 +270,9 @@ pipeline test_final_wrapup_tool_call_skip_is_observable(harness: Harness, task) 
     session_id: session,
     llm_caller: mock_llm,
   }
-  let captured = agent_capture_events(harness, session,
+  let captured = agent_capture_events(
+    harness.agent,
+    session,
     fn() { return agent_loop(harness, "Run out of budget while still trying tools.", nil, opts) },
   )
   assert_eq(captured.result.status, "budget_exhausted")

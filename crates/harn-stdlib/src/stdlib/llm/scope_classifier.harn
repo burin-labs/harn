@@ -178,7 +178,7 @@ fn __scope_classifier_fail_open(error, threshold) {
  * @api_stability: experimental
  * @example: pre_turn_scope_classifier({enabled: true})
  */
-pub fn pre_turn_scope_classifier(harness: Harness, opts = nil) {
+pub fn pre_turn_scope_classifier(agent: HarnessAgent, llm: HarnessLlm, opts = nil) {
   const cfg = opts ?? {}
   if type_of(cfg) != "dict" {
     throw "pre_turn_scope_classifier: opts must be a dict or nil; got " + type_of(cfg)
@@ -249,7 +249,9 @@ pub fn pre_turn_scope_classifier(harness: Harness, opts = nil) {
       }
     }
     const checkpoint = agent_typed_output_checkpoint(
-      harness, "agent.scope_classifier",
+      agent,
+      llm,
+      "agent.scope_classifier",
       __scope_classifier_prompt(classifier_payload, recent_context),
       schema,
       llm_opts,

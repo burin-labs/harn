@@ -47,13 +47,15 @@ import {
 
 /** Submit prepared batch artifacts through provider-native transports. */
 fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
-  const auth = __api_key_for_job(harness, "anthropic")
-  const base = __provider_base_url(harness, "anthropic")
-  const base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness.env, "anthropic")
+  const base = __provider_base_url(harness.env, "anthropic")
+  const base_job = __submission_job_base(harness.env, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  const response = __http_result(harness,  "POST",
+  const response = __http_result(
+    harness,
+    "POST",
     __join_url(base, "/v1/messages/batches"),
     {
       headers: {
@@ -90,9 +92,9 @@ fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
-  const auth = __api_key_for_job(harness, "fireworks")
-  const account = __fireworks_account_id(harness)
-  const base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness.env, "fireworks")
+  const account = __fireworks_account_id(harness.env)
+  const base_job = __submission_job_base(harness.env, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
@@ -121,10 +123,12 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
   }
   const upload = __fireworks_upload_dataset(
     harness,
-    account_id,
-    input_dataset_id,
-    safe_string(auth["value"], ""),
-    safe_string(payload["path"], ""),
+    {
+      account_id: account_id,
+      dataset_id: input_dataset_id,
+      api_key: safe_string(auth["value"], ""),
+      file_path: safe_string(payload["path"], ""),
+    },
   )
   if !safe_bool(upload["ok"], false) {
     return {
@@ -139,9 +143,11 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
     inputDatasetId: __fireworks_dataset_resource(account_id, input_dataset_id),
     outputDatasetId: __fireworks_dataset_resource(account_id, output_dataset_id),
   }
-  const response = __http_result(harness,  "POST",
+  const response = __http_result(
+    harness,
+    "POST",
     __join_url(
-      __provider_base_url(harness, "fireworks"),
+      __provider_base_url(harness.env, "fireworks"),
       "/accounts/" + account_id + "/batchInferenceJobs?batchInferenceJobId=" + batch_job_id,
     ),
     {
@@ -202,13 +208,13 @@ fn __openai_compatible_create_body(provider: string, upload: dict, endpoint: str
 }
 
 fn __submit_bedrock(harness: Harness, job: dict, payload: dict) -> dict {
-  const base_job = __submission_job_base(harness, job, payload, false)
+  const base_job = __submission_job_base(harness.env, job, payload, false)
   const policy = safe_dict(job["provider_policy"])
   const region = safe_string(policy["region"], "")
   const input_s3_uri = safe_string(policy["input_s3_uri"], "")
   const output_s3_uri = safe_string(policy["output_s3_uri"], "")
   const role_arn = safe_string(policy["role_arn"], "")
-  const input_url = __s3_request_url(harness, input_s3_uri, region)
+  const input_url = __s3_request_url(harness.env, input_s3_uri, region)
   if input_url == "" {
     return {
       ok: false,
@@ -218,12 +224,14 @@ fn __submit_bedrock(harness: Harness, job: dict, payload: dict) -> dict {
   }
   const upload = __bedrock_http_result(
     harness,
-    "PUT",
-    input_url,
-    region,
-    "s3",
-    safe_string(payload["text"], ""),
-    1048576,
+    {
+      method: "PUT",
+      url: input_url,
+      region: region,
+      service: "s3",
+      body: safe_string(payload["text"], ""),
+      max_response_bytes: 1048576,
+    },
   )
   if !safe_bool(upload["ok"], false) {
     return {
@@ -248,12 +256,14 @@ fn __submit_bedrock(harness: Harness, job: dict, payload: dict) -> dict {
   }
   const response = __bedrock_http_result(
     harness,
-    "POST",
-    __join_url(__provider_base_url(harness, "bedrock"), "/model-invocation-job"),
-    region,
-    "bedrock",
-    json_stringify(create_body),
-    1048576,
+    {
+      method: "POST",
+      url: __join_url(__provider_base_url(harness.env, "bedrock"), "/model-invocation-job"),
+      region: region,
+      service: "bedrock",
+      body: json_stringify(create_body),
+      max_response_bytes: 1048576,
+    },
   )
   const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
@@ -298,19 +308,21 @@ fn __submit_openai_compatible(
   payload: dict,
   provider: string,
 ) -> dict {
-  const auth = __api_key_for_job(harness, provider)
-  const base = __provider_base_url(harness, provider)
-  const base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness.env, provider)
+  const base = __provider_base_url(harness.env, provider)
+  const base_job = __submission_job_base(harness.env, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   const upload = __upload_jsonl_file(
     harness,
-    provider,
-    __join_url(base, "/files"),
-    safe_string(auth["env"], ""),
-    safe_string(auth["value"], ""),
-    safe_string(payload["path"], ""),
+    {
+      provider: provider,
+      url: __join_url(base, "/files"),
+      credential_env: safe_string(auth["env"], ""),
+      api_key: safe_string(auth["value"], ""),
+      file_path: safe_string(payload["path"], ""),
+    },
   )
   if !safe_bool(upload["ok"], false) {
     return {
@@ -324,7 +336,9 @@ fn __submit_openai_compatible(
     upload,
     safe_string(job["endpoint"], "/v1/chat/completions"),
   )
-  const response = __http_result(harness,  "POST",
+  const response = __http_result(
+    harness,
+    "POST",
     __join_url(base, "/batches"),
     {
       headers: __provider_auth_headers(
@@ -372,19 +386,21 @@ fn __submit_openai_compatible(
 }
 
 fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
-  const auth = __api_key_for_job(harness, "mistral")
-  const base = __provider_base_url(harness, "mistral")
-  const base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness.env, "mistral")
+  const base = __provider_base_url(harness.env, "mistral")
+  const base_job = __submission_job_base(harness.env, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   const upload = __upload_jsonl_file(
     harness,
-    "mistral",
-    __join_url(base, "/files"),
-    safe_string(auth["env"], ""),
-    safe_string(auth["value"], ""),
-    safe_string(payload["path"], ""),
+    {
+      provider: "mistral",
+      url: __join_url(base, "/files"),
+      credential_env: safe_string(auth["env"], ""),
+      api_key: safe_string(auth["value"], ""),
+      file_path: safe_string(payload["path"], ""),
+    },
   )
   if !safe_bool(upload["ok"], false) {
     return {
@@ -399,7 +415,9 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
     model: safe_string(job["model"], ""),
     timeout_hours: 24,
   }
-  const response = __http_result(harness,  "POST",
+  const response = __http_result(
+    harness,
+    "POST",
     __join_url(base, "/batch/jobs"),
     {
       headers: {
@@ -444,12 +462,14 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
-  const auth = __api_key_for_job(harness, "xai")
-  const base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness.env, "xai")
+  const base_job = __submission_job_base(harness.env, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  const upload = __upload_xai_jsonl_file(harness,  safe_string(payload["path"], ""),
+  const upload = __upload_xai_jsonl_file(
+    harness,
+    safe_string(payload["path"], ""),
     safe_string(auth["value"], ""),
   )
   if !safe_bool(upload["ok"], false) {
@@ -463,8 +483,10 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
     name: safe_string(job["id"], "harn-batch"),
     input_file_id: safe_string(upload["file_id"], ""),
   }
-  const response = __http_result(harness,  "POST",
-    __join_url(__provider_base_url(harness, "xai"), "/batches"),
+  const response = __http_result(
+    harness,
+    "POST",
+    __join_url(__provider_base_url(harness.env, "xai"), "/batches"),
     {
       headers: {
         Authorization: "Bearer " + safe_string(auth["value"], ""),
@@ -497,7 +519,7 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
       provider_batch_id: safe_string(body["batch_id"], ""),
       provider_status: __xai_provider_status(body),
       input_file_id: safe_string(upload["file_id"], ""),
-      results_url: __xai_results_url(harness, safe_string(body["batch_id"], ""), ""),
+      results_url: __xai_results_url(harness.env, safe_string(body["batch_id"], ""), ""),
       upload: upload,
       response_status: response["status"],
       response: body,
@@ -507,9 +529,9 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
-  const auth = __api_key_for_job(harness, "gemini")
-  const base = __provider_base_url(harness, "gemini")
-  const base_job = __submission_job_base(harness, job, payload, false)
+  const auth = __api_key_for_job(harness.env, "gemini")
+  const base = __provider_base_url(harness.env, "gemini")
+  const base_job = __submission_job_base(harness.env, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
@@ -533,7 +555,9 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
       inputConfig: {fileName: safe_string(upload["file_name"], "")},
     },
   }
-  const response = __http_result(harness,  "POST",
+  const response = __http_result(
+    harness,
+    "POST",
     __join_url(
       base,
       "/v1beta/" + __gemini_model_path(safe_string(job["model"], "")) + ":batchGenerateContent",
@@ -604,7 +628,7 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
   if adapter == "bedrock" {
     return __submit_bedrock(harness, job, payload)
   }
-  const base_job = __submission_job_base(harness, job, payload, false)
+  const base_job = __submission_job_base(harness.env, job, payload, false)
   return {
     ok: false,
     job: base_job + {status: "failed"},
@@ -613,7 +637,7 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __submit_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
-  const payload = __request_file_payload(harness, job)
+  const payload = __request_file_payload(harness.fs, job)
   if !safe_bool(payload["ok"], false) {
     const failed_job = {
       id: safe_string(job["id"], ""),
@@ -629,7 +653,7 @@ fn __submit_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
     }
   }
   const submitted = if dry_run {
-    __dry_run_submission(harness, job, payload)
+    __dry_run_submission(harness.env, job, payload)
   } else {
     __submit_live(harness, job, payload)
   }
@@ -651,23 +675,23 @@ fn __submission_status(jobs: list, errors: list, dry_run: bool) -> string {
   return "submitted"
 }
 
-fn __render_submit_human(harness: Harness, report: dict) {
+fn __render_submit_human(stdio: HarnessStdio, report: dict) {
   if !safe_bool(report["ok"], false) {
-    harness.stdio.eprintln("Batch submit failed")
+    stdio.eprintln("Batch submit failed")
   } else if safe_bool(report["dry_run"], false) {
-    harness.stdio.println("Batch submit dry run written: " + safe_string(report["out"], ""))
+    stdio.println("Batch submit dry run written: " + safe_string(report["out"], ""))
   } else {
-    harness.stdio.println("Batch submission receipt written: " + safe_string(report["out"], ""))
+    stdio.println("Batch submission receipt written: " + safe_string(report["out"], ""))
   }
-  harness.stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
-  harness.stdio.println("  submitted: " + safe_int_string(report["submitted_count"], "0"))
-  harness.stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
-  harness.stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
+  stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
+  stdio.println("  submitted: " + safe_int_string(report["submitted_count"], "0"))
+  stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
+  stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
   if safe_string(report["receipt_sha256"], "") != "" {
-    harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+    stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
   }
-  print_list(harness, "errors", safe_list(report["errors"]))
-  print_list(harness, "warnings", safe_list(report["warnings"]))
+  print_list(stdio, "errors", safe_list(report["errors"]))
+  print_list(stdio, "warnings", safe_list(report["warnings"]))
 }
 
 fn __render_submit_json(report: dict) -> string {
@@ -701,7 +725,7 @@ pub fn __run_submit(harness: Harness) -> int {
   const receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_RECEIPT", ""))
   const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMIT_OUT", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  const loaded = __batch_artifact_read(harness, receipt_path, "prepare_receipt")
+  const loaded = __batch_artifact_read(harness.fs, receipt_path, "prepare_receipt")
   let errors = loaded.errors
   const warnings = []
   if out_path == "" {
@@ -756,7 +780,7 @@ pub fn __run_submit(harness: Harness) -> int {
     warnings: warnings,
   }
   if out_path != "" {
-    __mkdirp(harness, dirname(out_path) ?? ".")
+    __mkdirp(harness.fs, dirname(out_path) ?? ".")
     const receipt_text = json_stringify_pretty(submission) + "\n"
     harness.fs.write_text(out_path, receipt_text)
     submission = submission + {receipt_sha256: sha256(receipt_text)}
@@ -765,7 +789,7 @@ pub fn __run_submit(harness: Harness) -> int {
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(__render_submit_json(report))
   } else {
-    __render_submit_human(harness, report)
+    __render_submit_human(harness.stdio, report)
   }
   if len(errors) == 0 {
     return 0

@@ -1,6 +1,9 @@
 pipeline default(harness: Harness) {
   // Render with bindings
-  const result = harness.fs.render_prompt("fixtures/greeting.prompt", {name: "Alice", place: "Harn"})
+  const result = harness.fs.render_prompt(
+    "fixtures/greeting.prompt",
+    {name: "Alice", place: "Harn"},
+  )
   harness.stdio.println(result)
   // Render without bindings (just reads file)
   const raw = harness.fs.render_prompt("fixtures/greeting.prompt")

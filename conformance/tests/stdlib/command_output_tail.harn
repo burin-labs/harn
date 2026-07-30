@@ -1,7 +1,7 @@
 import { command_output_range, command_output_tail, command_run } from "std/command"
 
-fn no_newline_echo(harness: Harness, text) {
-  if harness.system.platform().os == "windows" {
+fn no_newline_echo(system: HarnessSystem, text) {
+  if system.platform().os == "windows" {
     return ["cmd", "/C", "echo|set /p=" + text]
   }
   return ["printf", text]
@@ -9,7 +9,11 @@ fn no_newline_echo(harness: Harness, text) {
 
 pipeline default(harness: Harness) {
   const payload = "0123456789".repeat(20) + "TAIL"
-  const result = command_run(harness.tools, no_newline_echo(harness, payload), {capture: {max_inline_bytes: 8}})
+  const result = command_run(
+    harness.tools,
+    no_newline_echo(harness.system, payload),
+    {capture: {max_inline_bytes: 8}},
+  )
   assert_eq(result.success, true)
   assert_eq(len(result.stdout), 8)
   assert_eq(result.byte_count, len(payload))
@@ -18,7 +22,11 @@ pipeline default(harness: Harness) {
   assert_eq(tail.content, "TAIL")
   assert_eq(tail.total_bytes, len(payload))
   assert_eq(tail.eof, true)
-  const range = command_output_range(harness.tools, {path: result.output_path}, {offset: 10, length: 5})
+  const range = command_output_range(
+    harness.tools,
+    {path: result.output_path},
+    {offset: 10, length: 5},
+  )
   assert_eq(range.content, "01234")
   harness.stdio.println("ok")
 }

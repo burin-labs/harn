@@ -6,27 +6,27 @@ fn identity(value) {
   return value
 }
 
-fn return_value(harness: Harness) {
+fn return_value(stdio: HarnessStdio) {
   try {
     return "value"
   } finally {
-    harness.stdio.println("cleanup:value")
+    stdio.println("cleanup:value")
   }
 }
 
-fn return_failed_call(harness: Harness) {
+fn return_failed_call(stdio: HarnessStdio) {
   try {
     return fail("direct")
   } finally {
-    harness.stdio.println("cleanup:direct")
+    stdio.println("cleanup:direct")
   }
 }
 
-fn return_nested_failed_call(harness: Harness) {
+fn return_nested_failed_call(stdio: HarnessStdio) {
   try {
     return identity(fail("nested"))
   } finally {
-    harness.stdio.println("cleanup:nested")
+    stdio.println("cleanup:nested")
   }
 }
 
@@ -38,11 +38,11 @@ fn return_with_failed_cleanup() {
   }
 }
 
-fn throw_failed_call(harness: Harness) {
+fn throw_failed_call(stdio: HarnessStdio) {
   try {
     throw fail("throw operand")
   } finally {
-    harness.stdio.println("cleanup:throw operand")
+    stdio.println("cleanup:throw operand")
   }
 }
 
@@ -65,15 +65,15 @@ fn continue_and_break() {
 }
 
 pipeline default(harness: Harness) {
-  harness.stdio.println(return_value(harness))
+  harness.stdio.println(return_value(harness.stdio))
   const direct = try {
-    return_failed_call(harness)
+    return_failed_call(harness.stdio)
   } catch (error) {
     "caught:${error}"
   }
   harness.stdio.println(direct)
   const nested = try {
-    return_nested_failed_call(harness)
+    return_nested_failed_call(harness.stdio)
   } catch (error) {
     "caught:${error}"
   }
@@ -85,7 +85,7 @@ pipeline default(harness: Harness) {
   }
   harness.stdio.println(precedence)
   const throw_operand = try {
-    throw_failed_call(harness)
+    throw_failed_call(harness.stdio)
   } catch (error) {
     "caught:${error}"
   }

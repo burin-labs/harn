@@ -57,14 +57,16 @@ pipeline default(harness: Harness) {
   const report = workflow_validate(flow)
   harness.stdio.println(report.valid)
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Research complete."),
       llm_text("Implementation batch complete."),
       llm_text("Evaluation complete."),
     ],
     { ->
       const result = action_graph_run(
-        harness, "Fix parser diagnostics",
+        harness,
+        "Fix parser diagnostics",
         execution_plan,
         config,
         {max_steps: 8, persist_path: "/tmp/harn-action-graph-runtime.json"},

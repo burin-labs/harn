@@ -106,19 +106,20 @@ fn split_eval_header_does_not_lift_imports_after_other_statements() {
 fn eval_source_wraps_pipeline_body_snippets() {
     assert_eq!(
         eval_source_for_code("let x = 1\n__io_println(x)"),
-        "pipeline main(task) {\nlet x = 1\n__io_println(x)\n}"
+        "pipeline main(harness: Harness, task) {\nlet x = 1\n__io_println(x)\n}"
     );
 }
 
 #[test]
 fn eval_source_keeps_full_harn_programs_unnested() {
-    let code = "pipeline default() {\n  __io_println(\"ok\")\n}\n";
+    let code = "pipeline default(harness: Harness) {\n  harness.stdio.println(\"ok\")\n}\n";
     assert_eq!(eval_source_for_code(code), code);
 }
 
 #[test]
 fn eval_source_keeps_imported_full_harn_programs_unnested() {
-    let code = "import { x } from \"./lib\"\n\npipeline default() {\n  __io_println(x)\n}\n";
+    let code =
+        "import { x } from \"./lib\"\n\npipeline default(harness: Harness) {\n  harness.stdio.println(x)\n}\n";
     assert_eq!(eval_source_for_code(code), code);
 }
 
@@ -175,9 +176,9 @@ fn execute_explain_cost_does_not_execute_script() {
     std::fs::write(
         &script,
         r#"
-pipeline main() {
-  write_file("executed.txt", "bad")
-  llm_call("hello", nil, {provider: "mock", model: "mock"})
+pipeline main(harness: Harness) {
+  harness.fs.write_text("executed.txt", "bad")
+  harness.llm.call("hello", nil, {provider: "mock", model: "mock"})
 }
 "#,
     )
@@ -292,7 +293,7 @@ fn main(harness: Harness) -> int {
   harness.stdio.print("before ")
   harness.stdio.println("exit")
   try {
-    exit(2)
+    harness.runtime.exit(2)
   } catch (error) {
     harness.stdio.eprintln("caught")
   }
@@ -340,8 +341,8 @@ async fn execute_run_allows_read_from_explicit_read_only_root_but_denies_write()
         &script,
         format!(
             r#"
-pipeline main() {{
-  __io_println(read_file("{secret_literal}"))
+pipeline main(harness: Harness) {{
+  harness.stdio.println(harness.fs.read_text("{secret_literal}"))
 }}
 "#,
         ),
@@ -375,8 +376,8 @@ pipeline main() {{
         &script,
         format!(
             r#"
-pipeline main() {{
-  write_file("{prohibited_literal}", "should be denied")
+pipeline main(harness: Harness) {{
+  harness.fs.write_text("{prohibited_literal}", "should be denied")
 }}
 "#,
         ),
@@ -427,9 +428,9 @@ async fn execute_run_allows_write_to_explicit_write_root() {
         &script,
         format!(
             r#"
-pipeline main() {{
-  write_file("{target_literal}", "%PDF-1.4\n")
-  __io_println(read_file("{target_literal}"))
+pipeline main(harness: Harness) {{
+  harness.fs.write_text("{target_literal}", "%PDF-1.4\n")
+  harness.stdio.println(harness.fs.read_text("{target_literal}"))
 }}
 "#,
         ),
@@ -562,15 +563,16 @@ async fn execute_run_allows_command_run_read_from_process_only_root() {
             r#"
 import {{ command_run }} from "std/command"
 
-pipeline main() {{
+pipeline main(harness: Harness) {{
   const result = command_run(
+    harness.tools,
     {{argv: ["cat", "{secret_literal}"]}},
     {{capture: {{max_inline_bytes: 8}}, timeout_ms: 5000}},
   )
   if !result.success {{
     throw "command_run failed: exit_code=${{result.exit_code}} stderr=${{result.stderr}}"
   }}
-  __io_println(result.stdout)
+  harness.stdio.println(result.stdout)
 }}
 "#
         ),
@@ -629,15 +631,16 @@ async fn execute_run_granted_policy_injects_into_subprocess_env() {
         r#"
 import { command_run } from "std/command"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const result = command_run(
+    harness.tools,
     {argv: ["sh", "-c", "printf %s \"$HARN_TEST_CHILD_VAR\""]},
     {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
   )
   if !result.success {
     throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
   }
-  __io_println(result.stdout)
+  harness.stdio.println(result.stdout)
 }
 "#,
     )
@@ -696,15 +699,16 @@ async fn execute_run_command_bound_grant_skips_non_matching_exec() {
         r#"
 import { command_run } from "std/command"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const result = command_run(
+    harness.tools,
     {argv: ["env"]},
     {capture: {max_inline_bytes: 65536}, timeout_ms: 5000},
   )
   if !result.success {
     throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
   }
-  __io_println(result.stdout.contains("HARN_TEST_CHILD_VAR=") ? "leaked" : "absent")
+  harness.stdio.println(result.stdout.contains("HARN_TEST_CHILD_VAR=") ? "leaked" : "absent")
 }
 "#,
     )
@@ -762,12 +766,13 @@ async fn execute_run_isolated_policy_closes_subprocess_env() {
         r#"
 import { command_run } from "std/command"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const result = command_run(
+    harness.tools,
     {argv: ["sh", "-c", "printf %s \"$HARN_TEST_ISOLATED_SECRET\""]},
     {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
   )
-  __io_println(result.stdout == "" ? "CLOSED" : "LEAKED")
+  harness.stdio.println(result.stdout == "" ? "CLOSED" : "LEAKED")
 }
 "#,
     )
@@ -810,8 +815,8 @@ async fn execute_run_default_sandbox_reports_worktree_profile() {
     std::fs::write(
         &script,
         r"
-pipeline main() {
-  __io_println(sandbox_active_profile())
+pipeline main(harness: Harness) {
+  harness.stdio.println(harness.system.sandbox_active_profile())
 }
 ",
     )
@@ -849,9 +854,9 @@ async fn execute_run_default_sandbox_blocks_outside_workspace_read() {
         &script,
         format!(
             r#"
-pipeline main() {{
-  __io_println(sandbox_active_profile())
-  const _ = read_file("{outside_literal}")
+pipeline main(harness: Harness) {{
+  harness.stdio.println(harness.system.sandbox_active_profile())
+  const _ = harness.fs.read_text("{outside_literal}")
 }}
 "#
         ),
@@ -893,9 +898,9 @@ async fn execute_run_no_sandbox_allows_outside_workspace_read() {
         &script,
         format!(
             r#"
-pipeline main() {{
-  __io_println(sandbox_active_profile())
-  __io_println(read_file("{outside_literal}"))
+pipeline main(harness: Harness) {{
+  harness.stdio.println(harness.system.sandbox_active_profile())
+  harness.stdio.println(harness.fs.read_text("{outside_literal}"))
 }}
 "#
         ),
@@ -959,8 +964,8 @@ async fn execute_run_without_builtin_policy_eagerly_validates_manifest_handlers(
     let script = write_manifest_trigger_project(
         project.path(),
         r#"
-pipeline main() {
-  __io_println("target-ran")
+pipeline main(harness: Harness) {
+  harness.stdio.println("target-ran")
 }
 "#,
     );
@@ -996,8 +1001,8 @@ async fn execute_run_denies_network_by_default() {
     std::fs::write(
         &script,
         r#"
-pipeline main() {
-  const _ = http_get("https://example.com/")
+pipeline main(harness: Harness) {
+  const _ = harness.net.get("https://example.com/")
 }
 "#,
     )
@@ -1017,7 +1022,9 @@ pipeline main() {
 
     assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
     assert!(
-        outcome.stderr.contains("exceeds network.http ceiling"),
+        outcome
+            .stderr
+            .contains("exceeds the active effect ceiling: net:read"),
         "stderr:\n{}",
         outcome.stderr
     );
@@ -1026,14 +1033,13 @@ pipeline main() {
 
 #[cfg(feature = "hostlib")]
 #[tokio::test]
-async fn execute_run_installs_hostlib_gate() {
+async fn execute_run_installs_root_harness() {
     let temp = tempfile::NamedTempFile::new().expect("temp file");
     std::fs::write(
         temp.path(),
         r#"
-pipeline main() {
-  const _ = hostlib_enable("tools:deterministic")
-  __io_println("enabled")
+pipeline main(harness: Harness) {
+  harness.stdio.println("enabled")
 }
 "#,
     )
@@ -1062,23 +1068,22 @@ async fn execute_run_can_read_hostlib_command_artifacts() {
     std::fs::write(
         temp.path(),
         r#"
-pipeline main() {
-  const _ = hostlib_enable("tools:deterministic")
-  const result = hostlib_tools_run_command({
+pipeline main(harness: Harness) {
+  const result = harness.tools.run_command({
 argv: ["sh", "-c", "i=0; while [ $i -lt 2000 ]; do printf x; i=$((i+1)); done"],
 capture: {max_inline_bytes: 8},
 timeout_ms: 5000,
   })
-  __io_println(starts_with(result.command_id, "cmd_"))
-  __io_println(len(result.stdout))
-  __io_println(result.byte_count)
-  const window = hostlib_tools_read_command_output({
+  harness.stdio.println(starts_with(result.command_id, "cmd_"))
+  harness.stdio.println(len(result.stdout))
+  harness.stdio.println(result.byte_count)
+  const window = harness.tools.read_command_output({
 command_id: result.command_id,
 offset: 1990,
 length: 20,
   })
-  __io_println(len(window.content))
-  __io_println(window.eof)
+  harness.stdio.println(len(window.content))
+  harness.stdio.println(window.eof)
 }
 "#,
     )
@@ -1168,7 +1173,7 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
     // Entry pipeline at the PROJECT ROOT, rendering a top-level `@alias`.
     std::fs::write(
         project.join("main.harn"),
-        "pipeline main() {\n  let _ = render(\"@promptdir/greeting.harn.prompt\", {})\n}\n",
+        "pipeline main(harness: Harness) {\n  let _ = harness.fs.render_prompt(\"@promptdir/greeting.harn.prompt\", {})\n}\n",
     )
     .expect("write entry");
 

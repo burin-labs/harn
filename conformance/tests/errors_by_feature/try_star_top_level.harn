@@ -1,5 +1,5 @@
 // `try*` outside any function/pipeline/tool body is a compile error:
 // the rethrow has no body to live in.
-const x = try* read_file("nonexistent.txt")
+const x = try* Err("missing")
 
-harness.stdio.log(x)
+const y = x

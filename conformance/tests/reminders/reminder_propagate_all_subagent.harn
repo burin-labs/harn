@@ -1,5 +1,5 @@
-import { sub_agent_request, sub_agent_run, wait_agent } from "std/agent/workers"
 import { agent_loop } from "std/agent/loop"
+import { sub_agent_run } from "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn grandchild_tools() {
@@ -14,7 +14,9 @@ fn child_tools(harness: Harness, grandchild_session) {
     "Run a grandchild sub-agent",
     {
       handler: { _args ->
-        sub_agent_run(harness, "Grandchild task.",
+        sub_agent_run(
+          harness,
+          "Grandchild task.",
           {
             provider: "mock",
             session_id: grandchild_session,
@@ -40,7 +42,9 @@ fn parent_tools(harness: Harness, child_session, grandchild_session) {
     "Run a child sub-agent",
     {
       handler: { _args ->
-        sub_agent_run(harness, "Child task.",
+        sub_agent_run(
+          harness,
+          "Child task.",
           {
             provider: "mock",
             session_id: child_session,
@@ -74,7 +78,8 @@ pipeline main(harness: Harness) {
     ),
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "parent_delegate", name: "delegate_child", arguments: {}}]},
       {tool_calls: [{id: "child_delegate", name: "delegate_grandchild", arguments: {}}]},
       llm_text("grandchild done"),
@@ -82,7 +87,9 @@ pipeline main(harness: Harness) {
       llm_text("parent done"),
     ],
     { ->
-      agent_loop(harness, "Run child.",
+      agent_loop(
+        harness,
+        "Run child.",
         nil,
         {
           provider: "mock",

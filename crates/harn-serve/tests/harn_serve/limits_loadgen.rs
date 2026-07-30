@@ -400,8 +400,8 @@ async fn pg_query_budget_rejects_third_query_as_429_via_dispatch() {
         &dir,
         r#"
 @budget(pg_queries: 2)
-pub fn run_queries() -> int {
-  let pool = pg_mock_pool([{sql: "SELECT 1", rows: []}])
+pub fn run_queries(harness: Harness) -> int {
+  let pool = harness.testing.pg_mock_pool([{sql: "SELECT 1", rows: []}])
   pg_query(pool, "SELECT 1")
   pg_query(pool, "SELECT 1")
   pg_query(pool, "SELECT 1")

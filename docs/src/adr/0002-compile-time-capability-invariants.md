@@ -62,7 +62,7 @@ Three design axes mattered:
 We surveyed a handful of representative handlers: workspace-mutating
 tools (`write_file`, `apply_edit`, `delete_file`), HITL-gated pipelines
 that already call `request_approval` / `dual_control`, and budgeted LLM
-loops that thread `llm_budget_remaining()` through their state. The
+loops that thread `harness.llm.budget_remaining()` through their state. The
 common shape is: a handful of side-effecting builtin or tool calls,
 guarded by approval primitives and bounded by budget reads, with
 straight-line or simple branching control flow. That shape is exactly
@@ -93,8 +93,8 @@ opt-in.
 | Invariant | Meaning |
 |---|---|
 | `@invariant("fs.writes", "src/**")` | Every reachable filesystem-writing call (`write_file`, `apply_edit`, `delete_file`, …, plus `mcp_call`/`host_tool_call` whose tool name pattern-matches a writing verb) must target a literal path proven to stay within at least one declared glob. |
-| `@invariant("budget.remaining", target: "remaining")` | Assignments to the named budget variable may only preserve it, decrement it, or refresh it from `llm_budget_remaining()`. |
-| `@invariant("approval.reachability")` | Every reachable side-effecting call must be preceded by `request_approval(...)` or enclosed by a `dual_control(...)` approval scope on every path from the handler entry. |
+| `@invariant("budget.remaining", target: "remaining")` | Assignments to the named budget variable may only preserve it, decrement it, or refresh it from `harness.llm.budget_remaining()`. |
+| `@invariant("approval.reachability")` | Every reachable side-effecting call must be preceded by `harness.interaction.request_approval(...)` or enclosed by a `harness.interaction.dual_control(...)` approval scope on every path from the handler entry. |
 | `@invariant("capability.policy", allow: "fs.write,llm.model", ...)` | Every reachable effect must be declared in a canonical capability allow-list, and selected capabilities can require workspace globs, approval gates, budget evidence, autonomy policy, execution policy, command policy, egress policy, or tool approval policy. |
 
 These map onto the three concrete demands from the closed epic
@@ -110,7 +110,7 @@ The analysis is intentionally **conservative and decidable**:
 
 - **Literal-only path proofs.** `fs.writes` only proves a write is
   in-glob when the path argument is a string literal. Dynamic paths
-  fail the check — either as "outside the allowed glob(s)" (when the
+  fail the check — either as "outside the allowed harness.fs.glob(s)" (when the
   IR captured an identifier name that does not match) or "could not
   prove" (when the path expression is more complex). There is no
   symbolic reasoning over string concatenation, format strings, or

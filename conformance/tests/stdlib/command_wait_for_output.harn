@@ -9,9 +9,10 @@ const REQUEST = {
   timeout_ms: 1000,
 }
 
-fn test_wait_for_ready(harness: Harness) {
+fn test_wait_for_ready(testing: HarnessTesting, tools: HarnessTools) {
   const event = command_wait_for_output(
-    harness.tools, {handle_id: "hto-test-1", command_id: "cmd-test-1"},
+    tools,
+    {handle_id: "hto-test-1", command_id: "cmd-test-1"},
     REQUEST.pattern,
     {
       source: REQUEST.source,
@@ -20,7 +21,7 @@ fn test_wait_for_ready(harness: Harness) {
       timeout_ms: REQUEST.timeout_ms,
     },
   )
-  const calls = harness.testing.calls()
+  const calls = testing.calls()
   require len(calls) == 1
   require calls[0].capability == "tools"
   require calls[0].method == "wait_command_output"
@@ -61,6 +62,6 @@ pipeline default(harness: Harness) {
       },
     },
   )
-  test_wait_for_ready(harness)
+  test_wait_for_ready(harness.testing, harness.tools)
   harness.stdio.println("ok")
 }

@@ -7,37 +7,37 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * blocked and that safe rewordings (e.g. `--force-with-lease` without
  * `=false`, deletes targeting non-root paths) stay allowed.
  */
-fn probe(harness: Harness, reg, cmd) {
+fn probe(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
   /* Empty stacks so we exercise the "filter pass-through for stackless
    * catalogues" branch. */
-  const m = harness.tools.hooks_match(reg, cmd, {stacks: []})
+  const m = tools.hooks_match(reg, cmd, {stacks: []})
   if len(m) > 0 {
-    harness.stdio.println(m[0].rule_id + " " + m[0].severity)
+    stdio.println(m[0].rule_id + " " + m[0].severity)
   } else {
-    harness.stdio.println("miss")
+    stdio.println("miss")
   }
 }
 
 pipeline default(harness: Harness) {
-  const reg = tool_hooks_seed_registry(harness, [])
+  const reg = tool_hooks_seed_registry(harness.env, harness.tools, [])
   /* git_push_force_main: long, short, in-place force-with-lease=false,
    * and trailing-position --force all denied. */
-  probe(harness, reg, "git push --force origin main")
-  probe(harness, reg, "git push -f origin master")
-  probe(harness, reg, "git push --force-with-lease=false origin main")
-  probe(harness, reg, "git push origin main --force")
+  probe(harness.stdio, harness.tools, reg, "git push --force origin main")
+  probe(harness.stdio, harness.tools, reg, "git push -f origin master")
+  probe(harness.stdio, harness.tools, reg, "git push --force-with-lease=false origin main")
+  probe(harness.stdio, harness.tools, reg, "git push origin main --force")
   /* Safe forms — quiet. */
-  probe(harness, reg, "git push --force-with-lease origin main")
-  probe(harness, reg, "git push origin feature --force")
-  probe(harness, reg, "git push origin mainline --force")
+  probe(harness.stdio, harness.tools, reg, "git push --force-with-lease origin main")
+  probe(harness.stdio, harness.tools, reg, "git push origin feature --force")
+  probe(harness.stdio, harness.tools, reg, "git push origin mainline --force")
   /* rm_rf_root_adjacent: bundled/split flags, quoted/unquoted paths. */
-  probe(harness, reg, "rm -rf /")
-  probe(harness, reg, "rm -fr /")
-  probe(harness, reg, "rm -Rf '/'")
-  probe(harness, reg, "rm --recursive --force ..")
-  probe(harness, reg, "rm --force --recursive ~")
+  probe(harness.stdio, harness.tools, reg, "rm -rf /")
+  probe(harness.stdio, harness.tools, reg, "rm -fr /")
+  probe(harness.stdio, harness.tools, reg, "rm -Rf '/'")
+  probe(harness.stdio, harness.tools, reg, "rm --recursive --force ..")
+  probe(harness.stdio, harness.tools, reg, "rm --force --recursive ~")
   /* Safe forms — quiet. */
-  probe(harness, reg, "rm -rf ./target")
-  probe(harness, reg, "rm -rf /tmp/build")
-  probe(harness, reg, "rm myfile.txt")
+  probe(harness.stdio, harness.tools, reg, "rm -rf ./target")
+  probe(harness.stdio, harness.tools, reg, "rm -rf /tmp/build")
+  probe(harness.stdio, harness.tools, reg, "rm myfile.txt")
 }

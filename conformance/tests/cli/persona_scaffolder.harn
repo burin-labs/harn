@@ -6,8 +6,7 @@ pipeline default(harness: Harness) {
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn_persona_scaffolder_" + harness.random.uuid_v7())
-  harness.fs.mkdir(root)
+  const root = harness.fs.mkdtemp("harn-persona-scaffolder-")
   const created = harness.process.exec_at(
     root,
     harn_bin,
@@ -21,15 +20,31 @@ pipeline default(harness: Harness) {
   const persona_dir = path_join(root, "personas/my_release_captain")
   harness.stdio.println(harness.fs.exists(path_join(persona_dir, "harn.toml")))
   harness.stdio.println(harness.fs.exists(path_join(persona_dir, "src/my_release_captain.harn")))
-  harness.stdio.println(harness.fs.exists(path_join(persona_dir, "tests/my_release_captain_smoke.harn")))
-  harness.stdio.println(harness.fs.exists(path_join(persona_dir, "tests/my_release_captain_smoke.expected")))
+  harness.stdio.println(
+    harness.fs.exists(path_join(persona_dir, "tests/my_release_captain_smoke.harn")),
+  )
+  harness.stdio.println(
+    harness.fs.exists(path_join(persona_dir, "tests/my_release_captain_smoke.expected")),
+  )
   harness.stdio.println(harness.fs.exists(path_join(persona_dir, "fixtures/happy_path.json")))
   harness.stdio.println(harness.fs.exists(path_join(persona_dir, "evals/smoke.eval.json")))
-  const doctor = harness.process.exec_at(root, harn_bin, "persona", "doctor", "my_release_captain", "--json")
+  const doctor = harness.process.exec_at(
+    root,
+    harn_bin,
+    "persona",
+    "doctor",
+    "my_release_captain",
+    "--json",
+  )
   harness.stdio.println(doctor.success)
   const report = json_parse(doctor.stdout)
   harness.stdio.println(report.persona)
   harness.stdio.println(len(report.checks) >= 6)
-  const smoke = harness.process.exec_at(persona_dir, harn_bin, "test", "tests/my_release_captain_smoke.harn")
+  const smoke = harness.process.exec_at(
+    persona_dir,
+    harn_bin,
+    "test",
+    "tests/my_release_captain_smoke.harn",
+  )
   harness.stdio.println(smoke.success)
 }

@@ -25,14 +25,19 @@ pipeline default(harness: Harness) {
   }
   // Wrap the fallback in an outer caller so we can println the merged
   // fallback_index for the test before returning to agent_loop.
-  const inner = with_fallback(harness, [caller_a, caller_b])
+  const inner = with_fallback(harness.agent, [caller_a, caller_b])
   const observe = { call ->
     let env = inner(call)
     harness.stdio.println("fallback_index=" + to_string(env?.fallback_index ?? -1))
     harness.stdio.println("fallback_total=" + to_string(env?.fallback_total ?? -1))
     return env
   }
-  const result = agent_loop(harness, "hi", nil, {provider: "mock", llm_caller: observe, max_iterations: 1})
+  const result = agent_loop(
+    harness,
+    "hi",
+    nil,
+    {provider: "mock", llm_caller: observe, max_iterations: 1},
+  )
   harness.stdio.println(result.status)
   harness.stdio.println(result.visible_text)
 }

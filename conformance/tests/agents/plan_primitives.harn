@@ -23,12 +23,17 @@ pipeline main(harness: Harness) {
   require artifact.steps[0]?.status == "completed", "step status should normalize"
   require len(plan_acp_entries(artifact)) == 2, "ACP entries should derive from steps"
   harness.testing.clear()
-  harness.testing.respond("interaction", "approval_response", {approved: true, reviewer: "lead", reason: "ready"})
-  const approved = request_plan_approval(harness, artifact, {reviewers: ["lead"]})
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    {approved: true, reviewer: "lead", reason: "ready"},
+  )
+  const approved = request_plan_approval(harness.interaction, artifact, {reviewers: ["lead"]})
   require approved.approval.state == "approved", "plan approval should use HITL"
   require approved.approval.reviewers?.[0] == "lead", "reviewer should round-trip"
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {
@@ -48,7 +53,9 @@ pipeline main(harness: Harness) {
       llm_text("Plan emitted."),
     ],
     { ->
-      const result = agent_loop(harness, "Plan a parser change",
+      const result = agent_loop(
+        harness,
+        "Plan a parser change",
         nil,
         {provider: "mock", tools: tools, max_iterations: 2, session_id: "plan-conformance"},
       )

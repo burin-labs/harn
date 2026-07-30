@@ -1,4 +1,3 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 // Live-shape / registration proof for `agent_completion_gate` (std/agent/judge).
 //
@@ -18,6 +17,7 @@ import { agent_capture_events } from "std/agent/events"
 //   D. no host-fact callbacks -> graceful judge-only degradation, surfaced via the
 //      bundle's `_completion_gate.facts_available` flag (never a silent pass).
 import { agent_completion_gate } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn events_of(events, kind) {
@@ -48,7 +48,7 @@ pipeline default(harness: Harness) {
       const calls_key = "cg-calls-" + session
       harness.runtime.store_set(calls_key, 0)
       const captured = agent_capture_events(
-        harness,
+        harness.agent,
         session,
         fn() { return agent_loop(
           harness,
@@ -91,7 +91,7 @@ pipeline default(harness: Harness) {
       const session = "cg-green-" + harness.random.uuid()
       const probe = "cg-probe-" + session
       const captured = agent_capture_events(
-        harness,
+        harness.agent,
         session,
         fn() { return agent_loop(
           harness,
@@ -143,7 +143,7 @@ pipeline default(harness: Harness) {
     { ->
       const session = "cg-red-" + harness.random.uuid()
       const captured = agent_capture_events(
-        harness,
+        harness.agent,
         session,
         fn() { return agent_loop(
           harness,
@@ -185,7 +185,7 @@ pipeline default(harness: Harness) {
     { ->
       const session = "cg-degraded-" + harness.random.uuid()
       const captured = agent_capture_events(
-        harness,
+        harness.agent,
         session,
         fn() { return agent_loop(
           harness,
@@ -221,7 +221,7 @@ pipeline default(harness: Harness) {
       const session = "cg-escalation-" + harness.random.uuid()
       const decorated_key = "cg-decorated-" + session
       const captured = agent_capture_events(
-        harness,
+        harness.agent,
         session,
         fn() { return agent_loop(
           harness,

@@ -8,7 +8,8 @@ import { llm_text, with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("{\"ok\":true}")],
+    harness.llm,
+    [llm_text("{\"ok\":true}")],
     { ->
       const result = harness.llm.call(
         "return a structured answer",

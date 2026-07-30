@@ -16,7 +16,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(len(filled.models) > 0)
   // Caller input wins over the pack at every key.
   const overridden = agent_preset(
-    harness, "audit",
+    harness,
+    "audit",
     {
       timeout_ms: 42,
       budget: {total_budget_usd: 9.5},
@@ -38,12 +39,17 @@ pipeline default(harness: Harness) {
   const provider_only = agent_preset(harness, "audit", {provider: "llamacpp"})
   harness.stdio.println(provider_only.provider)
   harness.stdio.println(provider_only?.models == nil)
-  const configured_pair = agent_preset(harness, "audit", {provider: "llamacpp", model: "gemma4-local"})
+  const configured_pair = agent_preset(
+    harness,
+    "audit",
+    {provider: "llamacpp", model: "gemma4-local"},
+  )
   harness.stdio.println(configured_pair.provider)
   harness.stdio.println(configured_pair.model)
   harness.stdio.println(configured_pair?.models == nil)
   const nested_route = agent_preset(
-    harness, "audit",
+    harness,
+    "audit",
     {llm_options: {provider: "llamacpp", model: "gemma4-local"}},
   )
   harness.stdio.println(nested_route?.provider == nil)

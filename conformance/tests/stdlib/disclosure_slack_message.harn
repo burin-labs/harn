@@ -14,8 +14,8 @@ pipeline default(harness: Harness) {
     surfaces: {slack: {customize_icon_emoji: ":harn:"}},
   }
   const options = {project: false, env: false, config: config}
-  const byline = render(harness, chain, "slack", options)
-  const disclosure = slack_message_disclosure(harness, chain, options)
+  const byline = render(harness.env, harness.fs, chain, "slack", options)
+  const disclosure = slack_message_disclosure(harness.env, harness.fs, chain, options)
   harness.stdio.println(byline)
   harness.stdio.println(disclosure.kind)
   harness.stdio.println(disclosure.byline)

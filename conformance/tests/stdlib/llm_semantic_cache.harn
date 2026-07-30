@@ -40,7 +40,9 @@ pipeline default(harness: Harness) {
       value: {text: "answer:" + call.prompt, usage: {input_tokens: 10, output_tokens: 5}},
     }
   }
-  const caller = with_semantic_cache(harness, next,
+  const caller = with_semantic_cache(
+    harness,
+    next,
     {store: mem_cache({namespace: "semtest"}), threshold: 0.95, embed_model_hint: "t", root: root},
   )
   const base = {system: nil, opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}}
@@ -57,7 +59,9 @@ pipeline default(harness: Harness) {
   // Bounded index: with `max_entries: 1` each store evicts the prior entry, so
   // the France embedding is gone by the time its paraphrase arrives — proving
   // the index cannot grow without limit (an unbounded index would hit here).
-  const bounded = with_semantic_cache(harness, next,
+  const bounded = with_semantic_cache(
+    harness,
+    next,
     {
       store: mem_cache({namespace: "bounded"}),
       threshold: 0.95,

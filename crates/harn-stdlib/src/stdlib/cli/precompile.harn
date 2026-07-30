@@ -26,7 +26,7 @@
  *   HARN_PRECOMPILE_KEEP_GOING — "1" to continue after a per-file error
  *   HARN_PRECOMPILE_QUIET      — "1" to suppress per-file progress
  */
-fn __collect_harn_files(harness: Harness, root: string) -> list<string> {
+fn __collect_harn_files(fs: HarnessFs, root: string) -> list<string> {
   // walk_dir returns a flat list of {path, is_dir, is_file, depth}. We
   // only emit `.harn` files. Walk order is stable per the builtin
   // contract; we sort + dedupe afterwards to match the Rust impl which
@@ -35,7 +35,7 @@ fn __collect_harn_files(harness: Harness, root: string) -> list<string> {
   // The Rust collect_harn_files() (crates/harn-cli/src/commands/mod.rs)
   // also drops files with a sibling `<name>.conformance-skip` marker;
   // mirror that here so a directory with skip markers walks identically.
-  const entries = harness.fs.walk(root)
+  const entries = fs.walk(root)
   let files = []
   for entry in entries {
     const path = entry["path"]
@@ -47,7 +47,7 @@ fn __collect_harn_files(harness: Harness, root: string) -> list<string> {
       continue
     }
     const skip_marker = path_with_extension(path, "conformance-skip")
-    if harness.fs.exists(skip_marker) {
+    if fs.exists(skip_marker) {
       continue
     }
     files = files.appending(path)
@@ -91,15 +91,15 @@ fn __destination_path(
   return path_with_extension(joined, extension)
 }
 
-fn __ensure_parent(harness: Harness, path: string) {
+fn __ensure_parent(fs: HarnessFs, path: string) {
   const parent = path_parent(path)
-  if parent != "" && !harness.fs.exists(parent) {
-    harness.fs.mkdir(parent)
+  if parent != "" && !fs.exists(parent) {
+    fs.mkdir(parent)
   }
 }
 
 fn __spawn_precompile(
-  harness: Harness,
+  process: HarnessProcess,
   bin: string,
   source_path: string,
   per_file_out: string,
@@ -117,7 +117,7 @@ fn __spawn_precompile(
     args = args.appending(per_file_out)
   }
   const env = {HARN_PRECOMPILE_INNER: "1"}
-  return harness.process.run({cmd: bin, args: args, env: env})
+  return process.run({program: bin, args: args, env: env})
 }
 
 fn __render_failure(source: string, child: dict) -> string {
@@ -154,7 +154,7 @@ fn main(harness: Harness) {
   const info = harness.fs.stat(target)
   const is_dir = info["is_dir"] ?? false
   const sources = if is_dir {
-    __collect_harn_files(harness, target)
+    __collect_harn_files(harness.fs, target)
   } else {
     [target]
   }
@@ -179,10 +179,10 @@ fn main(harness: Harness) {
       ""
     } else {
       let dest = __destination_path(source, source_root, out_root, "harnbc")
-      __ensure_parent(harness, dest)
+      __ensure_parent(harness.fs, dest)
       path_parent(dest)
     }
-    const child = __spawn_precompile(harness, bin, source, per_file_out)
+    const child = __spawn_precompile(harness.process, bin, source, per_file_out)
     const exit_code = child["exit_code"] ?? -1
     if exit_code == 0 {
       compiled = compiled + 1

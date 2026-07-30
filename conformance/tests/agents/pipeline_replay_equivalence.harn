@@ -35,7 +35,7 @@ pipeline default(harness: Harness) {
         {target_pipeline: "nightly-drain", envelope_id: "envelope_replay_1"},
       )
       harness.emit_audit("pipeline_finalized", {reason: "replay_complete"})
-      const recorded = lifecycle_audit_log_take(harness)
+      const recorded = lifecycle_audit_log_take(harness.obs)
       const stream = harness.obs.event_log_subscribe(
         {topic: topic, from_cursor: cursor, kind_prefix: "lifecycle_audit"},
       )

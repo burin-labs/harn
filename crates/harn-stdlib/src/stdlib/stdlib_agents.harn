@@ -1,9 +1,9 @@
 pub import "std/agent/action_graph"
+import { agent_loop } from "std/agent/loop"
 pub import "std/agent/result_text"
 pub import "std/agent/workers"
 import "std/collections"
 import "std/context"
-import { agent_loop } from "std/agent/loop"
 import { llm_call_options } from "std/llm/options"
 import { workflow_execute } from "std/workflow/execute"
 
@@ -13,12 +13,12 @@ import { workflow_execute } from "std/workflow/execute"
  * @effects: []
  * @errors: []
  */
-pub fn workflow_model_spec(harness: Harness, config) {
+pub fn workflow_model_spec(llm: HarnessLlm, config) {
   const target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
   if target == nil || target == "" {
     return nil
   }
-  return harness.llm.pick_model(target, filter_nil({provider: config?.provider}))
+  return llm.pick_model(target, filter_nil({provider: config?.provider}))
 }
 
 /**
@@ -27,8 +27,8 @@ pub fn workflow_model_spec(harness: Harness, config) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_options(harness: Harness, config) {
-  const spec = workflow_model_spec(harness, config)
+pub fn workflow_options(llm: HarnessLlm, config) {
+  const spec = workflow_model_spec(llm, config)
   const option_keys = __llm_call_option_registry().keys
     + [
     "loop_until_done",
@@ -96,7 +96,7 @@ pub fn stage_prompt(task, config) {
  */
 pub fn run_stage(harness: Harness, task, config) {
   const prompt = stage_prompt(task, config)
-  const opts = workflow_options(harness, config)
+  const opts = workflow_options(harness.llm, config)
   if config?.mode == "completion" {
     return harness.llm.completion(
       prompt?.prompt,
@@ -126,8 +126,8 @@ pub fn verify_command(process: HarnessProcess, config) {
   if config?.command == nil || config?.command == "" {
     return nil
   }
-  const shell = process.default_shell()
-  const output = process.run({mode: "shell", command: config?.command, shell_id: shell?.id})
+  const invocation = process.shell_invocation({command: config.command})
+  const output = process.run({program: invocation.program, args: invocation.args})
   let ok = output?.success
   if config?.expect_status != nil {
     const actual_status = output?.exit_code ?? output?.legacy_status ?? output?.status
@@ -196,13 +196,7 @@ pub fn workflow(config) {
  */
 pub fn task_run(harness: Harness, task, flow, overrides) {
   const graph = workflow_graph(flow ?? {})
-  const runtime = workflow_execute(
-    harness,
-    task,
-    graph,
-    overrides?.artifacts ?? [],
-    overrides,
-  )
+  const runtime = workflow_execute(harness, task, graph, overrides?.artifacts ?? [], overrides)
   const stages = runtime?.run?.stages ?? []
   let act = nil
   let verify = nil
@@ -332,7 +326,7 @@ pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_result_run(harness: Harness, task, workflow_name, result, artifacts, options) {
+pub fn workflow_result_run(obs: HarnessObs, task, workflow_name, result, artifacts, options) {
   const base_run = if result?._type == "run_record" {
     result
   } else {
@@ -359,7 +353,7 @@ pub fn workflow_result_run(harness: Harness, task, workflow_name, result, artifa
       status: options?.status ?? base_run?.status ?? "completed",
       transcript: transcript,
       artifacts: run_artifacts,
-      trace_spans: harness.obs.trace_spans(),
+      trace_spans: obs.trace_spans(),
       metadata: metadata,
     },
   )
@@ -371,7 +365,15 @@ pub fn workflow_result_run(harness: Harness, task, workflow_name, result, artifa
  * @effects: []
  * @errors: []
  */
-pub fn workflow_result_persist(harness: Harness, task, workflow_name, result, artifacts, options) {
+pub fn workflow_result_persist(
+  fs: HarnessFs,
+  obs: HarnessObs,
+  task,
+  workflow_name,
+  result,
+  artifacts,
+  options,
+) {
   const base_run = if result?._type == "run_record" {
     result
   } else {
@@ -398,11 +400,11 @@ pub fn workflow_result_persist(harness: Harness, task, workflow_name, result, ar
       status: options?.status ?? base_run?.status ?? "completed",
       transcript: transcript,
       artifacts: run_artifacts,
-      trace_spans: harness.obs.trace_spans(),
+      trace_spans: obs.trace_spans(),
       metadata: metadata,
     },
   )
-  const persisted = harness.fs.run_record_save(run, options?.path)
+  const persisted = fs.run_record_save(run, options?.path)
   return {
     path: persisted?.path,
     persisted_path: persisted?.path,
@@ -485,9 +487,9 @@ pub fn workflow_session_new(metadata) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_restore(harness: Harness, source) {
+pub fn workflow_session_restore(fs: HarnessFs, source) {
   const run = if type_of(source) == "string" {
-    harness.fs.run_record_load(source)
+    fs.run_record_load(source)
   } else {
     source?.run ?? source
   }
@@ -601,10 +603,10 @@ pub fn workflow_session_reset(agent: HarnessAgent, prev, carry_summary) {
  * @effects: []
  * @errors: []
  */
-pub fn continue_as_new(harness: Harness, prev, options = nil) {
+pub fn continue_as_new(agent: HarnessAgent, runtime: HarnessRuntime, prev, options = nil) {
   const session = workflow_session(prev)
   const carry_summary = options?.carry_summary ?? true
-  const _ = harness.runtime.workflow_continue_as_new(session)
+  const _ = runtime.workflow_continue_as_new(session)
   return workflow_session(
     {
       workflow_id: session.workflow_id,
@@ -612,7 +614,7 @@ pub fn continue_as_new(harness: Harness, prev, options = nil) {
       status: "active",
       persisted_path: session.persisted_path,
       run: session.run,
-      transcript: workflow_reset(harness.agent, session.transcript, carry_summary),
+      transcript: workflow_reset(agent, session.transcript, carry_summary),
     },
   )
 }
@@ -623,12 +625,12 @@ pub fn continue_as_new(harness: Harness, prev, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_persist(harness: Harness, prev, path) {
+pub fn workflow_session_persist(fs: HarnessFs, prev, path) {
   const session = workflow_session(prev)
   if session.run == nil {
     return session
   }
-  const persisted = harness.fs.run_record_save(session.run, path)
+  const persisted = fs.run_record_save(session.run, path)
   return workflow_session(session + {run: persisted?.run, persisted_path: persisted?.path})
 }
 

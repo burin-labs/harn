@@ -28,7 +28,7 @@ pipeline main(harness: Harness) {
   )
   const emitted = handoff_artifact(review)
   const run = workflow_result_run(
-    harness,
+    harness.obs,
     "Prepare review handoff",
     "merge_captain",
     {visible_text: "handoff ready"},

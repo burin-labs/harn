@@ -49,13 +49,16 @@ fn injected_kind_in(calls, idx, marker) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Let me edit the file now."),
       llm_tool_call("edit", {path: "main.py"}),
       llm_text("The edit is complete."),
     ],
     { ->
-      const result = agent_loop(harness, "Edit main.py.",
+      const result = agent_loop(
+        harness,
+        "Edit main.py.",
         nil,
         {
           provider: "mock",

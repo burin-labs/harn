@@ -10,7 +10,10 @@ pipeline default(harness: Harness) {
   const helper_dir = path_join(root, "conformance/helpers")
   const server_script = path_join(helper_dir, "mcp_echo_server.harn")
   const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, root))
-  const state_dir = path_join(harness.fs.workspace_temp_dir(), "harn-agent-loop-mcp-" + harness.random.uuid())
+  const state_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-agent-loop-mcp-" + harness.random.uuid(),
+  )
   const state_path = path_join(state_dir, "state.jsonl")
   const pid_path = path_join(state_dir, "server.pid")
   const log_path = path_join(state_dir, "server.log")
@@ -53,7 +56,8 @@ pipeline default(harness: Harness) {
       }
       const result = agent_loop(harness, "Use both MCP echo tools", nil, opts)
       const calls = wait_for_file_content(
-        harness,
+        harness.clock,
+        harness.fs,
         state_path,
         { text ->
           const parsed = parse_jsonl(text)

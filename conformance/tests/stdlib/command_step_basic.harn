@@ -1,14 +1,14 @@
 import { command_output_tail, command_step } from "std/command"
 
-fn no_newline_echo(harness: Harness, text) {
-  if harness.system.platform().os == "windows" {
+fn no_newline_echo(system: HarnessSystem, text) {
+  if system.platform().os == "windows" {
     return ["cmd", "/C", "echo|set /p=" + text]
   }
   return ["printf", text]
 }
 
-fn failing_command(harness: Harness) {
-  if harness.system.platform().os == "windows" {
+fn failing_command(system: HarnessSystem) {
+  if system.platform().os == "windows" {
     return ["cmd", "/C", "echo out&&echo err 1>&2&&exit /b 7"]
   }
   return ["sh", "-c", "printf out; printf err >&2; exit 7"]
@@ -19,7 +19,7 @@ pipeline default(harness: Harness) {
     harness.tools,
     harness.clock,
     "say hello",
-    no_newline_echo(harness, "hello"),
+    no_newline_echo(harness.system, "hello"),
     {capture: {max_inline_bytes: 100}, tail_bytes: 100},
   )
   assert_eq(step.name, "say hello")
@@ -39,7 +39,7 @@ pipeline default(harness: Harness) {
     harness.tools,
     harness.clock,
     "fail",
-    failing_command(harness),
+    failing_command(harness.system),
     {capture: {max_inline_bytes: 100}, tail_bytes: 100},
   )
   assert_eq(failed.success, false)

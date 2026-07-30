@@ -416,8 +416,8 @@ async fn generate_sdk_source(
     let script = format!(
         r#"import {{ codegen_module, parse }} from {import_path}
 
-fn _load_doc(path: string) {{
-  const raw = read_file(path)
+fn _load_doc(fs: HarnessFs, path: string) {{
+  const raw = fs.read_text(path)
   const decoded = try {{
     json_parse(raw)
   }} catch (e) {{
@@ -426,8 +426,8 @@ fn _load_doc(path: string) {{
   return parse(json_stringify(decoded))
 }}
 
-pipeline default() {{
-  const doc = _load_doc(argv[0])
+pipeline default(harness: Harness) {{
+  const doc = _load_doc(harness.fs, argv[0])
   let options = {{
     module_name: argv[2],
     client_name: argv[3],
@@ -435,7 +435,7 @@ pipeline default() {{
   if argv[4] != "" {{
     options = {{...options, default_base_url: argv[4]}}
   }}
-  write_file(argv[1], codegen_module(doc, options))
+  harness.fs.write_text(argv[1], codegen_module(doc, options))
 }}
 "#,
         import_path = harn_string_literal(harn_openapi_import)
@@ -572,8 +572,8 @@ fn regen_script_source(
     format!(
         r#"import {{ codegen_module, parse }} from "harn-openapi/default"
 
-fn _load_doc(path: string) {{
-  const raw = read_file(path)
+fn _load_doc(fs: HarnessFs, path: string) {{
+  const raw = fs.read_text(path)
   const decoded = try {{
     json_parse(raw)
   }} catch (e) {{
@@ -582,12 +582,12 @@ fn _load_doc(path: string) {{
   return parse(json_stringify(decoded))
 }}
 
-pipeline default() {{
-  const root = source_dir() + "/.."
+pipeline default(harness: Harness) {{
+  const root = harness.fs.source_dir() + "/.."
   const spec_path = if len(argv) > 0 {{ argv[0] }} else {{ root + "/" + {spec_path} }}
   const out_path = if len(argv) > 1 {{ argv[1] }} else {{ root + "/src/lib.harn" }}
-  const doc = _load_doc(spec_path)
-  write_file(
+  const doc = _load_doc(harness.fs, spec_path)
+  harness.fs.write_text(
     out_path,
     codegen_module(
       doc,
@@ -598,7 +598,7 @@ pipeline default() {{
       }},
     ),
   )
-  __io_println("wrote " + out_path)
+  harness.stdio.println("wrote " + out_path)
 }}
 "#,
         spec_path = harn_string_literal(spec_relative_path),
@@ -613,16 +613,16 @@ fn smoke_test_source(smoke: Option<&SmokeOperation>, default_base_url: &str) -> 
         return format!(
             r#"import {{ new_client, {fn_name} }} from "../src/lib"
 
-pipeline test_generated_sdk_smoke(task) {{
-  http_mock_clear()
-  http_mock({method}, {url}, {{
+pipeline test_generated_sdk_smoke(harness: Harness, task) {{
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock({method}, {url}, {{
     status: 200,
     body: "{{}}",
     headers: {{"content-type": "application/json"}},
   }})
   const client = new_client()
-  {fn_name}(client)
-  const calls = http_mock_calls()
+  {fn_name}(harness.net, client)
+  const calls = harness.testing.http_mock_calls()
   assert_eq(len(calls), 1)
   assert_eq(calls[0].method, {method})
 }}
@@ -1111,8 +1111,8 @@ pub fn codegen_module(doc, options) -> string {
     + "  return []\n"
     + "}\n\n"
     + "/** ping */\n"
-    + "pub fn ping(client: dict) -> nil {\n"
-    + "  const resp = http_get(client.base_url + \"/ping\", {headers: {}})\n"
+    + "pub fn ping(net: HarnessNet, client: dict) -> nil {\n"
+    + "  const resp = net.get(client.base_url + \"/ping\", {headers: {}})\n"
     + "  if resp.status >= 400 { throw \"ping failed\" }\n"
     + "  return nil\n"
     + "}\n"

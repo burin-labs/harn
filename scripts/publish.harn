@@ -90,20 +90,20 @@ fn failed_receipt(
   }
 }
 
-fn wait_until_visible(harness: Harness, 
+fn wait_until_visible(
   name: string,
   version: string,
   probe: fn(string, string) -> RegistryProbe,
   wait: fn(int) -> nil,
   backoff_ms: list<int>,
 ) -> RegistryWait {
-  let last = probe(harness, name, version)
+  let last = probe(name, version)
   if last.status == "visible" {
     return {ok: true, waited: false, detail: "visible"}
   }
   for delay in backoff_ms {
     wait(delay)
-    last = probe(harness, name, version)
+    last = probe(name, version)
     if last.status == "visible" {
       return {ok: true, waited: true, detail: "visible"}
     }
@@ -144,7 +144,7 @@ pub fn publish_failure_category(output: string) -> PublishFailureCategory {
  * Resume a workspace publication directly from the unpublished dependency DAG.
  * Registry, Cargo, and waiting are injected so recovery tests never sleep.
  */
-pub fn publish_recover(harness: Harness, 
+pub fn publish_recover(
   packages: list<PublishPlanPackage>,
   adapters: PublishAdapters,
   options: PublishRecoveryOptions = {},
@@ -172,7 +172,7 @@ pub fn publish_recover(harness: Harness,
       if !published.contains(dep) {
         continue
       }
-      const visibility = wait_until_visible(harness, dep, version, adapters.probe, adapters.wait, backoff_ms)
+      const visibility = wait_until_visible(dep, version, adapters.probe, adapters.wait, backoff_ms)
       if visibility.waited {
         waiting = add_unique(waiting, dep)
       }
@@ -224,7 +224,7 @@ pub fn publish_recover(harness: Harness,
           if !published.contains(dep) {
             continue
           }
-          const visibility = wait_until_visible(harness, 
+          const visibility = wait_until_visible(
             dep,
             version,
             adapters.probe,
@@ -274,8 +274,8 @@ pub fn publish_recover(harness: Harness,
   }
 }
 
-fn crates_io_probe(harness: Harness, name: string, version: string) -> RegistryProbe {
-  const response: {status: int, ...rest} = harness.net.get(
+fn crates_io_probe(net: HarnessNet, name: string, version: string) -> RegistryProbe {
+  const response: {status: int, ...rest} = net.get(
     "https://crates.io/api/v1/crates/" + name + "/" + version,
     {
       headers: {"User-Agent": "harn-release-publish"},
@@ -312,30 +312,30 @@ fn publish_argv(package: PublishPlanPackage, verify: bool, allow_dirty: bool) ->
  * credential-shaped variables. Overlay the crates.io token explicitly so
  * `cargo publish` still authenticates (harn#5255 DAG publisher + hermetic env).
  */
-fn cargo_publish_env(harness: Harness) -> dict {
-  let env = {}
-  const token = harness.env.get("CARGO_REGISTRY_TOKEN")
+fn cargo_publish_env(env: HarnessEnv) -> dict {
+  let overlay = {}
+  const token = env.get("CARGO_REGISTRY_TOKEN")
   if token {
-    env = env + {CARGO_REGISTRY_TOKEN: token}
+    overlay = overlay + {CARGO_REGISTRY_TOKEN: token}
   }
-  const crates_io_token = harness.env.get("CARGO_REGISTRIES_CRATES_IO_TOKEN")
+  const crates_io_token = env.get("CARGO_REGISTRIES_CRATES_IO_TOKEN")
   if crates_io_token {
-    env = env + {CARGO_REGISTRIES_CRATES_IO_TOKEN: crates_io_token}
+    overlay = overlay + {CARGO_REGISTRIES_CRATES_IO_TOKEN: crates_io_token}
   }
-  return env
+  return overlay
 }
 
-fn run_cargo_publish(harness: Harness, args: list<string>) -> CommandResult {
-  return command_run(harness.tools, args, {env: cargo_publish_env(harness), env_mode: "patch"})
+fn run_cargo_publish(env: HarnessEnv, tools: HarnessTools, args: list<string>) -> CommandResult {
+  return command_run(tools, args, {env: cargo_publish_env(env), env_mode: "patch"})
 }
 
-fn tree_requires_allow_dirty(harness: Harness) -> bool {
-  const diff = command_run(harness.tools, ["git", "diff", "--quiet", "--ignore-submodules", "HEAD", "--"])
+fn tree_requires_allow_dirty(fs: HarnessFs, tools: HarnessTools) -> bool {
+  const diff = command_run(tools, ["git", "diff", "--quiet", "--ignore-submodules", "HEAD", "--"])
   if !diff.success {
     return true
   }
-  return harness.fs.exists("crates/harn-cli/generated/cli-bytecode-manifest.json")
-    || harness.fs.exists(
+  return fs.exists("crates/harn-cli/generated/cli-bytecode-manifest.json")
+    || fs.exists(
     "crates/harn-cli/portal-dist",
   )
 }
@@ -348,21 +348,22 @@ fn tree_requires_allow_dirty(harness: Harness) -> bool {
  * is already ~180 KiB, which previously aborted crates.io finalize with
  * `structured_parse_error` / EOF mid-string.
  */
-fn load_publish_packages(harness: Harness) -> list<PublishPlanPackage> {
-  const tmp = command_run(harness.tools, ["mktemp", "harn-publish-metadata.XXXXXX"])
+fn load_publish_packages(fs: HarnessFs, tools: HarnessTools) -> list<PublishPlanPackage> {
+  const tmp = command_run(tools, ["mktemp", "harn-publish-metadata.XXXXXX"])
   if !tmp.success {
     throw "mktemp failed while staging cargo metadata: " + command_output(tmp)
   }
   const metadata_path = trim(tmp.stdout)
   const write = command_run(
-    harness.tools, ["bash", "-lc", "cargo metadata --format-version 1 --no-deps > " + shell_quote(metadata_path)],
+    tools,
+    ["bash", "-lc", "cargo metadata --format-version 1 --no-deps > " + shell_quote(metadata_path)],
   )
   if !write.success {
-    const _ = command_run(harness.tools, ["rm", "-f", metadata_path])
+    const _ = command_run(tools, ["rm", "-f", metadata_path])
     throw "cargo metadata failed: " + command_output(write)
   }
-  const text = harness.fs.read_text(metadata_path)
-  const _ = command_run(harness.tools, ["rm", "-f", metadata_path])
+  const text = fs.read_text(metadata_path)
+  const _ = command_run(tools, ["rm", "-f", metadata_path])
   return publish_plan_packages_from_metadata(json_parse(text))
 }
 
@@ -372,8 +373,8 @@ fn arg_spec() {
   )
 }
 
-fn print_receipt(harness: Harness, receipt: PublishReceipt) -> nil {
-  harness.stdio.println(json_stringify(receipt))
+fn print_receipt(stdio: HarnessStdio, receipt: PublishReceipt) -> nil {
+  stdio.println(json_stringify(receipt))
   return nil
 }
 
@@ -388,17 +389,17 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const dry_run = unwrap(parsed_result).options.dry_run ?? false
-  const packages = load_publish_packages(harness)
+  const packages = load_publish_packages(harness.fs, harness.tools)
   const version = publish_plan_version(packages)
   const verify = harness.env.get("HARN_PUBLISH_VERIFY") == "1"
-  const allow_dirty = tree_requires_allow_dirty(harness)
+  const allow_dirty = tree_requires_allow_dirty(harness.fs, harness.tools)
   harness.stdio.println("Publishing workspace at version " + version)
   if dry_run {
     let args = ["cargo", "publish", "--workspace", "--dry-run", "--no-verify"]
     if allow_dirty {
       args = args + ["--allow-dirty"]
     }
-    const result = run_cargo_publish(harness, args)
+    const result = run_cargo_publish(harness.env, harness.tools, args)
     harness.stdio.print(result.stdout)
     harness.stdio.eprint(result.stderr)
     if !result.success {
@@ -407,9 +408,13 @@ fn main(harness: Harness) {
     return nil
   }
   const adapters: PublishAdapters = {
-    probe: crates_io_probe,
+    probe: { name, package_version -> crates_io_probe(harness.net, name, package_version) },
     publish: { package ->
-      const result = run_cargo_publish(harness, publish_argv(package, verify, allow_dirty))
+      const result = run_cargo_publish(
+        harness.env,
+        harness.tools,
+        publish_argv(package, verify, allow_dirty),
+      )
       harness.stdio.print(result.stdout)
       harness.stdio.eprint(result.stderr)
       return {success: result.success, output: command_output(result)}
@@ -419,8 +424,8 @@ fn main(harness: Harness) {
       return nil
     },
   }
-  const receipt = publish_recover(harness, packages, adapters)
-  print_receipt(harness, receipt)
+  const receipt = publish_recover(packages, adapters)
+  print_receipt(harness.stdio, receipt)
   if !receipt.ok {
     harness.runtime.exit(1)
   }

@@ -12,7 +12,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "pre_compact",
-    { event ->
+    { _hook_harness, event ->
       if type_of(event?.session?.id) == "string" {
         harness.runtime.atomic_add(pre_seen, 1)
       }
@@ -25,7 +25,7 @@ pipeline default(harness: Harness) {
   // First call: block. Second call: allow.
   harness.agent.register_session_hook(
     "post_compact",
-    { event ->
+    { _hook_harness, event ->
       if (event?.archived_messages ?? 0) > 0 {
         harness.runtime.atomic_add(post_seen, 1)
       }
@@ -35,9 +35,12 @@ pipeline default(harness: Harness) {
   // Force compaction with a hostile threshold so the autocompactor
   // tries to compress even with a tiny transcript.
   with_llm_script(
-    harness.llm, [llm_text("round one"), llm_text("round two")],
+    harness.llm,
+    [llm_text("round one"), llm_text("round two")],
     { ->
-      const result = agent_loop(harness, "compact me",
+      const result = agent_loop(
+        harness,
+        "compact me",
         nil,
         {
           provider: "mock",

@@ -9,7 +9,6 @@ use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
 
 fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
-    harn_hostlib::tools::permissions::enable_for_test();
     let mut registry = BuiltinRegistry::new();
     ToolsCapability.register_builtins(&mut registry);
     let entry = registry

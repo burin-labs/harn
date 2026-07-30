@@ -12,7 +12,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(describe(chosen))
   // Imported alias works as an `output` schema (schema-as-type lowering).
   with_llm_script(
-    harness.llm, [llm_text("{\"name\": \"beta\", \"score\": 3}")],
+    harness.llm,
+    [llm_text("{\"name\": \"beta\", \"score\": 3}")],
     { ->
       const r = harness.llm.call(
         "Pick a target",

@@ -1,6 +1,9 @@
 pipeline main(harness: Harness) {
   const root = harness.fs.workspace_root()
-  const artifacts = path_join(harness.fs.workspace_temp_dir(), "harn-persona-eval-ladder-" + harness.random.uuid())
+  const artifacts = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-persona-eval-ladder-" + harness.random.uuid(),
+  )
   const manifest = persona_eval_ladder_manifest(
     {
       id: "merge-captain-ladder-conformance",

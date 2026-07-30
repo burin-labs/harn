@@ -7,18 +7,18 @@ canonical dict so product code does not need to parse provider-native
 message shapes.
 
 ```harn
-const result = llm_call("What is 2 + 2?")
-log(result.text)
+const result = harness.llm.call("What is 2 + 2?")
+harness.stdio.log(result.text)
 ```
 
 With a system message:
 
 ```harn
-const result = llm_call(
+const result = harness.llm.call(
   "Explain quicksort",
   "You are a computer science teacher. Be concise."
 )
-log(result.text)
+harness.stdio.log(result.text)
 ```
 
 With options — build them through the typed `LlmCallOptions` alias from
@@ -33,12 +33,12 @@ const opts: LlmCallOptions = {
   model: "gpt-4o",
   max_tokens: 1024,
 }
-const result = llm_call(
+const result = harness.llm.call(
   "Translate to French: Hello, world",
   "You are a translator.",
   opts,
 )
-log(result.text)
+harness.stdio.log(result.text)
 ```
 
 With image or video content:
@@ -59,8 +59,8 @@ const opts: LlmCallOptions = {
     ],
   }],
 }
-const result = llm_call("", nil, opts)
-log(result.text)
+const result = harness.llm.call("", nil, opts)
+harness.stdio.log(result.text)
 ```
 
 Image blocks use the provider-neutral shape
@@ -274,7 +274,7 @@ post-parse validation, and early stream abort in one place:
 ```harn
 type Verdict = {pass: bool, reason: string}
 
-const result = llm_call(prompt, nil, {
+const result = harness.llm.call(prompt, nil, {
   output: {schema: Verdict, strict: true, validation: "error", stream_abort: true},
   schema_retries: 1,
 })
@@ -368,7 +368,7 @@ Provider-specific fields are legal only below `provider_options`. They are
 never accepted as top-level provider names:
 
 ```harn
-const result = llm_call("hello", nil, {
+const result = harness.llm.call("hello", nil, {
   provider: "ollama",
   provider_options: {ollama: {num_ctx: 32768}},
 })
@@ -377,7 +377,7 @@ const result = llm_call("hello", nil, {
 Model roles are ordinary defaults and compose with the same routing path:
 
 ```harn
-const merged = llm_call(prompt, nil, {
+const merged = harness.llm.call(prompt, nil, {
   model_role: "merge",
   output: schema,
 })
@@ -408,7 +408,7 @@ const opts: LlmCallOptions = {
   truncation: "auto",
   max_tool_calls: 4,
 }
-const result = llm_call("Search and summarize current docs.", nil, opts)
+const result = harness.llm.call("Search and summarize current docs.", nil, opts)
 ```
 
 Use normal Harn `tools` when Harn should execute, approve, and audit a tool or
@@ -429,7 +429,7 @@ const experiment_opts: LlmCallOptions = {
   provider: "mock",
   structural_experiment: "prompt_order_permutation(seed: 42)",
 }
-const result = llm_call("Instruction\n\nContext block", nil, experiment_opts)
+const result = harness.llm.call("Instruction\n\nContext block", nil, experiment_opts)
 ```
 
 For custom transforms, pass a closure (or a `std/experiments.custom(...)`
@@ -438,7 +438,7 @@ message list, or `{messages?, system?, metadata?}`.
 
 ## llm_call_structured
 
-`llm_call_structured(prompt, schema, options?)` is the ergonomic
+`harness.llm.call_structured(prompt, schema, options?)` is the ergonomic
 helper for the "ask for JSON against this schema, retry on
 validation failure, return just the parsed data" pattern. It wraps
 `llm_call` and pre-applies the schema-validated-JSON defaults so
@@ -456,13 +456,13 @@ const schema = {
   },
 }
 const structured_opts: LlmCallOptions = {provider: "anthropic", system: "You are precise."}
-const person = llm_call_structured(
+const person = harness.llm.call_structured(
   "Extract the speaker's name and age from the transcript.",
   schema,
   structured_opts,
 )
-log(person.name)
-log(person.age)
+harness.stdio.log(person.name)
+harness.stdio.log(person.age)
 ```
 
 ### Parameters
@@ -485,14 +485,14 @@ overrides them in `options`.
 
 ### Non-throwing variant
 
-`llm_call_structured_safe(prompt, schema, options?)` returns the
+`harness.llm.call_structured_safe(prompt, schema, options?)` returns the
 `{ok, data, error}` envelope (mirroring `llm_call_safe` but with
 the validated `.data` pre-unwrapped) instead of throwing:
 
 ```harn
-const r = llm_call_structured_safe(prompt, schema, {provider: "openai"})
+const r = harness.llm.call_structured_safe(prompt, schema, {provider: "openai"})
 if !r.ok {
-  log("structured call failed:", r.error.category, r.error.message)
+  harness.stdio.log("structured call failed:", r.error.category, r.error.message)
   return nil
 }
 const person = r.data
@@ -505,7 +505,7 @@ instead of string-sniffing the message.
 
 ### Diagnostic envelope variant
 
-`llm_call_structured_result(prompt, schema, options?)` returns the
+`harness.llm.call_structured_result(prompt, schema, options?)` returns the
 full failure-mode envelope production agent pipelines need, so
 callers can keep raw model text, attempt counts, and validation /
 repair state without hand-rolling parse / repair chains. It never
@@ -526,12 +526,12 @@ const result_opts: LlmCallOptions = {
     max_tokens: 600,
   },
 }
-const r = llm_call_structured_result(prompt, schema, result_opts)
+const r = harness.llm.call_structured_result(prompt, schema, result_opts)
 if r.ok {
   const person = r.data
   // ...
 } else {
-  log("structured call failed:", r.error_category, "raw:", r.raw_text)
+  harness.stdio.log("structured call failed:", r.error_category, "raw:", r.raw_text)
 }
 ```
 
@@ -585,7 +585,7 @@ Repair-pass semantics:
 ## Composable callers
 
 `agent_loop` accepts an `llm_caller:` option — a closure that owns
-each turn's `llm_call(...)`. Wrap it with middleware from
+each turn's `harness.llm.call(...)`. Wrap it with middleware from
 `std/llm/handlers` (retry / fallback / shadow / logging / budget /
 cache / circuit breaker) to compose resilience without forking the
 loop:
@@ -596,7 +596,7 @@ import {with_retry} from "std/llm/handlers"
 
 const caller = with_retry(default_llm_caller(), {max_attempts: 4})
 
-const result = agent_loop(task, system, {
+const result = agent_loop(harness, task, system, {
   loop_until_done: true,
   llm_caller: caller,
 })
@@ -612,7 +612,7 @@ more:
 ```harn,ignore
 import {llm_caller} from "std/llm/caller"
 
-const result = agent_loop(task, system, {
+const result = agent_loop(harness, task, system, {
   loop_until_done: true,
   llm_caller: llm_caller({retry: {max_attempts: 4}}),
 })
@@ -647,8 +647,8 @@ const completion_opts: LlmCallOptions = {
   provider: "ollama",
   model_tier: "small",
 }
-const result = llm_completion("const total = ", ";", nil, completion_opts)
-log(result.text)
+const result = harness.llm.completion("const total = ", ";", nil, completion_opts)
+harness.stdio.log(result.text)
 ```
 
 ## Cost tracking
@@ -658,18 +658,18 @@ Harn provides builtins for estimating and controlling LLM costs:
 ```harn
 // Estimate cost for a specific call
 const cost = llm_cost("claude-sonnet-5", 1000, 500)
-log("Estimated cost: $${cost}")
+harness.stdio.log("Estimated cost: $${cost}")
 
 // Check cumulative session costs
-const session = llm_session_cost()
-log("Total: $${session.total_cost}")
-log("Calls: ${session.call_count}")
-log("Input tokens: ${session.input_tokens}")
-log("Output tokens: ${session.output_tokens}")
+const session = harness.llm.session_cost()
+harness.stdio.log("Total: $${session.total_cost}")
+harness.stdio.log("Calls: ${session.call_count}")
+harness.stdio.log("Input tokens: ${session.input_tokens}")
+harness.stdio.log("Output tokens: ${session.output_tokens}")
 
 // Set a budget (LLM calls throw if exceeded)
-llm_budget(1.00)
-log("Remaining: $${llm_budget_remaining()}")
+harness.llm.budget(1.00)
+harness.stdio.log("Remaining: $${harness.llm.budget_remaining()}")
 ```
 
 For per-call controls, pass a `budget` envelope on `llm_call` (the typed
@@ -690,7 +690,7 @@ const budgeted_opts: LlmCallOptions = {
   budget: budget,
 }
 const result = try {
-  llm_call("Summarize this", nil, budgeted_opts)
+  harness.llm.call("Summarize this", nil, budgeted_opts)
 }
 ```
 
@@ -709,9 +709,9 @@ reason: "budget_exceeded", projected_cost_usd: ...})`.
 | Function | Description |
 |---|---|
 | `llm_cost(model, input_tokens, output_tokens)` | Estimate USD cost from embedded pricing table |
-| `llm_session_cost()` | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
-| `llm_budget(max_cost)` | Set session budget in USD. LLM calls throw if exceeded |
-| `llm_budget_remaining()` | Remaining budget (nil if no budget set) |
+| `harness.llm.session_cost()` | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `harness.llm.budget(max_cost)` | Set session budget in USD. LLM calls throw if exceeded |
+| `harness.llm.budget_remaining()` | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | Count text with the selected tiktoken encoder for known OpenAI/Claude/Gemini model families |
 
 Import `std/llm/budget` for reusable helpers such as
@@ -722,71 +722,49 @@ approximation.
 ## Testing with mock LLM responses
 
 The `mock` provider returns deterministic responses without API keys.
-Use `llm_mock()` to queue specific responses — text, tool calls, or both:
+Use `harness.llm.mock_enqueue()` to queue specific responses — text, tool calls, or both:
 
 ```harn
 // Queue a text response (consumed in FIFO order)
-llm_mock({text: "The capital of France is Paris."})
-const r = llm_call("What is the capital of France?", nil, {provider: "mock"})
+harness.llm.mock_enqueue({text: "The capital of France is Paris."})
+const r = harness.llm.call("What is the capital of France?", nil, {provider: "mock"})
 assert_eq(r.text, "The capital of France is Paris.")
 
 // Queue a response with tool calls
-llm_mock({
+harness.llm.mock_enqueue({
   text: "Let me read that file.",
   tool_calls: [{name: "read_file", arguments: {path: "src/main.rs"}}],
 })
 
 // Queue token logprobs for confidence/reranking tests
-llm_mock({text: "certain", logprobs: [{token: "certain", logprob: 0.0}]})
+harness.llm.mock_enqueue({text: "certain", logprobs: [{token: "certain", logprob: 0.0}]})
 
 // Pattern-matched mocks (reusable by default, matched in declaration order)
-llm_mock({text: "I don't know.", match: "*unknown*"})
-llm_mock({text: "step 1", match: "*planner*", consume_match: true})
-llm_mock({text: "step 2", match: "*planner*", consume_match: true})
+harness.llm.mock_enqueue({text: "I don't know.", match: "*unknown*"})
+harness.llm.mock_enqueue({text: "step 1", match: "*planner*", consume_match: true})
+harness.llm.mock_enqueue({text: "step 2", match: "*planner*", consume_match: true})
 
 // Provider-style error envelopes exercise the same catch/safe-call paths
 // as live provider failures.
-llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+harness.llm.mock_enqueue({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
 
 // Inspect what was sent to the mock provider
-const calls = llm_mock_calls()
+const calls = harness.llm.mock_calls()
 // Each entry includes mock_scope plus {messages: [...], system: "..." or nil,
 // tools: [...] or nil}.
 
 // Clear all mocks and call log between tests
-llm_mock_clear()
+harness.llm.mock_clear()
 ```
 
-For concurrent agent work, load one complete versioned JSONL document with
-`llm_mock_load_jsonl(text)`. Version 1 requires an explicit `id`, open-string
-`scope`, and `consume: "once"` or `"sticky"` on every entry:
+For concurrent agent work, prefer `with_llm_script(harness.llm, responses, fn)`
+from `std/testing`. It scopes fixture installation and cleanup to the supplied
+`HarnessLlm`; helpers that only receive another capability cannot inspect or
+mutate the queue. Use `harness.llm.mock_snapshot()` and
+`harness.llm.mock_calls()` for queue and call evidence. The JSONL fixture
+parser is a runtime-internal implementation seam, not a script interface.
 
-```harn
-const fixture = """
-{"schemaVersion":1,"strictScopes":false}
-{"id":"main-1","scope":"agent.main","consume":"once","text":"MAIN"}
-{"id":"judge-1","scope":"completion.judge","consume":"sticky","match":"*","text":"JUDGE"}
-"""
-const loaded = llm_mock_load_jsonl(fixture)
-const receipts = llm_mock_receipts()
-const queue = llm_mock_snapshot()
-const harn_purposes = llm_mock_known_scopes()
-```
-
-Matching checks the requested scope first. With `strictScopes: false`, a
-non-`default` request may fall through only to the `default` bucket; it never
-consumes another purpose's queue. `llm_mock_load_jsonl` validates the complete
-document before replacing the active store, so malformed input preserves the
-previous fixture. Headerless v0 documents retain the legacy default-scope
-FIFO/pattern behavior. Unknown v1 scopes are accepted as open strings and
-returned as advisory `warnings` rather than being rejected.
-`llm_mock_known_scopes()` exposes Harn's current purpose vocabulary to scripts;
-it is advisory and does not close the open-string `scope` field.
-Each `llm_mock_receipts()` item contains the authored `id`, requested and
-resolved scopes, `consume`, `fell_through`, and the post-match `remaining`
-count; `llm_mock_snapshot()` exposes the remaining count for every scope.
-
-When no `llm_mock()` responses are queued, the mock provider falls back to
+When no `harness.llm.mock_enqueue()` responses are queued, the mock provider falls back to
 its default deterministic behavior (echoing prompt metadata). This means
-existing tests using `provider: "mock"` without `llm_mock()` continue to
+existing tests using `provider: "mock"` without `harness.llm.mock_enqueue()` continue to
 work unchanged.

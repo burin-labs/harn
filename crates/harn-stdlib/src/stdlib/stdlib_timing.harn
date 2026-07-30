@@ -36,17 +36,17 @@ type TimingHandle = dict
  * @api_stability: experimental
  * @example: let r = timed("benchmark.agent_loop", {case_id: case_id}, { -> work() })
  */
-pub fn timed(harness: Harness, name: string, attrs: dict = {}, callback = nil) -> dict {
+pub fn timed(clock: HarnessClock, name: string, attrs: dict = {}, callback = nil) -> dict {
   if callback == nil {
     throw "timed: missing callback (use start_timing for imperative flows)"
   }
-  const handle = harness.clock.timing_start(name, attrs)
+  const handle = clock.timing_start(name, attrs)
   try {
     const value = callback()
-    const timing = harness.clock.timing_end(handle, {status: "ok"})
+    const timing = clock.timing_end(handle, {status: "ok"})
     return {result: value, timing: timing}
   } catch (e) {
-    const timing = harness.clock.timing_end(handle, {status: "error", error: to_string(e)})
+    const timing = clock.timing_end(handle, {status: "error", error: to_string(e)})
     throw e
   }
 }
@@ -61,8 +61,8 @@ pub fn timed(harness: Harness, name: string, attrs: dict = {}, callback = nil) -
  * @api_stability: experimental
  * @example: let h = start_timing("provider.preflight", {provider: provider})
  */
-pub fn start_timing(harness: Harness, name: string, attrs: dict = {}) -> TimingHandle {
-  return harness.clock.timing_start(name, attrs)
+pub fn start_timing(clock: HarnessClock, name: string, attrs: dict = {}) -> TimingHandle {
+  return clock.timing_start(name, attrs)
 }
 
 /**
@@ -75,8 +75,13 @@ pub fn start_timing(harness: Harness, name: string, attrs: dict = {}) -> TimingH
  * @api_stability: experimental
  * @example: timing_event(timing, "credentials.checked", {available: true})
  */
-pub fn timing_event(harness: Harness, handle: TimingHandle, name: string, attrs: dict = {}) -> bool {
-  return harness.clock.timing_event(handle, name, attrs)
+pub fn timing_event(
+  clock: HarnessClock,
+  handle: TimingHandle,
+  name: string,
+  attrs: dict = {},
+) -> bool {
+  return clock.timing_event(handle, name, attrs)
 }
 
 /**
@@ -91,8 +96,12 @@ pub fn timing_event(harness: Harness, handle: TimingHandle, name: string, attrs:
  * @api_stability: experimental
  * @example: let timing = end_timing(handle, {status: "ok"})
  */
-pub fn end_timing(harness: Harness, handle: TimingHandle, final_attrs: dict = {}) -> TimingSegment {
-  return harness.clock.timing_end(handle, final_attrs)
+pub fn end_timing(
+  clock: HarnessClock,
+  handle: TimingHandle,
+  final_attrs: dict = {},
+) -> TimingSegment {
+  return clock.timing_end(handle, final_attrs)
 }
 
 /**
@@ -105,7 +114,7 @@ pub fn end_timing(harness: Harness, handle: TimingHandle, final_attrs: dict = {}
  * @api_stability: experimental
  * @example: if elapsed_ms(handle) > 5000 { abort("deadline") }
  */
-pub fn elapsed_ms(harness: Harness, handle: TimingHandle) -> int {
+pub fn elapsed_ms(clock: HarnessClock, handle: TimingHandle) -> int {
   const started = handle?.monotonic_started_ms ?? 0
-  return harness.clock.timing_now_monotonic_ms() - started
+  return clock.timing_now_monotonic_ms() - started
 }

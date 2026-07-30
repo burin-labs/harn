@@ -4,8 +4,8 @@ import { agent_loop } from "std/agent/loop"
 import { agent_loop_options } from "std/agent/options"
 import { agent_turn_preamble_prompt } from "std/agent/prompts"
 
-fn __agent_turn_system(harness: Harness, user_system, opts = nil) {
-  const preamble = agent_turn_preamble_prompt(harness, opts)
+fn __agent_turn_system(fs: HarnessFs, user_system, opts = nil) {
+  const preamble = agent_turn_preamble_prompt(fs, opts)
   if user_system == nil || user_system == "" {
     return preamble
   }
@@ -130,8 +130,15 @@ fn __agent_turn_iteration_summaries(events) {
 pub fn agent_turn(harness: Harness, prompt, options = nil) {
   const opts = options ?? {}
   const loop_opts = __agent_turn_options(harness, opts)
-  const captured = agent_capture_events(harness, loop_opts.session_id,
-    fn() { return agent_loop(harness, prompt, __agent_turn_system(harness, opts?.system, loop_opts), loop_opts) },
+  const captured = agent_capture_events(
+    harness.agent,
+    loop_opts.session_id,
+    fn() { return agent_loop(
+      harness,
+      prompt,
+      __agent_turn_system(harness.fs, opts?.system, loop_opts),
+      loop_opts,
+    ) },
   )
   const result = captured.result
   if type_of(result) != "dict" {

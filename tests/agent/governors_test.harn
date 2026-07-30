@@ -12,7 +12,7 @@ fn __live_payload() {
 }
 
 pipeline test_unrecognized_signal_throws(harness: Harness, task) {
-  const cb = governor_post_turn(harness, {budget: 5.0, signal: "iteration"})
+  const cb = governor_post_turn(harness.agent, {budget: 5.0, signal: "iteration"})
   const outcome = try {
     cb(__live_payload())
   }
@@ -20,7 +20,7 @@ pipeline test_unrecognized_signal_throws(harness: Harness, task) {
 }
 
 pipeline test_recognized_signal_ok(harness: Harness, task) {
-  const cb = governor_post_turn(harness, {budget: 100.0, signal: "iterations"})
+  const cb = governor_post_turn(harness.agent, {budget: 100.0, signal: "iterations"})
   const outcome = try {
     cb(__live_payload())
   }
@@ -29,7 +29,7 @@ pipeline test_recognized_signal_ok(harness: Harness, task) {
 
 pipeline test_default_signal_ok(harness: Harness, task) {
   // Absent signal defaults to "iterations" and must not trip the guard.
-  const cb = governor_post_turn(harness, {budget: 100.0})
+  const cb = governor_post_turn(harness.agent, {budget: 100.0})
   const outcome = try {
     cb(__live_payload())
   }

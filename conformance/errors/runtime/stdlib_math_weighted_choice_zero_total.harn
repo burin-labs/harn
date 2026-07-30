@@ -1,5 +1,5 @@
 import "std/math"
 
 pipeline test(harness: Harness, task) {
-  weighted_choice(harness, ["a", "b"], [0, 0])
+  weighted_choice(harness.random, ["a", "b"], [0, 0])
 }

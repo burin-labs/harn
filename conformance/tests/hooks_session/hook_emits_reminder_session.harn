@@ -5,7 +5,7 @@ pipeline main(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "post_turn",
-    { _event ->
+    { _hook_harness, _event ->
       return [
         {reminder: {body: "session reminder stale", dedupe_key: "session-hook", tags: ["session"]}},
         {reminder: {body: "session reminder fresh", dedupe_key: "session-hook", tags: ["session"]}},
@@ -13,9 +13,12 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("done")],
+    harness.llm,
+    [llm_text("done")],
     { ->
-      const result = agent_loop(harness, "session hook reminder",
+      const result = agent_loop(
+        harness,
+        "session hook reminder",
         nil,
         {provider: "mock", session_id: "hook-reminder-session"},
       )

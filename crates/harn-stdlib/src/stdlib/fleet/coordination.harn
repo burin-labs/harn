@@ -415,7 +415,8 @@ pub fn fleet_ack(harness: Harness, scope, room, target_id, decision = "accepted"
     fleet_ack_schema(),
     "ack",
   )
-  return __fleet_post(harness,
+  return __fleet_post(
+    harness,
     scope,
     room,
     "ack",
@@ -432,7 +433,15 @@ pub fn fleet_ack(harness: Harness, scope, room, target_id, decision = "accepted"
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_done(harness: Harness, scope, room, claim_id, work_key, outcome = "completed", options = nil) {
+pub fn fleet_done(
+  harness: Harness,
+  scope,
+  room,
+  claim_id,
+  work_key,
+  outcome = "completed",
+  options = nil,
+) {
   const opts = __fleet_options(options)
   const claim = __fleet_required_text(claim_id, "claim_id")
   const key = __fleet_required_text(work_key, "work_key")
@@ -449,7 +458,8 @@ pub fn fleet_done(harness: Harness, scope, room, claim_id, work_key, outcome = "
     fleet_done_schema(),
     "done receipt",
   )
-  return __fleet_post(harness,
+  return __fleet_post(
+    harness,
     scope,
     room,
     "done",
@@ -488,7 +498,8 @@ pub fn fleet_finding(harness: Harness, scope, room, premise, options = nil) {
     fleet_finding_schema(),
     "finding",
   )
-  return __fleet_post(harness,
+  return __fleet_post(
+    harness,
     scope,
     room,
     "finding",
@@ -523,7 +534,8 @@ pub fn fleet_heartbeat(harness: Harness, scope, room, state = "busy", options = 
     fleet_heartbeat_schema(),
     "heartbeat",
   )
-  return __fleet_post(harness,
+  return __fleet_post(
+    harness,
     scope,
     room,
     "heartbeat",
@@ -557,7 +569,15 @@ pub fn fleet_checkin(harness: Harness, scope, room, sections, options = nil) {
     fleet_checkin_schema(),
     "checkin",
   )
-  return __fleet_post(harness, scope, room, "checkin", opts?.subject ?? "Fleet check-in", data, opts)
+  return __fleet_post(
+    harness,
+    scope,
+    room,
+    "checkin",
+    opts?.subject ?? "Fleet check-in",
+    data,
+    opts,
+  )
 }
 
 fn __fleet_row(item) {

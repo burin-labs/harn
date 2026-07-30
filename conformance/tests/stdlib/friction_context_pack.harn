@@ -93,9 +93,13 @@ pipeline main(harness: Harness) {
     ),
   )
   harness.stdio.println(events[0].metadata.api_key == "[redacted]")
-  harness.stdio.println(len(suggestions) == 1 && suggestions[0].recommended_artifact == "context_pack")
+  harness.stdio.println(
+    len(suggestions) == 1 && suggestions[0].recommended_artifact == "context_pack",
+  )
   harness.stdio.println(suggestions[0].candidate_manifest.capabilities[0] == "splunk.search")
   harness.stdio.println(suggestions[0].estimated_savings.estimated_time_saved_ms == 240000)
-  harness.stdio.println(pack.id == "checkout_incident_context" && pack.refresh_policy.mode == "on_demand")
+  harness.stdio.println(
+    pack.id == "checkout_incident_context" && pack.refresh_policy.mode == "on_demand",
+  )
   harness.stdio.println(eval.pass && eval.suggestion_count == 1)
 }

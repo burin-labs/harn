@@ -12,7 +12,9 @@ pipeline default(harness: Harness) {
   /* `inner` records whether it ran into a closure-captured ref via the
    * result envelope; on deny the envelope must omit `result` entirely. */
   const inner = { args -> {ok: true, ran: args.command} }
-  const wrapper = preset_run_command(harness, {stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  const wrapper = preset_run_command(
+    harness,
+    {stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
   )
   const result = wrapper({command: "cargo test"})
   harness.stdio.println(result.action)

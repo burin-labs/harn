@@ -25,12 +25,15 @@ fn verify_after_tool_stop(payload) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "", tool_calls: [{id: "edit-1", name: "apply_fix", arguments: {}}]},
       {text: "verified now ##DONE##"},
     ],
     { ->
-      const result = agent_loop(harness, "Apply the fix and finish only after verification.",
+      const result = agent_loop(
+        harness,
+        "Apply the fix and finish only after verification.",
         nil,
         {
           provider: "mock",
@@ -46,7 +49,9 @@ pipeline default(harness: Harness) {
       )
       harness.stdio.println(result.status)
       harness.stdio.println(result.llm.iterations)
-      harness.stdio.println(contains(json_stringify(harness.llm.mock_calls()), "verification required after edit"))
+      harness.stdio.println(
+        contains(json_stringify(harness.llm.mock_calls()), "verification required after edit"),
+      )
     },
   )
 }

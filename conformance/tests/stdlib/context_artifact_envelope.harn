@@ -101,14 +101,14 @@ pipeline default(harness: Harness) {
   harness.stdio.println(merged.token_estimate > primary.token_estimate)
   harness.stdio.println(
     contains(
-      context_render_artifacts(harness, [secret], {variant: "xml", skip_budget: true}),
+      context_render_artifacts(harness.llm, [secret], {variant: "xml", skip_budget: true}),
       "[sensitive context withheld: secret]",
     ),
   )
   harness.stdio.println(
     contains(
       context_render_artifacts(
-        harness,
+        harness.llm,
         [redaction_override],
         {variant: "plain", skip_budget: true},
       ),
@@ -117,7 +117,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(
     contains(
-      context_render_artifacts(harness, [xml_escape], {variant: "xml", skip_budget: true}),
+      context_render_artifacts(harness.llm, [xml_escape], {variant: "xml", skip_budget: true}),
       "Use &lt;span&gt; tags.",
     ),
   )
@@ -126,7 +126,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(len(context_artifact_dedupe([overlap_hash_a, overlap_hash_b])))
   harness.stdio.println(
     contains(
-      context_render_artifacts(harness, [primary], {variant: "plain"}),
+      context_render_artifacts(harness.llm, [primary], {variant: "plain"}),
       "Context Artifacts:",
     ),
   )
@@ -140,15 +140,19 @@ pipeline default(harness: Harness) {
     },
   )
   harness.stdio.println(packed.chunks[0].artifact_id)
-  harness.stdio.println(context_render_artifacts(harness, [primary], {variant: "markdown"}))
+  harness.stdio.println(context_render_artifacts(harness.llm, [primary], {variant: "markdown"}))
   harness.stdio.println(
-    context_render_artifacts(harness, [primary], {capabilities: {prefers_xml_scaffolding: true}}),
+    context_render_artifacts(
+      harness.llm,
+      [primary],
+      {capabilities: {prefers_xml_scaffolding: true}},
+    ),
   )
   harness.stdio.println(
-    context_render_artifacts(harness, [primary, digest], {variant: "compact", max_tokens: 100}),
+    context_render_artifacts(harness.llm, [primary, digest], {variant: "compact", max_tokens: 100}),
   )
   const prompt = prompt_compose(
-    harness,
+    harness.llm,
     "Fix parser spans.",
     context([], {artifacts: [primary]}),
     {capabilities: {prefers_markdown_scaffolding: true}, task_label: "Parser Task"},

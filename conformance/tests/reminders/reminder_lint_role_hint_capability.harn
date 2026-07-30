@@ -1,4 +1,4 @@
-pipeline main(harness: Harness, task) {
+pipeline test(harness: Harness, task) {
   harness.agent.register_reminder_provider(
     {
       id: "custom",

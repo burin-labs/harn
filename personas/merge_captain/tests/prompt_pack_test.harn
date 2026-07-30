@@ -154,7 +154,9 @@ pipeline test_next_action_checkpoint_repairs_missing_evidence(harness: Harness, 
     },
   )
   const checkpoint = choose_next_action_checkpoint(
-    harness, {state: "behind", action: "update_branch", evidence: {behind_by: 2}},
+    harness.agent,
+    harness.llm,
+    {state: "behind", action: "update_branch", evidence: {behind_by: 2}},
     {merge_queue_enabled: true},
     true,
     {required: false},
@@ -182,7 +184,9 @@ pipeline test_ci_failure_checkpoint_rejects_unknown_log_span(harness: Harness, t
     },
   )
   const checkpoint = diagnose_ci_failure_checkpoint(
-    harness, {
+    harness.agent,
+    harness.llm,
+    {
       failing_checks: ["ci / rust"],
       selected_log_spans: [{id: "span-1", text: "test_flake failed then passed"}],
       tool_errors: [],
@@ -209,7 +213,9 @@ pipeline test_flake_checkpoint_requires_flake_or_missing_context(harness: Harnes
     },
   )
   const checkpoint = classify_flake_checkpoint(
-    harness, {
+    harness.agent,
+    harness.llm,
+    {
       failing_checks: ["ci / rust"],
       selected_log_spans: [{id: "span-1", text: "test_flake failed once and passed on rerun"}],
       tool_errors: [],
@@ -230,7 +236,9 @@ pipeline test_release_changelog_checkpoint_separates_commit_evidence(harness: Ha
     },
   )
   const checkpoint = audit_release_changelog_checkpoint(
-    harness, {
+    harness.agent,
+    harness.llm,
+    {
       commits: [{sha: "abc123", subject: "feat: add release audit"}],
       changelog_excerpt: "## Unreleased",
       shell_observations: [{command: "git log", status: "ok"}],

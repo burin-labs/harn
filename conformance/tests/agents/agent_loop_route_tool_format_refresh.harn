@@ -1,9 +1,11 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 
 pipeline default(harness: Harness) {
-  const seen = harness.runtime.shared_cell({scope: "task_group", key: "route-tool-format-seen", initial: ""})
+  const seen = harness.runtime.shared_cell(
+    {scope: "task_group", key: "route-tool-format-seen", initial: ""},
+  )
   const post_turn_count = harness.runtime.shared_cell(
     {scope: "task_group", key: "route-tool-format-post-turn", initial: 0},
   )
@@ -41,7 +43,9 @@ pipeline default(harness: Harness) {
     done_sentinel: "DONE",
     max_iterations: 3,
   }
-  const captured = agent_capture_events(harness, session,
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
     fn() { return agent_loop(harness, "exercise a route-only model switch", nil, opts) },
   )
   harness.stdio.println("status=" + captured.result.status)

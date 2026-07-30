@@ -232,7 +232,7 @@ type GitToolRegistryOptions = {
 /**
  * git_env_remove returns ambient git env vars stripped from local git subprocesses.
  *
- * @effects: [process, fs.read]
+ * @effects: []
  * @errors: []
  */
 pub fn git_env_remove() -> list<string> {
@@ -1148,7 +1148,7 @@ pub fn git_find_tool(query: string, options: GitToolCatalogOptions = {}) -> GitT
  * @errors: []
  */
 pub fn git_run_tool(
-  harness: Harness,
+  process: HarnessProcess,
   operation: GitToolOperation,
   args: GitToolRunArgs = {},
   options: GitToolCatalogOptions = {},
@@ -1162,13 +1162,13 @@ pub fn git_run_tool(
   }
   const repo = __git_tool_repo(request, opts)
   if op == "status" {
-    return git_status(harness.process, repo)
+    return git_status(process, repo)
   }
   if op == "current_branch" {
-    return git_current_branch(harness.process, repo, request)
+    return git_current_branch(process, repo, request)
   }
   if op == "log" {
-    return git_log(harness.process, repo, request)
+    return git_log(process, repo, request)
   }
   if op == "diff" {
     let selector = {}
@@ -1179,55 +1179,44 @@ pub fn git_run_tool(
       selector = selector + {paths: request.paths}
     }
     if len(selector.keys()) == 0 {
-      return git_diff(harness.process, repo, nil)
+      return git_diff(process, repo, nil)
     }
-    return git_diff(harness.process, repo, selector)
+    return git_diff(process, repo, selector)
   }
   if op == "branch_list" {
-    return git_branch_list(harness.process, repo, request)
+    return git_branch_list(process, repo, request)
   }
   if op == "remote_list" {
-    return git_remote_list(harness.process, repo, request)
+    return git_remote_list(process, repo, request)
   }
   if op == "show" {
-    return git_show(harness.process, __git_non_empty_string(request.rev, "rev"), repo, request)
+    return git_show(process, __git_non_empty_string(request.rev, "rev"), repo, request)
   }
   if op == "discover" {
-    return git_discover(harness.process, request.path ?? repo)
+    return git_discover(process, request.path ?? repo)
   }
   if op == "conflicts" {
-    return git_conflicts(harness.process, repo)
+    return git_conflicts(process, repo)
   }
   if op == "merge_base" {
     return git_merge_base(
-      harness.process,
+      process,
       __git_non_empty_string(request.left, "left"),
       __git_non_empty_string(request.right, "right"),
       repo,
     )
   }
   if op == "fetch" {
-    return git_fetch(harness.process, request.remote ?? "origin", repo, request.refspecs ?? [])
+    return git_fetch(process, request.remote ?? "origin", repo, request.refspecs ?? [])
   }
   if op == "switch" {
-    return git_switch(
-      harness.process,
-      __git_non_empty_string(request.branch, "branch"),
-      repo,
-      request,
-    )
+    return git_switch(process, __git_non_empty_string(request.branch, "branch"), repo, request)
   }
   if op == "pull_ff_only" {
-    return git_pull_ff_only(
-      harness.process,
-      repo,
-      request.remote ?? "origin",
-      request.branch,
-      request,
-    )
+    return git_pull_ff_only(process, repo, request.remote ?? "origin", request.branch, request)
   }
   if op == "rebase" {
-    return git_rebase(harness.process, __git_non_empty_string(request.base_ref, "base_ref"), repo)
+    return git_rebase(process, __git_non_empty_string(request.base_ref, "base_ref"), repo)
   }
   throw "std/git: git operation not implemented: " + op
 }
@@ -1309,7 +1298,7 @@ fn __git_catalog_tool_run_options(entry, opts) {
   return opts
 }
 
-fn __git_define_catalog_tool(harness: Harness, tools, entry, opts) {
+fn __git_define_catalog_tool(process: HarnessProcess, tools, entry, opts) {
   const key = __git_catalog_tool_key(entry)
   if !__git_tool_enabled(opts, key, entry.group) {
     return tools
@@ -1326,7 +1315,7 @@ fn __git_define_catalog_tool(harness: Harness, tools, entry, opts) {
         parameters: entry.parameters,
         returns: {type: "object"},
         annotations: __git_catalog_tool_annotations(entry, opts, key),
-        handler: { args -> git_run_tool(harness, entry.operation, args, run_opts) },
+        handler: { args -> git_run_tool(process, entry.operation, args, run_opts) },
       },
     ),
   )
@@ -1339,14 +1328,14 @@ fn __git_define_catalog_tool(harness: Harness, tools, entry, opts) {
  * @errors: []
  */
 pub fn git_tools(
-  harness: Harness,
+  process: HarnessProcess,
   registry: {_type: "tool_registry", tools: list}? = nil,
   options: GitToolRegistryOptions = {},
 ) -> {_type: "tool_registry", tools: list} {
   const opts = options
   let tools = registry ?? tool_registry()
   for entry in __git_catalog_all() {
-    tools = __git_define_catalog_tool(harness, tools, entry, opts)
+    tools = __git_define_catalog_tool(process, tools, entry, opts)
   }
   return tools
 }
@@ -1391,7 +1380,7 @@ fn __git_toolbox_run_annotations(opts, key) {
  * @errors: []
  */
 pub fn git_toolbox_tools(
-  harness: Harness,
+  process: HarnessProcess,
   registry: {_type: "tool_registry", tools: list}? = nil,
   options: GitToolRegistryOptions = {},
 ) -> {_type: "tool_registry", tools: list} {
@@ -1467,7 +1456,7 @@ pub fn git_toolbox_tools(
           },
           returns: {type: "object"},
           annotations: __git_toolbox_run_annotations(opts, key),
-          handler: { args -> git_run_tool(harness, args.operation, args, opts) },
+          handler: { args -> git_run_tool(process, args.operation, args, opts) },
         },
       ),
     )

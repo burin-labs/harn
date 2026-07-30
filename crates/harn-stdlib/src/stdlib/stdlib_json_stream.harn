@@ -29,8 +29,8 @@ type JsonStreamValidator = {
  * @effects: [state.write@harness.runtime]
  * @errors: []
  */
-pub fn stream_validator(harness: Harness, schema) -> JsonStreamValidator {
-  const handle = harness.runtime.json_stream_validator(schema)
+pub fn stream_validator(runtime: HarnessRuntime, schema) -> JsonStreamValidator {
+  const handle = runtime.json_stream_validator(schema)
   return {
     _namespace: "json_stream_validator",
     feed: fn(chunk) { return __json_stream_validator_feed(handle, chunk) },
@@ -71,9 +71,14 @@ fn __stream_object_text(chunk) -> string {
  * @effects: [state.write@harness.runtime]
  * @errors: []
  */
-pub gen fn stream_object(harness: Harness, source, schema = nil, options = nil) -> Stream<any> {
+pub gen fn stream_object(
+  runtime: HarnessRuntime,
+  source,
+  schema = nil,
+  options = nil,
+) -> Stream<any> {
   const dedupe = (options ?? {})?.dedupe ?? true
-  const validator = stream_validator(harness, schema ?? {})
+  const validator = stream_validator(runtime, schema ?? {})
   let last_emitted = nil
   let emitted_any = false
   let invalid = false
@@ -131,8 +136,8 @@ pub gen fn stream_object(harness: Harness, source, schema = nil, options = nil) 
  * @effects: [state.write@harness.runtime]
  * @errors: []
  */
-pub fn stream_validate_create(harness: Harness, schema) -> resource {
-  return harness.runtime.json_stream_validate_create(schema)
+pub fn stream_validate_create(runtime: HarnessRuntime, schema) -> resource {
+  return runtime.json_stream_validate_create(schema)
 }
 
 /**
@@ -167,9 +172,9 @@ pub fn stream_validate_finalize(handle) -> dict {
  * @effects: [state.write@harness.runtime]
  * @errors: []
  */
-pub fn stream_validate(harness: Harness) -> dict {
+pub fn stream_validate(runtime: HarnessRuntime) -> dict {
   return {
-    create: fn(schema) { return harness.runtime.json_stream_validate_create(schema) },
+    create: fn(schema) { return runtime.json_stream_validate_create(schema) },
     chunk: fn(handle, chunk) { return __json_stream_validate_chunk(handle, chunk) },
     finalize: fn(handle) { return __json_stream_validate_finalize(handle) },
   }

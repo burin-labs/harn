@@ -63,20 +63,20 @@ fn envelope(name) {
 
 pipeline default(harness: Harness) {
   // (1) Generous budget — call passes, layer status "ok".
-  const mw_ok = with_timeout(harness, {max_ms: 60000})
+  const mw_ok = with_timeout(harness.clock, {max_ms: 60000})
   const r1 = mw_ok(envelope("read"), fast_next())
   harness.stdio.println(r1.ok)
   harness.stdio.println(r1.audit.layers[0].name)
   harness.stdio.println(r1.audit.layers[0].status)
   // (2) max_ms = 0 — every call breaches; tag and pass-through preserved.
-  const mw_strict = with_timeout(harness, {max_ms: 0, message: "tool over budget"})
+  const mw_strict = with_timeout(harness.clock, {max_ms: 0, message: "tool over budget"})
   const r2 = mw_strict(envelope("write"), slow_next(50))
   harness.stdio.println(r2.ok)
   harness.stdio.println(r2.error_category)
   harness.stdio.println(r2.audit.layers[0].status)
   // (3) per_tool override — `read` keeps the generous budget; `write`
   // gets the strict 0 budget that breaches.
-  const mw_mixed = with_timeout(harness, {max_ms: 60000, per_tool: {write: 0}})
+  const mw_mixed = with_timeout(harness.clock, {max_ms: 60000, per_tool: {write: 0}})
   const r3 = mw_mixed(envelope("read"), fast_next())
   const r4 = mw_mixed(envelope("write"), fast_next())
   harness.stdio.println(r3.ok)

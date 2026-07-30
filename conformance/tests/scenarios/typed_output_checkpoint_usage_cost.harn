@@ -14,7 +14,8 @@ pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
     },
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "{\"decision\":\"merge\",\"confidence\":0.9,\"evidence\":[\"green\"]}",
         provider: "anthropic",
@@ -38,8 +39,13 @@ pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
       },
     ],
     { ->
-      const captured = agent_capture_events(harness, "usage-cost-success",
-        fn() { typed_output_checkpoint(harness, "usage.success",
+      const captured = agent_capture_events(
+        harness.agent,
+        "usage-cost-success",
+        fn() { typed_output_checkpoint(
+          harness.agent,
+          harness.llm,
+          "usage.success",
           "Choose an action.",
           schema,
           {provider: "mock", session_id: "usage-cost-success", validator_retries: 0},
@@ -52,7 +58,10 @@ pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
       assert_eq(success.usage.cache_write_tokens, 1000)
       assert_approx(success.usage.cost_usd, 0.01875)
       assert_eq(captured.events[0].checkpoint.usage, success.usage)
-      const schema_failure = typed_output_checkpoint(harness, "usage.schema_failure",
+      const schema_failure = typed_output_checkpoint(
+        harness.agent,
+        harness.llm,
+        "usage.schema_failure",
         "Choose an action.",
         schema,
         {provider: "mock", schema_retries: 0, validator_retries: 0, repair: {enabled: false}},
@@ -63,7 +72,10 @@ pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
       assert_eq(schema_failure.usage.output_tokens, 500)
       assert_eq(schema_failure.usage.cache_read_tokens, 2000)
       assert_approx(schema_failure.usage.cost_usd, 0.0081)
-      const validator_failure = typed_output_checkpoint(harness, "usage.validator_failure",
+      const validator_failure = typed_output_checkpoint(
+        harness.agent,
+        harness.llm,
+        "usage.validator_failure",
         "Choose an action.",
         schema,
         {provider: "mock", validator_retries: 0, repair: {enabled: false}},

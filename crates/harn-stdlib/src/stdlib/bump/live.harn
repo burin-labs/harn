@@ -117,12 +117,12 @@ fn __json_or_nil(text) {
   }
 }
 
-fn __git(harness: Harness, argv: list<string>) {
-  return command_run(harness.tools, argv)
+fn __git(tools: HarnessTools, argv: list<string>) {
+  return command_run(tools, argv)
 }
 
-fn __shell(harness: Harness, command: string) {
-  return command_run(harness.tools, {mode: "shell", command: command})
+fn __shell(tools: HarnessTools, command: string) {
+  return command_run(tools, {mode: "shell", command: command})
 }
 
 /**
@@ -132,13 +132,13 @@ fn __shell(harness: Harness, command: string) {
  * std/connectors/github (whose connector client is NOT active in a plain
  * `harn run`), `gh` works in the bump workflow's runtime.
  */
-fn __rest(harness: Harness, method: string, path: string, body = nil) {
+fn __rest(tools: HarnessTools, method: string, path: string, body = nil) {
   const spec = if body == nil {
     __gh_spec(["gh", "api", path, "-X", method])
   } else {
     __gh_spec(["gh", "api", path, "-X", method, "--input", "-"], json_stringify(body))
   }
-  const result = command_run(harness.tools, spec)
+  const result = command_run(tools, spec)
   return if result.success ?? false {
     __json_or_nil(result.stdout ?? "")
   } else {
@@ -147,12 +147,12 @@ fn __rest(harness: Harness, method: string, path: string, body = nil) {
 }
 
 /** One GraphQL call through `gh api /graphql`; nil on failure. */
-fn __graphql(harness: Harness, query: string, variables: dict) {
+fn __graphql(tools: HarnessTools, query: string, variables: dict) {
   const spec = __gh_spec(
     ["gh", "api", "/graphql", "-X", "POST", "--input", "-"],
     json_stringify({query: query, variables: variables}),
   )
-  const result = command_run(harness.tools, spec)
+  const result = command_run(tools, spec)
   return if result.success ?? false {
     __json_or_nil(result.stdout ?? "")
   } else {
@@ -161,8 +161,8 @@ fn __graphql(harness: Harness, query: string, variables: dict) {
 }
 
 /** Release lookup normalized to the `{ok, ...release}` shape the adapter reads. */
-fn __release_view(harness: Harness, repo: string, tag: string) {
-  const release = __rest(harness, "GET", "/repos/${repo}/releases/tags/${tag}")
+fn __release_view(tools: HarnessTools, repo: string, tag: string) {
+  const release = __rest(tools, "GET", "/repos/${repo}/releases/tags/${tag}")
   return if release == nil {
     {ok: false}
   } else {
@@ -171,24 +171,24 @@ fn __release_view(harness: Harness, repo: string, tag: string) {
 }
 
 /** Close a PR (commenting first when a comment is given); `{ok}` mirrors the old helper. */
-fn __close_pr(harness: Harness, repo: string, number, comment) {
+fn __close_pr(tools: HarnessTools, repo: string, number, comment) {
   if trim(to_string(comment ?? "")) != "" {
-    __rest(harness, "POST", "/repos/${repo}/issues/${number}/comments", {body: comment})
+    __rest(tools, "POST", "/repos/${repo}/issues/${number}/comments", {body: comment})
   }
-  const closed = __rest(harness, "PATCH", "/repos/${repo}/pulls/${number}", {state: "closed"})
+  const closed = __rest(tools, "PATCH", "/repos/${repo}/pulls/${number}", {state: "closed"})
   return {ok: closed != nil}
 }
 
 /** Arm squash auto-merge via GraphQL; `{ok, state, error}` mirrors the old helper. */
-fn __enable_auto_merge(harness: Harness, repo: string, number) {
-  const pr = __rest(harness, "GET", "/repos/${repo}/pulls/${number}")
+fn __enable_auto_merge(tools: HarnessTools, repo: string, number) {
+  const pr = __rest(tools, "GET", "/repos/${repo}/pulls/${number}")
   const node_id = to_string(pr?.node_id ?? "")
   if node_id == "" {
     return {ok: false, state: "", error: "could not resolve PR node id"}
   }
   const mutation =
     "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { autoMergeRequest { enabledAt } } } }"
-  const result = __graphql(harness, mutation, {id: node_id})
+  const result = __graphql(tools, mutation, {id: node_id})
   const enabled = result?.data?.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt
     != nil
   return {
@@ -215,9 +215,9 @@ fn __release_finalized(release) -> bool {
 }
 
 /** Fetch the open bump PR via the REST list endpoint (there is no typed helper). */
-fn __find_open_pr(harness: Harness, cfg: LiveBumpConfig, owner: string) {
+fn __find_open_pr(tools: HarnessTools, cfg: LiveBumpConfig, owner: string) {
   const list = __rest(
-    harness,
+    tools,
     "GET",
     "/repos/${cfg.repo}/pulls?head=${owner}:${cfg.branch}&base=${cfg.base}&state=open",
   )
@@ -231,7 +231,11 @@ fn __find_open_pr(harness: Harness, cfg: LiveBumpConfig, owner: string) {
  * @effects: [net, process]
  * @errors: []
  */
-pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
+pub fn live_bump_adapter(
+  clock: HarnessClock,
+  tools: HarnessTools,
+  config: dict = {},
+) -> BumpAdapter {
   const cfg = live_bump_config(config)
   const owner = split(cfg.repo, "/")[0] ?? ""
   // Authenticate every `gh` CLI call as the GitHub App for this run.
@@ -245,7 +249,7 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
         }
         return requested
       }
-      const latest = __rest(harness, "GET", "/repos/${cfg.release_repo}/releases/latest")
+      const latest = __rest(tools, "GET", "/repos/${cfg.release_repo}/releases/latest")
       const resolved = trim(to_string(latest?.tag_name ?? ""))
       if !is_v_semver(resolved) {
         throw "std/bump/live: could not resolve a semver latest release for ${cfg.release_repo}"
@@ -256,10 +260,10 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       let attempts = 0
       let lines = []
       const found = poll_until(
-        harness,
+        clock,
         { ->
           attempts = attempts + 1
-          const view = __release_view(harness, cfg.release_repo, target)
+          const view = __release_view(tools, cfg.release_repo, target)
           const ready = view.ok && __release_finalized(view)
           lines = lines + ["attempt ${attempts}: ${target} finalized=${ready}"]
           return if ready {
@@ -287,19 +291,19 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       }
     },
     read_current_version: fn() {
-      const result = __shell(harness, "cat ${cfg.version_file} 2>/dev/null || true")
+      const result = __shell(tools, "cat ${cfg.version_file} 2>/dev/null || true")
       return trim(result.stdout ?? "")
     },
-    base_sha: fn() { return trim(__git(harness, ["git", "rev-parse", "HEAD"]).stdout ?? "") },
+    base_sha: fn() { return trim(__git(tools, ["git", "rev-parse", "HEAD"]).stdout ?? "") },
     apply_version: fn(target) {
       // Release tags carry the conventional `v`; .harn-version stores the
       // bare semver accepted by both old and new Harn installers.
       const version = strip_v(target)
-      const write = __shell(harness, "printf '%s\\n' '${version}' > ${cfg.version_file}")
-      const refresh = __shell(harness, cfg.refresh_command)
+      const write = __shell(tools, "printf '%s\\n' '${version}' > ${cfg.version_file}")
+      const refresh = __shell(tools, cfg.refresh_command)
       const ok = (write.success ?? false) && (refresh.success ?? false)
-      const changed = !(__git(harness, ["git", "diff", "--quiet"]).success ?? false)
-      const names = trim(__git(harness, ["git", "diff", "--name-only"]).stdout ?? "")
+      const changed = !(__git(tools, ["git", "diff", "--quiet"]).success ?? false)
+      const names = trim(__git(tools, ["git", "diff", "--name-only"]).stdout ?? "")
       const refreshed = if names == "" {
         []
       } else {
@@ -322,7 +326,7 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       if trim(cfg.validation_command) == "" {
         return {ok: true, steps: [], detail: "no validation command declared"}
       }
-      const result = __shell(harness, cfg.validation_command)
+      const result = __shell(tools, cfg.validation_command)
       const ok = result.success ?? false
       return {
         ok: ok,
@@ -336,11 +340,12 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
     },
     working_changes: fn() {
       const adds = trim(
-        __git(harness, ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout
+        __git(tools, ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout
           ?? "",
       )
       const dels = trim(
-        __git(harness, ["git", "diff", "--name-only", "--diff-filter=D", "HEAD"]).stdout ?? "",
+        __git(tools, ["git", "diff", "--name-only", "--diff-filter=D", "HEAD"]).stdout
+          ?? "",
       )
       return {
         additions: if adds == "" {
@@ -356,7 +361,7 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       }
     },
     find_bump_pr: fn() {
-      const first = __find_open_pr(harness, cfg, owner)
+      const first = __find_open_pr(tools, cfg, owner)
       if first == nil {
         return nil
       }
@@ -369,13 +374,13 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       }
     },
     disable_auto_merge: fn(number) {
-      const detail = __rest(harness, "GET", "/repos/${cfg.repo}/pulls/${number}")
+      const detail = __rest(tools, "GET", "/repos/${cfg.repo}/pulls/${number}")
       const node_id = detail?.node_id ?? ""
       if node_id == "" {
         return false
       }
       const result = __graphql(
-        harness,
+        tools,
         "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }",
         {id: node_id},
       )
@@ -383,12 +388,12 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
     },
     reset_branch: fn(base_sha) {
       const ref = "/repos/${cfg.repo}/git/refs/heads/${cfg.branch}"
-      const existing = __rest(harness, "GET", ref)
+      const existing = __rest(tools, "GET", ref)
       if existing != nil {
-        return __rest(harness, "PATCH", ref, {sha: base_sha, force: true}) != nil
+        return __rest(tools, "PATCH", ref, {sha: base_sha, force: true}) != nil
       }
       return __rest(
-        harness,
+        tools,
         "POST",
         "/repos/${cfg.repo}/git/refs",
         {ref: "refs/heads/${cfg.branch}", sha: base_sha},
@@ -398,15 +403,12 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
     create_signed_commit: fn(request) {
       let additions = []
       for path in request.additions {
-        const encoded = __shell(
-          harness,
-          "base64 -w0 < '${path}' || base64 < '${path}' | tr -d '\\n'",
-        )
+        const encoded = __shell(tools, "base64 -w0 < '${path}' || base64 < '${path}' | tr -d '\\n'")
         additions = additions + [{path: path, contents: trim(encoded.stdout ?? "")}]
       }
       const deletions = request.deletions.map({ p -> {path: p} }).to_list()
       const result = __graphql(
-        harness,
+        tools,
         "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
         {
           input: {
@@ -427,8 +429,8 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       return {oid: commit.oid, url: commit.url ?? ""}
     },
     branch_matches_base: fn() {
-      const branch = __rest(harness, "GET", "/repos/${cfg.repo}/commits/${cfg.branch}")
-      const base = __rest(harness, "GET", "/repos/${cfg.repo}/commits/${cfg.base}")
+      const branch = __rest(tools, "GET", "/repos/${cfg.repo}/commits/${cfg.branch}")
+      const base = __rest(tools, "GET", "/repos/${cfg.repo}/commits/${cfg.base}")
       const branch_tree = branch?.commit?.tree?.sha ?? "branch"
       const base_tree = base?.commit?.tree?.sha ?? "base"
       return branch_tree == base_tree
@@ -439,12 +441,12 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
         "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
       if existing != nil {
         __rest(
-          harness,
+          tools,
           "PATCH",
           "/repos/${cfg.repo}/pulls/${existing.number}",
           {title: title, body: body},
         )
-        const detail = __rest(harness, "GET", "/repos/${cfg.repo}/pulls/${existing.number}")
+        const detail = __rest(tools, "GET", "/repos/${cfg.repo}/pulls/${existing.number}")
         return {
           number: existing.number,
           head_oid: detail?.head?.sha ?? existing.head_oid,
@@ -453,7 +455,7 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
         }
       }
       const created = __rest(
-        harness,
+        tools,
         "POST",
         "/repos/${cfg.repo}/pulls",
         {title: title, head: cfg.branch, base: cfg.base, body: body},
@@ -466,11 +468,11 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       }
     },
     close_pr: fn(number, comment) {
-      const result = __close_pr(harness, cfg.repo, number, comment)
+      const result = __close_pr(tools, cfg.repo, number, comment)
       return result.ok
     },
     enable_auto_merge: fn(number, _head) {
-      const result = __enable_auto_merge(harness, cfg.repo, number)
+      const result = __enable_auto_merge(tools, cfg.repo, number)
       const ok = result.ok
       return {
         enabled: ok,

@@ -65,8 +65,9 @@ Trigger manifests and dynamic trigger registrations can set
 - `act_auto`: mutating actions run freely; dispatches are still logged.
 
 At runtime, handlers can inspect the effective tier with
-`handler_context().autonomy_tier`. Harn resolves that effective tier from the
-manifest default plus the latest trust-graph control record for the agent.
+`harness.runtime.handler_context().autonomy_tier`. Harn resolves that effective
+tier from the manifest default plus the latest trust-graph control record for
+the agent.
 The dispatcher enforces the tier by translating it into a capability policy
 before handler code runs: `shadow` denies side effects, `suggest` and
 `act_with_approval` are read-only for direct builtins, and `act_auto` keeps the
@@ -143,10 +144,11 @@ correcting an actor's decision path, `policy_for(actor_id)` caps that actor's
 derived side-effect level at `read_only` while the matching correction records
 remain applicable.
 
-Import `std/triggers` and use:
+At a trigger entrypoint, use the root `Harness` supplied by the runtime and
+attenuate it before calling helpers:
 
-- `handler_context()` to inspect the current dispatch context, including
-  `agent`, `action`, `trace_id`, and `autonomy_tier`
+- `harness.runtime.handler_context()` to inspect the current dispatch context,
+  including `agent`, `action`, `trace_id`, and `autonomy_tier`
 - `trust_record(agent, action, approver, outcome, tier)` to append a manual
   trust record and return the full finalized record
 - `trust_graph_record(decision)` to append a decision dict and return its

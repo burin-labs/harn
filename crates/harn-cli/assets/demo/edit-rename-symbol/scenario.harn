@@ -42,7 +42,8 @@ pipeline default(harness: Harness, _task) {
   //    re-parses every in-scope file with tree-sitter to collect the
   //    identifier-context byte spans that would be rewritten.
   const planned = edit_rename_symbol(
-    harness.code_index, {
+    harness.code_index,
+    {
       symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
       new_name: "Gadget",
       scope: "workspace",
@@ -54,7 +55,8 @@ pipeline default(harness: Harness, _task) {
   //    detects the shadow site and refuses to touch disk.
   const _ = harness.code_index.rebuild({root: conflict_root})
   const conflict = edit_rename_symbol(
-    harness.code_index, {
+    harness.code_index,
+    {
       symbol_ref: {name: "Widget", path: "src/main.rs", kind: "Type"},
       new_name: "Gadget",
       scope: "workspace",

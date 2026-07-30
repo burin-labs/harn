@@ -32,11 +32,14 @@ pipeline test(harness: Harness, task) {
   const blank_failure = unwrap_err(blank)
   harness.stdio.println(blank_failure.kind)
   harness.stdio.println(blank_failure.ocr_candidate)
-  let path = path_join(harness.fs.workspace_temp_dir(), "harn-document-" + harness.random.uuid() + ".pdf")
+  let path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-document-" + harness.random.uuid() + ".pdf",
+  )
   defer {
     harness.fs.delete(path)
   }
-  let result = write_pdf(harness, path, "Portable PDF", {title: "Portable"})
+  let result = write_pdf(harness.fs, path, "Portable PDF", {title: "Portable"})
   harness.stdio.println(result.media_type)
   harness.stdio.println(result.bytes > 0)
   harness.stdio.println(harness.fs.exists(path))

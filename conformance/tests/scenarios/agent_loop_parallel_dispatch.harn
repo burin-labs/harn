@@ -16,7 +16,7 @@ import { agent_loop } from "std/agent/loop"
 import { compose_tool_callers, with_audit_log, with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn fanout_tools(harness: Harness, state) {
+fn fanout_tools(runtime: HarnessRuntime, state) {
   const r = tool_registry()
   return tool_define(
     r,
@@ -24,16 +24,16 @@ fn fanout_tools(harness: Harness, state) {
     "Echo, but track concurrent in-flight handlers",
     {
       handler: { args ->
-        const now = harness.runtime.atomic_add(state.in_flight, 1) + 1
-        if now > harness.runtime.atomic_get(state.peak) {
-          harness.runtime.atomic_set(state.peak, now)
+        const now = runtime.atomic_add(state.in_flight, 1) + 1
+        if now > runtime.atomic_get(state.peak) {
+          runtime.atomic_set(state.peak, now)
         }
         let spins = 0
         while spins < 20 {
-          harness.runtime.yield_now()
+          runtime.yield_now()
           spins = spins + 1
         }
-        harness.runtime.atomic_add(state.in_flight, -1)
+        runtime.atomic_add(state.in_flight, -1)
         return "echoed:" + to_string(args?.msg ?? "")
       },
       parameters: {msg: {type: "string"}},
@@ -71,7 +71,7 @@ fn run(harness: Harness, state, cap) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness, state),
+          tools: fanout_tools(harness.runtime, state),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -112,7 +112,7 @@ fn run_without_middleware(harness: Harness, state, cap) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness, state),
+          tools: fanout_tools(harness.runtime, state),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -156,8 +156,8 @@ fn run_with_audit(harness: Harness, state, cap) {
         harness.runtime.atomic_add(state.audit_emit_order_bitmask, shifted)
       }
       const caller = compose_tool_callers(
-        harness,
-        [with_audit_log(harness, {sink: audit_sink}), reason.caller],
+        harness.clock,
+        [with_audit_log(harness.clock, harness.fs, {sink: audit_sink}), reason.caller],
       )
       const result = agent_loop(
         harness,
@@ -165,7 +165,7 @@ fn run_with_audit(harness: Harness, state, cap) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness, state),
+          tools: fanout_tools(harness.runtime, state),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -183,9 +183,11 @@ fn run_with_audit(harness: Harness, state, cap) {
   )
 }
 
-// Add each receipt's bit (1 << emit_order) to the bitmask atomic.
-// For 3 unique calls the bits are disjoint, so atomic_add == OR. The
-// expected mask for emit_orders {0, 1, 2} is 1+2+4 = 7.
+/**
+ * Add each receipt's bit (1 << emit_order) to the bitmask atomic.
+ * For 3 unique calls the bits are disjoint, so atomic_add == OR. The
+ * expected mask for emit_orders {0, 1, 2} is 1+2+4 = 7.
+ */
 fn run_prefetch(harness: Harness, state, prefetch) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
@@ -224,14 +226,17 @@ fn run_prefetch(harness: Harness, state, prefetch) {
     nil,
     {
       provider: "mock",
-      tools: fanout_tools(harness, state),
+      tools: fanout_tools(harness.runtime, state),
       tool_format: "native",
       max_iterations: 3,
       loop_until_done: true,
       done_sentinel: "##DONE##",
       max_concurrent_tools: 2,
       prefetch_next_turn: prefetch,
-      tool_caller: compose_tool_callers(harness, [with_audit_log(harness, {sink: audit_sink})]),
+      tool_caller: compose_tool_callers(
+        harness.clock,
+        [with_audit_log(harness.clock, harness.fs, {sink: audit_sink})],
+      ),
       llm_caller: llm_caller,
     },
   )

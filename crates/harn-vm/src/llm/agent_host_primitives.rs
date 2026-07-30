@@ -1782,7 +1782,7 @@ fn tag_mcp_tool(
     runtime_only = true
 )]
 async fn host_mcp_bootstrap_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     use std::collections::BTreeMap;
@@ -1819,6 +1819,10 @@ async fn host_mcp_bootstrap_impl(
     let mut tools_added: Vec<serde_json::Value> = Vec::new();
     let mut server_infos: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<serde_json::Value> = Vec::new();
+    let fixtures = ctx
+        .child_vm()
+        .harness()
+        .map(|harness| harness.inner().fixtures_arc());
 
     for spec in &specs_list {
         let server_name = spec
@@ -1848,6 +1852,9 @@ async fn host_mcp_bootstrap_impl(
                 }));
             }
             Ok(handle) => {
+                if let Some(fixtures) = fixtures.as_ref() {
+                    handle.set_capability_fixtures(fixtures.clone()).await;
+                }
                 let initialize = handle
                     .initialize_result
                     .lock()

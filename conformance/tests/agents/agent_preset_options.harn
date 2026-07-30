@@ -24,7 +24,11 @@ pipeline default(harness: Harness) {
   harness.stdio.println(json_audit.done_sentinel)
   const native_audit = agent_loop_options(
     harness,
-    agent_preset(harness, "audit", {provider: "mock", tools: tool_registry(), tool_format: "native"}),
+    agent_preset(
+      harness,
+      "audit",
+      {provider: "mock", tools: tool_registry(), tool_format: "native"},
+    ),
   )
   harness.stdio.println(native_audit.done_sentinel == nil)
   const summary = agent_preset(harness, "summary")
@@ -36,7 +40,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(summary.loop_until_done)
   harness.stdio.println(summary.max_nudges)
   const repair = agent_preset(
-    harness, "repair",
+    harness,
+    "repair",
     {iteration_budget: {mode: "adaptive", initial: 6, max: 20, extend_by: 3}},
   )
   harness.stdio.println(repair.iteration_budget.mode)

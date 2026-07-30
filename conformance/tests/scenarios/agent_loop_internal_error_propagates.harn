@@ -38,10 +38,13 @@ fn throwing_caller(category) {
 
 fn run_with_caller(harness: Harness, category, cap, calls) {
   return with_llm_script(
-    harness.llm, [{tool_calls: calls}, llm_text("##DONE##")],
+    harness.llm,
+    [{tool_calls: calls}, llm_text("##DONE##")],
     { ->
       const outcome = try {
-        agent_loop(harness, "internal-error probe",
+        agent_loop(
+          harness,
+          "internal-error probe",
           nil,
           {
             provider: "mock",

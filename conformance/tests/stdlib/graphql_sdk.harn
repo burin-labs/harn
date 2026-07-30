@@ -48,7 +48,9 @@ pipeline test(harness: Harness, task) {
       },
     },
   )
-  const envelope = graphql_execute_operation(harness, {endpoint: endpoint, auth: {access_token: "linear-token"}},
+  const envelope = graphql_execute_operation(
+    harness.net,
+    {endpoint: endpoint, auth: {access_token: "linear-token"}},
     operation,
     {id: "user-1"},
   )

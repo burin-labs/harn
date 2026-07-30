@@ -17,7 +17,7 @@ pipeline default(harness: Harness) {
     },
   }
   const options = {project: false, env: false, config: config}
-  const human = render(harness, chain, "github", options)
+  const human = render(harness.env, harness.fs, chain, "github", options)
   harness.stdio.println(human.author_mode)
   harness.stdio.println(human.mode)
   harness.stdio.println(human.required_auth_identity)
@@ -30,11 +30,20 @@ pipeline default(harness: Harness) {
   harness.stdio.println(to_string(human.commit_committer == nil))
   harness.stdio.println(to_string(human.append_git_trailers))
   harness.stdio.println(human.trailers)
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-disclosure-github-mode-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-disclosure-github-mode-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(root)
   const project_config = "[disclosure.surfaces.github]\n" + "author_mode = \"bot\"\n"
   harness.fs.write_text(path_join(root, "harn.toml"), project_config)
-  const bot = render(harness, chain, "github", options + {project: true, project_root: root})
+  const bot = render(
+    harness.env,
+    harness.fs,
+    chain,
+    "github",
+    options + {project: true, project_root: root},
+  )
   harness.stdio.println(bot.author_mode)
   harness.stdio.println(bot.mode)
   harness.stdio.println(bot.required_auth_identity)
@@ -46,7 +55,13 @@ pipeline default(harness: Harness) {
   harness.stdio.println(to_string(bot.omit_custom_commit_author))
   harness.stdio.println(to_string(bot.append_git_trailers))
   const invalid = try {
-    render(harness, chain, "github", options + {config: {surfaces: {github: {author_mode: "robot"}}}})
+    render(
+      harness.env,
+      harness.fs,
+      chain,
+      "github",
+      options + {config: {surfaces: {github: {author_mode: "robot"}}}},
+    )
   }
   require is_err(invalid), "invalid github author_mode must fail"
   harness.stdio.println(unwrap_err(invalid))

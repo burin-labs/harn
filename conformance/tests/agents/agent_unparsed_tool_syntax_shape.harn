@@ -20,8 +20,8 @@ const REGISTRY = {
   tools: [{name: "look", description: "look at a file", parameters: {}}],
 }
 
-fn shapes(text: string) -> string {
-  const parsed = agent_parse_tool_calls(text, REGISTRY, "text")
+fn shapes(agent: HarnessAgent, text: string) -> string {
+  const parsed = agent_parse_tool_calls(agent, text, REGISTRY, "text")
   let out = ""
   for finding in tool_shape_findings(parsed.dropped ?? []) {
     out = out + finding.shape + ";"
@@ -33,36 +33,57 @@ pipeline main(harness: Harness) {
   // The `<tool>` single-tag dialect, fenced, invoking a tool the registry does
   // not know — dozens of these appeared in raw model bytes with zero parsed
   // calls and, before this, zero violations.
-  harness.stdio.println(shapes("```\n<tool>\nsearch({ query: \"x\" })\n</tool>\n```"))
+  harness.stdio.println(
+    shapes(harness.agent, "```\n<tool>\nsearch({ query: \"x\" })\n</tool>\n```"),
+  )
   // A dialect invented for this test. Nothing in the detector names it; it is
   // caught because it is SHAPED like an invocation. This is the case that makes
   // the fix a class-kill rather than one more allowlist entry.
-  harness.stdio.println(shapes("```\n<perform_action>\nsearch({ query: \"x\" })\n</perform_action>\n```"))
+  harness.stdio.println(
+    shapes(
+      harness.agent,
+      "```\n<perform_action>\nsearch({ query: \"x\" })\n</perform_action>\n```",
+    ),
+  )
   // The bare/native JSON family, spread across lines inside a fence, naming an
   // unregistered tool.
   harness.stdio.println(
-    shapes("```\n{\n  \"name\": \"search\",\n  \"arguments\": { \"query\": \"x\" }\n}\n```"),
+    shapes(
+      harness.agent,
+      "```\n{\n  \"name\": \"search\",\n  \"arguments\": { \"query\": \"x\" }\n}\n```",
+    ),
   )
   // Fenced source code is not an invocation.
-  harness.stdio.println(shapes("```rust\nfn main() { println!(\"hi\"); }\n```"))
-  harness.stdio.println(shapes("```html\n<div class=\"x\">hello</div>\n```"))
+  harness.stdio.println(shapes(harness.agent, "```rust\nfn main() { println!(\"hi\"); }\n```"))
+  harness.stdio.println(shapes(harness.agent, "```html\n<div class=\"x\">hello</div>\n```"))
   // Prose about the protocol carries no arguments and must not fire.
-  harness.stdio.println(shapes("<assistant_prose>Wrap every call in <tool_call> tags.</assistant_prose>"))
+  harness.stdio.println(
+    shapes(
+      harness.agent,
+      "<assistant_prose>Wrap every call in <tool_call> tags.</assistant_prose>",
+    ),
+  )
   // A well-formed call parses, so there is nothing to flag.
   const good = agent_parse_tool_calls(
+    harness.agent,
     "<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>",
     REGISTRY,
     "text",
   )
   harness.stdio.println(len(good.tool_calls))
-  harness.stdio.println(shapes("<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>"))
+  harness.stdio.println(
+    shapes(harness.agent, "<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>"),
+  )
   // A fenced call the sniffer can already execute (registered tool) is not a
   // finding — the call ran; feedback would be false.
   const salvaged = agent_parse_tool_calls(
+    harness.agent,
     "```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```",
     REGISTRY,
     "text",
   )
   harness.stdio.println(len(salvaged.tool_calls))
-  harness.stdio.println(shapes("```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```"))
+  harness.stdio.println(
+    shapes(harness.agent, "```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```"),
+  )
 }

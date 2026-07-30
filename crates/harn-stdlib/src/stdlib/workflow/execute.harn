@@ -82,7 +82,13 @@ pub fn workflow_execute(harness: Harness, task, graph, artifacts = nil, options 
     } else {
       try {
         if plan?.run_map_stage {
-          workflow_execute_map_stage(current, plan.node, plan.artifacts, plan.map_options)
+          workflow_execute_map_stage(
+            harness.runtime,
+            current,
+            plan.node,
+            plan.artifacts,
+            plan.map_options,
+          )
         } else if plan.run_agent_loop {
           agent_loop(harness, plan.prompt, plan.system, plan.agent_loop_options)
         } else {

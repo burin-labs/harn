@@ -12,6 +12,7 @@ pipeline default(harness: Harness) {
   const cursor = harness.obs.event_log_latest(topic) ?? 0
   const gate = harness.runtime.channel(nil, 1)
   const pool = pool_create(
+    harness.agent,
     {name: "otel-drop-demo", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
   )
   const warmup = pool.submit(
@@ -37,7 +38,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(drop_receipt.payload.max_depth)
   harness.stdio.println(drop_receipt.payload.queue_depth)
   // Wait for the two surviving tasks after the gate has been released.
-  const results = pool_wait([warmup, queued, dropped])
+  const results = pool_wait(harness.agent, [warmup, queued, dropped])
   harness.stdio.println(results[0].status)
   harness.stdio.println(results[1].result)
   harness.stdio.println(results[2].status)

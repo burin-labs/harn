@@ -64,9 +64,12 @@ fn capability_policy() {
 
 fn one_call(harness: Harness, name, args, approval_policy) {
   return with_llm_script(
-    harness.llm, [{tool_calls: [{id: "call_1", name: name, arguments: args}]}],
+    harness.llm,
+    [{tool_calls: [{id: "call_1", name: name, arguments: args}]}],
     { ->
-      agent_loop(harness, "Use the requested tool.",
+      agent_loop(
+        harness,
+        "Use the requested tool.",
         "Use tools.",
         {
           provider: "mock",
@@ -89,7 +92,8 @@ pipeline main(harness: Harness) {
   harness.stdio.println(secret?.tools?.rejected[0] == "read_secret")
   harness.stdio.println(secret_events.contains("sensitive_path"))
   harness.stdio.println(secret_events.contains("harn.permission_policy_decision.v1"))
-  const ask = one_call(harness,
+  const ask = one_call(
+    harness,
     "fetch_url",
     {url: "https://api.example.com/v1/issues", method: "post"},
     {
@@ -105,7 +109,8 @@ pipeline main(harness: Harness) {
   harness.stdio.println(ask?.tools?.rejected[0] == "fetch_url")
   harness.stdio.println(ask_events.contains("managed network approval"))
   harness.stdio.println(ask_events.contains("\"action\":\"ask\""))
-  const allowed = one_call(harness,
+  const allowed = one_call(
+    harness,
     "run_command",
     {argv: ["npm", "test"]},
     {allow_sensitive_paths: true, rules: [{allow: {tool: "run_command", command_identity: "npm"}}]},
@@ -115,7 +120,8 @@ pipeline main(harness: Harness) {
   )
   harness.stdio.println(len(allowed?.tools?.rejected) == 0)
   harness.stdio.println(grant_events.contains("command_rule"))
-  const mcp = one_call(harness,
+  const mcp = one_call(
+    harness,
     "github__create_issue",
     {title: "blocked"},
     {
@@ -131,7 +137,8 @@ pipeline main(harness: Harness) {
   harness.stdio.println(mcp?.tools?.rejected[0] == "github__create_issue")
   harness.stdio.println(mcp_events.contains("mcp_rule"))
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "repeat_1", name: "run_command", arguments: {argv: ["echo", "ok"]}},
@@ -140,7 +147,9 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const repeated = agent_loop(harness, "Run twice.",
+      const repeated = agent_loop(
+        harness,
+        "Run twice.",
         "Use tools.",
         {
           provider: "mock",

@@ -7,7 +7,7 @@ pipeline test(harness: Harness, task) {
   )
   const actor_id = "trust-policy-" + unique
   record(
-    harness,
+    harness.runtime,
     {
       actor_id: actor_id,
       action: "trust.promote",
@@ -20,7 +20,7 @@ pipeline test(harness: Harness, task) {
   let i = 0
   while i < 10 {
     record(
-      harness,
+      harness.runtime,
       {
         actor_id: actor_id,
         action: "merge_pr",
@@ -33,8 +33,11 @@ pipeline test(harness: Harness, task) {
     )
     i = i + 1
   }
-  const policy: CapabilityPolicy = policy_for(harness, actor_id)
-  const records: list<TrustGraphRecord> = query(harness, {actor_id: actor_id, action: "merge_pr"})
+  const policy: CapabilityPolicy = policy_for(harness.runtime, actor_id)
+  const records: list<TrustGraphRecord> = query(
+    harness.runtime,
+    {actor_id: actor_id, action: "merge_pr"},
+  )
   harness.stdio.println(len(records) == 10)
   harness.stdio.println(policy.side_effect_level == "network")
 }

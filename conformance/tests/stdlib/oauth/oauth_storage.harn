@@ -50,11 +50,11 @@ fn exercise_backend(label, store, expect_kind) {
   require_nil(label + ".get(missing)", store.get("never-stored"))
 }
 
-fn exercise_memory(harness: Harness) {
-  exercise_backend("memory", memory(harness.auth), "memory")
+fn exercise_memory(auth: HarnessAuth) {
+  exercise_backend("memory", memory(auth), "memory")
   // Independent memory handles do not share state.
-  const a = memory(harness.auth)
-  const b = memory(harness.auth)
+  const a = memory(auth)
+  const b = memory(auth)
   a.set("shared-key", {access_token: "from-a"}, 60)
   require_nil("memory.isolation", b.get("shared-key"))
 }
@@ -98,14 +98,14 @@ fn exercise_file(harness: Harness) {
   s3.delete("github")
 }
 
-fn exercise_custom(harness: Harness) {
+fn exercise_custom(auth: HarnessAuth) {
   // Delegate to an in-process memory backend so the user-supplied
   // closures exercise real state without relying on closure capture
   // semantics. The contract is what matters here: get/set/delete are
   // dispatched to the closures the caller registered.
-  const inner = memory(harness.auth)
+  const inner = memory(auth)
   const s = custom(
-    harness.auth,
+    auth,
     {
       get: { key -> inner.get(key) },
       set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },
@@ -117,9 +117,9 @@ fn exercise_custom(harness: Harness) {
     throw "custom: expected id=test-vault, got " + s.id
   }
   exercise_backend("custom", s, "custom")
-  const locked_inner = memory(harness.auth)
+  const locked_inner = memory(auth)
   const locked = custom(
-    harness.auth,
+    auth,
     {
       get: { key -> locked_inner.get(key) },
       set: { key, tok, ttl = nil -> locked_inner.set(key, tok, ttl) },
@@ -140,17 +140,17 @@ fn exercise_custom(harness: Harness) {
   }
 }
 
-fn exercise_cloud(harness: Harness, scope, factory, expect_kind) {
-  harness.testing.clear()
-  harness.testing.respond("auth", "oauth_storage_set", nil)
-  harness.testing.respond("auth", "oauth_storage_delete", nil)
-  harness.testing.respond("auth", "oauth_storage_with_refresh_lock", "locked-" + scope)
-  harness.testing.respond(
+fn exercise_cloud(auth: HarnessAuth, testing: HarnessTesting, scope, factory, expect_kind) {
+  testing.clear()
+  testing.respond("auth", "oauth_storage_set", nil)
+  testing.respond("auth", "oauth_storage_delete", nil)
+  testing.respond("auth", "oauth_storage_with_refresh_lock", "locked-" + scope)
+  testing.respond(
     "auth",
     "oauth_storage_get",
     {access_token: "cloud-tok", refresh_token: "cloud-rfr", scopes: ["repo"]},
   )
-  const s = factory(harness.auth)
+  const s = factory(auth)
   if s.scope != scope {
     throw "cloud[" + scope + "]: expected scope field, got " + to_string(s.scope)
   }
@@ -164,7 +164,7 @@ fn exercise_cloud(harness: Harness, scope, factory, expect_kind) {
   if locked != "locked-" + scope {
     throw "cloud[" + scope + "].with_refresh_lock returned " + to_string(locked)
   }
-  const calls = harness.testing.calls()
+  const calls = testing.calls()
   if len(calls) != 4 {
     throw "cloud[" + scope + "]: expected 4 capability calls, got " + to_string(len(calls))
   }
@@ -183,11 +183,11 @@ fn exercise_cloud(harness: Harness, scope, factory, expect_kind) {
   if calls[3].method != "oauth_storage_with_refresh_lock" || calls[3].args[0].scope != scope {
     throw "cloud[" + scope + "]: oauth_storage_with_refresh_lock call shape mismatch"
   }
-  harness.testing.clear()
+  testing.clear()
 }
 
 fn exercise_namespace(harness: Harness) {
-  const ns = storage(harness)
+  const ns = storage(harness.auth, harness.secrets)
   if ns.memory.kind != "memory" {
     throw "storage(harness): expected memory handle on namespace"
   }
@@ -218,11 +218,11 @@ fn exercise_namespace(harness: Harness) {
 }
 
 pipeline test(harness: Harness, task) {
-  exercise_memory(harness)
+  exercise_memory(harness.auth)
   exercise_file(harness)
-  exercise_custom(harness)
-  exercise_cloud(harness, "session", harn_cloud_session, "harn_cloud_session")
-  exercise_cloud(harness, "org", harn_cloud_org, "harn_cloud_org")
+  exercise_custom(harness.auth)
+  exercise_cloud(harness.auth, harness.testing, "session", harn_cloud_session, "harn_cloud_session")
+  exercise_cloud(harness.auth, harness.testing, "org", harn_cloud_org, "harn_cloud_org")
   exercise_namespace(harness)
   harness.stdio.log("oauth storage ok")
 }

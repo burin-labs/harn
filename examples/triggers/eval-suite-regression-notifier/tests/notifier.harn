@@ -21,7 +21,7 @@ pipeline test_regression_notification_posts(harness: Harness, task) {
     },
   )
   const namespace = "eval-notifier-test-" + harness.random.uuid()
-  const manifest = load_eval_manifest(harness)
+  const manifest = load_eval_manifest(harness.fs)
   const config = {
     namespace: namespace,
     suite: DEFAULT_SUITE,
@@ -108,10 +108,10 @@ fn notifier_event(config, base) -> dict {
   }
 }
 
-fn load_eval_manifest(harness: Harness) -> dict {
-  const base_dir = path_join(harness.fs.source_dir(), "..")
+fn load_eval_manifest(fs: HarnessFs) -> dict {
+  const base_dir = path_join(fs.source_dir(), "..")
   const path = path_join(base_dir, "harn.eval.toml")
-  return eval_pack_manifest(toml_parse(harness.fs.read_text(path)) + {base_dir: base_dir})
+  return eval_pack_manifest(toml_parse(fs.read_text(path)) + {base_dir: base_dir})
 }
 
 fn ledger_options(config) -> dict {

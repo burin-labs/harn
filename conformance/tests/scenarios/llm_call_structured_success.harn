@@ -13,7 +13,8 @@ pipeline default(harness: Harness) {
     properties: {name: {type: "string"}, age: {type: "integer"}},
   }
   with_llm_script(
-    harness.llm, [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
+    harness.llm,
+    [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
     { ->
       const summary = harness.llm.call_structured("Summarize", schema, {provider: "mock"})
       harness.stdio.println(summary.name)
@@ -22,7 +23,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("{\"name\": \"Grace\", \"age\": 42}")],
+    harness.llm,
+    [llm_text("{\"name\": \"Grace\", \"age\": 42}")],
     { ->
       const grace = harness.llm.call_structured(
         "Summarize",

@@ -62,7 +62,7 @@ fn corpus_row_by_language(rows: list, language: string) {
   return matches[0]
 }
 
-fn path_artifact_digest(harness: Harness, package_name: string) -> string {
+fn path_artifact_digest(fs: HarnessFs, package_name: string) -> string {
   if package_name != "tree-sitter-harn" {
     throw "path dependency `${package_name}` needs an explicit artifact digest rule"
   }
@@ -73,22 +73,22 @@ fn path_artifact_digest(harness: Harness, package_name: string) -> string {
   ]
   let joined = ""
   for path in inputs {
-    joined = joined + path + "\n" + sha256(harness.fs.read_bytes(path)) + "\n"
+    joined = joined + path + "\n" + sha256(fs.read_bytes(path)) + "\n"
   }
   return "sha256:" + sha256(joined)
 }
 
-fn artifact_digest(harness: Harness, package) -> string {
+fn artifact_digest(fs: HarnessFs, package) -> string {
   const checksum = package?.checksum ?? ""
   if checksum != "" {
     return "sha256:" + checksum
   }
-  return path_artifact_digest(harness, package.name)
+  return path_artifact_digest(fs, package.name)
 }
 
-fn corpus_digest(harness: Harness, corpus_text: string, rows: list) -> string {
+fn corpus_digest(fs: HarnessFs, corpus_text: string, rows: list) -> string {
   let material = CORPUS_SCHEMA + "\n"
-    + sha256(harness.fs.read_bytes(CORPUS_SCHEMA))
+    + sha256(fs.read_bytes(CORPUS_SCHEMA))
     + "\n"
     + CORPUS
     + "\n"
@@ -96,19 +96,19 @@ fn corpus_digest(harness: Harness, corpus_text: string, rows: list) -> string {
     + "\n"
   for row in rows {
     const fixture = CORPUS_DIR + "/" + row.fixture
-    const fixture_digest = sha256(harness.fs.read_bytes(fixture))
+    const fixture_digest = sha256(fs.read_bytes(fixture))
     material = material + row.language + "\n" + row.fixture + "\n" + fixture_digest + "\n"
   }
   return "sha256:" + sha256(material)
 }
 
-fn render_receipt(harness: Harness) -> string {
-  const corpus_text = harness.fs.read_text(CORPUS)
+fn render_receipt(fs: HarnessFs) -> string {
+  const corpus_text = fs.read_text(CORPUS)
   const corpus = json_parse(corpus_text)
   if corpus?.schema_version != 1 {
     throw "unsupported grammar fitness corpus schema version"
   }
-  const lock = toml_parse(harness.fs.read_text(LOCKFILE))
+  const lock = toml_parse(fs.read_text(LOCKFILE))
   const packages = lock?.package ?? []
   let languages = []
   for mapping in LANGUAGE_PACKAGES {
@@ -123,7 +123,7 @@ fn render_receipt(harness: Harness) -> string {
           version: package.version,
           source: package?.source ?? "workspace-path",
           checksum: package?.checksum,
-          artifact_digest: artifact_digest(harness, package),
+          artifact_digest: artifact_digest(fs, package),
         },
         operations: row.operations,
         authority: row.authority,
@@ -134,7 +134,7 @@ fn render_receipt(harness: Harness) -> string {
     schema_version: 1,
     corpus: {
       schema_version: corpus.schema_version,
-      digest: corpus_digest(harness, corpus_text, corpus.rows),
+      digest: corpus_digest(fs, corpus_text, corpus.rows),
     },
     tree_sitter_runtime: package_by_name(packages, "tree-sitter").version,
     languages: languages,
@@ -143,7 +143,7 @@ fn render_receipt(harness: Harness) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  const candidate = render_receipt(harness)
+  const candidate = render_receipt(harness.fs)
   if argv.contains("--check") {
     const committed = harness.fs.read_text(OUTPUT)
     if committed == candidate {

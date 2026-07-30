@@ -9,7 +9,8 @@ pipeline default(harness: Harness) {
   // First mock: invalid JSON (missing required "verdict" key).
   // Second mock: valid JSON on the nudge retry.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("{\"improvement\": \"try again\"}"),
       llm_text("{\"verdict\": \"YES\", \"improvement\": \"\"}"),
     ],
@@ -52,7 +53,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("{\"improvement\": \"try again\"}")],
+    harness.llm,
+    [llm_text("{\"improvement\": \"try again\"}")],
     { ->
       const err = try {
         harness.llm.call(
@@ -70,7 +72,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Analyzing the task carefully"),
       llm_text("{\"verdict\": \"YES\", \"improvement\": \"\"}"),
     ],
@@ -94,7 +97,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Analyzing the user task"), llm_text("Examining the failed run")],
+    harness.llm,
+    [llm_text("Analyzing the user task"), llm_text("Examining the failed run")],
     { ->
       const prose_err = try {
         harness.llm.call(

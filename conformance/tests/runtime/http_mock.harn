@@ -7,7 +7,11 @@ pipeline test(harness: Harness, task) {
     {status: 200, body: "{\"users\": [\"alice\", \"bob\"]}", headers: {}},
   )
   // Register a mock for POST with glob pattern
-  harness.testing.http_mock("POST", "https://api.example.com/*", {status: 201, body: "{\"created\": true}"})
+  harness.testing.http_mock(
+    "POST",
+    "https://api.example.com/*",
+    {status: 201, body: "{\"created\": true}"},
+  )
   // Make a GET request - should hit mock
   const resp = harness.net.get("https://api.example.com/users")
   assert_eq(resp.status, 200)

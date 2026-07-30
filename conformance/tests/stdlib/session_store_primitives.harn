@@ -6,28 +6,31 @@ import "std/session-store"
  * fields printed are deterministic apart from the opaque canonical hashes.
  */
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-session-store-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-session-store-" + harness.random.uuid(),
+  )
   const sid = "burin.agent_context.memories.project"
   const opts = {root: root, kind_type: "AgentMemory"}
   const first = session_store_append(
-    harness,
+    harness.agent,
     sid,
     {operation: "upsert", record: {id: "m1", title: "one"}},
     opts,
   )
   const second = session_store_append(
-    harness,
+    harness.agent,
     sid,
     {operation: "upsert", record: {id: "m2", title: "two"}},
     opts,
   )
   session_store_append(
-    harness,
+    harness.agent,
     sid,
     {operation: "upsert", record: {id: "m1", title: "one-v2"}},
     opts,
   )
-  session_store_append(harness, sid, {operation: "delete", id: "m2"}, opts)
+  session_store_append(harness.agent, sid, {operation: "delete", id: "m2"}, opts)
   // Hash chain: 1-based event_id, genesis prev_hash is nil, then links.
   harness.stdio.println(first.event_id)
   harness.stdio.println(first.prev_hash == nil)
@@ -36,24 +39,27 @@ pipeline default(harness: Harness) {
   harness.stdio.println(starts_with(first.record_hash, "sha256:"))
   harness.stdio.println(first.kind.type)
   // Projection: m1 updated to v2, m2 deleted → only m1 survives.
-  const records = session_store_project(harness, sid, {root: root})
+  const records = session_store_project(harness.agent, sid, {root: root})
   harness.stdio.println(len(records))
   harness.stdio.println(records[0].id)
   harness.stdio.println(records[0].title)
   // Verification of the canonical SQLite chain.
-  const report = session_store_verify(harness, sid, {root: root})
+  const report = session_store_verify(harness.agent, sid, {root: root})
   harness.stdio.println(report.ok)
   harness.stdio.println(report.count)
   // Value stream projection (replace / clear fold).
   const vsid = "example.value.stream"
-  session_store_append(harness, vsid, {operation: "replace", value: "hello"}, {root: root})
-  harness.stdio.println(session_store_project_value(harness, vsid, "fallback", {root: root}))
+  session_store_append(harness.agent, vsid, {operation: "replace", value: "hello"}, {root: root})
+  harness.stdio.println(session_store_project_value(harness.agent, vsid, "fallback", {root: root}))
   harness.stdio.println(
     ends_with(
-      session_store_path(harness, sid, {root: root}),
+      session_store_path(harness.agent, sid, {root: root}),
       "/.harn/session-store/" + sid + ".jsonl",
     )
-      && ends_with(session_store_database_path(harness, {root: root}), "/.harn/session-store.sqlite"),
+      && ends_with(
+      session_store_database_path(harness.agent, {root: root}),
+      "/.harn/session-store.sqlite",
+    ),
   )
   harness.fs.delete(root)
 }

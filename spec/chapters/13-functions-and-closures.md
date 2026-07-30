@@ -41,7 +41,7 @@ a default — not just literals.
 
 ```harn
 fn greet(name, greeting = "hello") {
-  log("${greeting}, ${name}!")
+  harness.obs.log("${greeting}, ${name}!")
 }
 greet("world")           // "hello, world!"
 greet("world", "hi")     // "hi, world!"
@@ -62,7 +62,7 @@ be omitted.
 ```harn
 tool read_text(path: string, encoding: string = "utf-8") -> string {
   description "Read a file from the filesystem"
-  read_file(path)
+  harness.fs.read_text(path)
 }
 
 tool search_files(query: string, file_glob: string = "*.py") -> string {
@@ -283,9 +283,9 @@ historical examples.
 Command execution policy is a first-class Harn value created with
 `command_policy(config)`. A policy can be installed directly with
 `command_policy_push(policy)` / `command_policy_pop()` or scoped to
-`agent_loop` with `command_policy: policy` or
+`agent_loop(harness, ...)` with `command_policy: policy` or
 `policy: { command_policy: policy }`. While installed,
-`host_call("process.exec", ...)` builds a normalized command context,
+`harness.process.exec(...)` builds a normalized command context,
 runs deterministic risk classification, executes the policy pre-hook
 before spawning, and records decisions in the returned command envelope
 under `command_policy`.
@@ -327,7 +327,7 @@ in its config dict. Deferred tools keep their schema out of the model's
 context on each LLM call until a tool-search call surfaces them.
 
 ```harn
-fn admin(token) { log(token) }
+fn admin(token) { harness.obs.log(token) }
 
 const registry = tool_registry()
 registry = tool_define(registry, "rare_admin_action", "...", {
@@ -419,10 +419,10 @@ pub skill deploy {
   prompt "Follow the deployment runbook."
 
   on_activate fn() {
-    log("deploy skill activated")
+    harness.obs.log("deploy skill activated")
   }
   on_deactivate fn() {
-    log("deploy skill deactivated")
+    harness.obs.log("deploy skill deactivated")
   }
 }
 ```

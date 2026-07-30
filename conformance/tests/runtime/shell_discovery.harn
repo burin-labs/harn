@@ -8,8 +8,6 @@ pipeline default(harness: Harness) {
   harness.stdio.println(catalog?.default_shell_id == default_shell?.id)
   harness.stdio.println(invocation?.program == default_shell?.path)
   harness.stdio.println(invocation?.args != nil)
-  const result = harness.process.run(
-    {mode: "shell", shell_id: default_shell?.id, command: "printf shell-contract"},
-  )
+  const result = harness.process.run({program: invocation.program, args: invocation.args})
   harness.stdio.println(result?.stdout)
 }

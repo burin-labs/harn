@@ -471,7 +471,7 @@ fn known_host_operations() -> Vec<(String, String)> {
         .collect()
 }
 
-fn host_operation_is_registered(capability: &str, operation: &str) -> bool {
+pub(crate) fn host_operation_is_registered(capability: &str, operation: &str) -> bool {
     known_host_operations()
         .iter()
         .any(|(known_capability, known_operation)| {
@@ -808,6 +808,17 @@ pub async fn dispatch_host_operation_with_ctx(
     operation: &str,
     params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
+    if let Some(ctx) = ctx {
+        let vm = ctx.child_vm();
+        if let Some(fixtured) = vm.harness().and_then(|harness| {
+            harness
+                .inner()
+                .fixtures()
+                .dispatch_host(capability, operation, params)
+        }) {
+            return fixtured;
+        }
+    }
     if let Some(mocked) = dispatch_mock_host_call(capability, operation, params) {
         return mocked;
     }
@@ -1014,7 +1025,7 @@ fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
+    exposure = "privileged_wire",
     effects = [],
     sig = "host_mock_clear() -> nil", category = "host"
 )]
@@ -1104,7 +1115,7 @@ fn host_has_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
+    exposure = "privileged_wire",
     effects = [],
     sig = "host_call(name: string, args?: dict) -> any",
     kind = "async",

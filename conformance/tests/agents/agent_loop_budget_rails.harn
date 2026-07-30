@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 
 fn first_event(events, event_type) {
   for event in events {
@@ -26,8 +26,12 @@ fn wall_clock_case(harness: Harness) {
     }
   }
   const session = "budget-wall-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_loop(harness, "work",
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "work",
       nil,
       {
         session_id: session,
@@ -66,8 +70,12 @@ fn total_cost_case(harness: Harness) {
     }
   }
   const session = "budget-cost-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_loop(harness, "work",
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "work",
       nil,
       {
         session_id: session,
@@ -102,8 +110,12 @@ fn circuit_case(harness: Harness) {
     }
   }
   const session = "budget-circuit-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_loop(harness, "retry",
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "retry",
       nil,
       {
         session_id: session,

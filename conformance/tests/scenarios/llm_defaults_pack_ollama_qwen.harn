@@ -3,7 +3,7 @@
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(harness: Harness, task) {
-  const r = pack_for(harness, {model: "qwen3:8b", reasoning_policy: "off"})
+  const r = pack_for(harness.agent, harness.llm, {model: "qwen3:8b", reasoning_policy: "off"})
   assert_eq(r.provider, "ollama")
   assert_eq(r.has("thinking"), false)
   // No effort or thinkingBudget either — qwen3 path is a no-op.

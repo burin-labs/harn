@@ -250,7 +250,7 @@ fn __persona_blueprint_validate_external(
  * @api_stability: experimental
  */
 pub fn persona_blueprint_validate(
-  harness: Harness,
+  llm: HarnessLlm,
   blueprint,
   providers = nil,
 ) -> PersonaBlueprintValidationReport {
@@ -308,7 +308,7 @@ pub fn persona_blueprint_validate(
       ),
     )
   }
-  const catalog = providers ?? list_providers(harness)
+  const catalog = providers ?? list_providers(llm)
   if has_cron {
     report = __persona_blueprint_validate_cron(blueprint, catalog, report) + {source_kind: "cron"}
   } else {
@@ -372,12 +372,12 @@ fn __persona_blueprint_lower_trigger(blueprint, providers) -> PersonaBlueprintTr
  * @api_stability: experimental
  */
 pub fn persona_blueprint_compile(
-  harness: Harness,
+  llm: HarnessLlm,
   blueprint,
   providers = nil,
 ) -> PersonaBlueprintCompileResult {
-  const catalog = providers ?? list_providers(harness)
-  const validation = persona_blueprint_validate(harness, blueprint, catalog)
+  const catalog = providers ?? list_providers(llm)
+  const validation = persona_blueprint_validate(llm, blueprint, catalog)
   if !validation.valid {
     return Err(validation)
   }

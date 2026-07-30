@@ -20,34 +20,55 @@ import { probe, probe_canonical, sample_registry } from "_tool_parse_probe"
 pipeline main(harness: Harness) {
   // The observed shape: a malformed opener, a complete call, a well-formed
   // close that transport has already canonicalized.
-  probe(harness, "malformed opener with a complete call",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "malformed opener with a complete call",
     """[[CALL]
 run({ command: "cargo test -p core" })
 </tool_call>""",
     sample_registry(),
   )
-  probe_canonical(harness, "malformed opener leaves no debris in canonical replay",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "malformed opener leaves no debris in canonical replay",
     """[[CALL]
 run({ command: "cargo test -p core" })
 </tool_call>""",
     sample_registry(),
   )
   // A truncated opener must emit a typed TRUNCATED diagnostic, never prose.
-  probe(harness, "malformed opener, truncated body",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "malformed opener, truncated body",
     "[[CALL]\nedit({ action: \"create\", path: \"a.rs\"",
     sample_registry(),
   )
   // A literal marker inside a tool argument is consumed within the block.
-  probe(harness, "literal bracket marker inside an argument",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "literal bracket marker inside an argument",
     """<tool_call>
 edit({ action: "create", path: "a.txt", content: "[[CALL] literal" })
 </tool_call>""",
     sample_registry(),
   )
   // `[[CALLER]` is not the marker: its seventh byte is `E`, not `]`.
-  probe(harness, "unknown bracket text stays prose", "[[CALLER] is not a call", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown bracket text stays prose",
+    "[[CALLER] is not a call",
+    sample_registry(),
+  )
   // A marker inside a closed fence is fenced example text.
-  probe(harness, "bracket marker in a closed fence stays prose",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bracket marker in a closed fence stays prose",
     """```
 [[CALL]
 ```""",
@@ -58,7 +79,10 @@ edit({ action: "create", path: "a.txt", content: "[[CALL] literal" })
   // normalizes the brackets. With a registry the stray sniffer still finds and
   // executes the inner bare call — the delimiters themselves survive into
   // visible prose, which is the debris canonicalization exists to remove.
-  probe(harness, "raw wire form, registry present",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "raw wire form, registry present",
     """[[CALL]]
 run({ command: "cargo build" })
 [[/CALL]]""",
@@ -68,7 +92,10 @@ run({ command: "cargo build" })
   // execute nothing, and the regression being ruled out is silence — the call
   // vanishing with zero calls AND zero diagnostics, which is what let the agent
   // conclude nothing had happened and hallucinate completion.
-  probe(harness, "raw wire form, no registry",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "raw wire form, no registry",
     """[[CALL]]
 run({ command: "cargo build" })
 [[/CALL]]""",
@@ -76,7 +103,10 @@ run({ command: "cargo build" })
   )
   // The same bytes after the transport remap, which is what the parser is
   // actually contracted to handle.
-  probe(harness, "canonicalized wire form dispatches",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "canonicalized wire form dispatches",
     """<tool_call>
 run({ command: "cargo build" })
 </tool_call>""",

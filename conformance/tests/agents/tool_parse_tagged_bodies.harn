@@ -15,35 +15,53 @@ import { probe, sample_registry } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
   // Gemma-family stacks return raw JSON inside the wrapper.
-  probe(harness, "json object body",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "json object body",
     "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.rs\",\"content\":\"fn a() {}\"}}</tool_call>",
     sample_registry(),
   )
   // One logical call expressed as a single-element array dispatches identically.
-  probe(harness, "single element json array body",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "single element json array body",
     "<tool_call>[{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.rs\",\"content\":\"fn a() {}\"}}]</tool_call>",
     sample_registry(),
   )
   // Two calls in one block cannot be correlated to results, so this must not
   // over-dispatch — but it must surface the actionable one-call-per-block error
   // rather than being swallowed as prose.
-  probe(harness, "multi element json array body",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "multi element json array body",
     "<tool_call>[{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.rs\"}},{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"b.rs\"}}]</tool_call>",
     sample_registry(),
   )
   // A generic XML function wrapper naming a registered tool, with JSON args.
-  probe(harness, "nested xml wrapper naming a registered tool",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested xml wrapper naming a registered tool",
     "<tool_call><edit>{\"action\":\"create\",\"path\":\"a.rs\",\"content\":\"fn a() {}\"}</edit></tool_call>",
     sample_registry(),
   )
-  probe(harness, "nested xml wrapper naming an unknown tool",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested xml wrapper naming an unknown tool",
     "<tool_call><deploy>{\"target\":\"prod\"}</deploy></tool_call>",
     sample_registry(),
   )
   // The dominant DeepSeek shape: the inner open tag names a real tool, the
   // inner close is malformed, and there is no outer close. The JSON is
   // complete, so this is recoverable — not truncated.
-  probe(harness, "nested xml, mismatched inner close, no outer close",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested xml, mismatched inner close, no outer close",
     """<tool_call>
 <edit>
 { "action": "create", "path": "a.rs", "content": "fn a() {}" }
@@ -52,7 +70,10 @@ pipeline main(harness: Harness) {
   )
   // The inner tag never closes and a duplicate `</tool_call>` follows. Dispatch
   // the call and swallow the orphan close without a noisy violation.
-  probe(harness, "nested xml, missing inner close, duplicate outer close",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested xml, missing inner close, duplicate outer close",
     """<tool_call>
 <edit>
 { "action": "create", "path": "a.rs" }
@@ -62,7 +83,10 @@ pipeline main(harness: Harness) {
   )
   // Same sloppy shape with an unknown inner tag: prose with angle brackets must
   // not be mis-parsed into a call.
-  probe(harness, "nested xml, unknown tool, sloppy close",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested xml, unknown tool, sloppy close",
     """<tool_call>
 <frobnicate>
 { "target": "prod" }
@@ -71,7 +95,10 @@ pipeline main(harness: Harness) {
   )
   // Narration the model wrapped in `<tool_call>`: no call, no error, no
   // violation, text preserved as prose.
-  probe(harness, "wrapped assistant_prose is narration",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "wrapped assistant_prose is narration",
     """<tool_call>
 <assistant_prose>
 Reading parser.go to understand ParseManifest.
@@ -79,7 +106,10 @@ Reading parser.go to understand ParseManifest.
 </tool_call>""",
     sample_registry(),
   )
-  probe(harness, "bare prose body is narration",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bare prose body is narration",
     """<tool_call>
 Reading the file to understand the layout.
 </tool_call>""",
@@ -87,7 +117,10 @@ Reading the file to understand the layout.
   )
   // Narration AND a real call in the same block: recover the call, keep the
   // narration.
-  probe(harness, "narration alongside a real call",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "narration alongside a real call",
     """<tool_call>
 <assistant_prose>
 Reading parser.go first.
@@ -98,7 +131,10 @@ run({ command: "cat parser.go" })
   )
   // The narration allowance is scoped to the narration allowlist; an unknown
   // wrapped tag that looks like an attempted call is still rejected.
-  probe(harness, "unknown wrapped tag is not narration",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown wrapped tag is not narration",
     """<tool_call>
 <frobnicate>
 { "target": "prod" }

@@ -10,11 +10,17 @@
  * @api_stability: experimental
  * @example: external_agent_delegate(harness, "127.0.0.1:8080", "review this change", {budget: {max_usd: 0.25}})
  */
-pub fn external_agent_delegate(harness: Harness, target, task, options = nil) {
+pub fn external_agent_delegate(
+  agent: HarnessAgent,
+  random: HarnessRandom,
+  target,
+  task,
+  options = nil,
+) {
   const opts = options ?? {}
-  const key = opts?.idempotency_key ?? ("external-agent-" + harness.random.uuid_v7())
+  const key = opts?.idempotency_key ?? ("external-agent-" + random.uuid_v7())
   const checkpoint = opts?.checkpoint ?? {}
-  return harness.agent.external_agent_delegate(
+  return agent.external_agent_delegate(
     task,
     opts + {target: target, idempotency_key: key, checkpoint: checkpoint},
   )
@@ -31,12 +37,12 @@ pub fn external_agent_delegate(harness: Harness, target, task, options = nil) {
  * @api_stability: experimental
  * @example: external_agent_approve(checkpoint, {checkpoint: {approved_by: "operator"}})
  */
-pub fn external_agent_approve(harness: Harness, envelope, options = nil) {
+pub fn external_agent_approve(agent: HarnessAgent, envelope, options = nil) {
   const opts = options ?? {}
   const checkpoint_base = opts?.checkpoint ?? {}
   const checkpoint = checkpoint_base + {approved: true}
   const allow_cleartext = opts?.allow_cleartext ?? envelope?.allow_cleartext ?? false
-  return harness.agent.external_agent_delegate(
+  return agent.external_agent_delegate(
     envelope?.task,
     opts
       + {

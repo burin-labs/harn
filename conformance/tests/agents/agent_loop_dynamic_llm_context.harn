@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 
 fn iteration_events(events) {
   return events.filter({ event -> event.type == "iteration_start" })
@@ -55,8 +55,12 @@ pipeline test(harness: Harness, task) {
     }
   }
   const session = "agent-loop-dynamic-llm-context-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_loop(harness, "finish",
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "finish",
       nil,
       {
         provider: "anthropic",
@@ -88,10 +92,22 @@ pipeline test(harness: Harness, task) {
   const starts = iteration_events(captured.events)
   assert(captured.result.status == "done", "loop completed after dynamic model switch")
   assert(harness.runtime.atomic_get(call_count) == 2, "two LLM calls were made")
-  assert(harness.runtime.atomic_get(first_context_ok) == 1, "first turn rendered primary model context")
-  assert(harness.runtime.atomic_get(second_context_ok) == 1, "second turn rendered escalated model context")
-  assert(harness.runtime.atomic_get(first_thinking_kept) == 1, "direct Anthropic route kept supported thinking")
-  assert(harness.runtime.atomic_get(second_call_options_ok) == 1, "second call used escalated options")
+  assert(
+    harness.runtime.atomic_get(first_context_ok) == 1,
+    "first turn rendered primary model context",
+  )
+  assert(
+    harness.runtime.atomic_get(second_context_ok) == 1,
+    "second turn rendered escalated model context",
+  )
+  assert(
+    harness.runtime.atomic_get(first_thinking_kept) == 1,
+    "direct Anthropic route kept supported thinking",
+  )
+  assert(
+    harness.runtime.atomic_get(second_call_options_ok) == 1,
+    "second call used escalated options",
+  )
   assert(
     harness.runtime.atomic_get(second_thinking_stripped) == 1,
     "OpenRouter route stripped unsupported thinking",

@@ -41,8 +41,8 @@ use crate::vm::Vm;
 static TIMING_MONOTONIC_START: OnceLock<Instant> = OnceLock::new();
 
 fn now_monotonic_ms() -> i64 {
-    if let Some(mock) = crate::clock_mock::active_mock_clock() {
-        return mock.now_monotonic_ms();
+    if let Some(clock) = crate::clock_mock::active_clock() {
+        return clock.monotonic_ms();
     }
     let anchor = TIMING_MONOTONIC_START.get_or_init(Instant::now);
     anchor.elapsed().as_millis() as i64

@@ -9,12 +9,14 @@ fn has_text(result, snippet) {
 
 pipeline default(harness: Harness) {
   const tenant_result = try {
-    pool_create({name: "tenant-demo", scope: "tenant"})
+    pool_create(harness.agent, {name: "tenant-demo", scope: "tenant"})
   }
   harness.stdio.log(has_text(tenant_result, "host-managed"))
-  harness.stdio.log(is_err(tenant_result) && !contains(to_string(unwrap_err(tenant_result)), "harn-cloud"))
+  harness.stdio.log(
+    is_err(tenant_result) && !contains(to_string(unwrap_err(tenant_result)), "harn-cloud"),
+  )
   const org_result = try {
-    pool_create({name: "org-demo", scope: "org"})
+    pool_create(harness.agent, {name: "org-demo", scope: "org"})
   }
   harness.stdio.log(has_text(org_result, "host-managed"))
 }

@@ -4,11 +4,11 @@ pipeline test(harness: Harness, task) {
   // models_with returns ranked frontier models when asked. Multiple
   // open-weight frontier models exist in the catalog (MiniMax-M2.7,
   // glm-5.1, deepseek-v4-pro, ...), so the result must be non-empty.
-  const frontier = models_with(harness, {tier: "frontier"})
+  const frontier = models_with(harness.llm, {tier: "frontier"})
   harness.stdio.println(len(frontier) > 0)
   harness.stdio.println(frontier[0].tier == "frontier")
   // Strength filtering — every result must declare the requested tag.
-  const coders = models_with(harness, {strengths: ["coding"]})
+  const coders = models_with(harness.llm, {strengths: ["coding"]})
   harness.stdio.println(len(coders) > 0)
   let all_coding = true
   for model in coders {
@@ -18,7 +18,7 @@ pipeline test(harness: Harness, task) {
   }
   harness.stdio.println(all_coding)
   // Open-weight filter excludes Anthropic/OpenAI/Gemini closed models.
-  const open_only = models_with(harness, {open_weight: true, tier: "frontier"})
+  const open_only = models_with(harness.llm, {open_weight: true, tier: "frontier"})
   harness.stdio.println(len(open_only) > 0)
   let all_open = true
   for model in open_only {
@@ -29,34 +29,34 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(all_open)
   // min_benchmark filter — require swe_bench_verified ≥ 70 (matches
   // claude-sonnet-4-7 / opus-4-6 / opus-4-7 in the catalog).
-  const elite = models_with(harness, {min_benchmark: {swe_bench_verified: 70.0}})
+  const elite = models_with(harness.llm, {min_benchmark: {swe_bench_verified: 70.0}})
   harness.stdio.println(len(elite) > 0)
   // Impossibly strict filter returns an empty list.
   const nothing = models_with(
-    harness,
+    harness.llm,
     {tier: "frontier", strengths: ["coding"], min_benchmark: {swe_bench_verified: 999.0}},
   )
   harness.stdio.println(len(nothing) == 0)
   // best_available_models relaxes constraints until something matches.
   const relaxed = best_available_models(
-    harness,
+    harness.llm,
     {tier: "frontier", strengths: ["coding"], min_benchmark: {swe_bench_verified: 999.0}},
   )
   harness.stdio.println(len(relaxed.models) > 0)
   // Relaxation step > 0 because the strict filter would never match.
   harness.stdio.println(relaxed.relaxed_step > 0)
   // pick_model returns a single dict.
-  const one = pick_model(harness, {tier: "frontier"})
+  const one = pick_model(harness.llm, {tier: "frontier"})
   harness.stdio.println(one != nil)
   harness.stdio.println(one.tier == "frontier")
   harness.stdio.println(type_of(one._relaxed_step) == "int")
-  const routes = routing_routes(harness)
+  const routes = routing_routes(harness.llm)
   harness.stdio.println(len(routes) > 0)
   harness.stdio.println(routes[0].provider != nil && routes[0].model != nil)
   // pick_model on impossible filter still returns the best fallback
   // (never nil for a non-empty catalog).
   const fallback = pick_model(
-    harness,
+    harness.llm,
     {tier: "frontier", min_benchmark: {nonexistent_metric: 100.0}},
   )
   harness.stdio.println(fallback != nil)

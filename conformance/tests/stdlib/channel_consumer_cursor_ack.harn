@@ -12,7 +12,9 @@ pipeline default(harness: Harness) {
   const acked = harness.channels.ack("coord.ack.demo", "worker-A", first.cursor, opts)
   harness.stdio.println(acked.consumer_id)
   harness.stdio.println(acked.cursor == first.cursor)
-  harness.stdio.println(harness.channels.consumer_cursor("coord.ack.demo", "worker-A", opts) == first.cursor)
+  harness.stdio.println(
+    harness.channels.consumer_cursor("coord.ack.demo", "worker-A", opts) == first.cursor,
+  )
   const unread = harness.channels.events(
     "coord.ack.demo",
     opts + {from_cursor: harness.channels.consumer_cursor("coord.ack.demo", "worker-A", opts)},

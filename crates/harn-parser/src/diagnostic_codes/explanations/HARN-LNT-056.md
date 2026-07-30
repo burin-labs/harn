@@ -7,19 +7,15 @@ The lint fires on calls to the ambient `random`, `random_int`,
 through the `harness.random.*` sub-handle so capability requirements
 appear in the type system instead of being hidden in the stdlib surface.
 
-This is a lint, not a hard error. The legacy builtins still compile
-while the migration is in flight, but every new call site should use
-the matching `harness.random.*` method (`random` →
-`harness.random.gen_f64`, `random_int` → `harness.random.gen_range`,
-etc.). Seeded streams via an explicit `Rng` handle remain available
+The legacy effectful globals are removed. Use the matching
+`harness.random.*` method (`random` → `harness.random.f64`, `random_int` →
+`harness.random.range`, etc.). Seeded streams via an explicit `Rng` handle remain available
 through the `Rng.*` surface for tests that need deterministic output.
 
 ## How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient random calls to the VM-level `harness` binding with
-  `bindings/use-enclosing-harness-global`, preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with `HarnessRandom`.

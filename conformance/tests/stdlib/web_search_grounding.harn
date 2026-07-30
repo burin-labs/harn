@@ -19,7 +19,9 @@ fn has_import_status(items, package, symbol, status) {
 }
 
 pipeline test(harness: Harness, task) {
-  const curated = web_search(harness, "fastapi dependency injection",
+  const curated = web_search(
+    harness,
+    "fastapi dependency injection",
     {
       limit: 1,
       index: [
@@ -60,7 +62,9 @@ pipeline test(harness: Harness, task) {
       ),
     },
   )
-  const api = web_search(harness, "harn web",
+  const api = web_search(
+    harness,
+    "harn web",
     {
       api: {
         url: "https://search.example/api",
@@ -84,7 +88,10 @@ pipeline test(harness: Harness, task) {
     "web_search used web_fetch/http mock",
   )
   assert(contains(calls[0].url, "q=harn"), "web_search forwarded query")
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-web-grounding-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-web-grounding-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "package.json"),
@@ -107,6 +114,7 @@ pipeline test(harness: Harness, task) {
   )
   harness.fs.write_text(lib_rs, "use serde::Serialize;\nuse hallucinate_crate::Thing;\n")
   const verified = verify_imports(
+    harness.fs,
     [app_py, ui_ts, lib_rs],
     {
       project_root: root,

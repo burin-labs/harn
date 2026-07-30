@@ -111,7 +111,7 @@ use harn_serve::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut agent = EmbeddedAgentClient::spawn(AcpServerConfig::new(None)).await?;
-    let session = agent.start_run(AcpSessionNewParams::cwd(".")).await?;
+    let session = agent.start_run(AcpSessionNewParams::harness.fs.cwd(".")).await?;
     let view = agent.session_view(session.session_id.clone()).await?;
     assert_eq!(view.schema, "harn.session_view.v1");
 

@@ -28,15 +28,15 @@ clean view in a UI).
 
 ```harn
 const view = transcript_project(transcript, {policy: "clean_tool_repair"})
-log(view.policy)          // "clean_tool_repair"
-log(view.kept_count)      // messages surviving
-log(view.dropped_count)   // messages hidden from the next request
-log(view.redacted_count)  // tool-result bodies replaced by audit pointers
-log(view.reclaimed_tokens)// estimated prompt tokens reclaimed
-log(view.prefix_hash)     // "sha256:..." of the projected prefix
-log(view.event.kind)      // "transcript.projection" — ready to append to a session
-log(view.messages)        // the model-visible prefix
-log(view.provider_safety_blocked) // true when a signed reasoning block was
+harness.stdio.log(view.policy)          // "clean_tool_repair"
+harness.stdio.log(view.kept_count)      // messages surviving
+harness.stdio.log(view.dropped_count)   // messages hidden from the next request
+harness.stdio.log(view.redacted_count)  // tool-result bodies replaced by audit pointers
+harness.stdio.log(view.reclaimed_tokens)// estimated prompt tokens reclaimed
+harness.stdio.log(view.prefix_hash)     // "sha256:..." of the projected prefix
+harness.stdio.log(view.event.kind)      // "transcript.projection" — ready to append to a session
+harness.stdio.log(view.messages)        // the model-visible prefix
+harness.stdio.log(view.provider_safety_blocked) // true when a signed reasoning block was
                                   // protected from removal
 ```
 
@@ -118,8 +118,8 @@ const view = transcript_project(transcript, {
   write_barrier_refs: ["scratchpad:turn-42"],
   require_write_barrier: true,
 })
-log(view.redacted_count)
-log(view.redaction_pointers[0].source) // transcript.messages[N].content
+harness.stdio.log(view.redacted_count)
+harness.stdio.log(view.redaction_pointers[0].source) // transcript.messages[N].content
 ```
 
 Redacted tool-result bodies carry `_harn_projection.redaction_pointer`;
@@ -162,7 +162,7 @@ appends the resulting `transcript.projection` event to the raw transcript, and
 emits a typed `TranscriptProjected` agent event for hosts.
 
 ```harn,ignore
-const result = agent_loop(
+const result = agent_loop(harness,
   "Fix the failing tests.",
   "You are a test repair agent.",
   {
@@ -171,14 +171,14 @@ const result = agent_loop(
   },
 )
 const events = transcript_events_by_kind(result.transcript, "transcript.projection")
-log(len(events))                                  // one per turn
-log(events[0].metadata.policy)                    // "clean_tool_repair"
-log(events[0].metadata.prefix_hash)               // "sha256:..."
-log(events[0].metadata.kept_indices)              // indices kept from raw messages
-log(events[0].metadata.dropped_indices)           // indices hidden from the prefix
-log(events[0].metadata.redacted_indices)          // bodies reclaimed in place
-log(events[0].metadata.reclaimed_tokens)          // estimated prompt-token savings
-log(events[0].metadata.provider_safety_blocked)   // signed-reasoning guardrail state
+harness.stdio.log(len(events))                                  // one per turn
+harness.stdio.log(events[0].metadata.policy)                    // "clean_tool_repair"
+harness.stdio.log(events[0].metadata.prefix_hash)               // "sha256:..."
+harness.stdio.log(events[0].metadata.kept_indices)              // indices kept from raw messages
+harness.stdio.log(events[0].metadata.dropped_indices)           // indices hidden from the prefix
+harness.stdio.log(events[0].metadata.redacted_indices)          // bodies reclaimed in place
+harness.stdio.log(events[0].metadata.reclaimed_tokens)          // estimated prompt-token savings
+harness.stdio.log(events[0].metadata.provider_safety_blocked)   // signed-reasoning guardrail state
 ```
 
 Projection composes with compaction: compaction rewrites the persistent

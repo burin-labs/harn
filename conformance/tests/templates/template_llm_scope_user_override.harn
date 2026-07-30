@@ -8,5 +8,7 @@ pipeline default(harness: Harness) {
   // to use the `llm` key for unrelated data. A one-shot lint warning
   // is emitted in the host log (not captured in this transcript).
   const tmpl = "user={{ llm.tag }} provider={{ llm.provider }}"
-  harness.stdio.println(harness.fs.render_template(tmpl, {llm: {tag: "user-payload", provider: "user-provider"}}))
+  harness.stdio.println(
+    harness.fs.render_template(tmpl, {llm: {tag: "user-payload", provider: "user-provider"}}),
+  )
 }

@@ -251,6 +251,10 @@ pub(super) fn clear_persona_hooks_builtin(
 }
 
 /// Register a session-level lifecycle hook.
+///
+/// Runtime invocation uses the entrypoint ABI `(Harness, event)`. The root
+/// handle belongs at this orchestration boundary; callback helpers should
+/// attenuate it to the narrowest coherent nominal handle they require.
 #[harn_builtin(
     exposure = "harness.agent.register_session_hook",
     effects = ["state.mutate@const=session-hooks"],

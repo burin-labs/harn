@@ -8,7 +8,8 @@ import { llm_text, with_llm_script } from "std/testing"
  */
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("Still working."), llm_text("Finished. ##DONE##")],
+    harness.llm,
+    [llm_text("Still working."), llm_text("Finished. ##DONE##")],
     { ->
       const observe_caller = { call ->
         harness.stdio.println(
@@ -22,7 +23,9 @@ pipeline default(harness: Harness) {
         }
         return {ok: false, status: "exception", error: unwrap_err(result)}
       }
-      const result = agent_loop(harness, "finish",
+      const result = agent_loop(
+        harness,
+        "finish",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 2, llm_caller: observe_caller},
       )

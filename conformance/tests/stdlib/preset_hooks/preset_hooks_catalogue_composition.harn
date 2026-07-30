@@ -46,7 +46,10 @@ pipeline default(harness: Harness) {
   /* Register intentionally out-of-order so the priority-sort is the
    * subject under test (not the registration order). */
   const reg = harness.tools.hooks_register(
-    harness.tools.hooks_register(harness.tools.hooks_register(harness.tools.hooks_registry(), low_cat), deny_cat),
+    harness.tools.hooks_register(
+      harness.tools.hooks_register(harness.tools.hooks_registry(), low_cat),
+      deny_cat,
+    ),
     mid_cat,
   )
   const matches = harness.tools.hooks_match(reg, "git push origin main --force", {stacks: ["git"]})
@@ -61,7 +64,11 @@ pipeline default(harness: Harness) {
   /* Removing the deny catalogue collapses to the rewrite rules and the
    * mid (priority 5) rule wins over the low (priority 1) one. */
   const pruned = harness.tools.hooks_unregister(reg, "team/deny")
-  const pruned_matches = harness.tools.hooks_match(pruned, "git push origin main --force", {stacks: ["git"]})
+  const pruned_matches = harness.tools.hooks_match(
+    pruned,
+    "git push origin main --force",
+    {stacks: ["git"]},
+  )
   harness.stdio.println(len(pruned_matches))
   harness.stdio.println(pruned_matches[0].rule_id)
   harness.stdio.println(pruned_matches[1].rule_id)

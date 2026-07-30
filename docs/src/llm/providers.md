@@ -379,7 +379,7 @@ The native Gemini API uses Google's `generateContent` shape directly. Harn
 lowers native tools to `functionDeclarations`, records model-emitted
 `functionCall` parts, returns tool observations as `functionResponse` parts,
 and preserves Gemini thought signatures in conversation history without
-showing those opaque bytes as visible reasoning. `llm_call(..., {schema: ...})`
+showing those opaque bytes as visible reasoning. `harness.llm.call(..., {schema: ...})`
 uses Gemini's JSON response controls (`responseMimeType` plus JSON schema),
 and response usage maps `cachedContentTokenCount` to Harn's cache-read token
 field.
@@ -472,7 +472,7 @@ overrides.
 OpenAI has two Harn paths. The default path is the generic
 OpenAI-compatible chat-completions adapter. The native Responses path is
 selected explicitly with
-`llm_call(..., {provider: "openai", api_mode: "responses"})`.
+`harness.llm.call(..., {provider: "openai", api_mode: "responses"})`.
 
 Responses mode is for OpenAI-native hosted tools, remote MCP connectors,
 previous-response chaining, background jobs, and provider-side
@@ -529,7 +529,7 @@ const caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // `agent_loop` uses the same field when `tool_format` is unset or `"auto"`;
 // missing recommendations fall back to text tools and emit `capability_gap`.
 if caps.tools && "bm25" in caps.tool_search {
-  llm_call(prompt, sys, {
+  harness.llm.call(prompt, sys, {
     tools: registry,
     tool_search: "bm25",
   })
@@ -542,7 +542,7 @@ Provider-specific rows also expose `responses_api`, `hosted_tools`,
 
 The same matrix is the source of truth for Harn's default tool-calling
 mode. Alias-level `tool_format` still wins when set explicitly, but
-otherwise `preferred_tool_format` chooses `agent_loop()` and `models info`
+otherwise `preferred_tool_format` chooses `agent_loop(harness, ...)` and `models info`
 tool mode for that provider/model route. Rows that do not set it infer
 `native` when `native_tools = true` and `text` otherwise. Rows can set
 `text_tool_wire_format_supported = true` for runtimes where Harn's text-tool
@@ -893,11 +893,11 @@ mcp_servers = []
 Provider-specific call overrides use the provider name as the option key:
 
 ```harn
-const answer = llm_call("Summarize the current workspace", nil, {
+const answer = harness.llm.call("Summarize the current workspace", nil, {
   provider: "codex_acp",
   model: "default",
   codex_acp: {
-    cwd: cwd(),
+    cwd: harness.fs.cwd(),
     args: ["--profile", "default"],
     mcpServers: [],
   },
@@ -945,7 +945,7 @@ permissions.
   coupling scripts to a second routing abstraction:
 
 ```harn
-llm_call("Summarize the change.", nil, {
+harness.llm.call("Summarize the change.", nil, {
   provider: "vercel_ai_gateway",
   model: "vercel-gpt-5.4-nano",
   vercel_ai_gateway: {
@@ -1064,10 +1064,10 @@ respects `HARN_OLLAMA_NUM_CTX` (or the catalog's
 
 ## Provider resolution order
 
-When you call `llm_call()` or start an `agent_loop()`, Harn resolves the
+When you call `harness.llm.call()` or start an `agent_loop(harness, ...)`, Harn resolves the
 provider in this order:
 
-1. **Explicit option** — `llm_call({provider: "openai", ...})` in your script
+1. **Explicit option** — `harness.llm.call({provider: "openai", ...})` in your script
 2. **Environment variable** — `HARN_LLM_PROVIDER`
 3. **Inferred from model name** — e.g. `gpt-4o` → OpenAI, `claude-3` → Anthropic
 4. **Default** — `anthropic`
@@ -1096,7 +1096,7 @@ Set the model explicitly or via environment:
 
 ```harn
 // In code
-llm_call("...", nil, {model: "claude-sonnet-5"})
+harness.llm.call("...", nil, {model: "claude-sonnet-5"})
 
 // Or via environment
 // export HARN_LLM_MODEL=gpt-4o
@@ -1152,8 +1152,8 @@ export HARN_RATE_LIMIT_MYPROVIDER_TPM=1000000
 Or in code:
 
 ```harn
-llm_rate_limit("anthropic", {rpm: 60, tpm: 250000})
-const active = llm_rate_limit("anthropic", {details: true})
+harness.llm.rate_limit("anthropic", {rpm: 60, tpm: 250000})
+const active = harness.llm.rate_limit("anthropic", {details: true})
 ```
 
 The limiter uses a sliding-window budget and pauses before sending requests

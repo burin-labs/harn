@@ -40,4 +40,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(cfg2.options.tool_format, "native")
   harness.stdio.log("agent edge case tests passed")
 }
+
 import { agent, agent_config } from "std/agent/workers"

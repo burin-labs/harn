@@ -151,8 +151,8 @@ fn __form_body(params) {
   return join(parts, "&")
 }
 
-fn __now_seconds(harness: Harness) {
-  return to_int(harness.clock.timestamp())
+fn __now_seconds(clock: HarnessClock) {
+  return to_int(clock.timestamp())
 }
 
 fn __default_on_user_code(stdio: HarnessStdio, user_code, verification_uri) {
@@ -216,13 +216,13 @@ fn __build_token_set(parsed, scopes, issued_at) {
   return token_set
 }
 
-fn __audit_obtained(harness: Harness, provider_id, storage_key, token_set) {
+fn __audit_obtained(obs: HarnessObs, provider_id, storage_key, token_set) {
   const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
     next: __redact_token(token_set),
   }
-  const _ = harness.obs.event_log_emit(
+  const _ = obs.event_log_emit(
     __AUDIT_TOPIC,
     __AUDIT_KIND_OBTAINED,
     payload,
@@ -230,7 +230,7 @@ fn __audit_obtained(harness: Harness, provider_id, storage_key, token_set) {
   )
 }
 
-fn __request_device_code(harness: Harness, cfg) {
+fn __request_device_code(net: HarnessNet, cfg) {
   let form = [{key: "client_id", value: cfg.client_id}]
   const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
   if scopes_str != nil {
@@ -240,7 +240,7 @@ fn __request_device_code(harness: Harness, cfg) {
     form = form + [{key: "audience", value: cfg.audience}]
   }
   const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  const response = harness.net.post(cfg.device_code_url, __form_body(form), {headers: headers})
+  const response = net.post(cfg.device_code_url, __form_body(form), {headers: headers})
   if !(response?.ok ?? false) {
     const parsed: Result<unknown, JsonParseFailure> = try {
       json_parse(response?.body ?? "")
@@ -291,7 +291,7 @@ fn __request_device_code(harness: Harness, cfg) {
   }
 }
 
-fn __poll_once(harness: Harness, cfg, device_code) {
+fn __poll_once(net: HarnessNet, cfg, device_code) {
   let form = [
     {key: "grant_type", value: "urn:ietf:params:oauth:grant-type:device_code"},
     {key: "device_code", value: device_code},
@@ -301,7 +301,7 @@ fn __poll_once(harness: Harness, cfg, device_code) {
     form = form + [{key: "client_secret", value: cfg.client_secret}]
   }
   const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  const response = harness.net.post(cfg.token_url, __form_body(form), {headers: headers})
+  const response = net.post(cfg.token_url, __form_body(form), {headers: headers})
   const status = to_int(response?.status ?? 0)
   const parsed: Result<unknown, JsonParseFailure> = try {
     json_parse(response?.body ?? "")
@@ -337,7 +337,8 @@ fn __poll_once(harness: Harness, cfg, device_code) {
 }
 
 fn __poll_until_done(
-  harness: Harness,
+  clock: HarnessClock,
+  net: HarnessNet,
   cfg,
   device_code,
   initial_interval_seconds,
@@ -346,7 +347,7 @@ fn __poll_until_done(
   let interval_seconds = initial_interval_seconds
   let elapsed_seconds = 0
   while true {
-    const outcome = __poll_once(harness, cfg, device_code)
+    const outcome = __poll_once(net, cfg, device_code)
     if outcome.kind == "ok" {
       return outcome.parsed
     }
@@ -357,7 +358,7 @@ fn __poll_until_done(
     if expires_in_seconds > 0 && elapsed_seconds + interval_seconds > expires_in_seconds {
       throw "std/oauth/device_flow: device code expired before authorization completed"
     }
-    harness.clock.sleep_ms(interval_seconds * 1000)
+    clock.sleep_ms(interval_seconds * 1000)
     elapsed_seconds = elapsed_seconds + interval_seconds
   }
 }
@@ -407,7 +408,7 @@ pub fn device_flow(harness: Harness, provider, opts) {
     scope_separator: scope_separator,
     audience: opts?.audience,
   }
-  const device = __request_device_code(harness, cfg)
+  const device = __request_device_code(harness.net, cfg)
   const _ = __invoke_user_code_handler(
     harness.stdio,
     opts?.on_user_code,
@@ -415,15 +416,16 @@ pub fn device_flow(harness: Harness, provider, opts) {
     device.verification_uri,
   )
   const parsed = __poll_until_done(
-    harness,
+    harness.clock,
+    harness.net,
     cfg,
     device.device_code,
     device.interval_seconds,
     device.expires_in_seconds,
   )
-  const issued_at = __now_seconds(harness)
+  const issued_at = __now_seconds(harness.clock)
   const token_set = __build_token_set(parsed, scopes, issued_at)
   storage.set(storage_key, token_set)
-  __audit_obtained(harness, cfg.provider_id, storage_key, token_set)
+  __audit_obtained(harness.obs, cfg.provider_id, storage_key, token_set)
   return token_set
 }

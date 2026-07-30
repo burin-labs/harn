@@ -40,6 +40,8 @@ use crate::chunk::{Chunk, Constant, Op};
 pub struct CompiledCallableEntry {
     pub(crate) bootstrap: Chunk,
     pub(crate) has_fixture: bool,
+    pub(crate) fixture_expects_harness: bool,
+    pub(crate) expects_harness: bool,
 }
 
 /// Jump operands are 16-bit chunk offsets (`emit_jump`, `patch_jump`,
@@ -132,7 +134,7 @@ impl Default for CompilerOptions {
 
 /// Look through an `AttributedDecl` wrapper to the inner declaration.
 /// `compile_named` / `compile` use this so attributed declarations like
-/// `@test pipeline foo(...)` are still discoverable by name.
+/// `@test pipeline foo(harness: Harness, ...)` are still discoverable by name.
 fn peel_node(sn: &SNode) -> &Node {
     match &sn.node {
         Node::AttributedDecl { inner, .. } => &inner.node,

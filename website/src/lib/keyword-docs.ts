@@ -13,7 +13,6 @@ export const KEYWORD_DOCS: Record<string, string> = {
   in: "Names the collection a loop draws from.",
   retry: "Re-runs the block on failure, up to the given count.",
   spawn: "Starts a concurrent task you can await later.",
-  agent_loop: "Runs a tool-using agent until it finishes or hits a limit.",
   llm_call: "Calls a model. The first argument is the prompt, the second is the system prompt.",
   log: "Writes a value to the run log.",
   read_file: "Reads a file through the harness, a capability checked before the run.",

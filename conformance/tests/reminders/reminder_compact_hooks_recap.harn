@@ -10,7 +10,7 @@ pipeline main(harness: Harness) {
   harness.agent.inject(session, {role: "assistant", content: "four"})
   harness.agent.register_session_hook(
     "pre_compact",
-    { event ->
+    { _hook_harness, event ->
       if event?.session?.id == session {
         harness.runtime.atomic_add(pre_seen, 1)
       }
@@ -22,7 +22,7 @@ pipeline main(harness: Harness) {
   )
   harness.agent.register_session_hook(
     "post_compact",
-    { event ->
+    { _hook_harness, event ->
       if (event?.archived_messages ?? 0) > 0 {
         harness.runtime.atomic_add(post_seen, 1)
       }

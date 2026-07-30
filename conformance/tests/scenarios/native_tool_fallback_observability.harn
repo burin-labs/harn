@@ -18,12 +18,15 @@ fn tools() {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<tool_call>\nread({ path: \"src/lib.rs\" })\n</tool_call>"),
       llm_text("<tool_call>\nread({ path: \"src/lib.rs\" })\n</tool_call>"),
     ],
     { ->
-      const fallback = agent_loop(harness, "Inspect the repo",
+      const fallback = agent_loop(
+        harness,
+        "Inspect the repo",
         "You are helpful",
         {
           provider: "mock",
@@ -50,7 +53,8 @@ pipeline default(harness: Harness) {
   // thrown empty-completion shape surfaces on the first attempt with no
   // silent retry (pre-v0.10, `llm_retries` could opt mock into a budget).
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         error: {
           category: "server_error",
@@ -61,7 +65,9 @@ pipeline default(harness: Harness) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const surfaced = agent_loop(harness, "Finish the task",
+      const surfaced = agent_loop(
+        harness,
+        "Finish the task",
         "You are helpful",
         {provider: "mock", loop_until_done: true, max_iterations: 1},
       )

@@ -1,7 +1,10 @@
 import "../_common"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-orchestrator-auth-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-orchestrator-auth-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -9,7 +12,7 @@ pipeline test(harness: Harness, task) {
   )
   harness.fs.write_text(
     path_join(root, "lib.harn"),
-    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  harness.stdio.log(event.kind)\n}\n",
+    "import \"std/triggers\"\n\npub fn on_task(harness: Harness, event: TriggerEvent) {\n  harness.stdio.log(event.kind)\n}\n",
   )
   const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = resolve_harn_bin(harness, repo_root)
@@ -53,6 +56,6 @@ pipeline test(harness: Harness, task) {
   )
   harness.stdio.println(bearer.status == 200)
   const _ = harness.process.shell("kill -TERM " + pid)
-  wait_for_exit(harness, pid)
+  wait_for_exit(harness.clock, harness.process, pid)
   harness.fs.delete(root)
 }

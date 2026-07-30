@@ -1,4 +1,4 @@
-import { sub_agent_request, sub_agent_run, wait_agent } from "std/agent/workers"
+import { sub_agent_run } from "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn write_tools() {
@@ -18,9 +18,12 @@ fn write_tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("{\"callers\":[\"crate::parse_config\",\"cli::parse_config\"]}")],
+    harness.llm,
+    [llm_text("{\"callers\":[\"crate::parse_config\",\"cli::parse_config\"]}")],
     { ->
-      const typed = sub_agent_run(harness, "Find all callers of parse_config.",
+      const typed = sub_agent_run(
+        harness,
+        "Find all callers of parse_config.",
         {
           provider: "mock",
           returns: {
@@ -37,9 +40,12 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [{tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]}],
+    harness.llm,
+    [{tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]}],
     { ->
-      const denied = sub_agent_run(harness, "Try to write a note.",
+      const denied = sub_agent_run(
+        harness,
+        "Try to write a note.",
         {
           provider: "mock",
           tools: write_tools(),

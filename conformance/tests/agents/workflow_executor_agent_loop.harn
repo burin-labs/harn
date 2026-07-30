@@ -37,13 +37,20 @@ pipeline default(harness: Harness) {
         },
       }
     }
-    let r = agent_loop(harness, ctx.task, nil, {provider: "mock", llm_caller: caller, max_iterations: 1})
+    let r = agent_loop(
+      harness,
+      ctx.task,
+      nil,
+      {provider: "mock", llm_caller: caller, max_iterations: 1},
+    )
     return {text: r.text}
   }
   const verifier = { r ->
     return {ok: contains(to_string(r?.visible_text), token), findings: [token]}
   }
-  const out = workflow_run_repair(harness, {task: "do the work", executor: executor, verify: verifier, max_attempts: 2},
+  const out = workflow_run_repair(
+    harness,
+    {task: "do the work", executor: executor, verify: verifier, max_attempts: 2},
   )
   harness.stdio.println(out.ok)
   harness.stdio.println(len(out.attempts))

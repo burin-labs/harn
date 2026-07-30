@@ -27,7 +27,7 @@ Catch errors with an optional error binding:
 try {
   const data = json_parse(raw_input)
 } catch (e) {
-  log("Parse failed at ${e.line}:${e.column}: ${e.message}")
+  harness.stdio.log("Parse failed at ${e.line}:${e.column}: ${e.message}")
 }
 ```
 
@@ -39,7 +39,7 @@ fn risky_operation() { throw "boom" }
 try {
   risky_operation()
 } catch {
-  log("Something failed, moving on")
+  harness.stdio.log("Something failed, moving on")
 }
 ```
 
@@ -79,9 +79,9 @@ try {
   throw AppError.NotFound("user:123")
 } catch (e: AppError) {
   match e.variant {
-    "NotFound" -> { log("Missing: ${e.fields[0]}") }
-    "Unauthorized" -> { log("Access denied") }
-    "Internal" -> { log("Internal: ${e.fields[0]}") }
+    "NotFound" -> { harness.stdio.log("Missing: ${e.fields[0]}") }
+    "Unauthorized" -> { harness.stdio.log("Access denied") }
+    "Internal" -> { harness.stdio.log("Internal: ${e.fields[0]}") }
   }
 }
 ```
@@ -133,7 +133,7 @@ Automatically retry a block up to N times:
 
 ```harn
 retry 3 {
-  const response = http_post(url, payload)
+  const response = harness.net.post(url, payload)
   const parsed = json_parse(response.body)
   parsed
 }
@@ -161,7 +161,7 @@ crashing or needing a full `try`/`catch`:
 ```harn
 const parsed = try { json_parse(input) }
 if is_err(parsed) {
-  log("Bad input, using defaults")
+  harness.stdio.log("Bad input, using defaults")
   parsed = Ok({})
 }
 const data = unwrap(parsed)
@@ -201,7 +201,7 @@ enter Result-land and `?` to propagate within it:
 
 ```harn
 fn fetch_json(url) {
-  const body = try { http_get(url) }
+  const body = try { harness.net.get(url) }
   const text = unwrap(body)?
   const data = try { json_parse(text) }
   return data
@@ -222,7 +222,7 @@ a clear error is produced:
 
 ```harn,ignore
 fn process(user: {name: string, age: int}) {
-  log("${user.name} is ${user.age}")
+  harness.stdio.log("${user.name} is ${user.age}")
 }
 
 process({name: "Alice"})
@@ -253,8 +253,8 @@ const err = Err("something failed")
 const typed_ok: Result<int, string> = ok
 const typed_err: Result<int, string> = err
 
-log(ok)   // Result.Ok(42)
-log(err)  // Result.Err(something failed)
+harness.stdio.log(ok)   // Result.Ok(42)
+harness.stdio.log(err)  // Result.Err(something failed)
 ```
 
 The shorthand constructors `Ok(value)` and `Err(value)` are equivalent to
@@ -272,10 +272,10 @@ The shorthand constructors `Ok(value)` and `Err(value)` are equivalent to
 
 ```harn
 const r = Ok(42)
-log(is_ok(r))           // true
-log(is_err(r))          // false
-log(unwrap(r))          // 42
-log(unwrap_or(Err("x"), "default"))  // default
+harness.stdio.log(is_ok(r))           // true
+harness.stdio.log(is_err(r))          // false
+harness.stdio.log(unwrap(r))          // 42
+harness.stdio.log(unwrap_or(Err("x"), "default"))  // default
 ```
 
 ### Pattern matching on result
@@ -288,8 +288,8 @@ fn fetch_data(url) {
 }
 
 match fetch_data("/api/users") {
-  Result.Ok(data) -> { log("Got ${len(data)} users") }
-  Result.Err(err) -> { log("Failed: ${err}") }
+  Result.Ok(data) -> { harness.stdio.log("Got ${len(data)} users") }
+  Result.Err(err) -> { harness.stdio.log("Failed: ${err}") }
 }
 ```
 
@@ -321,7 +321,7 @@ chains naturally:
 
 ```harn
 fn fetch_and_parse(url) {
-  const response = http_get(url)?
+  const response = harness.net.get(url)?
   const data = json_parse(response)?
   return Ok(data)
 }
@@ -391,11 +391,11 @@ at a higher level.
 ```harn
 retry 3 {
   try {
-    const result = llm_call(prompt, system)
+    const result = harness.llm.call(prompt, system)
     const parsed = json_parse(result.text)
     return parsed
   } catch (e) {
-    log("Attempt failed: ${e}")
+    harness.stdio.log("Attempt failed: ${e}")
     throw e  // re-throw to trigger retry
   }
 }

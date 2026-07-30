@@ -56,7 +56,10 @@ pipeline default(harness: Harness) {
     { _req -> http_response_text("unreachable") },
     {max_body_bytes: 4},
   )
-  const rejected = harness.net.server_request(server, {method: "POST", path: "/limited", body: "12345"})
+  const rejected = harness.net.server_request(
+    server,
+    {method: "POST", path: "/limited", body: "12345"},
+  )
   harness.stdio.println(rejected.status)
   harness.stdio.println(http_header(rejected, "x-harn-body-limit"))
   harness.net.server_route(
@@ -66,7 +69,10 @@ pipeline default(harness: Harness) {
     { req -> http_response_text(to_string(req.raw_body == nil) + ":" + req.body) },
     {retain_raw_body: false},
   )
-  const discarded = harness.net.server_test(server, {method: "POST", path: "/discard", body: "kept-text"})
+  const discarded = harness.net.server_test(
+    server,
+    {method: "POST", path: "/discard", body: "kept-text"},
+  )
   harness.stdio.println(discarded.body)
   harness.net.server_set_ready(server, false)
   harness.stdio.println(harness.net.server_test(server, {method: "POST", path: "/discard"}).status)

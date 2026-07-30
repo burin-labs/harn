@@ -13,8 +13,10 @@ pipeline main(harness: Harness) {
   harness.fs.write_text(path_join(repo, "README.md"), "hello\n")
   harness.stdio.println(harness.process.exec_at(repo, "git", "add", "README.md")?.success)
   harness.stdio.println(
-    harness.process.shell_at(repo, "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init")
-      ?.success,
+    harness.process.shell_at(
+      repo,
+      "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init",
+    )?.success,
   )
   const worktree = worktree_create(
     harness.fs,

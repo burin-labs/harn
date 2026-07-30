@@ -16,11 +16,8 @@ code should use `harness.stdio.print`, `harness.stdio.println`,
 
 ## How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient stdio calls to an existing local Harness binding or to
-  the VM-level `harness` binding with `bindings/use-enclosing-harness-global`,
-  preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with `HarnessStdio`.

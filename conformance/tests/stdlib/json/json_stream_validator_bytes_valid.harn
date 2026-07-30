@@ -2,7 +2,7 @@ import { stream_validator } from "std/json"
 
 pipeline default(harness: Harness, task) {
   const validator = stream_validator(
-    harness,
+    harness.runtime,
     {type: "dict", required: ["ok"], properties: {ok: {type: "bool"}}},
   )
   harness.stdio.println(validator.feed(bytes_from_string("{\"ok\":true}")).variant)

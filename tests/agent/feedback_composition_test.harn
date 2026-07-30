@@ -83,9 +83,14 @@ pipeline test_next_step_requires_new_knowledge(harness: Harness, task) {
 
 pipeline test_tool_examples_follow_the_locked_format(harness: Harness, task) {
   const args = [{key: "path", value: "notes.txt"}]
-  const text = agent_feedback_tool_example(harness, "write_note", args, {tool_format: "text"})
-  const json = agent_feedback_tool_example(harness, "write_note", args, {tool_format: "json"})
-  const native = agent_feedback_tool_example(harness, "write_note", args, {tool_format: "native"})
+  const text = agent_feedback_tool_example(harness.llm, "write_note", args, {tool_format: "text"})
+  const json = agent_feedback_tool_example(harness.llm, "write_note", args, {tool_format: "json"})
+  const native = agent_feedback_tool_example(
+    harness.llm,
+    "write_note",
+    args,
+    {tool_format: "native"},
+  )
   assert(contains(text, "<tool_call>"))
   assert(contains(text, "write_note({ path: \"notes.txt\" })"))
   assert(contains(json, "```tool"))

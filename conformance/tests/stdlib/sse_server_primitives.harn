@@ -7,7 +7,9 @@ pipeline test(harness: Harness, task) {
   const response = harness.net.sse_server_response({max_event_bytes: 128, max_buffered_events: 2})
   assert_eq(response.status, 200)
   assert_eq(response.headers["content-type"], "text/event-stream; charset=utf-8")
-  assert(harness.net.sse_server_send(response, {event: "progress", data: "25", id: "1", retry: 1500}))
+  assert(
+    harness.net.sse_server_send(response, {event: "progress", data: "25", id: "1", retry: 1500}),
+  )
   assert(harness.net.sse_server_heartbeat(response, "tick"))
   assert(harness.net.sse_server_flush(response))
   const status = harness.net.sse_server_status(response)

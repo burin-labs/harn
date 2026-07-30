@@ -1,7 +1,7 @@
 import { with_llm_script } from "std/testing"
 import "std/triggers"
 
-fn handler(event: TriggerEvent) -> dict {
+fn handler(harness: Harness, event: TriggerEvent) -> dict {
   return {handled: true, kind: event.kind}
 }
 
@@ -16,7 +16,8 @@ fn classify(harness: Harness, event: TriggerEvent) -> bool {
 
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [{text: "yes", input_tokens: 3000, output_tokens: 4000, model: "gpt-4o-mini"}],
+    harness.llm,
+    [{text: "yes", input_tokens: 3000, output_tokens: 4000, model: "gpt-4o-mini"}],
     { ->
       const unique = to_string(to_int(harness.clock.timestamp())) + "-"
         + to_string(
@@ -44,14 +45,15 @@ pipeline test(harness: Harness, task) {
         handle,
         {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-budget-" + unique}},
       )
-      const budget_events = harness.runtime.trigger_inspect_lifecycle("predicate.budget_exceeded").filter(
-        { entry -> entry?.headers?.trigger_id == handle.id },
-      )
+      const budget_events = harness.runtime.trigger_inspect_lifecycle("predicate.budget_exceeded")
+        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
       const dispatches = harness.runtime.trigger_inspect_lifecycle("DispatchStarted").filter(
         { entry -> entry?.headers?.trigger_id == handle.id },
       )
       harness.stdio.println(fire.status == "dispatched")
-      harness.stdio.println(contains(json_stringify(fire.result ?? {}), "\"reason\":\"budget_exceeded\""))
+      harness.stdio.println(
+        contains(json_stringify(fire.result ?? {}), "\"reason\":\"budget_exceeded\""),
+      )
       harness.stdio.println(len(budget_events) == 1 && budget_events[0]?.payload?.tokens == 7000)
       harness.stdio.println(len(dispatches) == 0)
     },

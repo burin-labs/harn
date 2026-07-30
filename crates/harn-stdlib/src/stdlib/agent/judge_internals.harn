@@ -78,7 +78,8 @@ pub fn __judge_run_checkpoint(
   )
   const started = harness.clock.monotonic_ms()
   const checkpoint = agent_typed_output_checkpoint(
-    harness,
+    harness.agent,
+    harness.llm,
     checkpoint_name,
     user,
     schema,
@@ -89,7 +90,9 @@ pub fn __judge_run_checkpoint(
     const usage = checkpoint?.usage ?? checkpoint?.final_result?.usage ?? {}
     const cache_read_tokens = usage?.cache_read_tokens ?? 0
     const cache_write_tokens = usage?.cache_write_tokens ?? 0
-    agent_emit_event(harness, payload.session_id,
+    agent_emit_event(
+      harness.agent,
+      payload.session_id,
       "typed_checkpoint",
       {
         schema: "harn.completion_judge_cache.v1",

@@ -375,7 +375,7 @@ clients accept inbound sampling — see the
 | `prompts/get` | Supported; renders prompt templates with supplied arguments |
 | `completion/complete` | Supported for prompt arguments with front-matter suggestions and orchestrator resource template arguments |
 | `elicitation/create` | Supported on script-driven `harn run --serve mcp` surfaces via the `mcp_elicit(...)` builtin (see [Elicitation](#elicitation)). The orchestrator-mode tool catalog does not currently issue elicitations. |
-| `roots/list` | Supported outbound from script-driven `harn serve mcp` surfaces via the `mcp_client_roots(...)` builtin |
+| `roots/list` | Supported outbound from script-driven `harn serve mcp` surfaces via the `harness.tools.mcp_client_roots(...)` builtin |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.md#mcp-client-support-matrix). |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
 | `tools/call` with `params.task` | Supported for tools that advertise optional task execution; rejected with `-32602` for tools that advertise `execution.taskSupport="forbidden"` |
@@ -393,8 +393,8 @@ error instead of treating the request as an ordinary unknown method.
 
 ## Elicitation
 
-Script-driven MCP servers (those built with `mcp_tools(...)` /
-`mcp_resource(...)` / `mcp_prompt(...)` and started with `harn run --serve mcp`
+Script-driven MCP servers (those built with `harness.tools.mcp_tools(...)` /
+`harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` and started with `harn run --serve mcp`
 or `harn serve mcp`) can prompt the connected client for structured user
 input mid-tool-call via the `mcp_elicit(...)` builtin:
 
@@ -431,14 +431,14 @@ top-level — it raises a structured error rather than hanging.
 Script-driven MCP servers can ask the connected client for its roots:
 
 ```harn
-const roots = mcp_client_roots()
+const roots = harness.tools.mcp_client_roots()
 ```
 
-`mcp_client_roots()` is only valid while a client connection is active and
+`harness.tools.mcp_client_roots()` is only valid while a client connection is active and
 returns the client's `roots/list` result as a list of root objects.
 
-When Harn is on the *client* side of an MCP connection (`mcp_connect(...)`
-or `mcp_call(...)`) and a remote server sends an `elicitation/create`
+When Harn is on the *client* side of an MCP connection (`harness.tools.mcp_connect(...)`
+or `harness.tools.mcp_call(...)`) and a remote server sends an `elicitation/create`
 request, Harn dispatches it to the embedder via the `HostCallBridge`
 (`capability="mcp"`, `operation="elicit"`). If no host bridge is wired
 up, Harn responds with `{ action: "decline" }` so the server can fall
@@ -448,7 +448,7 @@ back to a sensible default rather than blocking forever.
 
 Per the [MCP progress utility][mcp-progress], a client may opt into
 progress updates by attaching `_meta.progressToken` to a request. While
-the matching tool call is in flight, Harn's `mcp_report_progress(...)`
+the matching tool call is in flight, Harn's `harness.tools.mcp_report_progress(...)`
 builtin emits `notifications/progress` notifications carrying that
 token:
 
@@ -458,7 +458,7 @@ pub fn import_records(rows: list) -> string {
   for row in rows {
     i = i + 1
     process(row)
-    mcp_report_progress(i, {total: len(rows), message: "imported " + to_string(i)})
+    harness.tools.mcp_report_progress(i, {total: len(rows), message: "imported " + to_string(i)})
   }
   return "imported " + to_string(i) + " records"
 }

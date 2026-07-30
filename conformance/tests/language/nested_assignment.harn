@@ -1,5 +1,5 @@
-fn bump_index(harness: Harness) {
-  harness.stdio.log("index evaluated")
+fn bump_index(stdio: HarnessStdio) {
+  stdio.log("index evaluated")
   return 1
 }
 
@@ -37,7 +37,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(acc.inner.n, 6, "compound assignment accumulates through the path")
   // A side-effecting index in a compound assignment evaluates exactly once
   let nums = [10, 20]
-  nums[bump_index(harness)] += 5
+  nums[bump_index(harness.stdio)] += 5
   assert_eq(nums[1], 25, "compound subscript writes through the hoisted index")
   // Immutability still holds through a nested path
   const frozen = {b: {c: 1}}

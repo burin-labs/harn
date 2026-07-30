@@ -2,7 +2,7 @@ import { execution_contract } from "std/llm/catalog"
 
 pipeline test(harness: Harness, task) {
   const selector = "claude-sonnet-4-20250514"
-  const contract = execution_contract(harness, selector)
+  const contract = execution_contract(harness.llm, selector)
   assert_eq(contract.schema, "harn.llm.execution-contract/v1")
   assert_eq(contract.selector, selector)
   assert_eq(type_of(contract.model_id), "string")

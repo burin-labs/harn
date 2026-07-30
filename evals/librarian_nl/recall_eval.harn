@@ -78,7 +78,9 @@ pipeline run(harness: Harness, task) {
   for q in questions {
     harness.llm.mock_push_scope()
     const mock_text = "{\"cypher\": \"" + q.cypher + "\"}"
-    harness.llm.mock_enqueue({data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text})
+    harness.llm.mock_enqueue(
+      {data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text},
+    )
     const r1 = code_librarian_query_nl(harness, q.nl)
     // Second invocation tests cache; the cache key is the NL text and
     // the namespace TTL is 5m so this hits.

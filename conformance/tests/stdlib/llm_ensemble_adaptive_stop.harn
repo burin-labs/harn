@@ -23,7 +23,8 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const result = debate(
-        harness,
+        harness.llm,
+        harness.obs,
         {
           prompt: "What is the capital of France?",
           debaters: ["alpha", "beta"],

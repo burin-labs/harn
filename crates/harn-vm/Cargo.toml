@@ -46,6 +46,7 @@ testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"
 [dependencies]
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.46" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.46" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.46" }
 harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.46" }
 harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.46" }
 linkme = "0.3"

@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import "std/collections"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -63,7 +63,8 @@ fn apply_fix_call(id) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       run_test_call("r1", "A"),
       apply_fix_call("e1"),
       run_test_call("r2", "B"),
@@ -75,8 +76,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "repair-reset-streak-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Make the failing test pass.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the failing test pass.",
           nil,
           {
             provider: "mock",
@@ -99,7 +104,9 @@ pipeline default(harness: Harness) {
         ) },
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
-      harness.stdio.println(count_where(stalls, { s -> s.warning.pattern == "stuck_same_diagnostic" }))
+      harness.stdio.println(
+        count_where(stalls, { s -> s.warning.pattern == "stuck_same_diagnostic" }),
+      )
       harness.stdio.println(len(stalls))
       harness.stdio.println(captured.result.status)
     },

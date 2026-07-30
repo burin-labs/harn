@@ -10,7 +10,9 @@ pipeline test(harness: Harness, task) {
     max_iterations: 5,
     progress_required: true,
   }
-  const completed = bounded_loop(harness, 0,
+  const completed = bounded_loop(
+    harness.clock,
+    0,
     fn(state) {
       let next = state + 1
       return {state: next, progress: true, done: next >= 3}
@@ -22,7 +24,12 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(completed.iterations)
   harness.stdio.println(completed.stopped_reason)
   harness.stdio.println(completed.receipt.schema)
-  const stalled = bounded_loop(harness, 7, fn(state) { return {state: state, progress: false} }, opts)
+  const stalled = bounded_loop(
+    harness.clock,
+    7,
+    fn(state) { return {state: state, progress: false} },
+    opts,
+  )
   harness.stdio.println(stalled.status)
   harness.stdio.println(stalled.state)
   harness.stdio.println(stalled.iterations)

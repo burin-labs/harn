@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn events_of(events, kind) {
@@ -8,7 +8,8 @@ fn events_of(events, kind) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<user_response>safe answer</user_response>\n<done>##DONE##</done>"),
       llm_text(
         "{\"verdict\":\"revise\",\"reasoning\":\"force a regression\",\"critique\":\"try again\"}",
@@ -16,8 +17,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "step-judge-low-budget-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Answer once.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Answer once.",
           nil,
           {
             provider: "mock",

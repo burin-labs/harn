@@ -1,5 +1,8 @@
 pipeline default(harness: Harness) {
-  const stream = harness.channels.subscribe("agent.done", {scope: "session", session_id: "sess-sub"})
+  const stream = harness.channels.subscribe(
+    "agent.done",
+    {scope: "session", session_id: "sess-sub"},
+  )
   const receipt = harness.channels.append(
     "agent.done",
     {n: 1},

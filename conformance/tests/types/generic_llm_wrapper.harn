@@ -9,8 +9,8 @@ type GraderOut = {verdict: "pass" | "fail", summary: string}
  * schema_expect guard. The inner llm_call picks up the same binding
  * via its own generic signature.
  */
-fn grade<T>(harness: Harness, prompt: string, schema: Schema<T>) -> T {
-  const r = harness.llm.call(
+fn grade<T>(llm: HarnessLlm, prompt: string, schema: Schema<T>) -> T {
+  const r = llm.call(
     prompt,
     nil,
     {provider: "mock", output: {schema: schema, strict: true, validation: "error"}},
@@ -20,9 +20,10 @@ fn grade<T>(harness: Harness, prompt: string, schema: Schema<T>) -> T {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
+    harness.llm,
+    [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
     { ->
-      const out: GraderOut = grade(harness, "Grade this", schema_of(GraderOut))
+      const out: GraderOut = grade(harness.llm, "Grade this", schema_of(GraderOut))
       harness.stdio.println(out.verdict)
       harness.stdio.println(out.summary)
     },

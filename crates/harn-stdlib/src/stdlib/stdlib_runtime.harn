@@ -100,8 +100,11 @@ pub fn runtime_approved_plan(runtime: HarnessRuntime) -> string {
  * @errors: []
  */
 pub fn process_run(process: HarnessProcess, argv: list<string>, options = nil) {
+  if len(argv) == 0 {
+    throw "process_run: argv must contain a program"
+  }
   const opts = options ?? {}
-  return process.run(filter_nil(opts + {mode: "argv", argv: argv}))
+  return process.run(filter_nil(opts + {program: argv[0], args: argv[1:len(argv)]}))
 }
 
 /**
@@ -112,7 +115,8 @@ pub fn process_run(process: HarnessProcess, argv: list<string>, options = nil) {
  */
 pub fn process_shell(process: HarnessProcess, command: string, options = nil) {
   const opts = options ?? {}
-  return process.run(filter_nil(opts + {mode: "shell", command: command}))
+  const invocation = process.shell_invocation({command: command})
+  return process.run(filter_nil(opts + {program: invocation.program, args: invocation.args}))
 }
 
 /**
@@ -187,18 +191,20 @@ pub fn interaction_ask_with_kind(interaction: HarnessInteraction, question, kind
  */
 pub fn record_run_metadata(runtime: HarnessRuntime, run, workflow_name) {
   if run?.path {
-    runtime.record_run({
-      workflow: workflow_name,
-      path: run?.path,
-      status: run?.status ?? "",
-      fixture_type: run?.run?.replay_fixture?._type,
-      usage: run?.usage,
-      persisted_path: run?.persisted_path,
-      summary: transcript_summary(run?.transcript),
-      transcript_state: run?.transcript?.state ?? "",
-      message_count: len(transcript_messages(run?.transcript)),
-      event_count: len(transcript_events(run?.transcript)),
-      asset_count: len(transcript_assets(run?.transcript)),
-    })
+    runtime.record_run(
+      {
+        workflow: workflow_name,
+        path: run?.path,
+        status: run?.status ?? "",
+        fixture_type: run?.run?.replay_fixture?._type,
+        usage: run?.usage,
+        persisted_path: run?.persisted_path,
+        summary: transcript_summary(run?.transcript),
+        transcript_state: run?.transcript?.state ?? "",
+        message_count: len(transcript_messages(run?.transcript)),
+        event_count: len(transcript_events(run?.transcript)),
+        asset_count: len(transcript_assets(run?.transcript)),
+      },
+    )
   }
 }

@@ -1,9 +1,11 @@
 # Hooks
 
 Harn exposes three concentric hook surfaces. Each surface fires
-synchronously on the agent-loop thread; closure handlers run inside the
-same VM context as the surrounding turn, so they see the live transcript
-and can call any builtin. Hook invocations are recorded on the active
+synchronously on the agent-loop thread. Runtime hook handlers run inside the
+same VM context as the surrounding turn and receive the root `Harness` plus
+the event. Importing a module grants no authority, and reusable helpers should
+accept only the coherent sub-handle they need. Hook invocations are recorded on
+the active
 session transcript under `hook_call`, `hook_returned`, and `hook_vetoed`
 event kinds, so replay tooling reproduces the same control flow byte for
 byte.
@@ -25,7 +27,7 @@ register_tool_hook({pattern: "*", max_output: 4000})
 register_tool_hook(
   {
     pattern: "fetch_*",
-    pre: { event ->
+    pre: { _hook_harness, event ->
       return {reminder: {body: "Network fetch is about to run", tags: ["tool"]}}
     },
   },
@@ -47,15 +49,15 @@ transcript. The reminder spec uses the same keys as
 `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint`.
 
 ```harn,ignore
-register_step_hook("merge_*", "audit", "PreStep", { ctx ->
+register_step_hook("merge_*", "audit", "PreStep", { _hook_harness, ctx ->
   return {
     reminder: {body: "Audit step is running", tags: ["audit"]},
     then: {args: ctx.step.args},
   }
-})
+}
 ```
 
-## Session lifecycle hooks (`register_session_hook`)
+## Session lifecycle hooks (`harness.agent.register_session_hook`)
 
 Session-level hooks fire from the whole-session turn loop. They are
 the primary plugin surface for hosts and package authors who want to
@@ -96,36 +98,47 @@ Any other return shape raises a runtime error so misuse fails loudly.
 ### Example: veto secrets
 
 ```harn
-register_session_hook("user_prompt_submit", { event ->
+fn reject_secret_prompt(stdio: HarnessStdio, event) {
   const prompt = to_string(event?.prompt ?? "")
   if prompt.contains("secret") {
+    stdio.log("blocked a prompt containing a secret")
     return {block: true, reason: "policy violation: secret in prompt"}
   }
   return nil
-})
+}
+
+pipeline main(harness: Harness) {
+  harness.agent.register_session_hook("user_prompt_submit", { hook_harness, event ->
+    return reject_secret_prompt(hook_harness.stdio, event)
+  })
+}
 ```
 
 ### Example: short-circuit a permission decision
 
 ```harn
-register_session_hook("permission_asked", { event ->
-  if to_string(event?.tool?.name ?? "") == "exec_root" {
-    return {decision: "deny", reason: "exec_root never runs unattended"}
-  }
-  return nil
-})
+pipeline main(harness: Harness) {
+  harness.agent.register_session_hook("permission_asked", { _hook_harness, event ->
+    if to_string(event?.tool?.name ?? "") == "exec_root" {
+      return {decision: "deny", reason: "exec_root never runs unattended"}
+    }
+    return nil
+  })
+}
 ```
 
 ### Example: re-run a linter after each file edit
 
 ```harn
-register_session_hook("file_edited", { event ->
-  const path = to_string(event?.path ?? "")
-  if path.ends_with(".rs") {
-    log("re-running clippy after edit to " + path)
-  }
-  return nil
-})
+pipeline main(harness: Harness) {
+  harness.agent.register_session_hook("file_edited", { hook_harness, event ->
+    const path = to_string(event?.path ?? "")
+    if path.ends_with(".rs") {
+      hook_harness.stdio.log("re-running clippy after edit to " + path)
+    }
+    return nil
+  })
+}
 ```
 
 For non-blocking context refresh, librarian, and crystallization jobs, use the
@@ -145,10 +158,12 @@ pattern = "*"
 handler = "policy::reject_secrets"
 ```
 
-The handler must resolve to an exported `pub fn` in the package's
-namespaced exports. The harness wires the closure via
-`register_vm_hook` and the resulting hook participates in the same
-veto / tape capture semantics as a programmatic registration.
+The handler must resolve to an exported `pub fn` in the package's namespaced
+exports with the signature `fn(harness: Harness, event)`. A manifest handler is
+a runtime entry boundary, so it receives root authority; reusable helpers
+should accept only the coherent sub-handle they need. The runtime wires the
+closure through the same hook registry and the resulting hook participates in
+the same veto and tape-capture semantics as a programmatic registration.
 
 ## Tape capture and replay
 

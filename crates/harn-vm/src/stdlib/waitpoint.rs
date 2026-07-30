@@ -1239,11 +1239,11 @@ mod tests {
             r#"
 import { create, complete, wait } from "std/waitpoint"
 
-pipeline test(task) {
-  const wp = create("outside-dispatch")
-  complete(wp, 9)
-  const resolved = wait(wp)
-  __io_println(resolved.value)
+pipeline test(harness: Harness, task) {
+  const wp = create(harness.runtime, "outside-dispatch")
+  complete(harness.runtime, wp, 9)
+  const resolved = wait(harness.runtime, wp)
+  harness.stdio.println(resolved.value)
 }
 "#,
         )

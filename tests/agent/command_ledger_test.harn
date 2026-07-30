@@ -281,7 +281,14 @@ pipeline test_ceiling_below_wall_does_not_breach(harness: Harness, task) {
   const cw = command_wait_normalize(nil)
   const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
   // Just under the 15-minute awaited ceiling: no breach.
-  const applied = command_ledger_apply_ceiling(harness, harness.tools, ledger, 899000, cw, "sess-test")
+  const applied = command_ledger_apply_ceiling(
+    harness.agent,
+    harness.tools,
+    ledger,
+    899000,
+    cw,
+    "sess-test",
+  )
   assert(!applied.breached)
 }
 
@@ -290,7 +297,14 @@ pipeline test_ceiling_breach_escalates_once_before_resolving(harness: Harness, t
   const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
   // First breach at/after the 15-minute ceiling: escalate once (a decision
   // re-entry), do NOT yet auto-resolve — the row is marked escalated and kept.
-  const applied = command_ledger_apply_ceiling(harness, harness.tools, ledger, 900000, cw, "sess-test")
+  const applied = command_ledger_apply_ceiling(
+    harness.agent,
+    harness.tools,
+    ledger,
+    900000,
+    cw,
+    "sess-test",
+  )
   assert(applied.breached)
   assert(applied.escalated)
   assert(_row_by_handle(applied.ledger, "hto-1").escalated)

@@ -222,7 +222,7 @@ fn collect_spawn_agent_sites(
 ) {
     if let Node::FunctionCall { name, args, .. } = &node.node {
         if name == "spawn_agent" {
-            if let Some(config) = args.first() {
+            if let Some(config) = args.last() {
                 let start = config.span.start.min(source.len());
                 let end = config.span.end.min(source.len());
                 if end > start {
@@ -1043,7 +1043,7 @@ fn scan_node_preflight(
             }
         }
         Node::FunctionCall { name, args, .. } if name == "spawn_agent" => {
-            if let Some(agent_config) = args.first() {
+            if let Some(agent_config) = args.last() {
                 scan_spawn_agent_preflight(agent_config, file_path, source, diagnostics);
             }
             scan_children(

@@ -205,16 +205,22 @@ pub fn artifact_lifecycle_errors(art) -> list {
   return ["[${aid}] unsupported lifecycle `${lifecycle}`; expected `source` or `release-package`."]
 }
 
-/**
- * Completeness: no gen-/sync- or check- Makefile target may escape the
- * registry. `targets` must already be sorted for deterministic diagnostics.
- */
-pub fn completeness_errors(
+pub type GeneratedRegistryCompletenessRequest = {
   targets: list,
   registered_gens: list,
   registered_checks: list,
   exempt: list,
-) -> list {
+}
+
+/**
+ * Completeness: no gen-/sync- or check- Makefile target may escape the
+ * registry. `targets` must already be sorted for deterministic diagnostics.
+ */
+pub fn completeness_errors(request: GeneratedRegistryCompletenessRequest) -> list {
+  const targets = request.targets
+  const registered_gens = request.registered_gens
+  const registered_checks = request.registered_checks
+  const exempt = request.exempt
   let errors = []
   for target in targets {
     if target.starts_with("gen-") || target.starts_with("sync-") {
@@ -296,6 +302,15 @@ pub fn preflight_dispatch_errors(targets: list, dispatch: dict) -> list {
   return errors
 }
 
+pub type GeneratedRegistryValidationRequest = {
+  artifacts: list,
+  exempt: list,
+  targets: list,
+  all_recipe: string,
+  workflow_text: string,
+  missing_outputs: list,
+}
+
 /**
  * Pure validation. Given the parsed registry pieces and the scanned
  * Makefile / workflow facts, return the ordered list of error strings
@@ -303,14 +318,13 @@ pub fn preflight_dispatch_errors(targets: list, dispatch: dict) -> list {
  * that do not exist on disk (computed by main, so this stays filesystem
  * free and testable).
  */
-pub fn validate(
-  artifacts: list,
-  exempt: list,
-  targets: list,
-  all_recipe: string,
-  workflow_text: string,
-  missing_outputs: list,
-) -> list {
+pub fn validate(request: GeneratedRegistryValidationRequest) -> list {
+  const artifacts = request.artifacts
+  const exempt = request.exempt
+  const targets = request.targets
+  const all_recipe = request.all_recipe
+  const workflow_text = request.workflow_text
+  const missing_outputs = request.missing_outputs
   let errors = []
   let seen_ids = []
   let registered_checks = []
@@ -346,7 +360,15 @@ pub fn validate(
     }
     errors = errors + artifact_flag_errors(art, check, all_recipe, workflow_text, missing_outputs)
   }
-  errors = errors + completeness_errors(targets, registered_gens, registered_checks, exempt)
+  errors = errors
+    + completeness_errors(
+    {
+      targets: targets,
+      registered_gens: registered_gens,
+      registered_checks: registered_checks,
+      exempt: exempt,
+    },
+  )
   errors = errors + exempt_hygiene_errors(exempt, registered_checks)
   return errors
 }
@@ -355,8 +377,8 @@ pub fn validate(
  * Concatenate the workflow file contents in sorted repo-relative order
  * (each followed by a newline).
  */
-fn read_workflows(harness: Harness) -> string {
-  const globbed = harness.fs.glob(WORKFLOWS_GLOB)
+fn read_workflows(fs: HarnessFs) -> string {
+  const globbed = fs.glob(WORKFLOWS_GLOB)
   let rels = []
   for g in globbed {
     const idx = g.index_of("/./")
@@ -369,12 +391,12 @@ fn read_workflows(harness: Harness) -> string {
   }
   let text = ""
   for rel in rels.sorted() {
-    text = text + harness.fs.read_text(rel) + "\n"
+    text = text + fs.read_text(rel) + "\n"
   }
   // The audit CI lane runs its gate battery through this script, so a check
   // named there is just as CI-enforced as one named directly in a workflow.
-  if harness.fs.exists(AUDIT_GATE_RUNNER) {
-    text = text + harness.fs.read_text(AUDIT_GATE_RUNNER) + "\n"
+  if fs.exists(AUDIT_GATE_RUNNER) {
+    text = text + fs.read_text(AUDIT_GATE_RUNNER) + "\n"
   }
   return text
 }
@@ -392,7 +414,7 @@ pipeline main(harness: Harness, task) {
   const make_text = harness.fs.read_text(MAKEFILE)
   const targets = makefile_targets(make_text)
   const all_recipe = make_all_recipe(make_text)
-  const workflow_text = read_workflows(harness)
+  const workflow_text = read_workflows(harness.fs)
   // Precompute which declared outputs are missing on disk so validate stays
   // filesystem free (preserving exact per-artifact error ordering).
   let missing_outputs = []
@@ -403,11 +425,17 @@ pipeline main(harness: Harness, task) {
       }
     }
   }
-  const errors = validate(artifacts, exempt, targets, all_recipe, workflow_text, missing_outputs)
-    + preflight_dispatch_errors(
-    targets,
-    dispatch,
+  const errors = validate(
+    {
+      artifacts: artifacts,
+      exempt: exempt,
+      targets: targets,
+      all_recipe: all_recipe,
+      workflow_text: workflow_text,
+      missing_outputs: missing_outputs,
+    },
   )
+    + preflight_dispatch_errors(targets, dispatch)
   if errors.count > 0 {
     harness.stdio.eprintln("error: generated-artifact registry is out of sync:\n")
     for e in errors {

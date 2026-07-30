@@ -1,4 +1,3 @@
-import { agent_loop } from "std/agent/loop"
 /**
  * Intra-turn resource fail-fast: when one assistant message emits multiple
  * mutating calls for the same annotated workspace resource, a failure in an
@@ -7,6 +6,7 @@ import { agent_loop } from "std/agent/loop"
  * run normally.
  */
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn edit_dependency_key_params() {
@@ -439,11 +439,16 @@ fn same_file_same_range_alias_applied_failure_batch() {
 
 fn run_scripted(harness: Harness, calls, opts = {}) {
   return with_llm_script(
-    harness.llm, [{text: "", tool_calls: calls}, llm_text("I saw the tool results.")],
+    harness.llm,
+    [{text: "", tool_calls: calls}, llm_text("I saw the tool results.")],
     { ->
       const session = "intra-turn-resource-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Apply the requested edits.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Apply the requested edits.",
           nil,
           {
             provider: "mock",
@@ -565,14 +570,19 @@ pipeline main(harness: Harness) {
     "receipt should expose the recovery action as structured data",
   )
   // Burin exposes this metadata as `policy`; Harn must treat it as resource annotations.
-  const policy_metadata = run_scripted(harness, same_file_failure_batch(), {tools: edit_tools("policy")})
+  const policy_metadata = run_scripted(
+    harness,
+    same_file_failure_batch(),
+    {tools: edit_tools("policy")},
+  )
   harness.stdio.println(policy_metadata.result.status)
   harness.stdio.println(contains(policy_metadata.transcript, "skipped dependent `edit` call"))
   harness.stdio.println(!contains(policy_metadata.transcript, "applied src/a.zig second"))
   harness.stdio.println(contains(policy_metadata.transcript, "applied src/b.zig other"))
   // Burin's runtime policy stores path params directly on the policy dict,
   // not under `arg_schema`; this must still be keyed.
-  const burin_policy_metadata = run_scripted(harness,
+  const burin_policy_metadata = run_scripted(
+    harness,
     same_file_failure_batch(),
     {tools: edit_tools("burin_policy")},
   )
@@ -582,7 +592,8 @@ pipeline main(harness: Harness) {
   harness.stdio.println(contains(burin_policy_metadata.transcript, "applied src/b.zig other"))
   // Some hosts carry canonical tool annotations in the turn policy rather
   // than each registry entry. The scheduler should still see resource keys.
-  const turn_policy_metadata = run_scripted(harness,
+  const turn_policy_metadata = run_scripted(
+    harness,
     same_file_failure_batch(),
     {
       tools: edit_tools("none"),
@@ -618,12 +629,20 @@ pipeline main(harness: Harness) {
   harness.stdio.println(contains(successful.transcript, "applied src/a.zig second"))
   harness.stdio.println(!contains(successful.transcript, "skipped dependent `edit` call"))
   // Explicit opt-out preserves legacy dispatch-all behavior.
-  const disabled = run_scripted(harness, same_file_failure_batch(), {intra_turn_resource_fail_fast: false})
+  const disabled = run_scripted(
+    harness,
+    same_file_failure_batch(),
+    {intra_turn_resource_fail_fast: false},
+  )
   harness.stdio.println(disabled.result.status)
   harness.stdio.println(!contains(disabled.transcript, "skipped dependent `edit` call"))
   harness.stdio.println(contains(disabled.transcript, "applied src/a.zig second"))
   // Even when parallel dispatch is requested, keyed mutating batches serialize.
-  const parallel_requested = run_scripted(harness, same_file_failure_batch(), {max_concurrent_tools: 4})
+  const parallel_requested = run_scripted(
+    harness,
+    same_file_failure_batch(),
+    {max_concurrent_tools: 4},
+  )
   harness.stdio.println(parallel_requested.result.status)
   harness.stdio.println(contains(parallel_requested.transcript, "skipped dependent `edit` call"))
   harness.stdio.println(!contains(parallel_requested.transcript, "applied src/a.zig second"))
@@ -664,7 +683,8 @@ pipeline main(harness: Harness) {
   const dependency_params = edit_dependency_key_params()
   const range_params = edit_dependency_range_params()
   const arg_aliases = {old: "old_string", start: "range_start", end: "range_end"}
-  const different_target = run_scripted(harness,
+  const different_target = run_scripted(
+    harness,
     same_file_different_target_applied_failure_batch(),
     {tools: edit_tools("annotations", dependency_params, range_params)},
   )
@@ -676,7 +696,8 @@ pipeline main(harness: Harness) {
     !contains(different_target.transcript, "skipped dependent `edit` call"),
     "independent same-file edit targets must not emit a dependency skip",
   )
-  const same_target = run_scripted(harness,
+  const same_target = run_scripted(
+    harness,
     same_file_same_target_applied_failure_batch(),
     {tools: edit_tools("annotations", dependency_params, range_params)},
   )
@@ -688,7 +709,8 @@ pipeline main(harness: Harness) {
     !contains(same_target.transcript, "applied src/a.zig same-target"),
     "the later same-file same-target edit must not run after a mutating failure",
   )
-  const overlapping_target = run_scripted(harness,
+  const overlapping_target = run_scripted(
+    harness,
     same_file_overlapping_target_applied_failure_batch(),
     {tools: edit_tools("annotations", dependency_params, range_params)},
   )
@@ -700,7 +722,8 @@ pipeline main(harness: Harness) {
     !contains(overlapping_target.transcript, "applied src/a.zig overlap-target"),
     "the later same-file overlapping edit must not run after a mutating failure",
   )
-  const same_range_different_action = run_scripted(harness,
+  const same_range_different_action = run_scripted(
+    harness,
     same_file_same_range_different_action_applied_failure_batch(),
     {tools: edit_tools("annotations", dependency_params, range_params)},
   )
@@ -715,7 +738,8 @@ pipeline main(harness: Harness) {
     ),
     "the later same-file same-range/different-action edit must not run after a mutating failure",
   )
-  const same_alias_target = run_scripted(harness,
+  const same_alias_target = run_scripted(
+    harness,
     same_file_same_alias_target_applied_failure_batch(),
     {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
   )
@@ -727,7 +751,8 @@ pipeline main(harness: Harness) {
     !contains(same_alias_target.transcript, "applied src/a.zig alias-old"),
     "the later same-file alias-spelled same-target edit must not run after a mutating failure",
   )
-  const different_alias_target = run_scripted(harness,
+  const different_alias_target = run_scripted(
+    harness,
     same_file_different_alias_target_applied_failure_batch(),
     {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
   )
@@ -735,7 +760,8 @@ pipeline main(harness: Harness) {
     contains(different_alias_target.transcript, "applied src/a.zig alias-old-different"),
     "dependency key aliases must preserve different canonical target values",
   )
-  const same_range_alias = run_scripted(harness,
+  const same_range_alias = run_scripted(
+    harness,
     same_file_same_range_alias_applied_failure_batch(),
     {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
   )
@@ -747,7 +773,8 @@ pipeline main(harness: Harness) {
     !contains(same_range_alias.transcript, "applied src/a.zig alias-range"),
     "the later same-file alias-spelled overlapping range edit must not run after a mutating failure",
   )
-  const burin_direct_target = run_scripted(harness,
+  const burin_direct_target = run_scripted(
+    harness,
     same_file_different_target_applied_failure_batch(),
     {tools: edit_tools("burin_policy", dependency_params, range_params)},
   )
@@ -755,7 +782,8 @@ pipeline main(harness: Harness) {
     contains(burin_direct_target.transcript, "applied src/a.zig second-target"),
     "Burin direct runtime policy dependency_key_params should refine same-file resource skips",
   )
-  const burin_direct_alias_target = run_scripted(harness,
+  const burin_direct_alias_target = run_scripted(
+    harness,
     same_file_same_alias_target_applied_failure_batch(),
     {tools: edit_tools("burin_policy", dependency_params, range_params, arg_aliases)},
   )
@@ -767,7 +795,8 @@ pipeline main(harness: Harness) {
     !contains(burin_direct_alias_target.transcript, "applied src/a.zig alias-old"),
     "Burin direct runtime policy must skip same-resource edits even when the later call uses an alias",
   )
-  const turn_policy_target = run_scripted(harness,
+  const turn_policy_target = run_scripted(
+    harness,
     same_file_different_target_applied_failure_batch(),
     {
       tools: edit_tools("none"),
@@ -788,7 +817,8 @@ pipeline main(harness: Harness) {
     contains(turn_policy_target.transcript, "applied src/a.zig second-target"),
     "turn policy dependency_key_params should refine same-file resource skips",
   )
-  const turn_policy_alias_target = run_scripted(harness,
+  const turn_policy_alias_target = run_scripted(
+    harness,
     same_file_same_alias_target_applied_failure_batch(),
     {
       tools: edit_tools("none"),

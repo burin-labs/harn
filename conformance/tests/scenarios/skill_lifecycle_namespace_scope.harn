@@ -44,9 +44,12 @@ pipeline test(harness: Harness, task) {
     allowed_tools ["namespace:read"]
   }
   with_llm_script(
-    harness.llm, [llm_text("On it.")],
+    harness.llm,
+    [llm_text("On it.")],
     { ->
-      const result = agent_loop(harness, "Investigate the auth flow",
+      const result = agent_loop(
+        harness,
+        "Investigate the auth flow",
         "You are a code explorer.",
         {
           provider: "mock",

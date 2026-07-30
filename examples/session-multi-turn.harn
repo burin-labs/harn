@@ -13,12 +13,16 @@
 pipeline main(harness: Harness, task) {
   const sid = harness.agent.open()
   harness.stdio.log("opened session ${sid}")
-  const first = agent_loop(harness, "Remember that my favorite color is teal.",
+  const first = agent_loop(
+    harness,
+    "Remember that my favorite color is teal.",
     nil,
     {session_id: sid, provider: "mock", max_iterations: 2},
   )
   harness.stdio.println("turn 1 status=${first.status} len=${harness.agent.length(sid)}")
-  const second = agent_loop(harness, "What did I just tell you?",
+  const second = agent_loop(
+    harness,
+    "What did I just tell you?",
     nil,
     {session_id: sid, provider: "mock", max_iterations: 2},
   )

@@ -23,7 +23,8 @@ pipeline test(harness: Harness, task) {
   )
   const default_tree = project_scan_tree(harness.project, root, {tiers: ["ambient"], depth: 4})
   const expanded_tree = project_scan_tree(
-    harness.project, root,
+    harness.project,
+    root,
     {tiers: ["ambient"], depth: 4, ignore_policy: "none", include_vendor: true},
   )
   harness.stdio.println(default_tree.app.languages[0] == "rust")

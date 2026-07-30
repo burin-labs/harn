@@ -1,4 +1,5 @@
 import { workflow_execute } from "std/workflow/execute"
+
 pipeline main(harness: Harness) {
   const flow = workflow_graph(
     {
@@ -24,7 +25,9 @@ pipeline main(harness: Harness) {
   harness.stdio.println(result?.status)
   harness.stdio.println(result?.run?.stages[0]?.kind)
   harness.stdio.println(result?.run?.stages[0]?.metadata?.worker?.name == "delegate-1")
-  harness.stdio.println(result?.run?.stages[0]?.metadata?.worker?.request?.payload?.source == "workflow")
+  harness.stdio.println(
+    result?.run?.stages[0]?.metadata?.worker?.request?.payload?.source == "workflow",
+  )
   harness.stdio.println(result?.run?.stages[0]?.artifacts[0]?.metadata?.delegated)
   harness.stdio.println(result?.run?.stages[0]?.artifacts[1]?.kind == "worker_result")
   harness.stdio.println(

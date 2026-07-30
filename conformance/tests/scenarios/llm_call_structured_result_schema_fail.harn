@@ -8,7 +8,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
-    harness.llm, [llm_text("{\"verdict\": 42}")],
+    harness.llm,
+    [llm_text("{\"verdict\": 42}")],
     { ->
       const r = harness.llm.call_structured_result("Grade", schema, {provider: "mock", retries: 0})
       harness.stdio.println(r.ok)

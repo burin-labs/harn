@@ -8,7 +8,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness, task) {
   harness.llm.rate_limit("mock", {rpm: 1000})
   with_llm_script(
-    harness.llm, [llm_text("one"), llm_text("two")],
+    harness.llm,
+    [llm_text("one"), llm_text("two")],
     { ->
       const a = harness.llm.with_rate_limit(
         "mock",

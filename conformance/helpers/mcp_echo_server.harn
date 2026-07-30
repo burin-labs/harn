@@ -1,8 +1,8 @@
-fn record_echo_call(harness: Harness, state_file: string, args) {
+fn record_echo_call(fs: HarnessFs, state_file: string, args) {
   if state_file == "" {
     return nil
   }
-  harness.fs.append(state_file, json_stringify({name: "echo", arguments: args}) + "\n")
+  fs.append(state_file, json_stringify({name: "echo", arguments: args}) + "\n")
 }
 
 pipeline default(harness: Harness) {
@@ -22,7 +22,7 @@ pipeline default(harness: Harness) {
     {
       parameters: {message: "string"},
       handler: { args ->
-        record_echo_call(harness, state_file, args)
+        record_echo_call(harness.fs, state_file, args)
         return args.message ?? ""
       },
       annotations: {

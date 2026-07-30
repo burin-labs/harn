@@ -7,7 +7,8 @@ import { llm_text, with_llm_script } from "std/testing"
  */
 pipeline default(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {error: {category: "rate_limit", message: "429"}},
       {error: {category: "transient_network", message: "connection reset"}},
       llm_text("finally"),

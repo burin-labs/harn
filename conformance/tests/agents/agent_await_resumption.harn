@@ -1,10 +1,11 @@
-import "std/agent/workers"
 import { agent_capture_events } from "std/agent/events"
+import "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {
@@ -22,9 +23,13 @@ pipeline main(harness: Harness) {
     ],
     { ->
       const session_id = "await-resumption-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session_id,
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
         fn() {
-          let handle = sub_agent_run(harness, "Park until a reviewer responds.",
+          let handle = sub_agent_run(
+            harness,
+            "Park until a reviewer responds.",
             {
               provider: "mock",
               background: true,

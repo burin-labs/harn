@@ -6,7 +6,7 @@ instruction against an eval set:
 ```harn
 import { optimize_prompt } from "std/llm/optimize"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const result = optimize_prompt({
     base_prompt: "Answer the question.",
     eval_set: [
@@ -26,8 +26,8 @@ pipeline default() {
     ],
   })
 
-  log(result.best_prompt)
-  log(result.best_score)
+  harness.stdio.log(result.best_prompt)
+  harness.stdio.log(result.best_score)
 }
 ```
 

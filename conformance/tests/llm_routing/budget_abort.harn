@@ -7,7 +7,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [{text: "should never reach the provider", model: "gpt-4o-mini", provider: "openai"}],
+    harness.llm,
+    [{text: "should never reach the provider", model: "gpt-4o-mini", provider: "openai"}],
     { ->
       const policy = harness.llm.routing_policy(
         {

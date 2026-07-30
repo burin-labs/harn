@@ -268,7 +268,7 @@ fn pow_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(
     exposure = "harness.random.seed",
     effects = ["random.mutate@const=generator"],
-    sig = "rng_seed(...args: any) -> any", category = "math"
+    sig = "rng_seed(seed: int) -> HarnessRandom", category = "math"
 )]
 fn rng_seed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::SeedableRng;
@@ -373,6 +373,27 @@ fn random_shuffle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         shuffled.shuffle(&mut rand::rng());
     }
     Ok(VmValue::List(std::sync::Arc::new(shuffled)))
+}
+
+/// Dispatch methods on the deterministic handle returned by
+/// `HarnessRandom.seed`. Seeded handles intentionally implement the same
+/// read-only generation surface as `HarnessRandom`, while advancing only
+/// their private stream.
+pub(crate) fn call_seeded_random_method(
+    receiver: &VmValue,
+    method: &str,
+    args: &[VmValue],
+) -> Option<Result<VmValue, VmError>> {
+    let mut call_args = Vec::with_capacity(args.len() + 1);
+    call_args.push(receiver.clone());
+    call_args.extend_from_slice(args);
+    match method {
+        "f64" => Some(random_impl(&call_args, &mut String::new())),
+        "range" => Some(random_int_impl(&call_args, &mut String::new())),
+        "choice" => Some(random_choice_impl(&call_args, &mut String::new())),
+        "shuffle" => Some(random_shuffle_impl(&call_args, &mut String::new())),
+        _ => None,
+    }
 }
 
 #[harn_builtin(

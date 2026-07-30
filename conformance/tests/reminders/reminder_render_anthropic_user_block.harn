@@ -15,9 +15,16 @@ pipeline main(harness: Harness) {
   const session = harness.agent.open("reminder-render-anthropic-user-block")
   harness.agent.reset(session)
   harness.agent.inject(session, {role: "user", content: "hello"})
-  agent_reminder_providers_fire(harness, session, "session_idle", {session: {id: session}}, {})
+  agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "session_idle",
+    {session: {id: session}},
+    {},
+  )
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       harness.llm.call(
         "ignored",
@@ -25,14 +32,16 @@ pipeline main(harness: Harness) {
         {
           provider: "mock",
           model: "claude-sonnet-4-7",
-          messages: agent_session_messages(harness, session),
+          messages: agent_session_messages(harness.agent, session),
           session_id: session,
         },
       )
       const call = harness.llm.mock_calls()[0]
       harness.stdio.println(call.messages[0].role)
       harness.stdio.println(contains(call.messages[0].content[0].text, "<system-reminder>"))
-      harness.stdio.println(contains(call.messages[0].content[0].text, "anthropic user block reminder"))
+      harness.stdio.println(
+        contains(call.messages[0].content[0].text, "anthropic user block reminder"),
+      )
       harness.stdio.println(call.messages[0].content[0].cache_control == nil)
       harness.stdio.println(call.messages[0].content[1].text)
       harness.agent.clear_reminder_providers()

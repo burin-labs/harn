@@ -10,6 +10,8 @@ pipeline test(harness: Harness, task) {
   harness.stdio.log(slack)
   // Constant-time equality. Same value, then differing byte, then differing length.
   harness.stdio.log(constant_time_eq(mac, mac))
-  harness.stdio.log(constant_time_eq(mac, "0000000000000000000000000000000000000000000000000000000000000000"))
+  harness.stdio.log(
+    constant_time_eq(mac, "0000000000000000000000000000000000000000000000000000000000000000"),
+  )
   harness.stdio.log(constant_time_eq(mac, "abc"))
 }

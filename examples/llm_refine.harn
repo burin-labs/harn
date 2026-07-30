@@ -15,7 +15,9 @@ pipeline default(harness: Harness) {
         "Summarize the article in 3 bullet points, each under 12 words.\nDIFF: tightened length, added bullet structure",
     },
   )
-  const result = refine_prompt(harness, {
+  const result = refine_prompt(
+    harness.llm,
+    {
       user_prompt: "please summarize this article briefly with bullets",
       provider: "mock",
       model: "mock-small",

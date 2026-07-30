@@ -15,13 +15,16 @@ use super::harness::*;
 use crate::vm::*;
 #[test]
 fn test_direct_builtin_call_uses_registered_sync_id() {
-    let (out, _) = run_harn_with_setup(r#"pipeline t(task) { test_sync("ok") }"#, |vm| {
-        vm.register_builtin("test_sync", |args, out| {
-            out.push_str("sync:");
-            out.push_str(&args[0].display());
-            Ok(VmValue::Nil)
-        });
-    })
+    let (out, _) = run_harn_with_setup(
+        r#"pipeline t(harness: Harness, task) { test_sync("ok") }"#,
+        |vm| {
+            vm.register_builtin("test_sync", |args, out| {
+                out.push_str("sync:");
+                out.push_str(&args[0].display());
+                Ok(VmValue::Nil)
+            });
+        },
+    )
     .unwrap();
     assert_eq!(out, "sync:ok");
 }
@@ -29,9 +32,9 @@ fn test_direct_builtin_call_uses_registered_sync_id() {
 #[test]
 fn test_direct_builtin_call_uses_registered_async_id() {
     let (out, _) = run_harn_with_setup(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 const value = test_async("ok")
-log(value)
+harness.stdio.log(value)
 }"#,
         |vm| {
             vm.register_async_builtin("test_async", |_ctx, args| async move {
@@ -49,9 +52,9 @@ log(value)
 #[test]
 fn test_direct_builtin_callback_uses_builtin_ref_id() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 const converted = ["first_name"].map(snake_to_camel)
-log(converted[0])
+harness.stdio.log(converted[0])
 }"#,
     );
     assert_eq!(out, "[harn] firstName");
@@ -60,9 +63,9 @@ log(converted[0])
 #[test]
 fn test_direct_builtin_call_preserves_function_shadowing() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 fn push(xs, x) {
-  log("shadow")
+  harness.stdio.log("shadow")
 }
 push([1], 2)
 }"#,
@@ -73,8 +76,8 @@ push([1], 2)
 #[test]
 fn test_direct_builtin_call_preserves_local_closure_shadowing() {
     let out = run_output(
-        r#"pipeline t(task) {
-const push = { xs, x -> log("local") }
+        r#"pipeline t(harness: Harness, task) {
+const push = { xs, x -> harness.stdio.log("local") }
 push([1], 2)
 }"#,
     );
@@ -105,7 +108,7 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
                     .await
                     .unwrap();
 
-                let source = r#"pipeline t(task) { log(bridge_echo("ok")) }"#;
+                let source = r#"pipeline t(harness: Harness, task) { harness.stdio.log(bridge_echo("ok")) }"#;
                 let mut lexer = Lexer::new(source);
                 let tokens = lexer.tokenize().unwrap();
                 let mut parser = Parser::new(tokens);

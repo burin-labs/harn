@@ -185,7 +185,7 @@ unchanged.
 ```harn
 import { on_finish_abandon } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_abandon)
   return "ok"
 }
@@ -207,7 +207,7 @@ audit captures the remainder.
 ```harn
 import { on_finish_drain } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_drain)
   return "triage complete"
 }
@@ -225,7 +225,7 @@ fallback (default `on_finish_drain`). Use this preset to make
 ```harn
 import { on_finish_block_until_settled } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_block_until_settled(30s))
   return "ok"
 }
@@ -243,7 +243,7 @@ pipeline does not need to run at all.
 ```harn
 import { on_finish_handoff_to } from "std/lifecycle"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
   return "triage complete"
 }
@@ -278,7 +278,7 @@ import {
 } from "std/lifecycle"
 import { compose, if_unsettled, with_telemetry } from "std/lifecycle/combinators"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   pipeline_on_finish(
     with_telemetry(
       if_unsettled(
@@ -319,7 +319,7 @@ fn audit_overage(harness, budget_state) {
   return budget_state
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   register_persona_hook(
     "*",
     "OnBudgetThreshold",
@@ -333,7 +333,8 @@ pipeline default() {
 
 Pipeline lifecycle gates fire on top of the same session-hook surface
 as the rest of the system. Register with
-`register_session_hook(event, handler)`. Veto with
+`harness.agent.register_session_hook(event, handler)`. The handler receives
+`(hook_harness, event)`. Veto with
 `{block: true, reason}`; amend the dispatched payload with
 `{modify: payload}`.
 
@@ -422,7 +423,7 @@ reproduces the same control flow:
    per-run monotonic `seq` rather than wall-clock time, so audit
    ordering is reproducible. Wall-clock fields (`queued_at_ms`,
    `age_ms`) come from `clock_mock`-aware sources and respect
-   `mock_time(...)` / `advance_time(...)` in tests.
+   `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)` in tests.
 4. **One-shot registration.** `pipeline_on_finish(callback)` is
    last-write-wins, and the slot is consumed exactly once per run via
    `take_pipeline_on_finish`. A stale registration cannot leak across

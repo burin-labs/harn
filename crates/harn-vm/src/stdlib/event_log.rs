@@ -51,7 +51,7 @@ async fn event_log_describe_impl(
 
 #[harn_builtin(
     exposure = "harness.obs.event_log_emit",
-    effects = ["state.write@arg0", "observability.write@arg0"],
+    effects = ["observability.write@arg0"],
     sig = "event_log.emit(topic: string, kind: string, payload?: any, headers?: dict) -> int",
     kind = "async",
     category = "event_log"

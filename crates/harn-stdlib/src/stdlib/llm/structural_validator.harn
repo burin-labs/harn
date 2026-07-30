@@ -648,7 +648,8 @@ fn __sv_feedback_payload(verdict) {
   )
 }
 
-fn __sv_emit_decision(harness: Harness, 
+fn __sv_emit_decision(
+  agent: HarnessAgent,
   session_id,
   iteration,
   cfg,
@@ -658,7 +659,9 @@ fn __sv_emit_decision(harness: Harness,
   skipped = false,
   reason = nil,
 ) {
-  agent_emit_event(harness, session_id,
+  agent_emit_event(
+    agent,
+    session_id,
     "structural_validator_decision",
     {
       iteration: iteration,
@@ -739,13 +742,14 @@ fn __sv_rule_verdict(payload, cfg, rule_cfg) {
   return nil
 }
 
-fn __sv_handle_turn(harness: Harness, call, cfg) {
+fn __sv_handle_turn(agent: HarnessAgent, call, cfg) {
   const payload = __sv_dict(call?.tool_args)
   const session_id = __sv_string(payload?.session_id ?? call?.turn?.session_id)
   const iteration = to_int(payload?.iteration ?? call?.turn?.iteration) ?? 0
   const attempts = to_int(payload?.attempts) ?? 0
   if attempts >= cfg.max_attempts {
-    __sv_emit_decision(harness, 
+    __sv_emit_decision(
+      agent,
       session_id,
       iteration,
       cfg,
@@ -761,7 +765,17 @@ fn __sv_handle_turn(harness: Harness, call, cfg) {
     const verdict = __sv_rule_verdict(payload, cfg, rule_cfg)
     if verdict != nil {
       if rule_cfg?.warn_only ?? false {
-        __sv_emit_decision(harness, session_id, iteration, cfg, verdict, attempts, false, false, "warn_only")
+        __sv_emit_decision(
+          agent,
+          session_id,
+          iteration,
+          cfg,
+          verdict,
+          attempts,
+          false,
+          false,
+          "warn_only",
+        )
         return __sv_pass_result(
           call,
           true,
@@ -775,7 +789,7 @@ fn __sv_handle_turn(harness: Harness, call, cfg) {
           },
         )
       }
-      __sv_emit_decision(harness, session_id, iteration, cfg, verdict, attempts)
+      __sv_emit_decision(agent, session_id, iteration, cfg, verdict, attempts)
       return __sv_veto_result(call, cfg, verdict)
     }
   }
@@ -803,12 +817,12 @@ fn __sv_handle_turn(harness: Harness, call, cfg) {
  *
  * @example: with_structural_validator({on_failure: "regenerate_with_feedback"})
  */
-pub fn with_structural_validator(harness: Harness, opts = nil) {
+pub fn with_structural_validator(agent: HarnessAgent, opts = nil) {
   const cfg = __sv_validate_opts(opts)
   return { call, next ->
     if call?.tool_name != __sv_tool_name() {
       return next(call)
     }
-    return __sv_handle_turn(harness, call, cfg)
+    return __sv_handle_turn(agent, call, cfg)
   }
 }

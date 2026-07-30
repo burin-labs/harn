@@ -32,6 +32,12 @@ pub struct HandlerSpec {
     pub span: Span,
     pub body: Vec<SNode>,
     pub invariants: Vec<InvariantSpec>,
+    /// Nominal capability handles available directly in this handler.
+    ///
+    /// Keeping this structural lets IR analysis attribute `fs.write_text(...)`
+    /// exactly like `harness.fs.write_text(...)` without guessing from local
+    /// variable names.
+    pub capability_handles: BTreeMap<String, harn_builtin_meta::CapabilityId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

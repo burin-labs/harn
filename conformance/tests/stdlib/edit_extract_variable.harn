@@ -6,9 +6,9 @@ import { edit_extract_variable } from "std/edit"
  * apply (Rust + Python declaration forms), the per-language capability
  * matrix, and parameter/conflict validation.
  */
-fn write_fixture(harness: Harness, dir: string, name: string, body: string) -> string {
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
-  harness.fs.write_text(path, body)
+  fs.write_text(path, body)
   return path
 }
 
@@ -27,7 +27,7 @@ pipeline default(harness: Harness) {
   // 1) Rust dry-run: preview the extraction without touching disk.
   const rs_body =
     "fn calc() -> i64 {\n    let result = compute(2) + compute(3);\n    return result;\n}\n"
-  const rs_path = write_fixture(harness, root, "calc.rs", rs_body)
+  const rs_path = write_fixture(harness.fs, root, "calc.rs", rs_body)
   const rs_range = range_of(rs_body, 1, "compute(2)")
   const preview = edit_extract_variable(
     harness.fs,
@@ -59,7 +59,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(rs_after, "    return result;"))
   // 3) Python apply: bare `name = expr` form, no `let`/`;`.
   const py_body = "def calc():\n    result = compute(2) + compute(3)\n    return result\n"
-  const py_path = write_fixture(harness, root, "calc.py", py_body)
+  const py_path = write_fixture(harness.fs, root, "calc.py", py_body)
   const py_range = range_of(py_body, 1, "compute(2)")
   const py_applied = edit_extract_variable(
     harness.fs,
@@ -73,7 +73,12 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(py_after, "    result = first + compute(3)"))
   harness.stdio.println(!contains(py_after, "let first"))
   // 4) Unsupported language: Java has no inferable local-declaration form.
-  const java_path = write_fixture(harness, root, "Calc.java", "int x = compute(2) + compute(3);\n")
+  const java_path = write_fixture(
+    harness.fs,
+    root,
+    "Calc.java",
+    "int x = compute(2) + compute(3);\n",
+  )
   const unsupported = edit_extract_variable(
     harness.fs,
     harness.random,

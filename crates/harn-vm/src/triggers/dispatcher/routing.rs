@@ -172,17 +172,22 @@ impl Dispatcher {
         #[cfg(feature = "otel")]
         let started_at = Instant::now();
         let metrics = self.metrics.clone();
-        let outcome = ACTIVE_DISPATCH_IS_REPLAY
-            .scope(
-                replay_of_event_id.is_some(),
-                self.dispatch_with_replay_inner(
-                    binding,
-                    event,
-                    replay_of_event_id,
-                    parent_headers_for_metrics,
-                )
-                .instrument(span),
+        // The attempt loop retains the event, action graph, receipts, leases,
+        // retry state, and handler future. Keep that large state machine on
+        // the heap before wrapping it in tracing and task-local scopes; those
+        // generic wrappers otherwise embed it repeatedly in every caller up
+        // through MCP and other synchronous host entrypoints.
+        let dispatch = Box::pin(
+            self.dispatch_with_replay_inner(
+                binding,
+                event,
+                replay_of_event_id.clone(),
+                parent_headers_for_metrics,
             )
+            .instrument(span),
+        );
+        let outcome = ACTIVE_DISPATCH_IS_REPLAY
+            .scope(replay_of_event_id.is_some(), dispatch)
             .await;
         if let Some(metrics) = metrics.as_ref() {
             match &outcome {

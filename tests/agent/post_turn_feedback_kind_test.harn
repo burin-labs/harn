@@ -8,6 +8,7 @@ import {
   agent_event_value,
   agent_feedback_injected_event_schema,
 } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -38,7 +39,8 @@ fn __feedback_event_count_by_kind(captured, kind: string) -> int {
 
 pipeline test_post_turn_feedback_kind_threads_to_event(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("Need one more turn."), llm_text("Finished. ##DONE##")],
+    harness.llm,
+    [llm_text("Need one more turn."), llm_text("Finished. ##DONE##")],
     { ->
       const session = "post-turn-feedback-kind-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
@@ -57,7 +59,9 @@ pipeline test_post_turn_feedback_kind_threads_to_event(harness: Harness, task) {
           return nil
         },
       }
-      const captured = agent_capture_events(harness, session,
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Finish after the callback.", nil, opts) },
       )
       const feedback = __feedback_event_by_kind(captured, "typed_policy_feedback")
@@ -70,7 +74,8 @@ pipeline test_post_turn_feedback_kind_threads_to_event(harness: Harness, task) {
 
 pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("Keep going."), llm_text("Still going."), llm_text("Finished. ##DONE##")],
+    harness.llm,
+    [llm_text("Keep going."), llm_text("Still going."), llm_text("Finished. ##DONE##")],
     { ->
       const session = "post-turn-feedback-default-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
@@ -89,7 +94,9 @@ pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(harness: Har
           return nil
         },
       }
-      const captured = agent_capture_events(harness, session,
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Finish after two callbacks.", nil, opts) },
       )
       assert_eq(__feedback_event_count_by_kind(captured, "post_turn"), 2)
@@ -100,7 +107,8 @@ pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(harness: Har
 
 pipeline test_terminal_feedback_kind_threads_to_event(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("Budget exhausted before done."), llm_text("Finished. ##DONE##")],
+    harness.llm,
+    [llm_text("Budget exhausted before done."), llm_text("Finished. ##DONE##")],
     { ->
       const session = "terminal-feedback-kind-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
@@ -116,7 +124,9 @@ pipeline test_terminal_feedback_kind_threads_to_event(harness: Harness, task) {
           }
         },
       }
-      const captured = agent_capture_events(harness, session,
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Finish after terminal rescue.", nil, opts) },
       )
       const feedback = __feedback_event_by_kind(captured, "terminal_rescue_policy")
@@ -128,7 +138,8 @@ pipeline test_terminal_feedback_kind_threads_to_event(harness: Harness, task) {
 
 pipeline test_feedback_kind_rejects_non_string(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("The callback will reject.")],
+    harness.llm,
+    [llm_text("The callback will reject.")],
     { ->
       const session = "post-turn-feedback-kind-invalid-" + harness.random.uuid()
       const opts: AgentLoopOptions = {

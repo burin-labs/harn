@@ -40,7 +40,7 @@ fn gated_task_handler_module(release_path: &Path) -> String {
         r#"
 import "std/triggers"
 
-pub fn on_task(event: TriggerEvent) -> string {{
+pub fn on_task(harness: Harness, event: TriggerEvent) -> string {{
   while !file_exists({release:?}) {{
     sleep(1ms)
   }}
@@ -476,7 +476,7 @@ handler = "handlers::on_task"
         r#"
 import "std/triggers"
 
-pub fn on_task(event: TriggerEvent) -> string {
+pub fn on_task(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -546,7 +546,7 @@ handler = "handlers::on_task"
         r#"
 import "std/triggers"
 
-pub fn on_task(event: TriggerEvent) -> string {
+pub fn on_task(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -645,7 +645,7 @@ handler = "handlers::on_task"
         r#"
 import "std/triggers"
 
-pub fn on_task(event: TriggerEvent) -> string {
+pub fn on_task(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -803,7 +803,7 @@ secrets = { signing_secret = "github/webhook-secret" }
         r#"
 import "std/triggers"
 
-pub fn on_event(event: TriggerEvent) {
+pub fn on_event(harness: Harness, event: TriggerEvent) {
   log(event.kind)
 }
 "#,
@@ -896,7 +896,7 @@ handler = "handlers::on_task"
         r#"
 import "std/triggers"
 
-pub fn on_task(event: TriggerEvent) -> string {
+pub fn on_task(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -1036,7 +1036,7 @@ handler = "handlers::on_task"
         r#"
 import "std/triggers"
 
-pub fn on_task(event: TriggerEvent) -> dict {
+pub fn on_task(harness: Harness, event: TriggerEvent) -> dict {
   return {
     ok: true,
     kind: event.kind,

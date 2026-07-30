@@ -217,8 +217,8 @@ pub fn render_spend_table(rows: list) -> string {
   )
 }
 
-fn current_utc_year(harness: Harness) -> string {
-  const res = harness.process.run({cmd: "date", args: ["-u", "+%Y"]})
+fn current_utc_year(process: HarnessProcess) -> string {
+  const res = process.run({program: "date", args: ["-u", "+%Y"]})
   if res.success {
     return res.stdout.trim()
   }
@@ -226,27 +226,35 @@ fn current_utc_year(harness: Harness) -> string {
 }
 
 fn require_gh(harness: Harness) {
-  const res = harness.process.run({cmd: "gh", args: ["--version"]})
+  const res = harness.process.run({program: "gh", args: ["--version"]})
   if !res.success {
     harness.stdio.eprintln("gha_spend_report: gh CLI not found")
     harness.runtime.exit(1)
   }
 }
 
-fn gh_api_json(harness: Harness, path: string) {
-  const res = harness.process.run({cmd: "gh", args: ["api", path]})
+fn gh_api_json(process: HarnessProcess, path: string) {
+  const res = process.run({program: "gh", args: ["api", path]})
   if !res.success {
     return nil
   }
   return parse_json_maybe(res.stdout)
 }
 
-fn collect_run_timing_rows(harness: Harness, org: string, repos: list<string>, runs_per_repo: int) -> list {
+fn collect_run_timing_rows(
+  process: HarnessProcess,
+  org: string,
+  repos: list<string>,
+  runs_per_repo: int,
+) -> list {
   let samples = []
   for repo in repos {
-    const runs = gh_api_json(harness, "/repos/${org}/${repo}/actions/runs?per_page=${runs_per_repo}")
+    const runs = gh_api_json(
+      process,
+      "/repos/${org}/${repo}/actions/runs?per_page=${runs_per_repo}",
+    )
     for ref in action_run_refs(runs) {
-      const timing = gh_api_json(harness, "/repos/${org}/${repo}/actions/runs/${ref.id}/timing")
+      const timing = gh_api_json(process, "/repos/${org}/${repo}/actions/runs/${ref.id}/timing")
       if timing == nil {
         continue
       }
@@ -280,7 +288,7 @@ fn main(_harness: Harness) {
     ?? DEFAULT_RUNS_PER_REPO
   require_gh(harness, _harness)
   const billing_path = "/orgs/${org}/settings/billing/usage?year=${current_utc_year(harness)}"
-  const billing = gh_api_json(harness, _harness, billing_path)
+  const billing = gh_api_json(harness.process, _harness, billing_path)
   if parsed?.json ?? false {
     if has_billing_usage_items(billing) {
       harness.stdio.println(json_stringify_pretty(billing))
@@ -306,7 +314,11 @@ fn main(_harness: Harness) {
     harness.stdio.eprintln(
       "(billing usage endpoint unavailable or unauthorized; falling back to run /timing minutes)",
     )
-    harness.stdio.println(render_spend_table(collect_run_timing_rows(harness, _harness, org, repos, runs_per_repo)))
+    harness.stdio.println(
+      render_spend_table(
+        collect_run_timing_rows(harness.process, _harness, org, repos, runs_per_repo),
+      ),
+    )
   }
   return nil
 }

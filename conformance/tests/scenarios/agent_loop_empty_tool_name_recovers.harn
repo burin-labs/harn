@@ -37,9 +37,12 @@ fn one_tool() {
 
 fn run_loop_with_empty_name(harness: Harness) {
   return with_llm_script(
-    harness.llm, [{tool_calls: [{id: "bad-1", name: "", arguments: {}}]}, llm_text("##DONE##")],
+    harness.llm,
+    [{tool_calls: [{id: "bad-1", name: "", arguments: {}}]}, llm_text("##DONE##")],
     { ->
-      const result = agent_loop(harness, "do something",
+      const result = agent_loop(
+        harness,
+        "do something",
         nil,
         {
           provider: "mock",
@@ -63,17 +66,22 @@ pipeline default(harness: Harness) {
   // Part A: the whole run survives a nameless tool call and reaches `done`.
   harness.stdio.println("loop.status=" + run_loop_with_empty_name(harness))
   // Part B: the dispatch primitive returns a recoverable envelope, not a throw.
-  const empty = agent_dispatch_tool_call(harness, {name: "", arguments: {}}, one_tool(), {})
+  const empty = agent_dispatch_tool_call(harness.tools, {name: "", arguments: {}}, one_tool(), {})
   harness.stdio.println("empty.ok=" + to_string(empty?.ok))
   harness.stdio.println("empty.status=" + to_string(empty?.status))
   harness.stdio.println("empty.error_category=" + to_string(empty?.error_category))
-  const missing = agent_dispatch_tool_call(harness, {arguments: {}}, one_tool(), {})
+  const missing = agent_dispatch_tool_call(harness.tools, {arguments: {}}, one_tool(), {})
   harness.stdio.println("missing.ok=" + to_string(missing?.ok))
   harness.stdio.println("missing.status=" + to_string(missing?.status))
   harness.stdio.println("missing.error_category=" + to_string(missing?.error_category))
   // A well-formed call against the same registry still executes normally:
   // the recovery path must not have broken the happy path.
-  const good = agent_dispatch_tool_call(harness, {name: "echo", arguments: {msg: "hi"}}, one_tool(), {})
+  const good = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "echo", arguments: {msg: "hi"}},
+    one_tool(),
+    {},
+  )
   harness.stdio.println("good.ok=" + to_string(good?.ok))
   harness.stdio.println("good.status=" + to_string(good?.status))
 }

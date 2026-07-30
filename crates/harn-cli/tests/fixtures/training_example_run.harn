@@ -16,6 +16,7 @@
  * passes `path`, so a schema inferred from observed arguments would visibly
  * differ from the one the model was served.
  */
+import { agent_loop } from "std/agent/loop"
 import { llm_done, llm_text, llm_tool_call, with_llm_mocks } from "std/testing"
 import { tool_registry_from } from "std/tools"
 

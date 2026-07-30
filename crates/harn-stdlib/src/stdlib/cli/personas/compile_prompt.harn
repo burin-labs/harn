@@ -19,7 +19,10 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("persona prompt compiler payload requires a string prompt")
     return 2
   }
-  const receipt = persona_compile_prompt(harness, payload.prompt,
+  const receipt = persona_compile_prompt(
+    harness.agent,
+    harness.llm,
+    payload.prompt,
     {
       provider: payload?.provider,
       model: payload?.model,

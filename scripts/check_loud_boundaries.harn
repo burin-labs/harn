@@ -28,8 +28,8 @@ pub type BoundarySite = {path: string, id: string}
 /** One reason the gate failed, with the path that caused it. */
 pub type BoundaryFinding = {kind: string, id: string, path: string, message: string}
 
-fn repo_root(harness: Harness) -> string {
-  return path_normalize(path_join(harness.fs.source_dir(), ".."))
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
 }
 
 /**
@@ -388,7 +388,12 @@ pub fn evaluate(
   return findings + audited_findings(registry?.audited ?? [], existing_paths, contents)
 }
 
-fn git_grep(harness: Harness, root: string, pattern: string, globs: list<string>) -> string? {
+fn git_grep(
+  process: HarnessProcess,
+  root: string,
+  pattern: string,
+  globs: list<string>,
+) -> string? {
   // `--untracked` is load-bearing, not a convenience. Without it the gate reads
   // only committed files, so the exact case it exists for — a brand-new file
   // that starts reporting a boundary nobody registered — would pass locally and
@@ -397,7 +402,7 @@ fn git_grep(harness: Harness, root: string, pattern: string, globs: list<string>
   for glob in globs {
     args = args.appending(glob)
   }
-  const result = harness.process.run({cmd: "git", args: args})
+  const result = process.run({program: "git", args: args})
   // 1 means "no matches", which is a legitimate (if alarming) answer.
   if result.exit_code != 0 && result.exit_code != 1 {
     return nil
@@ -421,7 +426,7 @@ fn referenced_paths(entries: list) -> list<string> {
 }
 
 pipeline main(harness: Harness, task) {
-  const root = repo_root(harness)
+  const root = repo_root(harness.fs)
   if !harness.fs.exists(path_join(root, REGISTRY_PATH)) {
     harness.stdio.eprintln("::error::missing ${REGISTRY_PATH}")
     return 1
@@ -443,8 +448,8 @@ pipeline main(harness: Harness, task) {
     )
     return 1
   }
-  const rust_grep = git_grep(harness, root, "BoundaryId::", ["crates/*.rs"])
-  const harn_grep = git_grep(harness, root, HARN_SITE_MARKER, ["crates/*.harn"])
+  const rust_grep = git_grep(harness.process, root, "BoundaryId::", ["crates/*.rs"])
+  const harn_grep = git_grep(harness.process, root, HARN_SITE_MARKER, ["crates/*.harn"])
   if rust_grep == nil || harn_grep == nil {
     harness.stdio.eprintln("::error::git grep failed; cannot scan for boundary construction sites")
     return 1
@@ -479,9 +484,13 @@ pipeline main(harness: Harness, task) {
     )
     return 0
   }
-  harness.stdio.eprintln("::error::loud-boundary registry failed (${to_string(findings.count)} finding(s)):")
+  harness.stdio.eprintln(
+    "::error::loud-boundary registry failed (${to_string(findings.count)} finding(s)):",
+  )
   for finding in findings {
-    harness.stdio.eprintln("  [${finding.kind}] ${finding.id} @ ${finding.path}: ${finding.message}")
+    harness.stdio.eprintln(
+      "  [${finding.kind}] ${finding.id} @ ${finding.path}: ${finding.message}",
+    )
   }
   harness.stdio.eprintln(
     "hint: a boundary that can drop model output must report through crate::boundary::BoundaryFailure and be listed in ${REGISTRY_PATH}. See the header of that file for the checklist.",

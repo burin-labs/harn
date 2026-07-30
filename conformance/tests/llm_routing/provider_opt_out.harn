@@ -4,7 +4,9 @@ pipeline main(harness: Harness) {
   const enabled_session = harness.agent.open("provider-opt-out-enabled")
   harness.agent.reset(enabled_session)
   const payload = {session: {id: enabled_session}, iteration: 1, wake_interval_ms: 65000}
-  const enabled = agent_reminder_providers_fire(harness, enabled_session,
+  const enabled = agent_reminder_providers_fire(
+    harness.agent,
+    enabled_session,
     "session_idle",
     payload,
     {reminders: {config: {idle_nudge: {idle_seconds: 60}}}},
@@ -16,7 +18,9 @@ pipeline main(harness: Harness) {
   // Opt out by listing the negated provider name.
   const opted_out_session = harness.agent.open("provider-opt-out-disabled")
   harness.agent.reset(opted_out_session)
-  const opted_out = agent_reminder_providers_fire(harness, opted_out_session,
+  const opted_out = agent_reminder_providers_fire(
+    harness.agent,
+    opted_out_session,
     "session_idle",
     {session: {id: opted_out_session}, iteration: 1, wake_interval_ms: 65000},
     {reminders: {providers: ["-idle_nudge"], config: {idle_nudge: {idle_seconds: 60}}}},

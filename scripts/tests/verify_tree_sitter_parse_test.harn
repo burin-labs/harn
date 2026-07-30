@@ -1,7 +1,7 @@
 import { with_temp_dir } from "std/testing"
 import "../verify_tree_sitter_parse.harn"
 
-fn mkdirs(harness: Harness, path: string) -> nil {
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
   let current = if path.starts_with("/") {
     "/"
@@ -17,17 +17,17 @@ fn mkdirs(harness: Harness, path: string) -> nil {
     } else {
       path_join(current, part)
     }
-    if !harness.fs.exists(current) {
-      harness.fs.mkdir(current)
+    if !fs.exists(current) {
+      fs.mkdir(current)
     }
   }
   return nil
 }
 
-fn write_file(harness: Harness, root: string, rel: string, text: string = "") -> nil {
+fn write_file(fs: HarnessFs, root: string, rel: string, text: string = "") -> nil {
   const path = path_join(root, rel)
-  mkdirs(harness, dirname(path) ?? root)
-  harness.fs.write_text(path, text)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
   return nil
 }
 
@@ -62,14 +62,17 @@ pipeline test_with_error_suffix(harness: Harness, task) {
 
 @test
 pipeline test_positive_harn_files_skips_error_fixtures_and_other_roots(harness: Harness, task) {
-  with_temp_dir(harness, { root ->
-      write_file(harness, root, "conformance/tests/good.harn", "let x = 1\n")
-      write_file(harness, root, "conformance/tests/bad.harn", "let x =\n")
-      write_file(harness, root, "conformance/tests/bad.error", "expected\n")
-      write_file(harness, root, "examples/demo/main.harn", "let y = 2\n")
-      write_file(harness, root, "tests/bridge/bridge.harn", "let z = 3\n")
-      write_file(harness, root, "other/ignored.harn", "let q = 4\n")
-      const files = positive_harn_files(harness, root).map({ path -> path_normalize(path) }).to_list()
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_file(harness.fs, root, "conformance/tests/good.harn", "let x = 1\n")
+      write_file(harness.fs, root, "conformance/tests/bad.harn", "let x =\n")
+      write_file(harness.fs, root, "conformance/tests/bad.error", "expected\n")
+      write_file(harness.fs, root, "examples/demo/main.harn", "let y = 2\n")
+      write_file(harness.fs, root, "tests/bridge/bridge.harn", "let z = 3\n")
+      write_file(harness.fs, root, "other/ignored.harn", "let q = 4\n")
+      const files = positive_harn_files(harness.fs, root).map({ path -> path_normalize(path) })
+        .to_list()
       assert_eq(
         files.contains(path_normalize(path_join(root, "conformance/tests/good.harn"))),
         true,

@@ -33,51 +33,48 @@ pub fn no_bad(slice, _ctx, _repo_at_base) {
 }
 """
 
-fn test_packages_dir(harness: Harness, dir, package_name: string) -> string {
+fn test_packages_dir(fs: HarnessFs, dir, package_name: string) -> string {
   const generation = "generation-test"
   const generation_root = path_join(dir, ".harn", "package-generations", generation)
   const packages = path_join(generation_root, "packages")
   const lock_body = "version = 4\n\n[[package]]\nname = \"${package_name}\"\n"
-  harness.fs.mkdir(packages)
-  harness.fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
-  harness.fs.write_text(path_join(generation_root, "lease.lock"), "")
-  harness.fs.write_text(
+  fs.mkdir(packages)
+  fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
+  fs.write_text(path_join(generation_root, "lease.lock"), "")
+  fs.write_text(
     path_join(generation_root, "generation.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\nlock_digest = \"sha256:${sha256(lock_body)}\"\n",
   )
-  harness.fs.write_text(path_join(dir, ".harn", "package-generation.lock"), "")
-  harness.fs.write_text(
+  fs.write_text(path_join(dir, ".harn", "package-generation.lock"), "")
+  fs.write_text(
     path_join(dir, ".harn", "package-current.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\n",
   )
   return packages
 }
 
-fn write_latex_canon_package(harness: Harness, dir) {
-  const packages = test_packages_dir(harness, dir, "latex-canon")
-  harness.fs.mkdir(path_join(packages, "latex-canon/canon/latex"))
-  harness.fs.write_text(
+fn write_latex_canon_package(fs: HarnessFs, dir) {
+  const packages = test_packages_dir(fs, dir, "latex-canon")
+  fs.mkdir(path_join(packages, "latex-canon/canon/latex"))
+  fs.write_text(
     path_join(packages, "latex-canon/harn.toml"),
     "version = 1\n[package]\nname = \"latex-canon\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nid = \"latex\"\ntitle = \"LaTeX\"\npath = \"canon/latex\"\nextensions = [\"tex\"]\n",
   )
-  harness.fs.write_text(path_join(packages, "latex-canon/canon/latex/invariants.harn"), INVARIANTS)
+  fs.write_text(path_join(packages, "latex-canon/canon/latex/invariants.harn"), INVARIANTS)
 }
 
-fn write_manifest_canon_package(harness: Harness, dir) {
-  const packages = test_packages_dir(harness, dir, "canon-manifest")
-  harness.fs.mkdir(path_join(packages, "canon-manifest/canon/latex"))
-  harness.fs.write_text(
+fn write_manifest_canon_package(fs: HarnessFs, dir) {
+  const packages = test_packages_dir(fs, dir, "canon-manifest")
+  fs.mkdir(path_join(packages, "canon-manifest/canon/latex"))
+  fs.write_text(
     path_join(packages, "canon-manifest/harn.toml"),
     "version = 1\n[package]\nname = \"canon-manifest\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nmanifest = \"canon/canon-packs.json\"\n",
   )
-  harness.fs.write_text(
+  fs.write_text(
     path_join(packages, "canon-manifest/canon/canon-packs.json"),
     "{\"schema_version\":1,\"packs\":[{\"id\":\"latex\",\"title\":\"LaTeX\",\"invariants\":\"latex/invariants.harn\",\"extensions\":[\"tex\"]}]}",
   )
-  harness.fs.write_text(
-    path_join(packages, "canon-manifest/canon/latex/invariants.harn"),
-    INVARIANTS,
-  )
+  fs.write_text(path_join(packages, "canon-manifest/canon/latex/invariants.harn"), INVARIANTS)
 }
 
 fn canon_feedback_state_key(session_id: string, suffix: string) -> string {
@@ -145,7 +142,7 @@ pipeline main(harness: Harness, task) {
   require event_symbols == expected_symbols,
     "canon_event_observed_symbols preserves ordered unique observations"
   with_fs(
-    harness,
+    harness.fs,
     {
       "canon-packs.json": manifest,
       "src/main.foo": "const bad = true;",
@@ -155,10 +152,17 @@ pipeline main(harness: Harness, task) {
       ".harn/canon/zig/invariants.harn": INVARIANTS,
     },
     { dir ->
-      harness.stdio.println(to_string(canon_resolve_root(harness, {canon_root: dir}) == dir))
+      harness.stdio.println(
+        to_string(canon_resolve_root(harness.env, harness.fs, {canon_root: dir}) == dir),
+      )
       harness.stdio.println(
         to_string(
-          canon_resolve_root(harness, {project_root: dir}) == path_join(dir, ".harn", "canon"),
+          canon_resolve_root(harness.env, harness.fs, {project_root: dir})
+            == path_join(
+            dir,
+            ".harn",
+            "canon",
+          ),
         ),
       )
       const slice = canon_slice_from_files([{path: "src/main.foo", text: "const bad = true;"}])
@@ -167,7 +171,7 @@ pipeline main(harness: Harness, task) {
       harness.stdio.println(to_string(result.packs[0].report.records[0].name == "no_bad"))
       const feedback = canon_feedback_text(result)
       harness.stdio.println(to_string(contains(feedback, "no_bad")))
-      const path_slice = canon_slice_from_paths(harness, ["src/main.foo"], {root: dir})
+      const path_slice = canon_slice_from_paths(harness.fs, ["src/main.foo"], {root: dir})
       harness.stdio.println(to_string(path_slice.files[0].text == "const bad = true;"))
       const disabled_session_id = harness.agent.open(
         "canon-router-disabled-" + harness.random.uuid_v7(),
@@ -275,7 +279,7 @@ pipeline main(harness: Harness, task) {
       const package_session_id = harness.agent.open(
         "canon-package-feedback-" + harness.random.uuid_v7(),
       )
-      write_latex_canon_package(harness, dir)
+      write_latex_canon_package(harness.fs, dir)
       harness.fs.write_text(path_join(dir, "paper.tex"), "bad macro")
       const package_injected = canon_inject_paths_feedback(
         harness,
@@ -316,10 +320,10 @@ pipeline main(harness: Harness, task) {
     },
   )
   with_fs(
-    harness,
+    harness.fs,
     {"paper.tex": "bad macro"},
     { dir ->
-      write_latex_canon_package(harness, dir)
+      write_latex_canon_package(harness.fs, dir)
       const package_only_session_id = harness.agent.open(
         "canon-package-only-feedback-" + harness.random.uuid_v7(),
       )
@@ -341,10 +345,10 @@ pipeline main(harness: Harness, task) {
     },
   )
   with_fs(
-    harness,
+    harness.fs,
     {"paper.tex": "bad macro"},
     { dir ->
-      write_manifest_canon_package(harness, dir)
+      write_manifest_canon_package(harness.fs, dir)
       const package_manifest_session_id = harness.agent.open(
         "canon-package-manifest-feedback-" + harness.random.uuid_v7(),
       )
@@ -369,17 +373,21 @@ pipeline main(harness: Harness, task) {
     },
   )
   with_fs(
-    harness,
+    harness.fs,
     {"paper.tex": "bad macro"},
     { dir ->
-      write_manifest_canon_package(harness, dir)
+      write_manifest_canon_package(harness.fs, dir)
       const manifest_path = path_join(
-        test_packages_dir(harness, dir, "canon-manifest"),
+        test_packages_dir(harness.fs, dir, "canon-manifest"),
         "canon-manifest/canon/canon-packs.json",
       )
       harness.fs.write_text(manifest_path, "{bad")
       const malformed = try {
-        canon_resolve_packs(harness, {project_root: dir, files: [{path: "paper.tex"}]})
+        canon_resolve_packs(
+          harness.env,
+          harness.fs,
+          {project_root: dir, files: [{path: "paper.tex"}]},
+        )
       }
       require unwrap_err(malformed).kind == "malformed",
         "malformed contribution manifest fails closed"
@@ -387,12 +395,12 @@ pipeline main(harness: Harness, task) {
     },
   )
   with_fs(
-    harness,
+    harness.fs,
     {"paper.tex": "bad macro"},
     { dir ->
-      write_manifest_canon_package(harness, dir)
+      write_manifest_canon_package(harness.fs, dir)
       const manifest_path = path_join(
-        test_packages_dir(harness, dir, "canon-manifest"),
+        test_packages_dir(harness.fs, dir, "canon-manifest"),
         "canon-manifest/canon/canon-packs.json",
       )
       harness.fs.write_text(
@@ -400,7 +408,11 @@ pipeline main(harness: Harness, task) {
         "{\"schema_version\":1,\"packs\":[{\"id\":7,\"invariants\":true}]}",
       )
       const invalid = try {
-        canon_resolve_packs(harness, {project_root: dir, files: [{path: "paper.tex"}]})
+        canon_resolve_packs(
+          harness.env,
+          harness.fs,
+          {project_root: dir, files: [{path: "paper.tex"}]},
+        )
       }
       require unwrap_err(invalid).kind == "schema_invalid",
         "mistyped contribution manifest fails closed"
@@ -408,12 +420,12 @@ pipeline main(harness: Harness, task) {
     },
   )
   with_fs(
-    harness,
+    harness.fs,
     {"paper.tex": "bad macro"},
     { dir ->
-      write_manifest_canon_package(harness, dir)
+      write_manifest_canon_package(harness.fs, dir)
       const manifest_path = path_join(
-        test_packages_dir(harness, dir, "canon-manifest"),
+        test_packages_dir(harness.fs, dir, "canon-manifest"),
         "canon-manifest/canon/canon-packs.json",
       )
       harness.fs.write_text(
@@ -421,7 +433,11 @@ pipeline main(harness: Harness, task) {
         "{\"schema_version\":2,\"packs\":[{\"id\":\"latex\",\"invariants\":\"latex/invariants.harn\"}]}",
       )
       const unsupported = try {
-        canon_resolve_packs(harness, {project_root: dir, files: [{path: "paper.tex"}]})
+        canon_resolve_packs(
+          harness.env,
+          harness.fs,
+          {project_root: dir, files: [{path: "paper.tex"}]},
+        )
       }
       require unwrap_err(unsupported).kind == "schema_invalid",
         "unsupported manifest version fails closed"
@@ -429,17 +445,21 @@ pipeline main(harness: Harness, task) {
     },
   )
   with_fs(
-    harness,
+    harness.fs,
     {"paper.tex": "bad macro"},
     { dir ->
-      write_manifest_canon_package(harness, dir)
+      write_manifest_canon_package(harness.fs, dir)
       const manifest_path = path_join(
-        test_packages_dir(harness, dir, "canon-manifest"),
+        test_packages_dir(harness.fs, dir, "canon-manifest"),
         "canon-manifest/canon/canon-packs.json",
       )
       harness.fs.delete(manifest_path)
       const missing = try {
-        canon_resolve_packs(harness, {project_root: dir, files: [{path: "paper.tex"}]})
+        canon_resolve_packs(
+          harness.env,
+          harness.fs,
+          {project_root: dir, files: [{path: "paper.tex"}]},
+        )
       }
       require unwrap_err(missing).kind == "absent", "missing contribution manifest fails closed"
       harness.stdio.println(is_err(missing))

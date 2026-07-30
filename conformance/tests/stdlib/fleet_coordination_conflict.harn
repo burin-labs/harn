@@ -5,13 +5,24 @@ pipeline default(harness: Harness) {
   harness.testing.clock_set(2000)
   const room = {session_id: "fleet-conflict"}
   const first = fleet_claim(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     "repo#7",
     room + {id: "claim-a", from: {agent: "lane-a"}},
   )
-  const _ = fleet_claim(harness, "session", "ops", "repo#7", room + {id: "claim-b", from: {agent: "lane-b"}})
-  const _ = coord_post(harness.runtime, harness.channels, harness.random, "session",
+  const _ = fleet_claim(
+    harness,
+    "session",
+    "ops",
+    "repo#7",
+    room + {id: "claim-b", from: {agent: "lane-b"}},
+  )
+  const _ = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "session",
     "ops",
     {
       kind: "heartbeat",
@@ -21,7 +32,11 @@ pipeline default(harness: Harness) {
     },
     room + {id: "future-heartbeat"},
   )
-  const _ = coord_post(harness.runtime, harness.channels, harness.random, "session",
+  const _ = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "session",
     "ops",
     {
       kind: "heartbeat",
@@ -41,7 +56,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(conflicted.unknown_messages[0]?.id)
   harness.stdio.println(len(conflicted.unknown_messages))
   const _ = fleet_done(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     first.id,
     "different-work",
@@ -54,7 +70,8 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(wrong_key.claims[0]?.state)
   const _ = fleet_done(
-    harness, "session",
+    harness,
+    "session",
     "ops",
     first.id,
     "repo#7",

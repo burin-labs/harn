@@ -20,20 +20,29 @@ fn rejected_timestamp(
 pipeline default(harness: Harness) {
   const opts = {session_id: "coord-append-metadata"}
   harness.testing.clock_set(2000)
-  const first = coord_post(harness.runtime, harness.channels, harness.random,
+  const first = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "ops",
     {kind: "status", subject: "first"},
     opts + {id: "coord-metadata-1"},
   )
-  const second = coord_post(harness.runtime, harness.channels, harness.random,
+  const second = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "ops",
     {kind: "status", subject: "second"},
     opts + {id: "coord-metadata-2"},
   )
   harness.testing.clock_set(3000)
-  const third = coord_post(harness.runtime, harness.channels, harness.random,
+  const third = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "ops",
     {kind: "status", subject: "third"},
@@ -43,7 +52,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(first.message.seq == first.channel.cursor)
   harness.stdio.println(second.message.seq > first.message.seq)
   harness.stdio.println(second.message.ts == first.message.ts)
-  const after_seq = coord_read(harness.runtime,
+  const after_seq = coord_read(
+    harness.runtime,
     harness.channels,
     "session",
     "ops",
@@ -53,7 +63,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(after_seq[0].subject)
   harness.stdio.println(after_seq[0].seq == third.message.seq)
   harness.stdio.println(after_seq[0].ts == third.message.ts)
-  const after_ts = coord_read(harness.runtime,
+  const after_ts = coord_read(
+    harness.runtime,
     harness.channels,
     "session",
     "ops",
@@ -63,7 +74,13 @@ pipeline default(harness: Harness) {
   harness.stdio.println(after_ts[0].subject)
   harness.stdio.println(
     len(
-      coord_read(harness.runtime, harness.channels, "session", "ops", opts + {since_ts: first.message.ts, limit: 0}),
+      coord_read(
+        harness.runtime,
+        harness.channels,
+        "session",
+        "ops",
+        opts + {since_ts: first.message.ts, limit: 0},
+      ),
     ),
   )
   const message_error = rejected_timestamp(

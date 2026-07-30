@@ -263,9 +263,9 @@ fn __secrets_secret_name(cfg, key) {
   return cfg.provider + "/" + leaf
 }
 
-fn __secrets_read_raw(harness: Harness, cfg, name) {
+fn __secrets_read_raw(secrets: HarnessSecrets, cfg, name) {
   return try {
-    harness.secrets.read(name, cfg.scope)
+    secrets.read(name, cfg.scope)
   } catch (err) {
     if __secrets_is_missing(err) {
       nil
@@ -287,9 +287,9 @@ fn __secrets_parse(cfg, name, raw) {
   }
 }
 
-fn __secrets_get(harness: Harness, cfg, key) {
+fn __secrets_get(secrets: HarnessSecrets, cfg, key) {
   const name = __secrets_secret_name(cfg, key)
-  const raw = __secrets_read_raw(harness, cfg, name)
+  const raw = __secrets_read_raw(secrets, cfg, name)
   if raw == nil || trim(to_string(raw)) == "" {
     return nil
   }
@@ -326,34 +326,34 @@ fn __secrets_merge(prev, incoming) {
   return out
 }
 
-fn __secrets_set(harness: Harness, cfg, key, token_set) {
+fn __secrets_set(secrets: HarnessSecrets, cfg, key, token_set) {
   if type_of(token_set) != "dict" {
     throw "std/oauth/storage: secrets backend set expects a TokenSet dict"
   }
   const name = __secrets_secret_name(cfg, key)
-  const prev = __secrets_get_stored(harness, cfg, name)
+  const prev = __secrets_get_stored(secrets, cfg, name)
   const merged = __secrets_merge(prev, token_set)
   // Deterministic serialization: `json_stringify` emits keys in sorted
   // order (dicts are ordered maps), so equal TokenSets encode identically.
   const payload = json_stringify(merged)
   // TTL is carried inside the TokenSet (`expires_at_unix`); canonical
   // secret stores (OS keyring) reject write-level TTLs, so none is set.
-  const _ = harness.secrets.write(name, payload, cfg.scope)
+  const _ = secrets.write(name, payload, cfg.scope)
   return nil
 }
 
-fn __secrets_get_stored(harness: Harness, cfg, name) {
-  const raw = __secrets_read_raw(harness, cfg, name)
+fn __secrets_get_stored(secrets: HarnessSecrets, cfg, name) {
+  const raw = __secrets_read_raw(secrets, cfg, name)
   if raw == nil || trim(to_string(raw)) == "" {
     return nil
   }
   return __secrets_parse(cfg, name, raw)
 }
 
-fn __secrets_delete(harness: Harness, cfg, key) {
+fn __secrets_delete(secrets: HarnessSecrets, cfg, key) {
   const name = __secrets_secret_name(cfg, key)
   try {
-    const _ = harness.secrets.delete(name, cfg.scope)
+    const _ = secrets.delete(name, cfg.scope)
   } catch (err) {
     // Already-absent is the desired post-delete state.
     if !__secrets_is_missing(err) {
@@ -404,7 +404,7 @@ fn __secrets_delete(harness: Harness, cfg, key) {
  * @api_stability: experimental
  * @example: secrets(harness, {provider: "github"})
  */
-pub fn secrets(harness: Harness, opts) -> Storage {
+pub fn secrets(auth: HarnessAuth, secret_store: HarnessSecrets, opts) -> Storage {
   if type_of(opts) != "dict" {
     throw "std/oauth/storage: secrets opts must be a dict"
   }
@@ -429,11 +429,11 @@ pub fn secrets(harness: Harness, opts) -> Storage {
     _namespace: "oauth_storage",
     kind: "secrets",
     provider: provider,
-    get: { key -> __secrets_get(harness, cfg, key) },
-    set: { key, token_set, ttl_seconds = nil -> __secrets_set(harness, cfg, key, token_set) },
-    delete: { key -> __secrets_delete(harness, cfg, key) },
+    get: { key -> __secrets_get(secret_store, cfg, key) },
+    set: { key, token_set, ttl_seconds = nil -> __secrets_set(secret_store, cfg, key, token_set) },
+    delete: { key -> __secrets_delete(secret_store, cfg, key) },
     with_refresh_lock: { key, body ->
-      harness.auth.oauth_storage_with_refresh_lock(cfg.lock_handle, key, body)
+      auth.oauth_storage_with_refresh_lock(cfg.lock_handle, key, body)
     },
   }
 }
@@ -449,13 +449,13 @@ pub fn secrets(harness: Harness, opts) -> Storage {
  * @api_stability: experimental
  * @example: storage(harness).file("/var/lib/harn/tokens.bin", key)
  */
-pub fn storage(harness: Harness) {
+pub fn storage(auth: HarnessAuth, secret_store: HarnessSecrets) {
   return {
-    memory: memory(harness.auth),
-    file: { path, encryption_key -> file(harness.auth, path, encryption_key) },
-    secrets: { opts -> secrets(harness, opts) },
-    harn_cloud_session: harn_cloud_session(harness.auth),
-    harn_cloud_org: harn_cloud_org(harness.auth),
-    custom: { handlers -> custom(harness.auth, handlers) },
+    memory: memory(auth),
+    file: { path, encryption_key -> file(auth, path, encryption_key) },
+    secrets: { opts -> secrets(auth, secret_store, opts) },
+    harn_cloud_session: harn_cloud_session(auth),
+    harn_cloud_org: harn_cloud_org(auth),
+    custom: { handlers -> custom(auth, handlers) },
   }
 }

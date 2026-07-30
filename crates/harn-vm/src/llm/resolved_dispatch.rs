@@ -33,7 +33,7 @@ use super::capabilities::WireDialect;
 /// `_dispatch_provenance` channel by the pipeline resolver
 /// (Burin's smart-escalation / model-selection layers, threaded through the
 /// agent-loop options). `Unknown` is the default when no resolver annotated the
-/// call — e.g. a raw `llm_call(...)` from script context.
+/// call — e.g. a raw `harness.llm.call(...)` from script context.
 ///
 /// The string values are a small, stable vocabulary so downstream tooling
 /// (the harness-debugger `dispatch_trace` MCP tool) can filter on them:

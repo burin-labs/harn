@@ -13,7 +13,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {
@@ -25,7 +26,9 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const handle = sub_agent_run(harness, "Park, get closed, reject resume.",
+      const handle = sub_agent_run(
+        harness,
+        "Park, get closed, reject resume.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
       const suspended = wait_agent(harness.agent, handle)

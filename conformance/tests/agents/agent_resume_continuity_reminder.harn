@@ -14,7 +14,8 @@ fn resume_tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}},
@@ -27,7 +28,9 @@ pipeline main(harness: Harness) {
     ],
     { ->
       const session_id = "resume-continuity-" + harness.random.uuid()
-      const handle = sub_agent_run(harness, "Park until an operator resumes you.",
+      const handle = sub_agent_run(
+        harness,
+        "Park until an operator resumes you.",
         {
           provider: "mock",
           background: true,

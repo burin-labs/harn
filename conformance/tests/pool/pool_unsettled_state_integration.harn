@@ -10,7 +10,7 @@ import { pool_create } from "std/lifecycle/pool"
 
 pipeline default(harness: Harness) {
   const gate = harness.runtime.channel(nil, 1)
-  const pool = pool_create({name: "unsettled-integration", max_concurrent: 1})
+  const pool = pool_create(harness.agent, {name: "unsettled-integration", max_concurrent: 1})
   // One task occupies the slot (parked on `gate`), two more sit in the
   // queue. None reach a terminal state before on_finish runs.
   const _running = pool.submit(

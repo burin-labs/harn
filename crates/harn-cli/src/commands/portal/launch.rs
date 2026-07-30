@@ -439,7 +439,7 @@ fn build_playground_source(
         .unwrap_or_default();
 
     format!(
-        r#"pipeline main() {{
+        r#"pipeline main(harness: Harness) {{
   const flow = workflow_graph(
     {{
     name: "portal_playground",
@@ -463,13 +463,14 @@ fn build_playground_source(
     relevance: 0.9,
   }})
   const result = workflow_execute(
+    harness,
     {task:?},
     flow,
     [seed, workspace_note],
     {{max_steps: 4, persist_path: {:?}}},
   )
-  __io_println(result?.status)
-  __io_println(result?.run?.persisted_path)
+  harness.stdio.println(result?.status)
+  harness.stdio.println(result?.run?.persisted_path)
 }}"#,
         persist_path.display().to_string()
     )

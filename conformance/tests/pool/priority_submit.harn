@@ -11,7 +11,7 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
  * priority order.
  */
 pipeline default(harness: Harness) {
-  const pool = pool_create({name: "priority-demo", max_concurrent: 1})
+  const pool = pool_create(harness.agent, {name: "priority-demo", max_concurrent: 1})
   const order = harness.runtime.atomic(0)
   const gate = harness.runtime.channel(nil, 1)
   const warmup_body = { ->
@@ -27,7 +27,7 @@ pipeline default(harness: Harness) {
   // All five tasks are now resident: warmup is parked, the others wait
   // in priority order behind it. Open the gate so warmup completes.
   harness.runtime.send(gate, "go")
-  const results = pool_wait([warmup, low, mid, high, mid_second])
+  const results = pool_wait(harness.agent, [warmup, low, mid, high, mid_second])
   // Expected dispatch order:
   //   warmup     (occupied the slot first)
   //   high       (priority 10)

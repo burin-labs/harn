@@ -11,6 +11,8 @@ pub(super) enum TopLevelEntry {
     Callable {
         bootstrap: ChunkRef,
         has_fixture: bool,
+        fixture_expects_harness: bool,
+        expects_harness: bool,
         args: Vec<VmValue>,
     },
 }
@@ -22,6 +24,8 @@ impl TopLevelEntry {
             Self::Callable {
                 bootstrap,
                 has_fixture,
+                fixture_expects_harness,
+                expects_harness,
                 mut args,
             } => {
                 let value = vm.run_chunk(bootstrap).await?;
@@ -39,7 +43,17 @@ impl TopLevelEntry {
                                 .to_string(),
                         ));
                     };
-                    let fixture_value = vm.call_closure_pub(fixture, &[]).await?;
+                    let fixture_args = if fixture_expects_harness {
+                        vec![vm.root_harness_value().ok_or_else(|| {
+                            VmError::Runtime(
+                                "test fixture requires Harness, but no root Harness is installed"
+                                    .to_string(),
+                            )
+                        })?]
+                    } else {
+                        Vec::new()
+                    };
+                    let fixture_value = vm.call_closure_pub(fixture, &fixture_args).await?;
                     args.insert(0, fixture_value);
                     Arc::clone(target)
                 } else {
@@ -50,6 +64,15 @@ impl TopLevelEntry {
                     };
                     target
                 };
+                if expects_harness {
+                    let harness = vm.root_harness_value().ok_or_else(|| {
+                        VmError::Runtime(
+                            "callable entry requires Harness, but no root Harness is installed"
+                                .to_string(),
+                        )
+                    })?;
+                    args.insert(0, harness);
+                }
                 vm.call_closure_pub(&target, &args).await
             }
         }
@@ -74,6 +97,8 @@ impl Vm {
             TopLevelEntry::Callable {
                 bootstrap: Arc::new(entry.bootstrap.clone()),
                 has_fixture: entry.has_fixture,
+                fixture_expects_harness: entry.fixture_expects_harness,
+                expects_harness: entry.expects_harness,
                 args: args.to_vec(),
             },
             timeout,

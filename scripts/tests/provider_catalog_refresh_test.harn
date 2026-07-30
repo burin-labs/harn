@@ -282,7 +282,10 @@ pipeline test_render_candidate_toml_emits_added_and_changed_only(harness: Harnes
 }
 
 @test
-pipeline test_render_candidate_toml_keeps_aggregator_discovery_out_of_patch(harness: Harness, task) {
+pipeline test_render_candidate_toml_keeps_aggregator_discovery_out_of_patch(
+  harness: Harness,
+  task,
+) {
   const discovered = aggregator_obs(
     "claude-next-unverified",
     {input_per_mtok: 9.0, output_per_mtok: 45.0},
@@ -476,7 +479,7 @@ pipeline test_key_required_adapter_skips_without_key(harness: Harness, task) {
     key_envs: ["FIREWORKS_API_KEY"],
     adapter: { _ -> {run: {}, observations: []} },
   }
-  const result = key_required_adapter(env, config)
+  const result = key_required_adapter(harness, env, config)
   assert_eq(result.run.status, "skipped")
   assert_eq(result.run.requires_key, true)
   assert_eq(result.run.key_envs, ["FIREWORKS_API_KEY"])
@@ -517,9 +520,9 @@ pipeline test_key_required_adapter_runs_with_key(harness: Harness, task) {
     source_owner: "provider",
     source_url: "https://api.fireworks.ai/inference/v1/models",
     key_envs: ["FIREWORKS_API_KEY"],
-    adapter: { e -> json_api_adapter(e, json_config) },
+    adapter: { adapter_harness, e -> json_api_adapter(adapter_harness, e, json_config) },
   }
-  const result = key_required_adapter(env, config)
+  const result = key_required_adapter(harness, env, config)
   assert_eq(result.run.status, "ok")
   assert_eq(result.run.requires_key, true)
   assert_eq(result.run.key_envs, ["FIREWORKS_API_KEY"])

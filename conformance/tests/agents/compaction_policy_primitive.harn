@@ -59,5 +59,7 @@ pipeline test(harness: Harness, task) {
   // After running, check should return defer again — transcript is below
   // threshold once the summary message replaces the archived ones.
   const after_decision = harness.agent.compaction_check(session)
-  harness.stdio.println(after_decision["action"] == "compact_now" || after_decision["action"] == "defer")
+  harness.stdio.println(
+    after_decision["action"] == "compact_now" || after_decision["action"] == "defer",
+  )
 }

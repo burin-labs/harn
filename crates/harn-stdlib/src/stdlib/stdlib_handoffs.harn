@@ -98,7 +98,15 @@ fn __handoff_predicate_matches(raw_when, handoff, context) -> bool {
   return false
 }
 
-fn __handoff_decision(harness: Harness, route, route_index, route_target, target_index, handoff, context) {
+fn __handoff_decision(
+  clock: HarnessClock,
+  route,
+  route_index,
+  route_target,
+  target_index,
+  handoff,
+  context,
+) {
   const raw_target = __handoff_value_string(route_target?.target)
   const target = __handoff_target_record(raw_target, route_target)
   return {
@@ -111,7 +119,7 @@ fn __handoff_decision(harness: Harness, route, route_index, route_target, target
     target: raw_target,
     target_persona_or_human: target,
     matched_when: route_target?.when ?? "always",
-    selected_at: harness.clock.date_iso(),
+    selected_at: clock.date_iso(),
     dispatch_kind: target.kind,
     dispatch_status: "selected",
     metadata: (route?.metadata ?? {}) + (route_target?.metadata ?? {}),
@@ -124,7 +132,7 @@ fn __handoff_decision(harness: Harness, route, route_index, route_target, target
  * @effects: []
  * @errors: []
  */
-pub fn handoff_route_select(harness: Harness, handoff_payload, routes = nil, context = nil) {
+pub fn handoff_route_select(clock: HarnessClock, handoff_payload, routes = nil, context = nil) {
   const route_table = routes ?? handoff_routes()
   const kind = __handoff_kind(handoff_payload, context)
   const source = __handoff_source(handoff_payload, context)
@@ -137,7 +145,8 @@ pub fn handoff_route_select(harness: Harness, handoff_payload, routes = nil, con
       const when = __handoff_value_string(route_target?.when)
       if when == "" || when == "always" {
         if fallback == nil {
-          fallback = __handoff_decision(harness, 
+          fallback = __handoff_decision(
+            clock,
             route,
             route_index,
             route_target,
@@ -149,7 +158,8 @@ pub fn handoff_route_select(harness: Harness, handoff_payload, routes = nil, con
         continue
       }
       if __handoff_predicate_matches(route_target?.when, handoff_payload, context) {
-        return __handoff_decision(harness, 
+        return __handoff_decision(
+          clock,
           route,
           route_index,
           route_target,
@@ -172,8 +182,8 @@ pub fn handoff_route_select(harness: Harness, handoff_payload, routes = nil, con
  * @effects: []
  * @errors: []
  */
-pub fn handoff_routed(harness: Harness, payload, routes = nil, context = nil) {
-  const decision = handoff_route_select(harness, payload, routes, context)
+pub fn handoff_routed(clock: HarnessClock, payload, routes = nil, context = nil) {
+  const decision = handoff_route_select(clock, payload, routes, context)
   if decision == nil {
     throw "handoff_routed: no matching handoff route"
   }
@@ -237,7 +247,10 @@ fn __handoff_invoke_dispatcher(harness: Harness, dispatcher, envelope) {
   if policy == nil {
     return dispatcher(harness, envelope)
   }
-  return __harn_with_execution_policy_override(policy, fn() { return dispatcher(harness, envelope) })
+  return __harn_with_execution_policy_override(
+    policy,
+    fn() { return dispatcher(harness, envelope) },
+  )
 }
 
 /**

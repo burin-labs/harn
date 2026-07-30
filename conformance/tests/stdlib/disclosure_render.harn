@@ -18,9 +18,9 @@ pipeline default(harness: Harness) {
     },
   }
   const options = {project: false, env: false, config: config}
-  harness.stdio.println(render(harness, chain, "git", options))
-  harness.stdio.println(render(harness, chain, "slack", options))
-  const github = render(harness, chain, "github", options)
+  harness.stdio.println(render(harness.env, harness.fs, chain, "git", options))
+  harness.stdio.println(render(harness.env, harness.fs, chain, "slack", options))
+  const github = render(harness.env, harness.fs, chain, "github", options)
   harness.stdio.println(github.kind)
   harness.stdio.println(github.mode)
   harness.stdio.println(github.author.subject)

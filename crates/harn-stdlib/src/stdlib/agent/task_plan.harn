@@ -428,8 +428,8 @@ fn __task_plan_validate_write_capability_budget(plan, write_kinds_seen, report) 
   const cap_tools = caps?.tools ?? []
   const allow_writes = contains(cap_tools, "edit")
     || contains(cap_tools, "run")
-    || caps?.side_effect_level == "writes_files"
-    || caps?.side_effect_level == "runs_commands"
+    || caps?.side_effect_level == "workspace_write"
+    || caps?.side_effect_level == "process_exec"
   if len(write_kinds_seen) > 0 && !allow_writes {
     out = __task_plan_push_warning(
       out,
@@ -437,7 +437,7 @@ fn __task_plan_validate_write_capability_budget(plan, write_kinds_seen, report) 
       "capabilities.tools",
       "plan declares write-capable node kinds ("
         + write_kinds_seen.join(", ")
-        + ") but capabilities.tools does not list `edit` or `run` and side_effect_level is not `writes_files`/`runs_commands`",
+        + ") but capabilities.tools does not list `edit` or `run` and side_effect_level is not `workspace_write`/`process_exec`",
     )
   }
   return out

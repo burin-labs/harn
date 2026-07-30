@@ -9,7 +9,8 @@ pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   // Success path: parsed data surfaces in `.data`, error is nil.
   with_llm_script(
-    harness.llm, [llm_text("{\"verdict\": \"PASS\"}")],
+    harness.llm,
+    [llm_text("{\"verdict\": \"PASS\"}")],
     { ->
       const ok = harness.llm.call_structured_safe("Grade", schema, {provider: "mock"})
       harness.stdio.println(ok.ok)
@@ -18,7 +19,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("{\"other\": \"nope\"}")],
+    harness.llm,
+    [llm_text("{\"other\": \"nope\"}")],
     { ->
       const bad = harness.llm.call_structured_safe("Grade", schema, {provider: "mock", retries: 0})
       harness.stdio.println(bad.ok)
@@ -27,7 +29,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [{error: {category: "rate_limit", message: "429 slow down"}}],
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 slow down"}}],
     { ->
       const rate = harness.llm.call_structured_safe("Grade", schema, {provider: "mock"})
       harness.stdio.println(rate.ok)

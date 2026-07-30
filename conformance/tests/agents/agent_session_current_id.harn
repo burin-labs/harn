@@ -23,7 +23,8 @@ pipeline main(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "Checking the session.",
         tool_calls: [{id: "sid1", name: "read_current_id", arguments: {}}],
@@ -31,7 +32,9 @@ pipeline main(harness: Harness, task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Report the current session id",
+      const result = agent_loop(
+        harness,
+        "Report the current session id",
         nil,
         {
           provider: "mock",

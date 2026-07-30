@@ -1,7 +1,7 @@
 # Workflow runtime
 
-Harn's workflow runtime is the layer above raw `llm_call()` and
-`agent_loop()`. It gives host applications a typed, inspectable, replayable
+Harn's workflow runtime is the layer above raw `harness.llm.call()` and
+`agent_loop(harness, ...)`. It gives host applications a typed, inspectable, replayable
 orchestration boundary instead of pushing orchestration logic into app code.
 
 > **Pipeline vs. workflow.** Two different things that are deliberately not
@@ -149,8 +149,8 @@ const run = action_graph_run("Fix parser diagnostics", plan, {
   verify: {command: "cargo test --workspace --quiet", expect_status: 0}
 })
 
-log(run.status)
-log(len(run.batches))
+harness.stdio.log(run.status)
+harness.stdio.log(len(run.batches))
 ```
 
 ### Artifacts and resources
@@ -186,7 +186,7 @@ Example:
 const selection = artifact({
   kind: "resource",
   title: "Selected code",
-  text: read_file("src/parser.rs"),
+  text: harness.fs.read_text("src/parser.rs"),
   source: "workspace",
   relevance: 0.95
 })
@@ -221,8 +221,8 @@ const run = workflow_execute(
   run_options,
 )
 
-log(run.status)
-log(run.path)
+harness.stdio.log(run.status)
+harness.stdio.log(run.path)
 ```
 
 Use `harn runs view --json <path>` on `run.path` for the stable
@@ -613,8 +613,8 @@ workflow.signal(workflow_id, "customer_joined", {customer_id: 7})
 workflow.publish_query(workflow_id, "progress_pct", 25)
 
 const next = workflow.receive(workflow_id)
-log(next?.kind == "signal")
-log(workflow.query(workflow_id, "progress_pct"))
+harness.stdio.log(next?.kind == "signal")
+harness.stdio.log(workflow.query(workflow_id, "progress_pct"))
 ```
 
 `workflow.update(...)` enqueues a request and waits until
@@ -628,7 +628,7 @@ const response = workflow.update(
   {max_usd: 10},
   {timeout_ms: 5000}
 )
-log(response?.approved)
+harness.stdio.log(response?.approved)
 ```
 
 Pause and resume are durable state transitions, not ephemeral process-local
@@ -656,9 +656,9 @@ setters plus the lifecycle builtins:
   `compact_strategy`, `hard_limit_tokens`, `hard_limit_strategy`.
 - `workflow_set_output_visibility(graph, node_id, visibility)` —
   `"public" | "private" | nil`.
-- `agent_session_reset(id)`, `agent_session_fork(src, dst?)`,
-  `agent_session_fork_at(src, keep_first, dst?)`,
-  `agent_session_trim(id, keep_last)`, `agent_session_compact(id, opts)`
+- `harness.agent.reset(id)`, `harness.agent.fork(src, dst?)`,
+  `harness.agent.fork_at(src, keep_first, dst?)`,
+  `harness.agent.trim(id, keep_last)`, `harness.agent.compact(id, opts)`
   — call these in the pipeline before `workflow_execute` to branch,
   reset, or compact a stage's conversation explicitly.
 

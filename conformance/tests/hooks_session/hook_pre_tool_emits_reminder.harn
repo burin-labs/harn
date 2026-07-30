@@ -22,12 +22,15 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "pre_tool_1", name: "pre_hook_tool", arguments: {}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "call the pre-hook tool",
+      const result = agent_loop(
+        harness,
+        "call the pre-hook tool",
         nil,
         {
           provider: "mock",

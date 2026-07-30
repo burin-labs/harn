@@ -1,7 +1,10 @@
 import "std/memory"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-memory-hybrid-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-memory-hybrid-" + harness.random.uuid(),
+  )
   harness.testing.clear()
   // Give distinct unit vectors per record by matching on the
   // record-key line that searchable_text emits first. The mocks are
@@ -45,7 +48,8 @@ pipeline default(harness: Harness) {
     true,
   )
   memory_open(
-    harness.memory, "agent/hybrid",
+    harness.memory,
+    "agent/hybrid",
     {
       backend: "hybrid",
       embed_dim: 2,
@@ -56,14 +60,16 @@ pipeline default(harness: Harness) {
     },
   )
   memory_store(
-    harness.memory, "agent/hybrid",
+    harness.memory,
+    "agent/hybrid",
     "alice",
     "Alice prefers Rust examples",
     ["profile", "rust"],
     {root: root, now: "2026-05-15T00:00:00Z"},
   )
   memory_store(
-    harness.memory, "agent/hybrid",
+    harness.memory,
+    "agent/hybrid",
     "bob",
     "Bob prefers TypeScript",
     ["profile", "typescript"],
@@ -77,7 +83,8 @@ pipeline default(harness: Harness) {
   // Semantic override picks the same record regardless of namespace
   // hybrid config.
   const semantic_only = memory_recall(
-    harness.memory, "agent/hybrid",
+    harness.memory,
+    "agent/hybrid",
     "typescript",
     5,
     {root: root, mode: "semantic"},
@@ -85,11 +92,23 @@ pipeline default(harness: Harness) {
   harness.stdio.println(semantic_only[0].key)
   // Lexical override drops cosine entirely; BM25 on "rust" matches alice
   // by tag boost.
-  const lexical = memory_recall(harness.memory, "agent/hybrid", "rust", 5, {root: root, mode: "lexical"})
+  const lexical = memory_recall(
+    harness.memory,
+    "agent/hybrid",
+    "rust",
+    5,
+    {root: root, mode: "lexical"},
+  )
   harness.stdio.println(lexical[0].key)
   // Re-open with a different default mode flips the default behavior.
   memory_open(harness.memory, "agent/hybrid", {backend: "bm25", root: root})
-  const default_now_lexical = memory_recall(harness.memory, "agent/hybrid", "typescript", 5, {root: root})
+  const default_now_lexical = memory_recall(
+    harness.memory,
+    "agent/hybrid",
+    "typescript",
+    5,
+    {root: root},
+  )
   harness.stdio.println(default_now_lexical[0].key)
   harness.fs.delete(root)
 }

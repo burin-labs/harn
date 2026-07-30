@@ -4,7 +4,8 @@ type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
+    harness.llm,
+    [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
     { ->
       const r = harness.llm.call(
         "Grade this",

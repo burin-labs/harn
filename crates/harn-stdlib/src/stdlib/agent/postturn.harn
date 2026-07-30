@@ -247,18 +247,29 @@ fn __native_tool_text_completion(opts, has_tool_calls, text) {
  * already nudged this session. Keyed on `_consecutive_text_only` so it
  * is idempotent under repeated post-turn calls.
  */
-fn __maybe_inject_completion_confirmation(harness: Harness, session, opts, has_tool_calls, text, iteration) {
+fn __maybe_inject_completion_confirmation(
+  agent: HarnessAgent,
+  session,
+  opts,
+  has_tool_calls,
+  text,
+  iteration,
+) {
   if !__zero_tool_completion_context(opts, has_tool_calls, text) {
     return false
   }
   if (opts?._consecutive_text_only ?? 1) >= 2 {
     return false
   }
-  agent_session_inject_feedback(harness, session.session_id,
+  agent_session_inject_feedback(
+    agent,
+    session.session_id,
     "completion_confirmation",
     "You ended your turn without calling a tool. If you intended to call a tool, call it now. If this was your final answer, restate it briefly on the next line — do not describe your process.",
   )
-  agent_emit_event(harness, session.session_id,
+  agent_emit_event(
+    agent,
+    session.session_id,
     "completion_confirmation_nudge",
     {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
   )
@@ -378,7 +389,7 @@ fn __missing_tool_call_recovery_config(opts) {
   return {enabled: true, options: options}
 }
 
-fn __missing_tool_call_recovery_classifier(harness: Harness, opts) {
+fn __missing_tool_call_recovery_classifier(agent: HarnessAgent, llm: HarnessLlm, opts) {
   const recovery = __missing_tool_call_recovery_config(opts)
   if !recovery.enabled {
     return nil
@@ -391,7 +402,7 @@ fn __missing_tool_call_recovery_classifier(harness: Harness, opts) {
   if opts?._llm_caller != nil && !has_test_classifier {
     return nil
   }
-  return missing_tool_call_classifier(harness, options)
+  return missing_tool_call_classifier(agent, llm, options)
 }
 
 fn __tool_name_in_list(name: string, names: list<string>) -> bool {
@@ -407,11 +418,18 @@ fn __tool_name_in_list(name: string, names: list<string>) -> bool {
  * Classify "intended tool action, no parsed call" through the default typed
  * recovery path. Classifier failures fail open to no nudge.
  */
-fn __classify_missing_tool_call(harness: Harness, session, text, opts, iteration) {
+fn __classify_missing_tool_call(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  session,
+  text,
+  opts,
+  iteration,
+) {
   if __text_has_call_shape(text) {
     return nil
   }
-  const classifier = __missing_tool_call_recovery_classifier(harness, opts)
+  const classifier = __missing_tool_call_recovery_classifier(agent, llm, opts)
   if classifier == nil {
     return nil
   }
@@ -447,7 +465,9 @@ fn __classify_missing_tool_call(harness: Harness, session, text, opts, iteration
   if type_of(result) != "dict" {
     return nil
   }
-  agent_emit_event(harness, session.session_id,
+  agent_emit_event(
+    agent,
+    session.session_id,
     "missing_tool_call_verdict",
     result
       + {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
@@ -475,7 +495,15 @@ fn __classify_missing_tool_call(harness: Harness, session, text, opts, iteration
  * loop can suppress the fallback progress-streak nudge and avoid
  * double-injecting on the same turn.
  */
-fn __maybe_inject_action_nudge(harness: Harness, session, opts, has_tool_calls, text, iteration) {
+fn __maybe_inject_action_nudge(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  session,
+  opts,
+  has_tool_calls,
+  text,
+  iteration,
+) {
   const text_family = __text_family_toolless_turn(opts, has_tool_calls, text)
   const native_mode = __native_completion_context(opts, has_tool_calls, text)
   if !text_family && !native_mode {
@@ -484,14 +512,16 @@ fn __maybe_inject_action_nudge(harness: Harness, session, opts, has_tool_calls, 
   // The corrective wording renders the taught call syntax from the single
   // format-aware owner, so a `json` lane is told to emit a ```tool block and a
   // `text` lane a `<tool_call>` block — never the wrong grammar.
-  const paradigm = agent_tool_call_paradigm(harness, opts)
+  const paradigm = agent_tool_call_paradigm(llm, opts)
   const fenced = if text_family {
     __detect_fenced_call_attempt(text)
   } else {
     nil
   }
   if fenced != nil {
-    agent_session_inject_feedback(harness, session.session_id,
+    agent_session_inject_feedback(
+      agent,
+      session.session_id,
       "fenced_call_attempt",
       "You wrapped a tool call in a ```"
         + fenced
@@ -499,13 +529,15 @@ fn __maybe_inject_action_nudge(harness: Harness, session, opts, has_tool_calls, 
         + paradigm.call_noun
         + " instead.",
     )
-    agent_emit_event(harness, session.session_id,
+    agent_emit_event(
+      agent,
+      session.session_id,
       "fenced_call_attempt_nudge",
       {iteration: iteration, fence: fenced, visible_text_prefix: visible_text_excerpt(text)},
     )
     return true
   }
-  const missing = __classify_missing_tool_call(harness, session, text, opts, iteration)
+  const missing = __classify_missing_tool_call(agent, llm, session, text, opts, iteration)
   if missing != nil {
     const tool_name = missing.tool_name
     const instruction = if native_mode {
@@ -514,17 +546,21 @@ fn __maybe_inject_action_nudge(harness: Harness, session, opts, has_tool_calls, 
         + "` now using the available native tool interface. Do not describe the action again."
     } else {
       "Emit the call now: "
-        + agent_render_tool_call_exemplar(harness, to_string(tool_name), [], opts)
+        + agent_render_tool_call_exemplar(llm, to_string(tool_name), [], opts)
         + " (fill in the arguments). Do not describe the action again."
     }
-    agent_session_inject_feedback(harness, session.session_id,
+    agent_session_inject_feedback(
+      agent,
+      session.session_id,
       "missing_tool_call",
       "You appeared to intend a call to `"
         + to_string(tool_name)
         + "` but did not call it. "
         + instruction,
     )
-    agent_emit_event(harness, session.session_id,
+    agent_emit_event(
+      agent,
+      session.session_id,
       "missing_tool_call_nudge",
       {
         iteration: iteration,
@@ -649,20 +685,36 @@ fn __completion_result(opts, payload, stop_reason) {
   return {kind: "break", stop_reason: stop_reason, needs_verify: false, done_judge_due: false}
 }
 
-fn __post_turn_verdict_result(harness: Harness, session, _opts, verdict, feedback_kind = "post_turn") {
+fn __post_turn_verdict_result(
+  agent: HarnessAgent,
+  session,
+  _opts,
+  verdict,
+  feedback_kind = "post_turn",
+) {
   if verdict.kind == "stop" {
     return {kind: "break", stop_reason: "post_turn_stop", needs_verify: false}
   }
   const effective_feedback_kind = verdict?.feedback_kind ?? feedback_kind
   if verdict.kind == "inject" {
-    agent_session_inject_feedback(harness, session.session_id, effective_feedback_kind, verdict.message)
+    agent_session_inject_feedback(
+      agent,
+      session.session_id,
+      effective_feedback_kind,
+      verdict.message,
+    )
     return {kind: "continue"}
   }
   if verdict.kind != "rich" {
     return nil
   }
   if verdict.message != nil {
-    agent_session_inject_feedback(harness, session.session_id, effective_feedback_kind, verdict.message)
+    agent_session_inject_feedback(
+      agent,
+      session.session_id,
+      effective_feedback_kind,
+      verdict.message,
+    )
   }
   if verdict.stop {
     const stop_reason = if verdict?.stop_reason != nil && verdict.stop_reason != "" {
@@ -952,7 +1004,13 @@ fn __tool_surface_remaining(candidates, removed) {
   return remaining
 }
 
-fn __tool_surface_narrowing_post_turn(harness: Harness, session, llm_result, dispatch_results, opts) {
+fn __tool_surface_narrowing_post_turn(
+  agent: HarnessAgent,
+  session,
+  llm_result,
+  dispatch_results,
+  opts,
+) {
   const config = opts?.tool_surface_narrowing ?? {}
   if !(config?.enabled ?? true) {
     return {history: [], narrowed_tools: nil, changed: false}
@@ -979,7 +1037,9 @@ fn __tool_surface_narrowing_post_turn(harness: Harness, session, llm_result, dis
   const remaining = __tool_surface_remaining(candidates, removed)
   const kept_details = __tool_surface_keep_details(candidate_entries, removed, used, hard_keep)
   const reason = "unused across last " + to_string(window_turns) + " turns"
-  agent_session_record_skill_event(harness, session.session_id,
+  agent_session_record_skill_event(
+    agent,
+    session.session_id,
     "skill_narrow",
     {
       reason: reason,
@@ -1124,14 +1184,19 @@ pub fn agent_reset_tool_surface_narrowing(opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_extract_tool_calls(llm_result, opts) {
+pub fn agent_extract_tool_calls(agent: HarnessAgent, llm_result, opts) {
   if len(llm_result?.tool_calls ?? []) > 0 {
     return llm_result.tool_calls
   }
   if opts?.tools == nil {
     return []
   }
-  const parsed = agent_parse_tool_calls(llm_result?.text ?? "", opts.tools, opts?.tool_format)
+  const parsed = agent_parse_tool_calls(
+    agent,
+    llm_result?.text ?? "",
+    opts.tools,
+    opts?.tool_format,
+  )
   return parsed?.calls ?? []
 }
 
@@ -1142,7 +1207,15 @@ pub fn agent_extract_tool_calls(llm_result, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_compute_post_turn(harness: Harness, session, llm_result, dispatch, opts, iteration) {
+pub fn agent_compute_post_turn(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  session,
+  llm_result,
+  dispatch,
+  opts,
+  iteration,
+) {
   const sentinel = __default_done_sentinel(opts)
   const text = llm_result?.text ?? ""
   const sentinel_text = llm_result?.raw_text ?? text
@@ -1174,11 +1247,11 @@ pub fn agent_compute_post_turn(harness: Harness, session, llm_result, dispatch, 
     visible_text: text,
   }
   __host_fire_session_hook("post_turn", payload)
-  agent_session_apply_reminder_post_turn(harness, session.session_id, iteration)
+  agent_session_apply_reminder_post_turn(agent, session.session_id, iteration)
   const narrowing = if contains(successful_tool_names, "load_skill") {
     {history: [], narrowed_tools: nil, changed: false}
   } else {
-    __tool_surface_narrowing_post_turn(harness, session, llm_result, dispatch_results, opts)
+    __tool_surface_narrowing_post_turn(agent, session, llm_result, dispatch_results, opts)
   }
   // Tool attempts take precedence over a completion marker from the same
   // turn: the next model turn must see the dispatch result before completion.
@@ -1192,12 +1265,12 @@ pub fn agent_compute_post_turn(harness: Harness, session, llm_result, dispatch, 
     )
   }
   const verdict = __post_turn_callback_verdict(opts, payload)
-  const verdict_result = __post_turn_verdict_result(harness, session, opts, verdict)
+  const verdict_result = __post_turn_verdict_result(agent, session, opts, verdict)
   if verdict_result != nil {
     return __post_turn_with_narrowing(verdict_result, narrowing)
   }
   const native_action_nudged = if lowercase(to_string(opts?.tool_format ?? "")) == "native" {
-    __maybe_inject_action_nudge(harness, session, opts, has_tool_calls, text, iteration)
+    __maybe_inject_action_nudge(agent, llm, session, opts, has_tool_calls, text, iteration)
   } else {
     false
   }
@@ -1223,7 +1296,8 @@ pub fn agent_compute_post_turn(harness: Harness, session, llm_result, dispatch, 
   if !has_tool_calls && !loop_until_done && !daemon {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
-  const confirmation_nudged = __maybe_inject_completion_confirmation(harness,
+  const confirmation_nudged = __maybe_inject_completion_confirmation(
+    agent,
     session,
     opts,
     has_tool_calls,
@@ -1233,7 +1307,7 @@ pub fn agent_compute_post_turn(harness: Harness, session, llm_result, dispatch, 
   const action_nudged = if lowercase(to_string(opts?.tool_format ?? "")) == "native" {
     false
   } else {
-    __maybe_inject_action_nudge(harness, session, opts, has_tool_calls, text, iteration)
+    __maybe_inject_action_nudge(agent, llm, session, opts, has_tool_calls, text, iteration)
   }
   return __post_turn_with_narrowing(
     {
@@ -1256,7 +1330,7 @@ pub fn agent_compute_post_turn(harness: Harness, session, llm_result, dispatch, 
  * @effects: [host]
  * @errors: []
  */
-pub fn agent_compute_terminal_callback(harness: Harness, session, opts, terminal) {
+pub fn agent_compute_terminal_callback(agent: HarnessAgent, session, opts, terminal) {
   const payload = {
     session_id: session.session_id,
     session: {id: session.session_id},
@@ -1281,7 +1355,13 @@ pub fn agent_compute_terminal_callback(harness: Harness, session, opts, terminal
     last_assistant_text: "",
   }
   const verdict = __terminal_callback_verdict(opts, payload)
-  const verdict_result = __post_turn_verdict_result(harness, session, opts, verdict, "terminal_callback")
+  const verdict_result = __post_turn_verdict_result(
+    agent,
+    session,
+    opts,
+    verdict,
+    "terminal_callback",
+  )
   if verdict_result != nil {
     return verdict_result
   }

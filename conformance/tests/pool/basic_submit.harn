@@ -3,7 +3,7 @@ import { pool_create, pool_get, pool_list, pool_wait } from "std/lifecycle/pool"
 
 pipeline default(harness: Harness) {
   // Create a named pool with a single worker slot.
-  const pool = pool_create({name: "demo", max_concurrent: 1})
+  const pool = pool_create(harness.agent, {name: "demo", max_concurrent: 1})
   harness.stdio.log(pool._type)
   harness.stdio.log(pool.name)
   harness.stdio.log(pool.max_concurrent)
@@ -18,7 +18,7 @@ pipeline default(harness: Harness) {
   harness.stdio.log(h1.pool)
   // Wait for completion via the pool-native API and via wait_agent —
   // both must return the same shape (pool_task snapshot dict).
-  const r1 = pool_wait(h1)
+  const r1 = pool_wait(harness.agent, h1)
   const r2 = wait_agent(harness.agent, h2)
   const r3 = wait_agent(harness.agent, h3)
   harness.stdio.log(r1.status)
@@ -35,10 +35,10 @@ pipeline default(harness: Harness) {
   harness.stdio.log(snap.failed)
   harness.stdio.log(snap.total)
   // Registry lookups round-trip by name.
-  const again = pool_get("demo")
+  const again = pool_get(harness.agent, "demo")
   harness.stdio.log(again.name)
   harness.stdio.log(again.id == pool.id)
-  const pools = pool_list()
+  const pools = pool_list(harness.agent)
   const listed = pools.find({ entry -> entry.name == "demo" })
   harness.stdio.log(listed.id == pool.id)
   // Failures surface as "failed" status with the error message.

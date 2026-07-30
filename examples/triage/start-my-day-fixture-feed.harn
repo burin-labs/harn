@@ -1,18 +1,17 @@
 import { triage_start_my_day } from "std/triage"
 
-fn fixture(harness: Harness, name) {
-  const root = harness.fs.workspace_root()
-  return json_parse(
-    harness.fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")),
-  )
+fn fixture(fs: HarnessFs, name) {
+  const root = fs.workspace_root()
+  return json_parse(fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")))
 }
 
 pipeline default(harness: Harness) {
   const feed = triage_start_my_day(
+    harness.obs,
     [
-      fixture(harness, "github_issue"),
-      fixture(harness, "slack_message"),
-      fixture(harness, "notion_page"),
+      fixture(harness.fs, "github_issue"),
+      fixture(harness.fs, "slack_message"),
+      fixture(harness.fs, "notion_page"),
     ],
     {
       title: "Start My Day",

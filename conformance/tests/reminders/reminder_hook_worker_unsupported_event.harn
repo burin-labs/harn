@@ -11,6 +11,12 @@ pipeline main(harness: Harness) {
   )
   const session = harness.agent.open("reminder-hook-worker-unsupported-event")
   harness.agent.reset(session)
-  agent_reminder_providers_fire(harness, session, "WorkerSpawned", {session: {id: session}}, {})
+  agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "WorkerSpawned",
+    {session: {id: session}},
+    {},
+  )
   harness.agent.clear_reminder_providers()
 }

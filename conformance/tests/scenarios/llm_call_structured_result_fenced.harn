@@ -8,7 +8,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
   with_llm_script(
-    harness.llm, [llm_text("Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone.")],
+    harness.llm,
+    [llm_text("Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone.")],
     { ->
       const r = harness.llm.call_structured_result("Q?", schema, {provider: "mock"})
       harness.stdio.println(r.ok)

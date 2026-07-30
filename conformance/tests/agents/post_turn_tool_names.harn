@@ -31,7 +31,8 @@ fn tools() {
 pipeline default(harness: Harness) {
   harness.tools.register_hook({pattern: "blocked", deny: "blocked by policy"})
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "",
         tool_calls: [
@@ -41,7 +42,9 @@ pipeline default(harness: Harness) {
       },
     ],
     { ->
-      const result = agent_loop(harness, "Try both tools.",
+      const result = agent_loop(
+        harness,
+        "Try both tools.",
         nil,
         {
           loop_until_done: true,

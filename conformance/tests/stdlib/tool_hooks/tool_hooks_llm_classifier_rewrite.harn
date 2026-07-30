@@ -14,7 +14,8 @@ pipeline default(harness: Harness) {
   harness.obs.pipeline_lifecycle_audit_log_take()
   harness.tools.classifier_cache_clear()
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"kind\": \"rewrite\", \"confidence\": 0.92,"
           + " \"rewritten\": \"npm run lint -- --fix\","
@@ -23,7 +24,9 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8}, inner: inner},
+      const wrapper = preset_run_command(
+        harness,
+        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8}, inner: inner},
       )
       const result = wrapper({command: "npm run lint"})
       harness.stdio.println(result.action)

@@ -180,7 +180,7 @@ fn agent_state_handoff_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     Ok(VmValue::Nil)
 }
 
-fn handle_from_args<'a>(args: &'a [VmValue], fn_name: &str) -> Result<Arc<StateHandle>, VmError> {
+fn handle_from_args(args: &[VmValue], fn_name: &str) -> Result<Arc<StateHandle>, VmError> {
     let handle = args
         .first()
         .ok_or_else(|| VmError::Runtime(format!("{fn_name}: `handle` is required")))?;

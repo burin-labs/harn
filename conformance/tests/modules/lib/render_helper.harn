@@ -1,4 +1,4 @@
 /** load_greeting. */
-pub fn load_greeting(harness: Harness) {
-  return harness.fs.render_prompt("greeting.txt")
+pub fn load_greeting(fs: HarnessFs) {
+  return fs.render_prompt("greeting.txt")
 }

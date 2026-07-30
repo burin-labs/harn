@@ -268,13 +268,15 @@ fn __persona_prompt_validation_error(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn persona_compile_prompt(harness: Harness, 
+pub fn persona_compile_prompt(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
   prompt: string,
   options: PersonaPromptCompileOptions? = nil,
   providers = nil,
 ) -> PersonaPromptCompileReceipt {
   const opts: PersonaPromptCompileOptions = options ?? {}
-  const live_providers = providers ?? list_providers(harness)
+  const live_providers = providers ?? list_providers(llm)
   const catalog = __persona_prompt_catalog(live_providers)
   const prompt_digest = __persona_prompt_digest(trim(prompt))
   const catalog_digest = __persona_prompt_digest(catalog)
@@ -299,7 +301,10 @@ pub fn persona_compile_prompt(harness: Harness,
       "persona prompt max_tokens must be between 1 and 1200",
     )
   }
-  const checkpoint = typed_output_checkpoint(harness, "personas.compile_prompt",
+  const checkpoint = typed_output_checkpoint(
+    agent,
+    llm,
+    "personas.compile_prompt",
     __persona_prompt_grounding(trim(prompt), catalog),
     __persona_prompt_blueprint_schema(),
     {
@@ -312,7 +317,7 @@ pub fn persona_compile_prompt(harness: Harness,
     },
     fn(candidate) {
       const normalized = __persona_prompt_candidate_blueprint(candidate, opts)
-      const validation = persona_blueprint_validate(harness, normalized, live_providers)
+      const validation = persona_blueprint_validate(llm, normalized, live_providers)
       return {
         ok: validation.valid,
         errors: validation.errors.map(
@@ -326,7 +331,7 @@ pub fn persona_compile_prompt(harness: Harness,
   if !checkpoint.ok {
     if checkpoint.status == "validator_rejected" {
       const blueprint = __persona_prompt_candidate_blueprint(checkpoint.data, opts)
-      const validation = persona_blueprint_validate(harness, blueprint, live_providers)
+      const validation = persona_blueprint_validate(llm, blueprint, live_providers)
       return {
         schema_version: "harn.persona.prompt_compile.v1",
         ok: false,
@@ -360,8 +365,8 @@ pub fn persona_compile_prompt(harness: Harness,
     }
   }
   const blueprint = __persona_prompt_candidate_blueprint(checkpoint.data, opts)
-  const validation = persona_blueprint_validate(harness, blueprint, live_providers)
-  const compiled = persona_blueprint_compile(harness, blueprint, live_providers)
+  const validation = persona_blueprint_validate(llm, blueprint, live_providers)
+  const compiled = persona_blueprint_compile(llm, blueprint, live_providers)
   if is_err(compiled) {
     const failed = unwrap_err(compiled)
     return {

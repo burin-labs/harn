@@ -1,7 +1,7 @@
 import { command_run } from "std/command"
 
-fn nonzero_command(harness: Harness) -> list<string> {
-  if harness.system.platform().os == "windows" {
+fn nonzero_command(system: HarnessSystem) -> list<string> {
+  if system.platform().os == "windows" {
     return ["cmd", "/C", "exit", "71"]
   }
   return ["sh", "-c", "exit 71"]
@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(command.category)
   require command.requested_cwd == nil, "omitted cwd remains structurally distinct"
   require trim(command.cwd) != "", "spawn error carries effective cwd"
-  const nonzero = command_run(harness.tools, nonzero_command(harness))
+  const nonzero = command_run(harness.tools, nonzero_command(harness.system))
   harness.stdio.println(nonzero.exit_code)
   harness.stdio.println(nonzero.success)
   require trim(nonzero.cwd) != "", "nonzero command result carries effective cwd"

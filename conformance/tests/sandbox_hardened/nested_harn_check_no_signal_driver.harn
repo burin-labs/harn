@@ -18,7 +18,10 @@ pipeline default(harness: Harness) {
   const root = path_join(harness.fs.temp_dir(), "nested-harn-check-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   const script = path_join(root, "child.harn")
-  harness.fs.write_text(script, "harness.stdio.println(\"child ok\")\n")
+  harness.fs.write_text(
+    script,
+    "pipeline main(harness: Harness) {\n  harness.stdio.println(\"child ok\")\n}\n",
+  )
   const harn_bin_dir = dirname(harn_bin)
   const result = harness.runtime.with_execution_policy(
     {
@@ -29,7 +32,8 @@ pipeline default(harness: Harness) {
     },
     { ->
       return command_run(
-        harness.tools, [harn_bin, "check", script],
+        harness.tools,
+        [harn_bin, "check", script],
         {cwd: root, capture: {max_inline_bytes: 200000}},
       )
     },

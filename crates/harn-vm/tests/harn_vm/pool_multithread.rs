@@ -29,21 +29,21 @@ fn pool_workers_run_on_multithread_runtime_without_localset() {
         r#"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline main(task) {
-  const pool = pool_create({name: "multithread-no-localset", max_concurrent: 4})
+pipeline main(harness: Harness, task) {
+  const pool = pool_create(harness.agent, {name: "multithread-no-localset", max_concurrent: 4})
   let handles = []
   for i in 0 to 8 exclusive {
     const seed = i
     handles = handles.appending(pool.submit({ -> seed + 10 }))
   }
-  const results = pool_wait(handles)
+  const results = pool_wait(harness.agent, handles)
   let completed = 0
   for result in results {
     if result.status == "completed" && result.result >= 10 {
       completed = completed + 1
     }
   }
-  log(completed)
+  harness.stdio.log(completed)
 }
 "#,
     )
@@ -58,18 +58,18 @@ fn pool_worker_inherits_registry_for_nested_waits() {
         r#"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline main(task) {
-  const pool = pool_create({name: "worker-nested-wait", max_concurrent: 2})
+pipeline main(harness: Harness, task) {
+  const pool = pool_create(harness.agent, {name: "worker-nested-wait", max_concurrent: 2})
   const inner = pool.submit({ -> "inner-ok" })
   const outer = pool.submit({ ->
-    const done = pool_wait(inner)
+    const done = pool_wait(harness.agent, inner)
     return done.result
   })
-  const outer_done = pool_wait(outer)
-  const inner_done = pool_wait(inner)
-  log(outer_done.status)
-  log(outer_done.result)
-  log(inner_done.result)
+  const outer_done = pool_wait(harness.agent, outer)
+  const inner_done = pool_wait(harness.agent, inner)
+  harness.stdio.log(outer_done.status)
+  harness.stdio.log(outer_done.result)
+  harness.stdio.log(inner_done.result)
 }
 "#,
     )
@@ -84,8 +84,8 @@ fn host_managed_pool_scope_diagnostic_is_public() {
         r#"
 import { pool_create } from "std/lifecycle/pool"
 
-pipeline main(task) {
-  pool_create({name: "tenant-backed", scope: "tenant"})
+pipeline main(harness: Harness, task) {
+  pool_create(harness.agent, {name: "tenant-backed", scope: "tenant"})
 }
 "#,
     )

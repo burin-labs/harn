@@ -62,9 +62,12 @@ pipeline test(harness: Harness, task) {
     prompt "Remove disk caches carefully."
   }
   with_llm_script(
-    harness.llm, [llm_text("Cleanup done.")],
+    harness.llm,
+    [llm_text("Cleanup done.")],
     { ->
-      const res = agent_loop(harness, "run disk cleanup please",
+      const res = agent_loop(
+        harness,
+        "run disk cleanup please",
         "You are a careful operator.",
         {
           provider: "mock",

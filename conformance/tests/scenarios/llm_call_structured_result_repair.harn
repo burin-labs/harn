@@ -7,7 +7,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
-    harness.llm, [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"PASS\"}")],
+    harness.llm,
+    [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"PASS\"}")],
     { ->
       const r = harness.llm.call_structured_result(
         "Grade",

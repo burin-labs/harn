@@ -1,6 +1,6 @@
 // HARN-NAM-101: a `main` with the right arity but a non-Harness
 // param type is rejected. The runtime can only safely thread the
 // concrete capability handle.
-fn main(_harness: Harness, harness: string) {
-  _harness.stdio.print(harness)
+fn main(harness: string) {
+  return harness
 }

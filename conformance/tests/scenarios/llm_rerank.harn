@@ -1,8 +1,8 @@
 import { pairwise_rerank, self_certainty } from "std/llm/rerank"
 import { llm_call_count, with_llm_mocks } from "std/testing"
 
-fn run_mock_self_certainty() {
-  return self_certainty("calibrated", {provider: "mock"})
+fn run_mock_self_certainty(llm: HarnessLlm) {
+  return self_certainty(llm, "calibrated", {provider: "mock"})
 }
 
 pipeline default(harness: Harness, task) {
@@ -32,6 +32,7 @@ pipeline default(harness: Harness, task) {
     judged.result.scores[1].avg_confidence > 0.84 && judged.result.scores[1].avg_confidence < 0.86,
   )
   const direct = self_certainty(
+    harness.llm,
     "ignored",
     {
       logprobs: [
@@ -44,7 +45,7 @@ pipeline default(harness: Harness, task) {
   const from_mock = with_llm_mocks(
     harness.llm,
     [{text: "calibrated", logprobs: [{token: "calibrated", logprob: 0.0}]}],
-    run_mock_self_certainty,
+    fn() { return run_mock_self_certainty(harness.llm) },
   )
   harness.stdio.println(from_mock == 1.0)
   const mocked_result = with_llm_mocks(

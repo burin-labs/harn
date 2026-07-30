@@ -14,7 +14,7 @@ pipeline default(harness: Harness, _task) {
       {type: "image", media_type: "image/png", url: "https://example.invalid/screenshot.png"},
     ],
   )
-  const blocks = runtime_prompt_content()
+  const blocks = runtime_prompt_content(harness.runtime)
   const receipt = {
     receipt_kind: "runtime_prompt_content_receipt",
     block_count: len(blocks),

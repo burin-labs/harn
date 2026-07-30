@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
 /**
@@ -87,7 +87,8 @@ fn terminal_verify_ran(events) -> bool {
  */
 fn run_scenario(harness: Harness, zero_write_on, reserve_iterations, release_verify) {
   return with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "", tool_calls: [{id: "r1", name: "look_file", arguments: {}}]},
       {text: "", tool_calls: [{id: "r2", name: "look_file", arguments: {}}]},
       {text: "", tool_calls: [{id: "r3", name: "look_file", arguments: {}}]},
@@ -96,8 +97,12 @@ fn run_scenario(harness: Harness, zero_write_on, reserve_iterations, release_ver
     ],
     { ->
       const session = "zero-write-verify-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Investigate the module.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Investigate the module.",
           nil,
           {
             provider: "mock",
@@ -141,7 +146,9 @@ pipeline default(harness: Harness) {
   const case1 = run_scenario(harness, true, 2, true)
   harness.stdio.println("case1.status=" + case1.status)
   harness.stdio.println("case1.stop_reason=" + case1.stop_reason)
-  harness.stdio.println("case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")))
+  harness.stdio.println(
+    "case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")),
+  )
   assert(
     case1.status == "done",
     "case1: a passing zero-write terminal verify must terminate done, not a blind budget_exhausted",
@@ -160,7 +167,9 @@ pipeline default(harness: Harness) {
   const case2 = run_scenario(harness, true, 1, false)
   harness.stdio.println("case2.status=" + case2.status)
   harness.stdio.println("case2.stop_reason=" + case2.stop_reason)
-  harness.stdio.println("case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")))
+  harness.stdio.println(
+    "case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")),
+  )
   harness.stdio.println("case2.events=" + to_string(count_zero_write_events(case2.events)))
   assert(
     terminal_verify_ran(case2.events),

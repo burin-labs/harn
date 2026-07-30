@@ -27,7 +27,12 @@ pipeline default(harness: Harness) {
     }
   }
   const caller = with_retry(harness, synthetic, {max_attempts: 5, base_ms: 1})
-  const result = agent_loop(harness, "hi", nil, {provider: "mock", llm_caller: caller, max_iterations: 1})
+  const result = agent_loop(
+    harness,
+    "hi",
+    nil,
+    {provider: "mock", llm_caller: caller, max_iterations: 1},
+  )
   harness.stdio.println(result.status)
   harness.stdio.println(result.visible_text)
 }

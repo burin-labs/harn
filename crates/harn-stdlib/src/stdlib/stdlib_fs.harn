@@ -814,8 +814,8 @@ pub fn file_size(fs: HarnessFs, path: string) {
  * @effects: [host]
  * @errors: []
  */
-fn __fs_snapshot_session(harness: Harness, opts) -> string {
-  const session = opts?.session_id ?? harness.agent.current_id()
+fn __fs_snapshot_session(agent: HarnessAgent, opts) -> string {
+  const session = opts?.session_id ?? agent.current_id()
   if session == nil || session == "" {
     throw "fs_snapshot: no active agent session; pass an explicit `session_id`"
   }
@@ -834,15 +834,16 @@ fn __fs_snapshot_session(harness: Harness, opts) -> string {
  * @effects: [host, fs]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: let snap = fs_snapshot(harness, ["src/lib.rs"]); fs_restore(harness, snap.snapshot_id)
+ * @example: let snap = fs_snapshot(harness.agent, ["src/lib.rs"]); fs_restore(harness.agent, snap.snapshot_id)
  */
-pub fn fs_snapshot(harness: Harness,
+pub fn fs_snapshot(
+  agent: HarnessAgent,
   fs: HarnessFs,
   random: HarnessRandom,
   paths: list<string> = [],
   opts = {},
 ) -> dict {
-  const session = __fs_snapshot_session(harness, opts)
+  const session = __fs_snapshot_session(agent, opts)
   const scope = opts?.snapshot_id ?? ("snapshot-" + random.uuid_v7())
   return fs.snapshot({session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root})
 }
@@ -855,10 +856,16 @@ pub fn fs_snapshot(harness: Harness,
  * @effects: [host, fs]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: fs_restore(harness, snap.snapshot_id)
+ * @example: fs_restore(harness.agent, snap.snapshot_id)
  */
-pub fn fs_restore(harness: Harness, fs: HarnessFs, snapshot_id: string, paths: list<string> = [], opts = {}) -> dict {
-  const session = __fs_snapshot_session(harness, opts)
+pub fn fs_restore(
+  agent: HarnessAgent,
+  fs: HarnessFs,
+  snapshot_id: string,
+  paths: list<string> = [],
+  opts = {},
+) -> dict {
+  const session = __fs_snapshot_session(agent, opts)
   return fs.restore({session_id: session, snapshot_id: snapshot_id, paths: paths ?? []})
 }
 
@@ -869,10 +876,10 @@ pub fn fs_restore(harness: Harness, fs: HarnessFs, snapshot_id: string, paths: l
  * @effects: [host]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: for snap in fs_list_snapshots(harness) { harness.stdio.println(snap.snapshot_id) }
+ * @example: for snap in fs_list_snapshots(harness.agent) { harness.stdio.println(snap.snapshot_id) }
  */
-pub fn fs_list_snapshots(harness: Harness, fs: HarnessFs, opts = {}) -> list<dict> {
-  const session = __fs_snapshot_session(harness, opts)
+pub fn fs_list_snapshots(agent: HarnessAgent, fs: HarnessFs, opts = {}) -> list<dict> {
+  const session = __fs_snapshot_session(agent, opts)
   const result = fs.list_snapshots({session_id: session})
   return result?.snapshots ?? []
 }
@@ -885,9 +892,14 @@ pub fn fs_list_snapshots(harness: Harness, fs: HarnessFs, opts = {}) -> list<dic
  * @effects: [host, fs]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: fs_drop_snapshot(harness, snap.snapshot_id)
+ * @example: fs_drop_snapshot(harness.agent, snap.snapshot_id)
  */
-pub fn fs_drop_snapshot(harness: Harness, fs: HarnessFs, snapshot_id: string, opts = {}) -> dict {
-  const session = __fs_snapshot_session(harness, opts)
+pub fn fs_drop_snapshot(
+  agent: HarnessAgent,
+  fs: HarnessFs,
+  snapshot_id: string,
+  opts = {},
+) -> dict {
+  const session = __fs_snapshot_session(agent, opts)
   return fs.drop_snapshot({session_id: session, snapshot_id: snapshot_id})
 }

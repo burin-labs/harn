@@ -5,9 +5,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [llm_text("<done>##DONE##</done>")],
+    harness.llm,
+    [llm_text("<done>##DONE##</done>")],
     { ->
-      agent_loop(harness, "finish quickly",
+      agent_loop(
+        harness,
+        "finish quickly",
         "Base system.",
         {
           provider: "mock",
@@ -25,7 +28,9 @@ pipeline test(harness: Harness, task) {
         "message timestamp visible",
       )
       const bad_override = try {
-        agent_loop(harness, "bad prompt id",
+        agent_loop(
+          harness,
+          "bad prompt id",
           "Base system.",
           {
             provider: "mock",
@@ -43,11 +48,14 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("<done>##DONE##</done>")],
+    harness.llm,
+    [llm_text("<done>##DONE##</done>")],
     { ->
       const typed_prompt_values = {loop_contract: {text: "TYPED LOOP CONTRACT {{ done_sentinel }}"}}
       const typed_prompt_options = agent_prompt_overrides(typed_prompt_values)
-      agent_loop(harness, "typed override",
+      agent_loop(
+        harness,
+        "typed override",
         "Base system.",
         typed_prompt_options
           + {provider: "mock", loop_until_done: true, max_iterations: 1},
@@ -60,12 +68,15 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<user_response>turn done</user_response>\n<done>##DONE##</done>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"turn complete\"}"),
     ],
     { ->
-      agent_turn(harness, "turn preamble override",
+      agent_turn(
+        harness,
+        "turn preamble override",
         {
           provider: "mock",
           max_iterations: 2,
@@ -87,9 +98,12 @@ pipeline test(harness: Harness, task) {
     {handler: { args -> "hello " + args.name }, parameters: {name: {type: "string"}}},
   )
   with_llm_script(
-    harness.llm, [llm_text("<user_response>done</user_response>\n<done>##DONE##</done>")],
+    harness.llm,
+    [llm_text("<user_response>done</user_response>\n<done>##DONE##</done>")],
     { ->
-      agent_loop(harness, "finish with a tool contract",
+      agent_loop(
+        harness,
+        "finish with a tool contract",
         "Base system.",
         {
           provider: "mock",

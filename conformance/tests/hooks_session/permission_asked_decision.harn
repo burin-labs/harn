@@ -21,7 +21,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "permission_asked",
-    { event ->
+    { _hook_harness, event ->
       if to_string(event?.tool?.name ?? "") == "guarded_tool" {
         return {decision: "deny", reason: "session hook says no"}
       }
@@ -30,7 +30,7 @@ pipeline default(harness: Harness) {
   )
   harness.agent.register_session_hook(
     "permission_replied",
-    { event ->
+    { _hook_harness, event ->
       if to_string(event?.decision ?? "") == "deny" {
         harness.runtime.atomic_add(replies, 1)
       }
@@ -38,9 +38,12 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [{tool_calls: [{id: "call_1", name: "guarded_tool", arguments: {}}]}, llm_text("done")],
+    harness.llm,
+    [{tool_calls: [{id: "call_1", name: "guarded_tool", arguments: {}}]}, llm_text("done")],
     { ->
-      const result = agent_loop(harness, "use guarded tool",
+      const result = agent_loop(
+        harness,
+        "use guarded tool",
         nil,
         {
           provider: "mock",

@@ -13,7 +13,8 @@ pipeline default(harness: Harness) {
   harness.obs.pipeline_lifecycle_audit_log_take()
   harness.tools.classifier_cache_clear()
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"kind\": \"deny\", \"confidence\": 0.95,"
           + " \"explanation\": \"rm against /etc is dangerous\"}",
@@ -21,7 +22,9 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+      const wrapper = preset_run_command(
+        harness,
+        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
       )
       const result = wrapper({command: "rm -rf /etc/foo"})
       harness.stdio.println(result.action)

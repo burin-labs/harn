@@ -17,7 +17,8 @@ pipeline default(harness: Harness) {
   const _ = harness.code_index.rebuild({root: root})
   // 1. Direct Cypher pass-through.
   const alpha: LibrarianCypherResult = code_librarian_query(
-    harness.code_index, "MATCH (f:Function {name: 'main'}) RETURN f.path AS path",
+    harness.code_index,
+    "MATCH (f:Function {name: 'main'}) RETURN f.path AS path",
   )
   harness.stdio.println("functions named `main`: " + to_string(len(alpha.rows)))
   // 2. Who calls a hot function?

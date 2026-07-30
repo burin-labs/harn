@@ -5,7 +5,8 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("candidate-A"),
       llm_text("candidate-B"),
       llm_text("candidate-C"),
@@ -15,7 +16,9 @@ pipeline default(harness: Harness) {
       ),
     ],
     { ->
-      const result = best_of_n(harness, "rate these",
+      const result = best_of_n(
+        harness.llm,
+        "rate these",
         "",
         {
           n: 4,

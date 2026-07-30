@@ -9,7 +9,10 @@ pipeline main(harness: Harness) {
     first.transcript,
     {body: "second", tags: ["lifecycle"], dedupe_key: "slot", ttl_turns: 3},
   )
-  const _cleared = harness.agent.transcript_clear_reminders(second.transcript, {id: second.reminder_id})
+  const _cleared = harness.agent.transcript_clear_reminders(
+    second.transcript,
+    {id: second.reminder_id},
+  )
   const stream = harness.obs.event_log_subscribe(
     {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."},
   )

@@ -9,8 +9,8 @@ import { llm_call_options } from "std/llm/options"
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_llm_turn(harness: Harness, prompt, system = nil, options = nil) {
-  return harness.llm.call(prompt, system, llm_call_options(options))
+pub fn agent_llm_turn(llm: HarnessLlm, prompt, system = nil, options = nil) {
+  return llm.call(prompt, system, llm_call_options(options))
 }
 
 /**
@@ -20,8 +20,16 @@ pub fn agent_llm_turn(harness: Harness, prompt, system = nil, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_typed_output_checkpoint(harness: Harness, name, prompt, schema, options = nil, validator = nil) {
-  return typed_output_checkpoint(harness, name, prompt, schema, options, validator)
+pub fn agent_typed_output_checkpoint(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  name,
+  prompt,
+  schema,
+  options = nil,
+  validator = nil,
+) {
+  return typed_output_checkpoint(agent, llm, name, prompt, schema, options, validator)
 }
 
 /**
@@ -35,10 +43,10 @@ pub fn agent_typed_output_checkpoint(harness: Harness, name, prompt, schema, opt
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: agent_parse_tool_calls(text, tools, "json")
+ * @example: agent_parse_tool_calls(harness.agent, text, tools, "json")
  */
-pub fn agent_parse_tool_calls(text, tools = nil, tool_format = nil) {
-  return __host_agent_parse_tool_calls(text, tools, tool_format)
+pub fn agent_parse_tool_calls(agent: HarnessAgent, text, tools = nil, tool_format = nil) {
+  return agent.parse_tool_calls(text, tools, tool_format)
 }
 
 /**
@@ -48,8 +56,8 @@ pub fn agent_parse_tool_calls(text, tools = nil, tool_format = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_dispatch_tool_call(harness: Harness, call, tools = nil, options = nil) {
-  return harness.tools.dispatch_agent_call(call, tools, options ?? {})
+pub fn agent_dispatch_tool_call(tool_runtime: HarnessTools, call, registry = nil, options = nil) {
+  return tool_runtime.dispatch_agent_call(call, registry, options ?? {})
 }
 
 /**
@@ -59,6 +67,6 @@ pub fn agent_dispatch_tool_call(harness: Harness, call, tools = nil, options = n
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_dispatch_tool_batch(harness: Harness, calls, tools = nil, options = nil) {
-  return harness.tools.dispatch_agent_batch(calls, tools, options ?? {})
+pub fn agent_dispatch_tool_batch(tool_runtime: HarnessTools, calls, registry = nil, options = nil) {
+  return tool_runtime.dispatch_agent_batch(calls, registry, options ?? {})
 }

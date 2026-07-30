@@ -1,7 +1,7 @@
 import { with_temp_dir } from "std/testing"
 import "../verify_crate_package_includes.harn"
 
-fn mkdirs(harness: Harness, path: string) -> nil {
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
   let current = if path.starts_with("/") {
     "/"
@@ -17,17 +17,17 @@ fn mkdirs(harness: Harness, path: string) -> nil {
     } else {
       path_join(current, part)
     }
-    if !harness.fs.exists(current) {
-      harness.fs.mkdir(current)
+    if !fs.exists(current) {
+      fs.mkdir(current)
     }
   }
   return nil
 }
 
-fn write_text(harness: Harness, root: string, rel: string, text: string) -> nil {
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(harness, dirname(path) ?? root)
-  harness.fs.write_text(path, text)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
   return nil
 }
 
@@ -53,23 +53,32 @@ pipeline test_rust_include_paths_extracts_normal_and_raw_literals(harness: Harne
 
 @test
 pipeline test_packaged_include_errors_accepts_existing_in_package_targets(harness: Harness, task) {
-  with_temp_dir(harness, { root ->
-      write_text(harness,
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_text(
+        harness.fs,
         root,
         "pkg/src/lib.rs",
         "include_str!(\"data/schema.json\");\ninclude_bytes!(r\"assets/raw.bin\");\n",
       )
-      write_text(harness, root, "pkg/src/data/schema.json", "{}\n")
-      write_text(harness, root, "pkg/src/assets/raw.bin", "x")
-      assert_eq(packaged_include_errors(harness, path_join(root, "pkg"), "demo").count, 0)
+      write_text(harness.fs, root, "pkg/src/data/schema.json", "{}\n")
+      write_text(harness.fs, root, "pkg/src/assets/raw.bin", "x")
+      assert_eq(packaged_include_errors(harness.fs, path_join(root, "pkg"), "demo").count, 0)
     },
   )
 }
 
 @test
-pipeline test_packaged_include_errors_reports_missing_absolute_and_escape_targets(harness: Harness, task) {
-  with_temp_dir(harness, { root ->
-      write_text(harness,
+pipeline test_packaged_include_errors_reports_missing_absolute_and_escape_targets(
+  harness: Harness,
+  task,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_text(
+        harness.fs,
         root,
         "pkg/src/lib.rs",
         join(
@@ -81,8 +90,8 @@ pipeline test_packaged_include_errors_reports_missing_absolute_and_escape_target
           "\n",
         ),
       )
-      write_text(harness, root, "outside.txt", "outside\n")
-      const errors = packaged_include_errors(harness, path_join(root, "pkg"), "demo")
+      write_text(harness.fs, root, "outside.txt", "outside\n")
+      const errors = packaged_include_errors(harness.fs, path_join(root, "pkg"), "demo")
       assert_eq(errors.count, 3)
       const rendered = join(errors, "\n")
       assert(rendered.contains("missing include target missing.txt"), rendered)

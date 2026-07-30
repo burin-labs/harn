@@ -7,7 +7,7 @@ pipeline default(harness: Harness) {
     properties: {name: {type: "string"}, age: {type: "int"}},
   }
   let emitted = []
-  for obj in stream_object(harness, ["{\"name\":\"Ada\",\"age\":\"not-an-int\"}"], schema) {
+  for obj in stream_object(harness.runtime, ["{\"name\":\"Ada\",\"age\":\"not-an-int\"}"], schema) {
     emitted = emitted.appending(obj)
   }
   harness.stdio.println(len(emitted))

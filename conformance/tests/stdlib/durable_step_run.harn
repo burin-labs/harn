@@ -6,7 +6,10 @@ pipeline default(harness: Harness) {
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-durable-step-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-durable-step-" + harness.random.uuid_v7(),
+  )
   const state = path_join(root, "state")
   const script = path_join(root, "durable_step_child.harn")
   harness.fs.mkdir(root)

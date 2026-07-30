@@ -9,7 +9,7 @@ import "std/triggers"
  * dispatches.
  */
 pipeline test(harness: Harness, task) {
-  const _ = lifecycle_audit_log_take(harness)
+  const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.range(100000, 999999),
@@ -41,7 +41,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(dispatch.result?.status == "dropped")
   harness.stdio.println(dispatch.result?.reason == "target_unknown_session")
   harness.stdio.println(dispatch.result?.target_kind == "concrete")
-  const audits = lifecycle_audit_log_take(harness)
+  const audits = lifecycle_audit_log_take(harness.obs)
   let drop_audits = 0
   let outcome = ""
   let reason = ""

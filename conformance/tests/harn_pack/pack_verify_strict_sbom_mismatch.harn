@@ -6,9 +6,15 @@ pipeline default(harness: Harness) {
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn_pack_strict_sbom_" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_pack_strict_sbom_" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
-  harness.fs.write_text(path_join(root, "hello.harn"), "harness.stdio.println(\"hi\")\n")
+  harness.fs.write_text(
+    path_join(root, "hello.harn"),
+    "fn main(harness: Harness) { harness.stdio.println(\"hi\") }\n",
+  )
   const pack = harness.process.exec_at(
     root,
     harn_bin,
@@ -20,7 +26,15 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(pack.success)
   const unpack_dir = path_join(root, "unpack")
-  const unpack = harness.process.exec_at(root, harn_bin, "pack", "unpack", "hello.harnpack", "--out", unpack_dir)
+  const unpack = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "unpack",
+    "hello.harnpack",
+    "--out",
+    unpack_dir,
+  )
   harness.stdio.println(unpack.success)
   const tamper = harness.process.exec_at(
     root,
@@ -31,7 +45,15 @@ pipeline default(harness: Harness) {
     path_join(root, "unpack/sbom.spdx.json"),
   )
   harness.stdio.println(tamper.success)
-  const repack = harness.process.exec_at(root, harn_bin, "pack", "repack", unpack_dir, "--out", "tampered.harnpack")
+  const repack = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "repack",
+    unpack_dir,
+    "--out",
+    "tampered.harnpack",
+  )
   harness.stdio.println(repack.success)
   const lenient = harness.process.exec_at(
     root,

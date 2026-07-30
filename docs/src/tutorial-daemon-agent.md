@@ -24,17 +24,18 @@ Start with the smallest useful loop: one prompt, one mocked response, one
 result. The pipeline returns as soon as the loop completes.
 
 ```harn
-pipeline main() {
-  llm_mock({text: "Triaged ticket #42 as duplicate of #38."})
+pipeline main(harness: Harness) {
+  harness.llm.mock_enqueue({text: "Triaged ticket #42 as duplicate of #38."})
 
-  const result = agent_loop(
+  const result = agent_loop(harness,
+    harness,
     "Triage ticket #42.",
     "You are a careful triage assistant.",
     {provider: "mock"},
   )
 
-  log("status=" + result.status)
-  log("text=" + result.visible_text)
+  harness.stdio.log("status=" + result.status)
+  harness.stdio.log("text=" + result.visible_text)
 }
 ```
 
@@ -60,18 +61,19 @@ item.
 ```harn
 import { on_finish_drain } from "std/lifecycle"
 
-pipeline main() {
-  pipeline_on_finish(on_finish_drain)
-  llm_mock({text: "Triaged ticket #42 as duplicate of #38."})
+pipeline main(harness: Harness) {
+  harness.agent.pipeline_on_finish(on_finish_drain)
+  harness.llm.mock_enqueue({text: "Triaged ticket #42 as duplicate of #38."})
 
-  const result = agent_loop(
+  const result = agent_loop(harness,
+    harness,
     "Triage ticket #42.",
     "You are a careful triage assistant.",
     {provider: "mock"},
   )
 
-  log("status=" + result.status)
-  log("text=" + result.visible_text)
+  harness.stdio.log("status=" + result.status)
+  harness.stdio.log("text=" + result.visible_text)
 }
 ```
 
@@ -95,10 +97,10 @@ path.
 ```harn
 import { on_finish_drain } from "std/lifecycle"
 
-pipeline main() {
-  pipeline_on_finish(on_finish_drain)
+pipeline main(harness: Harness) {
+  harness.agent.pipeline_on_finish(on_finish_drain)
 
-  llm_mock({
+  harness.llm.mock_enqueue({
     tool_calls: [{
       id: "park_1",
       name: "agent_await_resumption",
@@ -106,15 +108,16 @@ pipeline main() {
     }],
   })
 
-  const result = agent_loop(
+  const result = agent_loop(harness,
+    harness,
     "Triage ticket #42, escalate to a human if you need review.",
     "If you need a human review before proceeding, call agent_await_resumption.",
     {provider: "mock", tool_format: "native", max_iterations: 2},
   )
 
-  log("status=" + result.status)
-  log("reason=" + result.reason)
-  log("snapshot=" + result.handle.snapshot_path)
+  harness.stdio.log("status=" + result.status)
+  harness.stdio.log("reason=" + result.reason)
+  harness.stdio.log("snapshot=" + result.handle.snapshot_path)
 }
 ```
 
@@ -145,32 +148,33 @@ the prose after the snippet shows the cross-process command.
 import { on_finish_drain } from "std/lifecycle"
 import { resume_agent, wait_agent } from "std/agent/workers"
 
-pipeline main() {
-  pipeline_on_finish(on_finish_drain)
+pipeline main(harness: Harness) {
+  harness.agent.pipeline_on_finish(on_finish_drain)
 
-  llm_mock({
+  harness.llm.mock_enqueue({
     tool_calls: [{
       id: "park_1",
       name: "agent_await_resumption",
       arguments: {reason: "waiting on maintainer review"},
     }],
   })
-  llm_mock({text: "Approved. Triaged ticket #42 as duplicate of #38."})
+  harness.llm.mock_enqueue({text: "Approved. Triaged ticket #42 as duplicate of #38."})
 
-  const first = agent_loop(
+  const first = agent_loop(harness,
+    harness,
     "Triage ticket #42, escalate to a human if you need review.",
     "If you need a human review before proceeding, call agent_await_resumption.",
     {provider: "mock", tool_format: "native", max_iterations: 3},
   )
 
-  log("first.status=" + first.status)
-  log("snapshot=" + first.handle.snapshot_path)
+  harness.stdio.log("first.status=" + first.status)
+  harness.stdio.log("snapshot=" + first.handle.snapshot_path)
 
-  resume_agent(first.handle)
-  const done = wait_agent(first.handle)
+  resume_agent(harness.agent, first.handle)
+  const done = wait_agent(harness.agent, first.handle)
 
-  log("after_resume=" + done.status)
-  log("text=" + done.result.summary)
+  harness.stdio.log("after_resume=" + done.status)
+  harness.stdio.log("text=" + done.result.summary)
 }
 ```
 
@@ -201,10 +205,10 @@ pipeline.
 ```harn
 import { on_finish_drain } from "std/lifecycle"
 
-pipeline main() {
-  pipeline_on_finish(on_finish_drain)
+pipeline main(harness: Harness) {
+  harness.agent.pipeline_on_finish(on_finish_drain)
 
-  llm_mock({
+  harness.llm.mock_enqueue({
     tool_calls: [{
       id: "park_for_release",
       name: "agent_await_resumption",
@@ -220,22 +224,23 @@ pipeline main() {
       },
     }],
   })
-  llm_mock({text: "Release cut; tagged v0.9.0 and posted to the changelog."})
+  harness.llm.mock_enqueue({text: "Release cut; tagged v0.9.0 and posted to the changelog."})
 
   const worker = sub_agent_run(
+    harness,
     "Tag the next release once the maintainer signals.",
     {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
   )
 
-  const parked = wait_agent(worker)
-  log("parked_status=" + parked.status)
-  log("waiting_on=" + parked.suspension.conditions.trigger.match.events[0])
+  const parked = wait_agent(harness.agent, worker)
+  harness.stdio.log("parked_status=" + parked.status)
+  harness.stdio.log("waiting_on=" + parked.suspension.conditions.trigger.match.events[0])
 
-  emit_channel("release.cut", {tag: "v0.9.0"})
+  harness.channels.append("release.cut", {tag: "v0.9.0"})
 
-  const done = wait_agent(worker)
-  log("final_status=" + done.status)
-  log("final_text=" + done.result.summary)
+  const done = wait_agent(harness.agent, worker)
+  harness.stdio.log("final_status=" + done.status)
+  harness.stdio.log("final_text=" + done.result.summary)
 }
 ```
 
@@ -268,25 +273,26 @@ Pool tasks compose with the same waiter as agent handles, so `pool_wait`
 import { on_finish_drain } from "std/lifecycle"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline main() {
-  pipeline_on_finish(on_finish_drain)
+pipeline main(harness: Harness) {
+  harness.agent.pipeline_on_finish(on_finish_drain)
 
   const tickets = ["t-101", "t-102", "t-103"]
 
   for ticket in tickets {
-    llm_mock({
+    harness.llm.mock_enqueue({
       match: "*" + ticket + "*",
       text: "Triaged " + ticket + " as duplicate of t-100.",
       consume_match: true,
     })
   }
 
-  const pool = pool_create({name: "ticket-triage", max_concurrent: 2})
+  const pool = pool_create(harness.agent, {name: "ticket-triage", max_concurrent: 2})
   let handles = []
   for ticket in tickets {
     const t = ticket
     handles = handles + [pool.submit({ ->
-      return agent_loop(
+      return agent_loop(harness,
+        harness,
         "Triage ticket " + t + ".",
         "You are a careful triage assistant.",
         {provider: "mock"},
@@ -294,9 +300,9 @@ pipeline main() {
     })]
   }
 
-  const outcomes = pool_wait(handles)
+  const outcomes = pool_wait(harness.agent, handles)
   for outcome in outcomes {
-    log(outcome.status + " " + outcome.result.visible_text)
+    harness.stdio.log(outcome.status + " " + outcome.result.visible_text)
   }
 }
 ```

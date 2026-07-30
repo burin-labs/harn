@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
 /**
@@ -73,7 +73,8 @@ fn has_phase(events, phase) {
 // the reserve can never reach the repair never lands (case 2).
 fn run_scenario(harness: Harness, reserved_on, reserve_iterations, green_at_iteration) {
   return with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
       {text: "", tool_calls: [{id: "e2", name: "apply_fix", arguments: {}}]},
       {text: "", tool_calls: [{id: "e3", name: "apply_fix", arguments: {}}]},
@@ -82,8 +83,12 @@ fn run_scenario(harness: Harness, reserved_on, reserve_iterations, green_at_iter
     ],
     { ->
       const session = "reserved-verify-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Make the build green.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the build green.",
           nil,
           {
             provider: "mock",
@@ -134,7 +139,9 @@ pipeline default(harness: Harness) {
   const case1 = run_scenario(harness, true, 2, 3)
   harness.stdio.println("case1.status=" + case1.status)
   harness.stdio.println("case1.grant=" + to_string(has_phase(case1.events, "grant")))
-  harness.stdio.println("case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")))
+  harness.stdio.println(
+    "case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")),
+  )
   assert(
     case1.status == "done",
     "case1: run must terminate done after a passing reserved verify, not a blind budget_exhausted",
@@ -152,8 +159,12 @@ pipeline default(harness: Harness) {
   // blind exhaust. Bounded: the reserve cannot loop forever (one grant here).
   const case2 = run_scenario(harness, true, 1, 999)
   harness.stdio.println("case2.status=" + case2.status)
-  harness.stdio.println("case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")))
-  harness.stdio.println("case2.grants=" + to_string(count_events(case2.events, "reserved_terminal_verify")))
+  harness.stdio.println(
+    "case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")),
+  )
+  harness.stdio.println(
+    "case2.grants=" + to_string(count_events(case2.events, "reserved_terminal_verify")),
+  )
   assert(
     terminal_verify_ran(case2.events),
     "case2: a terminal verify must RUN even when repair never lands",

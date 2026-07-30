@@ -49,7 +49,8 @@ pipeline test(harness: Harness, task) {
   // meta-tool. `provider_overrides` is keyed by provider name so the
   // same call can pass multiple provider-specific flags.
   with_llm_script(
-    harness.llm, [llm_text("ack")],
+    harness.llm,
+    [llm_text("ack")],
     { ->
       harness.llm.call(
         "x",

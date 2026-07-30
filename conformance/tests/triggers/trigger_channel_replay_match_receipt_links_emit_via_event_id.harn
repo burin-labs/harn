@@ -1,6 +1,6 @@
 import "std/triggers"
 
-fn handle_channel(event) {
+fn handle_channel(harness: Harness, event) {
   return event.provider_payload.name
 }
 

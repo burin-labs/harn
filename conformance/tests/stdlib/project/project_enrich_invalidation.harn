@@ -1,7 +1,10 @@
 import "std/project"
 
 pipeline test(harness: Harness, task) {
-  const base_dir = path_join(harness.fs.workspace_temp_dir(), "harn-project-enrich-invalidation-" + harness.random.uuid())
+  const base_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-project-enrich-invalidation-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(path_join(base_dir, "src"))
   harness.fs.write_text(
     path_join(base_dir, "Cargo.toml"),
@@ -26,7 +29,8 @@ pipeline test(harness: Harness, task) {
     },
   }
   const first = project_enrich(
-    harness.project, base_dir,
+    harness.project,
+    base_dir,
     {
       base_evidence: base,
       prompt: prompt,
@@ -43,7 +47,8 @@ pipeline test(harness: Harness, task) {
     "pub struct ChangedName;\npub fn greet_name() -> &'static str { \"hello\" }\n",
   )
   const second = project_enrich(
-    harness.project, base_dir,
+    harness.project,
+    base_dir,
     {
       base_evidence: base,
       prompt: prompt,

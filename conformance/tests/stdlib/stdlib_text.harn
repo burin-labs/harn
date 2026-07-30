@@ -71,7 +71,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(regex_first_capture("does-not-(\\d+)", "no match here"))
   harness.stdio.println(json_stringify(regex_capture_groups("(\\d+)\\.(\\d+)\\.(\\d+)", "1.2.3")))
   harness.stdio.println(json_stringify(regex_capture_groups("(\\d+)", "no digits")))
-  harness.stdio.println(json_stringify(regex_all_first_captures("#(\\d+)", "fixes #12 and #34, refs #56")))
+  harness.stdio.println(
+    json_stringify(regex_all_first_captures("#(\\d+)", "fixes #12 and #34, refs #56")),
+  )
   harness.stdio.println(json_stringify(regex_all_first_captures("#(\\d+)", "no issue refs")))
   // truncate_middle: ensure head/tail bias goes to head (regression for the
   // pre-fix `ceil(int / 2)` no-op that biased the tail instead).

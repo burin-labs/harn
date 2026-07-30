@@ -87,7 +87,7 @@ fn __repair_verification_findings(verification) {
  * closure. A string command runs through the shell; a list runs argv-direct.
  * The exit status gates the verdict; combined output becomes the finding.
  */
-fn __repair_command_verifier(harness: Harness, spec) {
+fn __repair_command_verifier(tools: HarnessTools, spec) {
   return { _result ->
     const cmd = spec?.command
     const run_spec = if type_of(cmd) == "list" {
@@ -95,7 +95,7 @@ fn __repair_command_verifier(harness: Harness, spec) {
     } else {
       {mode: "shell", command: to_string(cmd)}
     }
-    const out = command_run(harness.tools, run_spec, {capture: {max_inline_bytes: 65536}})
+    const out = command_run(tools, run_spec, {capture: {max_inline_bytes: 65536}})
     const expected = __repair_int(spec?.expect_status) ?? 0
     const code = __repair_int(out?.exit_code) ?? __repair_int(out?.exit_status) ?? -1
     const detail = __repair_string(out?.combined, __repair_string(out?.stdout, ""))
@@ -129,7 +129,7 @@ fn __repair_assertion_verifier(spec) {
  * into a single fn-verify closure the attempt loop can gate on. `nil` verify
  * means "no validation" (the stage settles on its own status).
  */
-fn __repair_resolve_verify(harness: Harness, verify) {
+fn __repair_resolve_verify(tools: HarnessTools, verify) {
   if verify == nil {
     return nil
   }
@@ -138,7 +138,7 @@ fn __repair_resolve_verify(harness: Harness, verify) {
   }
   if type_of(verify) == "dict" {
     if verify?.command != nil {
-      return __repair_command_verifier(harness, verify)
+      return __repair_command_verifier(tools, verify)
     }
     return __repair_assertion_verifier(verify)
   }
@@ -239,7 +239,7 @@ pub type WorkflowRepairResult = {
 pub fn workflow_run_repair(harness: Harness, config: ValidateRepairConfig) -> WorkflowRepairResult {
   const cfg = __repair_dict(config)
   const task = __repair_string(cfg?.task, __repair_string(cfg?.prompt, ""))
-  const verify = __repair_resolve_verify(harness, cfg?.verify)
+  const verify = __repair_resolve_verify(harness.tools, cfg?.verify)
   const base_retry = {max_attempts: __repair_int(cfg?.max_attempts) ?? 2}
   // A repair_prompt_builder takes full control of the retry prompt; otherwise
   // findings are threaded via the bounded feedback template (defaulted on).

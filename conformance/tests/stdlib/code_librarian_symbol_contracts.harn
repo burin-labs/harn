@@ -1,43 +1,37 @@
 import "std/code_librarian"
 
-fn seed_cpp(harness: Harness, root: string) {
-  harness.fs.mkdir(path_join(root, "include"))
-  harness.fs.mkdir(path_join(root, "src"))
-  harness.fs.mkdir(path_join(root, "dupe"))
-  harness.fs.write_text(
+fn seed_cpp(fs: HarnessFs, root: string) {
+  fs.mkdir(path_join(root, "include"))
+  fs.mkdir(path_join(root, "src"))
+  fs.mkdir(path_join(root, "dupe"))
+  fs.write_text(
     path_join(root, "include/sta'tus.hpp"),
     "class StatusOr {\npublic:\n  bool ok() const { return true; }\n  int value() const { return 1; }\n};\n",
   )
-  harness.fs.write_text(
+  fs.write_text(
     path_join(root, "src/use.cpp"),
     "bool inspect(StatusOr &result) { return result.ok(); }\n",
   )
-  harness.fs.write_text(
+  fs.write_text(
     path_join(root, "src/use_again.cpp"),
     "bool inspect_again(StatusOr &result) { return result.ok(); }\n",
   )
-  harness.fs.write_text(path_join(root, "src/missing.cpp"), "void check_missing() { phantom(); }\n")
-  harness.fs.write_text(
-    path_join(root, "dupe/a.cpp"),
-    "class Duplicate { public: void same() {} };\n",
-  )
-  harness.fs.write_text(
-    path_join(root, "dupe/b.cpp"),
-    "class Duplicate { public: void same() {} };\n",
-  )
-  harness.fs.write_text(
+  fs.write_text(path_join(root, "src/missing.cpp"), "void check_missing() { phantom(); }\n")
+  fs.write_text(path_join(root, "dupe/a.cpp"), "class Duplicate { public: void same() {} };\n")
+  fs.write_text(path_join(root, "dupe/b.cpp"), "class Duplicate { public: void same() {} };\n")
+  fs.write_text(
     path_join(root, "dupe/use.cpp"),
     "void inspect_duplicate(Duplicate &value) { value.same(); }\n",
   )
 }
 
-fn seed_scala(harness: Harness, root: string) {
-  harness.fs.mkdir(path_join(root, "scala"))
-  harness.fs.write_text(
+fn seed_scala(fs: HarnessFs, root: string) {
+  fs.mkdir(path_join(root, "scala"))
+  fs.write_text(
     path_join(root, "scala/Rule.scala"),
     "object Rule {\n  def greaterThan(a: Int, b: Int): Boolean = a > b\n  def equalTo(a: Int, b: Int): Boolean = a == b\n}\n",
   )
-  harness.fs.write_text(
+  fs.write_text(
     path_join(root, "scala/RuleSpec.scala"),
     "object RuleSpec { def check(): Boolean = Rule.greaterThan(2, 1) }\n",
   )
@@ -53,8 +47,8 @@ pipeline default(harness: Harness) {
     "harn_code_librarian_contracts_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
-  seed_cpp(harness, root)
-  seed_scala(harness, root)
+  seed_cpp(harness.fs, root)
+  seed_scala(harness.fs, root)
   const _ = harness.code_index.rebuild({root: root})
   const cpp = code_librarian_member_surface(harness.code_index, "StatusOr", "include/sta'tus.hpp")
   const cpp_names = member_names(cpp)
@@ -68,24 +62,49 @@ pipeline default(harness: Harness) {
     !scala.ambiguous && scala_names.contains("greaterThan") && scala_names.contains("equalTo"),
   )
   const missing = code_librarian_member_surface(harness.code_index, "DoesNotExist")
-  harness.stdio.println(!missing.ambiguous && len(missing.definitions) == 0 && len(missing.members) == 0)
+  harness.stdio.println(
+    !missing.ambiguous && len(missing.definitions) == 0 && len(missing.members) == 0,
+  )
   const duplicate = code_librarian_member_surface(harness.code_index, "Duplicate")
   harness.stdio.println(duplicate.ambiguous && len(duplicate.definitions) == 2)
-  const selected_duplicate = code_librarian_member_surface(harness.code_index, "Duplicate", "dupe/a.cpp")
+  const selected_duplicate = code_librarian_member_surface(
+    harness.code_index,
+    "Duplicate",
+    "dupe/a.cpp",
+  )
   harness.stdio.println(!selected_duplicate.ambiguous && len(selected_duplicate.definitions) == 1)
-  const cpp_consumers = code_librarian_external_consumers(harness.code_index, "ok", "include/sta'tus.hpp", 1)
+  const cpp_consumers = code_librarian_external_consumers(
+    harness.code_index,
+    "ok",
+    "include/sta'tus.hpp",
+    1,
+  )
   harness.stdio.println(cpp_consumers.definition_found && cpp_consumers.sole_definer)
   harness.stdio.println(cpp_consumers.file_count == 2 && len(cpp_consumers.sites) == 1)
-  const scala_consumers = code_librarian_external_consumers(harness.code_index, "greaterThan", "scala/Rule.scala")
+  const scala_consumers = code_librarian_external_consumers(
+    harness.code_index,
+    "greaterThan",
+    "scala/Rule.scala",
+  )
   harness.stdio.println(
     scala_consumers.definition_found
       && scala_consumers.sole_definer
       && scala_consumers.file_count == 1,
   )
-  const duplicate_consumers = code_librarian_external_consumers(harness.code_index, "same", "dupe/a.cpp")
+  const duplicate_consumers = code_librarian_external_consumers(
+    harness.code_index,
+    "same",
+    "dupe/a.cpp",
+  )
   harness.stdio.println(duplicate_consumers.definition_found && !duplicate_consumers.sole_definer)
-  const phantom = code_librarian_external_consumers(harness.code_index, "phantom", "src/missing_definition.cpp")
-  harness.stdio.println(!phantom.definition_found && !phantom.sole_definer && phantom.file_count == 1)
+  const phantom = code_librarian_external_consumers(
+    harness.code_index,
+    "phantom",
+    "src/missing_definition.cpp",
+  )
+  harness.stdio.println(
+    !phantom.definition_found && !phantom.sole_definer && phantom.file_count == 1,
+  )
   const escaped = code_librarian_who_calls(harness.code_index, "ok\\\\' OR c.name = 'phantom")
   harness.stdio.println(len(escaped) == 0)
 }

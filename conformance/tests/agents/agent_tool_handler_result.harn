@@ -22,7 +22,7 @@ pipeline main(harness: Harness) {
       },
     },
   )
-  const dispatched = agent_dispatch_tool_call(harness, {name: "edit", arguments: {}}, tools)
+  const dispatched = agent_dispatch_tool_call(harness.tools, {name: "edit", arguments: {}}, tools)
   harness.stdio.println(
     dispatched.rendered_result == "Edited src/main.harn\n\nDiagnostics wording may change.",
   )

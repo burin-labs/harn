@@ -9,19 +9,25 @@ import {
 import { with_temp_dir } from "std/testing"
 
 pipeline default(harness: Harness) {
-  with_temp_dir(harness, { root ->
+  with_temp_dir(
+    harness.fs,
+    { root ->
       const options = {
         project_root: root,
         now: "2026-06-27T12:00:00Z",
         support_threshold: 2,
         window_days: 30,
       }
-      pattern_learning_observe(harness, "s1",
+      pattern_learning_observe(
+        harness,
+        "s1",
         "Refactor the auth refresh tests in Swift",
         ["read", "edit"],
         options,
       )
-      pattern_learning_observe(harness, "s2",
+      pattern_learning_observe(
+        harness,
+        "s2",
         "Refactor the auth refresh tests in Swift",
         ["read", "edit"],
         options,
@@ -32,7 +38,9 @@ pipeline default(harness: Harness) {
       const accepted = pattern_learning_accept(harness, pending[0].id, options)
       harness.stdio.println(accepted.accepted)
       harness.stdio.println(harness.fs.exists(accepted.skill_path))
-      const context = pattern_learning_context(harness, "s3",
+      const context = pattern_learning_context(
+        harness,
+        "s3",
         "Please refactor auth refresh tests",
         3,
         options,
@@ -48,7 +56,9 @@ pipeline default(harness: Harness) {
       }
       const read_only_context = harness.runtime.with_execution_policy(
         read_only_policy,
-        fn() { return pattern_learning_context(harness, "ro1",
+        fn() { return pattern_learning_context(
+          harness,
+          "ro1",
           "Read-only context lookup",
           3,
           read_only_options,
@@ -59,7 +69,9 @@ pipeline default(harness: Harness) {
       harness.stdio.println(to_string(read_only_context.error ?? "") == "")
       const read_only_observe = harness.runtime.with_execution_policy(
         read_only_policy,
-        fn() { return pattern_learning_observe(harness, "ro2",
+        fn() { return pattern_learning_observe(
+          harness,
+          "ro2",
           "Read-only observation",
           ["read"],
           read_only_options,
@@ -67,7 +79,9 @@ pipeline default(harness: Harness) {
       )
       harness.stdio.println(!read_only_observe.observed)
       harness.stdio.println(read_only_observe.unavailable)
-      harness.stdio.println(contains(to_string(read_only_observe.error ?? ""), "workspace write ceiling"))
+      harness.stdio.println(
+        contains(to_string(read_only_observe.error ?? ""), "active effect ceiling"),
+      )
     },
   )
 }

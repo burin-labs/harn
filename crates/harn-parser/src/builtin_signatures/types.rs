@@ -83,22 +83,6 @@ impl TyExt for Ty {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const STRING: Ty = Ty::Named("string");
-    const LIST_ARGS: &[Ty] = &[STRING];
-
-    #[test]
-    fn builtin_container_metadata_uses_language_ast_variants() {
-        assert_eq!(
-            ty_to_type_expr(&Ty::Apply("list", LIST_ARGS)),
-            TypeExpr::List(Box::new(TypeExpr::Named("string".into())))
-        );
-    }
-}
-
 pub trait BuiltinSignatureExt {
     /// Materialize per-parameter types as owned [`TypeExpr`]s for the type
     /// checker's call-site validation.
@@ -114,5 +98,21 @@ impl BuiltinSignatureExt for BuiltinSignature {
 
     fn return_type_expr(&self) -> TypeExpr {
         ty_to_type_expr(&self.returns)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const STRING: Ty = Ty::Named("string");
+    const LIST_ARGS: &[Ty] = &[STRING];
+
+    #[test]
+    fn builtin_container_metadata_uses_language_ast_variants() {
+        assert_eq!(
+            ty_to_type_expr(&Ty::Apply("list", LIST_ARGS)),
+            TypeExpr::List(Box::new(TypeExpr::Named("string".into())))
+        );
     }
 }

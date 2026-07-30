@@ -3,13 +3,16 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "What can I help with today?{ \"verdict\": \"done\", \"reasoning\": \"greeting\", \"next_step\": \"\" }",
       ),
     ],
     { ->
-      const result = agent_loop(harness, "Hi, how are you?",
+      const result = agent_loop(
+        harness,
+        "Hi, how are you?",
         nil,
         {provider: "mock", max_iterations: 1, done_judge: false},
       )

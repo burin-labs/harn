@@ -255,7 +255,11 @@ fn __missing_tool_call_fail_open(error, threshold: float) -> MissingToolCallVerd
  * @errors: []
  * @api_stability: experimental
  */
-pub fn missing_tool_call_classifier(harness: Harness, opts: MissingToolCallOptions = {}) {
+pub fn missing_tool_call_classifier(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  opts: MissingToolCallOptions = {},
+) {
   const cfg = opts ?? {}
   if type_of(cfg) != "dict" {
     throw __missing_tool_call_config_error(
@@ -331,7 +335,9 @@ pub fn missing_tool_call_classifier(harness: Harness, opts: MissingToolCallOptio
       }
     }
     const checkpoint = agent_typed_output_checkpoint(
-      harness, "agent.missing_tool_call",
+      agent,
+      llm,
+      "agent.missing_tool_call",
       __missing_tool_call_prompt(classifier_payload, candidate_tools),
       schema,
       llm_opts,

@@ -9,7 +9,7 @@ async fn retry_exhaustion_moves_failed_dispatch_to_dlq() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   throw "boom"
 }
 "#,
@@ -79,7 +79,7 @@ async fn destination_circuit_opens_and_dlqs_subsequent_dispatches() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   throw "provider 503"
 }
 "#,
@@ -139,7 +139,7 @@ async fn replay_dispatch_emits_replay_chain_edge_and_headers() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> dict {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> dict {
   return {kind: event.kind, id: event.id}
 }
 "#,
@@ -200,10 +200,10 @@ async fn replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process() {
             let source = r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> dict {
-  let child = shell("__CHILD_COMMAND__")
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> dict {
+  let child = harness.process.shell("__CHILD_COMMAND__")
   return {
-    replay_env: env_or("HARN_REPLAY", "missing"),
+    replay_env: harness.env.get_or("HARN_REPLAY", "missing"),
     child_replay_env: child.stdout,
     dedupe_key: event.dedupe_key,
   }
@@ -282,9 +282,9 @@ async fn shutdown_propagates_cancel_to_all_in_flight_local_handlers() {
                 r#"
 import "std/triggers"
 
-pub fn wait_for_cancel(event: TriggerEvent) -> string {
+pub fn wait_for_cancel(harness: Harness, event: TriggerEvent) -> string {
   while !is_cancelled() {
-    sleep(1)
+    harness.clock.sleep_ms(1)
   }
   return event.kind
 }
@@ -334,9 +334,9 @@ async fn external_cancel_request_cancels_in_flight_local_handler() {
                 r#"
 import "std/triggers"
 
-pub fn wait_for_cancel(event: TriggerEvent) -> string {
+pub fn wait_for_cancel(harness: Harness, event: TriggerEvent) -> string {
   while !is_cancelled() {
-    sleep(1)
+    harness.clock.sleep_ms(1)
   }
   return event.kind
 }
@@ -400,7 +400,7 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn external_cancel_request_interrupts_waitpoint_waiting_handler() {
+async fn external_cancel_request_cancels_suspended_waitpoint_handler() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -408,9 +408,9 @@ async fn external_cancel_request_interrupts_waitpoint_waiting_handler() {
                 r#"
 import "std/triggers"
 
-pub fn wait_for_signal(event: TriggerEvent) -> string {
-  waitpoint_create("cancel-demo")
-  let result = waitpoint_wait("cancel-demo", {wait_id: "wait-cancel"})
+pub fn wait_for_signal(harness: Harness, event: TriggerEvent) -> string {
+  harness.runtime.waitpoint_create("cancel-demo")
+  let result = harness.runtime.waitpoint_wait("cancel-demo")
   return result.status
 }
 "#,
@@ -425,7 +425,6 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
             let event = trigger_event("issues.opened", "delivery-waitpoint-cancel");
             let event_id = event.id.0.clone();
             let binding_key = binding.binding_key();
-            let wait_id = "wait-cancel";
 
             let run_dispatcher = dispatcher.clone();
             let handle = tokio::task::spawn_local(async move {
@@ -435,7 +434,19 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
                     .expect("dispatch completes")
             });
 
-            await_wait_event(log.clone(), wait_id, "waitpoint_wait_started").await;
+            let outcome = handle.await.expect("join suspended local dispatch");
+            assert_eq!(outcome.status, DispatchStatus::Waiting, "{outcome:?}");
+            let waits = read_topic(log.clone(), crate::waitpoints::WAITPOINT_WAITS_TOPIC).await;
+            let wait_id = waits
+                .iter()
+                .find(|(_, event)| {
+                    event.kind == "waitpoint.wait"
+                        && event.headers.get("event_id").map(String::as_str)
+                            == Some(event_id.as_str())
+                })
+                .and_then(|(_, event)| event.headers.get("wait_id"))
+                .cloned()
+                .expect("suspended dispatch records its generated wait id");
             append_dispatch_cancel_request(
                 &log,
                 &DispatchCancelRequest {
@@ -449,17 +460,17 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
             .await
             .expect("append external cancel request");
 
-            let outcome = handle.await.expect("join local dispatch");
-            assert_eq!(outcome.status, DispatchStatus::Cancelled);
-            assert!(
-                outcome
-                    .error
-                    .as_deref()
-                    .is_some_and(|message| message.contains("trigger cancel request")),
-                "{outcome:?}"
-            );
-
-            await_wait_event(log.clone(), wait_id, "waitpoint_wait_interrupted").await;
+            let processed = crate::stdlib::waitpoint::service_waitpoints_once(&dispatcher, None)
+                .await
+                .expect("service cancelled waitpoint");
+            assert_eq!(processed, 1);
+            let waits = read_topic(log.clone(), crate::waitpoints::WAITPOINT_WAITS_TOPIC).await;
+            assert!(waits.iter().any(|(_, event)| {
+                event.kind == "waitpoint.wait"
+                    && event.headers.get("wait_id").map(String::as_str) == Some(wait_id.as_str())
+                    && event.payload["status"] == serde_json::json!("cancelled")
+                    && event.payload["cancel_reason"] == serde_json::json!("upstream_cancelled")
+            }));
         })
         .await;
 }
@@ -473,7 +484,7 @@ async fn run_skips_historical_inbox_entries_on_startup() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -554,8 +565,8 @@ async fn drain_waits_for_in_flight_local_handlers_without_cancelling() {
                 r#"
 import "std/triggers"
 
-pub fn slow_handler(event: TriggerEvent) -> string {
-  sleep(50)
+pub fn slow_handler(harness: Harness, event: TriggerEvent) -> string {
+  harness.clock.sleep_ms(50)
   return event.kind
 }
 "#,
@@ -591,7 +602,8 @@ pub fn slow_handler(event: TriggerEvent) -> string {
 }
 
 // Regression coverage for harn#324: dispatcher shutdown must wake handlers
-// that are blocked in `sleep()` so a cooperative `is_cancelled()` loop can
+// that are blocked in `harness.clock.sleep_ms()` so a cooperative
+// `is_cancelled()` loop can
 // exit without silently dropping an already-dequeued inbox event.
 #[tokio::test(flavor = "current_thread")]
 async fn run_shutdown_does_not_silently_drop_dequeued_inbox_events() {
@@ -602,9 +614,9 @@ async fn run_shutdown_does_not_silently_drop_dequeued_inbox_events() {
                 r#"
 import "std/triggers"
 
-pub fn wait_for_cancel(event: TriggerEvent) -> string {
+pub fn wait_for_cancel(harness: Harness, event: TriggerEvent) -> string {
   while !is_cancelled() {
-    sleep(1)
+    harness.clock.sleep_ms(1)
   }
   return event.kind
 }

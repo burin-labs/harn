@@ -152,6 +152,7 @@ pub(crate) fn validate_accepted_content(
 pub(crate) async fn dispatch_inbound_elicitation(
     server_name: &str,
     request: &JsonValue,
+    fixtures: Option<&crate::harness::CapabilityFixtureState>,
 ) -> JsonValue {
     let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
     let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -191,9 +192,14 @@ pub(crate) async fn dispatch_inbound_elicitation(
         json_to_vm_value(&requested_schema),
     );
 
-    let bridge_result = match dispatch_mock_host_call("mcp", "elicit", &bridge_params) {
+    let bridge_result = match fixtures
+        .and_then(|fixtures| fixtures.dispatch_host("mcp", "elicit", &bridge_params))
+    {
         Some(result) => Some(result),
-        None => dispatch_host_call_bridge("mcp", "elicit", &bridge_params).await,
+        None => match dispatch_mock_host_call("mcp", "elicit", &bridge_params) {
+            Some(result) => Some(result),
+            None => dispatch_host_call_bridge("mcp", "elicit", &bridge_params).await,
+        },
     };
 
     let envelope_value: JsonValue = match bridge_result {

@@ -8,9 +8,9 @@ raw OS thread IDs are not part of the stable language surface.
 
 ```harn
 const ctx = runtime_context()
-log(ctx.task_id)
-log(ctx.parent_task_id)
-log(ctx.root_task_id)
+harness.stdio.log(ctx.task_id)
+harness.stdio.log(ctx.parent_task_id)
+harness.stdio.log(ctx.root_task_id)
 ```
 
 ## Stable fields

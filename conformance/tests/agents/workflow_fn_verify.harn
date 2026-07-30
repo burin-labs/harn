@@ -119,6 +119,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(throw_attempts[1].status)
   // The throw is captured as a failed verification carrying its message.
   harness.stdio.println(throw_attempts[0].verification.ok)
-  harness.stdio.println(contains(json_stringify(throw_attempts[0].verification.findings), "verifier threw"))
-  harness.stdio.println(contains(json_stringify(throw_attempts[0].verification.findings), "verifier boom"))
+  harness.stdio.println(
+    contains(json_stringify(throw_attempts[0].verification.findings), "verifier threw"),
+  )
+  harness.stdio.println(
+    contains(json_stringify(throw_attempts[0].verification.findings), "verifier boom"),
+  )
 }

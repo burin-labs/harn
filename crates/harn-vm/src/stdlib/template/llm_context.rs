@@ -37,7 +37,7 @@ pub struct LlmRenderContext {
     pub provider: String,
     pub model: String,
     pub family: String,
-    /// Snapshot of `provider_capabilities(provider, model)` — a
+    /// Snapshot of `harness.llm.provider_capabilities(provider, model)` — a
     /// `VmValue::Dict` shaped exactly like the builtin's return value.
     pub capabilities: VmValue,
 }

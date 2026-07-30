@@ -26,7 +26,9 @@ pipeline default(harness: Harness) {
     }
     return {best_index: best_i, reasoning: "longest text wins"}
   }
-  const result = best_of_n(harness, "Tell me a story.",
+  const result = best_of_n(
+    harness.llm,
+    "Tell me a story.",
     "",
     {n: 3, parallel: false, judge: longest_judge, call_opts: {provider: "mock"}},
   )

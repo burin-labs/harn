@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 fn write_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -15,7 +16,9 @@ fn write_tools() {
 }
 
 pipeline main(harness: Harness) {
-  const denied = agent_loop(harness, "Try to write a note",
+  const denied = agent_loop(
+    harness,
+    "Try to write a note",
     "You are helpful",
     {
       provider: "mock",
@@ -34,7 +37,9 @@ pipeline main(harness: Harness) {
   // denial still carries the gate and retry metadata for host harnesses.
   harness.stdio.println(transcript.contains("tool_ceiling"))
   harness.stdio.println(transcript.contains("retryable"))
-  const read_only_denied = agent_loop(harness, "Try to write a note",
+  const read_only_denied = agent_loop(
+    harness,
+    "Try to write a note",
     "You are helpful",
     {
       provider: "mock",

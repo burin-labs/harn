@@ -122,8 +122,8 @@ pub fn __agent_stall_current_hashes(result) {
     ?? result?.fileHashes
 }
 
-pub fn __agent_stall_gate_input(previous, result) {
-  return verification_gate_input(previous, result, __agent_stall_current_hashes(result))
+pub fn __agent_stall_gate_input(agent: HarnessAgent, previous, result) {
+  return verification_gate_input(agent, previous, result, __agent_stall_current_hashes(result))
 }
 
 /**
@@ -134,7 +134,7 @@ pub fn __agent_stall_gate_input(previous, result) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_result_outcome(result) -> dict {
+pub fn __agent_stall_result_outcome(agent: HarnessAgent, result) -> dict {
   if __agent_stall_result_ok(result) {
     const payload = json_stringify(result?.result ?? result?.output ?? result?.content)
     return {kind: "ok", signature: "ok:" + sha256(payload)}
@@ -143,7 +143,7 @@ pub fn __agent_stall_result_outcome(result) -> dict {
   if __agent_stall_is_context_window_error(error_text) {
     return {kind: "context_window", signature: "ctx"}
   }
-  const gate = __agent_stall_gate_input(nil, result)
+  const gate = __agent_stall_gate_input(agent, nil, result)
   if !gate.feedsGates {
     return {kind: "advisory", signature: "advisory:" + sha256(json_stringify(gate.current))}
   }
@@ -285,6 +285,7 @@ pub fn __agent_stall_gate_failure(gate) -> bool {
  * @errors: []
  */
 pub fn __agent_stall_fold_diagnostic(
+  agent: HarnessAgent,
   state: AgentStallState,
   prev_dispatch,
   turn_made_edit: bool,
@@ -306,7 +307,7 @@ pub fn __agent_stall_fold_diagnostic(
   const result = __agent_stall_turn_result(prev_dispatch)
   const result_is_non_ok = result != nil && !__agent_stall_result_ok(result)
   const gate = if result_is_non_ok {
-    __agent_stall_gate_input(__agent_stall_delta_previous(state), result)
+    __agent_stall_gate_input(agent, __agent_stall_delta_previous(state), result)
   } else {
     nil
   }
@@ -363,7 +364,7 @@ pub fn __agent_stall_fold_diagnostic(
     const pass_signature = if delta != nil {
       "ok:" + sha256(json_stringify(delta.current))
     } else {
-      __agent_stall_result_outcome(result).signature
+      __agent_stall_result_outcome(agent, result).signature
     }
     const verified_epoch = if state.write_epoch > state.verified_write_epoch {
       state.write_epoch
@@ -437,7 +438,7 @@ pub fn __agent_stall_fold_diagnostic(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_outcome_for(prev_dispatch, tool_name: string) {
+pub fn __agent_stall_outcome_for(agent: HarnessAgent, prev_dispatch, tool_name: string) {
   if prev_dispatch == nil {
     return nil
   }
@@ -448,13 +449,13 @@ pub fn __agent_stall_outcome_for(prev_dispatch, tool_name: string) {
   }
   for result in results {
     if __agent_stall_result_name(result) == tool_name {
-      return __agent_stall_result_outcome(result)
+      return __agent_stall_result_outcome(agent, result)
     }
   }
   return nil
 }
 
-pub fn __agent_stall_warning_record(
+pub type AgentStallWarningInput = {
   iteration: int,
   tool_name: string,
   args: dict,
@@ -463,25 +464,29 @@ pub fn __agent_stall_warning_record(
   count: int,
   consecutive_trips: int,
   hard_stop: bool,
-  config: AgentStallConfig,
   threshold: int,
+}
+
+pub fn __agent_stall_warning_record(
+  input: AgentStallWarningInput,
+  config: AgentStallConfig,
 ) -> AgentStallWarning {
-  const args_text = json_stringify(args)
+  const args_text = json_stringify(input.args)
   let record = {
-    iteration: iteration,
-    tool_name: tool_name,
-    repeat_count: count,
-    threshold: threshold,
+    iteration: input.iteration,
+    tool_name: input.tool_name,
+    repeat_count: input.count,
+    threshold: input.threshold,
     arguments_digest: "sha256:" + sha256(args_text),
-    signature_digest: "sha256:" + sha256(signature),
-    pattern: pattern,
-    signature: signature,
-    count: count,
-    consecutive_trips: consecutive_trips,
-    hard_stop: hard_stop,
+    signature_digest: "sha256:" + sha256(input.signature),
+    pattern: input.pattern,
+    signature: input.signature,
+    count: input.count,
+    consecutive_trips: input.consecutive_trips,
+    hard_stop: input.hard_stop,
   }
   if config.include_arguments {
-    record = record + {arguments: args}
+    record = record + {arguments: input.args}
   }
   return record
 }
@@ -493,7 +498,8 @@ pub fn __agent_stall_warning_record(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stall_inject_feedback(harness: Harness, 
+pub fn agent_stall_inject_feedback(
+  agent: HarnessAgent,
   session_id: string,
   warning: AgentStallWarning,
   config: AgentStallConfig,
@@ -502,7 +508,9 @@ pub fn agent_stall_inject_feedback(harness: Harness,
   const wants_feedback = config.inject_feedback ?? true
   const should_feedback = wants_feedback && state.feedback_count < config.max_feedback
   if should_feedback {
-    agent_feedback_emit(harness,  session_id,
+    agent_feedback_emit(
+      agent,
+      session_id,
       [
         {
           kind: "stall_diagnostics",
@@ -522,19 +530,20 @@ pub fn agent_stall_inject_feedback(harness: Harness,
   return state
 }
 
-pub fn __agent_stall_maybe_emit(harness: Harness, 
+pub fn __agent_stall_maybe_emit(
+  agent: HarnessAgent,
   session_id: string,
   warning: AgentStallWarning,
   config: AgentStallConfig,
   state: AgentStallState,
   defer_feedback: bool,
 ) {
-  agent_emit_event(harness, session_id, "agent_loop_stall_warning", warning)
+  agent_emit_event(agent, session_id, "agent_loop_stall_warning", warning)
   if defer_feedback {
     return {state: state, warning: warning, feedback_deferred: true}
   }
   return {
-    state: agent_stall_inject_feedback(harness, session_id, warning, config, state),
+    state: agent_stall_inject_feedback(agent, session_id, warning, config, state),
     warning: warning,
     feedback_deferred: false,
   }
@@ -657,7 +666,8 @@ pub fn __agent_stall_observation(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_emit_diagnostic_trip(harness: Harness, 
+pub fn __agent_stall_emit_diagnostic_trip(
+  agent: HarnessAgent,
   session_id: string,
   config: AgentStallConfig,
   tripped: AgentStallState,
@@ -669,16 +679,18 @@ pub fn __agent_stall_emit_diagnostic_trip(harness: Harness,
   remediation_delivered = false,
 ) -> AgentStallObservation {
   let warning = __agent_stall_warning_record(
-    iteration,
-    "",
-    {},
-    tripped.last_diagnostic_signature,
-    pattern,
-    count,
-    tripped.consecutive_trips,
-    tripped.hard_stop,
+    {
+      iteration: iteration,
+      tool_name: "",
+      args: {},
+      signature: tripped.last_diagnostic_signature,
+      pattern: pattern,
+      count: count,
+      consecutive_trips: tripped.consecutive_trips,
+      hard_stop: tripped.hard_stop,
+      threshold: threshold,
+    },
     config,
-    threshold,
   )
     + {
     diagnostic_class: tripped.last_diagnostic_class,
@@ -688,7 +700,14 @@ pub fn __agent_stall_emit_diagnostic_trip(harness: Harness,
   if remediation_delivered {
     warning = warning + {remediation_delivered: true}
   }
-  const emitted = __agent_stall_maybe_emit(harness, session_id, warning, config, tripped, defer_feedback)
+  const emitted = __agent_stall_maybe_emit(
+    agent,
+    session_id,
+    warning,
+    config,
+    tripped,
+    defer_feedback,
+  )
   const next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
@@ -700,7 +719,8 @@ pub fn __agent_stall_emit_diagnostic_trip(harness: Harness,
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_observe_no_progress(harness: Harness, 
+pub fn __agent_stall_observe_no_progress(
+  agent: HarnessAgent,
   session_id: string,
   iteration: int,
   config: AgentStallConfig,
@@ -727,18 +747,27 @@ pub fn __agent_stall_observe_no_progress(harness: Harness,
     "no_progress_monologue"
   }
   const warning = __agent_stall_warning_record(
-    iteration,
-    "",
-    {},
-    "",
-    pattern,
-    next_state.no_progress_streak,
-    next_state.consecutive_trips,
-    next_state.hard_stop,
+    {
+      iteration: iteration,
+      tool_name: "",
+      args: {},
+      signature: "",
+      pattern: pattern,
+      count: next_state.no_progress_streak,
+      consecutive_trips: next_state.consecutive_trips,
+      hard_stop: next_state.hard_stop,
+      threshold: config.no_progress_messages,
+    },
     config,
-    config.no_progress_messages,
   )
-  const emitted = __agent_stall_maybe_emit(harness, session_id, warning, config, next_state, defer_feedback)
+  const emitted = __agent_stall_maybe_emit(
+    agent,
+    session_id,
+    warning,
+    config,
+    next_state,
+    defer_feedback,
+  )
   next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
@@ -748,7 +777,8 @@ pub fn __agent_stall_observe_no_progress(harness: Harness,
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_observe_parse_rejection(harness: Harness, 
+pub fn __agent_stall_observe_parse_rejection(
+  agent: HarnessAgent,
   session_id: string,
   iteration: int,
   config: AgentStallConfig,
@@ -763,18 +793,27 @@ pub fn __agent_stall_observe_parse_rejection(harness: Harness,
   }
   next_state = __agent_stall_register_trip(next_state, config)
   const warning = __agent_stall_warning_record(
-    iteration,
-    "",
-    {},
-    "parse_rejection",
-    "repeated_parse_rejection",
-    next_state.parse_rejection_streak,
-    next_state.consecutive_trips,
-    next_state.hard_stop,
+    {
+      iteration: iteration,
+      tool_name: "",
+      args: {},
+      signature: "parse_rejection",
+      pattern: "repeated_parse_rejection",
+      count: next_state.parse_rejection_streak,
+      consecutive_trips: next_state.consecutive_trips,
+      hard_stop: next_state.hard_stop,
+      threshold: config.repeat_parse_rejection,
+    },
     config,
-    config.repeat_parse_rejection,
   )
-  const emitted = __agent_stall_maybe_emit(harness, session_id, warning, config, next_state, defer_feedback)
+  const emitted = __agent_stall_maybe_emit(
+    agent,
+    session_id,
+    warning,
+    config,
+    next_state,
+    defer_feedback,
+  )
   next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
@@ -792,6 +831,7 @@ pub fn __agent_stall_observe_parse_rejection(harness: Harness,
  * @errors: []
  */
 pub fn __agent_stall_process_call(
+  agent: HarnessAgent,
   state: AgentStallState,
   config: AgentStallConfig,
   call,
@@ -801,7 +841,7 @@ pub fn __agent_stall_process_call(
 ) -> dict {
   const signature = __agent_tool_call_signature(call)
   const same_action = signature == state.last_signature
-  const outcome = __agent_stall_outcome_for(prev_dispatch, tool_name)
+  const outcome = __agent_stall_outcome_for(agent, prev_dispatch, tool_name)
   // Observation signature of the action that just repeated. When dispatch
   // results are unavailable, fall back to the action signature itself so the
   // legacy adjacent-repeat behavior still trips.
@@ -999,7 +1039,8 @@ pub fn __agent_stall_classify_trip(config: AgentStallConfig, s) {
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn __agent_stall_observe_core(harness: Harness, 
+pub fn __agent_stall_observe_core(
+  agent: HarnessAgent,
   session_id: string,
   tool_calls: list,
   iteration: int,
@@ -1028,7 +1069,8 @@ pub fn __agent_stall_observe_core(harness: Harness,
   // bounded warning/feedback/hard-stop ladder so recovery does not depend on a
   // successfully parsed call.
   if had_parse_errors {
-    return __agent_stall_observe_parse_rejection(harness, 
+    return __agent_stall_observe_parse_rejection(
+      agent,
       session_id,
       iteration,
       config,
@@ -1049,7 +1091,8 @@ pub fn __agent_stall_observe_core(harness: Harness,
     // no-progress monologue candidate; a fully empty turn resets the action
     // stream.
     if to_string(turn_text) != "" || len(tool_calls) > 0 {
-      return __agent_stall_observe_no_progress(harness, 
+      return __agent_stall_observe_no_progress(
+        agent,
         session_id,
         iteration,
         config,
@@ -1075,6 +1118,7 @@ pub fn __agent_stall_observe_core(harness: Harness,
       continue
     }
     const processed = __agent_stall_process_call(
+      agent,
       next_state,
       config,
       call,
@@ -1087,18 +1131,21 @@ pub fn __agent_stall_observe_core(harness: Harness,
     if trip != nil {
       next_state = __agent_stall_register_trip(next_state, config)
       const warning = __agent_stall_warning_record(
-        iteration,
-        tool_name,
-        __agent_tool_call_args(call),
-        __agent_tool_call_signature(call),
-        trip.pattern,
-        trip.count,
-        next_state.consecutive_trips,
-        next_state.hard_stop,
+        {
+          iteration: iteration,
+          tool_name: tool_name,
+          args: __agent_tool_call_args(call),
+          signature: __agent_tool_call_signature(call),
+          pattern: trip.pattern,
+          count: trip.count,
+          consecutive_trips: next_state.consecutive_trips,
+          hard_stop: next_state.hard_stop,
+          threshold: trip.threshold,
+        },
         config,
-        trip.threshold,
       )
-      const emitted = __agent_stall_maybe_emit(harness, 
+      const emitted = __agent_stall_maybe_emit(
+        agent,
         session_id,
         warning,
         config,
@@ -1179,7 +1226,8 @@ pub fn __agent_stall_eval_remediation(state: AgentStallState, signature: string,
   )
 }
 
-pub fn __agent_stall_apply_repair(harness: Harness, 
+pub fn __agent_stall_apply_repair(
+  agent: HarnessAgent,
   session_id: string,
   config: AgentStallConfig,
   observation: AgentStallObservation,
@@ -1201,7 +1249,12 @@ pub fn __agent_stall_apply_repair(harness: Harness,
   if !should_fold_current_failure && !clean_verify_floor_active {
     return observation
   }
-  const folded = __agent_stall_fold_diagnostic(observation.state, prev_dispatch, turn_made_edit)
+  const folded = __agent_stall_fold_diagnostic(
+    agent,
+    observation.state,
+    prev_dispatch,
+    turn_made_edit,
+  )
   const hard_cap_due = config.no_net_progress_extend_guard
     && folded.last_diagnostic_class == "fail"
     && folded.failing_verify_turns
@@ -1212,7 +1265,8 @@ pub fn __agent_stall_apply_repair(harness: Harness,
     .no_net_progress_hard_cap_after
   if hard_cap_due {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
-    return __agent_stall_emit_diagnostic_trip(harness, 
+    return __agent_stall_emit_diagnostic_trip(
+      agent,
       session_id,
       config,
       tripped,
@@ -1239,7 +1293,8 @@ pub fn __agent_stall_apply_repair(harness: Harness,
     .turns_since_clean_verify
   if clean_floor_due {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
-    return __agent_stall_emit_diagnostic_trip(harness, 
+    return __agent_stall_emit_diagnostic_trip(
+      agent,
       session_id,
       config,
       tripped,
@@ -1296,7 +1351,8 @@ pub fn __agent_stall_apply_repair(harness: Harness,
     }
     if evaluated.delivered {
       const tripped = __agent_stall_register_trip(current, config)
-      return __agent_stall_emit_diagnostic_trip(harness, 
+      return __agent_stall_emit_diagnostic_trip(
+        agent,
         session_id,
         config,
         tripped,
@@ -1328,7 +1384,8 @@ pub fn __agent_stall_apply_repair(harness: Harness,
     return observation + {state: current}
   }
   const tripped = __agent_stall_register_trip(current, config)
-  return __agent_stall_emit_diagnostic_trip(harness, 
+  return __agent_stall_emit_diagnostic_trip(
+    agent,
     session_id,
     config,
     tripped,
@@ -1361,7 +1418,8 @@ pub fn __agent_stall_apply_repair(harness: Harness,
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_apply_action_signal(harness: Harness, 
+pub fn __agent_stall_apply_action_signal(
+  agent: HarnessAgent,
   session_id: string,
   config: AgentStallConfig,
   observation: AgentStallObservation,
@@ -1394,7 +1452,8 @@ pub fn __agent_stall_apply_action_signal(harness: Harness,
   const trips = observation.state.action_flail_trips + 1
   const hard_stop = trips >= config.hard_stop_after_trips
   const tripped = observation.state + {action_flail_trips: trips, hard_stop: hard_stop}
-  return __agent_stall_emit_diagnostic_trip(harness, 
+  return __agent_stall_emit_diagnostic_trip(
+    agent,
     session_id,
     config,
     tripped,
@@ -1432,7 +1491,8 @@ pub fn __agent_stall_observe_monologue_actuation(
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_stall_observe_tool_calls(harness: Harness, 
+pub fn agent_stall_observe_tool_calls(
+  agent: HarnessAgent,
   session_id: string,
   tool_calls: list,
   iteration: int,
@@ -1446,7 +1506,8 @@ pub fn agent_stall_observe_tool_calls(harness: Harness,
   turn_stop_reason = "",
   payload = nil,
 ) -> AgentStallObservation {
-  const observation = __agent_stall_observe_core(harness, 
+  const observation = __agent_stall_observe_core(
+    agent,
     session_id,
     tool_calls,
     iteration,
@@ -1462,7 +1523,8 @@ pub fn agent_stall_observe_tool_calls(harness: Harness,
   if !observation.enabled {
     return observation
   }
-  const repaired = __agent_stall_apply_repair(harness, 
+  const repaired = __agent_stall_apply_repair(
+    agent,
     session_id,
     observation.config,
     observation,
@@ -1475,7 +1537,8 @@ pub fn agent_stall_observe_tool_calls(harness: Harness,
   // unchanged) unless an `action_signal` callback is configured, so the default is
   // byte-identical. Applied after the repair overlay so it respects the one-warning-
   // per-turn discipline.
-  const signaled = __agent_stall_apply_action_signal(harness, 
+  const signaled = __agent_stall_apply_action_signal(
+    agent,
     session_id,
     observation.config,
     repaired,

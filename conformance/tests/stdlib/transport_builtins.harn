@@ -1,13 +1,25 @@
 pipeline test(harness: Harness, task) {
   harness.testing.http_mock_clear()
   harness.testing.transport_mock_clear()
-  harness.testing.http_mock("GET", "https://api.example.test/session", {status: 200, body: "pooled", headers: {}})
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.test/session",
+    {status: 200, body: "pooled", headers: {}},
+  )
   const session = harness.net.session({timeout_ms: 100})
-  const response = harness.net.session_request(session, "GET", "https://api.example.test/session", {})
+  const response = harness.net.session_request(
+    session,
+    "GET",
+    "https://api.example.test/session",
+    {},
+  )
   assert_eq(response.status, 200)
   assert_eq(response.body, "pooled")
   assert(harness.net.session_close(session))
-  harness.testing.sse_mock("https://events.example.test/stream", [{event: "hello", data: "one", id: "1"}, "two"])
+  harness.testing.sse_mock(
+    "https://events.example.test/stream",
+    [{event: "hello", data: "one", id: "1"}, "two"],
+  )
   const stream = harness.net.sse_connect("GET", "https://events.example.test/stream", {})
   const opened = harness.net.sse_receive(stream, 0)
   const first = harness.net.sse_receive(stream, 0)
@@ -29,7 +41,10 @@ pipeline test(harness: Harness, task) {
   assert_eq(echoed.data, "ack")
   assert(harness.net.websocket_close(socket))
   harness.testing.websocket_mock("wss://socket.example.test/limited", ["too-long"])
-  const limited = harness.net.websocket_connect("wss://socket.example.test/limited", {max_message_bytes: 3})
+  const limited = harness.net.websocket_connect(
+    "wss://socket.example.test/limited",
+    {max_message_bytes: 3},
+  )
   const limit_result = try {
     harness.net.websocket_receive(limited, 0)
   }

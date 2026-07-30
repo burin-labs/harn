@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /** Handle a Notion poll or webhook change notification. */
-pub fn on_database_change(event: TriggerEvent) -> dict {
+pub fn on_database_change(_harness: Harness, event: TriggerEvent) -> dict {
   const raw = event.provider_payload.raw
   return {
     action: "notion_database_change",

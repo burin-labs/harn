@@ -16,7 +16,8 @@ pipeline main(harness: Harness) {
   // surfaced with a distinct, machine-readable status (not "ok", not a generic
   // "error"/"missing_json"), so a harness author can SEE the window was blown.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         error: {
           status: 400,
@@ -27,7 +28,9 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const envelope = safe_structured_call(harness, "Grade this output.",
+      const envelope = safe_structured_call(
+        harness.llm,
+        "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )
@@ -38,7 +41,8 @@ pipeline main(harness: Harness) {
   // (b) A different provider's phrasing (Gemini, no "context" word) is detected
   // the same way — provider-agnostic.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         error: {
           status: 400,
@@ -48,7 +52,9 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const envelope = safe_structured_call(harness, "Grade this output.",
+      const envelope = safe_structured_call(
+        harness.llm,
+        "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )
@@ -59,7 +65,8 @@ pipeline main(harness: Harness) {
   // it keeps its own category so callers can still back off rather than
   // (futilely) trying to shrink the prompt.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         error: {
           status: 429,
@@ -69,7 +76,9 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const envelope = safe_structured_call(harness, "Grade this output.",
+      const envelope = safe_structured_call(
+        harness.llm,
+        "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )

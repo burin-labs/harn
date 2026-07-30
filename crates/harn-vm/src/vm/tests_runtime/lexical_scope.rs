@@ -8,16 +8,16 @@ use super::harness::*;
 #[test]
 fn test_if_else_has_lexical_block_scope() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 const x = "outer"
 if true {
   const x = "inner"
-  log(x)
+  harness.stdio.log(x)
 } else {
   const x = "other"
-  log(x)
+  harness.stdio.log(x)
 }
-log(x)
+harness.stdio.log(x)
 }"#,
     );
     assert_eq!(out, "[harn] inner\n[harn] outer");
@@ -26,18 +26,18 @@ log(x)
 #[test]
 fn test_loop_and_catch_bindings_are_block_scoped() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 const label = "outer"
 for item in [1, 2] {
   const label = "loop ${item}"
-  log(label)
+  harness.stdio.log(label)
 }
 try {
   throw("boom")
 } catch (label) {
-  log(label)
+  harness.stdio.log(label)
 }
-log(label)
+harness.stdio.log(label)
 }"#,
     );
     assert_eq!(

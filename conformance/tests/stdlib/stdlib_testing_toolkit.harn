@@ -103,7 +103,7 @@ pipeline test_testing_toolkit(harness: Harness, task) {
   // captured variable.
   // === with_temp_dir: workspace exists in body, removed after ===
   const temp_result = with_temp_dir(
-    harness,
+    harness.fs,
     { dir ->
       assert(harness.fs.exists(dir))
       harness.fs.write_text(dir + "/x.txt", "1")
@@ -116,7 +116,7 @@ pipeline test_testing_toolkit(harness: Harness, task) {
   assert_eq(harness.fs.exists(temp_result.dir), false)
   // === with_fs: seeds files (incl. nested + JSON), reads back, cleans up ===
   const fs_result = with_fs(
-    harness,
+    harness.fs,
     {"in.txt": "hello", "nested/deep/cfg.json": {a: 1}},
     { dir ->
       assert_eq(harness.fs.read_text(dir + "/in.txt"), "hello")
@@ -129,7 +129,7 @@ pipeline test_testing_toolkit(harness: Harness, task) {
   // Throw the dir itself so we can assert it was removed after the throw.
   const leaked_dir = try {
     with_temp_dir(
-      harness,
+      harness.fs,
       { dir ->
         throw dir
       },

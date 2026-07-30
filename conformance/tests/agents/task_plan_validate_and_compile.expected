@@ -17,5 +17,5 @@ verify
 cargo test -p auth
 agent_loop
 Add rate limiter around existing auth middleware
-writes_files
+workspace_write
 true

@@ -94,6 +94,11 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
     },
     HostCapabilityGroup {
         capability: CapabilityId::Ast,
+        methods: &["changeset_summary"],
+        effects: HOST_READ,
+    },
+    HostCapabilityGroup {
+        capability: CapabilityId::Ast,
         methods: &[
             "apply_node",
             "batch_apply",
@@ -216,6 +221,11 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
         capability: CapabilityId::SecretStore,
         methods: &["delete", "set"],
         effects: SECRET_MUTATE,
+    },
+    HostCapabilityGroup {
+        capability: CapabilityId::System,
+        methods: &["sample"],
+        effects: HOST_READ,
     },
     HostCapabilityGroup {
         capability: CapabilityId::TerminalSession,

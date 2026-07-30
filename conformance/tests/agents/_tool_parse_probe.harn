@@ -138,47 +138,53 @@ pub fn native_registry() -> dict {
 }
 
 /** Print the observable outcome of one parse under `label`. */
-pub fn report(harness: Harness, label: string, parsed) -> nil {
-  harness.stdio.println("# ${label}")
-  harness.stdio.println(
+pub fn report(stdio: HarnessStdio, label: string, parsed) -> nil {
+  stdio.println("# ${label}")
+  stdio.println(
     "  calls=${len(parsed.tool_calls)} errors=${len(parsed.tool_parse_errors)} violations=${len(parsed.protocol_violations)} stray=${parsed.recovered_from_stray_count}",
   )
   for call in parsed.tool_calls {
-    harness.stdio.println("  call ${call.name} ${json_stringify(call.arguments)}")
+    stdio.println("  call ${call.name} ${json_stringify(call.arguments)}")
   }
   for error in parsed.tool_parse_errors {
-    harness.stdio.println("  err ${json_stringify(error)}")
+    stdio.println("  err ${json_stringify(error)}")
   }
   for violation in parsed.protocol_violations {
-    harness.stdio.println("  vio ${json_stringify(violation.message)}")
+    stdio.println("  vio ${json_stringify(violation.message)}")
   }
-  harness.stdio.println("  prose=${json_stringify(parsed.prose)}")
-  harness.stdio.println("  answer=${json_stringify(parsed.user_response)}")
-  harness.stdio.println("  done=${json_stringify(parsed.done_marker)}")
+  stdio.println("  prose=${json_stringify(parsed.prose)}")
+  stdio.println("  answer=${json_stringify(parsed.user_response)}")
+  stdio.println("  done=${json_stringify(parsed.done_marker)}")
   return nil
 }
 
 /** Parse `text` through the canonical tagged/heredoc text grammar and report it. */
-pub fn probe(harness: Harness, label: string, text: string, tools) -> nil {
-  return report(harness, label, agent_parse_tool_calls(text, tools, "text"))
+pub fn probe(agent: HarnessAgent, stdio: HarnessStdio, label: string, text: string, tools) -> nil {
+  return report(stdio, label, agent_parse_tool_calls(agent, text, tools, "text"))
 }
 
 /**
  * Parse `text` through the fenced-JSON grammar. That grammar carries no
  * registry — it resolves nothing against tool names — so none is passed.
  */
-pub fn probe_json(harness: Harness, label: string, text: string) -> nil {
-  return report(harness, label, agent_parse_tool_calls(text, nil, "json"))
+pub fn probe_json(agent: HarnessAgent, stdio: HarnessStdio, label: string, text: string) -> nil {
+  return report(stdio, label, agent_parse_tool_calls(agent, text, nil, "json"))
 }
 
 /**
  * Report the canonical replay text, which is what the agent loop writes back
  * into assistant history in place of the model's raw bytes.
  */
-pub fn probe_canonical(harness: Harness, label: string, text: string, tools) -> nil {
-  const parsed = agent_parse_tool_calls(text, tools, "text")
-  harness.stdio.println("# ${label}")
-  harness.stdio.println("  canonical=${json_stringify(parsed.canonical_text)}")
+pub fn probe_canonical(
+  agent: HarnessAgent,
+  stdio: HarnessStdio,
+  label: string,
+  text: string,
+  tools,
+) -> nil {
+  const parsed = agent_parse_tool_calls(agent, text, tools, "text")
+  stdio.println("# ${label}")
+  stdio.println("  canonical=${json_stringify(parsed.canonical_text)}")
   return nil
 }
 
@@ -186,12 +192,18 @@ pub fn probe_canonical(harness: Harness, label: string, text: string, tools) -> 
  * Report the dropped-fragment ledger: every path that consumes text without
  * producing a call must record what it swallowed.
  */
-pub fn probe_drops(harness: Harness, label: string, text: string, tools) -> nil {
-  const parsed = agent_parse_tool_calls(text, tools, "text")
-  harness.stdio.println("# ${label}")
-  harness.stdio.println("  calls=${len(parsed.tool_calls)} dropped=${len(parsed.dropped ?? [])}")
+pub fn probe_drops(
+  agent: HarnessAgent,
+  stdio: HarnessStdio,
+  label: string,
+  text: string,
+  tools,
+) -> nil {
+  const parsed = agent_parse_tool_calls(agent, text, tools, "text")
+  stdio.println("# ${label}")
+  stdio.println("  calls=${len(parsed.tool_calls)} dropped=${len(parsed.dropped ?? [])}")
   for fragment in parsed.dropped ?? [] {
-    harness.stdio.println("  drop ${json_stringify(fragment)}")
+    stdio.println("  drop ${json_stringify(fragment)}")
   }
   return nil
 }

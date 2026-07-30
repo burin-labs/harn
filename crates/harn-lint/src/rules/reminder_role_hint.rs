@@ -66,6 +66,19 @@ fn check_pipeline_body(body: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
                 }
             }
         }
+        Node::MethodCall {
+            object,
+            method,
+            args,
+        } if method == "call" && is_llm_handle(object) => {
+            for arg in args {
+                if let Node::DictLiteral(entries) = &arg.node {
+                    if let Some(route) = literal_route_from_entries(entries) {
+                        routes.push(route);
+                    }
+                }
+            }
+        }
         Node::CostRoute { options, .. } => {
             if let Some(route) = literal_route_from_options(options) {
                 routes.push(route);
@@ -84,6 +97,16 @@ fn check_pipeline_body(body: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
     for span in user_block_spans {
         diagnostics.push(make_diagnostic(route, span));
     }
+}
+
+fn is_llm_handle(node: &SNode) -> bool {
+    matches!(
+        &node.node,
+        Node::PropertyAccess { property, .. } if property == "llm"
+    ) || matches!(
+        &node.node,
+        Node::Identifier(name) if name == "llm"
+    )
 }
 
 fn collect_user_block_role_hints(entries: &[DictEntry], spans: &mut Vec<Span>) {
@@ -211,6 +234,23 @@ pipeline default(task) {
         let diag = diags.iter().find(|d| d.rule == RULE_NAME).unwrap();
         assert_eq!(diag.code, Code::ReminderUnsupportedUserBlockRoleHint);
         assert_eq!(diag.severity, LintSeverity::Warning);
+    }
+
+    #[test]
+    fn warns_for_user_block_with_harness_llm_route() {
+        let diags = lint(
+            r#"
+pipeline default(harness: Harness) {
+    harness.agent.register_reminder_provider({
+        id: "custom",
+        subscribes_to: ["session_idle"],
+        evaluate: { _ctx -> return {reminder: {body: "heads up", role_hint: "user_block"}} },
+    })
+    harness.llm.call("hi", nil, {provider: "mock", model: "mock"})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
     }
 
     #[test]

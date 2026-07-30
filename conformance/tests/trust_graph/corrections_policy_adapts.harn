@@ -17,8 +17,11 @@ pipeline test(harness: Harness, task) {
     step: "outcome",
     evidence_refs: [evidence],
   }
-  const correction_id: CorrectionId = record(harness, correction)
-  const records: list<CorrectionRecord> = query(harness, {actor_id: actor_id, action: action})
+  const correction_id: CorrectionId = record(harness.runtime, correction)
+  const records: list<CorrectionRecord> = query(
+    harness.runtime,
+    {actor_id: actor_id, action: action},
+  )
   const policy: CapabilityPolicy = harness.runtime.trust_policy_for(actor_id)
   harness.stdio.println(correction_id != "")
   harness.stdio.println(len(records) == 1)

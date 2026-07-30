@@ -1,7 +1,10 @@
 import { render } from "std/disclosure"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-disclosure-project-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-disclosure-project-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -14,8 +17,13 @@ pipeline default(harness: Harness) {
       + "name = \"Project Human\"\n",
   )
   const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
-  harness.stdio.println(render(harness, chain, "slack", {project_root: root, env: false}))
-  const unrelated_root = path_join(harness.fs.workspace_temp_dir(), "harn-disclosure-unrelated-" + harness.random.uuid())
+  harness.stdio.println(
+    render(harness.env, harness.fs, chain, "slack", {project_root: root, env: false}),
+  )
+  const unrelated_root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-disclosure-unrelated-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(unrelated_root)
   harness.fs.write_text(
     path_join(unrelated_root, "harn.toml"),
@@ -24,7 +32,10 @@ pipeline default(harness: Harness) {
       + "template = \"Wrong {{ current.name }} for {{ origin.name }}\"\n",
   )
   harness.stdio.println(
-    render(harness, chain,
+    render(
+      harness.env,
+      harness.fs,
+      chain,
       "slack",
       {
         project_root: unrelated_root,

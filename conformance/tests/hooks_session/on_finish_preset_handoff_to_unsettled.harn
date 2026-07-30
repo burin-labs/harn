@@ -14,7 +14,7 @@ pipeline default(harness: Harness) {
     { harness, return_value ->
       harness.handoff_to("seed-pipeline", {note: "seed work"})
       const result = preset(harness, return_value)
-      const audits = lifecycle_audit_log_take(harness)
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("result_status=" + result.status)
       harness.stdio.println("target=" + result.envelope.target_pipeline)
       harness.stdio.println("priority=" + result.envelope.payload.priority)

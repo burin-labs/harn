@@ -166,7 +166,7 @@ mod tests {
 
     fn open_source(root: &std::path::Path) -> String {
         format!(
-            "fn main(harness: Harness) {{ return package_snapshot_open({}) }}",
+            "fn main(harness: Harness) {{ return harness.fs.package_snapshot_open({}) }}",
             serde_json::to_string(&root.to_string_lossy()).unwrap()
         )
     }
@@ -252,7 +252,7 @@ mod tests {
             "close" => {
                 let root = serde_json::to_string(&root.to_string_lossy()).unwrap();
                 let chunk = crate::compile_source(&format!(
-                    "fn main(harness: Harness) {{\n  const snapshot = package_snapshot_open({root})\n  return package_snapshot_close(snapshot.handle)\n}}"
+                    "fn main(harness: Harness) {{\n  const snapshot = harness.fs.package_snapshot_open({root})\n  return harness.fs.package_snapshot_close(snapshot.handle)\n}}"
                 ))
                 .unwrap();
                 assert!(matches!(

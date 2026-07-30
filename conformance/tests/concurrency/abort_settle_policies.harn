@@ -7,7 +7,10 @@
 import { settle_with_abort } from "std/abort"
 
 pipeline default(harness: Harness) {
-  const threshold = settle_with_abort(harness, [1, 2, 3, 4],
+  const threshold = settle_with_abort(
+    harness.random,
+    harness.runtime,
+    [1, 2, 3, 4],
     { item ->
       if item == 2 {
         throw "boom"
@@ -20,7 +23,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(threshold.failed)
   harness.stdio.println(threshold.abandoned)
   harness.stdio.println(to_string(threshold.aborted))
-  const selective = settle_with_abort(harness, [1, 2, 3, 4],
+  const selective = settle_with_abort(
+    harness.random,
+    harness.runtime,
+    [1, 2, 3, 4],
     { item ->
       if item <= 2 {
         return Err({code: "network", message: "blip"})
@@ -45,7 +51,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(selective.abandoned)
   harness.stdio.println(to_string(selective.aborted))
   harness.stdio.println(selective.reason?.code)
-  const collect = settle_with_abort(harness, [1, 2, 3],
+  const collect = settle_with_abort(
+    harness.random,
+    harness.runtime,
+    [1, 2, 3],
     { item ->
       if item == 2 {
         throw "boom"

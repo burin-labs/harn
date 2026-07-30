@@ -65,6 +65,49 @@ pub(super) async fn dispatch_process_exec_after_policy(
     command_policy_context: JsonValue,
     command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
 ) -> Result<VmValue, VmError> {
+    let (tape_program, tape_args) = process_exec_argv(params)?;
+    let tape_cwd = optional_string(params, "cwd").map(|cwd| resolve_process_exec_cwd(&cwd));
+    let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");
+    let started = crate::clock_mock::leak_audit::instant_now("host_call/process.exec.started");
+    if let Some(intercepted) = crate::testbench::process_tape::intercept_spawn(
+        &tape_program,
+        &tape_args,
+        tape_cwd.as_deref(),
+    ) {
+        let output = intercepted
+            .map_err(|message| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message))))?;
+        let exit_code = output.status.code().unwrap_or(-1);
+        let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
+        let stderr_utf8_valid = std::str::from_utf8(&output.stderr).is_ok();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let response = process_exec_response(ProcessExecResponse {
+            pid: None,
+            started_at,
+            started,
+            stdout: &stdout,
+            stderr: &stderr,
+            exit_code,
+            status: "completed",
+            success: output.status.success(),
+            timed_out: false,
+            stdout_utf8_valid,
+            stderr_utf8_valid,
+        });
+        return crate::orchestration::run_command_policy_postflight_with_ctx(
+            ctx,
+            params,
+            response,
+            command_policy_context,
+            command_policy_decisions,
+        )
+        .await;
+    }
+    let tape_recording = crate::testbench::process_tape::start_recording(
+        &tape_program,
+        &tape_args,
+        tape_cwd.as_deref(),
+    );
     let timeout_ms = optional_i64(params, "timeout")
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
@@ -90,11 +133,9 @@ pub(super) async fn dispatch_process_exec_after_policy(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");
-    let started = crate::clock_mock::leak_audit::instant_now("host_call/process.exec.started");
     let mut child = cmd
         .spawn()
-        .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
+        .map_err(|error| crate::value::environment_io_error_thrown(&error, error.to_string()))?;
     drop(profile_guard);
     let pid = child.id();
     crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
@@ -202,6 +243,18 @@ pub(super) async fn dispatch_process_exec_after_policy(
         drain_pipes.await?
     };
     drop(cleanup_registration);
+    if let Some(recording) = tape_recording {
+        recording.finish_parts(exit_code, &stdout, &stderr);
+    }
+
+    if status == "completed" {
+        if let Some(error) = crate::process_sandbox::wrapped_spawn_io_error(exit_code, &stderr) {
+            return Err(crate::value::environment_io_error_thrown(
+                &error,
+                error.to_string(),
+            ));
+        }
+    }
 
     let stdout_utf8_valid = std::str::from_utf8(&stdout).is_ok();
     let stderr_utf8_valid = std::str::from_utf8(&stderr).is_ok();
@@ -295,11 +348,18 @@ pub(crate) fn build_sandboxed_command(
 ) -> Result<tokio::process::Command, VmError> {
     let (program, args) = process_exec_argv(params)?;
     let mut cmd = crate::process_sandbox::tokio_command_for(&program, &args)
-        .map_err(|e| VmError::Runtime(format!("host_call {label} sandbox setup: {e}")))?;
-    if let Some(cwd) = optional_string(params, "cwd") {
+        .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
+    let execution_context = crate::stdlib::process::current_execution_context();
+    let cwd = optional_string(params, "cwd").or_else(|| {
+        execution_context
+            .as_ref()
+            .and_then(|context| context.cwd.clone())
+            .filter(|cwd| !cwd.is_empty())
+    });
+    if let Some(cwd) = cwd {
         let cwd = resolve_process_exec_cwd(&cwd);
         crate::process_sandbox::enforce_process_cwd(&cwd)
-            .map_err(|e| VmError::Runtime(format!("host_call {label} cwd: {e}")))?;
+            .map_err(|error| contextualize_process_error(label, "cwd", error))?;
         cmd.current_dir(cwd);
     }
     // Under a session profile the command from `tokio_command_for` already
@@ -309,7 +369,32 @@ pub(crate) fn build_sandboxed_command(
     // Track keys the caller set explicitly so the sandbox-local TMPDIR overlay
     // below never clobbers an intentional per-call value.
     let mut caller_env_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    if let Some(env) = optional_string_dict(params, "env")? {
+    let env = optional_string_dict(params, "env")?;
+    let env_mode = optional_string(params, "env_mode");
+    match env_mode.as_deref().unwrap_or("merge") {
+        "replace" => {
+            cmd.env_clear();
+        }
+        "merge" => {
+            if let Some(context) = &execution_context {
+                for (key, value) in &context.env {
+                    cmd.env(key, value);
+                }
+            }
+        }
+        other => {
+            return Err(VmError::Runtime(format!(
+                "host_call {label}: unknown env_mode {other:?}; expected \"merge\" or \"replace\""
+            )));
+        }
+    }
+    // Runtime semantic context (currently replay state) must cross the same
+    // boundary as an explicit `harness.env` read. Apply it before caller
+    // overlays/removals so an explicitly supplied key remains authoritative.
+    for (key, value) in crate::stdlib::process::runtime_child_env_overlay() {
+        cmd.env(key, value);
+    }
+    if let Some(env) = env {
         // `env_mode` controls how the provided `env` keys combine with the
         // parent environment:
         //   - "merge" (default): inherit the parent env and overlay the
@@ -318,18 +403,6 @@ pub(crate) fn build_sandboxed_command(
         //   - "replace": clear the parent env entirely, then set only the
         //     provided keys. This is the footgun shape and must be requested
         //     explicitly whenever `env` is supplied.
-        let env_mode = optional_string(params, "env_mode");
-        match env_mode.as_deref().unwrap_or("merge") {
-            "replace" => {
-                cmd.env_clear();
-            }
-            "merge" => {}
-            other => {
-                return Err(VmError::Runtime(format!(
-                    "host_call {label}: unknown env_mode {other:?}; expected \"merge\" or \"replace\""
-                )));
-            }
-        }
         for (key, value) in env {
             caller_env_keys.insert(key.clone());
             cmd.env(key, value);
@@ -372,6 +445,16 @@ pub(crate) fn build_sandboxed_command(
         cmd.env(key, value);
     }
     Ok(cmd)
+}
+
+fn contextualize_process_error(label: &str, stage: &str, error: VmError) -> VmError {
+    match error {
+        VmError::CategorizedError { message, category } => VmError::CategorizedError {
+            message: format!("host_call {label} {stage}: {message}"),
+            category,
+        },
+        other => VmError::Runtime(format!("host_call {label} {stage}: {other}")),
+    }
 }
 
 struct ProcessExecResponse<'a> {

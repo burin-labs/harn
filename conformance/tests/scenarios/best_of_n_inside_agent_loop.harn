@@ -12,7 +12,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   // 3 candidate samples consumed in order by best_of_n's sequential sampler.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("candidate-A"),
       llm_text("candidate-B"),
       llm_text("candidate-C"),
@@ -20,7 +21,9 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const bon_caller = { call ->
-        let result = best_of_n(harness, call.prompt,
+        let result = best_of_n(
+          harness.llm,
+          call.prompt,
           call.system,
           {n: 3, parallel: false, call_opts: {provider: "mock"}, judge_opts: {provider: "mock"}},
         )
@@ -39,7 +42,9 @@ pipeline default(harness: Harness) {
           },
         }
       }
-      const result = agent_loop(harness, "hi",
+      const result = agent_loop(
+        harness,
+        "hi",
         nil,
         {provider: "mock", llm_caller: bon_caller, max_iterations: 1},
       )

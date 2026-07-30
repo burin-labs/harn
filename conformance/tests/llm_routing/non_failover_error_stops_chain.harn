@@ -7,7 +7,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {error: {category: "auth", message: "missing API key"}, model: "mock", provider: "mock"},
       {text: "would never run", model: "mock", provider: "mock"},
     ],

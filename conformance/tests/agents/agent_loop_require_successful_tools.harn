@@ -19,12 +19,15 @@ fn tools() {
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]},
       llm_text("Finished."),
     ],
     { ->
-      const failed = agent_loop(harness, "Use one tool.",
+      const failed = agent_loop(
+        harness,
+        "Use one tool.",
         nil,
         {
           provider: "mock",
@@ -41,12 +44,15 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "x"}}]},
       llm_text("Finished."),
     ],
     { ->
-      const satisfied = agent_loop(harness, "Use one tool.",
+      const satisfied = agent_loop(
+        harness,
+        "Use one tool.",
         nil,
         {
           provider: "mock",
@@ -62,13 +68,16 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Finished before using the required tool."),
       {tool_calls: [{id: "lookup_3", name: "lookup", arguments: {query: "x"}}]},
       llm_text("Finished after using the required tool."),
     ],
     { ->
-      const gated = agent_loop(harness, "Use one tool.",
+      const gated = agent_loop(
+        harness,
+        "Use one tool.",
         nil,
         {
           provider: "mock",

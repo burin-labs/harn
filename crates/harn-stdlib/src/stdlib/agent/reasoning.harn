@@ -9,6 +9,6 @@
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_reasoning_apply(harness: Harness, opts) {
-  return harness.llm.apply_reasoning_policy(opts)
+pub fn agent_reasoning_apply(llm: HarnessLlm, opts) {
+  return llm.apply_reasoning_policy(opts)
 }

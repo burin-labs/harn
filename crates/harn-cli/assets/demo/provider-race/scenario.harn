@@ -40,7 +40,10 @@ pipeline default(harness: Harness, _task) {
   // widening every per-row dict field to `_`.
   const responses: list<string> = parallel each prov { p ->
     harness.stdio.println("[start ${p.name}]")
-    const envelope = harness.llm.call(prompt_for(p.name, p.model), "Be concise. Answer in one sentence.")
+    const envelope = harness.llm.call(
+      prompt_for(p.name, p.model),
+      "Be concise. Answer in one sentence.",
+    )
     envelope.text
   }
   // Zip provider metadata + LLM response into a typed result list.

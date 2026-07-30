@@ -33,7 +33,9 @@ pipeline test(harness: Harness, task) {
     {status: 200, headers: {etag: "\"item-2\""}, body: "two"},
   )
   const store = mem_cache({namespace: "web-conditional-cache"})
-  const first = web_fetch(harness, "https://example.com/catalog",
+  const first = web_fetch(
+    harness,
+    "https://example.com/catalog",
     {
       store: store,
       http_options: {headers: {Accept: "text/html"}},
@@ -41,7 +43,9 @@ pipeline test(harness: Harness, task) {
       fetched_at: "t1",
     },
   )
-  const second = web_fetch(harness, "https://example.com/catalog",
+  const second = web_fetch(
+    harness,
+    "https://example.com/catalog",
     {
       store: store,
       http_options: {headers: {Accept: "text/html"}},
@@ -63,7 +67,11 @@ pipeline test(harness: Harness, task) {
   assert_eq(calls[1].headers["if-modified-since"], "Mon, 11 May 2026 00:00:00 GMT")
   const item_one = web_fetch(harness, "https://example.com/item", {store: store, query: {id: 1}})
   const item_two = web_fetch(harness, "https://example.com/item", {store: store, query: {id: 2}})
-  const item_one_again = web_fetch(harness, "https://example.com/item", {store: store, query: {id: 1}})
+  const item_one_again = web_fetch(
+    harness,
+    "https://example.com/item",
+    {store: store, query: {id: 1}},
+  )
   assert_eq(item_one.body, "one")
   assert_eq(item_two.cache_status, "miss")
   assert_eq(item_two.body, "two")

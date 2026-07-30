@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { default_llm_caller } from "std/llm/caller"
 import { assert_eq, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
@@ -111,7 +111,7 @@ fn run_case(harness: Harness, script, session, actuation = nil, tool_format = "t
     script,
     { ->
       return agent_capture_events(
-        harness,
+        harness.agent,
         session,
         fn() { return agent_loop(
           harness,
@@ -125,9 +125,9 @@ fn run_case(harness: Harness, script, session, actuation = nil, tool_format = "t
   )
 }
 
-fn prefill_capable_caller_options(harness: Harness) {
+fn prefill_capable_caller_options(agent: HarnessAgent, llm: HarnessLlm) {
   return {
-    llm_caller: default_llm_caller(harness),
+    llm_caller: default_llm_caller(agent, llm),
     llm_caller_transport: {forwards_assistant_prefill: true},
   }
 }
@@ -326,7 +326,7 @@ pipeline default(harness: Harness) {
     "monologue-actuation-compatible-text-" + harness.random.uuid(),
     {enabled: true},
     "text",
-    prefill_capable_caller_options(harness),
+    prefill_capable_caller_options(harness.agent, harness.llm),
   )
   const compatible_text_receipts = actuation_receipts(compatible_text.events)
   assert_eq(compatible_text.result.status, "done")
@@ -344,7 +344,7 @@ pipeline default(harness: Harness) {
     "monologue-actuation-compatible-json-" + harness.random.uuid(),
     {enabled: true},
     "json",
-    prefill_capable_caller_options(harness),
+    prefill_capable_caller_options(harness.agent, harness.llm),
   )
   const compatible_json_receipts = actuation_receipts(compatible_json.events)
   assert_eq(compatible_json.result.status, "done")
@@ -362,7 +362,7 @@ pipeline default(harness: Harness) {
     "monologue-actuation-external-caller-" + harness.random.uuid(),
     {enabled: true},
     "text",
-    {llm_caller: default_llm_caller(harness)},
+    {llm_caller: default_llm_caller(harness.agent, harness.llm)},
   )
   const external_caller_receipts = actuation_receipts(external_caller.events)
   assert_eq(external_caller.result.status, "done")

@@ -791,17 +791,17 @@ mod tests {
 import "std/review"
 import "std/triggers"
 
-pipeline test(task) {
-  llm_mock({
+pipeline test(harness: Harness, task) {
+  harness.llm.mock_enqueue({
     text: "{\"summary\":\"Parser change needs a regression test.\",\"findings\":[{\"severity\":\"blocking\",\"category\":\"test_coverage\",\"title\":\"Missing regression test\",\"detail\":\"The parser behavior changed without a focused regression test.\",\"suggestion\":\"Add a conformance case.\",\"file\":\"conformance/tests/parser_case.harn\",\"line_start\":1,\"line_end\":1}]}"
   })
-  const result: ReviewResult = self_review("diff --git a/src/parser.rs b/src/parser.rs\n+parse_new_branch()", "code", 1)
-  __io_println(result.rubric_preset == "code")
-  __io_println(result.has_blocking_findings)
-  __io_println(result.findings[0].source == "llm")
-  const records: list<TrustRecord> = trust_query({action: "pr.self_review"})
-  __io_println(len(records) == 1)
-  __io_println(records[0].metadata.blocking_finding_count == 1)
+  const result: ReviewResult = harness.agent.self_review("diff --git a/src/parser.rs b/src/parser.rs\n+parse_new_branch()", "code", 1)
+  harness.stdio.println(result.rubric_preset == "code")
+  harness.stdio.println(result.has_blocking_findings)
+  harness.stdio.println(result.findings[0].source == "llm")
+  const records: list<TrustRecord> = harness.runtime.trust_query({action: "pr.self_review"})
+  harness.stdio.println(len(records) == 1)
+  harness.stdio.println(records[0].metadata.blocking_finding_count == 1)
 }
 "#,
             );
@@ -816,12 +816,12 @@ pipeline test(task) {
                 r#"
 import "std/review"
 
-pipeline test(task) {
-  llm_mock({text: "{\"summary\":\"No extra issues.\",\"findings\":[]}"})
-  const result: ReviewResult = self_review("diff --git a/.env b/.env\n+OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx123456", "default", 1)
-  __io_println(result.has_blocking_findings)
-  __io_println(len(result.secret_scan_findings) == 1)
-  __io_println(result.findings[0].source == "secret_scan")
+pipeline test(harness: Harness, task) {
+  harness.llm.mock_enqueue({text: "{\"summary\":\"No extra issues.\",\"findings\":[]}"})
+  const result: ReviewResult = harness.agent.self_review("diff --git a/.env b/.env\n+OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx123456", "default", 1)
+  harness.stdio.println(result.has_blocking_findings)
+  harness.stdio.println(len(result.secret_scan_findings) == 1)
+  harness.stdio.println(result.findings[0].source == "secret_scan")
 }
 "#,
             );
@@ -836,14 +836,14 @@ pipeline test(task) {
                 r#"
 import "std/review"
 
-pipeline test(task) {
-  llm_mock({
+pipeline test(harness: Harness, task) {
+  harness.llm.mock_enqueue({
     text: "{\"summary\":\"One issue.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"runtime_safety\",\"detail\":\"The changed path can crash on startup.\"}]}"
   })
-  const result: ReviewResult = self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
-  __io_println(len(result.findings) == 1)
-  __io_println(result.findings[0].title == "Review finding")
-  __io_println(result.findings[0].detail == "The changed path can crash on startup.")
+  const result: ReviewResult = harness.agent.self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
+  harness.stdio.println(len(result.findings) == 1)
+  harness.stdio.println(result.findings[0].title == "Review finding")
+  harness.stdio.println(result.findings[0].detail == "The changed path can crash on startup.")
 }
 "#,
             );
@@ -858,14 +858,14 @@ pipeline test(task) {
                 r#"
 import "std/review"
 
-pipeline test(task) {
-  llm_mock({
+pipeline test(harness: Harness, task) {
+  harness.llm.mock_enqueue({
     text: "{\"summary\":\"One issue.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"runtime_safety\",\"title\":\"Startup crash\",\"description\":\"The changed path can crash on startup.\",\"path\":\"src/main.rs\",\"line\":1}]}"
   })
-  const result: ReviewResult = self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
-  __io_println(result.findings[0].detail == "The changed path can crash on startup.")
-  __io_println(result.findings[0].file == "src/main.rs")
-  __io_println(result.findings[0].line_start == 1)
+  const result: ReviewResult = harness.agent.self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
+  harness.stdio.println(result.findings[0].detail == "The changed path can crash on startup.")
+  harness.stdio.println(result.findings[0].file == "src/main.rs")
+  harness.stdio.println(result.findings[0].line_start == 1)
 }
 "#,
             );
@@ -880,20 +880,20 @@ pipeline test(task) {
                 r#"
 import "std/review"
 
-pipeline test(task) {
-  llm_mock({
+pipeline test(harness: Harness, task) {
+  harness.llm.mock_enqueue({
     text: "{\"summary\":\"Maybe add a test.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"test_coverage\",\"title\":\"Consider a test\",\"detail\":\"A narrow regression test would help.\"}]}"
   })
-  llm_mock({
+  harness.llm.mock_enqueue({
     text: "{\"summary\":\"Clean after reconsidering the evidence.\",\"findings\":[]}"
   })
-  const result: ReviewResult = self_review("diff --git a/src/lib.rs b/src/lib.rs\n+const value = 1", "default", 2)
-  const calls = llm_mock_calls()
+  const result: ReviewResult = harness.agent.self_review("diff --git a/src/lib.rs b/src/lib.rs\n+const value = 1", "default", 2)
+  const calls = harness.llm.mock_calls()
   const second_prompt = calls[1].messages[0].content
-  __io_println(len(result.rounds) == 2)
-  __io_println(result.rounds[1].summary == "Clean after reconsidering the evidence.")
-  __io_println(contains(second_prompt, "Candidate findings JSON"))
-  __io_println(contains(second_prompt, "Do not add new findings"))
+  harness.stdio.println(len(result.rounds) == 2)
+  harness.stdio.println(result.rounds[1].summary == "Clean after reconsidering the evidence.")
+  harness.stdio.println(contains(second_prompt, "Candidate findings JSON"))
+  harness.stdio.println(contains(second_prompt, "Do not add new findings"))
 }
 "#,
             );

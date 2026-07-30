@@ -112,7 +112,7 @@ fn __pin_allowed_kinds(options) {
  * @api_stability: stable
  * @example: pin(harness, "goal", "Ship the migration", {dedupe_key: "pin/goal"})
  */
-pub fn pin(harness: Harness, kind, content, opts = nil) {
+pub fn pin(random: HarnessRandom, kind, content, opts = nil) {
   const options = if type_of(opts) == "dict" {
     opts
   } else {
@@ -120,15 +120,14 @@ pub fn pin(harness: Harness, kind, content, opts = nil) {
   }
   const allowed = __pin_allowed_kinds(options)
   if type_of(kind) != "string" || !contains(allowed, kind) {
-    throw "pin(harness, kind, content, opts?): kind must be one of " + join(allowed, ", ") + "; got "
-      + to_string(
-      kind,
-    )
+    throw "pin(harness, kind, content, opts?): kind must be one of " + join(allowed, ", ")
+      + "; got "
+      + to_string(kind)
   }
   if type_of(content) != "string" || content == "" {
     throw "pin(harness, \"" + kind + "\", content): content must be a non-empty string"
   }
-  const id = options?.id ?? ("pin_" + harness.random.uuid_v7())
+  const id = options?.id ?? ("pin_" + random.uuid_v7())
   return {
     content: content,
     dedupe_key: options?.dedupe_key ?? ("pin/" + kind + "/" + id),
@@ -326,14 +325,16 @@ fn __pin_reminder_validate(options) {
   return options
 }
 
-fn __pin_reminder_body(harness: Harness, content, options) {
+fn __pin_reminder_body(agent: HarnessAgent, content, options) {
   const limit = options?.max_body
   const text = to_string(content ?? "")
   if type_of(limit) != "int" || limit <= 0 || len(text) <= limit {
     return content
   }
   const retained = text.substring(0, limit)
-  let _ = agent_report_truncation(harness, text,
+  let _ = agent_report_truncation(
+    agent,
+    text,
     retained,
     "pin reminder exceeded its model-visible body budget",
   )
@@ -355,10 +356,10 @@ fn __pin_reminder_tags(base_tags, options) {
 }
 
 /**
- * pin_reminder(harness, pin, opts?) lowers a PinSpec to a system-reminder options dict
+ * pin_reminder(harness.agent, pin, opts?) lowers a PinSpec to a system-reminder options dict
  * with `preserve_on_compact: true`, `tags: ["pin", <kind>]`, the pin's
  * `dedupe_key`, and its `role_hint`. Spread it into
- * `harness.agent.transcript_inject_reminder(...)` or `agent_session_inject_reminder(harness, ...)` —
+ * `harness.agent.transcript_inject_reminder(...)` or `agent_session_inject_reminder(harness.agent, ...)` —
  * this is the "survives compaction by construction" mechanism (the
  * structured-metadata twin of `[no-compact]`).
  *
@@ -373,7 +374,7 @@ fn __pin_reminder_tags(base_tags, options) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn pin_reminder(harness: Harness, pin, opts = nil) {
+pub fn pin_reminder(agent: HarnessAgent, pin, opts = nil) {
   const raw = if type_of(opts) == "dict" {
     opts
   } else {
@@ -382,7 +383,7 @@ pub fn pin_reminder(harness: Harness, pin, opts = nil) {
   const options = __pin_reminder_validate(raw)
   const kind = to_string(pin?.kind ?? "note")
   let reminder = {
-    body: __pin_reminder_body(harness, pin.content, options),
+    body: __pin_reminder_body(agent, pin.content, options),
     dedupe_key: pin?.dedupe_key ?? ("pin/" + kind),
     preserve_on_compact: true,
     role_hint: pin?.role_hint ?? __pin_role_hint(kind),
@@ -396,7 +397,7 @@ pub fn pin_reminder(harness: Harness, pin, opts = nil) {
 }
 
 /**
- * agent_pin(harness, session_id, pin) persists a pin into a live session by injecting its
+ * agent_pin(harness.agent, session_id, pin) persists a pin into a live session by injecting its
  * `preserve_on_compact` reminder. Returns the reminder id. The pin re-renders
  * each turn and is carried across compaction by the reminder lifecycle.
  *
@@ -404,8 +405,8 @@ pub fn pin_reminder(harness: Harness, pin, opts = nil) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn agent_pin(harness: Harness, session_id, pin) {
-  return agent_session_inject_reminder(harness, session_id, pin_reminder(harness, pin))
+pub fn agent_pin(agent: HarnessAgent, session_id, pin) {
+  return agent_session_inject_reminder(agent, session_id, pin_reminder(agent, pin))
 }
 
 /**
@@ -432,9 +433,9 @@ pub fn strip_no_compact(text) {
  * @api_stability: stable
  * @example: recognize_no_compact(harness, "## Session goal [no-compact]\nObjective: X")
  */
-pub fn recognize_no_compact(harness: Harness, text, opts = nil) {
+pub fn recognize_no_compact(random: HarnessRandom, text, opts = nil) {
   if type_of(text) != "string" || !text.contains(__NO_COMPACT_MARKER) {
     return nil
   }
-  return pin(harness, "no_compact", strip_no_compact(text), opts)
+  return pin(random, "no_compact", strip_no_compact(text), opts)
 }

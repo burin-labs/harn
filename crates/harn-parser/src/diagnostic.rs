@@ -254,9 +254,9 @@ pub fn harness_random_replacement(name: &str) -> Option<&'static str> {
 }
 
 /// Map an ambient net-capability builtin to its `harness.net.*`
-/// replacement. Backs the `bindings/thread-harness-net` repair. Only
-/// the basic verb surface is migrated mechanically; streaming, session,
-/// and server-mode builtins keep their ambient names today.
+/// replacement. Backs the `bindings/thread-harness-net` repair. Every
+/// script-facing network effect is exposed only through `HarnessNet`; response
+/// constructors and event encoders remain pure globals.
 pub fn harness_net_replacement(name: &str) -> Option<&'static str> {
     match name {
         "http_get" => Some("harness.net.get"),
@@ -266,6 +266,49 @@ pub fn harness_net_replacement(name: &str) -> Option<&'static str> {
         "http_delete" => Some("harness.net.delete"),
         "http_request" => Some("harness.net.request"),
         "http_download" => Some("harness.net.download"),
+        "http_server" => Some("harness.net.server"),
+        "http_server_after" => Some("harness.net.server_after"),
+        "http_server_before" => Some("harness.net.server_before"),
+        "http_server_on_shutdown" => Some("harness.net.server_on_shutdown"),
+        "http_server_readiness" => Some("harness.net.server_readiness"),
+        "http_server_ready" => Some("harness.net.server_ready"),
+        "http_server_request" => Some("harness.net.server_request"),
+        "http_server_route" => Some("harness.net.server_route"),
+        "http_server_security_headers" => Some("harness.net.server_security_headers"),
+        "http_server_set_ready" => Some("harness.net.server_set_ready"),
+        "http_server_shutdown" => Some("harness.net.server_shutdown"),
+        "http_server_test" => Some("harness.net.server_test"),
+        "http_server_tls_edge" => Some("harness.net.server_tls_edge"),
+        "http_server_tls_pem" => Some("harness.net.server_tls_pem"),
+        "http_server_tls_plain" => Some("harness.net.server_tls_plain"),
+        "http_server_tls_self_signed_dev" => Some("harness.net.server_tls_self_signed_dev"),
+        "http_session" => Some("harness.net.session"),
+        "http_session_close" => Some("harness.net.session_close"),
+        "http_session_request" => Some("harness.net.session_request"),
+        "http_stream_close" => Some("harness.net.stream_close"),
+        "http_stream_info" => Some("harness.net.stream_info"),
+        "http_stream_open" => Some("harness.net.stream_open"),
+        "http_stream_read" => Some("harness.net.stream_read"),
+        "sse_close" => Some("harness.net.sse_close"),
+        "sse_connect" => Some("harness.net.sse_connect"),
+        "sse_receive" => Some("harness.net.sse_receive"),
+        "sse_server_cancel" => Some("harness.net.sse_server_cancel"),
+        "sse_server_cancelled" => Some("harness.net.sse_server_cancelled"),
+        "sse_server_close" => Some("harness.net.sse_server_close"),
+        "sse_server_disconnected" => Some("harness.net.sse_server_disconnected"),
+        "sse_server_flush" => Some("harness.net.sse_server_flush"),
+        "sse_server_heartbeat" => Some("harness.net.sse_server_heartbeat"),
+        "sse_server_response" => Some("harness.net.sse_server_response"),
+        "sse_server_send" => Some("harness.net.sse_server_send"),
+        "sse_server_status" => Some("harness.net.sse_server_status"),
+        "websocket_accept" => Some("harness.net.websocket_accept"),
+        "websocket_close" => Some("harness.net.websocket_close"),
+        "websocket_connect" => Some("harness.net.websocket_connect"),
+        "websocket_receive" => Some("harness.net.websocket_receive"),
+        "websocket_route" => Some("harness.net.websocket_route"),
+        "websocket_send" => Some("harness.net.websocket_send"),
+        "websocket_server" => Some("harness.net.websocket_server"),
+        "websocket_server_close" => Some("harness.net.websocket_server_close"),
         _ => None,
     }
 }

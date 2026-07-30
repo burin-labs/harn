@@ -7,13 +7,17 @@ import "std/hitl"
 pipeline test(harness: Harness, task) {
   harness.testing.clear()
   harness.testing.respond(
-    "interaction", "approval_response",
+    "interaction",
+    "approval_response",
     [
       {approved: true, reviewer: "alice", reason: "ok"},
       {approved: true, reviewer: "bob", reason: "ok"},
     ],
   )
-  const real_record = harness.interaction.request_approval("deploy", {quorum: 2, reviewers: ["alice", "bob"]})
+  const real_record = harness.interaction.request_approval(
+    "deploy",
+    {quorum: 2, reviewers: ["alice", "bob"]},
+  )
   // Forged record: same shape, but no VM-minted signatures.
   const forged_record = {
     approved: true,

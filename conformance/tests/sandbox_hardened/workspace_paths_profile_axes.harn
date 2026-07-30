@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
   harness.runtime.with_execution_policy(
     {sandbox_profile: "workspace_paths", workspace_roots: [root]},
     { ->
-  harness.stdio.println(harness.system.sandbox_active_profile())
+      harness.stdio.println(harness.system.sandbox_active_profile())
       // Path axis: enforced, exactly as under `worktree`.
       harness.fs.write_text(in_path, "ok\n")
       const write_err = try {
@@ -39,7 +39,7 @@ pipeline default(harness: Harness) {
       // Process axis: not applied — the child runs. Launched from `root`
       // so the cwd check has a root to accept regardless of where the
       // conformance runner itself was started.
-      const result = harness.process.run( {mode: "argv", argv: argv, cwd: root})
+      const result = harness.process.run({program: argv[0], args: argv[1:len(argv)], cwd: root})
       harness.stdio.println(result?.success)
       harness.stdio.println(result?.stdout)
     },

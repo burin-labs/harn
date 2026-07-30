@@ -7,7 +7,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "answer: TODO finish later", model: "mock", provider: "mock"},
       {text: "answer: 42", model: "mock-strong", provider: "mock"},
     ],

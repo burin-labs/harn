@@ -8,15 +8,15 @@
  */
 import { command_run } from "std/command"
 
-fn echo_argv(harness: Harness, text) {
-  if harness.system.platform().os == "windows" {
+fn echo_argv(system: HarnessSystem, text) {
+  if system.platform().os == "windows" {
     return ["cmd", "/C", "echo " + text]
   }
   return ["printf", "%s", text]
 }
 
-fn file_capture_shell_spec(harness: Harness) {
-  if harness.system.platform().os == "windows" {
+fn file_capture_shell_spec(system: HarnessSystem) {
+  if system.platform().os == "windows" {
     return {
       mode: "shell",
       shell_id: "cmd",
@@ -31,7 +31,11 @@ fn file_capture_shell_spec(harness: Harness) {
 }
 
 pipeline default(harness: Harness) {
-  const result = command_run(harness.tools, echo_argv(harness, "smoke"), {capture: {max_inline_bytes: 64}})
+  const result = command_run(
+    harness.tools,
+    echo_argv(harness.system, "smoke"),
+    {capture: {max_inline_bytes: 64}},
+  )
   if !result.success {
     throw "process smoke failed: success=${result.success} exit_code=${result.exit_code} stderr=${result.stderr}"
   }
@@ -42,7 +46,8 @@ pipeline default(harness: Harness) {
     throw "process smoke failed: stdout did not contain expected marker (got ${result.stdout})"
   }
   const file_result = command_run(
-    harness.tools, file_capture_shell_spec(harness),
+    harness.tools,
+    file_capture_shell_spec(harness.system),
     {capture: {transport: "file", max_inline_bytes: 128}},
   )
   if file_result.success {

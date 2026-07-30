@@ -520,7 +520,7 @@ async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_activ
         "session/prompt",
         json!({
             "sessionId": session_id,
-            "prompt": [{"type": "text", "text": "__io_println(\"websocket prompt\")"}],
+            "prompt": [{"type": "text", "text": "harness.stdio.println(\"websocket prompt\")"}],
         }),
     )
     .await;
@@ -658,7 +658,7 @@ async fn acp_websocket_multi_client_observer_attaches_to_live_session() {
         "session/prompt",
         json!({
             "sessionId": session_id,
-            "prompt": [{"type": "text", "text": "__io_println(\"observer\")"}],
+            "prompt": [{"type": "text", "text": "harness.stdio.println(\"observer\")"}],
         }),
     )
     .await;
@@ -736,7 +736,7 @@ async fn acp_websocket_routes_host_requests_only_to_host_owner() {
         "session/prompt",
         json!({
             "sessionId": session_id,
-            "prompt": [{"type": "text", "text": "__io_println(\"owner-only host request\")"}],
+            "prompt": [{"type": "text", "text": "harness.stdio.println(\"owner-only host request\")"}],
         }),
     )
     .await;
@@ -814,7 +814,7 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
         "session/prompt",
         json!({
             "sessionId": session_id,
-            "prompt": [{"type": "text", "text": "__io_println(\"reconnect\")"}],
+            "prompt": [{"type": "text", "text": "harness.stdio.println(\"reconnect\")"}],
         }),
     )
     .await;

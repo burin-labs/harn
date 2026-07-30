@@ -1,13 +1,13 @@
-[harn] alpha
-[harn] beta
-[harn] gamma
-[harn] nil
-[harn] hello
+alpha
+beta
+gamma
+nil
+hello
 world
 
-[harn] nil
+nil
 [harn] warn: disk full
 retry in 5s
 
-[harn] true
-[harn] false
+true
+false

@@ -10,6 +10,6 @@ pipeline test(harness: Harness, task) {
   harness.stdio.log(is_absolute("relative/path"))
   const root = path_join(harness.fs.workspace_temp_dir(), "harn_stdlib_path_module")
   harness.fs.write_text(path_join(root, "nested/file.txt"), "ok")
-  harness.stdio.println(workspace_canonicalize_existing(harness, "nested/file.txt", root))
+  harness.stdio.println(workspace_canonicalize_existing(harness.fs, "nested/file.txt", root))
   harness.fs.delete(root)
 }

@@ -47,14 +47,18 @@ pipeline test(harness: Harness, task) {
   assert_eq(robots_allowed(harness, "https://example.com/private/secret"), false)
   assert_eq(robots_allowed(harness, "https://example.com/private/public/page"), true)
   assert_eq(
-    robots_allowed(harness, "https://example.com/private/secret",
+    robots_allowed(
+      harness,
+      "https://example.com/private/secret",
       "AuditBot",
       {robots_url: "https://example.com/specific-robots.txt"},
     ),
     false,
   )
   assert_eq(
-    robots_allowed(harness, "https://example.com/private/secret",
+    robots_allowed(
+      harness,
+      "https://example.com/private/secret",
       "OtherBot",
       {robots_url: "https://example.com/specific-robots.txt"},
     ),

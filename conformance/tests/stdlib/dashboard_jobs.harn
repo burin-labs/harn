@@ -1,19 +1,19 @@
 import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 
-fn fixture(harness: Harness, name) {
-  const root = harness.fs.workspace_root()
+fn fixture(fs: HarnessFs, name) {
+  const root = fs.workspace_root()
   return json_parse(
-    harness.fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
+    fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
   )
 }
 
 pipeline default(harness: Harness) {
-  const local = fixture(harness, "local_job_stream")
+  const local = fixture(harness.fs, "local_job_stream")
   let events = []
   for item in local.events {
     events = events.appending(dashboard_job_event(item.kind, item))
   }
-  const cloud_event = dashboard_job_event("run.started", fixture(harness, "cloud_managed_run"))
+  const cloud_event = dashboard_job_event("run.started", fixture(harness.fs, "cloud_managed_run"))
   const approval_requested = events.find({ event -> event.kind == "approval.requested" })
   const dlq_created = events.find({ event -> event.kind == "dlq.created" })
   const receipt_available = events.find({ event -> event.kind == "receipt.available" })
@@ -35,7 +35,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(receipt_available.receipt_refs[0].url)
   harness.stdio.println(replay_available.replay_refs[0].id)
   const view = dashboard_jobs_view(
-    harness,
+    harness.obs,
     events.appending(cloud_event),
     {generated_at: "fixture", emit: true, topic: "dashboard.jobs.test"},
   )

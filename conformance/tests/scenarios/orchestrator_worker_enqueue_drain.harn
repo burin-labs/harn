@@ -20,7 +20,7 @@ pipeline default(harness: Harness, task) {
   )
   harness.fs.write_text(
     path_join(consumer_dir, "lib.harn"),
-    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, kind: event.kind, event_id: event.id}\n}\n",
+    "import \"std/triggers\"\n\npub fn on_task(harness: Harness, event: TriggerEvent) -> dict {\n  return {ok: true, kind: event.kind, event_id: event.id}\n}\n",
   )
   const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
@@ -76,5 +76,7 @@ pipeline default(harness: Harness, task) {
   harness.stdio.println(
     data.summary.ready == 0 && data.summary.in_flight == 0 && data.summary.responses == 1,
   )
-  harness.stdio.println(data.responses[0].outcome?.status == "succeeded" && data.responses[0].error == nil)
+  harness.stdio.println(
+    data.responses[0].outcome?.status == "succeeded" && data.responses[0].error == nil,
+  )
 }

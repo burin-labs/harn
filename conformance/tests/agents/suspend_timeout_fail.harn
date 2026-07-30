@@ -14,7 +14,8 @@ import { with_llm_script } from "std/testing"
 pipeline main(harness: Harness) {
   const _ = harness.testing.clock_set(1700000100000)
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {
@@ -32,7 +33,9 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const handle = sub_agent_run(harness, "Park until the review timeout fails the worker.",
+      const handle = sub_agent_run(
+        harness,
+        "Park until the review timeout fails the worker.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
       const suspended = wait_agent(harness.agent, handle)

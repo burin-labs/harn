@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 
 fn terminal_checkpoint(events: list) -> dict {
   for event in events {
@@ -11,8 +11,12 @@ fn terminal_checkpoint(events: list) -> dict {
 }
 
 fn run_case(harness: Harness, session_id: string, callback) -> dict {
-  return agent_capture_events(harness, session_id,
-    fn() { return agent_loop(harness, "finish",
+  return agent_capture_events(
+    harness.agent,
+    session_id,
+    fn() { return agent_loop(
+      harness,
+      "finish",
       nil,
       {
         session_id: session_id,
@@ -25,8 +29,12 @@ fn run_case(harness: Harness, session_id: string, callback) -> dict {
 }
 
 fn run_sentinel_case(harness: Harness, session_id: string) -> dict {
-  return agent_capture_events(harness, session_id,
-    fn() { return agent_loop(harness, "finish",
+  return agent_capture_events(
+    harness.agent,
+    session_id,
+    fn() { return agent_loop(
+      harness,
+      "finish",
       nil,
       {
         session_id: session_id,
@@ -51,7 +59,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println("sentinel=" + sentinel_checkpoint.terminal.kind)
   harness.stdio.println("sentinel_owner=" + sentinel_checkpoint.terminal.owner)
   harness.stdio.println("sentinel_reason=" + sentinel_checkpoint.terminal.reason)
-  const policy = run_case(harness,
+  const policy = run_case(
+    harness,
     "terminal-policy-" + harness.random.uuid(),
     { _info -> return {stop: true, stop_reason: "fixture_policy_stop"} },
   )

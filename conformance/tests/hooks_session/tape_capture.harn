@@ -22,7 +22,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "user_prompt_submit",
-    { event ->
+    { _hook_harness, event ->
       const prompt = to_string(event?.prompt ?? "")
       if prompt.contains("vetome") {
         return {block: true, reason: "captured by tape"}
@@ -30,9 +30,10 @@ pipeline default(harness: Harness) {
       return nil
     },
   )
-  harness.agent.register_session_hook("session_start", { _event -> return nil })
+  harness.agent.register_session_hook("session_start", { _hook_harness, _event -> return nil })
   with_llm_script(
-    harness.llm, [llm_text("ok")],
+    harness.llm,
+    [llm_text("ok")],
     { ->
       const result = agent_loop(harness, "hello vetome please", nil, {provider: "mock"})
       const events = transcript_events(result?.transcript)

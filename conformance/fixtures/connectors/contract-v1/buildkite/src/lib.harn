@@ -203,7 +203,7 @@ pub fn call(harness: Harness, method, args = {}) {
   if method == "graphql" {
     return __graphql(harness, args ?? {})
   }
-  const config = __outbound_config(harness, args ?? {})
+  const config = __outbound_config(harness, harness.env, args ?? {})
   if is_err(config) {
     return config
   }
@@ -212,7 +212,8 @@ pub fn call(harness: Harness, method, args = {}) {
     const http_method = __upcase_method(args?.method ?? "GET")
     const path = to_string(args?.path ?? "")
     return __buildkite_json(
-      harness,
+      harness.clock,
+      harness.net,
       http_method,
       __api_url(cfg.api_base_url, path),
       args?.body,
@@ -225,7 +226,8 @@ pub fn call(harness: Harness, method, args = {}) {
   }
   if method == "job.log" {
     return __buildkite_json(
-      harness,
+      harness.clock,
+      harness.net,
       "GET",
       __api_url(
         cfg.api_base_url,
@@ -242,7 +244,8 @@ pub fn call(harness: Harness, method, args = {}) {
   }
   if method == "job.retry" {
     return __buildkite_json(
-      harness,
+      harness.clock,
+      harness.net,
       "PUT",
       __api_url(
         cfg.api_base_url,
@@ -255,7 +258,8 @@ pub fn call(harness: Harness, method, args = {}) {
   }
   if method == "job.unblock" {
     return __buildkite_json(
-      harness,
+      harness.clock,
+      harness.net,
       "PUT",
       __api_url(
         cfg.api_base_url,
@@ -268,7 +272,8 @@ pub fn call(harness: Harness, method, args = {}) {
   }
   if method == "build.rebuild" {
     return __buildkite_json(
-      harness,
+      harness.clock,
+      harness.net,
       "PUT",
       __api_url(cfg.api_base_url, __build_path(unwrap(org), args) + "/rebuild"),
       nil,
@@ -277,7 +282,8 @@ pub fn call(harness: Harness, method, args = {}) {
   }
   if method == "build.cancel" {
     return __buildkite_json(
-      harness,
+      harness.clock,
+      harness.net,
       "PUT",
       __api_url(cfg.api_base_url, __build_path(unwrap(org), args) + "/cancel"),
       nil,
@@ -285,7 +291,8 @@ pub fn call(harness: Harness, method, args = {}) {
     )
   }
   return __buildkite_json(
-    harness,
+    harness.clock,
+    harness.net,
     "GET",
     __api_url(cfg.api_base_url, __build_path(unwrap(org), args)),
     nil,
@@ -350,8 +357,8 @@ fn __header(headers, name) {
 }
 
 @complexity(allow)
-fn __webhook_token(harness: Harness, raw) {
-  const state = __state(harness.runtime)
+fn __webhook_token(runtime: HarnessRuntime, secrets: HarnessSecrets, raw) {
+  const state = __state(runtime)
   const ctx_token = state.ctx?.webhook_token ?? state.ctx?.secrets?.webhook_token
   if ctx_token != nil && trim(to_string(ctx_token)) != "" {
     return to_string(ctx_token)
@@ -367,10 +374,10 @@ fn __webhook_token(harness: Harness, raw) {
       return to_string(binding_token)
     }
   }
-  const secret_id = __webhook_token_id(harness.runtime, raw)
+  const secret_id = __webhook_token_id(runtime, raw)
   if secret_id != nil {
     const resolved = try {
-      harness.secrets.read(secret_id)
+      secrets.read(secret_id)
     }
     if !is_err(resolved) {
       const value = to_string(unwrap(resolved))
@@ -380,7 +387,7 @@ fn __webhook_token(harness: Harness, raw) {
     }
   }
   const fallback = try {
-    harness.secrets.read(BUILDKITE_WEBHOOK_TOKEN_SECRET)
+    secrets.read(BUILDKITE_WEBHOOK_TOKEN_SECRET)
   }
   if !is_err(fallback) {
     const value = to_string(unwrap(fallback))
@@ -413,7 +420,7 @@ fn __webhook_token_id(runtime: HarnessRuntime, raw) {
 
 @complexity(allow)
 fn __verify_webhook(harness: Harness, raw, headers, body_text) {
-  const token = __webhook_token(harness, raw)
+  const token = __webhook_token(harness.runtime, harness.secrets, raw)
   if token == nil || trim(to_string(token)) == "" {
     return __err(
       "missing_secret",
@@ -422,7 +429,7 @@ fn __verify_webhook(harness: Harness, raw, headers, body_text) {
   }
   const signature_header = __header(headers, "x-buildkite-signature")
   if signature_header != nil && signature_header != "" {
-    return __verify_signature(harness, raw, signature_header, body_text, to_string(token))
+    return __verify_signature(harness.clock, raw, signature_header, body_text, to_string(token))
   }
   const provided_token = __header(headers, "x-buildkite-token")
   if provided_token == nil || provided_token == "" {
@@ -438,7 +445,7 @@ fn __verify_webhook(harness: Harness, raw, headers, body_text) {
 }
 
 @complexity(allow)
-fn __verify_signature(harness: Harness, raw, signature_header, body_text, token) {
+fn __verify_signature(clock: HarnessClock, raw, signature_header, body_text, token) {
   const fields = __parse_signature_header(signature_header)
   const timestamp = fields.get("timestamp")
   const signature = fields.get("signature")
@@ -463,7 +470,7 @@ fn __verify_signature(harness: Harness, raw, signature_header, body_text, token)
   if is_err(parsed_ts) {
     return __err("invalid_signature", "x-buildkite-signature timestamp is not an integer")
   }
-  const now = __verification_timestamp(harness, raw)
+  const now = __verification_timestamp(clock, raw)
   const age = now - unwrap(parsed_ts)
   if age > SIGNATURE_MAX_AGE_SECONDS || age < -SIGNATURE_MAX_AGE_SECONDS {
     return __err(
@@ -475,7 +482,7 @@ fn __verify_signature(harness: Harness, raw, signature_header, body_text, token)
   return Ok("signed")
 }
 
-fn __verification_timestamp(harness: Harness, raw) {
+fn __verification_timestamp(clock: HarnessClock, raw) {
   const received_at = raw?.received_at
   if received_at != nil && trim(to_string(received_at)) != "" {
     const parsed = try {
@@ -485,7 +492,7 @@ fn __verification_timestamp(harness: Harness, raw) {
       return to_int(unwrap(parsed))
     }
   }
-  return to_int(harness.clock.timestamp())
+  return to_int(clock.timestamp())
 }
 
 fn __parse_signature_header(header) {
@@ -635,9 +642,9 @@ fn __upcase_method(method) {
 }
 
 @complexity(allow)
-fn __outbound_config(harness: Harness, args) {
+fn __outbound_config(harness: Harness, env: HarnessEnv, args) {
   const api_base_url = args?.api_base_url
-    ?? harness.env.get_or(
+    ?? env.get_or(
     "BUILDKITE_API_BASE_URL",
     BUILDKITE_API_BASE_URL,
   )
@@ -649,7 +656,7 @@ fn __outbound_config(harness: Harness, args) {
     ?? harness
     .env
     .get("BUILDKITE_API_TOKEN")
-    ?? harness.env.get("BUILDKITE_TOKEN")
+    ?? env.get("BUILDKITE_TOKEN")
   if api_token == nil || trim(to_string(api_token)) == "" {
     return __err(
       "missing_token",
@@ -777,7 +784,7 @@ fn __is_disallowed_host(host_lc) {
 }
 
 @complexity(allow)
-fn __buildkite_json(harness: Harness, method, url, body, cfg) {
+fn __buildkite_json(clock: HarnessClock, net: HarnessNet, method, url, body, cfg) {
   let options = {
     headers: {Accept: "application/json", Authorization: "Bearer " + cfg.api_token},
     retry: {backoff_ms: 0, max: 0},
@@ -789,13 +796,13 @@ fn __buildkite_json(harness: Harness, method, url, body, cfg) {
   let retried_rate_limit = false
   while true {
     const response_result = try {
-      harness.net.request(method, url, options)
+      net.request(method, url, options)
     }
     if is_err(response_result) {
       return __err("transport", to_string(unwrap_err(response_result)))
     }
     const response = unwrap(response_result)
-    const limited = __maybe_wait_for_rate_limit(harness, response)
+    const limited = __maybe_wait_for_rate_limit(clock, response)
     if is_err(limited) {
       return limited
     }
@@ -844,7 +851,7 @@ fn __decode_response(response) {
 }
 
 @complexity(allow)
-fn __maybe_wait_for_rate_limit(harness: Harness, response) {
+fn __maybe_wait_for_rate_limit(clock: HarnessClock, response) {
   const remaining = __header(response.headers ?? {}, "ratelimit-remaining")
   if remaining == nil || trim(to_string(remaining)) != "0" {
     return Ok(false)
@@ -859,12 +866,12 @@ fn __maybe_wait_for_rate_limit(harness: Harness, response) {
   if is_err(parsed_reset) {
     return Ok(true)
   }
-  const wait_seconds = unwrap(parsed_reset) - to_int(harness.clock.timestamp())
+  const wait_seconds = unwrap(parsed_reset) - to_int(clock.timestamp())
   if wait_seconds > 60 {
     return __err("rate_limited", "buildkite API rate limit reset is more than 60 seconds away")
   }
   if wait_seconds > 0 {
-    harness.clock.sleep_ms(wait_seconds * 1000)
+    clock.sleep_ms(wait_seconds * 1000)
   }
   return Ok(true)
 }
@@ -888,7 +895,8 @@ fn __graphql(harness: Harness, args) {
     return base_check
   }
   return __buildkite_json(
-    harness,
+    harness.clock,
+    harness.net,
     "POST",
     to_string(url),
     {query: to_string(args.query), variables: args?.variables ?? {}},
@@ -927,5 +935,12 @@ fn __github_commit_pulls(harness: Harness, args) {
     )
       + "/pulls",
   )
-  return __buildkite_json(harness, "GET", url, nil, {api_token: to_string(github_token)})
+  return __buildkite_json(
+    harness.clock,
+    harness.net,
+    "GET",
+    url,
+    nil,
+    {api_token: to_string(github_token)},
+  )
 }

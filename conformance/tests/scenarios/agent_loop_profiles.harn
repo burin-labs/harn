@@ -4,9 +4,12 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
-    harness.llm, [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"pass\"}")],
+    harness.llm,
+    [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"pass\"}")],
     { ->
-      const structured = agent_loop(harness, "grade this",
+      const structured = agent_loop(
+        harness,
+        "grade this",
         nil,
         {
           provider: "mock",
@@ -31,9 +34,12 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Needs another pass.")],
+    harness.llm,
+    [llm_text("Needs another pass.")],
     { ->
-      const verifier = agent_loop(harness, "verify this",
+      const verifier = agent_loop(
+        harness,
+        "verify this",
         nil,
         {provider: "mock", profile: "verifier", loop_until_done: true},
       )
@@ -47,9 +53,12 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Still working."), llm_text("Finished. ##DONE##")],
+    harness.llm,
+    [llm_text("Still working."), llm_text("Finished. ##DONE##")],
     { ->
-      const overridden = agent_loop(harness, "finish in two",
+      const overridden = agent_loop(
+        harness,
+        "finish in two",
         nil,
         {
           provider: "mock",

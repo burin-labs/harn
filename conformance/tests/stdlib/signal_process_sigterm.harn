@@ -7,7 +7,7 @@ pipeline default(harness: Harness) {
   const log_path = path_join(root, "sigterm.log")
   harness.fs.write_text(
     script_path,
-    "import \"std/signal\"\n\npipeline default() {\n  on_interrupt({ -> harness.stdio.println(\"term\") }, {signals: [\"SIGTERM\"], once: false})\n  harness.stdio.println(\"ready\")\n  try {\n    sleep(duration_seconds(30))\n  } catch (e) {\n    harness.stdio.println(\"caught\")\n  }\n  harness.stdio.println(interrupted())\n}\n",
+    "import \"std/signal\"\n\npipeline default(harness: Harness) {\n  on_interrupt({ -> harness.stdio.println(\"term\") }, {signals: [\"SIGTERM\"], once: false})\n  harness.stdio.println(\"ready\")\n  try {\n    harness.clock.sleep_ms(30000)\n  } catch (e) {\n    harness.stdio.println(\"caught\")\n  }\n  harness.stdio.println(interrupted())\n}\n",
   )
   const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
@@ -22,7 +22,7 @@ pipeline default(harness: Harness) {
   require pid != "", "missing child pid"
   require wait_for_log_contains(harness, log_path, "ready"), "child did not become ready"
   const _ = harness.process.shell("kill -TERM " + pid)
-  const exited = wait_for_exit(harness, pid)
+  const exited = wait_for_exit(harness.clock, harness.process, pid)
   const _ = harness.process.shell("kill -TERM " + pid + " >/dev/null 2>&1 || true")
   require exited, "child did not exit after SIGTERM"
   const log = harness.fs.read_text(log_path)

@@ -10,7 +10,10 @@
 import { probe_canonical, sample_registry } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
-  probe_canonical(harness, "full canonical response round trips",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "full canonical response round trips",
     """<assistant_prose>Creating the file.</assistant_prose>
 <user_response>Created the file.</user_response>
 <tool_call>
@@ -19,24 +22,42 @@ edit({ action: "create", path: "a.rs", content: "fn a() {}" })
 <done>##DONE##</done>""",
     sample_registry(),
   )
-  probe_canonical(harness, "user_response only",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "user_response only",
     "<user_response>Visible answer.</user_response>",
     sample_registry(),
   )
   // Raw stray text is wrapped as narration rather than replayed verbatim.
-  probe_canonical(harness, "stray text is wrapped as assistant prose",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "stray text is wrapped as assistant prose",
     """leading garbage
 <assistant_prose>Narration.</assistant_prose>""",
     sample_registry(),
   )
-  probe_canonical(harness, "plain prose response", "just prose with no tags at all", sample_registry())
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "plain prose response",
+    "just prose with no tags at all",
+    sample_registry(),
+  )
   // A bare call is replayed with the wrapper the model omitted.
-  probe_canonical(harness, "bare call gains a wrapper",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "bare call gains a wrapper",
     "edit({ action: \"create\", path: \"a.rs\", content: \"x\" })",
     sample_registry(),
   )
   // Compact aliases are replayed in the canonical spelling.
-  probe_canonical(harness, "compact aliases replay canonically",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "compact aliases replay canonically",
     """<assistantprose>Checking status.</assistantprose>
 <userresponse>Done.</userresponse>
 <toolcall>
@@ -46,38 +67,56 @@ run({ command: "git status" })
     sample_registry(),
   )
   // A nested-XML body is replayed as Harn syntax, not as the XML it arrived in.
-  probe_canonical(harness, "nested xml body replays as harn syntax",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "nested xml body replays as harn syntax",
     "<tool_call><edit>{\"action\":\"create\",\"path\":\"a.rs\",\"content\":\"fn a() {}\"}</edit></tool_call>",
     sample_registry(),
   )
   // Mistral markers become real tool_call blocks, one per recovered call.
-  probe_canonical(harness, "mistral markers replay as tool_call blocks",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "mistral markers replay as tool_call blocks",
     """I'll inspect first.
 [TOOL_CALLS] [{"name":"edit","arguments":{"action":"create","path":"a.rs","content":"fn a() {}"}},{"name":"run","arguments":"{\"command\":\"cargo test\"}"}]""",
     sample_registry(),
   )
   // Harmony framing: the analysis channel becomes prose and the frame tokens
   // are gone.
-  probe_canonical(harness, "harmony frames do not survive replay",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "harmony frames do not survive replay",
     """<|start|>assistant<|channel|>analysis<|message|>I need to inspect the files first.<|end|><|start|>assistant<|channel|>commentary<|message|><tool_call>
 edit({ action: "create", path: "a.rs", content: "a" })
 </tool_call><|end|>""",
     sample_registry(),
   )
-  probe_canonical(harness, "malformed wrapper debris does not survive replay",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "malformed wrapper debris does not survive replay",
     """<tool_call>
 run({ "command": "cargo test -p core" })
 </tool_call><tool_call<|message|>run({ "command": "cargo test -p app" })""",
     sample_registry(),
   )
-  probe_canonical(harness, "malformed assistant header does not survive replay",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "malformed assistant header does not survive replay",
     """<assistant<|channel|>analysis<|message|>We need to inspect the file.<tool_call>
 run({ "command": "zig test src/root.zig" })
 </tool_call>""",
     sample_registry(),
   )
   // Chat-template markup replays as the tagged grammar.
-  probe_canonical(harness, "function markup replays as the tagged grammar",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "function markup replays as the tagged grammar",
     """<tool_call>
 <function=edit>
 <parameter=action>
@@ -91,7 +130,10 @@ internal/handlers/health.go
     sample_registry(),
   )
   // An unclosed wrapper around a complete call is re-emitted well-formed.
-  probe_canonical(harness, "recovered unclosed wrapper replays well formed",
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "recovered unclosed wrapper replays well formed",
     """<tool_call>
 edit({ "action": "create", "path": "src/main.swift", "content": <<EOF
 import Foundation

@@ -9,9 +9,14 @@ import { with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
   with_llm_script(
-    harness.llm, [{error: {category: "rate_limit", message: "429 slow down"}}],
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 slow down"}}],
     { ->
-      const r = harness.llm.call_structured_result("Q", schema, {provider: "mock", repair: {enabled: true}})
+      const r = harness.llm.call_structured_result(
+        "Q",
+        schema,
+        {provider: "mock", repair: {enabled: true}},
+      )
       harness.stdio.println(r.ok)
       harness.stdio.println(r.data == nil)
       harness.stdio.println(r.error_category)

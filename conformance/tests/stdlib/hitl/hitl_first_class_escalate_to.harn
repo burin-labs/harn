@@ -5,10 +5,14 @@ import "std/hitl"
 pipeline test(harness: Harness, task) {
   harness.testing.clear()
   harness.testing.respond(
-    "interaction", "escalation_response",
+    "interaction",
+    "escalation_response",
     {accepted: true, reviewer: "oncall-primary", reason: "took over"},
   )
-  const handle = harness.interaction.escalate_to("oncall", "deploy failed during maintenance window")
+  const handle = harness.interaction.escalate_to(
+    "oncall",
+    "deploy failed during maintenance window",
+  )
   harness.stdio.println(handle.role)
   harness.stdio.println(handle.reason)
   harness.stdio.println(handle.status)

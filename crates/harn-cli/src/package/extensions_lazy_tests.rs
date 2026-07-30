@@ -117,7 +117,7 @@ import "std/triggers"
 
 let must_not_initialize = 1 / 0
 
-pub fn on_new_issue(event: TriggerEvent) -> string {
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -187,7 +187,7 @@ import "std/triggers"
 
 let must_not_initialize = 1 / 0
 
-pub fn on_new_issue(event: TriggerEvent) -> string {
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 
@@ -221,7 +221,7 @@ import "std/triggers"
 
 let must_not_initialize = 1 / 0
 
-pub fn on_new_issue(event: TriggerEvent) -> string {
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 

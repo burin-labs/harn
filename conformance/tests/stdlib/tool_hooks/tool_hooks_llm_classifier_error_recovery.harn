@@ -15,10 +15,13 @@ pipeline default(harness: Harness) {
   /* Non-JSON model output — the parser should classify as kind=error
    * and the wrapper should passthrough rather than throw. */
   with_llm_script(
-    harness.llm, [llm_text("I am a chatty model and I do not return JSON.")],
+    harness.llm,
+    [llm_text("I am a chatty model and I do not return JSON.")],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
+      const wrapper = preset_run_command(
+        harness,
+        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
       )
       const r = wrapper({command: "echo hi"})
       harness.stdio.println(r.ok)

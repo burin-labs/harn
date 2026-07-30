@@ -32,7 +32,9 @@ pipeline test(harness: Harness, task) {
   } catch (e) {
     to_string(e)
   }
-  harness.stdio.println(contains(int_error, "count_by") && contains(int_error, "string discriminator"))
+  harness.stdio.println(
+    contains(int_error, "count_by") && contains(int_error, "string discriminator"),
+  )
   // group_by has the same contract.
   const bool_error = try {
     [1, 2, 3].group_by({ x -> x % 2 == 0 })
@@ -40,7 +42,9 @@ pipeline test(harness: Harness, task) {
   } catch (e) {
     to_string(e)
   }
-  harness.stdio.println(contains(bool_error, "group_by") && contains(bool_error, "string discriminator"))
+  harness.stdio.println(
+    contains(bool_error, "group_by") && contains(bool_error, "string discriminator"),
+  )
   // Coercing to string works as documented.
   const by_parity = [1, 2, 3, 4].count_by({ x -> to_string(x % 2) })
   harness.stdio.println(by_parity["0"] == 2 && by_parity["1"] == 2)

@@ -1249,7 +1249,7 @@ fn main(harness: Harness) {
   const sccache_install_action = read_yaml(harness.fs, SCCACHE_INSTALL_ACTION_PATH, nil)
   let workflows = {}
   for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
-    workflows[workflow_name(path)] = read_yaml(path, nil)
+    workflows[workflow_name(path)] = read_yaml(harness.fs, path, nil)
   }
   const errors = ci_cache_policy_errors(policy, action, node_action, workflows)
     + setup_harn_cache_action_errors(

@@ -35,7 +35,7 @@ pipeline main(harness: Harness) {
   )
   harness.stdio.println(gated_manifest.bindings[0].policy.disposition)
   const gated = harness.tools.composition_execute(
-    "return write_file(harness, {path: \"x\", content: \"bad\"})",
+    "return write_file({path: \"x\", content: \"bad\"})",
     gated_manifest,
     {run_id: "conformance-gated"},
   )

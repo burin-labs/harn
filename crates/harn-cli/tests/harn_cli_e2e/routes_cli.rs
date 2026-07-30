@@ -73,7 +73,7 @@ budget = { max_cost_usd = 0.02 }
 import "std/triggers"
 import { post_message } from "std/connectors/slack"
 
-pub fn on_review(event: TriggerEvent) -> dict {
+pub fn on_review(harness: Harness, event: TriggerEvent) -> dict {
   const body = read_file("README.md")
   const prompt = harness.fs.render_prompt("prompts/review.harn.prompt", {body: body})
   http_post("https://example.test/hook", prompt)
@@ -84,7 +84,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
   return true
 }
 
-pub fn portable(event: TriggerEvent) -> dict {
+pub fn portable(harness: Harness, event: TriggerEvent) -> dict {
   return {ok: true}
 }
 "#,

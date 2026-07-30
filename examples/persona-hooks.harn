@@ -17,7 +17,8 @@ pipeline default(harness: Harness) {
     "PostStep",
     { ctx ->
       post_message(
-        harness, "#release-ops",
+        harness,
+        "#release-ops",
         "merge_captain.admin_merge completed: " + to_string(ctx.output),
         nil,
         {metadata: {persona_hook_target: ctx.target}},

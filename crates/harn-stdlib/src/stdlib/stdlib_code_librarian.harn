@@ -566,7 +566,8 @@ const __DEFAULT_LLM_OPTIONS = {
  * @api_stability: experimental
  * @example: code_librarian_query_nl(harness, "which file defines formatDate?")
  */
-pub fn code_librarian_query_nl(harness: Harness,
+pub fn code_librarian_query_nl(
+  harness: Harness,
   code_index: HarnessCodeIndex,
   clock: HarnessClock,
   text: string,
@@ -576,8 +577,9 @@ pub fn code_librarian_query_nl(harness: Harness,
   const started_ms = clock.monotonic_ms()
   const cache_key = "v1:" + lowercase(trim(text))
   const envelope = with_cache_envelope(
-    harness, cache_key,
-    { -> __nl_resolve(harness, code_index, text, opts) },
+    harness,
+    cache_key,
+    { -> __nl_resolve(harness.agent, harness.llm, code_index, text, opts) },
     {store: {backend: "mem", namespace: __NL_CACHE_NAMESPACE}, ttl_seconds: __NL_CACHE_TTL_SECONDS},
   )
   const result = envelope.value
@@ -592,8 +594,14 @@ pub fn code_librarian_query_nl(harness: Harness,
   }
 }
 
-fn __nl_resolve(harness: Harness, code_index: HarnessCodeIndex, text, opts) -> dict {
-  const compiled = __nl_compile(harness, text, opts)
+fn __nl_resolve(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  code_index: HarnessCodeIndex,
+  text,
+  opts,
+) -> dict {
+  const compiled = __nl_compile(llm, text, opts)
   if compiled.ok {
     const rows = try {
       const raw = code_index.cypher({query: compiled.cypher})
@@ -613,7 +621,7 @@ fn __nl_resolve(harness: Harness, code_index: HarnessCodeIndex, text, opts) -> d
   }
   // Compile-path missed (parse error or zero rows). Fall back to MCTS.
   const mcts = __nl_mcts(code_index, text, opts)
-  __nl_emit_fallback(harness, opts, text, compiled?.cypher, mcts)
+  __nl_emit_fallback(agent, opts, text, compiled?.cypher, mcts)
   return {
     cypher: compiled?.cypher,
     mcts_depth: mcts.depth,
@@ -623,13 +631,15 @@ fn __nl_resolve(harness: Harness, code_index: HarnessCodeIndex, text, opts) -> d
   }
 }
 
-fn __nl_emit_fallback(harness: Harness, opts, text, attempted_cypher, mcts) {
+fn __nl_emit_fallback(agent: HarnessAgent, opts, text, attempted_cypher, mcts) {
   const session_id = to_string(opts?.session_id ?? "")
   if session_id == "" {
     return
   }
   const _ = try {
-    agent_emit_event(harness, session_id,
+    agent_emit_event(
+      agent,
+      session_id,
       "code_librarian_query_nl_fallback",
       {
         attempted_cypher: attempted_cypher,
@@ -658,12 +668,12 @@ const __CYPHER_TEMPLATES = [
 const __CYPHER_PROMPT_PREAMBLE =
   "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Field, EnumCase, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, access_level, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
 
-fn __nl_compile(harness: Harness, text, opts) -> dict {
+fn __nl_compile(llm: HarnessLlm, text, opts) -> dict {
   const prompt = __nl_compile_prompt(text)
   const schema = schema_object({cypher: schema_string()})
   const call_opts = __nl_llm_options(opts)
   const envelope = try {
-    safe_structured_call(harness, prompt, schema, call_opts)
+    safe_structured_call(llm, prompt, schema, call_opts)
   } catch (_) {
     return {cypher: nil, ok: false}
   }

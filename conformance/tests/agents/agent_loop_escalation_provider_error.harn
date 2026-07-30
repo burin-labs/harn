@@ -1,4 +1,3 @@
-import { agent_loop } from "std/agent/loop"
 // C13: a smart-escalation turn whose escalated provider fails fast
 // (pre-dispatch `provider_error`) must NOT silently break the loop and let a
 // stale cheap-model turn masquerade as success. The non-tracked provider-error
@@ -14,6 +13,7 @@ import { agent_loop } from "std/agent/loop"
 // NO escalation in effect still surfaces an event and stops with provider_error
 // (no spurious retry), so normal handling is preserved.
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 
 /**
  * The provider_error path stamps a `skip_reason` of "provider_failure" or
@@ -54,7 +54,9 @@ fn escalation_fallback_case(harness: Harness) {
   // route. The tool_format clause prevents native escalations from leaking
   // back into text-only primaries after an escalation provider error.
   const seen = harness.runtime.shared_cell({scope: "task_group", key: "esc-providers", initial: ""})
-  const formats = harness.runtime.shared_cell({scope: "task_group", key: "esc-formats", initial: ""})
+  const formats = harness.runtime.shared_cell(
+    {scope: "task_group", key: "esc-formats", initial: ""},
+  )
   const turn = harness.runtime.shared_cell({scope: "task_group", key: "esc-turn", initial: 0})
   const caller = { call ->
     let provider = to_string(call?.opts?.provider ?? "")
@@ -100,8 +102,12 @@ fn escalation_fallback_case(harness: Harness) {
     return nil
   }
   const session = "esc-fallback-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_loop(harness, "do the task",
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "do the task",
       nil,
       {
         session_id: session,
@@ -120,10 +126,14 @@ fn escalation_fallback_case(harness: Harness) {
   //     the failed escalated provider/model/status — not a silent break.
   const perr = first_provider_error_event(captured.events)
   harness.stdio.println("esc_event_present=" + to_string(perr != nil))
-  harness.stdio.println("esc_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  harness.stdio.println(
+    "esc_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""),
+  )
   harness.stdio.println("esc_event_provider=" + to_string(perr?.iteration_info?.provider ?? ""))
   harness.stdio.println("esc_event_model=" + to_string(perr?.iteration_info?.model ?? ""))
-  harness.stdio.println("esc_event_status=" + to_string(perr?.iteration_info?.provider_status ?? ""))
+  harness.stdio.println(
+    "esc_event_status=" + to_string(perr?.iteration_info?.provider_status ?? ""),
+  )
   harness.stdio.println(
     "esc_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false),
   )
@@ -159,8 +169,12 @@ fn primary_provider_error_case(harness: Harness) {
     }
   }
   const session = "esc-primary-err-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_loop(harness, "do the task",
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "do the task",
       nil,
       {
         session_id: session,
@@ -175,12 +189,16 @@ fn primary_provider_error_case(harness: Harness) {
   )
   const perr = first_provider_error_event(captured.events)
   harness.stdio.println("primary_event_present=" + to_string(perr != nil))
-  harness.stdio.println("primary_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  harness.stdio.println(
+    "primary_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""),
+  )
   harness.stdio.println(
     "primary_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false),
   )
   // Exactly one failing turn — no escalation fallback means no spurious retry.
-  harness.stdio.println("primary_event_count=" + to_string(count_events(captured.events, "iteration_end")))
+  harness.stdio.println(
+    "primary_event_count=" + to_string(count_events(captured.events, "iteration_end")),
+  )
   harness.stdio.println("primary_status=" + captured.result.status)
 }
 
@@ -189,8 +207,12 @@ fn primary_provider_error_case(harness: Harness) {
 // -------------------------------------------------------------------------------------------------
 
 fn escalation_transient_transport_abort_case(harness: Harness) {
-  const seen = harness.runtime.shared_cell({scope: "task_group", key: "esc-transport-providers", initial: ""})
-  const turn = harness.runtime.shared_cell({scope: "task_group", key: "esc-transport-turn", initial: 0})
+  const seen = harness.runtime.shared_cell(
+    {scope: "task_group", key: "esc-transport-providers", initial: ""},
+  )
+  const turn = harness.runtime.shared_cell(
+    {scope: "task_group", key: "esc-transport-turn", initial: 0},
+  )
   const caller = { call ->
     let provider = to_string(call?.opts?.provider ?? "")
     let snap = harness.runtime.shared_snapshot(seen)
@@ -224,8 +246,12 @@ fn escalation_transient_transport_abort_case(harness: Harness) {
     return nil
   }
   const session = "esc-transport-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_loop(harness, "do the task",
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "do the task",
       nil,
       {
         session_id: session,
@@ -242,7 +268,9 @@ fn escalation_transient_transport_abort_case(harness: Harness) {
   )
   const perr = first_provider_error_event(captured.events)
   harness.stdio.println("transport_event_present=" + to_string(perr != nil))
-  harness.stdio.println("transport_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  harness.stdio.println(
+    "transport_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""),
+  )
   harness.stdio.println("transport_status=" + captured.result.status)
   harness.stdio.println("transport_stop_reason=" + captured.result.stop_reason)
   harness.stdio.println(

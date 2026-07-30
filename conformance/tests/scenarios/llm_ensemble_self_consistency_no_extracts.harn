@@ -6,9 +6,13 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("noise-1"), llm_text("noise-2"), llm_text("noise-3")],
+    harness.llm,
+    [llm_text("noise-1"), llm_text("noise-2"), llm_text("noise-3")],
     { ->
-      const result = self_consistency(harness, "anything",
+      const result = self_consistency(
+        harness.agent,
+        harness.llm,
+        "anything",
         "",
         {
           n: 3,

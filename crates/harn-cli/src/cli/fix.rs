@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, ValueEnum};
+use clap::Args;
 use harn_parser::RepairSafety;
 
 #[derive(Debug, Args)]
@@ -17,9 +17,6 @@ pub(crate) struct FixArgs {
     /// Maximum repair safety class to include.
     #[arg(long, value_parser = parse_repair_safety, value_name = "SAFETY")]
     pub safety: Option<RepairSafety>,
-    /// How Harness migrations should satisfy call sites without a local Harness binding.
-    #[arg(long, value_enum, default_value_t = HarnessThreadingMode::ThreadParams)]
-    pub harness_threading: HarnessThreadingMode,
     /// Restrict the plan/apply pass to explicit Harness capability migrations.
     #[arg(long)]
     pub capability_migrations_only: bool,
@@ -29,30 +26,6 @@ pub(crate) struct FixArgs {
     /// .harn file or directory to inspect.
     #[arg(required = true)]
     pub path: PathBuf,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
-pub(crate) enum HarnessThreadingMode {
-    /// Use the VM-level `harness` binding and preserve helper signatures.
-    LocalGlobal,
-    /// Add `harness: Harness` parameters and update same-file callers.
-    #[default]
-    ThreadParams,
-}
-
-impl HarnessThreadingMode {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::LocalGlobal => "local-global",
-            Self::ThreadParams => "thread-params",
-        }
-    }
-}
-
-impl std::fmt::Display for HarnessThreadingMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
 }
 
 fn parse_repair_safety(value: &str) -> Result<RepairSafety, String> {

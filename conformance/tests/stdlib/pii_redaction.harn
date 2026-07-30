@@ -32,7 +32,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println("invalid_iban:" + to_string(len(pii_detect("iban GB00WEST12345698765432"))))
   // 4. Reversible round-trip is exact.
   const redacted = pii_redact(text)
-  harness.stdio.println("roundtrip:" + to_string(pii_restore(redacted.clean, redacted.restore) == text))
+  harness.stdio.println(
+    "roundtrip:" + to_string(pii_restore(redacted.clean, redacted.restore) == text),
+  )
   harness.stdio.println("email_scrubbed:" + to_string(index_of(redacted.clean, "a@b.com") == -1))
   // 5. Deterministic tokens: the same entity value maps to one stable token.
   const dup = pii_redact("from a@b.com to a@b.com")

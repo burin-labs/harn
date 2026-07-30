@@ -1,10 +1,11 @@
-import { workflow_execute } from "std/workflow/execute"
 import { task_plan_compile } from "std/agent/task_plan"
 import { with_llm_script } from "std/testing"
+import { workflow_execute } from "std/workflow/execute"
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "still working",
         provider: "openai",
@@ -30,7 +31,13 @@ pipeline main(harness: Harness) {
         budgets: {total_cost_usd: 0.000001},
       }
       const compiled = task_plan_compile(plan)
-      const result = workflow_execute(harness, "Budgeted workflow", compiled.workflow, [], {max_steps: 1})
+      const result = workflow_execute(
+        harness,
+        "Budgeted workflow",
+        compiled.workflow,
+        [],
+        {max_steps: 1},
+      )
       const stage = result.run.stages[0]
       harness.stdio.println(result.status)
       harness.stdio.println(stage.status)

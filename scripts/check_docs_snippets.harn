@@ -263,7 +263,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
   }
   let target_dir = ""
   const meta = harness.process.run(
-    {cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
+    {program: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
   )
   if meta.success {
     const parsed = try {
@@ -282,9 +282,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process.run(
-      {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
-    )
+    const build = harness.process.run({program: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
       harness.stdio.eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
@@ -303,16 +301,14 @@ pipeline main(harness: Harness, task) {
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the snippet scratch directory lives there (removed afterward) rather
    * than under the system temp dir the bash version used. */
-  const mk = harness.process.run(
-    {cmd: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]},
-  )
+  const mk = harness.process.run({program: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]})
   if !mk.success {
     harness.stdio.eprintln("error: could not create temp directory")
     harness.runtime.exit(1)
   }
   const tmp_dir = mk.stdout.trim()
   defer {
-    harness.process.run({cmd: "rm", args: ["-rf", tmp_dir]})
+    harness.process.run({program: "rm", args: ["-rf", tmp_dir]})
   }
   let checked = 0
   let skipped = 0
@@ -327,7 +323,9 @@ pipeline main(harness: Harness, task) {
       if event.kind == "unclosed" {
         failures = failures + 1
         harness.stdio.println("")
-        harness.stdio.println("FAIL: ${md_file} (unclosed ```harn fence opened at line ${event.open_line})")
+        harness.stdio.println(
+          "FAIL: ${md_file} (unclosed ```harn fence opened at line ${event.open_line})",
+        )
         harness.stdio.println("      hint: the next fenced block opens before this one closes.")
         continue
       }
@@ -338,9 +336,7 @@ pipeline main(harness: Harness, task) {
       checked = checked + 1
       const block_path = "${prefix}_${event.idx}${mode_extension(event.mode)}"
       harness.fs.write_text(block_path, event.content)
-      const res = harness.process.run(
-        {cmd: harn_bin, args: mode_argv(event.mode, block_path)},
-      )
+      const res = harness.process.run({program: harn_bin, args: mode_argv(event.mode, block_path)})
       if !res.success {
         failures = failures + 1
         harness.stdio.println("")
@@ -367,7 +363,7 @@ pipeline main(harness: Harness, task) {
     harness.stdio.println("      intentional fragment.")
     // harness.runtime.exit() bypasses defer, so remove the scratch directory before reporting
     // failure to the calling shell.
-    harness.process.run({cmd: "rm", args: ["-rf", tmp_dir]})
+    harness.process.run({program: "rm", args: ["-rf", tmp_dir]})
     harness.runtime.exit(1)
   }
 }

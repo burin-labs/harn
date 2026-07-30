@@ -9,9 +9,9 @@ async fn parallel_settle_propagates_explicit_process_exit() {
     let local = tokio::task::LocalSet::new();
     let result = local
         .run_until(run_harn_result_async(
-            r"pipeline default(task) {
+            r"pipeline default(harness: Harness, task) {
   const result = parallel settle [1] { _ ->
-    exit(7)
+    harness.runtime.exit(7)
   }
   return result
 }",
@@ -27,11 +27,11 @@ async fn detached_spawn_propagates_explicit_process_exit_to_parent() {
     local
         .run_until(async {
             let handle = tokio::task::spawn_local(run_harn_result_async(
-                r"pipeline default(task) {
+                r"pipeline default(harness: Harness, task) {
   const child = spawn {
-    exit(11)
+    harness.runtime.exit(11)
   }
-  sleep(1s)
+  harness.clock.sleep_ms(1000)
   return 0
 }",
             ));

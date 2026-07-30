@@ -14,7 +14,7 @@ import "std/triggers"
  * layer (via agent_loop, which pushes onto the current-session stack).
  */
 pipeline test(harness: Harness, task) {
-  const _ = lifecycle_audit_log_take(harness)
+  const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.range(100000, 999999),
@@ -58,7 +58,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(dispatch.result?.status == "dropped")
   harness.stdio.println(dispatch.result?.reason == "target_missing")
   harness.stdio.println(dispatch.result?.target_kind == "current")
-  const audits = lifecycle_audit_log_take(harness)
+  const audits = lifecycle_audit_log_take(harness.obs)
   let inject_audit_count = 0
   let outcome = ""
   let reason = ""

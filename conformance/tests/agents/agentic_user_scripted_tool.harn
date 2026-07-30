@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { scripted_user, simulated_user_status, user_tools } from "std/agent/user"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -27,7 +27,7 @@ pipeline main(harness: Harness) {
       )
       const session = "agentic-user-scripted-tool"
       const captured = agent_capture_events(
-        harness,
+        harness.agent,
         session,
         fn() { return agent_loop(
           harness,
@@ -49,7 +49,7 @@ pipeline main(harness: Harness) {
         },
       )
       const calls = harness.llm.mock_calls()
-      const status = simulated_user_status(harness, answerer)
+      const status = simulated_user_status(harness.runtime, answerer)
       harness.stdio.println(captured.result.status)
       harness.stdio.println(contains(captured.result.text, "Vitest edge coverage"))
       harness.stdio.println(status.state.replies)

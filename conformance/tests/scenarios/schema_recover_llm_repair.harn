@@ -10,7 +10,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
-    harness.llm, [llm_text("{\"verdict\": \"pass\"}")],
+    harness.llm,
+    [llm_text("{\"verdict\": \"pass\"}")],
     { ->
       const r = harness.llm.recover_schema(
         "model said pass but failed to format it",

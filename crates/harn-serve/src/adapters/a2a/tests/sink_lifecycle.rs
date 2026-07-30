@@ -30,8 +30,8 @@ async fn waits_for_sink_failure_before_completing_and_clears_registration() {
         r#"
 import { agent_progress } from "std/agent/progress"
 
-pub fn triage(task: string) -> string {
-  agent_progress({message: "Persist this progress."})
+pub fn triage(harness: Harness, task: string) -> string {
+  agent_progress(harness.agent, {message: "Persist this progress."})
   return task
 }
 "#,
@@ -64,8 +64,8 @@ async fn cancellation_keeps_sink_failure_without_losing_cancelled_status() {
         r#"
 import { agent_progress } from "std/agent/progress"
 
-pub fn triage(task: string) -> string {
-  agent_progress({message: "Ready for cancellation."})
+pub fn triage(harness: Harness, task: string) -> string {
+  agent_progress(harness.agent, {message: "Ready for cancellation."})
   while true {
     if is_cancelled() {
       return task

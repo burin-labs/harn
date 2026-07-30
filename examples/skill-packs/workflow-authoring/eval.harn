@@ -17,9 +17,9 @@
  * case; non-zero otherwise.
  */
 pipeline default(harness: Harness) {
-  const opts = parse_argv(harness, argv)
+  const opts = parse_argv(harness.env, argv)
   if opts.case == "" {
-    __io_write_stderr(
+    harness.stdio.eprint(
       "usage: harn run eval.harn -- --case <path> [--provider <id>] [--model <name>] [--tmp <dir>]\n",
     )
     return 2
@@ -41,17 +41,38 @@ pipeline default(harness: Harness) {
     const response = harness.llm.call(case.user_prompt, case.system_prompt, opts_dict)
     bundle_text = extract_block(response.text, "bundle")
     if bundle_text == "" {
-      __io_write_stderr("eval: model response missing <bundle>...</bundle>\n")
+      harness.stdio.eprint("eval: model response missing <bundle>...</bundle>\n")
       return 3
     }
   }
-  exec("mkdir", "-p", opts.tmp)
+  harness.fs.mkdir(opts.tmp)
   const bundle_path = opts.tmp + "/" + case.id + ".bundle.json"
   harness.fs.write_text(bundle_path, bundle_text)
   const harn_bin = opts.harn_bin
-  const validate = exec(harn_bin, "workflow", "validate", "--bundle", bundle_path, "--json")
-  const preview = exec(harn_bin, "workflow", "preview", "--bundle", bundle_path, "--json")
-  const runres = exec(harn_bin, "workflow", "run", "--bundle", bundle_path, "--json")
+  const validate = harness.process.exec(
+    harn_bin,
+    "workflow",
+    "validate",
+    "--bundle",
+    bundle_path,
+    "--json",
+  )
+  const preview = harness.process.exec(
+    harn_bin,
+    "workflow",
+    "preview",
+    "--bundle",
+    bundle_path,
+    "--json",
+  )
+  const runres = harness.process.exec(
+    harn_bin,
+    "workflow",
+    "run",
+    "--bundle",
+    bundle_path,
+    "--json",
+  )
   const validate_ok = validate.success
   const preview_ok = preview.success
   const run_ok = runres.success
@@ -72,21 +93,21 @@ pipeline default(harness: Harness) {
     validate_stdout: validate.stdout,
     validate_stderr: validate.stderr,
   }
-  __io_write_stdout(json_stringify(report))
-  __io_write_stdout("\n")
+  harness.stdio.print(json_stringify(report))
+  harness.stdio.print("\n")
   if validate_ok && preview_ok && run_ok && assertions.ok {
     return 0
   }
   return 1
 }
 
-fn parse_argv(harness: Harness, args: list<string>) -> dict {
+fn parse_argv(env: HarnessEnv, args: list<string>) -> dict {
   let opts = {
     case: "",
     provider: "fake",
     model: "fake-model",
     tmp: ".harn-runs/workflow-authoring-eval",
-    harn_bin: harness.env.get_or("HARN_BIN", "harn"),
+    harn_bin: env.get_or("HARN_BIN", "harn"),
   }
   let i = 0
   while i < len(args) {

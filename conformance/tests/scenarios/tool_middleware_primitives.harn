@@ -58,7 +58,7 @@ pipeline default(harness: Harness) {
   const middle = { call, inner ->
     return inner(call + {tool_args: call.tool_args + {seen_by_middle: "yes"}})
   }
-  const composed = compose_tool_callers(harness, [outer, middle])
+  const composed = compose_tool_callers(harness.clock, [outer, middle])
   const r2 = composed(envelope("write", {path: "/tmp/x"}), next)
   harness.stdio.println(r2.wrapped_by)
   harness.stdio.println(r2.arguments.seen_by)

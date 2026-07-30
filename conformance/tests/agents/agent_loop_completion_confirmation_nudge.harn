@@ -68,13 +68,16 @@ fn nudge_text_in(calls, idx) {
 pipeline main(harness: Harness) {
   // Scenario 1: regression-then-recover.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Let me look that up for you."),
       {tool_calls: [{id: "l1", name: "lookup", arguments: {query: "release"}}]},
       llm_text("Found it: release notes are ready."),
     ],
     { ->
-      const recover = agent_loop(harness, "Look up the release notes.",
+      const recover = agent_loop(
+        harness,
+        "Look up the release notes.",
         nil,
         {
           provider: "mock",
@@ -93,9 +96,12 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Direct answer: 42."), llm_text("Confirmed: 42.")],
+    harness.llm,
+    [llm_text("Direct answer: 42."), llm_text("Confirmed: 42.")],
     { ->
-      const confirm = agent_loop(harness, "What is the answer?",
+      const confirm = agent_loop(
+        harness,
+        "What is the answer?",
         nil,
         {
           provider: "mock",
@@ -114,12 +120,15 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "bad1", name: "always_fails", arguments: {}}]},
       llm_text("Tool blew up, here is what I can say from prior knowledge."),
     ],
     { ->
-      const skip = agent_loop(harness, "Try the tool and report.",
+      const skip = agent_loop(
+        harness,
+        "Try the tool and report.",
         nil,
         {
           provider: "mock",

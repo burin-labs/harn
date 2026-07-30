@@ -25,8 +25,8 @@ for `run_command`-shaped tools that take a shell command string.
 The examples on this page intentionally wrap a shell-command tool: the point
 is to intercept, rewrite, deny, and audit command strings before a trusted
 host executes them. For ordinary tools that do not need shell syntax, prefer
-argv-style calls such as `exec("rg", "--", pattern)` or a narrow host
-capability instead of building a shell string.
+argv-style calls such as `harness.process.exec("rg", "--", pattern)` instead
+of building a shell string.
 
 The quickref companion (LLM-friendly) lives in the "Catalogue-driven
 `run_command` hooks" section of
@@ -43,12 +43,12 @@ the preset wrapper composes under).
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
     stacks: ["rust", "python"],
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -105,7 +105,7 @@ original command when the rule has no rewriter (treat that case as a
 Side effects:
 
 - `tool_hooks_emit_audit("tool_rewrite", payload)` — lifecycle audit
-  entry observable via `lifecycle_audit_log_take()`.
+  entry observable via `harness.obs.pipeline_lifecycle_audit_log_take()`.
 - `tool_hooks_inject_reminder({tags: ["tool_rewritten"], body, ttl_turns: 1})`
   — queues a one-turn `system_reminder` so the next agent turn sees
   the corrected shape. When no agent session is active (headless
@@ -208,7 +208,7 @@ const wrapper = preset_run_command({
   stacks: ["rust"],
   custom_rules: [no_curl_pipe_sh],
   mode: tool_hooks_mode_deny_with_explanation,
-  inner: { args -> shell(args.command) },
+  inner: { args -> harness.process.shell(args.command) },
 })
 ```
 
@@ -252,7 +252,7 @@ const wrapper = preset_run_command({
     threshold: 0.8,
     cache: {ttl_seconds: 3600},
   },
-  inner: { args -> shell(args.command) },
+  inner: { args -> harness.process.shell(args.command) },
 })
 ```
 
@@ -368,7 +368,7 @@ that flow through the standard transcript machinery:
 | `tool_hook_classifier_verdict` | LLM classifier | `scope`, `model`, `kind`, `confidence`, `threshold`, `cache_hit`, `action`, `normalized_command`, `error?` |
 | `tool_hooks.reminder_injected` | Any reminder-injecting mode | The reminder spec passed to `tool_hooks_inject_reminder` |
 
-`lifecycle_audit_log_take()` drains the in-memory buffer so unit tests
+`harness.obs.pipeline_lifecycle_audit_log_take()` drains the in-memory buffer so unit tests
 can assert on the exact sequence; in a live session, the events are
 also written to the transcript next to `hook_call` / `hook_returned`
 events from the broader [hooks
@@ -387,15 +387,15 @@ dispatch in the agent loop. The two compose freely:
 ```harn,ignore
 import { preset_run_command } from "std/tool_hooks"
 
-pipeline default(task) {
-  register_tool_hook({pattern: "*", max_output: 4000})
-  register_tool_hook({pattern: "exec_*", deny: "exec_* is gated"})
+pipeline default(harness: Harness, task) {
+  harness.tools.register_hook({pattern: "*", max_output: 4000})
+  harness.tools.register_hook({pattern: "exec_*", deny: "exec_* is gated"})
 
   const run_command = preset_run_command({
     stacks: ["rust"],
-    inner: { args -> shell(args.command) },
+    inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 

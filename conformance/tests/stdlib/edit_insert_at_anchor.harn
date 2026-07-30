@@ -5,9 +5,9 @@ import "std/edit"
  * `hostlib_ast_insert_at_anchor` through the std/edit wrapper across
  * Rust + TypeScript fixtures plus every position + failure mode.
  */
-fn write_fixture(harness: Harness, dir: string, name: string, body: string) -> string {
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
-  harness.fs.write_text(path, body)
+  fs.write_text(path, body)
   return path
 }
 
@@ -20,13 +20,15 @@ pipeline default(harness: Harness) {
   )
   harness.fs.mkdir(root)
   // 1) Rust: append a sibling function after `alpha`.
-  const rs_path = write_fixture(harness, 
+  const rs_path = write_fixture(
+    harness.fs,
     root,
     "rs_lib.rs",
     "fn alpha() {\n    1\n}\n\nfn gamma() {\n    3\n}\n",
   )
   const rs_after = edit_insert_at_anchor(
-    harness.ast, {
+    harness.ast,
+    {
       path: rs_path,
       query: "(function_item name: (identifier) @name (#eq? @name \"alpha\")) @anchor",
       position: "after",
@@ -43,13 +45,15 @@ pipeline default(harness: Harness) {
   harness.stdio.println(alpha_idx < beta_idx && beta_idx < gamma_idx)
   // 2) TypeScript: insert a new import before an existing one (before
   //    position at the file's top level).
-  const ts_path = write_fixture(harness, 
+  const ts_path = write_fixture(
+    harness.fs,
     root,
     "ts_lib.ts",
     "import { a } from \"./a\";\nimport { b } from \"./b\";\n\nconst x = 1;\n",
   )
   const ts_before = edit_insert_at_anchor(
-    harness.ast, {
+    harness.ast,
+    {
       path: ts_path,
       query:
         "(import_statement source: (string (string_fragment) @src) (#eq? @src \"./b\")) @anchor",
@@ -63,13 +67,15 @@ pipeline default(harness: Harness) {
   const b_idx = ts_text.index_of("./b\"")
   harness.stdio.println(aa_idx >= 0 && b_idx >= 0 && aa_idx < b_idx)
   // 3) Rust: append a new test as last_child of a `mod tests` body.
-  const mod_path = write_fixture(harness, 
+  const mod_path = write_fixture(
+    harness.fs,
     root,
     "mod_tests.rs",
     "#[cfg(test)]\nmod tests {\n    #[test]\n    fn one() {}\n}\n",
   )
   const mod_after = edit_insert_at_anchor(
-    harness.ast, {
+    harness.ast,
+    {
       path: mod_path,
       query:
         "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
@@ -84,9 +90,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(one_idx >= 0 && two_idx >= 0 && one_idx < two_idx)
   harness.stdio.println(contains(mod_text, "    #[test]\n    fn two() {}"))
   // 4) TypeScript: first_child on an empty body inserts at child depth.
-  const noop_path = write_fixture(harness, root, "noop.ts", "function noop() {}\n")
+  const noop_path = write_fixture(harness.fs, root, "noop.ts", "function noop() {}\n")
   const noop_after = edit_insert_at_anchor(
-    harness.ast, {
+    harness.ast,
+    {
       path: noop_path,
       query: "(function_declaration body: (statement_block) @anchor)",
       position: "first_child",
@@ -97,18 +104,20 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(harness.fs.read_text(noop_path), "return 1;"))
   // 5) Ambiguous anchor (multi-match) is rejected — the issue spec
   //    requires uniqueness.
-  const multi_path = write_fixture(harness, root, "multi.rs", "fn a() { 1 }\nfn b() { 2 }\n")
+  const multi_path = write_fixture(harness.fs, root, "multi.rs", "fn a() { 1 }\nfn b() { 2 }\n")
   const ambiguous = edit_insert_at_anchor(
-    harness.ast, {path: multi_path, query: "(function_item) @anchor", position: "after", content: "fn c() {}"},
+    harness.ast,
+    {path: multi_path, query: "(function_item) @anchor", position: "after", content: "fn c() {}"},
   )
   harness.stdio.println(!ambiguous.applied && ambiguous.result == "ambiguous")
   harness.stdio.println(ambiguous.match_count == 2)
   // 6) Syntax-error rejection: file is left untouched on validation
   //    failure (e.g. unbalanced braces in the inserted content).
-  const broken_path = write_fixture(harness, root, "broken.rs", "fn one() {}\n")
+  const broken_path = write_fixture(harness.fs, root, "broken.rs", "fn one() {}\n")
   const broken_before = harness.fs.read_text(broken_path)
   const broken = edit_insert_at_anchor(
-    harness.ast, {
+    harness.ast,
+    {
       path: broken_path,
       query: "(function_item name: (identifier) @name (#eq? @name \"one\")) @anchor",
       position: "after",
@@ -119,14 +128,16 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.fs.read_text(broken_path) == broken_before)
   // 7) Invalid tree-sitter query surfaces a structured error.
   const bad_query = edit_insert_at_anchor(
-    harness.ast, {path: rs_path, query: "((((", position: "after", content: "fn x() {}"},
+    harness.ast,
+    {path: rs_path, query: "((((", position: "after", content: "fn x() {}"},
   )
   harness.stdio.println(!bad_query.applied && bad_query.result == "invalid_query")
   // 8) Dry-run leaves the file untouched but returns a preview.
-  const dry_path = write_fixture(harness, root, "dry.rs", "fn alpha() {}\n")
+  const dry_path = write_fixture(harness.fs, root, "dry.rs", "fn alpha() {}\n")
   const dry_before = harness.fs.read_text(dry_path)
   const dry = edit_insert_at_anchor(
-    harness.ast, {
+    harness.ast,
+    {
       path: dry_path,
       query: "(function_item name: (identifier) @name (#eq? @name \"alpha\")) @anchor",
       position: "after",

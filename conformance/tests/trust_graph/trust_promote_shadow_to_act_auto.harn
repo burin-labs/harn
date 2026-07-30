@@ -16,7 +16,10 @@ pipeline test(harness: Harness, task) {
     harness.random.range(100000, 999999),
   )
   const agent_id = "shadow-bot-" + unique
-  const file_path = path_join(harness.fs.workspace_temp_dir(), "trust_graph_shadow_" + agent_id + ".txt")
+  const file_path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "trust_graph_shadow_" + agent_id + ".txt",
+  )
   const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: agent_id,
@@ -50,7 +53,9 @@ pipeline test(harness: Harness, task) {
     "success",
     "act_auto",
   )
-  const promote_records: list<TrustRecord> = harness.runtime.trust_query({agent: agent_id, action: "trust.promote"})
+  const promote_records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: agent_id, action: "trust.promote"},
+  )
   const second: DispatchHandle = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-auto-" + unique}},

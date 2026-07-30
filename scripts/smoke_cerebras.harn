@@ -40,7 +40,9 @@ pipeline default(harness: Harness, args) {
   const p99 = sorted[p99_index]
   const mean = sorted.sum() / measured_count
   harness.stdio.log("")
-  harness.stdio.log("Cerebras latency baseline — model=${model} iterations=${iterations} warmup=${warmup}")
+  harness.stdio.log(
+    "Cerebras latency baseline — model=${model} iterations=${iterations} warmup=${warmup}",
+  )
   harness.stdio.log("  p50  : ${p50}ms")
   harness.stdio.log("  p99  : ${p99}ms")
   harness.stdio.log("  mean : ${mean}ms")

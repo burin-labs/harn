@@ -65,7 +65,10 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harnes
   assert(is_type(report, agent_transcript_report_schema()), "report satisfies schema")
 }
 
-pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(harness: Harness, _task) {
+pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(
+  harness: Harness,
+  _task,
+) {
   const records = [
     {
       type: "response",
@@ -170,9 +173,13 @@ pipeline test_agent_transcript_normalize_is_composable(harness: Harness, _task) 
 }
 
 pipeline test_agent_transcript_read_jsonl(harness: Harness, _task) {
-  with_temp_dir(harness, { dir ->
+  with_temp_dir(
+    harness.fs,
+    { dir ->
       const path = path_join(dir, "llm_transcript.jsonl")
-      write_jsonl(harness, path,
+      write_jsonl(
+        harness.fs,
+        path,
         [
           {
             type: "message",
@@ -185,7 +192,7 @@ pipeline test_agent_transcript_read_jsonl(harness: Harness, _task) {
           },
         ],
       )
-      const rows = agent_transcript_read(harness, path)
+      const rows = agent_transcript_read(harness.fs, path)
       assert(len(rows) == 1, "read one row")
       assert(rows[0].tool_calls[0].args.path == "a", "read JSONL normalizes calls")
     },

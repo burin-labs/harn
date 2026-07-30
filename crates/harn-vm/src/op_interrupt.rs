@@ -813,7 +813,7 @@ pub enum ChildWait {
 /// Wait for `child` while polling [`requested`] and the optional timeout.
 ///
 /// Used by the VM-side `process.*` builtins (`exec`, `shell`, `exec_opts`,
-/// `spawn_captured`). The hostlib `run_command` family implements the same
+/// `harness.process.run`). The hostlib `run_command` family implements the same
 /// protocol inside its `ProcessSpawner` abstraction. Callers should have
 /// spawned the child with [`configure_kill_group`] so group signals reach
 /// ordinary grandchildren; escaped descendants are reaped by process-tree

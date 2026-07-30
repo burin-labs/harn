@@ -2,16 +2,22 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 
 type WorkspacePackage = {dir: string, name: string}
 
-fn command_stdout(harness: Harness, cmd: string, args: list<string>) -> string {
-  const result = harness.process.run({cmd: cmd, args: args})
+fn command_stdout(
+  process: HarnessProcess,
+  command: {program: string, args: list<string>, env: dict?},
+) -> string {
+  const result = process.run(command)
   if result.exit_code != 0 {
-    throw cmd + " " + args.join(" ") + " failed:\n" + result.stderr
+    throw command.program + " " + command.args.join(" ") + " failed:\n" + result.stderr
   }
   return result.stdout
 }
 
-fn repo_root(harness: Harness) -> string {
-  return command_stdout(harness, "git", ["rev-parse", "--show-toplevel"]).trim()
+fn repo_root(process: HarnessProcess) -> string {
+  return command_stdout(
+    process,
+    {program: "git", args: ["rev-parse", "--show-toplevel"], env: {}},
+  ).trim()
 }
 
 fn rel_path(path: string, root: string) -> string {
@@ -57,17 +63,27 @@ pub fn workspace_packages_from_metadata(meta: dict, root: string) -> list<Worksp
   return packages.sorted_by({ package -> package.dir })
 }
 
-fn load_workspace_packages(harness: Harness, root: string) -> list<WorkspacePackage> {
-  const raw = command_stdout(harness, 
-    "cargo",
-    [
-      "metadata",
-      "--no-deps",
-      "--format-version",
-      "1",
-      "--manifest-path",
-      path_join(root, "Cargo.toml"),
-    ],
+fn load_workspace_packages(process: HarnessProcess, root: string) -> list<WorkspacePackage> {
+  const raw = command_stdout(
+    process,
+    {
+      program: "cargo",
+      args: [
+        "metadata",
+        "--no-deps",
+        "--format-version",
+        "1",
+        "--manifest-path",
+        path_join(root, "Cargo.toml"),
+      ],
+      // This metadata-only path intentionally avoids the repository toolchain:
+      // the audit lane consumes a prebuilt Harn CLI and grants process writes
+      // only inside the checkout. Letting rustup select rust-toolchain.toml can
+      // otherwise attempt a networked install under ~/.rustup, which is both
+      // unnecessary for manifest inspection and correctly denied by the
+      // process sandbox.
+      env: {RUSTUP_TOOLCHAIN: "stable"},
+    },
   )
   return workspace_packages_from_metadata(json_parse(raw), root)
 }
@@ -88,7 +104,8 @@ fn add_filter(filters: list<string>, filter: string) -> list<string> {
   return filters + [filter]
 }
 
-pub fn filter_for_path(harness: Harness, 
+pub fn filter_for_path(
+  fs: HarnessFs,
   raw_path: string,
   packages: list<WorkspacePackage>,
   root: string,
@@ -121,8 +138,8 @@ pub fn filter_for_path(harness: Harness,
     // consolidated pattern (many former test binaries merged into one whose
     // root is `main.rs`, e.g. `harn_cli_fast`/`harn_cli_e2e`/`harn_vm`). Either
     // way the nextest binary name is `<dir>`.
-    if harness.fs.exists(path_join(root, crate_dir, "tests", dir + ".rs"))
-      || harness.fs.exists(
+    if fs.exists(path_join(root, crate_dir, "tests", dir + ".rs"))
+      || fs.exists(
       path_join(root, crate_dir, "tests", dir, "main.rs"),
     ) {
       return "binary(" + dir + ")"
@@ -140,14 +157,15 @@ pub fn filter_for_path(harness: Harness,
   return nil
 }
 
-pub fn nextest_filter_for_paths(harness: Harness, 
+pub fn nextest_filter_for_paths(
+  fs: HarnessFs,
   paths: list<string>,
   packages: list<WorkspacePackage>,
   root: string,
 ) -> string {
   let filters: list<string> = []
   for path in paths {
-    const filter = filter_for_path(harness, path, packages, root)
+    const filter = filter_for_path(fs, path, packages, root)
     if filter != nil {
       filters = add_filter(filters, filter)
     }
@@ -193,13 +211,14 @@ fn main(harness: Harness) {
     return nil
   }
   const root = if to_string(parsed?.root ?? "") == "" {
-    repo_root(harness)
+    repo_root(harness.process)
   } else {
     path_normalize(to_string(parsed?.root ?? ""))
   }
-  const filter = nextest_filter_for_paths(harness, 
+  const filter = nextest_filter_for_paths(
+    harness.fs,
     paths.map({ path -> to_string(path) }).to_list(),
-    load_workspace_packages(harness, root),
+    load_workspace_packages(harness.process, root),
     root,
   )
   if filter != "" {

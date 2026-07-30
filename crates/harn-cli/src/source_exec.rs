@@ -416,12 +416,21 @@ pub(crate) fn default_harness_for_secret_namespace(
         harn_vm::secrets::configured_default_chain(secret_namespace)
             .map_err(|error| error.to_string())?,
     );
-    Ok(harn_vm::Harness::real().with_secret_provider(secret_provider))
+    // Testbench installs its clock before entering the canonical CLI run
+    // boundary. Bind that clock into the newly constructed Harness explicitly
+    // so capability methods, legacy runtime internals, and tape recording all
+    // observe one timeline. Production has no active override and receives the
+    // ordinary real clock.
+    let harness = match harn_vm::clock_mock::active_mock_clock() {
+        Some(clock) => harn_vm::Harness::with_clock(clock.auto_advancing()),
+        None => harn_vm::Harness::real(),
+    };
+    Ok(harness.with_secret_provider(secret_provider))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::should_install_default_connector_clients;
+    use super::{default_harness_for_secret_namespace, should_install_default_connector_clients};
     use std::path::Path;
 
     #[test]
@@ -443,5 +452,19 @@ mod tests {
             "__io_println(1)",
             Some(Path::new("examples/demo.harn"))
         ));
+    }
+
+    #[test]
+    fn default_harness_binds_the_active_testbench_clock() {
+        let start_ms = 1_700_000_000_000;
+        let _clock = harn_vm::clock_mock::install_override(
+            harn_vm::clock_mock::MockClock::at_wall_ms(start_ms),
+        );
+        let harness = default_harness_for_secret_namespace("harn/test".to_string()).unwrap();
+
+        assert_eq!(
+            harness.clock().clock().now_utc().unix_timestamp_nanos() / 1_000_000,
+            i128::from(start_ms)
+        );
     }
 }

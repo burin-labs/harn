@@ -20,12 +20,15 @@ fn lookup_tools() {
 pipeline default(harness: Harness) {
   // Case 1: adaptive budget starts low, ends early on natural completion.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "alpha"}}]},
       llm_text("<user_response>All good.</user_response>"),
     ],
     { ->
-      const early = agent_loop(harness, "Inspect alpha",
+      const early = agent_loop(
+        harness,
+        "Inspect alpha",
         nil,
         {
           provider: "mock",
@@ -46,14 +49,17 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "t1", name: "lookup", arguments: {query: "1"}}]},
       {tool_calls: [{id: "t2", name: "lookup", arguments: {query: "2"}}]},
       {tool_calls: [{id: "t3", name: "lookup", arguments: {query: "3"}}]},
       llm_text("<user_response>Done after extension.</user_response>"),
     ],
     { ->
-      const extended = agent_loop(harness, "Inspect everything",
+      const extended = agent_loop(
+        harness,
+        "Inspect everything",
         nil,
         {
           provider: "mock",
@@ -73,7 +79,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "tA", name: "lookup", arguments: {query: "x"}}]},
       {tool_calls: [{id: "tB", name: "lookup", arguments: {query: "y"}}]},
       {tool_calls: [{id: "tC", name: "lookup", arguments: {query: "z"}}]},
@@ -81,7 +88,9 @@ pipeline default(harness: Harness) {
       {tool_calls: [{id: "tE", name: "lookup", arguments: {query: "q"}}]},
     ],
     { ->
-      const capped = agent_loop(harness, "Keep working",
+      const capped = agent_loop(
+        harness,
+        "Keep working",
         nil,
         {
           provider: "mock",
@@ -97,12 +106,15 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "early1", name: "lookup", arguments: {query: "stop"}}]},
       {tool_calls: [{id: "early2", name: "lookup", arguments: {query: "now"}}]},
     ],
     { ->
-      const controlled = agent_loop(harness, "Inspect stop",
+      const controlled = agent_loop(
+        harness,
+        "Inspect stop",
         nil,
         {
           provider: "mock",
@@ -128,9 +140,12 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Plain final answer.")],
+    harness.llm,
+    [llm_text("Plain final answer.")],
     { ->
-      const legacy = agent_loop(harness, "Do nothing fancy.",
+      const legacy = agent_loop(
+        harness,
+        "Do nothing fancy.",
         nil,
         {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
       )

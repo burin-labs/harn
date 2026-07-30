@@ -6,7 +6,10 @@ import {
 } from "std/personas/bulletins"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-bulletin-embed-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-bulletin-embed-" + harness.random.uuid(),
+  )
   harness.testing.clear()
   harness.testing.respond(
     "embed",
@@ -15,7 +18,9 @@ pipeline default(harness: Harness) {
     nil,
     true,
   )
-  const proposed = bulletin_propose(harness, {
+  const proposed = bulletin_propose(
+    harness.clock,
+    {
       scope: "user",
       scope_key: "kenneth",
       subject: "kenneth",
@@ -30,8 +35,14 @@ pipeline default(harness: Harness) {
   harness.stdio.println(namespace)
   // Open the bulletin's memory namespace with the vector backend so the
   // accept path picks the right defaults.
-  memory_open(harness.memory, namespace, {backend: "vector", embed_dim: 3, embed_model_hint: "fake", root: root})
-  const receipt = bulletin_accept(harness, proposed,
+  memory_open(
+    harness.memory,
+    namespace,
+    {backend: "vector", embed_dim: 3, embed_model_hint: "fake", root: root},
+  )
+  const receipt = bulletin_accept(
+    harness,
+    proposed,
     {
       embed: true,
       memory_root: root,

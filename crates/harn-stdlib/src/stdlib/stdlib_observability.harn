@@ -2,9 +2,9 @@
  * std/observability - unified user-facing spans, logs, and metrics.
  *
  * The module exposes direct functions (`span`, `log`, `metric`,
- * `configure`) plus `obs(harness)`, a namespace record for call sites that
- * prefer `obs(harness).span(...)` style. Backend factories are named values
- * returned by `backends()` / `obs(harness).Backend`, so runtime configuration
+ * `configure`) plus `obs(harness.obs)`, a namespace record for call sites that
+ * prefer `obs(harness.obs).span(...)` style. Backend factories are named values
+ * returned by `backends()` / `obs(harness.obs).Backend`, so runtime configuration
  * chooses routing once instead of making every emission pick a wire
  * format.
  */
@@ -294,34 +294,34 @@ pub fn reset(obs: HarnessObs) {
 
 /**
  * obs returns the ergonomic namespace record for user code that wants
- * `obs(harness).span(...)`, `obs(harness).Backend.auto`, and matching direct helpers.
+ * `obs(harness.obs).span(...)`, `obs(harness.obs).Backend.auto`, and matching direct helpers.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: let o = obs(harness); o.log("ready")
+ * @example: let o = obs(harness.obs); o.log("ready")
  */
-pub fn obs(harness: Harness) -> dict {
+pub fn obs(obs: HarnessObs) -> dict {
   return {
     Backend: backends(),
     Processor: processors(),
-    configure: { config = {} -> configure(harness.obs, config) },
-    auto_backend: { -> auto_backend(harness.obs) },
-    start_span: { name, attrs = {} -> start_span(harness.obs, name, attrs) },
-    end_span: { handle -> end_span(harness.obs, handle) },
-    span: { name, attrs = {}, callback = nil -> span(harness.obs, name, attrs, callback) },
-    log: { message, level = "info", fields = {} -> log(harness.obs, message, level, fields) },
+    configure: { config = {} -> configure(obs, config) },
+    auto_backend: { -> auto_backend(obs) },
+    start_span: { name, attrs = {} -> start_span(obs, name, attrs) },
+    end_span: { handle -> end_span(obs, handle) },
+    span: { name, attrs = {}, callback = nil -> span(obs, name, attrs, callback) },
+    log: { message, level = "info", fields = {} -> log(obs, message, level, fields) },
     log_in_span: { handle, message, level = "info", fields = {} ->
-      log_in_span(harness.obs, handle, message, level, fields)
+      log_in_span(obs, handle, message, level, fields)
     },
-    metric: { name, value, fields = {} -> metric(harness.obs, name, value, fields) },
-    counter: { name, value = 1, attrs = {} -> counter(harness.obs, name, value, attrs) },
-    histogram: { name, value, attrs = {} -> histogram(harness.obs, name, value, attrs) },
-    gauge: { name, value, attrs = {} -> gauge(harness.obs, name, value, attrs) },
-    request_id: { -> request_id(harness.obs) },
-    event: { record -> event(harness.obs, record) },
-    events: { -> events(harness.obs) },
-    events_take: { -> events_take(harness.obs) },
-    reset: { -> reset(harness.obs) },
+    metric: { name, value, fields = {} -> metric(obs, name, value, fields) },
+    counter: { name, value = 1, attrs = {} -> counter(obs, name, value, attrs) },
+    histogram: { name, value, attrs = {} -> histogram(obs, name, value, attrs) },
+    gauge: { name, value, attrs = {} -> gauge(obs, name, value, attrs) },
+    request_id: { -> request_id(obs) },
+    event: { record -> event(obs, record) },
+    events: { -> events(obs) },
+    events_take: { -> events_take(obs) },
+    reset: { -> reset(obs) },
   }
 }

@@ -67,6 +67,16 @@ pub fn harn_capability_method(input: TokenStream) -> TokenStream {
     }
 }
 
+/// Declare a capability method in the dependency-leaf contract crate.
+#[proc_macro]
+pub fn harn_capability_contract(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as CapabilityMethodInput);
+    match expand_leaf_capability_contract(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
 struct CapabilityMethodInput {
     rust_name: Ident,
     exposure: LitStr,
@@ -149,6 +159,53 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         #[allow(non_upper_case_globals)]
         #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
+    })
+}
+
+fn expand_leaf_capability_contract(input: CapabilityMethodInput) -> syn::Result<TokenStream2> {
+    let support = quote!(crate::support);
+    let (sig_expr, signature_text, signature_attr) = match &input.signature {
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(signature),
+            ..
+        }) => (
+            sig_parser::parse_sig(&signature.value(), signature.span(), &support)?,
+            Some(signature.value()),
+            Some(signature.clone()),
+        ),
+        expression => (quote!(#expression), None, None),
+    };
+    let attrs = BuiltinAttrs {
+        sig: signature_attr,
+        exposure: Some(input.exposure),
+        effects: input.effects,
+        effects_declared: true,
+        parser_only: true,
+        ..BuiltinAttrs::default()
+    };
+    let contract = contract_expr(&attrs, &support)?;
+    let upper = input.rust_name.to_string().to_uppercase();
+    let def_ident = format_ident!("{upper}_DEF");
+    let link_ident = format_ident!("__{upper}_LINKME");
+    let doc = input.doc.value();
+    let signature_text_expr = match signature_text {
+        Some(signature) => quote!(::core::option::Option::Some(#signature)),
+        None => quote!(::core::option::Option::None),
+    };
+    Ok(quote! {
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        pub static #def_ident: #support::CapabilityMethodDef = #support::CapabilityMethodDef {
+            signature: #sig_expr,
+            contract: #contract,
+            doc: #doc,
+            signature_text: #signature_text_expr,
+        };
+
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        #[#support::distributed_slice(#support::ALL_CAPABILITY_METHOD_DEFS)]
+        static #link_ident: &'static #support::CapabilityMethodDef = &#def_ident;
     })
 }
 

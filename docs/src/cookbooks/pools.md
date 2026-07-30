@@ -20,14 +20,14 @@ queued task (a `pool_drop` audit lands on `lifecycle.pool.audit`) but
 never the actively-running ones.
 
 ```harn,ignore
-import { trigger_register, SpawnToPool } from "std/triggers"
+import { SpawnToPool } from "std/triggers"
 import { Backpressure, fair_round_robin, pool_create } from "std/lifecycle/pool"
 
-pipeline webhook_intake_setup() {
+pipeline webhook_intake_setup(harness: Harness) {
   const bp = Backpressure()
 
   // One named pool, shared across every webhook source.
-  pool_create({
+  pool_create(harness.agent, {
     name: "webhook-work",
     max_concurrent: 10,
     queue: fair_round_robin("source"),
@@ -37,7 +37,7 @@ pipeline webhook_intake_setup() {
 
   // Generic webhook connector emits `channel:webhook.received` for
   // every inbound payload. Route the channel into the pool.
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "webhook-router",
     kind: "channel.emit",
     provider: "channel",
@@ -86,14 +86,14 @@ selector. Tenants share the budget fairly, and any cross-tenant burst
 queues rather than spilling onto non-GPU hosts.
 
 ```harn,ignore
-import { trigger_register, SpawnToPool } from "std/triggers"
+import { SpawnToPool } from "std/triggers"
 import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline inference_pool_setup() {
+pipeline inference_pool_setup(harness: Harness) {
   const bp = Backpressure()
   const gpu_count = 4   // discovered from the host worker tier in real deployments
 
-  pool_create({
+  pool_create(harness.agent, {
     name: "gpu-inference",
     max_concurrent: gpu_count,
     queue: fair_round_robin("tenant_id"),
@@ -101,7 +101,7 @@ pipeline inference_pool_setup() {
     scope: "tenant",   // host routes to the GPU-tier worker pool
   })
 
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "inference-router",
     kind: "channel.emit",
     provider: "channel",
@@ -122,13 +122,13 @@ pipeline inference_pool_setup() {
 }
 
 // Synchronous caller path that wraps the trigger flow for in-process use.
-pipeline inference_call(tenant_id, model, prompt, params) {
-  const pool = pool_get("gpu-inference")
+pipeline inference_call(harness: Harness, tenant_id, model, prompt, params) {
+  const pool = pool_get(harness.agent, "gpu-inference")
   const handle = pool.submit({ ->
     return run_gpu_inference(model, prompt, params)
   }, {tenant_id: tenant_id})
 
-  return pool_wait(handle).result
+  return pool_wait(harness.agent, handle).result
 }
 ```
 
@@ -157,13 +157,13 @@ on the customer id flips the worst case from "one customer drains
 the queue" to "all active customers interleave one task at a time."
 
 ```harn,ignore
-import { trigger_register, SpawnToPool } from "std/triggers"
+import { SpawnToPool } from "std/triggers"
 import { Backpressure, fair_round_robin, pool_create } from "std/lifecycle/pool"
 
-pipeline tenant_work_setup() {
+pipeline tenant_work_setup(harness: Harness) {
   const bp = Backpressure()
 
-  pool_create({
+  pool_create(harness.agent, {
     name: "tenant-agents",
     max_concurrent: 20,
     queue: fair_round_robin("tenant_id"),
@@ -172,7 +172,7 @@ pipeline tenant_work_setup() {
   })
 
   // Direct submits from a connector loop.
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "tenant-agent-router",
     kind: "channel.emit",
     provider: "channel",
@@ -183,14 +183,14 @@ pipeline tenant_work_setup() {
       priority_from: "provider_payload.payload.priority",
       task_factory: { event ->
         const req = event.provider_payload.payload
-        return { -> run_agent_task(req.tenant_id, req.task_kind, req.input) }
+        return { -> run_agent_task(harness, req.tenant_id, req.task_kind, req.input) }
       },
     }),
   })
 }
 
-fn run_agent_task(tenant_id, kind, input) {
-  return agent_loop(input, "You are the " + kind + " agent.")
+fn run_agent_task(harness: Harness, tenant_id, kind, input) {
+  return agent_loop(harness, input, "You are the " + kind + " agent.")
 }
 ```
 
@@ -218,13 +218,13 @@ saturating a downstream SaaS API. A small `max_concurrent` plus a
 large queue depth turns a "thundering herd" into a slow drain.
 
 ```harn,ignore
-import { trigger_register, SpawnToPool } from "std/triggers"
+import { SpawnToPool } from "std/triggers"
 import { Backpressure, fifo, pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline nightly_report_setup() {
+pipeline nightly_report_setup(harness: Harness) {
   const bp = Backpressure()
 
-  pool_create({
+  pool_create(harness.agent, {
     name: "nightly-reports",
     max_concurrent: 3,                       // small drain rate
     queue: fifo(),                           // run in submission order
@@ -233,13 +233,13 @@ pipeline nightly_report_setup() {
   })
 
   // Cron-triggered fan-out: one submit per customer report.
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "nightly-report-cron",
     kind: "cron",
     provider: "cron",
     match: {schedule: "0 2 * * *"},          // 02:00 UTC nightly
-    handler: { event ->
-      const pool = pool_get("nightly-reports")
+    handler: { harness, event ->
+      const pool = pool_get(harness.agent, "nightly-reports")
       const customers = list_active_customers()
       for customer in customers {
         // Idempotency key = (run date, customer). A retry of the cron

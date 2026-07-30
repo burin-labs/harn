@@ -25,7 +25,7 @@
  * `assert_nil(x)` and `assert_true(x)`, which have no expectation to place at
  * all.
  *
- * That domain is the whole rule, and it is why `assert_snapshot(harness, name, actual)`
+ * That domain is the whole rule, and it is why `assert_snapshot(harness.env, harness.fs, name, actual)`
  * is not an exception to it. The rule guards against silently transposing two
  * VALUES. A snapshot's expectation lives in a file, so its leading argument is
  * an identifier naming WHICH snapshot — not an expectation. A name and a value
@@ -299,22 +299,24 @@ pub type CapabilityFixture = {
 
 /**
  * Run `body` with an isolated fixture scope owned by this exact `Harness`.
- * Fixture targets are validated against the generated capability contract, so
- * misspelled capabilities and methods fail before the behavior under test runs.
+ * A target must be either a method in the generated capability contract or a
+ * registered host-protocol operation such as `mcp.elicit`; protocol fixtures
+ * use `method` for the operation name. Unknown targets fail before the behavior
+ * under test runs, and fixtures never leak to another `Harness`.
  *
  * @effects: [state.mutate]
  * @errors: [invalid_capability, invalid_method]
  */
 pub fn with_capability_fixtures(
-  harness: Harness,
+  testing: HarnessTesting,
   fixtures: list<CapabilityFixture>,
   body,
 ) -> any {
-  harness.testing.push_scope()
+  testing.push_scope()
   try {
     for fixture in fixtures {
       if fixture.error != nil {
-        harness.testing.respond_error(
+        testing.respond_error(
           fixture.capability,
           fixture.method,
           fixture.error,
@@ -322,7 +324,7 @@ pub fn with_capability_fixtures(
           fixture.repeat,
         )
       } else {
-        harness.testing.respond(
+        testing.respond(
           fixture.capability,
           fixture.method,
           fixture.result,
@@ -332,10 +334,10 @@ pub fn with_capability_fixtures(
       }
     }
     const result = __testing_call_body(body)
-    harness.testing.pop_scope()
+    testing.pop_scope()
     return result
   } catch (e) {
-    harness.testing.pop_scope()
+    testing.pop_scope()
     throw e
   }
 }
@@ -371,10 +373,10 @@ pub fn step_events() {
  * @effects: []
  * @errors: []
  */
-pub fn step_assertions_begin(harness: Harness, persona_pattern = "*") {
-  harness.agent.clear_persona_hooks()
+pub fn step_assertions_begin(agent: HarnessAgent, persona_pattern = "*") {
+  agent.clear_persona_hooks()
   step_events_clear()
-  harness.agent.register_persona_hook(
+  agent.register_persona_hook(
     persona_pattern,
     "PreStep",
     { ctx ->
@@ -382,7 +384,7 @@ pub fn step_assertions_begin(harness: Harness, persona_pattern = "*") {
       return nil
     },
   )
-  harness.agent.register_persona_hook(
+  agent.register_persona_hook(
     persona_pattern,
     "PostStep",
     { ctx ->
@@ -399,8 +401,8 @@ pub fn step_assertions_begin(harness: Harness, persona_pattern = "*") {
  * @effects: []
  * @errors: []
  */
-pub fn step_assertions_end(harness: Harness) {
-  harness.agent.clear_persona_hooks()
+pub fn step_assertions_end(agent: HarnessAgent) {
+  agent.clear_persona_hooks()
   return nil
 }
 
@@ -854,16 +856,16 @@ fn __testing_fs_content(value) -> string {
  *
  * @effects: []
  * @errors: []
- * @example: with_temp_dir(harness, { dir -> harness.fs.write_text(dir + "/x", "1") })
+ * @example: with_temp_dir(harness.fs, { dir -> harness.fs.write_text(dir + "/x", "1") })
  */
-pub fn with_temp_dir(harness: Harness, body) -> any {
-  const dir = harness.fs.mkdtemp_in_workspace("harn-test-")
+pub fn with_temp_dir(fs: HarnessFs, body) -> any {
+  const dir = fs.mkdtemp_in_workspace("harn-test-")
   try {
     const result = body(dir)
-    harness.fs.delete(dir)
+    fs.delete(dir)
     return result
   } catch (e) {
-    harness.fs.delete(dir)
+    fs.delete(dir)
     throw e
   }
 }
@@ -877,15 +879,16 @@ pub fn with_temp_dir(harness: Harness, body) -> any {
  *
  * @effects: []
  * @errors: []
- * @example: with_fs(harness, {"in.txt": "hello"}, { dir -> harness.fs.read_text(dir + "/in.txt") })
+ * @example: with_fs(harness.fs, {"in.txt": "hello"}, { dir -> harness.fs.read_text(dir + "/in.txt") })
  */
-pub fn with_fs(harness: Harness, files, body) -> any {
-  return with_temp_dir(harness, 
+pub fn with_fs(fs: HarnessFs, files, body) -> any {
+  return with_temp_dir(
+    fs,
     { dir ->
       for entry in entries(files ?? {}) {
         const full = dir + "/" + entry.key
-        harness.fs.mkdir(dirname(full))
-        harness.fs.write_text(full, __testing_fs_content(entry.value))
+        fs.mkdir(dirname(full))
+        fs.write_text(full, __testing_fs_content(entry.value))
       }
       body(dir)
     },
@@ -911,19 +914,16 @@ pub fn with_fs(harness: Harness, files, body) -> any {
 pub fn with_scenario(harness: Harness, config, body) {
   fn run_scoped(dir) {
     return with_capability_fixtures(
-      harness,
+      harness.testing,
       config?.capabilities ?? [],
-      {
-        _ ->
-        return with_llm_mocks(harness.llm, config?.llm ?? [], { _ -> body({dir: dir}) })
-      },
+      { _ -> return with_llm_mocks(harness.llm, config?.llm ?? [], { _ -> body({dir: dir}) }) },
     )
   }
   if config?.fs != nil {
-    return with_fs(harness, config.fs, run_scoped)
+    return with_fs(harness.fs, config.fs, run_scoped)
   }
   if config?.temp_dir {
-    return with_temp_dir(harness, run_scoped)
+    return with_temp_dir(harness.fs, run_scoped)
   }
   return run_scoped(nil)
 }
@@ -950,8 +950,8 @@ pub fn with_scenario(harness: Harness, config, body) {
 // -------------------------------------------------------------------------------------------------
 
 /** Truthy for an env var set to anything other than "", "0", or "false". */
-fn __testing_env_flag(harness: Harness, name: string) -> bool {
-  const raw = harness.env.get(name)
+fn __testing_env_flag(env: HarnessEnv, name: string) -> bool {
+  const raw = env.get(name)
   return raw != nil && raw != "" && raw != "0" && raw != "false"
 }
 
@@ -960,8 +960,8 @@ fn __testing_env_flag(harness: Harness, name: string) -> bool {
  * signal; `harn test` exposes no snapshot flag today). Requesting an update
  * does not by itself permit a write — see `__testing_snapshot_may_write`.
  */
-fn __testing_snapshot_update_requested(harness: Harness) -> bool {
-  return __testing_env_flag(harness, "HARN_UPDATE_SNAPSHOTS")
+fn __testing_snapshot_update_requested(env: HarnessEnv) -> bool {
+  return __testing_env_flag(env, "HARN_UPDATE_SNAPSHOTS")
 }
 
 /**
@@ -970,8 +970,8 @@ fn __testing_snapshot_update_requested(harness: Harness) -> bool {
  * `HARN_UPDATE_SNAPSHOTS` env trigger is ignored, so a leaked update flag can
  * never make a broken output silently rewrite its own golden.
  */
-fn __testing_running_in_ci(harness: Harness) -> bool {
-  return __testing_env_flag(harness, "CI") || __testing_env_flag(harness, "HARN_CI")
+fn __testing_running_in_ci(env: HarnessEnv) -> bool {
+  return __testing_env_flag(env, "CI") || __testing_env_flag(env, "HARN_CI")
 }
 
 /**
@@ -984,11 +984,11 @@ fn __testing_running_in_ci(harness: Harness) -> bool {
  *     the convenient local flow; CI suppresses it so an ambient flag can't
  *     turn the gate into a silent no-op.
  */
-fn __testing_snapshot_may_write(harness: Harness, options) -> bool {
+fn __testing_snapshot_may_write(env: HarnessEnv, options) -> bool {
   if options?.update == true {
     return true
   }
-  return __testing_snapshot_update_requested(harness) && !__testing_running_in_ci(harness)
+  return __testing_snapshot_update_requested(env) && !__testing_running_in_ci(env)
 }
 
 /**
@@ -999,8 +999,8 @@ fn __testing_snapshot_may_write(harness: Harness, options) -> bool {
  * owned by this primitive so a future orphan sweep never touches another
  * tool's goldens.
  */
-fn __testing_snapshot_path(harness: Harness, name: string, options) -> string {
-  const dir = options?.dir ?? (harness.fs.source_dir() + "/__snapshots__")
+fn __testing_snapshot_path(fs: HarnessFs, name: string, options) -> string {
+  const dir = options?.dir ?? (fs.source_dir() + "/__snapshots__")
   return dir + "/" + name + ".harn.snap"
 }
 
@@ -1024,8 +1024,8 @@ fn __testing_snapshot_normalize(actual: string, options) -> string {
  * trigger is ignored and points at the local update flow; otherwise it names
  * the update env var.
  */
-fn __testing_snapshot_guidance(harness: Harness, action: string) -> string {
-  if __testing_running_in_ci(harness) {
+fn __testing_snapshot_guidance(env: HarnessEnv, action: string) -> string {
+  if __testing_running_in_ci(env) {
     return "\nHARN_UPDATE_SNAPSHOTS is ignored in CI. Run the test locally with "
       + "HARN_UPDATE_SNAPSHOTS=1 to "
       + action
@@ -1059,25 +1059,32 @@ fn __testing_snapshot_guidance(harness: Harness, action: string) -> string {
  *
  * @effects: []
  * @errors: []
- * @example: assert_snapshot(harness, "render_home", render_home())
+ * @example: assert_snapshot(harness.env, harness.fs, "render_home", render_home())
  */
-pub fn assert_snapshot(harness: Harness, name: string, actual: string, options = nil) -> string {
-  const path = __testing_snapshot_path(harness, name, options)
+pub fn assert_snapshot(
+  env: HarnessEnv,
+  fs: HarnessFs,
+  name: string,
+  actual: string,
+  options = nil,
+) -> string {
+  const path = __testing_snapshot_path(fs, name, options)
   const normalized = __testing_snapshot_normalize(actual, options)
-  if __testing_snapshot_may_write(harness, options) {
-    harness.fs.mkdir(dirname(path))
-    harness.fs.write_text(path, normalized)
+  if __testing_snapshot_may_write(env, options) {
+    fs.mkdir(dirname(path))
+    fs.write_text(path, normalized)
     return actual
   }
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     require false,
       "snapshot '" + name + "' does not exist at " + path
-      + __testing_snapshot_guidance(harness, 
+      + __testing_snapshot_guidance(
+      env,
       "create it",
     )
     return actual
   }
-  const golden = harness.fs.read_text(path)
+  const golden = fs.read_text(path)
   if golden == normalized {
     return actual
   }
@@ -1091,7 +1098,7 @@ pub fn assert_snapshot(harness: Harness, name: string, actual: string, options =
     + name
     + "' mismatch at "
     + path
-    + __testing_snapshot_guidance(harness, "update it if the change is intended")
+    + __testing_snapshot_guidance(env, "update it if the change is intended")
     + "\n"
     + diff
   return actual

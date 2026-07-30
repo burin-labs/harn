@@ -18,7 +18,7 @@ const report = tool_surface_validate({
 assert(report.valid, "tool surface is coherent")
 ```
 
-`agent_loop(...)` runs the same validation at startup. Warnings are logged with
+`agent_loop(harness, ...)` runs the same validation at startup. Warnings are logged with
 stable diagnostic codes; error diagnostics abort the loop before the first model
 call. `workflow_validate(...)` and `workflow_policy_report(...)` include the
 same diagnostics for workflow and stage tool surfaces.

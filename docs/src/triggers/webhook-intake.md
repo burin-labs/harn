@@ -115,7 +115,7 @@ import "std/triggers"
 const intake = webhook_intake_register({
   id: "github",
   path: "/hooks/github",
-  secret: secret_get("github/webhook-secret"),
+  secret: harness.secrets.read("github/webhook-secret"),
   signature_header: "x-hub-signature-256",
   delivery_id_header: "x-github-delivery",
   topic: "github.events",
@@ -153,7 +153,7 @@ request dict directly:
 ```harn,ignore
 const outcome = webhook_intake_feed("github", {
   headers: load_json("fixtures/github_pr_opened_headers.json"),
-  body: read_file("fixtures/github_pr_opened.body"),
+  body: harness.fs.read_text("fixtures/github_pr_opened.body"),
 })
 ```
 

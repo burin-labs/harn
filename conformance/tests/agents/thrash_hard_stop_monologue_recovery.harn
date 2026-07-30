@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -33,7 +33,8 @@ fn events_of(events, kind) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("I should inspect app/Models/Entry.php before editing."),
       llm_text("I still need to read the Entry model, but I am only narrating."),
       look_call("look_after_monologue"),
@@ -59,7 +60,9 @@ pipeline default(harness: Harness) {
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(harness, session,
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
         fn() { return agent_loop(harness, "Edit the target file after inspecting it.", nil, opts) },
       )
       const receipts = events_of(captured.events, "typed_checkpoint").filter(

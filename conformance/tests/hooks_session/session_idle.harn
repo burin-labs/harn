@@ -11,7 +11,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "session_idle",
-    { event ->
+    { _hook_harness, event ->
       if type_of(event?.session?.id) == "string"
         && type_of(event?.wake_interval_ms) == "int" {
         harness.runtime.atomic_add(idle_seen, 1)
@@ -20,9 +20,12 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("tick"), llm_text("tock")],
+    harness.llm,
+    [llm_text("tick"), llm_text("tock")],
     { ->
-      const result = agent_loop(harness, "poll background",
+      const result = agent_loop(
+        harness,
+        "poll background",
         nil,
         {provider: "mock", daemon: true, max_iterations: 2, wake_interval_ms: 1},
       )

@@ -17,7 +17,8 @@ pipeline default(harness: Harness) {
   const audit_explicit = agent_loop_options(
     harness,
     agent_preset(
-      harness, "audit",
+      harness,
+      "audit",
       {provider: "anthropic", model: "claude-opus-4-7", thinking: {mode: "disabled"}},
     ),
   )
@@ -39,7 +40,11 @@ pipeline default(harness: Harness) {
   // Model with no advertised thinking modes leaves thinking unset.
   const audit_unknown = agent_loop_options(
     harness,
-    agent_preset(harness, "audit", {provider: "ollama", model: "ollama-something-without-thinking"}),
+    agent_preset(
+      harness,
+      "audit",
+      {provider: "ollama", model: "ollama-something-without-thinking"},
+    ),
   )
   harness.stdio.println(audit_unknown?.thinking == nil)
   // summary preset prefers disabled mode when supported, else nothing.
@@ -47,5 +52,7 @@ pipeline default(harness: Harness) {
     harness,
     agent_preset(harness, "summary", {provider: "anthropic", model: "claude-opus-4-7"}),
   )
-  harness.stdio.println(summary_anthropic?.thinking == nil || summary_anthropic.thinking.mode == "disabled")
+  harness.stdio.println(
+    summary_anthropic?.thinking == nil || summary_anthropic.thinking.mode == "disabled",
+  )
 }

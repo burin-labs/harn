@@ -34,7 +34,7 @@ async fn run_composition_dispatcher_source(
 
     let mut vm = crate::Vm::new();
     crate::register_vm_stdlib(&mut vm);
-    vm.unregister_builtin("host_has");
+    vm.set_harness(crate::Harness::real());
     configure(&mut vm);
     let value = vm.execute(&chunk).await?;
     Ok(crate::llm::vm_value_to_json(&value))
@@ -535,16 +535,16 @@ async fn composition_state_runs_through_the_public_harn_builtin_path() {
     let _session = crate::agent_sessions::enter_current_session("state-builtin-session");
     let result = run_composition_dispatcher_source(
         r#"
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const manifest = composition_binding_manifest([], {
     state: {max_value_bytes: 32, max_total_bytes: 64, max_keys: 2},
   })
-  const first = composition_execute(
+  const first = harness.tools.composition_execute(
     "state.put(\"step\", {done: true})\nreturn state.list()",
     manifest,
     {run_id: "state-builtin-first"},
   )
-  const second = composition_execute(
+  const second = harness.tools.composition_execute(
     "return state.get(\"step\")",
     manifest,
     {run_id: "state-builtin-second"},
@@ -577,7 +577,7 @@ pipeline default(task) {
 async fn harn_composition_dispatcher_closure_can_call_host_has() {
     let report = run_composition_dispatcher_source(
         r#"
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const tools = [
     {
       "name": "look",
@@ -589,18 +589,31 @@ pipeline default(task) {
   const dispatcher = { binding, input ->
     return {
       "binding": binding,
-      "has_runtime_result": host_has("runtime", "set_result"),
+      "has_runtime_result": harness.runtime.host_has("runtime", "set_result"),
       "path": input.path
     }
   }
-  return composition_execute(
+  return harness.tools.composition_execute(
     "const result = look({path: \"README.md\"})\nreturn result",
     manifest,
     {"dispatcher": dispatcher}
   )
 }
 "#,
-        |_| {},
+        |vm| {
+            vm.register_capability_method(
+                harn_builtin_meta::CapabilityId::Runtime,
+                "host_has",
+                |args, output| {
+                    assert!(output.is_empty());
+                    let capability = args.first().map(VmValue::display).unwrap_or_default();
+                    let operation = args.get(1).map(VmValue::display).unwrap_or_default();
+                    Ok(VmValue::Bool(
+                        capability == "runtime" && operation == "set_result",
+                    ))
+                },
+            );
+        },
     )
     .await
     .expect("composition succeeds");
@@ -616,7 +629,7 @@ pipeline default(task) {
 async fn harn_composition_dispatcher_closure_preserves_custom_host_has() {
     let report = run_composition_dispatcher_source(
         r#"
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const tools = [
     {
       "name": "look",
@@ -628,11 +641,11 @@ pipeline default(task) {
   const dispatcher = { binding, input ->
     return {
       "binding": binding,
-      "has_runtime_result": host_has("runtime", "set_result"),
+      "has_runtime_result": harness.runtime.host_has("runtime", "set_result"),
       "path": input.path
     }
   }
-  return composition_execute(
+  return harness.tools.composition_execute(
     "const result = look({path: \"README.md\"})\nreturn result",
     manifest,
     {"dispatcher": dispatcher}
@@ -640,14 +653,18 @@ pipeline default(task) {
         }
 "#,
         |vm| {
-            vm.register_builtin("host_has", |args, output| {
-                assert!(output.is_empty());
-                let capability = args.first().map(VmValue::display).unwrap_or_default();
-                let operation = args.get(1).map(VmValue::display).unwrap_or_default();
-                Ok(VmValue::Bool(
-                    capability == "runtime" && operation == "set_result",
-                ))
-            });
+            vm.register_capability_method(
+                harn_builtin_meta::CapabilityId::Runtime,
+                "host_has",
+                |args, output| {
+                    assert!(output.is_empty());
+                    let capability = args.first().map(VmValue::display).unwrap_or_default();
+                    let operation = args.get(1).map(VmValue::display).unwrap_or_default();
+                    Ok(VmValue::Bool(
+                        capability == "runtime" && operation == "set_result",
+                    ))
+                },
+            );
         },
     )
     .await

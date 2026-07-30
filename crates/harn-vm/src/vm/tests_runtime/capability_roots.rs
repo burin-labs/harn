@@ -7,6 +7,37 @@
 use crate::{VmError, VmValue};
 
 use super::harness::*;
+
+#[test]
+fn harness_fs_source_dir_tracks_the_owning_imported_module() {
+    let project = tempfile::tempdir().unwrap();
+    let library_dir = project.path().join("lib");
+    std::fs::create_dir_all(&library_dir).unwrap();
+    std::fs::write(
+        library_dir.join("paths.harn"),
+        "pub fn local_source_dir(fs: HarnessFs) { return fs.source_dir() }\n",
+    )
+    .unwrap();
+    let entry = project.path().join("entry.harn");
+    let source = r#"
+import { local_source_dir } from "./lib/paths"
+
+pipeline main(harness: Harness) {
+  return local_source_dir(harness.fs)
+}
+"#;
+
+    let (_, value) = run_harn_at(&entry, source).expect("entry executes");
+    let VmValue::String(path) = &value else {
+        panic!("source_dir must return a string, got {value:?}");
+    };
+    assert_eq!(
+        std::path::Path::new(path.as_str()).canonicalize().unwrap(),
+        library_dir.canonicalize().unwrap(),
+        "source_dir must retain lexical module ownership after attenuation"
+    );
+}
+
 #[test]
 fn test_policy_workspace_roots_catch_filesystem_escapes() {
     let allowed = tempfile::tempdir().unwrap();
@@ -26,6 +57,7 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
                 "exists".to_string(),
                 "write_text".to_string(),
                 "delete".to_string(),
+                "apply_edit".to_string(),
             ],
         )]),
         workspace_roots: vec![allowed.path().display().to_string()],
@@ -35,45 +67,41 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
 
     let escapes = [
         format!(
-            r#"pipeline t(task) {{ read_file("{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.read_text("{}") }}"#,
             outside_file.display()
         ),
         format!(
-            r#"pipeline t(task) {{ read_file_bytes("{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.read_bytes("{}") }}"#,
             outside_file.display()
         ),
         format!(
-            r#"pipeline t(task) {{ write_file("{}", "x") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.write_text("{}", "x") }}"#,
             outside_new.display()
         ),
         format!(
-            r#"pipeline t(task) {{ append_file("{}", "x") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.append("{}", "x") }}"#,
             outside_file.display()
         ),
         format!(
-            r#"pipeline t(task) {{ copy_file("{}", "{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.copy("{}", "{}") }}"#,
             outside_file.display(),
             allowed.path().join("copy.txt").display()
         ),
         format!(
-            r#"pipeline t(task) {{ copy_file("{}", "{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.copy("{}", "{}") }}"#,
             allowed.path().join("missing.txt").display(),
             outside_copy.display()
         ),
         format!(
-            r#"pipeline t(task) {{ list_dir("{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.list_dir("{}") }}"#,
             outside.path().display()
         ),
         format!(
-            r#"pipeline t(task) {{ mkdir("{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}") }}"#,
             outside_dir.display()
         ),
         format!(
-            r#"pipeline t(task) {{ stat("{}") }}"#,
-            outside_file.display()
-        ),
-        format!(
-            r#"pipeline t(task) {{ delete_file("{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.delete("{}") }}"#,
             outside_file.display()
         ),
     ];
@@ -96,23 +124,35 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
         );
     }
 
-    // `file_exists`/`exists` is the one read-scope probe that soft-falses
-    // instead of throwing on an out-of-root path (v0.8.55): an absent path and
-    // an out-of-sandbox path are indistinguishable to a caller, so the safe,
-    // non-leaky answer is `false` rather than a sandbox violation. Content
-    // reads (`read_file`, asserted above) still error — only presence probing
-    // is softened.
+    // Presence and status probes do not throw for an out-of-root path. `exists`
+    // deliberately makes absence and denial indistinguishable, while `status`
+    // returns the typed denial envelope needed by host diagnostics.
     let (_, exists_outside) = run_harn_with_policy(
         &format!(
-            r#"pipeline t(task) {{ file_exists("{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.exists("{}") }}"#,
             outside_file.display()
         ),
-        policy,
+        policy.clone(),
     )
     .expect("file_exists outside sandbox should soft-false, not error");
     assert!(
         matches!(exists_outside, VmValue::Bool(false)),
         "file_exists on an out-of-root path must read as absent, got {exists_outside:?}"
+    );
+    let (_, status_outside) = run_harn_with_policy(
+        &format!(
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.status("{}") }}"#,
+            outside_file.display()
+        ),
+        policy,
+    )
+    .expect("path status outside sandbox should return a typed denial");
+    let status = status_outside
+        .as_dict()
+        .expect("HarnessFs.status must return a record");
+    assert_eq!(
+        status.get("status").map(VmValue::display).as_deref(),
+        Some("scope_denied")
     );
 }
 
@@ -132,6 +172,7 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
                 "exists".to_string(),
                 "write_text".to_string(),
                 "delete".to_string(),
+                "apply_edit".to_string(),
             ],
         )]),
         workspace_roots: vec![writable.path().display().to_string()],
@@ -142,7 +183,7 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
 
     // Reading from a read-only root succeeds.
     let read_source = format!(
-        r#"pipeline t(task) {{ return read_file("{}") }}"#,
+        r#"pipeline t(harness: Harness, task) {{ return harness.fs.read_text("{}") }}"#,
         read_only_file.display()
     );
     let (_out, value) = run_harn_with_policy(&read_source, policy.clone()).unwrap();
@@ -158,15 +199,15 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
     // non-existent case by the `sandbox_hardened` integration test).
     let existing_mutations = [
         format!(
-            r#"pipeline t(task) {{ write_file("{}", "x") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.write_text("{}", "x") }}"#,
             read_only_file.display()
         ),
         format!(
-            r#"pipeline t(task) {{ append_file("{}", "x") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.append("{}", "x") }}"#,
             read_only_file.display()
         ),
         format!(
-            r#"pipeline t(task) {{ delete_file("{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.delete("{}") }}"#,
             read_only_file.display()
         ),
     ];
@@ -190,7 +231,7 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
 
     // Creating a new file under a read-only root is likewise rejected.
     let create = format!(
-        r#"pipeline t(task) {{ write_file("{}", "x") }}"#,
+        r#"pipeline t(harness: Harness, task) {{ harness.fs.write_text("{}", "x") }}"#,
         read_only.path().join("new.txt").display()
     );
     let err = run_harn_with_policy(&create, policy).unwrap_err();
@@ -255,26 +296,32 @@ fn test_policy_workspace_roots_reject_process_cwd_escape() {
     let allowed = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let policy = crate::orchestration::CapabilityPolicy {
-        capabilities: std::collections::BTreeMap::from([(
-            "process".to_string(),
-            vec!["exec".to_string()],
-        )]),
+        capabilities: std::collections::BTreeMap::from([
+            ("process".to_string(), vec!["run".to_string()]),
+            ("workspace".to_string(), vec!["read_text".to_string()]),
+        ]),
         workspace_roots: vec![allowed.path().display().to_string()],
         side_effect_level: Some("process_exec".to_string()),
         ..Default::default()
     };
 
     let source = format!(
-        r#"pipeline t(task) {{ exec_at("{}", "sh", "-c", "true") }}"#,
+        r#"pipeline t(harness: Harness, task) {{ harness.process.exec_at("{}", "sh", "-c", "true") }}"#,
         outside.path().display()
     );
     let err = run_harn_with_policy(&source, policy).unwrap_err();
-    assert!(matches!(
-        err,
-        VmError::CategorizedError {
-            category: crate::value::ErrorCategory::ToolRejected,
-            ..
-        }
-    ));
-    assert!(err.to_string().contains("process cwd"));
+    assert!(
+        matches!(
+            err,
+            VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            }
+        ),
+        "expected typed process-cwd rejection, got {err:?}"
+    );
+    assert!(
+        err.to_string().contains("process cwd"),
+        "expected process-cwd sandbox denial, got {err}"
+    );
 }

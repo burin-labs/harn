@@ -337,7 +337,7 @@ impl ReplSession {
         let emitted_line = if is_bare_expression {
             self.result_counter += 1;
             let counter = self.result_counter;
-            format!("let _{counter} = {line}\n__io_println(to_string(_{counter}))")
+            format!("let _{counter} = {line}\nharness.stdio.println(to_string(_{counter}))")
         } else {
             line.clone()
         };
@@ -359,9 +359,9 @@ impl ReplSession {
 
         let body_block = body_lines.join("\n");
         let source = if top_level_block.is_empty() {
-            format!("pipeline repl(task) {{\n{body_block}\n}}")
+            format!("pipeline repl(harness: Harness, task) {{\n{body_block}\n}}")
         } else {
-            format!("{top_level_block}\npipeline repl(task) {{\n{body_block}\n}}")
+            format!("{top_level_block}\npipeline repl(harness: Harness, task) {{\n{body_block}\n}}")
         };
 
         match execute(&source, None).await {
@@ -531,9 +531,9 @@ mod tests {
     #[test]
     fn repl_builtin_names_include_live_stdlib_entries() {
         let builtins = repl_builtin_names();
-        assert!(builtins.iter().any(|name| name == "http_get"));
+        assert!(!builtins.iter().any(|name| name == "http_get"));
         assert!(builtins.iter().any(|name| name == "uuid"));
-        assert!(builtins.iter().any(|name| name == "workflow_execute"));
+        assert!(!builtins.iter().any(|name| name == "workflow_execute"));
     }
 
     #[test]

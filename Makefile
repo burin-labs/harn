@@ -654,19 +654,20 @@ check-connector-matrix:
 # changes, run
 #   $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check --update
 # and commit the regenerated files under scripts/provider_catalog_fixtures/.
-# The fixture workflow installs its own deterministic egress policy. Clear
+# The fixture workflow installs its own deterministic per-Harness egress policy. Clear
 # operator/environment policy variables so that policy is not configured twice
 # before the Harn script reaches its fixture setup.
 check-provider-catalog-drift:
 	@echo "=== Checking provider catalog refresh workflow ==="
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) run --allow-process-network scripts/update_provider_catalog.harn -- --check
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/provider_catalog_notice_test.harn
 	@echo "    Provider catalog refresh OK."
 
 # Validate the ready-to-customize trigger example library.
 check-trigger-examples:
 	@echo "=== Checking trigger examples ==="
-	@find examples/triggers -mindepth 1 -maxdepth 1 -type d | sort | while IFS= read -r dir; do \
+	@set -e; for dir in examples/triggers/*; do \
+		test -d "$$dir" || continue; \
 		test -f "$$dir/harn.toml"; \
 		test -f "$$dir/lib.harn"; \
 		test -f "$$dir/README.md"; \

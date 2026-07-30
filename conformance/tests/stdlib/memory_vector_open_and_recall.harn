@@ -1,7 +1,10 @@
 import "std/memory"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-memory-vector-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-memory-vector-" + harness.random.uuid(),
+  )
   harness.testing.clear()
   // Fixed-vector mock so any text → same embedding. Cosine similarity is
   // then 1.0 across all records and order falls through to the
@@ -14,7 +17,8 @@ pipeline default(harness: Harness) {
     true,
   )
   const opened = memory_open(
-    harness.memory, "agent/vector",
+    harness.memory,
+    "agent/vector",
     {backend: "vector", embed_dim: 3, embed_model_hint: "test", root: root},
   )
   harness.stdio.println(opened._type)
@@ -22,14 +26,16 @@ pipeline default(harness: Harness) {
   harness.stdio.println(opened.embed_dim)
   harness.stdio.println(opened.embed_model_hint)
   memory_store(
-    harness.memory, "agent/vector",
+    harness.memory,
+    "agent/vector",
     "alice",
     "Alice prefers Rust examples",
     ["profile"],
     {root: root, now: "2026-05-15T00:00:00Z"},
   )
   memory_store(
-    harness.memory, "agent/vector",
+    harness.memory,
+    "agent/vector",
     "bob",
     "Bob prefers TypeScript",
     ["profile"],
@@ -43,7 +49,13 @@ pipeline default(harness: Harness) {
   // Newer record wins on tie.
   harness.stdio.println(recalled[0].key)
   // Explicit lexical override should ignore embeddings entirely.
-  const lexical = memory_recall(harness.memory, "agent/vector", "rust profile", 5, {root: root, mode: "lexical"})
+  const lexical = memory_recall(
+    harness.memory,
+    "agent/vector",
+    "rust profile",
+    5,
+    {root: root, mode: "lexical"},
+  )
   harness.stdio.println(lexical[0].key)
   // The embedding cache should now contain both stored records plus the
   // last query. Verify entries exist for the configured model.

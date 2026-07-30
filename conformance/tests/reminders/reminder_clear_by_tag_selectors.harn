@@ -12,7 +12,10 @@ pipeline main(harness: Harness) {
     {body: "clear by tag", tags: ["tagged"], dedupe_key: "tag-key"},
   )
   const by_id = harness.agent.transcript_clear_reminders(third.transcript, {id: first.reminder_id})
-  const by_dedupe = harness.agent.transcript_clear_reminders(by_id.transcript, {dedupe_key: "dedupe-key"})
+  const by_dedupe = harness.agent.transcript_clear_reminders(
+    by_id.transcript,
+    {dedupe_key: "dedupe-key"},
+  )
   const by_tag = harness.agent.transcript_clear_reminders(by_dedupe.transcript, {tag: "tagged"})
   const events = transcript_events_by_kind(by_tag.transcript, "system_reminder")
   harness.stdio.println(by_id.removed_count)

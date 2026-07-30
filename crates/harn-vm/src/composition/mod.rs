@@ -535,6 +535,10 @@ async fn execute_harn_composition_inner(
     }));
     let mut vm = Vm::new();
     crate::register_core_stdlib(&mut vm);
+    // Composition snippets receive the standard root entrypoint argument but
+    // intentionally have no ambient authority. Their only egress is the
+    // manifest-bound `__composition_call` adapter installed below.
+    vm.set_harness(crate::Harness::null());
     let limits = state.lock().request.limits.clone();
     let runtime = CompositionRuntime {
         state: state.clone(),
@@ -1112,7 +1116,7 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
 }
 
 fn composition_validation_source(snippet: &str) -> String {
-    let mut source = String::from("pipeline main() {\n");
+    let mut source = String::from("pipeline main(harness: Harness) {\n");
     source.push_str(snippet);
     if !snippet.ends_with('\n') {
         source.push('\n');
@@ -1130,7 +1134,7 @@ fn composition_source(manifest: &BindingManifest, snippet: &str) -> String {
             escape_harn_string(&binding.name)
         ));
     }
-    source.push_str("pipeline main() {\n");
+    source.push_str("pipeline main(harness: Harness) {\n");
     if manifest.state.is_some() {
         source.push_str(state::harn_runtime_source());
     }

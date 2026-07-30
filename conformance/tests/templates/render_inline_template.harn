@@ -17,6 +17,9 @@ pipeline default(harness: Harness) {
     ),
   )
   harness.stdio.println(
-    harness.fs.render_template(template, {fn_name: "greet", params: [], greeting: "hi", show_note: false}),
+    harness.fs.render_template(
+      template,
+      {fn_name: "greet", params: [], greeting: "hi", show_note: false},
+    ),
   )
 }

@@ -7,7 +7,9 @@ import { agent_session_push_bridge_injection } from "std/agent/state"
 
 pipeline main(harness: Harness) {
   const result = try {
-    agent_session_push_bridge_injection(harness, "bridge-push-no-bridge",
+    agent_session_push_bridge_injection(
+      harness.agent,
+      "bridge-push-no-bridge",
       {body: "should fail", mode: "interrupt_immediate"},
     )
   }

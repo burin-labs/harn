@@ -1,5 +1,9 @@
 pipeline default(harness: Harness) {
-  const session = harness.channels.append("scoped.session", {}, {scope: "session", id: "scope-session"})
+  const session = harness.channels.append(
+    "scoped.session",
+    {},
+    {scope: "session", id: "scope-session"},
+  )
   const prefixed = harness.channels.append("session:scoped.prefixed", {}, {id: "scope-prefix"})
   harness.stdio.println(session.name_resolved)
   harness.stdio.println(prefixed.name_resolved)

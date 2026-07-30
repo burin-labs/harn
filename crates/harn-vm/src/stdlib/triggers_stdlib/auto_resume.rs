@@ -9,6 +9,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use harn_parser::diagnostic_codes::Code;
@@ -237,15 +238,18 @@ fn schedule_auto_resume_timeout(
     let base_vm = ctx
         .map(crate::vm::AsyncBuiltinCtx::child_vm)
         .unwrap_or_default();
+    let harness_inner = base_vm.harness().map(|harness| Arc::clone(harness.inner()));
     let event = auto_resume_timeout_event(&handle, &worker_id, &timeout);
     let trigger_id = handle.id.clone();
     let version = handle.version;
     let task_trigger_id = trigger_id.clone();
     let task = tokio::task::spawn_local(async move {
-        clock::sleep(Duration::from_secs(
-            timeout.duration_minutes.saturating_mul(60),
-        ))
-        .await;
+        let duration = Duration::from_secs(timeout.duration_minutes.saturating_mul(60));
+        if let Some(harness_inner) = harness_inner {
+            harness_inner.wait_for_clock_advance(duration).await;
+        } else {
+            clock::sleep(duration).await;
+        }
         AUTO_RESUME_TIMEOUTS.with(|slot| {
             slot.borrow_mut().remove(task_trigger_id.as_str());
         });

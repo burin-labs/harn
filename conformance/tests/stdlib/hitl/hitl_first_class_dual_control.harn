@@ -1,6 +1,7 @@
-// Dual control is explicit on the interaction capability and still requires
-// distinct principals to reach quorum.
-
+/**
+ * Dual control is explicit on the interaction capability and still requires
+ * distinct principals to reach quorum.
+ */
 fn destructive_step() -> string {
   return "deleted"
 }
@@ -8,10 +9,10 @@ fn destructive_step() -> string {
 pipeline test(harness: Harness, task) {
   harness.testing.clear()
   harness.testing.respond(
-    "interaction", "dual_control_response",
+    "interaction",
+    "dual_control_response",
     [{approved: true, reviewer: "alice"}, {approved: true, reviewer: "bob"}],
   )
-  const result =
-    harness.interaction.dual_control(2, 3, destructive_step, ["alice", "bob", "carol"])
+  const result = harness.interaction.dual_control(2, 3, destructive_step, ["alice", "bob", "carol"])
   harness.stdio.println(result)
 }

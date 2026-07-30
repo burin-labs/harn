@@ -671,12 +671,7 @@ fn __coord_dir_lock_reaper_path(lock_path) {
   return lock_path + ".reap.d"
 }
 
-fn __coord_dir_lock_owner(
-  runtime: HarnessRuntime,
-  random: HarnessRandom,
-  owner,
-  options,
-) {
+fn __coord_dir_lock_owner(runtime: HarnessRuntime, random: HarnessRandom, owner, options) {
   const opts = __coord_dict(options)
   const ctx = __coord_ctx(runtime)
   const raw = if type_of(owner) == "dict" {
@@ -1006,14 +1001,7 @@ fn __coord_subject(message, options, body) {
   return first_line
 }
 
-fn __coord_envelope(
-  runtime: HarnessRuntime,
-  random: HarnessRandom,
-  scope,
-  room,
-  message,
-  options,
-) {
+fn __coord_envelope(runtime: HarnessRuntime, random: HarnessRandom, scope, room, message, options) {
   const msg = __coord_dict(message)
   const opts = __coord_dict(options)
   append_metadata.reject_write(msg, opts)
@@ -1282,15 +1270,7 @@ pub fn coord_with_dir_lock(
   if !__coord_is_callable(body) {
     throw "std/coordination: coord_with_dir_lock body must be callable; got " + type_of(body)
   }
-  const lock = coord_acquire_dir_lock(
-    runtime,
-    fs,
-    clock,
-    random,
-    resource_path,
-    owner,
-    options,
-  )
+  const lock = coord_acquire_dir_lock(runtime, fs, clock, random, resource_path, owner, options)
   if !(lock?.acquired ?? false) {
     throw lock?.message ?? "std/coordination: directory lock was not acquired"
   }
@@ -1583,17 +1563,18 @@ pub fn coord_ack(
  * @effects: []
  * @errors: [runtime]
  */
-pub fn coord_inbox(
-  runtime: HarnessRuntime,
-  channels: HarnessChannels,
-  scope,
-  room,
-  options = nil,
-) {
+pub fn coord_inbox(runtime: HarnessRuntime, channels: HarnessChannels, scope, room, options = nil) {
   const opts = __coord_dict(options)
   const consumer_id = __coord_consumer_id(runtime, opts)
   const from_cursor = opts?.from_cursor ?? opts?.cursor
-    ?? coord_cursor(runtime, channels, scope, room, consumer_id, opts)
+    ?? coord_cursor(
+    runtime,
+    channels,
+    scope,
+    room,
+    consumer_id,
+    opts,
+  )
   const scanned = coord_read(
     runtime,
     channels,
@@ -1636,13 +1617,7 @@ pub fn coord_inbox(
  * @effects: []
  * @errors: [runtime]
  */
-pub fn coord_read(
-  runtime: HarnessRuntime,
-  channels: HarnessChannels,
-  scope,
-  room,
-  options = nil,
-) {
+pub fn coord_read(runtime: HarnessRuntime, channels: HarnessChannels, scope, room, options = nil) {
   const opts = __coord_dict(options)
   const resolution = __coord_resolution(runtime, scope, room, opts)
   return append_metadata.read_messages(

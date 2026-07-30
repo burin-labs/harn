@@ -14,7 +14,7 @@ pipeline main(harness: Harness) {
         prompt: "implement",
         agent_loop: {max_iterations: 4, done_sentinel: "DONE"},
         tools: ["edit"],
-        effects: ["writes_files"],
+        effects: ["workspace_write"],
       },
       worker: {
         kind: "sub_agent",
@@ -47,7 +47,7 @@ pipeline main(harness: Harness) {
       {from: "run_tests", to: "compact_now"},
       {from: "compact_now", to: "check"},
     ],
-    capabilities: {tools: ["read", "edit", "grep", "run"], side_effect_level: "runs_commands"},
+    capabilities: {tools: ["read", "edit", "grep", "run"], side_effect_level: "process_exec"},
   }
   const compiled = task_plan_compile(plan)
   harness.stdio.println(compiled.ok)

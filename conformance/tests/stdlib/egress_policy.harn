@@ -13,7 +13,11 @@ pipeline test(harness: Harness, task) {
       default: "deny",
     },
   )
-  harness.testing.http_mock("GET", "https://allowed.example.test/ok", {status: 200, body: "allowed"})
+  harness.testing.http_mock(
+    "GET",
+    "https://allowed.example.test/ok",
+    {status: 200, body: "allowed"},
+  )
   const allowed = harness.net.get("https://allowed.example.test/ok")
   assert_eq(allowed.status, 200)
   harness.testing.http_mock("GET", "https://api.wild.example.test/ok", {status: 200, body: "wild"})

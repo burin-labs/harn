@@ -19,7 +19,8 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   // --- A. the matched row's text reaches the first outbound system prompt ---
   with_llm_script(
-    harness.llm, [llm_text("done ##DONE##")],
+    harness.llm,
+    [llm_text("done ##DONE##")],
     { ->
       const opts = overlay_policy(
         default_overlay_rows(),
@@ -36,7 +37,8 @@ pipeline default(harness: Harness) {
   )
   // --- B. no matching row -> system is unaffected ---
   with_llm_script(
-    harness.llm, [llm_text("done ##DONE##")],
+    harness.llm,
+    [llm_text("done ##DONE##")],
     { ->
       const opts = overlay_policy(
         default_overlay_rows(),
@@ -52,13 +54,18 @@ pipeline default(harness: Harness) {
       const result = agent_loop(harness, "Do the task.", nil, opts)
       const system = harness.llm.mock_calls()[0].system
       harness.stdio.println("B.status=" + result.status)
-      harness.stdio.println("B.has_caller_system=" + to_string(contains(system, "base system prompt")))
-      harness.stdio.println("B.no_overlay_added=" + to_string(!contains(system, "Batch related read-only")))
+      harness.stdio.println(
+        "B.has_caller_system=" + to_string(contains(system, "base system prompt")),
+      )
+      harness.stdio.println(
+        "B.no_overlay_added=" + to_string(!contains(system, "Batch related read-only")),
+      )
     },
   )
   // --- C. overlay ADDS alongside an explicit system prompt, never replaces it ---
   with_llm_script(
-    harness.llm, [llm_text("done ##DONE##")],
+    harness.llm,
+    [llm_text("done ##DONE##")],
     { ->
       const opts = overlay_policy(
         default_overlay_rows(),
@@ -78,12 +85,15 @@ pipeline default(harness: Harness) {
         "C.has_caller_system="
           + to_string(contains(system, "explicit caller-supplied system prompt")),
       )
-      harness.stdio.println("C.has_overlay=" + to_string(contains(system, "concrete, reviewable plan")))
+      harness.stdio.println(
+        "C.has_overlay=" + to_string(contains(system, "concrete, reviewable plan")),
+      )
     },
   )
   // --- D. an explicit override reaches the wire instead of the row default ---
   with_llm_script(
-    harness.llm, [llm_text("done ##DONE##")],
+    harness.llm,
+    [llm_text("done ##DONE##")],
     { ->
       const opts = overlay_policy(
         default_overlay_rows(),

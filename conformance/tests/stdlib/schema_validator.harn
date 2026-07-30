@@ -19,7 +19,9 @@ pipeline test(harness: Harness, task) {
   const bad_report = validator.report({name: "A"})
   harness.stdio.println(!bad_report.ok)
   harness.stdio.println(len(bad_report.issues))
-  harness.stdio.println(contains(join(validator.errors({name: "A"}), "\n"), "is shorter than 2 characters"))
+  harness.stdio.println(
+    contains(join(validator.errors({name: "A"}), "\n"), "is shorter than 2 characters"),
+  )
   harness.stdio.println(json_stringify(validator.issues({name: "A"})).contains("\"path\":\"name\""))
   harness.stdio.println(validator.json_schema().type)
   harness.stdio.println(validator.openapi_schema().type)

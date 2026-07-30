@@ -3,7 +3,8 @@ import "std/hitl"
 pipeline test(harness: Harness, task) {
   harness.testing.clear()
   harness.testing.respond(
-    "interaction", "approval_response",
+    "interaction",
+    "approval_response",
     [
       {approved: true, reviewer: "alice", reason: "checked"},
       {approved: true, reviewer: "bob", reason: "approved"},
@@ -15,7 +16,10 @@ pipeline test(harness: Harness, task) {
     approved_at: string,
     reason: string?,
     signatures: list<{reviewer: string, signed_at: string, signature: string}>,
-  } = harness.interaction.request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob", "carol"]})
+  } = harness.interaction.request_approval(
+    "deploy production",
+    {quorum: 2, reviewers: ["alice", "bob", "carol"]},
+  )
   harness.stdio.println(record.approved)
   harness.stdio.println(len(record.reviewers))
   harness.stdio.println(record.reviewers[0])

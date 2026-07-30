@@ -356,7 +356,7 @@ pub const TRANSCRIPT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("archived_messages", TY_INT),
 ]);
 
-/// `agent_session_snapshot(id)` returns the transcript plus session lineage
+/// `harness.agent.snapshot(id)` returns the transcript plus session lineage
 /// and prompt/tool metadata.
 pub const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("_type", Ty::LitString("transcript")),

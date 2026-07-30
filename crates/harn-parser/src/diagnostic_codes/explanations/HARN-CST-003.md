@@ -11,8 +11,8 @@ mediate I/O or non-determinism.
 
 ```harn,ignore
 // Rejected:
-const X = read_file("/etc/passwd")
-const Y = env("HOME")
+const X = harness.fs.read_text("/etc/passwd")
+const Y = harness.env.get("HOME")
 const Z = spawn { ... }
 const W = harness.clock.now()
 ```

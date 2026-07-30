@@ -136,15 +136,21 @@ fn __agent_required_tools_envelope(
   }
 }
 
-fn __agent_required_tools_emit_friction(harness: Harness, result: dict, opts, missing: list<string>) {
+fn __agent_required_tools_emit_friction(
+  agent: HarnessAgent,
+  obs: HarnessObs,
+  result: dict,
+  opts,
+  missing: list<string>,
+) {
   const event = __agent_required_tools_friction_event(result, opts, missing)
   const _ = try {
-    harness.obs.friction_record(event)
+    obs.friction_record(event)
   }
   const session_id = to_string(result?.session_id ?? "")
   if session_id != "" {
     const _ = try {
-      agent_emit_event(harness, session_id, "require_successful_tools_violation", event)
+      agent_emit_event(agent, session_id, "require_successful_tools_violation", event)
     }
   }
 }
@@ -173,7 +179,12 @@ fn __agent_required_tools_preserve_terminal_error(result: dict) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_required_tools_enforce(harness: Harness, result: dict, opts) -> dict {
+pub fn agent_required_tools_enforce(
+  agent: HarnessAgent,
+  obs: HarnessObs,
+  result: dict,
+  opts,
+) -> dict {
   if __agent_required_tools_preserve_terminal_error(result) {
     return result
   }
@@ -183,7 +194,7 @@ pub fn agent_required_tools_enforce(harness: Harness, result: dict, opts) -> dic
   }
   const iterations = result?.llm?.iterations ?? 0
   const envelope = __agent_required_tools_envelope(result, missing, iterations)
-  __agent_required_tools_emit_friction(harness, result, opts, missing)
+  __agent_required_tools_emit_friction(agent, obs, result, opts, missing)
   return result
     + {
     status: "failed",
@@ -216,8 +227,14 @@ pub fn agent_required_tools_feedback(missing: list<string>) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_required_tools_inject_feedback(harness: Harness, session_id: string, missing: list<string>) {
-  agent_session_inject_feedback(harness, session_id,
+pub fn agent_required_tools_inject_feedback(
+  agent: HarnessAgent,
+  session_id: string,
+  missing: list<string>,
+) {
+  agent_session_inject_feedback(
+    agent,
+    session_id,
     "required_tools",
     agent_required_tools_feedback(missing),
   )

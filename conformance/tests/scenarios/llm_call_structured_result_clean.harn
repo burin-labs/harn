@@ -12,7 +12,8 @@ pipeline default(harness: Harness) {
     properties: {name: {type: "string"}, age: {type: "integer"}},
   }
   with_llm_script(
-    harness.llm, [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
+    harness.llm,
+    [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
     { ->
       const r = harness.llm.call_structured_result("Summarize", schema, {provider: "mock"})
       harness.stdio.println(r.ok)

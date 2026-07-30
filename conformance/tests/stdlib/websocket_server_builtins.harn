@@ -50,7 +50,10 @@ pipeline test(harness: Harness, task) {
   assert_eq(closed.type, "close")
   assert_eq(closed.code, 1000)
   assert_eq(closed.reason, "done")
-  const limited_client = harness.net.websocket_connect(server.url + "/limited", {timeout_ms: ws_timeout_ms})
+  const limited_client = harness.net.websocket_connect(
+    server.url + "/limited",
+    {timeout_ms: ws_timeout_ms},
+  )
   const limited_conn = harness.net.websocket_accept(server, ws_timeout_ms) ?? {}
   assert(harness.net.websocket_send(limited_client, "toolong", {}))
   const limited = try {

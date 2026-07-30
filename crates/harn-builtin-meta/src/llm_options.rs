@@ -267,7 +267,7 @@ pub const LLM_REMOVED_OPTIONS: &[RemovedLlmOption] = &[
     // Session lifecycle (removed pre-W2; kept here so the fix survives).
     removed(
         "transcript",
-        "open or resume a session with agent_session_open(id) and pass `session_id: id`",
+        "open or resume a session with harness.agent.open(id) and pass `session_id: id`",
     ),
     // Internal channels that briefly leaked into the public dict.
     removed(

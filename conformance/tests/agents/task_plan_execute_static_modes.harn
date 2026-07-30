@@ -1,9 +1,13 @@
-import { workflow_execute } from "std/workflow/execute"
 import { task_plan_compile } from "std/agent/task_plan"
+import { workflow_execute } from "std/workflow/execute"
 
 pipeline main(harness: Harness) {
   harness.testing.clear()
-  harness.testing.respond("interaction", "approval_response", {approved: true, reviewer: "lead", reason: "ready"})
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    {approved: true, reviewer: "lead", reason: "ready"},
+  )
   const argv = if harness.system.platform().os == "windows" {
     ["cmd", "/C", "echo|set /p=task-plan-command-ok"]
   } else {
@@ -31,13 +35,15 @@ pipeline main(harness: Harness) {
       },
     },
     edges: [{from: "gate", to: "cmd", branch: "approved"}, {from: "cmd", to: "compact"}],
-    capabilities: {tools: ["run"], side_effect_level: "runs_commands"},
+    capabilities: {tools: ["run"], side_effect_level: "process_exec"},
   }
   const compiled = task_plan_compile(plan)
   harness.stdio.println(compiled.ok)
   const validation = workflow_validate(compiled.workflow)
   harness.stdio.println(validation.valid)
-  const result = workflow_execute(harness, "Execute static task-plan modes",
+  const result = workflow_execute(
+    harness,
+    "Execute static task-plan modes",
     compiled.workflow,
     [{id: "seed", kind: "summary", text: "seed artifact"}],
     {max_steps: 4},

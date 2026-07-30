@@ -15,14 +15,14 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "pre_finish",
-    { event ->
+    { _hook_harness, event ->
       harness.stdio.println("pre_finish saw " + to_string(event.return_value))
       return nil
     },
   )
   harness.agent.register_session_hook(
     "post_finish",
-    { event ->
+    { _hook_harness, event ->
       harness.stdio.println("post_finish saw " + to_string(event.return_value))
       return nil
     },

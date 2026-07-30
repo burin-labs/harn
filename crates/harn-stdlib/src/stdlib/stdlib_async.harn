@@ -12,18 +12,18 @@
  * @effects: [time]
  * @errors: []
  */
-pub fn wait_for(harness: Harness, timeout_ms, interval_ms, predicate) {
-  const end_time = harness.clock.timestamp() * 1000 + timeout_ms
+pub fn wait_for(clock: HarnessClock, timeout_ms, interval_ms, predicate) {
+  const end_time = clock.timestamp() * 1000 + timeout_ms
   let interval = interval_ms
   if interval <= 0 {
     interval = 100
   }
-  while harness.clock.timestamp() * 1000 < end_time {
+  while clock.timestamp() * 1000 < end_time {
     const value = predicate()
     if value {
       return Ok(value)
     }
-    harness.clock.sleep_ms(interval)
+    clock.sleep_ms(interval)
   }
   // One final check after deadline
   const value = predicate()
@@ -54,7 +54,7 @@ pub fn retry_until(max_attempts, predicate) {
   return Err("exhausted")
 }
 
-// retry_predicate_with_backoff(harness, max_attempts, base_ms, predicate) -> Result
+// retry_predicate_with_backoff(harness.clock, max_attempts, base_ms, predicate) -> Result
 // Calls predicate() with exponential backoff (base_ms * 2^attempt).
 // Returns Ok(value) on first truthy result, or Err("exhausted").
 /**
@@ -63,7 +63,7 @@ pub fn retry_until(max_attempts, predicate) {
  * @effects: []
  * @errors: []
  */
-pub fn retry_predicate_with_backoff(harness: Harness, max_attempts, base_ms, predicate) {
+pub fn retry_predicate_with_backoff(clock: HarnessClock, max_attempts, base_ms, predicate) {
   let attempt = 0
   while attempt < max_attempts {
     const value = predicate()
@@ -73,7 +73,7 @@ pub fn retry_predicate_with_backoff(harness: Harness, max_attempts, base_ms, pre
     attempt = attempt + 1
     if attempt < max_attempts {
       const delay = base_ms * pow(2, attempt - 1)
-      harness.clock.sleep_ms(delay)
+      clock.sleep_ms(delay)
     }
   }
   return Err("exhausted")
@@ -92,8 +92,8 @@ pub fn retry_predicate_with_backoff(harness: Harness, max_attempts, base_ms, pre
  * @effects: []
  * @errors: []
  */
-pub fn circuit_call(harness: Harness, name, closure) {
-  const state = harness.runtime.circuit_check(name)
+pub fn circuit_call(runtime: HarnessRuntime, name, closure) {
+  const state = runtime.circuit_check(name)
   if state == "open" {
     return Err("circuit_open")
   }
@@ -101,9 +101,9 @@ pub fn circuit_call(harness: Harness, name, closure) {
     closure()
   }
   if is_ok(result) {
-    harness.runtime.circuit_record_success(name)
+    runtime.circuit_record_success(name)
   } else {
-    harness.runtime.circuit_record_failure(name)
+    runtime.circuit_record_failure(name)
   }
   return result
 }

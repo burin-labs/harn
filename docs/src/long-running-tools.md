@@ -7,11 +7,11 @@ that support `background: true`.
 
 Supported stdlib operations:
 
-- `walk_dir(path, {background: true, ...})`
-- `glob(pattern, base?, {background: true})`
-- `glob(pattern, {base: "...", background: true})`
-- `find_text(root, pattern, {background: true, ...})`
-- `find_evidence(roots, patterns, {background: true, ...})`
+- `harness.fs.walk(path, {background: true, ...})`
+- `harness.fs.glob(pattern, base?, {background: true})`
+- `harness.fs.glob(pattern, {base: "...", background: true})`
+- `harness.fs.find_text(root, pattern, {background: true, ...})`
+- `harness.fs.find_evidence(roots, patterns, {background: true, ...})`
 
 Supported host tools:
 
@@ -29,20 +29,22 @@ output wait subscribes to capture publication; it does not poll artifact files.
 ```harn,ignore
 import { command_cancel, command_run, command_wait_for_output } from "std/command"
 
-const service = command_run(["my-service"], {background: true})
-defer { command_cancel(service, {wait_result_ms: 5000}) }
-const ready = command_wait_for_output(service, "listening", {
-  source: "stderr",
-  timeout_ms: 10000,
-})
-if !ready.matched { throw "service did not become ready: " + ready.status }
+fn run_service(tools: HarnessTools) {
+  const service = command_run(tools, ["my-service"], {background: true})
+  defer { command_cancel(tools, service, {wait_result_ms: 5000}) }
+  const ready = command_wait_for_output(tools, service, "listening", {
+    source: "stderr",
+    timeout_ms: 10000,
+  })
+  if !ready.matched { throw "service did not become ready: " + ready.status }
+}
 ```
 
 ## Process lifecycle
 
 Foreground command tools (`run_command` without `background`, plus
 `run_test`, `run_build_command`, `manage_packages`, and the VM-side
-`process.exec` / `shell` / `exec_opts` builtins) tie their subprocess to
+`harness.process.exec` / `shell` / `exec_opts` methods) tie their subprocess to
 the invoking scope. The child runs in its own process group; when the
 invoking scope is cancelled, a `deadline` expires, or the VM is dropped,
 the whole group — grandchildren included — receives SIGTERM and, after a
@@ -62,7 +64,7 @@ as described below.
 A long-running call returns immediately with a handle envelope:
 
 ```harn
-const handle = walk_dir(".", {background: true})
+const handle = harness.fs.walk(".", {background: true})
 ```
 
 The returned dict includes:
@@ -96,13 +98,13 @@ Use `defer` or `finally` so early returns and thrown errors still release the
 handle when the script no longer needs the result.
 
 ```harn
-pipeline main() {
-  const handle = walk_dir(".", {background: true})
+pipeline main(harness: Harness) {
+  const handle = harness.fs.walk(".", {background: true})
   defer {
-    host_tool_call("cancel_handle", {handle_id: handle.handle_id})
+    harness.tools.invoke("cancel_handle", {handle_id: handle.handle_id})
   }
 
-  agent_loop("Summarize the repository while the file walk runs.", nil, {
+  agent_loop(harness, "Summarize the repository while the file walk runs.", nil, {
     tools: ["read_file"],
   })
 }
@@ -117,9 +119,9 @@ in-flight store and its result has been queued.
 This starts background work but has no cleanup path if the pipeline exits early:
 
 ```harn
-pipeline main() {
-  const handle = walk_dir(".", {background: true})
-  log(handle.handle_id)
+pipeline main(harness: Harness) {
+  const handle = harness.fs.walk(".", {background: true})
+  harness.stdio.log(handle.handle_id)
 }
 ```
 

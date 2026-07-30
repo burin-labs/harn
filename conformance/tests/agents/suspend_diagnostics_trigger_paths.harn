@@ -15,7 +15,9 @@ pipeline main(harness: Harness) {
   }
   harness.stdio.println(has_code(bad_trigger_shape, "HARN-SUS-002"))
   const bad_timeout_action = try {
-    agent_await_resumption(harness.agent, "waiting on review",
+    agent_await_resumption(
+      harness.agent,
+      "waiting on review",
       {timeout: {duration_minutes: 1, on_timeout: "explode"}},
     )
   }

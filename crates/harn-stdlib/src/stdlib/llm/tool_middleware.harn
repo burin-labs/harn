@@ -206,11 +206,11 @@ fn __tool_mw_attach_audit(result, addition) {
   return result + {audit: merged}
 }
 
-fn __tool_mw_now_iso(harness: Harness) -> string {
-  return harness.clock.date_iso()
+fn __tool_mw_now_iso(clock: HarnessClock) -> string {
+  return clock.date_iso()
 }
 
-fn __safe_call_caller(harness: Harness, caller, envelope, next) {
+fn __safe_call_caller(clock: HarnessClock, caller, envelope, next) {
   const outcome = try {
     caller(envelope, next)
   }
@@ -234,7 +234,7 @@ fn __safe_call_caller(harness: Harness, caller, envelope, next) {
             name: "tool_caller",
             status: "exception",
             error: to_string(err),
-            at: __tool_mw_now_iso(harness),
+            at: __tool_mw_now_iso(clock),
           },
         ],
       },
@@ -386,7 +386,7 @@ pub fn default_tool_caller() {
  * @effects: []
  * @errors: []
  */
-pub fn compose_tool_callers(harness: Harness, wrappers) {
+pub fn compose_tool_callers(clock: HarnessClock, wrappers) {
   const list = __tool_mw_list(wrappers)
   if len(list) == 0 {
     return default_tool_caller()
@@ -397,7 +397,7 @@ pub fn compose_tool_callers(harness: Harness, wrappers) {
     while i >= 0 {
       const layer = list[i]
       const prev = built
-      built = { c -> __safe_call_caller(harness, layer, c, prev) }
+      built = { c -> __safe_call_caller(clock, layer, c, prev) }
       i = i - 1
     }
     return built(call)
@@ -511,7 +511,7 @@ pub fn with_required_reason(opts = nil) {
 }
 
 /**
- * local_receipt_sink(harness, session_id) -> sink_fn
+ * local_receipt_sink(harness.fs, session_id) -> sink_fn
  *
  * Returns a receipt sink that appends JSONL to `<state_root>/receipts/<session>.jsonl`.
  * The sink writes one record per invocation and does not buffer.
@@ -519,13 +519,13 @@ pub fn with_required_reason(opts = nil) {
  * @effects: []
  * @errors: [runtime]
  */
-pub fn local_receipt_sink(harness: Harness, session_id) {
+pub fn local_receipt_sink(fs: HarnessFs, session_id) {
   const fallback = __tool_mw_optional_text(session_id) ?? "session"
   return { receipt ->
     const raw_session = __tool_mw_optional_text(receipt?.session_id) ?? fallback
-    const path = __tool_mw_local_receipt_path(harness, raw_session)
-    harness.fs.mkdir(path_parent(path))
-    harness.fs.append(path, json_stringify(receipt) + "\n")
+    const path = __tool_mw_local_receipt_path(fs, raw_session)
+    fs.mkdir(path_parent(path))
+    fs.append(path, json_stringify(receipt) + "\n")
     return path
   }
 }
@@ -542,20 +542,20 @@ fn __tool_mw_local_receipt_filename(session_id_text) -> string {
  * instead of landing in a `.harn` beside whatever directory the agent
  * happened to start in.
  */
-fn __tool_mw_local_receipt_path(harness: Harness, session_id_value) -> string {
+fn __tool_mw_local_receipt_path(fs: HarnessFs, session_id_value) -> string {
   const raw = __tool_mw_optional_text(session_id_value) ?? "session"
   const filename = __tool_mw_local_receipt_filename(raw)
-  return path_join(harness.fs.runtime_paths().state_root, "receipts", filename + ".jsonl")
+  return path_join(fs.runtime_paths().state_root, "receipts", filename + ".jsonl")
 }
 
-fn __tool_mw_local_receipt_uri(harness: Harness, session_id_value) -> string {
-  const path = __tool_mw_local_receipt_path(harness, session_id_value)
+fn __tool_mw_local_receipt_uri(fs: HarnessFs, session_id_value) -> string {
+  const path = __tool_mw_local_receipt_path(fs, session_id_value)
   // `file://` needs an absolute path. The state root is absolute in every
   // real run; anchor a relative one so the URI stays resolvable regardless.
   if path_is_absolute(path) {
     return "file://" + path
   }
-  return "file://" + path_join(harness.fs.cwd(), path)
+  return "file://" + path_join(fs.cwd(), path)
 }
 
 fn __tool_mw_receipt_status(result) -> string {
@@ -612,7 +612,7 @@ fn __tool_mw_receipt_result_hash(result) {
   return __tool_mw_sha256_value(result.result)
 }
 
-fn __tool_mw_tool_call_receipt(harness: Harness, call, result, duration_ms, redact_keys) {
+fn __tool_mw_tool_call_receipt(clock: HarnessClock, call, result, duration_ms, redact_keys) {
   const turn = __tool_mw_dict(call?.turn)
   const audit = __tool_mw_dict(result?.audit)
   const iteration = __tool_mw_nonnegative_int(turn?.iteration)
@@ -640,7 +640,7 @@ fn __tool_mw_tool_call_receipt(harness: Harness, call, result, duration_ms, reda
     args_hash: __tool_mw_sha256_value(args_for_hash),
     result_hash: __tool_mw_receipt_result_hash(result),
     audit: audit,
-    emitted_at: __tool_mw_now_iso(harness),
+    emitted_at: __tool_mw_now_iso(clock),
     model: __tool_mw_optional_text(turn?.model),
     provider: __tool_mw_optional_text(turn?.provider),
   }
@@ -668,8 +668,8 @@ fn __tool_mw_audit_log_config(sink) {
   return {mode: mode, sink_fn: nil, redact_keys: redact_keys}
 }
 
-fn __tool_mw_audit_log_emit_local(harness: Harness, receipt) {
-  const sink = local_receipt_sink(harness, receipt?.session_id)
+fn __tool_mw_audit_log_emit_local(fs: HarnessFs, receipt) {
+  const sink = local_receipt_sink(fs, receipt?.session_id)
   return sink(receipt)
 }
 
@@ -677,9 +677,9 @@ fn __tool_mw_audit_log_has_deferred_sink(cfg) -> bool {
   return cfg.mode == "local" || cfg.mode == "both" || cfg.sink_fn != nil
 }
 
-fn __tool_mw_audit_log_flush(harness: Harness, cfg, receipt) {
+fn __tool_mw_audit_log_flush(fs: HarnessFs, cfg, receipt) {
   if cfg.mode == "local" || cfg.mode == "both" {
-    __tool_mw_audit_log_emit_local(harness, receipt)
+    __tool_mw_audit_log_emit_local(fs, receipt)
   }
   if cfg.sink_fn != nil {
     cfg.sink_fn(receipt)
@@ -694,7 +694,7 @@ fn __tool_mw_audit_log_return(result, cfg, receipt) {
 }
 
 /**
- * with_audit_log(harness, sink_or_options) -> caller
+ * with_audit_log(harness.clock, harness.fs, sink_or_options) -> caller
  *
  * Builds one typed ToolCallReceipt per tool call after the call completes.
  * `sink_or_options` accepts:
@@ -716,15 +716,15 @@ fn __tool_mw_audit_log_return(result, cfg, receipt) {
  * @effects: []
  * @errors: [runtime]
  */
-pub fn with_audit_log(harness: Harness, sink_or_options) {
+pub fn with_audit_log(clock: HarnessClock, fs: HarnessFs, sink_or_options) {
   const cfg = __tool_mw_audit_log_config(sink_or_options)
   return { call, next ->
-    const started = harness.clock.now_ms()
+    const started = clock.now_ms()
     const result = next(call)
-    const duration = harness.clock.now_ms() - started
-    const base_receipt = __tool_mw_tool_call_receipt(harness, call, result, duration, cfg.redact_keys)
+    const duration = clock.now_ms() - started
+    const base_receipt = __tool_mw_tool_call_receipt(clock, call, result, duration, cfg.redact_keys)
     const receipt_uri = if cfg.mode == "local" || cfg.mode == "both" {
-      __tool_mw_local_receipt_uri(harness, base_receipt.session_id)
+      __tool_mw_local_receipt_uri(fs, base_receipt.session_id)
     } else {
       nil
     }
@@ -742,17 +742,17 @@ pub fn with_audit_log(harness: Harness, sink_or_options) {
       const returned = __tool_mw_audit_log_return(enriched_result, cfg, receipt)
       if __tool_mw_audit_log_has_deferred_sink(cfg) {
         return returned
-          + {_audit_flush: { -> __tool_mw_audit_log_flush(harness, cfg, receipt) }}
+          + {_audit_flush: { -> __tool_mw_audit_log_flush(fs, cfg, receipt) }}
       }
       return returned
     }
-    __tool_mw_audit_log_flush(harness, cfg, receipt)
+    __tool_mw_audit_log_flush(fs, cfg, receipt)
     return __tool_mw_audit_log_return(enriched_result, cfg, receipt)
   }
 }
 
 /**
- * with_consent(harness, prompt_fn) -> caller
+ * with_consent(harness.clock, prompt_fn) -> caller
  *
  * `prompt_fn(call) -> bool | dict` is consulted before each tool call.
  * - `true` / `{decision: "approved"}`: proceed; record decision in audit.
@@ -765,7 +765,7 @@ pub fn with_audit_log(harness: Harness, sink_or_options) {
  * @effects: []
  * @errors: []
  */
-pub fn with_consent(harness: Harness, prompt_fn) {
+pub fn with_consent(clock: HarnessClock, prompt_fn) {
   if !__tool_mw_is_callable(prompt_fn) {
     throw "with_consent: prompt_fn must be callable; got " + type_of(prompt_fn)
   }
@@ -799,7 +799,7 @@ pub fn with_consent(harness: Harness, prompt_fn) {
             consent: {
               decision: "denied",
               decided_by: to_string(decision?.decided_by ?? "with_consent"),
-              decided_at: __tool_mw_now_iso(harness),
+              decided_at: __tool_mw_now_iso(clock),
             },
             layers: [{name: "with_consent", status: "denied"}],
           },
@@ -813,7 +813,7 @@ pub fn with_consent(harness: Harness, prompt_fn) {
         consent: {
           decision: verdict,
           decided_by: to_string(decision?.decided_by ?? "with_consent"),
-          decided_at: __tool_mw_now_iso(harness),
+          decided_at: __tool_mw_now_iso(clock),
         },
         layers: [{name: "with_consent", status: verdict}],
       },
@@ -837,9 +837,9 @@ pub fn with_consent(harness: Harness, prompt_fn) {
  * either does expensive work:
  *
  *     compose_tool_callers(harness, [
- *       with_audit_log(harness, {...}),
+ *       with_audit_log(harness.clock, harness.fs, {...}),
  *       with_scoped_executor({stage: "research", allowed_tools: [...]}),
- *       with_consent(harness, ...),
+ *       with_consent(harness.clock, ...),
  *       default_tool_caller(),
  *     ])
  *
@@ -861,7 +861,7 @@ pub fn with_consent(harness: Harness, prompt_fn) {
  * @effects: []
  * @errors: []
  */
-pub fn with_scoped_executor(harness: Harness, opts) {
+pub fn with_scoped_executor(runtime: HarnessRuntime, opts) {
   const cfg = __tool_mw_dict(opts)
   const stage = to_string(cfg?.stage ?? "scoped")
   const allowed = __tool_mw_string_list(cfg?.allowed_tools)
@@ -913,7 +913,7 @@ pub fn with_scoped_executor(harness: Harness, opts) {
     if capabilities_value != nil {
       policy = policy + {capabilities: capabilities_value}
     }
-    const result = harness.runtime.with_execution_policy(policy, fn() { return next(call) })
+    const result = runtime.with_execution_policy(policy, fn() { return next(call) })
     return __tool_mw_attach_audit(
       result,
       {
@@ -1042,7 +1042,7 @@ pub fn with_redaction(redactor) {
  * @effects: []
  * @errors: []
  */
-pub fn with_idempotency(harness: Harness, key_fn, opts = nil) {
+pub fn with_idempotency(llm: HarnessLlm, key_fn, opts = nil) {
   if !__tool_mw_is_callable(key_fn) {
     throw "with_idempotency: key_fn must be callable; got " + type_of(key_fn)
   }
@@ -1065,7 +1065,7 @@ pub fn with_idempotency(harness: Harness, key_fn, opts = nil) {
     if key == "" {
       return next(call)
     }
-    const cached = cache_get(harness, key, cache_options)
+    const cached = cache_get(llm, key, cache_options)
     if cached?.hit ?? false {
       return __tool_mw_attach_audit(
         cached.value,
@@ -1074,7 +1074,7 @@ pub fn with_idempotency(harness: Harness, key_fn, opts = nil) {
     }
     const result = next(call)
     if result?.ok ?? false {
-      const _ = cache_put(harness, key, result, cache_options)
+      const _ = cache_put(llm, key, result, cache_options)
     }
     return __tool_mw_attach_audit(
       result,
@@ -1100,18 +1100,18 @@ pub fn with_idempotency(harness: Harness, key_fn, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn with_rate_limit(harness: Harness, opts) {
+pub fn with_rate_limit(runtime: HarnessRuntime, opts) {
   const cfg = __tool_mw_dict(opts)
   const cap = cfg?.max_calls
   if type_of(cap) != "int" || cap < 0 {
     throw "with_rate_limit: max_calls must be a non-negative int"
   }
-  const counter = harness.runtime.atomic(0)
+  const counter = runtime.atomic(0)
   const message = to_string(cfg?.message ?? "rate limit exceeded")
   return { call, next ->
-    const count = harness.runtime.atomic_add(counter, 1)
+    const count = runtime.atomic_add(counter, 1)
     if count >= cap {
-      const _ = harness.runtime.atomic_add(counter, -1)
+      const _ = runtime.atomic_add(counter, -1)
       return __tool_mw_short_circuit(
         call,
         "rate_limited",
@@ -1170,10 +1170,10 @@ pub fn with_telemetry(harness: Harness, sink_or_opts) {
   const extras = __telemetry_extras(sink_or_opts)
   return { call, next ->
     const started_ms = harness.clock.now_ms()
-    const started_iso = __tool_mw_now_iso(harness)
+    const started_iso = __tool_mw_now_iso(harness.clock)
     const result = next(call)
     const ended_ms = harness.clock.now_ms()
-    const ended_iso = __tool_mw_now_iso(harness)
+    const ended_iso = __tool_mw_now_iso(harness.clock)
     const span = tool_call_span(
       call,
       result,
@@ -1414,7 +1414,7 @@ fn __tool_mw_handoff_dict_candidate(raw_result) {
  * @effects: []
  * @errors: []
  */
-pub fn with_timeout(harness: Harness, opts) {
+pub fn with_timeout(clock: HarnessClock, opts) {
   const cfg = __tool_mw_dict(opts)
   const default_ms = cfg?.max_ms
   if type_of(default_ms) != "int" || default_ms < 0 {
@@ -1428,9 +1428,9 @@ pub fn with_timeout(harness: Harness, opts) {
     } else {
       default_ms
     }
-    const started = harness.clock.now_ms()
+    const started = clock.now_ms()
     const result = next(call)
-    const elapsed = harness.clock.now_ms() - started
+    const elapsed = clock.now_ms() - started
     if elapsed < limit {
       return __tool_mw_attach_audit(
         result,

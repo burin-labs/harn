@@ -1021,11 +1021,16 @@ mod tests {
         }));
 
         let mut vm = Vm::new();
-        register_vision_builtins(&mut vm);
+        crate::register_vm_stdlib(&mut vm);
+        let system = vm
+            .harness()
+            .and_then(|harness| harness.sub_handle("system"))
+            .expect("stdlib registration installs HarnessSystem");
         let result = vm
-            .call_named_builtin(
+            .call_harness_method(
+                &system,
                 "vision_ocr",
-                vec![crate::schema::json_to_vm_value(&serde_json::json!({
+                &[crate::schema::json_to_vm_value(&serde_json::json!({
                     "bytes_base64": "ZmFrZQ==",
                     "mime_type": "image/png",
                     "name": "sample.png",

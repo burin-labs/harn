@@ -28,12 +28,15 @@ fn tools() {
 pipeline main(harness: Harness) {
   harness.obs.friction_clear()
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]},
       llm_text("Finished."),
     ],
     { ->
-      const failed = agent_loop(harness, "Use one tool.",
+      const failed = agent_loop(
+        harness,
+        "Use one tool.",
         nil,
         {
           provider: "mock",
@@ -65,12 +68,15 @@ pipeline main(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "y"}}]},
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      const satisfied = agent_loop(harness, "Use one tool.",
+      const satisfied = agent_loop(
+        harness,
+        "Use one tool.",
         nil,
         {
           provider: "mock",

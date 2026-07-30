@@ -744,9 +744,11 @@ mod tests {
         .expect("serialize root literal");
         let source = format!(
             r###"
-pipeline main(task) {{
-  llm_mock({{text: "", tool_calls: [{{id: "live-call", name: "noop", arguments: {{}}}}]}})
-  llm_mock({{text: "##DONE##"}})
+import {{ agent_loop }} from "std/agent/loop"
+
+pipeline main(harness: Harness, task) {{
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "live-call", name: "noop", arguments: {{}}}}]}})
+  harness.llm.mock_enqueue({{text: "##DONE##"}})
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -759,6 +761,7 @@ pipeline main(task) {{
     }},
   )
   const result = agent_loop(
+    harness,
     "Use noop, then finish.",
     nil,
     {{
@@ -772,7 +775,7 @@ pipeline main(task) {{
       max_iterations: 4,
     }},
   )
-  __io_println(result.status)
+  harness.stdio.println(result.status)
 }}
 "###,
         );

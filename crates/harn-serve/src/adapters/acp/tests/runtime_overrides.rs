@@ -106,7 +106,7 @@ async fn prompt_healthcheck(
                 "sessionId": session_id,
                 "prompt": [{
                     "type": "text",
-                    "text": "const result = llm_healthcheck(\"fixture\")\n__io_println(result.valid)\n__io_println(result.metadata.url)",
+                    "text": "const result = harness.llm.healthcheck(\"fixture\")\nharness.stdio.println(result.valid)\nharness.stdio.println(result.metadata.url)",
                 }],
             },
         }))
@@ -138,6 +138,30 @@ async fn prompt_healthcheck(
     }
 }
 
+async fn set_code_mode(
+    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    session_id: &str,
+    request_id: i64,
+) {
+    request_tx
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "session/set_mode",
+            "params": {"sessionId": session_id, "modeId": "code"},
+        }))
+        .expect("send session/set_mode");
+
+    let ack = recv_json(response_rx).await;
+    assert_eq!(ack["id"], request_id);
+    for expected in ["current_mode_update", "config_option_update"] {
+        let notification = recv_json(response_rx).await;
+        assert_eq!(notification["method"], "session/update");
+        assert_eq!(notification["params"]["update"]["sessionUpdate"], expected);
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
     let local = LocalSet::new();
@@ -166,6 +190,10 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
                 )
                 .await;
 
+            tokio::join!(
+                set_code_mode(&first_tx, &mut first_rx, &first_session, 8),
+                set_code_mode(&second_tx, &mut second_rx, &second_session, 9),
+            );
             let (first_output, second_output) = tokio::join!(
                 prompt_healthcheck(&first_tx, &mut first_rx, &first_session, 10),
                 prompt_healthcheck(&second_tx, &mut second_rx, &second_session, 20),

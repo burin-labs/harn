@@ -15,12 +15,9 @@ pub fn payload_schema() {
   }
 }
 
-pub fn init(ctx) {
+pub fn init(_harness: Harness, ctx) {
   if ctx.provider_id != "github" {
     throw "unexpected provider id"
-  }
-  if !ctx.capabilities.event_log_emit {
-    throw "event_log_emit capability missing"
   }
 }
 
@@ -52,6 +49,6 @@ pub fn normalize_inbound(harness: Harness, raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }

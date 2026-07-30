@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { agent_session_messages } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -9,14 +9,19 @@ fn judge_events(events) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<user_response>isolated final answer</user_response>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"complete\"}"),
     ],
     { ->
       const session = "done-judge-isolation-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Finish once.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Finish once.",
           nil,
           {
             provider: "mock",
@@ -29,7 +34,7 @@ pipeline default(harness: Harness) {
           },
         ) },
       )
-      const messages = agent_session_messages(harness, session)
+      const messages = agent_session_messages(harness.agent, session)
       const encoded = json_stringify(messages)
       const judges = judge_events(captured.events)
       require len(judges) == 1, "done_judge should emit one decision"

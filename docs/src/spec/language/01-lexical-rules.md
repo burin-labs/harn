@@ -133,7 +133,7 @@ Duration literals evaluate to an integer number of milliseconds. They can be use
 anywhere an expression is expected:
 
 ```harn
-sleep(500ms)
+harness.clock.sleep_ms(500ms)
 deadline 30s { /* ... */ }
 const one_day = 1d       // 86400000
 const two_weeks = 2w     // 1209600000
@@ -188,7 +188,7 @@ escape-free:
 ```harn
 // A regex matching a double-quoted string body, with no backslash soup:
 const caps = regex_captures(r#""([^"\\]*)""#, "name=\"value\"")
-log("first body: ${caps[0].groups[0]}")
+harness.obs.log("first body: ${caps[0].groups[0]}")
 ```
 
 #### Multi-line strings
@@ -210,7 +210,7 @@ Use `\${` for a literal `${` sequence inside a multi-line string.
 const name = "world"
 const doc = """
   Hello, ${name}!
-  Today is ${timestamp()}.
+  Today is ${harness.clock.timestamp()}.
 """
 ```
 

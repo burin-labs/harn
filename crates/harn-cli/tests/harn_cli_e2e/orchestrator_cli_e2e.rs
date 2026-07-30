@@ -85,7 +85,7 @@ secrets = {{ signing_secret = "github/webhook-secret" }}
         r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) {
+pub fn on_issue(harness: Harness, event: TriggerEvent) {
   log(event.kind)
 }
 "#,
@@ -144,7 +144,7 @@ handler = "handlers::on_task"
         r#"
 import "std/triggers"
 
-pub fn on_task(event: TriggerEvent) -> string {
+pub fn on_task(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,

@@ -33,13 +33,16 @@ pipeline main(harness: Harness) {
   // native-contract feedback instead of completing — the live failure was a
   // natural completion on exactly this turn shape, losing the call.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
       llm_text(MARKUP_TURN),
       llm_text("Final answer: release evidence verified."),
     ],
     { ->
-      const result = agent_loop(harness, "Inspect evidence and finish.",
+      const result = agent_loop(
+        harness,
+        "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",
@@ -61,9 +64,12 @@ pipeline main(harness: Harness) {
   )
   // `allow` policy: the rescued markup call dispatches this turn.
   with_llm_script(
-    harness.llm, [llm_text(MARKUP_TURN), llm_text("All set.")],
+    harness.llm,
+    [llm_text(MARKUP_TURN), llm_text("All set.")],
     { ->
-      const result = agent_loop(harness, "Look up the evidence.",
+      const result = agent_loop(
+        harness,
+        "Look up the evidence.",
         nil,
         {
           provider: "mock",
@@ -86,13 +92,16 @@ pipeline main(harness: Harness) {
   // feedback reaches the model — without it this zero-call turn reads as a
   // natural completion and the feedback is lost.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
       llm_text("<tool_call>\n<function=lookup>\n<parameter=query>\nfollow-up evi"),
       llm_text("Final answer: release evidence verified."),
     ],
     { ->
-      const result = agent_loop(harness, "Inspect evidence and finish.",
+      const result = agent_loop(
+        harness,
+        "Inspect evidence and finish.",
         nil,
         {
           provider: "mock",

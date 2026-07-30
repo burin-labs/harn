@@ -17,9 +17,12 @@ pipeline test(harness: Harness, task) {
     prompt "Ship the release."
   }
   with_llm_script(
-    harness.llm, [llm_text("No skill needed.")],
+    harness.llm,
+    [llm_text("No skill needed.")],
     { ->
-      const generic = agent_loop(harness, "hey wassup? can you help with this?",
+      const generic = agent_loop(
+        harness,
+        "hey wassup? can you help with this?",
         nil,
         {
           provider: "mock",
@@ -36,9 +39,12 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("No ship skill needed.")],
+    harness.llm,
+    [llm_text("No ship skill needed.")],
     { ->
-      const substring = agent_loop(harness, "review membership analytics",
+      const substring = agent_loop(
+        harness,
+        "review membership analytics",
         nil,
         {provider: "mock", max_iterations: 1, skills: ship, skill_match: {strategy: "metadata"}},
       )
@@ -50,9 +56,12 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("Cleanup skill active.")],
+    harness.llm,
+    [llm_text("Cleanup skill active.")],
     { ->
-      const explicit_id = agent_loop(harness, "run disk cleanup",
+      const explicit_id = agent_loop(
+        harness,
+        "run disk cleanup",
         nil,
         {
           provider: "mock",

@@ -79,9 +79,9 @@ fn __stance_policy_patch(opts, escape_tool) {
   return {policy: policy + {tools: allowed.appending(escape_tool)}}
 }
 
-fn __stance_recent_user_messages(harness: Harness, session_id, limit = 6) {
+fn __stance_recent_user_messages(agent: HarnessAgent, session_id, limit = 6) {
   const messages = try {
-    agent_session_messages(harness, session_id)
+    agent_session_messages(agent, session_id)
   } catch (e) {
     []
   }
@@ -111,8 +111,14 @@ fn __stance_recent_user_messages(harness: Harness, session_id, limit = 6) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stance_default_consent_check(harness: Harness, justification, session_id, options = nil) {
-  const recent = __stance_recent_user_messages(harness, session_id)
+pub fn agent_stance_default_consent_check(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  justification,
+  session_id,
+  options = nil,
+) {
+  const recent = __stance_recent_user_messages(agent, session_id)
   const transcript = if len(recent) == 0 {
     "(no user messages available)"
   } else {
@@ -141,7 +147,7 @@ pub fn agent_stance_default_consent_check(harness: Harness, justification, sessi
     temperature: 0,
   }
   const outcome = try {
-    harness.llm.call(prompt, nil, llm_options)
+    llm.call(prompt, nil, llm_options)
   } catch (e) {
     nil
   }
@@ -169,10 +175,12 @@ fn __stance_register_escape_tool(harness: Harness, opts, cfg, session_id, grant_
     const verdict = if consent != nil {
       consent(justification, session_id)
     } else {
-      agent_stance_default_consent_check(harness, justification, session_id)
+      agent_stance_default_consent_check(harness.agent, harness.llm, justification, session_id)
     }
     const granted = (verdict?.verdict ?? "deny") == "grant"
-    agent_emit_event(harness, session_id,
+    agent_emit_event(
+      harness.agent,
+      session_id,
       if granted {
         "stance_write_access_granted"
       } else {
@@ -264,7 +272,9 @@ pub fn agent_stance_prepare(harness: Harness, session, message, opts) {
   const policy_patch = __stance_policy_patch(opts, escape_tool)
   const effective_policy = policy_patch?.policy ?? opts?.policy
   const allowed = __stance_read_only_names(tools, effective_policy, cfg?.hard_keep, escape_tool)
-  agent_emit_event(harness, session.session_id,
+  agent_emit_event(
+    harness.agent,
+    session.session_id,
     "stance_armed",
     {escape_tool: escape_tool, allowed_tools: allowed},
   )
@@ -310,15 +320,15 @@ pub fn agent_stance_apply(turn_opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stance_post_turn(harness: Harness, session, opts) {
+pub fn agent_stance_post_turn(agent: HarnessAgent, runtime: HarnessRuntime, session, opts) {
   if len(opts?._read_only_stance_tools ?? []) == 0 {
     return opts
   }
   const grant_flag = opts?._read_only_stance_grant
-  if grant_flag == nil || harness.runtime.atomic_get(grant_flag) == 0 {
+  if grant_flag == nil || runtime.atomic_get(grant_flag) == 0 {
     return opts
   }
   const escape_tool = __stance_config(opts)?.escape_tool ?? "request_write_access"
-  agent_emit_event(harness, session.session_id, "stance_disarmed", {escape_tool: escape_tool})
+  agent_emit_event(agent, session.session_id, "stance_disarmed", {escape_tool: escape_tool})
   return opts + {_read_only_stance_tools: nil, _read_only_stance_grant: nil}
 }

@@ -198,7 +198,7 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
 /**
  * agent_loop_control_invoke normalizes a custom or adaptive loop command.
  *
- * @effects: [agent]
+ * @effects: [state.mutate]
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
@@ -359,7 +359,7 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_loop_apply_command(harness: Harness, state) -> AgentLoopCommandApplication {
+pub fn agent_loop_apply_command(agent: HarnessAgent, state) -> AgentLoopCommandApplication {
   const command = state.command
   const session_id = state.session_id
   const iteration = state.iteration
@@ -385,7 +385,9 @@ pub fn agent_loop_apply_command(harness: Harness, state) -> AgentLoopCommandAppl
       command.reason,
       stop_status,
     )
-    agent_emit_event(harness, session_id,
+    agent_emit_event(
+      agent,
+      session_id,
       "loop_control_decision",
       {
         iteration: iteration,
@@ -420,7 +422,9 @@ pub fn agent_loop_apply_command(harness: Harness, state) -> AgentLoopCommandAppl
         command.reason,
         "",
       )
-      agent_emit_event(harness, session_id,
+      agent_emit_event(
+        agent,
+        session_id,
         "loop_control_decision",
         {
           iteration: iteration,

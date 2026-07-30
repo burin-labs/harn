@@ -1,5 +1,5 @@
-import { workflow_execute } from "std/workflow/execute"
 import { llm_text, with_llm_script } from "std/testing"
+import { workflow_execute } from "std/workflow/execute"
 
 /**
  * harn v0.7.20 Gap 2: `skills:` / `skill_match:` pass through
@@ -54,9 +54,12 @@ pipeline test(harness: Harness, task) {
   // the only one with tools + skills attached, so only its system
   // prompt carries the active-skill section.
   with_llm_script(
-    harness.llm, [llm_text("Queued up deploy."), llm_text("Verification ok.")],
+    harness.llm,
+    [llm_text("Queued up deploy."), llm_text("Verification ok.")],
     { ->
-      const result = workflow_execute(harness, "Ship the new release to production",
+      const result = workflow_execute(
+        harness,
+        "Ship the new release to production",
         flow,
         [],
         {max_steps: 4, skills: registry, skill_match: {strategy: "metadata"}},

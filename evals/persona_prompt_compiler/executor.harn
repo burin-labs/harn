@@ -44,13 +44,13 @@ fn __command_failure_detail(result: dict) -> string {
   return trim(result.combined ?? "")
 }
 
-fn __write_outcome(harness: Harness, outcome) -> int {
-  harness.stdio.println(json_stringify(outcome))
+fn __write_outcome(stdio: HarnessStdio, outcome) -> int {
+  stdio.println(json_stringify(outcome))
   return 0
 }
 
 fn __failure_outcome(
-  harness: Harness,
+  clock: HarnessClock,
   started_ms: int,
   bucket: string,
   message: string,
@@ -58,7 +58,7 @@ fn __failure_outcome(
 ) -> dict {
   return {
     verification: "FAIL",
-    wallTimeSeconds: to_float(harness.clock.monotonic_ms() - started_ms) / 1000.0,
+    wallTimeSeconds: to_float(clock.monotonic_ms() - started_ms) / 1000.0,
     costUsd: 0.0,
     stageCount: stage_count,
     failures: [message],
@@ -66,11 +66,11 @@ fn __failure_outcome(
   }
 }
 
-fn __ensure_clean_dir(harness: Harness, path: string) {
-  if harness.fs.exists(path) {
-    harness.fs.delete(path)
+fn __ensure_clean_dir(fs: HarnessFs, path: string) {
+  if fs.exists(path) {
+    fs.delete(path)
   }
-  harness.fs.mkdir(path)
+  fs.mkdir(path)
 }
 
 fn __artifact_path(case_id: string, trial: int) -> string {
@@ -97,7 +97,9 @@ fn __mock_blueprint(prompt: string, expected: PersonaPromptEvalExpected) -> dict
   return blueprint
 }
 
-fn __compile_prompt(harness: Harness,
+fn __compile_prompt(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
   prompt: string,
   expected: PersonaPromptEvalExpected,
   provider: string,
@@ -105,8 +107,8 @@ fn __compile_prompt(harness: Harness,
   max_tokens: int,
 ) -> PersonaPromptCompileReceipt {
   if provider == "mock" {
-    harness.llm.mock_clear()
-    harness.llm.mock_enqueue(
+    llm.mock_clear()
+    llm.mock_enqueue(
       {
         text: json_stringify(__mock_blueprint(prompt, expected)),
         provider: "mock",
@@ -116,7 +118,10 @@ fn __compile_prompt(harness: Harness,
       },
     )
   }
-  return persona_compile_prompt(harness, prompt,
+  return persona_compile_prompt(
+    agent,
+    llm,
+    prompt,
     {provider: provider, model: model, max_tokens: max_tokens, name_override: expected.name},
   )
 }
@@ -144,19 +149,21 @@ fn __request_schema() -> dict {
 }
 
 fn __materialize(
-  harness: Harness,
+  fs: HarnessFs,
+  tools: HarnessTools,
   blueprint: PersonaBlueprint,
   lowering: PersonaBlueprintLowering,
   case_id: string,
   trial: int,
 ) -> PersonaPromptMaterializeResult {
   const trial_root = path_join("generated", case_id + "-" + to_string(trial))
-  __ensure_clean_dir(harness, trial_root)
+  __ensure_clean_dir(fs, trial_root)
   const blueprint_path = path_join(trial_root, "blueprint.json")
   const output_root = path_join(trial_root, "personas")
-  harness.fs.write_text(blueprint_path, json_stringify_pretty(blueprint))
+  fs.write_text(blueprint_path, json_stringify_pretty(blueprint))
   const result = command_run(
-    harness.tools, {
+    tools,
+    {
       argv: [
         "harn",
         "persona",
@@ -181,7 +188,7 @@ fn __materialize(
     }
   }
   const manifest_path = path_join(package_root, "harn.toml")
-  if !harness.fs.exists(manifest_path) {
+  if !fs.exists(manifest_path) {
     return {
       ok: false,
       failure_bucket: "materialize_output_missing",
@@ -190,7 +197,7 @@ fn __materialize(
       package_root: package_root,
     }
   }
-  const manifest = toml_parse(harness.fs.read_text(manifest_path))
+  const manifest = toml_parse(fs.read_text(manifest_path))
   const verdict = persona_prompt_materialized_verdict(manifest, lowering)
   return {
     ok: verdict.pass,
@@ -203,7 +210,7 @@ fn __materialize(
 }
 
 fn __fire(
-  harness: Harness,
+  tools: HarnessTools,
   lowering: PersonaBlueprintLowering,
   materialized: PersonaPromptMaterializeResult,
   case_id: string,
@@ -228,7 +235,8 @@ fn __fire(
   }
   const trigger_id = trigger.id
   const result = command_run(
-    harness.tools, {
+    tools,
+    {
       argv: [
         "harn",
         "orchestrator",
@@ -253,7 +261,8 @@ fn __fire(
 }
 
 fn __execute_compiled(
-  harness: Harness,
+  fs: HarnessFs,
+  tools: HarnessTools,
   receipt: PersonaPromptCompileReceipt,
   case_id: string,
   trial: int,
@@ -280,9 +289,9 @@ fn __execute_compiled(
       fired: {ok: false, failure_bucket: "compile_contract_missing", failures: []},
     }
   }
-  const materialized = __materialize(harness, blueprint, lowering, case_id, trial)
+  const materialized = __materialize(fs, tools, blueprint, lowering, case_id, trial)
   const fired = if materialized.ok {
-    __fire(harness, lowering, materialized, case_id, trial)
+    __fire(tools, lowering, materialized, case_id, trial)
   } else {
     {ok: false, failure_bucket: materialized.failure_bucket, failures: []}
   }
@@ -291,18 +300,25 @@ fn __execute_compiled(
 
 fn main(harness: Harness) -> int {
   const started_ms = harness.clock.monotonic_ms()
-  const raw = read_stdin()
+  const raw = harness.stdio.read_stdin()
   if raw == nil || trim(raw) == "" {
-    return __write_outcome(harness,
-      __failure_outcome(harness, started_ms, "invalid_request", "eval executor request is empty"),
+    return __write_outcome(
+      harness.stdio,
+      __failure_outcome(
+        harness.clock,
+        started_ms,
+        "invalid_request",
+        "eval executor request is empty",
+      ),
     )
   }
   const request = try {
     schema_expect(json_parse(raw), __request_schema())
   } catch (e) {
-    return __write_outcome(harness,
+    return __write_outcome(
+      harness.stdio,
       __failure_outcome(
-        harness,
+        harness.clock,
         started_ms,
         "invalid_request",
         "eval executor request is invalid JSON: " + to_string(e),
@@ -314,9 +330,10 @@ fn main(harness: Harness) -> int {
   const prompt = request.case.task
   const trial = request.trial
   if !__safe_token(case_id) || !__safe_token(expected.name) || trial < 1 {
-    return __write_outcome(harness,
+    return __write_outcome(
+      harness.stdio,
       __failure_outcome(
-        harness,
+        harness.clock,
         started_ms,
         "invalid_request",
         "eval executor request failed its closed boundary checks",
@@ -329,7 +346,9 @@ fn main(harness: Harness) -> int {
   if !harness.fs.exists("generated") {
     harness.fs.mkdir("generated")
   }
-  const receipt = __compile_prompt(harness,
+  const receipt = __compile_prompt(
+    harness.agent,
+    harness.llm,
     prompt,
     expected,
     request.manifest.metadata.provider,
@@ -344,7 +363,7 @@ fn main(harness: Harness) -> int {
   }
   let fired: PersonaPromptFireResult = {ok: false, failure_bucket: "compile_rejected", failures: []}
   if compile_verdict.pass {
-    const execution = __execute_compiled(harness, receipt, case_id, trial)
+    const execution = __execute_compiled(harness.fs, harness.tools, receipt, case_id, trial)
     materialized = execution.materialized
     fired = execution.fired
   }
@@ -374,7 +393,8 @@ fn main(harness: Harness) -> int {
   const artifact_json = json_stringify_pretty(artifact)
   harness.fs.write_text(artifact_path, artifact_json)
   harness.fs.write_text(latest_artifact_path, artifact_json)
-  return __write_outcome(harness,
+  return __write_outcome(
+    harness.stdio,
     {
       verification: if pass {
         "PASS"

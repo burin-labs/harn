@@ -141,9 +141,9 @@ type TriggerState = "registering" | "active" | "draining" | "terminated"
 
 type TriggerBindingSource = "manifest" | "dynamic"
 
-type TriggerHandler = fn(TriggerEvent) -> any | string
+type TriggerHandler = fn(Harness, TriggerEvent) -> any | string
 
-type TriggerPredicate = fn(TriggerEvent) -> bool | Result<bool, any>
+type TriggerPredicate = fn(Harness, TriggerEvent) -> bool | Result<bool, any>
 
 type TriggerMatch = {events: list<string>?}
 
@@ -526,8 +526,8 @@ pub fn InterruptAndSuspend(options: InterruptAndSuspendOptions) -> InterruptAndS
  * @effects: []
  * @errors: []
  */
-pub fn list_providers(harness: Harness) -> list<ProviderCatalogEntry> {
-  return harness.llm.list_providers_native()
+pub fn list_providers(llm: HarnessLlm) -> list<ProviderCatalogEntry> {
+  return llm.list_providers_native()
 }
 
 /**

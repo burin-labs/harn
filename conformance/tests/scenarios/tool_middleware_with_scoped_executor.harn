@@ -1,4 +1,4 @@
-import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 /**
  * with_scoped_executor — preemptively rejects tool names outside the
  * stage allowlist, decorates approved calls with `audit.scope`, and
@@ -41,7 +41,7 @@ pipeline default(harness: Harness) {
   const next = synthetic_next()
   // Allowed tool passes; audit.scope records the stage + allowlist.
   const research_mw = with_scoped_executor(
-    harness,
+    harness.runtime,
     {stage: "research", allowed_tools: ["search_files", "read_file"]},
   )
   const ok = research_mw(envelope("search_files"), next)
@@ -58,7 +58,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(reject.audit.layers[0].status)
   // `on_violation: "raise"` throws instead of short-circuiting.
   const raising_mw = with_scoped_executor(
-    harness,
+    harness.runtime,
     {stage: "plan", allowed_tools: ["sketch_plan"], on_violation: "raise"},
   )
   try {
@@ -71,7 +71,7 @@ pipeline default(harness: Harness) {
   // Missing `allowed_tools` skips the preemptive check; the middleware
   // still pushes a side_effect_level for the duration of `next`.
   const ceiling_mw = with_scoped_executor(
-    harness,
+    harness.runtime,
     {stage: "edit", side_effect_level: "workspace_write"},
   )
   const r3 = ceiling_mw(envelope("anything"), next)
@@ -80,7 +80,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(r3.audit.scope.keys(), "allowed_tools"))
   // Invalid on_violation rejects at middleware-construction time.
   try {
-    with_scoped_executor(harness, {stage: "x", allowed_tools: ["y"], on_violation: "log"})
+    with_scoped_executor(harness.runtime, {stage: "x", allowed_tools: ["y"], on_violation: "log"})
     harness.stdio.println("no-throw-ctor")
   } catch (e) {
     harness.stdio.println("caught-ctor")
@@ -112,12 +112,15 @@ pipeline default(harness: Harness) {
   )
   const dispatch_next = { call ->
     return agent_dispatch_tool_call(
-      harness,
+      harness.tools,
       {name: "write_note", id: call.call_id, arguments: {path: "notes.txt"}},
       tools,
     )
   }
-  const dispatch_mw = with_scoped_executor(harness, {stage: "audit", allowed_tools: ["read_note"]})
+  const dispatch_mw = with_scoped_executor(
+    harness.runtime,
+    {stage: "audit", allowed_tools: ["read_note"]},
+  )
   // Envelope advertises an allowed name; `next` rewrites to the denied
   // name to simulate a misbehaving inner layer.
   const runtime_deny = dispatch_mw(envelope("read_note"), dispatch_next)

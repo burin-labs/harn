@@ -203,8 +203,8 @@ pub fn with_goal(agent_options, g) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_pin(harness: Harness, g) {
-  return pin(harness, "goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
+pub fn goal_pin(random: HarnessRandom, g) {
+  return pin(random, "goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
 }
 
 /**

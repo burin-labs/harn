@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { read_jsonl } from "std/jsonl"
 import {
   compose_tool_callers,
@@ -24,7 +24,8 @@ fn receipt_tools() {
 
 fn run_receipt_agent(harness: Harness, session, audit_options) {
   return with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {
@@ -39,8 +40,13 @@ fn run_receipt_agent(harness: Harness, session, audit_options) {
     { ->
       const reason = with_required_reason({schema_required: false})
       const tools = tools_use_middleware(receipt_tools(), reason.schema_transform)
-      const caller = compose_tool_callers(harness, [with_audit_log(harness, audit_options), reason.caller])
-      return agent_loop(harness, "emit a tool receipt",
+      const caller = compose_tool_callers(
+        harness.clock,
+        [with_audit_log(harness.clock, harness.fs, audit_options), reason.caller],
+      )
+      return agent_loop(
+        harness,
+        "emit a tool receipt",
         nil,
         {
           provider: "mock",
@@ -78,15 +84,21 @@ pipeline default(harness: Harness) {
   const local_session = "receipt-local-" + harness.random.uuid()
   // Derived, not spelled out: the local sink writes under the runtime state
   // root, so a run with `HARN_STATE_DIR` set finds its receipts there too.
-  const local_path = path_join(harness.fs.runtime_paths().state_root, "receipts", local_session + ".jsonl")
+  const local_path = path_join(
+    harness.fs.runtime_paths().state_root,
+    "receipts",
+    local_session + ".jsonl",
+  )
   if harness.fs.exists(local_path) {
     harness.fs.delete(local_path)
   }
-  const local_captured = agent_capture_events(harness, local_session,
+  const local_captured = agent_capture_events(
+    harness.agent,
+    local_session,
     fn() { return run_receipt_agent(harness, local_session, {sink: "local", redact: ["secret"]}) },
   )
   const local_result = local_captured.result
-  const records = read_jsonl(harness, local_path, {strict: true})
+  const records = read_jsonl(harness.fs, local_path, {strict: true})
   const receipt = records[0]
   const receipt_json = json_stringify(receipt)
   const reminder_audit = receipt?.audit?.reminders ?? {}
@@ -104,14 +116,18 @@ pipeline default(harness: Harness) {
   harness.stdio.println("receipt_status=" + receipt.status)
   harness.stdio.println("secret_redacted=" + to_string(!contains(receipt_json, "hide-me")))
   harness.stdio.println("args_hash_redacted=" + to_string(receipt.args_hash == expected_args_hash))
-  harness.stdio.println("result_hash_present=" + to_string(len(to_string(receipt.result_hash ?? "")) == 64))
+  harness.stdio.println(
+    "result_hash_present=" + to_string(len(to_string(receipt.result_hash ?? "")) == 64),
+  )
   harness.stdio.println(
     "receipt_uri_in_receipt="
       + to_string(
       to_string(receipt?.audit?.receipt_uri ?? "") == expected_receipt_uri,
     ),
   )
-  harness.stdio.println("receipt_uri_in_audit_event=" + to_string(local_audit_uri == expected_receipt_uri))
+  harness.stdio.println(
+    "receipt_uri_in_audit_event=" + to_string(local_audit_uri == expected_receipt_uri),
+  )
   harness.stdio.println("reminder_audit_origin=" + to_string(reminder_audit?.origin ?? ""))
   harness.stdio.println("reminder_lifecycle_count=" + to_string(len(reminder_lifecycle)))
   harness.stdio.println("reminder_hook_event=" + to_string(reminder_lifecycle[0]?.hook_event ?? ""))
@@ -123,7 +139,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println("reminder_role_hint=" + to_string(reminder_lifecycle[0]?.role_hint ?? ""))
   harness.stdio.println("reminder_tag=" + to_string(reminder_lifecycle[0]?.tags[0] ?? ""))
   const cloud_session = "receipt-cloud-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, cloud_session,
+  const captured = agent_capture_events(
+    harness.agent,
+    cloud_session,
     fn() { return run_receipt_agent(harness, cloud_session, {sink: "cloud", redact: ["secret"]}) },
   )
   const receipt_events = captured.events.filter(

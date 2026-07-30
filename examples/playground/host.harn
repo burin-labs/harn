@@ -1,4 +1,4 @@
-pub fn build_prompt(task_text) {
+pub fn build_prompt(harness: Harness, task_text) {
   return "Task: " + task_text + "\nWorkspace: " + harness.fs.cwd()
 }
 

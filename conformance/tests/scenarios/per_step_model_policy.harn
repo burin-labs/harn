@@ -8,47 +8,48 @@ import { with_llm_script } from "std/testing"
 // propagates (`fail`), gets skipped (`continue`), or is bubbled to a
 // handoff (`escalate`).
 @persona(name: "triage_captain", tools: [github], autonomy: suggest, receipts: optional)
-fn triage_captain(harness: Harness, ctx) -> string {
-  const cheap = classify_step(harness, ctx)
-  const mid = judge_step(harness, cheap)
-  const expensive = decide_step(harness, mid)
-  const skipped = budget_exhausted_continue_step(harness, expensive)
+fn triage_captain(llm: HarnessLlm, ctx) -> string {
+  const cheap = classify_step(llm, ctx)
+  const mid = judge_step(llm, cheap)
+  const expensive = decide_step(llm, mid)
+  const skipped = budget_exhausted_continue_step(llm, expensive)
   return "${cheap}|${mid}|${expensive}|${skipped}"
 }
 
 @step(name: "classify", model: "claude-haiku-4-5", receipt: audit, error_boundary: fail)
-fn classify_step(harness: Harness, ctx) -> string {
-  const r = harness.llm.call("classify ${ctx}", nil, {provider: "mock"})
+fn classify_step(llm: HarnessLlm, ctx) -> string {
+  const r = llm.call("classify ${ctx}", nil, {provider: "mock"})
   return "classify:${r.text}"
 }
 
 @step(name: "judge", model: "claude-sonnet-4-6", receipt: audit, error_boundary: fail)
-fn judge_step(harness: Harness, ctx) -> string {
-  const r = harness.llm.call("judge ${ctx}", nil, {provider: "mock"})
+fn judge_step(llm: HarnessLlm, ctx) -> string {
+  const r = llm.call("judge ${ctx}", nil, {provider: "mock"})
   return "judge:${r.text}"
 }
 
 @step(name: "decide", model: "claude-opus-4-7", receipt: audit, error_boundary: fail)
-fn decide_step(harness: Harness, ctx) -> string {
-  const r = harness.llm.call("decide ${ctx}", nil, {provider: "mock"})
+fn decide_step(llm: HarnessLlm, ctx) -> string {
+  const r = llm.call("decide ${ctx}", nil, {provider: "mock"})
   return "decide:${r.text}"
 }
 
 @step(name: "expensive_skipped", model: "claude-opus-4-7", budget: {max_tokens: 5}, error_boundary: continue)
-fn budget_exhausted_continue_step(harness: Harness, ctx) -> string {
-  const r = harness.llm.call("explode ${ctx}", nil, {provider: "mock"})
+fn budget_exhausted_continue_step(llm: HarnessLlm, ctx) -> string {
+  const r = llm.call("explode ${ctx}", nil, {provider: "mock"})
   return "should_not_reach:${r.text}"
 }
 
 @step(name: "expensive_escalate", model: "claude-opus-4-7", budget: {max_tokens: 5}, error_boundary: escalate)
-fn budget_exhausted_escalate_step(harness: Harness, ctx) -> string {
-  const r = harness.llm.call("escalate ${ctx}", nil, {provider: "mock"})
+fn budget_exhausted_escalate_step(llm: HarnessLlm, ctx) -> string {
+  const r = llm.call("escalate ${ctx}", nil, {provider: "mock"})
   return "should_not_reach:${r.text}"
 }
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         match: "classify*",
         consume_match: false,
@@ -91,11 +92,11 @@ pipeline default(harness: Harness) {
       },
     ],
     { ->
-      const result = triage_captain(harness, "PR-42")
+      const result = triage_captain(harness.llm, "PR-42")
       harness.stdio.println(result)
       harness.stdio.println(len(harness.llm.mock_calls()))
       const escalation_caught = try {
-        budget_exhausted_escalate_step(harness, "PR-42")
+        budget_exhausted_escalate_step(harness.llm, "PR-42")
       }
       const err = unwrap_err(escalation_caught)
       harness.stdio.println(err.category)

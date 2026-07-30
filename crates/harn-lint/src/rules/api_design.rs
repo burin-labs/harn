@@ -19,10 +19,36 @@ const POSITIONAL_RULE: &str = "homogeneous-positional-api";
 const POSITIONAL_THRESHOLD: usize = 4;
 
 pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
+    // A named function installed as a handler is entered by the runtime or a
+    // host framework. That callback boundary receives the root Harness by
+    // contract even when today's body happens to use one capability. Treat
+    // this structural registration as stronger evidence than local body-use
+    // counting; narrowing it would make the callback uncallable.
+    let mut boundary_callbacks = BTreeSet::new();
+    visit::walk_program(program, &mut |node| {
+        let Node::DictLiteral(entries) = &node.node else {
+            return;
+        };
+        for entry in entries {
+            let is_handler = matches!(
+                &entry.key.node,
+                Node::Identifier(key) | Node::StringLiteral(key) if key == "handler"
+            );
+            if is_handler {
+                if let Node::Identifier(name) = &entry.value.node {
+                    boundary_callbacks.insert(name.clone());
+                }
+            }
+        }
+    });
+
     for declaration in program {
-        let declaration = match &declaration.node {
-            Node::AttributedDecl { inner, .. } => inner.as_ref(),
-            _ => declaration,
+        let (declaration, attributed_boundary) = match &declaration.node {
+            Node::AttributedDecl { attributes, inner } => (
+                inner.as_ref(),
+                attributes.iter().any(|attribute| attribute.name == "job"),
+            ),
+            _ => (declaration, false),
         };
         let Node::FnDecl {
             name,
@@ -35,7 +61,18 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
             continue;
         };
 
-        check_capability_attenuation(name, params, body, declaration, diagnostics);
+        let trigger_boundary = params.len() >= 2
+            && matches!(
+                params[0].type_expr.as_ref(),
+                Some(TypeExpr::Named(type_name)) if type_name == HarnessKind::Root.type_name()
+            )
+            && matches!(
+                params[1].type_expr.as_ref(),
+                Some(TypeExpr::Named(type_name)) if type_name == "TriggerEvent"
+            );
+        if !attributed_boundary && !trigger_boundary && !boundary_callbacks.contains(name) {
+            check_capability_attenuation(name, params, body, declaration, diagnostics);
+        }
         if *is_pub {
             check_homogeneous_positionals(name, params, declaration, diagnostics);
         }
@@ -210,6 +247,29 @@ mod tests {
         let diagnostics = lint(
             "fn main(harness: Harness) { harness.fs.cwd() }\nfn orchestrate(harness: Harness) { delegate(harness) }",
         );
+        assert!(diagnostics.iter().all(|d| d.rule != ATTENUATION_RULE));
+    }
+
+    #[test]
+    fn preserves_runtime_registered_handler_boundaries() {
+        let diagnostics = lint(
+            "fn on_event(harness: Harness, event) { harness.channels.append(\"seen\", event) }\n\
+             fn install(runtime: HarnessRuntime) { runtime.trigger_register({handler: on_event}) }",
+        );
+        assert!(diagnostics.iter().all(|d| d.rule != ATTENUATION_RULE));
+    }
+
+    #[test]
+    fn preserves_job_entrypoint_boundaries() {
+        let diagnostics =
+            lint("@job(\"scan\")\npub fn scan(harness: Harness, event) { return event.kind }");
+        assert!(diagnostics.iter().all(|d| d.rule != ATTENUATION_RULE));
+    }
+
+    #[test]
+    fn preserves_nominal_trigger_handler_boundaries() {
+        let diagnostics =
+            lint("pub fn on_event(harness: Harness, event: TriggerEvent) { return event.kind }");
         assert!(diagnostics.iter().all(|d| d.rule != ATTENUATION_RULE));
     }
 

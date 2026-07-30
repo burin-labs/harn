@@ -17,7 +17,9 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(parsed.role)
   const missing_required = get_typed_report({}, user_schema, true)
   harness.stdio.println(!missing_required.ok)
-  harness.stdio.println(contains(join(missing_required.errors, "\n"), "\"name\" is a required property"))
+  harness.stdio.println(
+    contains(join(missing_required.errors, "\n"), "\"name\" is a required property"),
+  )
   const openapi = schema_openapi(user_schema)
   harness.stdio.println(openapi.type)
   const from_json = from_json_schema(
@@ -55,11 +57,18 @@ pipeline test(harness: Harness, task) {
   const wrong_shape = parse_json_typed_report("{\"name\": 42}", AliasReportUser)
   harness.stdio.println(!wrong_shape.ok)
   harness.stdio.println(wrong_shape.stage)
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-schema-runtime-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-schema-runtime-" + harness.random.uuid_v7(),
+  )
   const json_path = path_join(root, "user.json")
   write_json(harness.fs, json_path, {name: "Mira"})
   harness.stdio.println(read_json_typed(harness.fs, json_path, AliasReportUser).name)
-  const missing_result = read_json_typed_result(harness.fs, path_join(root, "missing.json"), AliasReportUser)
+  const missing_result = read_json_typed_result(
+    harness.fs,
+    path_join(root, "missing.json"),
+    AliasReportUser,
+  )
   harness.stdio.println(is_err(missing_result))
   harness.stdio.println(unwrap_err(missing_result).kind)
 }

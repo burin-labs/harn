@@ -12,8 +12,8 @@ pub fn tracked_commands() {
   return [{key: "version", args: ["version"]}, {key: "try --help", args: ["try", "--help"]}]
 }
 
-fn env_or(harness: Harness, name: string, fallback: string) -> string {
-  const value = harness.env.get(name)
+fn env_or(env: HarnessEnv, name: string, fallback: string) -> string {
+  const value = env.get(name)
   if value == nil || value == "" {
     return fallback
   }
@@ -74,8 +74,8 @@ pub fn load_budgets_text(text: string) {
   return resolved
 }
 
-fn load_budgets(harness: Harness, path: string) {
-  return load_budgets_text(harness.fs.read_text(path))
+fn load_budgets(fs: HarnessFs, path: string) {
+  return load_budgets_text(fs.read_text(path))
 }
 
 pub fn load_baseline_text(text: string) {
@@ -86,39 +86,43 @@ pub fn load_baseline_text(text: string) {
   return json_parse(trimmed)
 }
 
-fn load_baseline(harness: Harness, path: string) {
-  return load_baseline_text(harness.fs.read_text(path))
+fn load_baseline(fs: HarnessFs, path: string) {
+  return load_baseline_text(fs.read_text(path))
 }
 
-fn save_baseline(harness: Harness, path: string, payload) {
-  harness.fs.write_text(path, json_stringify_pretty(payload) + "\n")
+fn save_baseline(fs: HarnessFs, path: string, payload) {
+  fs.write_text(path, json_stringify_pretty(payload) + "\n")
 }
 
-fn command_stdout_or(harness: Harness, cmd: string, args: list<string>, fallback: string) -> string {
-  const res = harness.process.run({cmd: cmd, args: args})
+fn command_stdout_or(
+  process: HarnessProcess,
+  cmd: string,
+  args: list<string>,
+  fallback: string,
+) -> string {
+  const res = process.run({program: cmd, args: args})
   if res.success {
     return res.stdout.trim()
   }
   return fallback
 }
 
-fn current_commit_sha(harness: Harness, repo_root: string) -> string {
-  const res = harness.process.run(
-    {cmd: "git", args: ["rev-parse", "HEAD"], cwd: repo_root},
-  )
+fn current_commit_sha(process: HarnessProcess, repo_root: string) -> string {
+  const res = process.run({program: "git", args: ["rev-parse", "HEAD"], cwd: repo_root})
   if res.success {
     return res.stdout.trim()
   }
   return "uncommitted"
 }
 
-fn harn_version(harness: Harness, harn_bin: string) -> string {
-  return command_stdout_or(harness, harn_bin, ["--version"], "unknown")
+fn harn_version(process: HarnessProcess, harn_bin: string) -> string {
+  return command_stdout_or(process, harn_bin, ["--version"], "unknown")
 }
 
-fn host_label(harness: Harness) -> string {
-  return command_stdout_or(harness, "uname", ["-s"], "unknown") + " "
-    + command_stdout_or(harness, 
+fn host_label(process: HarnessProcess) -> string {
+  return command_stdout_or(process, "uname", ["-s"], "unknown") + " "
+    + command_stdout_or(
+    process,
     "uname",
     ["-m"],
     "unknown",
@@ -155,11 +159,15 @@ pub fn most_recent_baseline_for(payload, key: string, exclude_sha: string) {
   return {sha: best_sha, cold_ms: best_cold}
 }
 
-pub fn build_invocation(harness: Harness, args_template: list<string>, tmpdir: string) -> list<string> {
+pub fn build_invocation(
+  fs: HarnessFs,
+  args_template: list<string>,
+  tmpdir: string,
+) -> list<string> {
   const trace_input = path_join(tmpdir, "trace_input.jsonl")
   const trace_output = path_join(tmpdir, "trace_output.jsonl")
-  if !harness.fs.exists(trace_input) {
-    harness.fs.write_text(trace_input, "{\"prompt\":\"hi\",\"response\":\"hi\"}\n")
+  if !fs.exists(trace_input) {
+    fs.write_text(trace_input, "{\"prompt\":\"hi\",\"response\":\"hi\"}\n")
   }
   let rendered: list<string> = []
   for piece in args_template {
@@ -171,18 +179,18 @@ pub fn build_invocation(harness: Harness, args_template: list<string>, tmpdir: s
   return rendered
 }
 
-fn path_env(harness: Harness) -> string {
-  const value = harness.env.get("PATH")
+fn path_env(env: HarnessEnv) -> string {
+  const value = env.get("PATH")
   if value == nil || value == "" {
     return "/usr/bin:/bin:/usr/sbin:/sbin"
   }
   return value ?? ""
 }
 
-pub fn isolated_env_args(harness: Harness, cache_dir: string, home_dir: string) -> list<string> {
+pub fn isolated_env_args(env: HarnessEnv, cache_dir: string, home_dir: string) -> list<string> {
   return [
     "-i",
-    "PATH=" + path_env(harness),
+    "PATH=" + path_env(env),
     "LC_ALL=C",
     "HARN_BYTECODE_CACHE=0",
     "HARN_CACHE_DIR=" + cache_dir,
@@ -190,18 +198,18 @@ pub fn isolated_env_args(harness: Harness, cache_dir: string, home_dir: string) 
   ]
 }
 
-fn command_exists(harness: Harness, cmd: string) -> bool {
+fn command_exists(process: HarnessProcess, cmd: string) -> bool {
   const res = try {
-    harness.process.run({cmd: "sh", args: ["-c", "command -v " + shell_quote(cmd)]})
+    process.run({program: "sh", args: ["-c", "command -v " + shell_quote(cmd)]})
   } catch (err) {
     return false
   }
   return res.success
 }
 
-fn reset_cache_dir(harness: Harness, cache_dir: string) -> nil {
-  harness.process.run({cmd: "rm", args: ["-rf", cache_dir]})
-  harness.fs.mkdir(cache_dir)
+fn reset_cache_dir(fs: HarnessFs, process: HarnessProcess, cache_dir: string) -> nil {
+  process.run({program: "rm", args: ["-rf", cache_dir]})
+  fs.mkdir(cache_dir)
   return nil
 }
 
@@ -210,7 +218,8 @@ fn median(values: list<float>) -> float {
   return sorted[sorted.count / 2] ?? 0.0
 }
 
-fn measure_with_hyperfine(harness: Harness, 
+fn measure_with_hyperfine(
+  harness: Harness,
   invocation: list<string>,
   runs: int,
   cache_dir: string,
@@ -232,9 +241,9 @@ fn measure_with_hyperfine(harness: Harness,
     "--",
     "env",
   ]
-    + isolated_env_args(harness, cache_dir, home_dir)
+    + isolated_env_args(harness.env, cache_dir, home_dir)
     + invocation
-  const res = harness.process.run({cmd: "hyperfine", args: args})
+  const res = harness.process.run({program: "hyperfine", args: args})
   if !res.success {
     if res.stderr != "" {
       harness.stdio.eprint(res.stderr)
@@ -259,7 +268,8 @@ fn measure_with_hyperfine(harness: Harness,
   return seconds * 1000.0
 }
 
-fn measure_with_monotonic(harness: Harness, 
+fn measure_with_monotonic(
+  harness: Harness,
   invocation: list<string>,
   runs: int,
   cache_dir: string,
@@ -267,10 +277,10 @@ fn measure_with_monotonic(harness: Harness,
 ) -> float {
   let samples: list<float> = []
   for _ in range(0, runs) {
-    reset_cache_dir(harness, cache_dir)
+    reset_cache_dir(harness.fs, harness.process, cache_dir)
     const start = harness.clock.monotonic_ms()
     const res = harness.process.run(
-      {cmd: "env", args: isolated_env_args(harness, cache_dir, home_dir) + invocation},
+      {program: "env", args: isolated_env_args(harness.env, cache_dir, home_dir) + invocation},
     )
     const elapsed = harness.clock.monotonic_ms() - start
     if !res.success {
@@ -284,7 +294,8 @@ fn measure_with_monotonic(harness: Harness,
   return median(samples)
 }
 
-fn measure_cold_start(harness: Harness, 
+fn measure_cold_start(
+  harness: Harness,
   cmd,
   tmp_root: string,
   harn_bin: string,
@@ -294,7 +305,7 @@ fn measure_cold_start(harness: Harness,
   const key = to_string(cmd.key)
   const per_cmd_root = path_join(tmp_root, key.replace(" ", "_").replace("/", "_"))
   harness.fs.mkdir(per_cmd_root)
-  const args = build_invocation(harness, cmd.args, per_cmd_root)
+  const args = build_invocation(harness.fs, cmd.args, per_cmd_root)
   const cache_dir = path_join(per_cmd_root, "harn_cache")
   const home_dir = path_join(per_cmd_root, "fake_home")
   harness.fs.mkdir(home_dir)
@@ -462,15 +473,24 @@ pub fn select_commands(filter_raw: string) {
   return {ok: missing.count == 0, commands: selected, missing: missing.sorted()}
 }
 
-pub fn merge_baseline(
-  payload,
+pub type MergeBaselineRequest = {
+  payload: any,
   sha: string,
-  measurements,
+  measurements: any,
   update_baseline: bool,
   host: string,
   version: string,
   captured_at: string,
-) {
+}
+
+pub fn merge_baseline(request: MergeBaselineRequest) {
+  const payload = request.payload
+  const sha = request.sha
+  const measurements = request.measurements
+  const update_baseline = request.update_baseline
+  const host = request.host
+  const version = request.version
+  const captured_at = request.captured_at
   const existing_entry = payload[sha] ?? {}
   const existing_commands = existing_entry?.commands ?? {}
   let merged_commands = existing_commands
@@ -505,25 +525,25 @@ fn main(harness: Harness) -> int {
     return 2
   }
   const iterations = iterations_res.value
-  const update_baseline = env_or(harness, "HARN_CLI_UPDATE_BASELINE", "0") == "1"
-  const selection = select_commands(env_or(harness, "HARN_CLI_COMMANDS_FILTER", ""))
+  const update_baseline = env_or(harness.env, "HARN_CLI_UPDATE_BASELINE", "0") == "1"
+  const selection = select_commands(env_or(harness.env, "HARN_CLI_COMMANDS_FILTER", ""))
   if !selection.ok {
     harness.stdio.eprintln(
       "error: unknown bench keys in --commands filter: " + json_stringify(selection.missing),
     )
     return 2
   }
-  const budgets = load_budgets(harness, budgets_file)
-  const baseline = load_baseline(harness, baseline_file)
-  const sha = current_commit_sha(harness, repo_root)
-  const use_hyperfine = command_exists(harness, "hyperfine")
+  const budgets = load_budgets(harness.fs, budgets_file)
+  const baseline = load_baseline(harness.fs, baseline_file)
+  const sha = current_commit_sha(harness.process, repo_root)
+  const use_hyperfine = command_exists(harness.process, "hyperfine")
   const timer_label = if use_hyperfine {
     "hyperfine"
   } else {
     "monotonic fallback"
   }
-  const version = harn_version(harness, harn_bin)
-  const host = host_label(harness)
+  const version = harn_version(harness.process, harn_bin)
+  const host = host_label(harness.process)
   harness.stdio.println(
     "# CLI cold-start benchmark (iterations=${iterations}, timer=${timer_label})",
   )
@@ -543,10 +563,13 @@ fn main(harness: Harness) -> int {
   )
   let measurements = {}
   let failures: list<string> = []
-  const tmp_root = path_join(harness.fs.workspace_temp_dir(), "harn-cli-coldstart-" + harness.random.uuid_v7())
+  const tmp_root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-cli-coldstart-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(tmp_root)
   defer {
-    harness.process.run({cmd: "rm", args: ["-rf", tmp_root]})
+    harness.process.run({program: "rm", args: ["-rf", tmp_root]})
   }
   for cmd in selection.commands {
     const key = to_string(cmd.key)
@@ -569,14 +592,16 @@ fn main(harness: Harness) -> int {
     return 1
   }
   const merged = merge_baseline(
-    baseline,
-    sha,
-    measurements,
-    update_baseline,
-    host,
-    version,
-    harness.clock.date_iso(),
+    {
+      payload: baseline,
+      sha: sha,
+      measurements: measurements,
+      update_baseline: update_baseline,
+      host: host,
+      version: version,
+      captured_at: harness.clock.date_iso(),
+    },
   )
-  save_baseline(harness, baseline_file, merged)
+  save_baseline(harness.fs, baseline_file, merged)
   return 0
 }

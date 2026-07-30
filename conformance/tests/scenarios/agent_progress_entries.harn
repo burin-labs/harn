@@ -4,17 +4,26 @@ import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
 pipeline default(harness: Harness) {
   const session_id = "agent-progress-entries-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session_id,
+  const captured = agent_capture_events(
+    harness.agent,
+    session_id,
     fn() {
-      let session = agent_session_init(harness, "progress entries", nil, {session_id: session_id})
-      agent_progress(harness, {
+      let session = agent_session_init(
+        harness.agent,
+        "progress entries",
+        nil,
+        {session_id: session_id},
+      )
+      agent_progress(
+        harness.agent,
+        {
           entries: [
             {content: "Inspect code", status: "completed", priority: "high"},
             {content: "Run tests", status: "pending"},
           ],
         },
       )
-      agent_session_finalize(harness, session.session_id, "done")
+      agent_session_finalize(harness.agent, session.session_id, "done")
       return nil
     },
   )

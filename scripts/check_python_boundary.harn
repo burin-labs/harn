@@ -54,8 +54,8 @@ const EMBEDDED_PYTHON_ALLOWLIST = [
 
 const EMBEDDED_TEXT_SUFFIXES = [".sh", ".mk", ".yml", ".yaml"]
 
-fn repo_root(harness: Harness) -> string {
-  return path_normalize(path_join(harness.fs.source_dir(), ".."))
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
 }
 
 fn rel_path(path: string, root: string) -> string {
@@ -100,17 +100,17 @@ pub fn python_boundary_rule_for(path: string) -> dict {
   }
 }
 
-fn git_python_files(harness: Harness, root: string) -> list<string>? {
-  const top_level = harness.process.run(
-    {cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
+fn git_python_files(fs: HarnessFs, process: HarnessProcess, root: string) -> list<string>? {
+  const top_level = process.run(
+    {program: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
   )
   if top_level.exit_code != 0
     || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
     return nil
   }
-  const listed = harness.process.run(
+  const listed = process.run(
     {
-      cmd: "git",
+      program: "git",
       args: [
         "-C",
         root,
@@ -127,24 +127,24 @@ fn git_python_files(harness: Harness, root: string) -> list<string>? {
     return nil
   }
   return listed.stdout.lines().map({ path -> path.trim() }).filter(
-    { path -> path != "" && harness.fs.exists(path_join(root, path)) },
+    { path -> path != "" && fs.exists(path_join(root, path)) },
   )
     .to_list()
     .sort()
 }
 
-pub fn python_files(harness: Harness, root: string = "") -> list<string> {
+pub fn python_files(fs: HarnessFs, process: HarnessProcess, root: string = "") -> list<string> {
   const resolved_root = if root == "" {
-    repo_root(harness)
+    repo_root(fs)
   } else {
     path_normalize(root)
   }
-  const tracked = git_python_files(harness, resolved_root)
+  const tracked = git_python_files(fs, process, resolved_root)
   if tracked != nil {
     return tracked
   }
   let out: list<string> = []
-  for path in find_files(harness.fs, resolved_root, "**/*.py") {
+  for path in find_files(fs, resolved_root, "**/*.py") {
     const rel = rel_path(path, resolved_root)
     if is_skipped(rel) {
       continue
@@ -190,15 +190,15 @@ fn is_embedded_text_path(path: string) -> bool {
   return false
 }
 
-fn git_embedded_text_files(harness: Harness, root: string) -> list<string>? {
-  const top_level = harness.process.run(
-    {cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
+fn git_embedded_text_files(fs: HarnessFs, process: HarnessProcess, root: string) -> list<string>? {
+  const top_level = process.run(
+    {program: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
   )
   if top_level.exit_code != 0
     || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
     return nil
   }
-  const listed = harness.process.run({cmd: "git", args: ["-C", root, "ls-files"]})
+  const listed = process.run({program: "git", args: ["-C", root, "ls-files"]})
   if listed.exit_code != 0 {
     return nil
   }
@@ -206,15 +206,19 @@ fn git_embedded_text_files(harness: Harness, root: string) -> list<string>? {
     { path ->
       path != ""
         && is_embedded_text_path(path)
-        && harness.fs.exists(path_join(root, path))
+        && fs.exists(path_join(root, path))
     },
   )
     .to_list()
     .sort()
 }
 
-pub fn embedded_python_text_files(harness: Harness, root: string) -> list<string> {
-  const tracked = git_embedded_text_files(harness, root)
+pub fn embedded_python_text_files(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  root: string,
+) -> list<string> {
+  const tracked = git_embedded_text_files(fs, process, root)
   if tracked != nil {
     return tracked
   }
@@ -228,7 +232,7 @@ pub fn embedded_python_text_files(harness: Harness, root: string) -> list<string
     ".github/workflows/*.yml",
     ".github/workflows/*.yaml",
   ] {
-    for path in find_files(harness.fs, root, pattern) {
+    for path in find_files(fs, root, pattern) {
       const rel = rel_path(path, root)
       if !is_skipped(rel) {
         files = files + [rel]
@@ -236,26 +240,26 @@ pub fn embedded_python_text_files(harness: Harness, root: string) -> list<string
     }
   }
   const workflow_root = path_join(root, ".github/workflows")
-  if harness.fs.exists(workflow_root) {
-    for name in harness.fs.list_dir(workflow_root) {
+  if fs.exists(workflow_root) {
+    for name in fs.list_dir(workflow_root) {
       const path = path_join(workflow_root, name)
-      if harness.fs.exists(path) && (name.ends_with(".yml") || name.ends_with(".yaml")) {
+      if fs.exists(path) && (name.ends_with(".yml") || name.ends_with(".yaml")) {
         files = files + [rel_path(path, root)]
       }
     }
   }
   const root_makefile = path_join(root, "Makefile")
-  if harness.fs.exists(root_makefile) {
+  if fs.exists(root_makefile) {
     files = files + ["Makefile"]
   }
   return files.unique().sort()
 }
 
-pub fn embedded_python_findings(harness: Harness, root: string) -> dict {
+pub fn embedded_python_findings(fs: HarnessFs, process: HarnessProcess, root: string) -> dict {
   let allowed = []
   let violations = []
-  for path in embedded_python_text_files(harness, root) {
-    const text = harness.fs.read_text(path_join(root, path))
+  for path in embedded_python_text_files(fs, process, root) {
+    const text = fs.read_text(path_join(root, path))
     let line_no = 0
     for line in text.lines() {
       line_no = line_no + 1
@@ -280,15 +284,15 @@ pub fn embedded_python_findings(harness: Harness, root: string) -> dict {
   return {allowed: allowed, violations: violations}
 }
 
-pub fn check_python_boundary(harness: Harness, root: string = "") -> dict {
+pub fn check_python_boundary(fs: HarnessFs, process: HarnessProcess, root: string = "") -> dict {
   const resolved_root = if root == "" {
-    repo_root(harness)
+    repo_root(fs)
   } else {
     path_normalize(root)
   }
   let allowed = []
   let violations = []
-  for path in python_files(harness, resolved_root) {
+  for path in python_files(fs, process, resolved_root) {
     const rule = python_boundary_rule_for(path)
     const row = {kind: "python-file", path: path, category: rule.category, reason: rule.reason}
     if rule.allowed ?? false {
@@ -297,7 +301,7 @@ pub fn check_python_boundary(harness: Harness, root: string = "") -> dict {
       violations = violations + [row]
     }
   }
-  const embedded = embedded_python_findings(harness, resolved_root)
+  const embedded = embedded_python_findings(fs, process, resolved_root)
   for row in embedded.allowed {
     allowed = allowed + [row + {kind: "embedded-command"}]
   }
@@ -358,7 +362,7 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_python_boundary(harness, to_string(parsed?.root ?? ""))
+  const report = check_python_boundary(harness.fs, harness.process, to_string(parsed?.root ?? ""))
   if parsed?.json ?? false {
     harness.stdio.println(json_stringify_pretty(report))
   } else {

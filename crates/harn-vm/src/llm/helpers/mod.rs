@@ -177,7 +177,7 @@ mod tests {
         // that names a catalog-known cross-provider alias must route
         // to the catalog provider, not silently fall into the
         // `local` fast-path. Otherwise a call like
-        // `llm_call(..., {model: "anthropic/claude-sonnet-4-6"})`
+        // `harness.llm.call(..., {model: "anthropic/claude-sonnet-4-6"})`
         // ends up at the local Ollama endpoint and returns a 404
         // `model_unavailable`.
         let _guard = crate::llm::env_guard();

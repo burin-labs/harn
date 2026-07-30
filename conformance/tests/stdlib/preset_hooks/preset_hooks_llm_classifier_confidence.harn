@@ -18,7 +18,8 @@ pipeline default(harness: Harness) {
   /* Above threshold: classifier asks for a rewrite with confidence 0.95;
    * threshold is 0.7 so the rewrite mode fires. */
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text(
         "{\"kind\": \"rewrite\", \"confidence\": 0.95,"
           + " \"rewritten\": \"echo confident\","
@@ -32,7 +33,9 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+      const wrapper = preset_run_command(
+        harness,
+        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
       )
       const above = wrapper({command: "echo above"})
       harness.stdio.println(above.action)

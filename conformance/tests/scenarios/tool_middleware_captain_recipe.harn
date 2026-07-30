@@ -93,10 +93,11 @@ pipeline default(harness: Harness) {
     { ->
       const reason_mw = with_required_reason()
       const stack = compose_tool_callers(
-        harness,
+        harness.clock,
         [
           with_audit_log(
-            harness,
+            harness.clock,
+            harness.fs,
             { _record ->
               let _ = harness.runtime.atomic_add(audit_records, 1)
             },
@@ -116,7 +117,7 @@ pipeline default(harness: Harness) {
               },
             },
           ),
-          with_rate_limit(harness, {max_calls: 10}),
+          with_rate_limit(harness.runtime, {max_calls: 10}),
           with_dry_run({only: ["edit"], message: "preview"}),
         ],
       )

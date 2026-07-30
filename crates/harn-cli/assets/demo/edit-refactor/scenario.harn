@@ -26,13 +26,22 @@ pipeline default(harness: Harness, _task) {
   const rs = assets + "/seed/lib.rs"
   const py = assets + "/seed/calc.py"
   const extract = edit_extract_function(
-    harness.fs, {path: py, range: {start_line: 1, end_line: 2}, new_name: "compute_subtotal", dry_run: true},
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: py, range: {start_line: 1, end_line: 2}, new_name: "compute_subtotal", dry_run: true},
   )
   const add_param = edit_add_parameter(
-    harness.fs, {path: rs, symbol: {name: "scale"}, param: "offset: i64", default: "0", dry_run: true},
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: rs, symbol: {name: "scale"}, param: "offset: i64", default: "0", dry_run: true},
   )
   const ret = edit_change_return_type(
-    harness.fs, {path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true},
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true},
   )
   harness.stdio.println("=== edit-refactor demo ===")
   harness.stdio.println("extract_function   -> " + extract.result)

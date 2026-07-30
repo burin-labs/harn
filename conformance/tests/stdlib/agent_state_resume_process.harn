@@ -1,7 +1,10 @@
 import "../_common"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.workspace_temp_dir(), "harn-agent-state-process-" + harness.random.uuid())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-agent-state-process-" + harness.random.uuid(),
+  )
   const script_dir = path_join(root, "scripts")
   harness.fs.mkdir(script_dir)
   const writer = script_dir + "/writer.harn"

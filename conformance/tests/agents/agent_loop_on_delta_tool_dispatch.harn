@@ -19,7 +19,8 @@ fn on_delta_tools() {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_tool_call("note", {text: "remember"}), llm_text("All done.")],
+    harness.llm,
+    [llm_tool_call("note", {text: "remember"}), llm_text("All done.")],
     { ->
       const opts: AgentLoopOptions = {
         provider: "mock",

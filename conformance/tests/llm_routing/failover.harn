@@ -7,7 +7,8 @@ import { with_llm_script } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         error: {category: "rate_limit", message: "HTTP 429 rate limit", retry_after_ms: 100},
         model: "mock",

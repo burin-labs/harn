@@ -46,10 +46,22 @@ fn real_monotonic_ms() -> i64 {
 /// Current wall-clock time in milliseconds since UNIX_EPOCH.
 /// Honors the active mock if one is installed.
 pub fn now_wall_ms() -> i64 {
-    let value = clock_mock::active_mock_clock()
-        .map(|c| c.now_wall_ms())
-        .unwrap_or_else(real_wall_ms);
+    let value = now_wall_ms_unrecorded();
     record_clock_read(ClockSource::Wall, value);
+    value
+}
+
+/// Runtime bookkeeping time that does not itself represent a script-visible
+/// host-boundary read on the unified testbench tape.
+pub(crate) fn now_wall_ms_unrecorded() -> i64 {
+    clock_mock::active_clock()
+        .map(|clock| harn_clock::now_wall_ms(clock.as_ref()))
+        .unwrap_or_else(real_wall_ms)
+}
+
+pub(crate) fn now_wall_ms_from(clock: &dyn harn_clock::Clock) -> i64 {
+    let value = harn_clock::now_wall_ms(clock);
+    record_clock_read_from(clock, ClockSource::Wall, value);
     value
 }
 
@@ -61,15 +73,37 @@ pub fn now_wall_seconds() -> f64 {
 /// Monotonic milliseconds. Honors the active mock; otherwise returns
 /// elapsed millis since process start.
 pub fn now_monotonic_ms() -> i64 {
-    let value = clock_mock::active_mock_clock()
-        .map(|c| c.now_monotonic_ms())
+    let value = clock_mock::active_clock()
+        .map(|clock| clock.monotonic_ms())
         .unwrap_or_else(real_monotonic_ms);
     record_clock_read(ClockSource::Monotonic, value);
     value
 }
 
-fn record_clock_read(source: ClockSource, value_ms: i64) {
+pub(crate) fn now_monotonic_ms_from(clock: &dyn harn_clock::Clock) -> i64 {
+    let value = clock.monotonic_ms();
+    record_clock_read_from(clock, ClockSource::Monotonic, value);
+    value
+}
+
+pub(crate) fn record_clock_read(source: ClockSource, value_ms: i64) {
     tape::with_active_recorder(|_recorder| Some(TapeRecordKind::ClockRead { source, value_ms }));
+}
+
+fn record_clock_read_from(clock: &dyn harn_clock::Clock, source: ClockSource, value_ms: i64) {
+    tape::with_active_recorder_clock(clock, |_recorder| {
+        Some(TapeRecordKind::ClockRead { source, value_ms })
+    });
+}
+
+pub(crate) fn record_clock_sleep(duration_ms: u64) {
+    tape::with_active_recorder(|_recorder| Some(TapeRecordKind::ClockSleep { duration_ms }));
+}
+
+pub(crate) fn record_clock_sleep_from(clock: &dyn harn_clock::Clock, duration_ms: u64) {
+    tape::with_active_recorder_clock(clock, |_recorder| {
+        Some(TapeRecordKind::ClockSleep { duration_ms })
+    });
 }
 
 /// Whether a clock mock is currently active.
@@ -84,11 +118,7 @@ pub fn advance(ms: i64) {
         return;
     }
     clock_mock::advance(Duration::from_millis(ms as u64));
-    tape::with_active_recorder(|_recorder| {
-        Some(TapeRecordKind::ClockSleep {
-            duration_ms: ms as u64,
-        })
-    });
+    record_clock_sleep(ms as u64);
 }
 
 fn push_mock(wall_ms: i64) {

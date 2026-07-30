@@ -37,9 +37,12 @@ fn smoke_tools() {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_tool_call("add", {lhs: 2, rhs: 3}), llm_text("The sum is 5.")],
+    harness.llm,
+    [llm_tool_call("add", {lhs: 2, rhs: 3}), llm_text("The sum is 5.")],
     { ->
-      const result = agent_loop(harness, "Add 2 and 3 using the tool, then report the sum.",
+      const result = agent_loop(
+        harness,
+        "Add 2 and 3 using the tool, then report the sum.",
         nil,
         {
           provider: "mock",

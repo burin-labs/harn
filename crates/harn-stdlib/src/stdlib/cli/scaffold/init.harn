@@ -143,7 +143,7 @@ fn __basic_files(project_name: string, harn_range: string) -> list {
       "main.harn",
       "import \"lib/helpers\"\n"
         + "\n"
-        + "pipeline default(task) {\n"
+        + "pipeline default(harness: Harness, task) {\n"
         + "  const greeting = greet(\"world\")\n"
         + "  harness.stdio.log(greeting)\n"
         + "}\n",
@@ -188,8 +188,8 @@ fn __agent_files(project_name: string, harn_range: string) -> list {
     + "  const path = path_join(harness.fs.cwd(), \"agent\", \"instructions.md\")\n"
     + "  if harness.fs.exists(path) {\n" + "    return harness.fs.read_text(path)\n" + "  }\n"
     + "  return \"Review the workspace carefully.\"\n" + "}\n" + "\n"
-    + "pub fn agent_app_tools(root) {\n" + "  return agent_host_tools(harness, \n" + "    nil,\n" + "    {\n"
-    + "      root: root,\n" + "      cwd: root,\n"
+    + "pub fn agent_app_tools(root) {\n" + "  return agent_host_tools(harness, \n" + "    nil,\n"
+    + "    {\n" + "      root: root,\n" + "      cwd: root,\n"
     + "      enabled_tools: [\"list_directory\", \"read_file\", \"search_files\"],\n"
     + "      max_inline_bytes: 6000,\n"
     + "      search_exclude_globs: [\".git/**\", \".harn/**\", \"target/**\", \"node_modules/**\"],\n"
@@ -381,7 +381,7 @@ fn __chat_files(project_name: string, harn_range: string) -> list {
 }
 
 fn __mcp_files(project_name: string, harn_range: string) -> list {
-  const main_harn = "pipeline default(task) {\n"
+  const main_harn = "pipeline default(harness: Harness, task) {\n"
     + "  let tools = tool_registry()\n"
     + "  tools = tool_define(tools, \"ping\", \"Return a pong response\", {\n"
     + "    parameters: {\n"
@@ -417,7 +417,7 @@ fn __mcp_files(project_name: string, harn_range: string) -> list {
 }
 
 fn __eval_files(project_name: string, harn_range: string) -> list {
-  const main_harn = "pipeline default(task) {\n"
+  const main_harn = "pipeline default(harness: Harness, task) {\n"
     + "  const input = \"hello world\"\n"
     + "  const output = input.upper()\n"
     + "  const passed = output == \"HELLO WORLD\"\n"
@@ -469,7 +469,7 @@ fn __pipeline_lab_files(project_name: string, harn_range: string) -> list {
     + "pub fn request_permission(tool_name, request_args) -> bool {\n"
     + "  return true\n"
     + "}\n"
-  const pipeline_harn = "pipeline default(task) {\n"
+  const pipeline_harn = "pipeline default(harness: Harness, task) {\n"
     + "  const context = build_context(env_or(harness, \"HARN_TASK\", \"\"))\n"
     + "  const result = harness.llm.call(\n"
     + "    \"Task: \" + context.task + \"\\nWorkspace: \" + context.cwd,\n"
@@ -551,7 +551,7 @@ fn __package_files(project_name: string, harn_range: string, harn_version: strin
     + "}\n"
   const main_harn = "import \"lib/main\"\n"
     + "\n"
-    + "pipeline default(task) {\n"
+    + "pipeline default(harness: Harness, task) {\n"
     + "  harness.stdio.log(greet(\"world\"))\n"
     + "}\n"
   const test_harn = "import \"../lib/main\"\n"
@@ -636,7 +636,7 @@ fn __connector_files(project_name: string, harn_range: string, harn_version: str
     + "}\n"
   const main_harn = "import \"connectors/echo\"\n"
     + "\n"
-    + "pipeline default(task) {\n"
+    + "pipeline default(harness: Harness, task) {\n"
     + "  harness.stdio.log(provider_id())\n"
     + "}\n"
   const test_harn = "import \"../connectors/echo\"\n"
@@ -747,56 +747,54 @@ fn __template_files(
   throw "unknown template: " + template
 }
 
-fn __write_if_new(harness: Harness, dir: string, rel: string, content: string) {
+fn __write_if_new(fs: HarnessFs, stdio: HarnessStdio, dir: string, rel: string, content: string) {
   const path = path_join(dir, rel)
   const parent = dirname(path)
-  if parent != "" && !harness.fs.exists(parent) {
+  if parent != "" && !fs.exists(parent) {
     try {
-      harness.fs.mkdir(parent)
+      fs.mkdir(parent)
     } catch (e) {
-      harness.stdio.eprintln("Failed to create " + parent + ": " + to_string(e))
+      stdio.eprintln("Failed to create " + parent + ": " + to_string(e))
       return
     }
   }
-  if harness.fs.exists(path) {
-    harness.stdio.println("  skip  " + path + " (already exists)")
+  if fs.exists(path) {
+    stdio.println("  skip  " + path + " (already exists)")
     return
   }
   try {
-    harness.fs.write_text(path, content)
+    fs.write_text(path, content)
   } catch (e) {
-    harness.stdio.eprintln("Failed to write " + path + ": " + to_string(e))
+    stdio.eprintln("Failed to write " + path + ": " + to_string(e))
     return
   }
-  harness.stdio.println("  create  " + path)
+  stdio.println("  create  " + path)
 }
 
-fn __print_next_steps(harness: Harness, name: string, template: string) {
-  harness.stdio.println("")
+fn __print_next_steps(stdio: HarnessStdio, name: string, template: string) {
+  stdio.println("")
   if name != "" {
-    harness.stdio.println("  cd " + name)
+    stdio.println("  cd " + name)
   }
   if template == "chat" {
-    harness.stdio.println("  harn run main.harn       # run the program")
+    stdio.println("  harn run main.harn       # run the program")
   } else if template == "mcp-server" {
-    harness.stdio.println("  harn serve mcp main.harn # expose the starter MCP server")
+    stdio.println("  harn serve mcp main.harn # expose the starter MCP server")
   } else if template == "pipeline-lab" {
-    harness.stdio.println("  harn playground --task \"Explain this repo\"    # run the lab")
-    harness.stdio.println(
-      "  harn playground --watch --task \"Refine the prompt\"  # live iteration",
-    )
+    stdio.println("  harn playground --task \"Explain this repo\"    # run the lab")
+    stdio.println("  harn playground --watch --task \"Refine the prompt\"  # live iteration")
   } else {
     // basic | agent | eval | package | connector
-    harness.stdio.println("  harn run main.harn       # run the program")
-    harness.stdio.println("  harn package verify      # run the canonical package gate")
+    stdio.println("  harn run main.harn       # run the program")
+    stdio.println("  harn package verify      # run the canonical package gate")
   }
-  harness.stdio.println("  harn fmt main.harn       # format code")
-  harness.stdio.println("  harn lint main.harn      # lint code")
+  stdio.println("  harn fmt main.harn       # format code")
+  stdio.println("  harn lint main.harn      # lint code")
   if template == "package" || template == "connector" {
-    harness.stdio.println("  harn package docs        # generate API docs")
-    harness.stdio.println("  harn package pack        # build an inspectable artifact")
+    stdio.println("  harn package docs        # generate API docs")
+    stdio.println("  harn package pack        # build an inspectable artifact")
   }
-  harness.stdio.println("  harn doctor              # verify the local environment")
+  stdio.println("  harn doctor              # verify the local environment")
 }
 
 fn main(harness: Harness) {
@@ -824,7 +822,7 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   for entry in files {
-    __write_if_new(harness, dir, entry[0], entry[1])
+    __write_if_new(harness.fs, harness.stdio, dir, entry[0], entry[1])
   }
-  __print_next_steps(harness, name, template)
+  __print_next_steps(harness.stdio, name, template)
 }

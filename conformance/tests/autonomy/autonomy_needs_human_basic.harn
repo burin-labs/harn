@@ -10,9 +10,9 @@
  *
  * Tracking: harn#1792.
  */
-fn attempt_write(harness: Harness, target: string) -> dict {
+fn attempt_write(fs: HarnessFs, target: string) -> dict {
   try {
-    harness.fs.write_text(target, "should never land")
+    fs.write_text(target, "should never land")
     return {caught: nil, wrote: true}
   } catch (e) {
     return {caught: to_string(e), wrote: false}
@@ -33,7 +33,7 @@ pipeline test(harness: Harness, task) {
       reviewers: ["ops-lead"],
       requires_human_actions: ["fs.write"],
     },
-    fn() { return attempt_write(harness, target) },
+    fn() { return attempt_write(harness.fs, target) },
   )
   // 1. The structured deny fired and the file was never written, even
   //    though the resolved tier is `act_auto`.

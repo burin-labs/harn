@@ -2,7 +2,7 @@
  * Cache cost-moat receipts on the agent event tape.
  *
  * Verifies the ledger story end-to-end:
- *  - `agent_emit_event(harness, session_id, "cache_hit"|"cache_miss", payload)`
+ *  - `agent_emit_event(harness.agent, session_id, "cache_hit"|"cache_miss", payload)`
  *    is accepted by the host. Pre-fix the event names weren't
  *    registered as `AgentEvent` variants and the wrapper's `try`
  *    around `agent_emit_event` silently swallowed the rejection.
@@ -49,7 +49,7 @@ pipeline default(harness: Harness) {
   // registered as canonical AgentEvent variants, the call succeeds.
   const direct = try {
     agent_emit_event(
-      harness,
+      harness.agent,
       session_id,
       "cache_hit",
       {key: "direct", backend: "mem", namespace: "ns", metrics: {model_calls_avoided: 1}},
@@ -69,7 +69,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const store = mem_cache({namespace: "cache-event-receipts-direct-" + harness.random.uuid()})
-      cache_clear(harness, {store: store})
+      cache_clear(harness.llm, {store: store})
       const opts = {provider: "p", model: "m", stream: false, store: store, session_id: session_id}
       const first = with_cache(harness, "hello", "sys", opts)
       const second = with_cache(harness, "hello", "sys", opts)

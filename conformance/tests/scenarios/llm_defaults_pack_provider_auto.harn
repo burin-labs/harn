@@ -10,7 +10,7 @@ pipeline test(harness: Harness, task) {
   // it back, but the model id starts with "gpt-" so the inference rule
   // overrides to "openai" by the time pack_for assembles the result.)
   // For test purposes, omit provider so inference runs cleanly.
-  const r = pack_for(harness, {model: "gpt-5"})
+  const r = pack_for(harness.agent, harness.llm, {model: "gpt-5"})
   assert_eq(r.model, "gpt-5")
   assert_eq(r.provider, "openai")
   // Medium scale calibration populates the low-level effort.

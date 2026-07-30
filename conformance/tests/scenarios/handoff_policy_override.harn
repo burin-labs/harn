@@ -1,4 +1,4 @@
-import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 /**
  * Handoff policy overrides are carried on the typed envelope, surfaced in
  * tool-middleware audit records, and adopted as a replacement execution policy
@@ -66,10 +66,14 @@ fn successful_handoff_result(payload) {
 fn review_captain_mock(harness: Harness, envelope) {
   const policy = harness.runtime.current_policy()
   const tools = note_tools()
-  const read_result = agent_dispatch_tool_call(harness, {name: "read_note", id: "read-1", arguments: {path: "notes.txt"}},
+  const read_result = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "read_note", id: "read-1", arguments: {path: "notes.txt"}},
     tools,
   )
-  const denied = agent_dispatch_tool_call(harness, {name: "write_note", id: "write-1", arguments: {path: "notes.txt"}},
+  const denied = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "write_note", id: "write-1", arguments: {path: "notes.txt"}},
     tools,
   )
   return {
@@ -108,7 +112,7 @@ pipeline main(harness: Harness) {
   const record = handoff(payload)
   const mw = with_handoff_artifact()
   const audited = mw(handoff_tool_call(), successful_handoff_result(payload))
-  const routed = handoff_routed(harness, payload, routes, {})
+  const routed = handoff_routed(harness.clock, payload, routes, {})
   const dispatch = handoff_dispatch(
     harness,
     routed,

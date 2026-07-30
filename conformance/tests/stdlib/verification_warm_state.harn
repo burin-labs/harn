@@ -71,7 +71,7 @@ pipeline test(harness: Harness, task) {
     },
   )
   const plan = verification_ladder_plan(
-    harness,
+    harness.runtime,
     {language: "toolchainy", task: "post_edit"},
     {timing_kind: "auto", warm_state_facts: facts},
   )
@@ -85,7 +85,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(plan.selected[1].p95_ms, 7000)
   assert_eq(plan.selected[1].warm_state.id, "svc/cold")
   const cold_override = verification_ladder_plan(
-    harness,
+    harness.runtime,
     {language: "toolchainy", task: "post_edit"},
     {timing_kind: "cold", warm_state_facts: facts},
   )

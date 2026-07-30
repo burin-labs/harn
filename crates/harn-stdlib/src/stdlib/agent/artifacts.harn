@@ -156,12 +156,13 @@ pub fn agent_result_descriptor(
  *
  * @effects: [fs.read]
  * @errors: []
- * @example: read_agent_result_result(harness, run.paths.agent_result)
+ * @example: read_agent_result_result(harness.fs, run.paths.agent_result)
  */
-pub fn read_agent_result_result(harness: Harness, 
+pub fn read_agent_result_result(
+  fs: HarnessFs,
   path: string,
 ) -> Result<VersionedValue<AgentResult>, ArtifactReadFailure> {
-  return read_versioned_json_result(harness, path, agent_result_contract())
+  return read_versioned_json_result(fs, path, agent_result_contract())
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -389,7 +390,7 @@ fn __event_family(tag, id, schema) -> EventFamily {
  *
  * @effects: []
  * @errors: [validation]
- * @example: read_typed_events_page_result(harness, path, transcript_event_spec())
+ * @example: read_typed_events_page_result(harness.fs, path, transcript_event_spec())
  */
 pub fn transcript_event_spec() -> DiscriminatedSpec {
   return discriminated_spec(
@@ -438,13 +439,14 @@ pub fn transcript_event_spec() -> DiscriminatedSpec {
  *
  * @effects: [fs.read]
  * @errors: []
- * @example: read_transcript_events_page_result(harness, run.paths.agent_llm_transcript)
+ * @example: read_transcript_events_page_result(harness.fs, run.paths.agent_llm_transcript)
  */
-pub fn read_transcript_events_page_result(harness: Harness, 
+pub fn read_transcript_events_page_result(
+  fs: HarnessFs,
   path: string,
   options: JsonlPageOptions = {},
 ) -> Result<TypedEventPage, FsFailure> {
-  return read_typed_events_page_result(harness, path, transcript_event_spec(), options)
+  return read_typed_events_page_result(fs, path, transcript_event_spec(), options)
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -526,9 +528,10 @@ fn __context_ingest(context: TranscriptContext, event) -> TranscriptContext {
  *
  * @effects: [fs.read]
  * @errors: []
- * @example: read_transcript_context_result(harness, run.paths.agent_llm_transcript)
+ * @example: read_transcript_context_result(harness.fs, run.paths.agent_llm_transcript)
  */
-pub fn read_transcript_context_result(harness: Harness, 
+pub fn read_transcript_context_result(
+  fs: HarnessFs,
   path: string,
   options: JsonlPageOptions = {},
 ) -> Result<VersionedValue<TranscriptContext>, ArtifactReadFailure> {
@@ -542,7 +545,7 @@ pub fn read_transcript_context_result(harness: Harness,
   let cursor: JsonlCursor = opts.cursor ?? {offset: 0, line: 1}
   while true {
     const page_options: JsonlPageOptions = opts + {cursor: cursor}
-    const page = read_transcript_events_page_result(harness, path, page_options)
+    const page = read_transcript_events_page_result(fs, path, page_options)
     if !is_ok(page) {
       const failure = unwrap_err(page)
       return Err(
@@ -578,7 +581,7 @@ pub fn read_transcript_context_result(harness: Harness,
  *
  * @effects: []
  * @errors: [validation]
- * @example: read_transcript_events_page_result(harness, agent_transcript_path(run))
+ * @example: read_transcript_events_page_result(harness.fs, agent_transcript_path(run))
  */
 pub fn agent_transcript_path(run, name: string = "agent-llm") -> string {
   return run_artifact_transcript_path(run, name)

@@ -1,37 +1,25 @@
 pipeline test(harness: Harness, task) {
   // Empty store: file lookup returns nil and does not error.
-  assert_eq(
-    harness.project.path_metadata_get({path: "src/foo.rs", namespace: "facts"}),
-    nil,
-  )
+  assert_eq(harness.project.path_metadata_get({path: "src/foo.rs", namespace: "facts"}), nil)
   // Default kind is "file"; missing entry is nil regardless of namespace arg.
   assert_eq(harness.project.path_metadata_get({path: "src/foo.rs"}), nil)
   // Dir-level metadata seeded via the existing API.
-  harness.project.metadata_set(
-    {dir: ".", namespace: "facts", value: {root_owner: "vm"}},
-  )
+  harness.project.metadata_set({dir: ".", namespace: "facts", value: {root_owner: "vm"}})
   harness.project.metadata_set({dir: "src", namespace: "facts", value: {owner: "vm"}})
   // File entry on a child file: stored and retrieved exactly.
   harness.project.path_metadata_set(
     {path: "src/foo.rs", namespace: "facts", value: {summary: "entry point"}},
   )
-  const file_facts = harness.project.path_metadata_get(
-    {path: "src/foo.rs", namespace: "facts"},
-  )
+  const file_facts = harness.project.path_metadata_get({path: "src/foo.rs", namespace: "facts"})
   assert_eq(file_facts.summary, "entry point")
   // File lookups never inherit from parent dirs.
   assert_eq(file_facts?.owner, nil)
   assert_eq(file_facts?.root_owner, nil)
   // Normalization: "./src/foo.rs" addresses the same entry.
-  const normalized = harness.project.path_metadata_get(
-    {path: "./src/foo.rs", namespace: "facts"},
-  )
+  const normalized = harness.project.path_metadata_get({path: "./src/foo.rs", namespace: "facts"})
   assert_eq(normalized.summary, "entry point")
   // Missing namespace on a known file returns nil.
-  assert_eq(
-    harness.project.path_metadata_get({path: "src/foo.rs", namespace: "missing_ns"}),
-    nil,
-  )
+  assert_eq(harness.project.path_metadata_get({path: "src/foo.rs", namespace: "missing_ns"}), nil)
   // kind: "dir" delegates to hierarchical dir resolution.
   const dir_facts = harness.project.path_metadata_get(
     {path: "src", namespace: "facts", options: {kind: "dir"}},
@@ -40,12 +28,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(dir_facts.root_owner, "vm")
   // kind: "dir" on path_metadata_set mirrors metadata_set.
   harness.project.path_metadata_set(
-    {
-      path: "src/nested",
-      namespace: "facts",
-      value: {tag: "deep"},
-      options: {kind: "dir"},
-    },
+    {path: "src/nested", namespace: "facts", value: {tag: "deep"}, options: {kind: "dir"}},
   )
   const nested = harness.project.metadata_get({dir: "src/nested", namespace: "facts"})
   assert_eq(nested.tag, "deep")

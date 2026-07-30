@@ -126,18 +126,18 @@ fn _resolve_input() {
   }
 }
 
-fn _adapter_for(harness: Harness, input) {
+fn _adapter_for(fs: HarnessFs, input) {
   if input.mode == "live" {
     return live_adapter()
   }
-  const raw = harness.fs.read_text(input.fixture_path)
+  const raw = fs.read_text(input.fixture_path)
   const parsed = json_parse(raw)
   return fixture_adapter(parsed)
 }
 
 pub pipeline run(harness: Harness, task) -> dict {
   const input = _resolve_input()
-  const policies_load = load_policies(harness, input.policy_paths)
+  const policies_load = load_policies(harness.fs, input.policy_paths)
   if len(policies_load.errors) > 0 {
     const summary = {
       persona: "merge_captain",
@@ -148,7 +148,7 @@ pub pipeline run(harness: Harness, task) -> dict {
     harness.stdio.println(json_stringify(summary))
     return summary
   }
-  const adapter = _adapter_for(harness, input)
+  const adapter = _adapter_for(harness.fs, input)
   const checkpoint_handle = open_checkpoints(
     harness.agent,
     input.state_root,

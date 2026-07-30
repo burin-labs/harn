@@ -15,41 +15,65 @@
 import { probe, sample_registry } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
-  probe(harness, "encoded operator in json content",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "encoded operator in json content",
     "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.ts\",\"content\":\"xs.map(x =&gt; x)\"}}</tool_call>",
     sample_registry(),
   )
   // The three operator classes from the field forensics in one pass.
-  probe(harness, "all operator classes decode",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "all operator classes decode",
     "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.ts\",\"content\":\"if (a &lt;= b &amp;&amp; b &gt;= 0) {}\"}}</tool_call>",
     sample_registry(),
   )
   // Double-escaped references survive as literal references.
-  probe(harness, "double escaped reference stays literal",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "double escaped reference stays literal",
     "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"page.html\",\"content\":\"<p>a &amp;lt; b &amp;amp; c</p>\"}}</tool_call>",
     sample_registry(),
   )
   // A bare `&` that opens no recognized reference is emitted verbatim.
-  probe(harness, "bare ampersands untouched",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bare ampersands untouched",
     "<tool_call>{\"name\":\"run\",\"arguments\":{\"command\":\"echo R&D && sleep 1 & wait; printf '&amp'\"}}</tool_call>",
     sample_registry(),
   )
-  probe(harness, "quote references decode",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "quote references decode",
     "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.py\",\"content\":\"print(&quot;a&quot;, &#39;b&#39;, &apos;c&apos;)\"}}</tool_call>",
     sample_registry(),
   )
   // Decoding recurses into nested arrays and objects.
-  probe(harness, "nested arguments decode recursively",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested arguments decode recursively",
     "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"patch\",\"path\":\"a.ts\",\"ops\":[{\"content\":\"x =&gt; x\"},{\"content\":\"a &lt; b\"}]}}</tool_call>",
     sample_registry(),
   )
   // The nested-XML wrapper shares the JSON-string channel.
-  probe(harness, "nested xml wrapper content decodes",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested xml wrapper content decodes",
     "<tool_call><edit>{\"action\":\"create\",\"path\":\"a.ts\",\"content\":\"x =&gt; x\"}</edit></tool_call>",
     sample_registry(),
   )
   // SCOPE GUARD: a heredoc raw body is not decoded.
-  probe(harness, "heredoc raw body is not decoded",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc raw body is not decoded",
     """edit({ action: "create", path: "page.html", content: <<EOF
 <p>a &lt; b</p>
 EOF
@@ -57,7 +81,10 @@ EOF
     sample_registry(),
   )
   // The whole point: a compile-breaking edit becomes compilable.
-  probe(harness, "operator corruption class is repaired",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "operator corruption class is repaired",
     "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"replace_body\",\"path\":\"a.ts\",\"new_body\":\"const f = (xs) =&gt; xs.filter(x =&gt; x &gt; 0)\"}}</tool_call>",
     sample_registry(),
   )

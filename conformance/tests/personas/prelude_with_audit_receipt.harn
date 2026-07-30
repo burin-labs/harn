@@ -8,14 +8,16 @@ pipeline test(harness: Harness, task) {
     started_at: "2026-05-03T00:00:00Z",
     completed_at: "2026-05-03T00:00:00Z",
   }
-  const wrapped = with_audit_receipt(harness, fn() { return {done: true} }, opts)
+  const wrapped = with_audit_receipt(harness.clock, fn() { return {done: true} }, opts)
   const ok = wrapped()
   harness.stdio.println(ok.status)
   harness.stdio.println(ok.result.done)
   harness.stdio.println(ok.receipt.schema)
   harness.stdio.println(ok.receipt.step)
   harness.stdio.println(len(ok.receipt.tool_calls))
-  const failed_wrapper = with_audit_receipt(harness, fn() {
+  const failed_wrapper = with_audit_receipt(
+    harness.clock,
+    fn() {
       throw "boom"
     },
     opts,

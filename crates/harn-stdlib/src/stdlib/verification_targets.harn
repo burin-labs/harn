@@ -308,11 +308,7 @@ pub fn __verification_parse_adapter_targets(
   throw "verification_affected_targets: unsupported parser_id `" + parser_id + "`"
 }
 
-pub fn __verification_code_index_fallback(
-  code_index: HarnessCodeIndex,
-  changed_paths,
-  opts,
-) {
+pub fn __verification_code_index_fallback(code_index: HarnessCodeIndex, changed_paths, opts) {
   if opts?.fallback == false {
     return {enabled: false, available: false, targets: []}
   }

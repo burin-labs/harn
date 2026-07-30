@@ -35,8 +35,8 @@ fn total_added(files) {
   return total
 }
 
-fn render_review_prompt(harness: Harness, diff) {
-  return harness.fs.render_prompt(
+fn render_review_prompt(fs: HarnessFs, diff) {
+  return fs.render_prompt(
     "review.harn.prompt",
     {
       pr: diff.pr_number,
@@ -47,21 +47,25 @@ fn render_review_prompt(harness: Harness, diff) {
   )
 }
 
-fn render_clarification_prompt(harness: Harness, pr, answer) {
-  return harness.fs.render_prompt("clarification.harn.prompt", {pr: pr, answer: answer})
+fn render_clarification_prompt(fs: HarnessFs, pr, answer) {
+  return fs.render_prompt("clarification.harn.prompt", {pr: pr, answer: answer})
 }
 
 pipeline default(harness: Harness, _task) {
   const diff = diff_summary()
   const system = "You are review_captain, a thorough code reviewer."
-  const review_prompt = render_review_prompt(harness, diff)
+  const review_prompt = render_review_prompt(harness.fs, diff)
   const initial_envelope = harness.llm.call(review_prompt, system)
   harness.stdio.println("=== review_captain · stage 1 (initial scan) ===")
   harness.stdio.println(initial_envelope.text)
   harness.stdio.println("")
   const author_answer =
     "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
-  const clarification_prompt = render_clarification_prompt(harness, diff.pr_number, author_answer)
+  const clarification_prompt = render_clarification_prompt(
+    harness.fs,
+    diff.pr_number,
+    author_answer,
+  )
   const final_envelope = harness.llm.call(clarification_prompt, system)
   const receipt = {
     persona: "review_captain",

@@ -1,8 +1,8 @@
 import "std/path"
 
 /** Return the sample workspace root for the experiment. */
-pub fn workspace_root(harness: Harness) {
-  return path_join(harness.fs.source_dir(), "..", "workspace")
+pub fn workspace_root(fs: HarnessFs) {
+  return path_join(fs.source_dir(), "..", "workspace")
 }
 
 fn workspace_alias_path(path) {
@@ -14,8 +14,8 @@ fn workspace_alias_path(path) {
 }
 
 /** Normalize a model-provided path into a workspace-relative path. */
-pub fn workspace_path(harness: Harness, path) {
-  const normalized = workspace_normalize(workspace_alias_path(path), workspace_root(harness))
+pub fn workspace_path(fs: HarnessFs, path) {
+  const normalized = workspace_normalize(workspace_alias_path(path), workspace_root(fs))
   guard normalized else {
     throw "Path is outside the experiment workspace: ${path ?? ""}"
   }
@@ -23,26 +23,26 @@ pub fn workspace_path(harness: Harness, path) {
 }
 
 /** Resolve a workspace-relative path to an on-disk host path. */
-pub fn resolve_workspace_path(harness: Harness, path) {
-  return path_join(workspace_root(harness), workspace_path(harness, path))
+pub fn resolve_workspace_path(fs: HarnessFs, path) {
+  return path_join(workspace_root(fs), workspace_path(fs, path))
 }
 
 /** Read one file from the sample workspace. */
-pub fn read_workspace(harness: Harness, path) {
-  return harness.fs.read_text(resolve_workspace_path(harness, path))
+pub fn read_workspace(fs: HarnessFs, path) {
+  return fs.read_text(resolve_workspace_path(fs, path))
 }
 
 /** Write one file inside the sample workspace. */
-pub fn write_workspace(harness: Harness, path, content) {
-  const resolved = resolve_workspace_path(harness, path)
-  harness.fs.write_text(resolved, content)
+pub fn write_workspace(fs: HarnessFs, path, content) {
+  const resolved = resolve_workspace_path(fs, path)
+  fs.write_text(resolved, content)
   return resolved
 }
 
 /** Search the sample workspace with ripgrep. */
-pub fn search_workspace(harness: Harness, query) {
-  const result = exec_at(
-    workspace_root(harness),
+pub fn search_workspace(fs: HarnessFs, process: HarnessProcess, query) {
+  const result = process.exec_at(
+    workspace_root(fs),
     "rg",
     "-n",
     "--hidden",
@@ -59,9 +59,9 @@ pub fn search_workspace(harness: Harness, query) {
 }
 
 /** List every workspace file in deterministic (path-sorted) order. */
-pub fn list_workspace_files(harness: Harness) {
-  const result = exec_at(
-    workspace_root(harness),
+pub fn list_workspace_files(fs: HarnessFs, process: HarnessProcess) {
+  const result = process.exec_at(
+    workspace_root(fs),
     "rg",
     "--files",
     "--hidden",
@@ -92,21 +92,21 @@ pub fn list_workspace_files(harness: Harness) {
  * "auth middleware" rarely match content literally; the filename pass
  * is what saves them.
  */
-pub fn find_workspace(harness: Harness, query) {
+pub fn find_workspace(fs: HarnessFs, process: HarnessProcess, query) {
   const q = (query ?? "").trim()
   if q == "" {
     return "(empty query)"
   }
   // Filename pass: path-sorted file list, filter by case-insensitive substring.
   let name_hits = []
-  for path in list_workspace_files(harness) {
+  for path in list_workspace_files(fs, process) {
     if contains(lowercase(path), lowercase(q)) {
       name_hits = name_hits + [path]
     }
   }
   // Content pass: ripgrep -n -i, capped at 80 lines.
-  const rg = exec_at(
-    workspace_root(harness),
+  const rg = process.exec_at(
+    workspace_root(fs),
     "rg",
     "-n",
     "-i",
@@ -152,6 +152,6 @@ pub fn find_workspace(harness: Harness, query) {
 }
 
 /** Run one shell command from the sample workspace root. */
-pub fn run_workspace(harness: Harness, command) {
-  return shell_at(workspace_root(harness), command)
+pub fn run_workspace(fs: HarnessFs, process: HarnessProcess, command) {
+  return process.shell_at(workspace_root(fs), command)
 }

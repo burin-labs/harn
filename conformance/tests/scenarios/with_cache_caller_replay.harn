@@ -18,8 +18,12 @@ import { with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   const store = mem_cache({namespace: "with-cache-caller-" + harness.random.uuid()})
-  cache_clear(harness, {store: store})
-  const caller = with_cache(harness, default_llm_caller(harness), {store: store, ttl: "1h"})
+  cache_clear(harness.llm, {store: store})
+  const caller = with_cache(
+    harness,
+    default_llm_caller(harness.agent, harness.llm),
+    {store: store, ttl: "1h"},
+  )
   const session_id = "with-cache-caller-session-" + harness.random.uuid()
   const hits = harness.runtime.atomic(0)
   const misses = harness.runtime.atomic(0)

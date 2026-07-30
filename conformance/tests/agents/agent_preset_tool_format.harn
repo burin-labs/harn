@@ -16,14 +16,19 @@ pipeline default(harness: Harness) {
   // auto-derived; it is the reverse safety valve, reached only via a pin or an
   // explicit request — see `forced_text` below.)
   const text_audit = agent_preset(
-    harness, "audit",
+    harness,
+    "audit",
     {provider: "ollama", model: "qwen3.6:35b-a3b-coding-nvfp4"},
   )
   harness.stdio.println(text_audit.tool_format)
   // Caller explicit `tool_format` wins over the derived default — even if the
   // capability matrix disagrees. An explicit `text` still yields heredoc (the
   // format is demoted to opt-in, not removed).
-  const forced_text = agent_preset(harness, "audit", {model: "claude-sonnet-4-5", tool_format: "text"})
+  const forced_text = agent_preset(
+    harness,
+    "audit",
+    {model: "claude-sonnet-4-5", tool_format: "text"},
+  )
   harness.stdio.println(forced_text.tool_format)
   // Summary preset does not opt into tool semantics, so the derivation is
   // skipped and `tool_format` stays absent regardless of model.

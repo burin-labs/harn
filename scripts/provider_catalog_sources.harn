@@ -312,7 +312,7 @@ pub fn json_api_adapter(harness: Harness, env: dict, config: dict) -> dict {
  * surfaces the gap instead of silently treating the source as a
  * removal.
  */
-pub fn key_required_adapter(env: dict, config: dict) -> dict {
+pub fn key_required_adapter(harness: Harness, env: dict, config: dict) -> dict {
   const key_envs = config.key_envs ?? []
   const secret = __first_available_secret(env, key_envs)
   if secret == nil {
@@ -333,7 +333,7 @@ pub fn key_required_adapter(env: dict, config: dict) -> dict {
     }
   }
   const adapter_env = __env_with_auth_header(env, config, secret)
-  const result = config.adapter(adapter_env)
+  const result = config.adapter(harness, adapter_env)
   const augmented = result.run + {requires_key: true, key_envs: key_envs}
   return {run: augmented, observations: result.observations}
 }

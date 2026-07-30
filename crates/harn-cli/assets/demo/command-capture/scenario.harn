@@ -71,7 +71,10 @@ pipeline default(harness: Harness, _task) {
   //    exists, so a sandbox that blocks the write produces no false promise.
   // Write under the workspace root so the demo stays inside its sandbox
   // (a real run captures to the host temp dir instead).
-  const capture_path = path_join(harness.fs.runtime_paths().execution_root, "harn-demo-capture-" + harness.random.uuid() + ".out")
+  const capture_path = path_join(
+    harness.fs.runtime_paths().execution_root,
+    "harn-demo-capture-" + harness.random.uuid() + ".out",
+  )
   let full = ""
   let i = 1
   while i <= 200 {
@@ -81,7 +84,7 @@ pipeline default(harness: Harness, _task) {
   harness.fs.write_text(capture_path, full)
   const plan = command_capture_plan("seq 200 | tail -3", capture_path)
   const agent_result = {stdout: "198\n199\n200\n", exit_code: 0, success: true}
-  const annotated = command_capture_annotate(harness, agent_result, plan)
+  const annotated = command_capture_annotate(harness.fs, agent_result, plan)
   harness.stdio.println("agent's run_command result:")
   harness.stdio.println("  stdout (filtered): " + json_stringify(annotated.stdout))
   harness.stdio.println("  output_capture.producer: " + annotated.output_capture.producer)

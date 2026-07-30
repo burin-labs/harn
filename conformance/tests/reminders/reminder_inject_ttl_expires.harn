@@ -5,7 +5,7 @@ pipeline main(harness: Harness) {
   harness.agent.reset(session)
   harness.agent.inject(session, transcript_reminder_event({body: "expire me", ttl_turns: 1}))
   const before = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
-  const report = agent_session_apply_reminder_post_turn(harness, session, 1)
+  const report = agent_session_apply_reminder_post_turn(harness.agent, session, 1)
   const after = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   harness.stdio.println(len(before))
   harness.stdio.println(before[0].reminder.ttl_turns)

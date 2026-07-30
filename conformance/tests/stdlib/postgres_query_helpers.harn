@@ -92,7 +92,8 @@ LIMIT {limit}
   harness.stdio.println(rows[0].payload.ok)
   const result = exec(db, update_query)
   harness.stdio.println(result.rows_affected)
-  const named_rows = run(db,
+  const named_rows = run(
+    db,
     named("list_receipts_named", "many", list_query.sql, list_query.params),
   )
   harness.stdio.println(named_rows[0].created_at)

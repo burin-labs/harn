@@ -1,6 +1,5 @@
 //! Workspace-root path-scope enforcement for the path-touching hostlib
-//! builtins (issue #2600, follow-up to the coarse `tools:deterministic`
-//! gate from #2548).
+//! builtins (issue #2600).
 //!
 //! Under a restricted `SandboxProfile` with explicit `workspace_roots`,
 //! every builtin that resolves a host filesystem path must reject paths
@@ -12,7 +11,6 @@
 use std::fs;
 use std::path::Path;
 
-use harn_hostlib::tools::permissions;
 use harn_hostlib::{
     ast::AstCapability, fs::FsCapability, tools::ToolsCapability, BuiltinRegistry,
     HostlibCapability, HostlibError,
@@ -25,12 +23,8 @@ use harn_vm::stdlib::process::set_thread_execution_context;
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
-/// Build a registry carrying every path-touching capability surface, with
-/// the deterministic-tools feature enabled so the coarse gate never gets in
-/// the way of the scope assertions.
+/// Build a registry carrying every path-touching capability surface.
 fn registry() -> BuiltinRegistry {
-    permissions::reset();
-    permissions::enable_for_test();
     let mut registry = BuiltinRegistry::new();
     ToolsCapability.register_builtins(&mut registry);
     FsCapability.register_builtins(&mut registry);

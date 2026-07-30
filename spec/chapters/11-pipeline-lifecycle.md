@@ -104,8 +104,8 @@ the stable ownership boundaries:
 |---|---|---|
 | `stdio`, `term`, `clock`, `env`, `random`, `system` | Process observation, user I/O, time, and entropy |
 | `fs`, `process`, `net`, `channels`, `secrets` | External I/O and durable communication |
-| `llm`, `agent`, `tools`, `interaction`, `verdict` | Model, worker, tool-protocol, human-interaction, and decision authority |
-| `tenant`, `auth`, `obs`, `runtime`, `project` | Execution identity, authentication, telemetry, runtime context, and project state |
+| `llm`, `agent`, `tools`, `interaction`, `verdict` | Model, worker, tool, human-interaction, and decision authority |
+| `tenant`, `auth`, `obs`, `runtime`, `project` | Identity, authentication, telemetry, runtime, and project state |
 | `ast`, `code_index`, `scanner`, `rules`, `lint` | Language and code-analysis services |
 | `computer`, `embed`, `memory`, `sqlite`, `postgres` | Native interaction and data services |
 | `fs_watch`, `host_lease`, `secret_store`, `terminal` | Long-lived resource factories |
@@ -160,10 +160,18 @@ conformance fixtures and IDE hosts can observe the loop boundary.
 
 ### Lifecycle event taxonomy
 
-The runtime exposes 40 hook events. Registration surfaces:
-`register_tool_hook` (tool events), `register_persona_hook` (persona
-events), `register_worker_hook` (worker events), and
-`register_session_hook` (session events).
+The runtime exposes 40 hook events. Registration surfaces live on typed
+capabilities: `harness.tools.register_hook` (tool events),
+`harness.agent.register_persona_hook` (persona events),
+`harness.agent.register_worker_hook` (worker events), and
+`harness.agent.register_session_hook` (session events).
+
+Every VM-backed hook handler has the entrypoint shape
+`fn(harness: Harness, event)`. The runtime supplies the exact root Harness for
+the firing execution. This is an orchestration boundary, so root authority is
+appropriate here; ordinary helpers called by a hook SHOULD accept the
+narrowest coherent nominal handle they require. A package-manifest `[[hooks]]`
+export uses the same ABI as a programmatically registered closure.
 
 | Event | Category | Reminder effects |
 |---|---|---|

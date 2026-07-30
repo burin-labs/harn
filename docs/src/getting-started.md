@@ -161,9 +161,9 @@ For larger workflow-style programs, organize code into named pipelines. The
 runtime executes the `default` pipeline (or the first one declared):
 
 ```harn
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const name = "Harn"
-  log("Hello from ${name}!")
+  harness.stdio.log("Hello from ${name}!")
 }
 ```
 
@@ -194,12 +194,12 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ```harn
-const response = llm_call(
+const response = harness.llm.call(
   "Explain quicksort in two sentences.",
   "You are a computer science tutor.",
   {provider: "anthropic", model: "claude-sonnet-5"}
 )
-log(response)
+harness.stdio.log(response)
 ```
 
 The third argument is the model route. You can omit it after `harn quickstart`
@@ -220,7 +220,7 @@ import {default_llm_caller} from "std/llm/caller"
 import {with_retry} from "std/llm/handlers"
 
 const caller = with_retry(default_llm_caller(), {max_attempts: 4})
-const result = agent_loop(task, system, {llm_caller: caller, loop_until_done: true})
+const result = agent_loop(harness, task, system, {llm_caller: caller, loop_until_done: true})
 ```
 
 See [Composable callers and middleware](./stdlib/llm-handlers.md) for
@@ -311,7 +311,7 @@ And call it from a program:
 
 ```harn,ignore
 fn main(harness: Harness) {
-  const pages = mcp_call(mcp.notion, "search", {query: "release notes"})
+  const pages = harness.tools.mcp_call(mcp.notion, "search", {query: "release notes"})
   harness.stdio.println(json_stringify_pretty(pages))
 }
 ```

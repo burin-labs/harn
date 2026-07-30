@@ -5,8 +5,8 @@
  * @errors: []
  * @api_stability: experimental
  */
-pub fn render_workflow_prompt_asset(harness: Harness, path, bindings = nil) {
-  return harness.fs.render_prompt("std/workflow/prompts/" + path, bindings ?? {})
+pub fn render_workflow_prompt_asset(fs: HarnessFs, path, bindings = nil) {
+  return fs.render_prompt("std/workflow/prompts/" + path, bindings ?? {})
 }
 
 /**
@@ -16,8 +16,8 @@ pub fn render_workflow_prompt_asset(harness: Harness, path, bindings = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_stage_prompt(harness: Harness, bindings) {
-  return render_workflow_prompt_asset(harness, "stage.harn.prompt", bindings)
+pub fn workflow_stage_prompt(fs: HarnessFs, bindings) {
+  return render_workflow_prompt_asset(fs, "stage.harn.prompt", bindings)
 }
 
 /**
@@ -27,8 +27,8 @@ pub fn workflow_stage_prompt(harness: Harness, bindings) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_verification_context_intro(harness: Harness) {
-  return render_workflow_prompt_asset(harness, "verification_context_intro.harn.prompt", {})
+pub fn workflow_verification_context_intro(fs: HarnessFs) {
+  return render_workflow_prompt_asset(fs, "verification_context_intro.harn.prompt", {})
 }
 
 fn __workflow_escape_prompt_text(text) {
@@ -183,11 +183,11 @@ fn __workflow_render_contract(contract) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_render_verification_context(harness: Harness, contracts = nil) {
+pub fn workflow_render_verification_context(fs: HarnessFs, contracts = nil) {
   if len(contracts ?? []) == 0 {
     return ""
   }
-  let out = workflow_verification_context_intro(harness) + "\n"
+  let out = workflow_verification_context_intro(fs) + "\n"
   for contract in contracts {
     out = out + __workflow_render_contract(contract)
   }
@@ -209,7 +209,7 @@ fn __workflow_stage_label(label) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_prepare_stage_prompt(harness: Harness, config = nil) {
+pub fn workflow_prepare_stage_prompt(fs: HarnessFs, config = nil) {
   const opts = config ?? {}
   const rendered_context = opts?.rendered_context
     ?? workflow_render_artifacts_context(
@@ -217,10 +217,12 @@ pub fn workflow_prepare_stage_prompt(harness: Harness, config = nil) {
     opts?.context_policy ?? {},
   )
   const rendered_verification = opts?.rendered_verification
-    ?? workflow_render_verification_context(harness, 
+    ?? workflow_render_verification_context(
+    fs,
     opts?.verification_contracts ?? [],
   )
-  const prompt = workflow_stage_prompt(harness, 
+  const prompt = workflow_stage_prompt(
+    fs,
     {
       label: __workflow_escape_prompt_text(__workflow_stage_label(opts?.task_label)),
       instructions: trim(opts?.task ?? ""),

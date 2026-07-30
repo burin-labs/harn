@@ -16,7 +16,8 @@ pipeline default(harness: Harness) {
   // Inline-reasoning emitter: reasoning stripped from text/visible_text
   // and surfaced on the thinking channel.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "<think>secret reasoning</think>The answer is 4",
         provider: "ollama",
@@ -33,7 +34,8 @@ pipeline default(harness: Harness) {
   // Non-inline route: the literal `<think>` block is preserved on the text
   // channel, and nothing is added to the thinking channel.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         text: "<think>secret reasoning</think>The answer is 4",
         provider: "anthropic",

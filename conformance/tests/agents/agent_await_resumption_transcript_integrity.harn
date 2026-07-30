@@ -1,4 +1,3 @@
-import "std/agent/workers"
 // Transcript integrity across a model-initiated suspension: when the model
 // calls agent_await_resumption(harness.agent, with a parallel sibling call in the same
 // turn), the persisted assistant tool_use turn must be closed out with
@@ -6,11 +5,13 @@ import "std/agent/workers"
 // the transcript, and Anthropic rejects any assistant tool_use with no
 // adjacent tool_result (HTTP 400 on the first post-resume LLM call).
 import { agent_session_messages } from "std/agent/state"
+import "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}},
@@ -22,7 +23,9 @@ pipeline main(harness: Harness) {
     ],
     { ->
       const session_id = "await-integrity-" + harness.random.uuid()
-      const handle = sub_agent_run(harness, "Park until a reviewer responds.",
+      const handle = sub_agent_run(
+        harness,
+        "Park until a reviewer responds.",
         {
           provider: "mock",
           background: true,
@@ -33,7 +36,7 @@ pipeline main(harness: Harness) {
       )
       const suspended = wait_agent(harness.agent, handle)
       harness.stdio.println(suspended?.status)
-      const messages = agent_session_messages(harness, session_id)
+      const messages = agent_session_messages(harness.agent, session_id)
       let park_result = nil
       let side_result = nil
       let pending_ids = []
@@ -62,7 +65,9 @@ pipeline main(harness: Harness) {
       )
       harness.stdio.println(contains(to_string(park_result?.content ?? ""), "waiting on review"))
       harness.stdio.println(side_result != nil)
-      harness.stdio.println(contains(to_string(side_result?.content ?? ""), "was not dispatched: skipped"))
+      harness.stdio.println(
+        contains(to_string(side_result?.content ?? ""), "was not dispatched: skipped"),
+      )
       let orphaned = 0
       for id in pending_ids {
         if !contains(closed_ids, id) {

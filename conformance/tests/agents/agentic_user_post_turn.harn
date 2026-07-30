@@ -21,7 +21,7 @@ pipeline main(harness: Harness) {
         },
       )
       const calls = harness.llm.mock_calls()
-      const status = simulated_user_status(harness, answerer)
+      const status = simulated_user_status(harness.runtime, answerer)
       harness.stdio.println(result.status)
       harness.stdio.println(result.stop_reason)
       harness.stdio.println(result.llm.iterations)

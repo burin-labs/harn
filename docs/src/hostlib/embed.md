@@ -1,19 +1,19 @@
-# Text similarity / embeddings (hostlib)
+# Text similarity / embeddings
 
 The `embed` capability is a cross-platform, fully-offline core for
 cosine/semantic similarity. It is the single source of truth two consumers
 share: Burin's push-context Tier-2 (auto-injecting skills/canon/memory/
 few-shot above a similarity threshold) and Burin's `SymbolRelevance` symbol
 ranking (today split between macOS-only `NLEmbedding` and a Linux Jaccard
-fallback). It is registered automatically by
-`harn_hostlib::install_default` and exposes four builtins:
+fallback). The host adapter registers one implementation, exposed only through
+the nominal `HarnessEmbed` interface:
 
-| Builtin                       | Returns                                          |
+| Method                        | Returns                                          |
 |-------------------------------|--------------------------------------------------|
-| `hostlib_embed_similarity`    | `{similarity, relatedness}`                      |
-| `hostlib_embed_top_k`         | `{results: [{index, text, score, relatedness}]}` |
-| `hostlib_embed_vector`        | `{dim, vector}`                                  |
-| `hostlib_embed_info`          | `{backend, dim}`                                 |
+| `harness.embed.similarity`    | `{similarity, relatedness}`                      |
+| `harness.embed.top_k`         | `{results: [{index, text, score, relatedness}]}` |
+| `harness.embed.vector`        | `{dim, vector}`                                  |
+| `harness.embed.info`          | `{backend, dim}`                                 |
 
 `similarity` is the raw cosine in `[-1, 1]`; `relatedness` is the same value
 clamped to `[0, 1]` so each consumer picks the shape it wants without

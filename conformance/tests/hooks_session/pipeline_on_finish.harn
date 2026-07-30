@@ -11,7 +11,7 @@ pipeline default(harness: Harness) {
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "pre_finish",
-    { event ->
+    { _hook_harness, event ->
       harness.stdio.println(
         "pre_finish: has_on_finish=" + to_string(event.has_on_finish) + " return_value="
           + to_string(
@@ -23,14 +23,14 @@ pipeline default(harness: Harness) {
   )
   harness.agent.register_session_hook(
     "post_finish",
-    { event ->
+    { _hook_harness, event ->
       harness.stdio.println("post_finish: return_value=" + to_string(event.return_value))
       return nil
     },
   )
   harness.agent.register_session_hook(
     "on_unsettled_detected",
-    { event ->
+    { _hook_harness, event ->
       harness.stdio.println("on_unsettled_detected fired (unexpected for P-01)")
       return nil
     },

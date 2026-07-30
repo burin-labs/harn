@@ -18,8 +18,8 @@ pipeline main(harness: Harness) {
   const after_inject = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   // Advance two turns. Session-scoped reminders survive within the same
   // session as long as their TTL has not lapsed.
-  agent_session_apply_reminder_post_turn(harness, session, 1)
-  agent_session_apply_reminder_post_turn(harness, session, 2)
+  agent_session_apply_reminder_post_turn(harness.agent, session, 1)
+  agent_session_apply_reminder_post_turn(harness.agent, session, 2)
   const after_turns = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   harness.stdio.println(len(after_inject))
   harness.stdio.println(after_inject[0].reminder.propagate)

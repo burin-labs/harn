@@ -41,23 +41,43 @@ fn calculator_tools() {
 pipeline main(harness: Harness) {
   const tools = calculator_tools()
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "<tool_call>\nadd({ left: 2, right: 3 })\n</tool_call>"},
       {text: "", tool_calls: [{id: "native_add", name: "add", arguments: {left: 4, right: 6}}]},
     ],
     { ->
-      const turn = agent_llm_turn(harness, "Calculate 2 + 3", nil, {provider: "mock", tools: tools})
-      const parsed = agent_parse_tool_calls(turn.raw_text, tools)
-      const dispatched = agent_dispatch_tool_call(harness, parsed.tool_calls[0], tools)
-      const batch = agent_dispatch_tool_batch(harness, parsed.tool_calls, tools)
+      const turn = agent_llm_turn(
+        harness.llm,
+        "Calculate 2 + 3",
+        nil,
+        {provider: "mock", tools: tools},
+      )
+      const parsed = agent_parse_tool_calls(harness.agent, turn.raw_text, tools)
+      const dispatched = agent_dispatch_tool_call(harness.tools, parsed.tool_calls[0], tools)
+      const batch = agent_dispatch_tool_batch(harness.tools, parsed.tool_calls, tools)
       const malformed_text = agent_parse_tool_calls(
+        harness.agent,
         "<tool_call>\nadd({ left: })\n</tool_call>",
         tools,
       )
-      const schema_error = agent_dispatch_tool_call(harness, {name: "add", arguments: {left: 2}}, tools)
-      const handler_error = agent_dispatch_tool_call(harness, {name: "explode", arguments: {}}, tools)
-      const native_turn = agent_llm_turn(harness, "Calculate 4 + 6", nil, {provider: "mock", tools: tools})
-      const native_batch = agent_dispatch_tool_batch(harness, native_turn.tool_calls, tools)
+      const schema_error = agent_dispatch_tool_call(
+        harness.tools,
+        {name: "add", arguments: {left: 2}},
+        tools,
+      )
+      const handler_error = agent_dispatch_tool_call(
+        harness.tools,
+        {name: "explode", arguments: {}},
+        tools,
+      )
+      const native_turn = agent_llm_turn(
+        harness.llm,
+        "Calculate 4 + 6",
+        nil,
+        {provider: "mock", tools: tools},
+      )
+      const native_batch = agent_dispatch_tool_batch(harness.tools, native_turn.tool_calls, tools)
       harness.stdio.println(parsed.tool_calls[0].name)
       harness.stdio.println(dispatched.ok)
       harness.stdio.println(dispatched.rendered_result)

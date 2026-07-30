@@ -1,7 +1,7 @@
 import { with_temp_dir } from "std/testing"
 import "../check_burin_protocol_bindings.harn"
 
-fn mkdirs(harness: Harness, path: string) -> nil {
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
   let current = if path.starts_with("/") {
     "/"
@@ -17,29 +17,29 @@ fn mkdirs(harness: Harness, path: string) -> nil {
     } else {
       path_join(current, part)
     }
-    if !harness.fs.exists(current) {
-      harness.fs.mkdir(current)
+    if !fs.exists(current) {
+      fs.mkdir(current)
     }
   }
   return nil
 }
 
-fn write_text(harness: Harness, root: string, rel: string, text: string) -> nil {
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(harness, dirname(path) ?? root)
-  harness.fs.write_text(path, text)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
   return nil
 }
 
-fn write_sources(harness: Harness, root: string, swift: string, ts: string) -> nil {
-  write_text(harness, root, "spec/protocol-artifacts/HarnProtocol.swift", swift)
-  write_text(harness, root, "spec/protocol-artifacts/harn-protocol.ts", ts)
+fn write_sources(fs: HarnessFs, root: string, swift: string, ts: string) -> nil {
+  write_text(fs, root, "spec/protocol-artifacts/HarnProtocol.swift", swift)
+  write_text(fs, root, "spec/protocol-artifacts/harn-protocol.ts", ts)
   return nil
 }
 
-fn write_burin(harness: Harness, root: string, swift: string, ts: string) -> nil {
-  write_text(harness, root, "Sources/BurinCore/ACP/HarnProtocol.generated.swift", swift)
-  write_text(harness, root, "server/src/generated/harn-protocol.ts", ts)
+fn write_burin(fs: HarnessFs, root: string, swift: string, ts: string) -> nil {
+  write_text(fs, root, "Sources/BurinCore/ACP/HarnProtocol.generated.swift", swift)
+  write_text(fs, root, "server/src/generated/harn-protocol.ts", ts)
   return nil
 }
 
@@ -50,12 +50,20 @@ pipeline test_normalize_protocol_text_line_endings(harness: Harness, task) {
 
 @test
 pipeline test_matching_bindings_pass_with_line_ending_normalization(harness: Harness, task) {
-  with_temp_dir(harness, { root ->
+  with_temp_dir(
+    harness.fs,
+    { root ->
       const harn_root = path_join(root, "harn")
       const burin_root = path_join(root, "burin-code")
-      write_sources(harness, harn_root, "swift\n", "type Foo = string\n")
-      write_burin(harness, burin_root, "swift\r\n", "type Foo = string\r\n")
-      const report = check_burin_protocol_bindings(harness, burin_root, true, harn_root)
+      write_sources(harness.fs, harn_root, "swift\n", "type Foo = string\n")
+      write_burin(harness.fs, burin_root, "swift\r\n", "type Foo = string\r\n")
+      const report = check_burin_protocol_bindings(
+        harness.env,
+        harness.fs,
+        burin_root,
+        true,
+        harn_root,
+      )
       assert_eq(report.ok, true)
       assert_eq(report.status, "ok")
       assert_eq(report.stale_count, 0)
@@ -66,13 +74,26 @@ pipeline test_matching_bindings_pass_with_line_ending_normalization(harness: Har
 
 @test
 pipeline test_stale_and_missing_bindings_are_reported_in_target_order(harness: Harness, task) {
-  with_temp_dir(harness, { root ->
+  with_temp_dir(
+    harness.fs,
+    { root ->
       const harn_root = path_join(root, "harn")
       const burin_root = path_join(root, "burin-code")
-      write_sources(harness, harn_root, "swift source\n", "ts source\n")
-      write_text(harness, burin_root, "Sources/BurinCore/ACP/HarnProtocol.generated.swift", "swift stale\n")
-      mkdirs(harness, path_join(burin_root, "server/src/generated"))
-      const report = check_burin_protocol_bindings(harness, burin_root, true, harn_root)
+      write_sources(harness.fs, harn_root, "swift source\n", "ts source\n")
+      write_text(
+        harness.fs,
+        burin_root,
+        "Sources/BurinCore/ACP/HarnProtocol.generated.swift",
+        "swift stale\n",
+      )
+      mkdirs(harness.fs, path_join(burin_root, "server/src/generated"))
+      const report = check_burin_protocol_bindings(
+        harness.env,
+        harness.fs,
+        burin_root,
+        true,
+        harn_root,
+      )
       assert_eq(report.ok, false)
       assert_eq(report.status, "stale")
       assert_eq(report.stale_count, 2)
@@ -84,13 +105,15 @@ pipeline test_stale_and_missing_bindings_are_reported_in_target_order(harness: H
 
 @test
 pipeline test_missing_root_respects_required_flag(harness: Harness, task) {
-  with_temp_dir(harness, { root ->
+  with_temp_dir(
+    harness.fs,
+    { root ->
       const missing = path_join(root, "missing-burin")
-      const optional = check_burin_protocol_bindings(harness, missing, false, root)
+      const optional = check_burin_protocol_bindings(harness.env, harness.fs, missing, false, root)
       assert_eq(optional.ok, true)
       assert_eq(optional.skipped, true)
       assert_eq(optional.status, "missing_root")
-      const required = check_burin_protocol_bindings(harness, missing, true, root)
+      const required = check_burin_protocol_bindings(harness.env, harness.fs, missing, true, root)
       assert_eq(required.ok, false)
       assert_eq(required.skipped, false)
       assert_eq(required.status, "missing_root")

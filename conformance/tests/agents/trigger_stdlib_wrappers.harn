@@ -1,14 +1,14 @@
 import "std/triggers"
 
-fn ok_handler(event: TriggerEvent) -> dict {
+fn ok_handler(harness: Harness, event: TriggerEvent) -> dict {
   return {binding: "ok-trigger", kind: event.kind, provider: event.provider}
 }
 
-fn ok_when(event: TriggerEvent) -> bool {
+fn ok_when(_harness: Harness, event: TriggerEvent) -> bool {
   return event.kind == "issue.opened"
 }
 
-fn fail_handler(event: TriggerEvent) -> any {
+fn fail_handler(harness: Harness, event: TriggerEvent) -> any {
   throw "dlq:" + event.kind
 }
 
@@ -71,7 +71,9 @@ pipeline test(harness: Harness, task) {
     fail_handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-dlq"}},
   )
-  harness.stdio.println(fail_fire.status == "dlq" && contains(fail_fire.error ?? "", "dlq:issue.opened"))
+  harness.stdio.println(
+    fail_fire.status == "dlq" && contains(fail_fire.error ?? "", "dlq:issue.opened"),
+  )
   const dlq_before: list<DlqEntry> = harness.runtime.trigger_inspect_dlq()
   const current_dlq_before = dlq_before.filter({ entry -> entry.binding_id == fail_handle.id })
   harness.stdio.println(
@@ -83,7 +85,9 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(replay.status == "dlq" && replay.replay_of_event_id == fail_fire.event_id)
   const dlq_after: list<DlqEntry> = harness.runtime.trigger_inspect_dlq()
   const current_dlq_after = dlq_after.filter({ entry -> entry.binding_id == fail_handle.id })
-  harness.stdio.println(len(current_dlq_after) == 1 && len(current_dlq_after[0]?.retry_history) == 2)
+  harness.stdio.println(
+    len(current_dlq_after) == 1 && len(current_dlq_after[0]?.retry_history) == 2,
+  )
   harness.stdio.println(current_dlq_after[0]?.retry_history?.[1]?.status == "replay_dlq")
   const bindings_after: list<TriggerBinding> = harness.runtime.trigger_list()
   const live_fail = bindings_after.find({ binding -> binding.id == fail_handle.id })

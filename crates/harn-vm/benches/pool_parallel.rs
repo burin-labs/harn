@@ -51,14 +51,14 @@ import {{ pool_create, pool_wait }} from "std/lifecycle/pool"
 
 {}
 
-pipeline default() {{
-  let pool = pool_create({{name: "pool-parallel-bench", max_concurrent: {max_concurrent}}})
+pipeline default(harness: Harness) {{
+  let pool = pool_create(harness.agent, {{name: "pool-parallel-bench", max_concurrent: {max_concurrent}}})
   let handles = []
   for i in 0 to {TASKS} exclusive {{
     let seed = i
     handles = handles.appending(pool.submit({{ -> crunch(seed) }}))
   }}
-  let results = pool_wait(handles)
+  let results = pool_wait(harness.agent, handles)
   return len(results)
 }}
 "#,

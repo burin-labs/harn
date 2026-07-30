@@ -395,7 +395,7 @@ pub fn reset_egress_policy_for_tests() {
 /// guard is safe to hold across `await` points.
 ///
 /// This governs only the *inputs* to policy installation;
-/// `egress_policy(...)`'s deliberate refuse-to-override behavior is
+/// `harness.net.egress_policy(...)`'s deliberate refuse-to-override behavior is
 /// unchanged.
 #[cfg(test)]
 #[must_use]
@@ -464,7 +464,7 @@ pub(crate) fn install_test_policy(config: &[(&str, VmValue)]) {
     install_policy(policy, "test").expect("test egress policy installs");
 }
 
-/// Scope outbound network to explicit `egress_policy(...)` /
+/// Scope outbound network to explicit `harness.net.egress_policy(...)` /
 /// `HARN_EGRESS_*` configuration. Without a configured policy, URL
 /// checks return [`EgressBlocked`] before opening a socket.
 pub fn require_explicit_egress_policy_for_host() -> ExplicitEgressPolicyGuard {
@@ -491,7 +491,8 @@ impl Drop for ExplicitEgressPolicyGuard {
 /// Mirrors [`require_explicit_egress_policy_for_host`]. While in scope, any
 /// URL whose host is, or resolves to, a private/loopback/link-local/metadata
 /// address is blocked by [`check_url`] unless the caller explicitly opts out
-/// via `egress_policy({block_private:"off"})` / `HARN_EGRESS_BLOCK_PRIVATE=off`.
+/// via `harness.net.egress_policy({block_private:"off"})` /
+/// `HARN_EGRESS_BLOCK_PRIVATE=off`.
 pub fn require_ssrf_guard_for_host() -> SsrfGuardScope {
     REQUIRE_SSRF_GUARD_DEPTH.with(|depth| {
         *depth.borrow_mut() += 1;

@@ -7,8 +7,8 @@ relational state.
 ```harn
 import "std/postgres"
 
-pipeline default() {
-  const db = pg_pool("env:DATABASE_URL", {
+pipeline default(harness: Harness) {
+  const db = harness.postgres.pool("env:DATABASE_URL", {
     max_connections: 5,
     acquire_timeout_ms: 3000,
     ssl_mode: "require",
@@ -21,7 +21,7 @@ pipeline default() {
     ["tenant-123"],
   )
 
-  log(json_stringify(rows))
+  harness.stdio.log(json_stringify(rows))
   pg_close(db)
 }
 ```
@@ -30,8 +30,8 @@ pipeline default() {
 
 | Function | Returns | Notes |
 |---|---|---|
-| `pg_pool(source, options?)` | `PgPool` | Open a pooled Postgres connection. |
-| `pg_connect(source, options?)` | `PgPool` | Open a single-connection pool, useful for session-oriented work. |
+| `harness.postgres.pool(source, options?)` | `PgPool` | Open a pooled Postgres connection. |
+| `harness.postgres.connect(source, options?)` | `PgPool` | Open a single-connection pool, useful for session-oriented work. |
 | `pg_query(handle, sql, params?)` | `list<dict>` | Run a parameterized query and return decoded rows. |
 | `pg_query_one(handle, sql, params?)` | `dict` or `nil` | Return the first row, or `nil` when the query returns no rows. |
 | `pg_execute(handle, sql, params?)` | `PgExecuteResult` | Run a statement that does not need returned rows. Returns `{rows_affected, duration_ms}`. |
@@ -322,9 +322,9 @@ ignored — keep down migrations alongside ups for tooling outside Harn but
 let Harn only apply the ups.
 
 ```harn
-const pool = pg_pool("env:DATABASE_URL", {max_connections: 1})
+const pool = harness.postgres.pool("env:DATABASE_URL", {max_connections: 1})
 const result = pg_migrate(pool, {dir: "./migrations"})
-log("applied " + to_string(len(result.applied)) + " of " + to_string(len(result.available)))
+harness.stdio.log("applied " + to_string(len(result.applied)) + " of " + to_string(len(result.available)))
 ```
 
 The result dict carries `applied`, `skipped`, `available`, `dry_run`,
@@ -345,7 +345,7 @@ Pass `ledger: "sqlx"` to apply an existing SQLx migration history into
 SQLx's own `_sqlx_migrations` table, byte-for-byte compatibly:
 
 ```harn
-const pool = pg_pool("env:DATABASE_URL", {max_connections: 1})
+const pool = harness.postgres.pool("env:DATABASE_URL", {max_connections: 1})
 const result = pg_migrate(pool, {dir: "./migrations", ledger: "sqlx"})
 ```
 
@@ -401,7 +401,7 @@ database is required — this is build-time codegen.
 import { ReceiptsRow } from "./db_types.harn"
 
 const receipt: ReceiptsRow = pg_query_one(pool, "select * from receipts where id = $1", [id])
-log(receipt.kind)   // type-checked against the column set
+harness.stdio.log(receipt.kind)   // type-checked against the column set
 ```
 
 SQL types map to the same Harn types the row decoder produces at
@@ -443,7 +443,7 @@ if (pg_with_advisory_lock(db, 0x4861726E, { tx ->
   // opens an internal txn, takes the lock, runs the body, commits.
   return pg_query_one(tx, "select count(*) as n from receipts", []).n > 0
 })) {
-  log("had receipts")
+  harness.stdio.log("had receipts")
 }
 
 // Non-blocking probe:
@@ -474,7 +474,7 @@ const listener = pg_listen(db, ["receipts.updated", "captain.notice"])
 while (true) {
   const n = pg_listener_recv(listener, 5000)
   if (n == nil) { continue }
-  log(n.channel + " -> " + n.payload)
+  harness.stdio.log(n.channel + " -> " + n.payload)
 }
 pg_listener_close(listener)
 
@@ -509,7 +509,7 @@ const stats = pg_pool_stats(db)
 ```
 
 `circuit_state` is `"disabled"` unless `circuit_breaker` was passed to
-`pg_pool(...)`. When enabled, consecutive failure budgets are tracked
+`harness.postgres.pool(...)`. When enabled, consecutive failure budgets are tracked
 per pool; once `failure_threshold` is reached the circuit opens and
 queries fast-fail with `pg: circuit open` until `reset_after_ms`
 elapses, then a single half-open probe runs.
@@ -535,7 +535,7 @@ string concatenation hits the wire.
 ## Read replicas
 
 ```harn
-const db = pg_pool("env:DATABASE_URL", {
+const db = harness.postgres.pool("env:DATABASE_URL", {
   max_connections: 10,
   replicas: ["env:DATABASE_REPLICA_URL", "env:DATABASE_REPLICA2_URL"],
   read_routing_policy: "round_robin_replica",

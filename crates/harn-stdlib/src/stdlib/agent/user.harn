@@ -28,7 +28,7 @@ fn __sim_user_bool(value, fallback) {
   return fallback
 }
 
-fn __sim_user_truncate(harness: Harness, text, max_chars) {
+fn __sim_user_truncate(agent: HarnessAgent, text, max_chars) {
   const value = __sim_user_string(text)
   if max_chars == nil || max_chars <= 0 || len(value) <= max_chars {
     return value
@@ -36,7 +36,7 @@ fn __sim_user_truncate(harness: Harness, text, max_chars) {
   const retained_chars = max_chars <= 16 ? max_chars : max_chars - 16
   const retained = value.substring(0, retained_chars)
   let _ = agent_report_truncation(
-    harness,
+    agent,
     value,
     retained,
     "simulated user reply exceeded its model-visible budget",
@@ -114,7 +114,7 @@ fn __sim_user_normalize_decision(raw) {
   return __sim_user_reply(message, raw?.reason, raw?.metadata)
 }
 
-fn __sim_user_set(harness: Harness, answerer, key, value) {
+fn __sim_user_set(runtime: HarnessRuntime, answerer, key, value) {
   const state = answerer?.state ?? {}
   const cell = state[key]
   if type_of(cell) == "atomic" {
@@ -123,13 +123,13 @@ fn __sim_user_set(harness: Harness, answerer, key, value) {
     } else {
       value
     }
-    harness.runtime.atomic_set(cell, stored)
-    return __sim_user_state(harness, answerer)
+    runtime.atomic_set(cell, stored)
+    return __sim_user_state(runtime, answerer)
   }
-  return __sim_user_state(harness, answerer) + {[key]: value}
+  return __sim_user_state(runtime, answerer) + {[key]: value}
 }
 
-fn __sim_user_state(harness: Harness, answerer) {
+fn __sim_user_state(runtime: HarnessRuntime, answerer) {
   const state = answerer?.state ?? {}
   if type_of(state) != "dict" {
     return {}
@@ -137,7 +137,7 @@ fn __sim_user_state(harness: Harness, answerer) {
   let out = {}
   for entry in state {
     const value = if type_of(entry.value) == "atomic" {
-      const stored = harness.runtime.atomic_get(entry.value)
+      const stored = runtime.atomic_get(entry.value)
       if entry.key == "stopped" {
         stored != 0
       } else {
@@ -151,52 +151,52 @@ fn __sim_user_state(harness: Harness, answerer) {
   return out
 }
 
-fn __sim_user_atomic_state(harness: Harness, raw) {
+fn __sim_user_atomic_state(runtime: HarnessRuntime, raw) {
   const state = raw ?? {}
   return {
-    index: harness.runtime.atomic(__sim_user_int(state?.index, 0)),
-    replies: harness.runtime.atomic(__sim_user_int(state?.replies, 0)),
-    llm_calls: harness.runtime.atomic(__sim_user_int(state?.llm_calls, 0)),
-    stopped: harness.runtime.atomic(__sim_user_bool(state?.stopped, false) ? 1 : 0),
+    index: runtime.atomic(__sim_user_int(state?.index, 0)),
+    replies: runtime.atomic(__sim_user_int(state?.replies, 0)),
+    llm_calls: runtime.atomic(__sim_user_int(state?.llm_calls, 0)),
+    stopped: runtime.atomic(__sim_user_bool(state?.stopped, false) ? 1 : 0),
   }
 }
 
-fn __sim_user_state_int(harness: Harness, answerer, key, fallback) {
-  return __sim_user_int(__sim_user_state(harness, answerer)[key], fallback)
+fn __sim_user_state_int(runtime: HarnessRuntime, answerer, key, fallback) {
+  return __sim_user_int(__sim_user_state(runtime, answerer)[key], fallback)
 }
 
-fn __sim_user_increment(harness: Harness, answerer, key, amount = 1) {
-  const next = __sim_user_state_int(harness, answerer, key, 0) + amount
-  __sim_user_set(harness, answerer, key, next)
+fn __sim_user_increment(runtime: HarnessRuntime, answerer, key, amount = 1) {
+  const next = __sim_user_state_int(runtime, answerer, key, 0) + amount
+  __sim_user_set(runtime, answerer, key, next)
   return next
 }
 
-fn __sim_user_mark_stopped(harness: Harness, answerer) {
-  __sim_user_set(harness, answerer, "stopped", true)
+fn __sim_user_mark_stopped(runtime: HarnessRuntime, answerer) {
+  __sim_user_set(runtime, answerer, "stopped", true)
 }
 
-fn __sim_user_budget_stop(harness: Harness, answerer, reason) {
-  __sim_user_mark_stopped(harness, answerer)
+fn __sim_user_budget_stop(runtime: HarnessRuntime, answerer, reason) {
+  __sim_user_mark_stopped(runtime, answerer)
   return __sim_user_stop(
     reason,
     {
-      replies: __sim_user_state_int(harness, answerer, "replies", 0),
-      llm_calls: __sim_user_state_int(harness, answerer, "llm_calls", 0),
+      replies: __sim_user_state_int(runtime, answerer, "replies", 0),
+      llm_calls: __sim_user_state_int(runtime, answerer, "llm_calls", 0),
     },
   )
 }
 
-fn __sim_user_preflight(harness: Harness, answerer) {
-  const state = __sim_user_state(harness, answerer)
+fn __sim_user_preflight(runtime: HarnessRuntime, answerer) {
+  const state = __sim_user_state(runtime, answerer)
   if state?.stopped ?? false {
     if answerer?.max_replies != nil
-      && __sim_user_state_int(harness, answerer, "replies", 0)
+      && __sim_user_state_int(runtime, answerer, "replies", 0)
       >= answerer
       .max_replies {
       return __sim_user_stop("max_replies")
     }
     if answerer?.max_llm_calls != nil
-      && __sim_user_state_int(harness, answerer, "llm_calls", 0)
+      && __sim_user_state_int(runtime, answerer, "llm_calls", 0)
       >= answerer
       .max_llm_calls {
       return __sim_user_stop("max_llm_calls")
@@ -204,26 +204,30 @@ fn __sim_user_preflight(harness: Harness, answerer) {
     return __sim_user_stop("stopped")
   }
   const max_replies = answerer?.max_replies
-  if max_replies != nil && __sim_user_state_int(harness, answerer, "replies", 0) >= max_replies {
-    return __sim_user_budget_stop(harness, answerer, "max_replies")
+  if max_replies != nil
+    && __sim_user_state_int(runtime, answerer, "replies", 0)
+    >= max_replies {
+    return __sim_user_budget_stop(runtime, answerer, "max_replies")
   }
   const max_llm_calls = answerer?.max_llm_calls
-  if max_llm_calls != nil && __sim_user_state_int(harness, answerer, "llm_calls", 0) >= max_llm_calls {
-    return __sim_user_budget_stop(harness, answerer, "max_llm_calls")
+  if max_llm_calls != nil
+    && __sim_user_state_int(runtime, answerer, "llm_calls", 0)
+    >= max_llm_calls {
+    return __sim_user_budget_stop(runtime, answerer, "max_llm_calls")
   }
   return nil
 }
 
-fn __sim_user_record_decision(harness: Harness, answerer, decision) {
+fn __sim_user_record_decision(runtime: HarnessRuntime, answerer, decision) {
   if decision.action == "reply" {
-    __sim_user_increment(harness, answerer, "replies")
+    __sim_user_increment(runtime, answerer, "replies")
   } else {
-    __sim_user_mark_stopped(harness, answerer)
+    __sim_user_mark_stopped(runtime, answerer)
   }
   return decision
 }
 
-fn __sim_user_event_payload(harness: Harness, answerer, payload, decision) {
+fn __sim_user_event_payload(runtime: HarnessRuntime, answerer, payload, decision) {
   return {
     id: answerer?.id,
     kind: answerer?.kind,
@@ -231,19 +235,31 @@ fn __sim_user_event_payload(harness: Harness, answerer, payload, decision) {
     reason: decision?.reason,
     question: __sim_user_extract_question(payload),
     message_chars: len(decision?.message ?? ""),
-    replies: __sim_user_state_int(harness, answerer, "replies", 0),
-    llm_calls: __sim_user_state_int(harness, answerer, "llm_calls", 0),
+    replies: __sim_user_state_int(runtime, answerer, "replies", 0),
+    llm_calls: __sim_user_state_int(runtime, answerer, "llm_calls", 0),
   }
 }
 
-fn __sim_user_emit(harness: Harness, answerer, event_type, payload, decision) {
-  const session_id = harness.agent.current_id()
+fn __sim_user_emit(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  answerer,
+  event_type,
+  payload,
+  decision,
+) {
+  const session_id = agent.current_id()
   if session_id == nil {
     return nil
   }
-  const audit = __sim_user_event_payload(harness, answerer, payload, decision) + {event_type: event_type}
+  const audit = __sim_user_event_payload(runtime, answerer, payload, decision)
+    + {
+    event_type: event_type,
+  }
   const result = try {
-    agent_emit_event(harness, session_id,
+    agent_emit_event(
+      agent,
+      session_id,
       "tool_call_audit",
       {
         tool_call_id: payload?.tool_call_id ?? payload?.call_id ?? "simulated_user",
@@ -258,14 +274,20 @@ fn __sim_user_emit(harness: Harness, answerer, event_type, payload, decision) {
   return unwrap(result)
 }
 
-fn __sim_user_emit_decision(harness: Harness, answerer, payload, decision) {
+fn __sim_user_emit_decision(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  answerer,
+  payload,
+  decision,
+) {
   if decision.action == "reply" {
-    return __sim_user_emit(harness, answerer, "simulated_user_reply", payload, decision)
+    return __sim_user_emit(agent, runtime, answerer, "simulated_user_reply", payload, decision)
   }
   if decision.action == "stop" {
-    return __sim_user_emit(harness, answerer, "simulated_user_stop", payload, decision)
+    return __sim_user_emit(agent, runtime, answerer, "simulated_user_stop", payload, decision)
   }
-  return __sim_user_emit(harness, answerer, "simulated_user_failed", payload, decision)
+  return __sim_user_emit(agent, runtime, answerer, "simulated_user_failed", payload, decision)
 }
 
 fn __sim_user_extract_question(payload) {
@@ -375,14 +397,14 @@ fn __scripted_exhausted(answerer) {
   return __sim_user_stop("script_exhausted")
 }
 
-fn __scripted_user_respond(harness: Harness, answerer, payload = nil) {
-  const preflight = __sim_user_preflight(harness, answerer)
+fn __scripted_user_respond(agent: HarnessAgent, runtime: HarnessRuntime, answerer, payload = nil) {
+  const preflight = __sim_user_preflight(runtime, answerer)
   if preflight != nil {
-    __sim_user_emit(harness, answerer, "simulated_user_budget_exhausted", payload, preflight)
+    __sim_user_emit(agent, runtime, answerer, "simulated_user_budget_exhausted", payload, preflight)
     return preflight
   }
   const script = answerer?.script ?? []
-  let index = __sim_user_state_int(harness, answerer, "index", 0)
+  let index = __sim_user_state_int(runtime, answerer, "index", 0)
   while index < len(script) {
     const entry = script[index]
     const matcher = if type_of(entry) == "dict" {
@@ -397,17 +419,21 @@ fn __scripted_user_respond(harness: Harness, answerer, payload = nil) {
     }
     if __sim_user_matches(payload, matcher) {
       if consume {
-        __sim_user_set(harness, answerer, "index", index + 1)
+        __sim_user_set(runtime, answerer, "index", index + 1)
       }
-      const decision = __sim_user_record_decision(harness, answerer, __scripted_entry_decision(entry))
-      __sim_user_emit_decision(harness, answerer, payload, decision)
+      const decision = __sim_user_record_decision(
+        runtime,
+        answerer,
+        __scripted_entry_decision(entry),
+      )
+      __sim_user_emit_decision(agent, runtime, answerer, payload, decision)
       return decision
     }
     index = index + 1
   }
-  __sim_user_set(harness, answerer, "index", index)
-  const exhausted = __sim_user_record_decision(harness, answerer, __scripted_exhausted(answerer))
-  __sim_user_emit_decision(harness, answerer, payload, exhausted)
+  __sim_user_set(runtime, answerer, "index", index)
+  const exhausted = __sim_user_record_decision(runtime, answerer, __scripted_exhausted(answerer))
+  __sim_user_emit_decision(agent, runtime, answerer, payload, exhausted)
   return exhausted
 }
 
@@ -448,12 +474,12 @@ fn __agentic_user_parse(raw) {
   return __sim_user_normalize_decision(raw)
 }
 
-fn __sim_user_session_tail(harness: Harness, session_id, max_chars) {
+fn __sim_user_session_tail(agent: HarnessAgent, session_id, max_chars) {
   if session_id == nil || session_id == "" || max_chars == 0 {
     return ""
   }
   const messages = try {
-    agent_session_messages(harness, session_id)
+    agent_session_messages(agent, session_id)
   }
   if is_err(messages) {
     return ""
@@ -464,14 +490,15 @@ fn __sim_user_session_tail(harness: Harness, session_id, max_chars) {
     const content = message?.content ?? message?.text ?? json_stringify(message)
     out = out + "\n[" + role + "] " + __sim_user_string(content)
   }
-  return __sim_user_truncate(harness, out, max_chars)
+  return __sim_user_truncate(agent, out, max_chars)
 }
 
-fn __agentic_user_bindings(harness: Harness, answerer, payload) {
+fn __agentic_user_bindings(agent: HarnessAgent, runtime: HarnessRuntime, answerer, payload) {
   const question = __sim_user_extract_question(payload)
   const context = __sim_user_payload_context(payload)
-  const transcript = __sim_user_session_tail(harness,
-    payload?.session_id ?? harness.agent.current_id(),
+  const transcript = __sim_user_session_tail(
+    agent,
+    payload?.session_id ?? agent.current_id(),
     answerer?.transcript_max_chars ?? 4000,
   )
   return {
@@ -480,19 +507,25 @@ fn __agentic_user_bindings(harness: Harness, answerer, payload) {
     question: question,
     context: context,
     transcript: transcript,
-    reply_count: __sim_user_state_int(harness, answerer, "replies", 0),
+    reply_count: __sim_user_state_int(runtime, answerer, "replies", 0),
     max_replies: answerer?.max_replies ?? "",
   }
 }
 
 fn __agentic_user_prompt(harness: Harness, answerer, payload) {
-  const bindings = __agentic_user_bindings(harness, answerer, payload)
+  const bindings = __agentic_user_bindings(harness.agent, harness.runtime, answerer, payload)
   const system = answerer?.system_prompt
-    ?? render_agent_prompt(harness, "agentic_user_system.harn.prompt",
+    ?? render_agent_prompt(
+    harness.fs,
+    "agentic_user_system.harn.prompt",
     bindings,
   )
   const prompt = answerer?.prompt
-    ?? render_agent_prompt(harness, "agentic_user_user.harn.prompt", bindings)
+    ?? render_agent_prompt(
+    harness.fs,
+    "agentic_user_user.harn.prompt",
+    bindings,
+  )
   return {system: system, prompt: prompt}
 }
 
@@ -505,23 +538,23 @@ fn __agentic_user_llm_option_keys() {
   return __llm_call_option_registry().keys
 }
 
-fn __agentic_user_remaining_llm_calls(harness: Harness, answerer) {
+fn __agentic_user_remaining_llm_calls(runtime: HarnessRuntime, answerer) {
   const max_llm_calls = answerer?.max_llm_calls
   if max_llm_calls == nil {
     return answerer?.max_iterations ?? 4
   }
-  const remaining = max_llm_calls - __sim_user_state_int(harness, answerer, "llm_calls", 0)
+  const remaining = max_llm_calls - __sim_user_state_int(runtime, answerer, "llm_calls", 0)
   return remaining > 0 ? remaining : 0
 }
 
-fn __agentic_user_call_once(harness: Harness, answerer, prompts) {
-  const result = harness.llm.call(prompts.prompt, prompts.system, __agentic_user_base_llm_options(answerer))
-  __sim_user_increment(harness, answerer, "llm_calls")
+fn __agentic_user_call_once(llm: HarnessLlm, runtime: HarnessRuntime, answerer, prompts) {
+  const result = llm.call(prompts.prompt, prompts.system, __agentic_user_base_llm_options(answerer))
+  __sim_user_increment(runtime, answerer, "llm_calls")
   return result.text ?? result?.raw_text ?? json_stringify(result)
 }
 
 fn __agentic_user_call_loop(harness: Harness, answerer, prompts) {
-  const remaining = __agentic_user_remaining_llm_calls(harness, answerer)
+  const remaining = __agentic_user_remaining_llm_calls(harness.runtime, answerer)
   const max_iterations = __sim_user_int(answerer?.max_iterations, 4)
   const iteration_limit = if remaining > 0 && remaining < max_iterations {
     remaining
@@ -539,14 +572,21 @@ fn __agentic_user_call_loop(harness: Harness, answerer, prompts) {
     session_id: answerer?.session_id,
   }
   const result = agent_loop(harness, prompts.prompt, prompts.system, opts)
-  __sim_user_increment(harness, answerer, "llm_calls", result?.llm?.iterations ?? 1)
+  __sim_user_increment(harness.runtime, answerer, "llm_calls", result?.llm?.iterations ?? 1)
   return result?.visible_text ?? result?.text ?? result?.raw_text ?? json_stringify(result)
 }
 
 fn __agentic_user_respond(harness: Harness, answerer, payload = nil) {
-  const preflight = __sim_user_preflight(harness, answerer)
+  const preflight = __sim_user_preflight(harness.runtime, answerer)
   if preflight != nil {
-    __sim_user_emit(harness, answerer, "simulated_user_budget_exhausted", payload, preflight)
+    __sim_user_emit(
+      harness.agent,
+      harness.runtime,
+      answerer,
+      "simulated_user_budget_exhausted",
+      payload,
+      preflight,
+    )
     return preflight
   }
   const prompts = __agentic_user_prompt(harness, answerer, payload)
@@ -554,19 +594,24 @@ fn __agentic_user_respond(harness: Harness, answerer, payload = nil) {
     if answerer?.tools != nil {
       __agentic_user_call_loop(harness, answerer, prompts)
     } else {
-      __agentic_user_call_once(harness, answerer, prompts)
+      __agentic_user_call_once(harness.llm, harness.runtime, answerer, prompts)
     }
   }
   if is_err(call) {
-    const decision = __sim_user_record_decision(harness,
+    const decision = __sim_user_record_decision(
+      harness.runtime,
       answerer,
       __sim_user_fail("llm_call_failed", __sim_user_string(unwrap_err(call))),
     )
-    __sim_user_emit_decision(harness, answerer, payload, decision)
+    __sim_user_emit_decision(harness.agent, harness.runtime, answerer, payload, decision)
     return decision
   }
-  const decision = __sim_user_record_decision(harness, answerer, __agentic_user_parse(unwrap(call)))
-  __sim_user_emit_decision(harness, answerer, payload, decision)
+  const decision = __sim_user_record_decision(
+    harness.runtime,
+    answerer,
+    __agentic_user_parse(unwrap(call)),
+  )
+  __sim_user_emit_decision(harness.agent, harness.runtime, answerer, payload, decision)
   return decision
 }
 
@@ -593,9 +638,16 @@ fn __sim_user_should_answer_post_turn(payload, options) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agentic_user(harness: Harness, task_or_config, behavior = nil, tools = nil, model = nil, options = nil) {
+pub fn agentic_user(
+  harness: Harness,
+  task_or_config,
+  behavior = nil,
+  tools = nil,
+  model = nil,
+  options = nil,
+) {
   const config = __sim_user_config(task_or_config, behavior, tools, model, options)
-  const state = __sim_user_atomic_state(harness, config?.state)
+  const state = __sim_user_atomic_state(harness.runtime, config?.state)
   let answerer = {
     kind: "agentic_user",
     id: config?.id ?? ("agentic-user-" + harness.random.uuid_v7()),
@@ -629,7 +681,7 @@ pub fn agentic_user(harness: Harness, task_or_config, behavior = nil, tools = ni
  */
 pub fn scripted_user(harness: Harness, script, options = nil) {
   const opts = options ?? {}
-  const state = __sim_user_atomic_state(harness, opts?.state)
+  const state = __sim_user_atomic_state(harness.runtime, opts?.state)
   let answerer = {
     kind: "scripted_user",
     id: opts?.id ?? ("scripted-user-" + harness.random.uuid_v7()),
@@ -639,7 +691,9 @@ pub fn scripted_user(harness: Harness, script, options = nil) {
     max_replies: opts?.max_replies ?? 32,
     state: state,
   }
-  answerer["respond"] = { payload -> __scripted_user_respond(harness, answerer, payload) }
+  answerer["respond"] = { payload ->
+    __scripted_user_respond(harness.agent, harness.runtime, answerer, payload)
+  }
   return answerer
 }
 
@@ -685,14 +739,14 @@ pub fn simulated_user_respond(answerer, payload = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn simulated_user_status(harness: Harness, answerer) {
+pub fn simulated_user_status(runtime: HarnessRuntime, answerer) {
   if type_of(answerer) != "dict" {
     return {}
   }
   return {
     id: answerer?.id,
     kind: answerer?.kind,
-    state: __sim_user_state(harness, answerer),
+    state: __sim_user_state(runtime, answerer),
     max_replies: answerer?.max_replies,
     max_llm_calls: answerer?.max_llm_calls,
   }
@@ -790,6 +844,11 @@ pub fn simulated_user_post_turn(answerer, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn simulated_user_read_tools(harness: Harness, registry = nil, options = nil) {
-  return agent_read_tools(harness, registry, options)
+pub fn simulated_user_read_tools(
+  fs: HarnessFs,
+  tools: HarnessTools,
+  registry = nil,
+  options = nil,
+) {
+  return agent_read_tools(fs, tools, registry, options)
 }

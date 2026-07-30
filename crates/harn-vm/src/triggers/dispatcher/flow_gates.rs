@@ -248,7 +248,7 @@ impl Dispatcher {
         replay_of_event_id: Option<&String>,
     ) -> Result<String, DispatchError> {
         let value = self
-            .invoke_vm_callable(
+            .invoke_vm_event_callable(
                 &expr.callable,
                 binding_key,
                 event,

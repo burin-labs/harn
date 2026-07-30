@@ -45,7 +45,10 @@ pipeline test(harness: Harness, task) {
       ],
     },
   )
-  const model = verification_hud_model(harness, {
+  const model = verification_hud_model(
+    harness.clock,
+    harness.runtime,
+    {
       started_ms: 1000,
       last_edit_ms: 61000,
       path: "src/a.tx",
@@ -72,7 +75,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(model.next_check.p95, "0s")
   assert_eq(model.full_check.row_id, "tx/full")
   assert_eq(model.full_check.p95, "9s")
-  const text = verification_hud_text(harness, model)
+  const text = verification_hud_text(harness.clock, harness.runtime, model)
   assert(contains(text, "[verification]"), "HUD text has header")
   assert(contains(text, "last check: R2 -> failed @11s ago - STALE"), "HUD text labels stale red")
   assert(contains(text, "next check: R0 toolchainx parse {file}"), "HUD text names next check")

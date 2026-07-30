@@ -8,7 +8,7 @@ receipt needs the same current-actor-through-origin view that Harn's Rust
 ```harn
 import { actor_chain_format, actor_chain_report } from "std/identity"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const chain = {
     sub: "user:owner",
     scopes: ["repo:read", "repo:write"],

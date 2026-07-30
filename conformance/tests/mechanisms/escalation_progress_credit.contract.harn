@@ -1,4 +1,3 @@
-import { agent_loop } from "std/agent/loop"
 // MECHANISM CONTRACT (onramp tier): escalation/termination PROGRESS CREDIT.
 //
 // This is the FIRST committed example of the mechanism-contract tier (the
@@ -24,6 +23,7 @@ import { agent_loop } from "std/agent/loop"
 // degrade to primary) are deliberately NOT duplicated here — see
 // conformance/tests/agents/agent_loop_escalation_provider_error.harn.
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { contract_effect, contract_negative, count_contract_events } from "./lib/mechanism_contract"
 
 fn shrinking_error_set_case(harness: Harness) {
@@ -56,8 +56,12 @@ fn shrinking_error_set_case(harness: Harness) {
     }
   }
   const session = "contract-shrink-" + harness.random.uuid()
-  const captured = agent_capture_events(harness, session,
-    fn() { return agent_loop(harness, "fix the build",
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "fix the build",
       nil,
       {
         session_id: session,
@@ -74,9 +78,17 @@ fn shrinking_error_set_case(harness: Harness) {
   const breaker_count = count_contract_events(captured.events, "budget_circuit_breaker")
   const stuck_count = count_contract_events(captured.events, "loop_stuck")
   // NEGATIVE: no premature circuit-break / no-progress stop while shrinking.
-  contract_negative(harness, "no_premature_stop_while_shrinking", breaker_count > 0 || stuck_count > 0)
+  contract_negative(
+    harness.stdio,
+    "no_premature_stop_while_shrinking",
+    breaker_count > 0 || stuck_count > 0,
+  )
   // EFFECT: the run reached DONE rather than being cut at budget.
-  contract_effect(harness, "ran_to_completion_not_budget_cut", to_string(captured.result.status) == "done")
+  contract_effect(
+    harness.stdio,
+    "ran_to_completion_not_budget_cut",
+    to_string(captured.result.status) == "done",
+  )
 }
 
 pipeline default(harness: Harness) {

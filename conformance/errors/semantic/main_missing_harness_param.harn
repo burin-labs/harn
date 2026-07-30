@@ -2,6 +2,6 @@
 // supported signature is `main(harness: Harness)`. A zero-arg main
 // fails the typechecker so the runtime never gets to threading a
 // `Harness` it can't bind.
-fn main(harness: Harness) {
-  harness.stdio.print("oops")
+fn main() {
+  return nil
 }

@@ -48,9 +48,12 @@ pipeline test(harness: Harness, task) {
   // Single-turn mock so the loop completes naturally; we're only
   // observing the system prompt + tool schema filtering on that turn.
   with_llm_script(
-    harness.llm, [llm_text("On it.")],
+    harness.llm,
+    [llm_text("On it.")],
     { ->
-      const result = agent_loop(harness, "Ship the new release to production",
+      const result = agent_loop(
+        harness,
+        "Ship the new release to production",
         "You are a staff deploy engineer.",
         {
           provider: "mock",

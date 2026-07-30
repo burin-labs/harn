@@ -15,7 +15,8 @@ fn preset_agent(harness: Harness, kind, prompt, options = nil) {
 pipeline default(harness: Harness) {
   // Default retry: transient failure is retried, second attempt succeeds.
   with_llm_script(
-    harness.llm, [{error: {category: "rate_limit", message: "429 transient"}}, llm_text("Recovered. ##DONE##")],
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 transient"}}, llm_text("Recovered. ##DONE##")],
     { ->
       const ok = preset_agent(harness, "summary", "finish", {provider: "mock", retry: {base_ms: 1}})
       harness.stdio.println(ok.status)
@@ -25,7 +26,8 @@ pipeline default(harness: Harness) {
   )
   // retry: false opts out — the loop stays fail-fast on the transient error.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {error: {category: "rate_limit", message: "429 transient"}},
       llm_text("unreachable without a composed retry handler."),
     ],

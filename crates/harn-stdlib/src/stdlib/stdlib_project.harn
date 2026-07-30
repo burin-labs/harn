@@ -83,22 +83,22 @@ pub fn project_inventory(project: HarnessProject, namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn project_root_package(harness: Harness) -> string {
+pub fn project_root_package(fs: HarnessFs, project: HarnessProject) -> string {
   let root_package = ""
-  const root_enrichment = harness.project.metadata_get({dir: "", namespace: "enrichment"})
+  const root_enrichment = project.metadata_get({dir: "", namespace: "enrichment"})
   if root_enrichment?.rootPackageName {
     root_package = root_enrichment?.rootPackageName
   }
   if !root_package {
-    const src_enrichment = harness.project.metadata_get({dir: "src", namespace: "enrichment"})
+    const src_enrichment = project.metadata_get({dir: "src", namespace: "enrichment"})
     if src_enrichment?.rootPackageName {
       root_package = src_enrichment?.rootPackageName
     }
   }
   if !root_package {
-    const project_root = harness.fs.project_root() ?? ""
+    const project_root = fs.project_root() ?? ""
     if project_root {
-      const scan = project_scan(harness.project, project_root, {tiers: ["ambient", "config"]})
+      const scan = project_scan(project, project_root, {tiers: ["ambient", "config"]})
       if scan?.package_name {
         root_package = scan.package_name
       }
@@ -178,12 +178,7 @@ pub fn project_scan_paths(project: HarnessProject, path = ".", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn project_deep_scan(
-  project: HarnessProject,
-  clock: HarnessClock,
-  path = ".",
-  options = nil,
-) {
+pub fn project_deep_scan(project: HarnessProject, clock: HarnessClock, path = ".", options = nil) {
   const opts = options ?? {}
   const namespace = opts?.namespace ?? "project-enrichment"
   const tiers = __project_deep_scan_tiers(opts)
@@ -236,9 +231,7 @@ pub fn project_deep_scan(
       signature,
       now,
     )
-    project.metadata_set(
-      {dir: entry.dir, namespace: namespace, value: {_deep_scan: record}},
-    )
+    project.metadata_set({dir: entry.dir, namespace: namespace, value: {_deep_scan: record}})
     cache[entry.dir] = {_deep_scan: record}
     tree[entry.path] = __project_deep_scan_select_tiers(record.evidence ?? {}, tiers)
     if tree[entry.path]?.enriched != nil {
@@ -261,9 +254,7 @@ pub fn project_deep_scan(
       signature: signature,
     },
   }
-  project.metadata_set(
-    {dir: scope_dir, namespace: namespace, value: {_deep_scan_status: status}},
-  )
+  project.metadata_set({dir: scope_dir, namespace: namespace, value: {_deep_scan_status: status}})
   project.metadata_save({})
   return tree
 }

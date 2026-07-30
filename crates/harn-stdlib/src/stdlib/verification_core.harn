@@ -147,7 +147,7 @@ pub fn __verification_result_text(result, source: string) -> string {
   return ""
 }
 
-pub fn __verification_failure_signature(harness: Harness, result, opts) {
+pub fn __verification_failure_signature(agent: HarnessAgent, result, opts) {
   if opts?.failure_signature != nil {
     const explicit = to_string(opts.failure_signature)
     return trim(explicit) == "" ? nil : explicit
@@ -163,7 +163,7 @@ pub fn __verification_failure_signature(harness: Harness, result, opts) {
   const text = trim(__verification_result_text(result, source))
   if text != "" {
     return agent_truncate_prompt_text(
-      harness,
+      agent,
       text,
       max_chars,
       "verification failure signature exceeded its model-visible budget",
@@ -707,7 +707,7 @@ pub fn __verification_delta_replacement_text(entry) -> string {
   return " "
 }
 
-pub fn __verification_delta_normalize_text(harness: Harness, text: string, cfg: dict) -> string {
+pub fn __verification_delta_normalize_text(agent: HarnessAgent, text: string, cfg: dict) -> string {
   let out = to_string(text ?? "")
   if cfg?.strip_ansi != false {
     out = regex_replace("\\u{1b}\\[[0-9;]*m", "", out)
@@ -738,7 +738,7 @@ pub fn __verification_delta_normalize_text(harness: Harness, text: string, cfg: 
   const max_chars = to_int(cfg?.max_chars) ?? 4000
   if max_chars > 0 {
     out = agent_truncate_prompt_text(
-      harness,
+      agent,
       out,
       max_chars,
       "verification evidence exceeded its model-visible budget",
@@ -747,7 +747,7 @@ pub fn __verification_delta_normalize_text(harness: Harness, text: string, cfg: 
   return out
 }
 
-pub fn __verification_delta_signature(harness: Harness, value, cfg: dict) -> string {
+pub fn __verification_delta_signature(agent: HarnessAgent, value, cfg: dict) -> string {
   let parts: list<string> = []
   if type_of(value) == "dict" {
     if cfg?.include_path == true {
@@ -777,7 +777,7 @@ pub fn __verification_delta_signature(harness: Harness, value, cfg: dict) -> str
   if text != "" {
     parts = parts.appending(text)
   }
-  return __verification_delta_normalize_text(harness, join(parts, " "), cfg)
+  return __verification_delta_normalize_text(agent, join(parts, " "), cfg)
 }
 
 pub fn __verification_delta_ignored(signature: string, cfg: dict) -> bool {
@@ -796,11 +796,11 @@ pub fn __verification_delta_direct_count(value) {
   )
 }
 
-pub fn __verification_delta_info(harness: Harness, value, cfg: dict) -> dict {
+pub fn __verification_delta_info(agent: HarnessAgent, value, cfg: dict) -> dict {
   const entries = __verification_delta_raw_entries(value)
   let normalized: list<string> = []
   for entry in entries {
-    const signature = __verification_delta_signature(harness, entry, cfg)
+    const signature = __verification_delta_signature(agent, entry, cfg)
     if signature != "" && !__verification_delta_ignored(signature, cfg) {
       normalized = normalized.appending(signature)
     }

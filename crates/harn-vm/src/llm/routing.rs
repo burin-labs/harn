@@ -1,7 +1,7 @@
 //! First-class `routing_policy` primitive for `llm_call`.
 //!
 //! `routing_policy({...})` validates a config dict and returns a tagged
-//! handle. Passing it through `llm_call(prompt, system, {routing:
+//! handle. Passing it through `harness.llm.call(prompt, system, {routing:
 //! policy, ...})` runs the chain with failover, latency-aware racing,
 //! and per-call / session budget enforcement. Each decision emits a
 //! structured tape event so transcripts and replay can attribute the
@@ -1178,7 +1178,7 @@ pub(crate) fn extract_routing_policy(
         VmValue::Dict(dict) => dict,
         other => {
             return Err(runtime_error(format!(
-                "llm_call(... routing: ...): expected a routing_policy(...) value, got {}",
+                "harness.llm.call(... routing: ...): expected a routing_policy(...) value, got {}",
                 other.type_name()
             )));
         }
@@ -1187,7 +1187,7 @@ pub(crate) fn extract_routing_policy(
         Some(VmValue::Bool(true)) => {}
         _ => {
             return Err(runtime_error(
-                "llm_call(... routing: ...): pass the result of routing_policy({...}); the routing key does not accept a bare dict".to_string(),
+                "harness.llm.call(... routing: ...): pass the result of routing_policy({...}); the routing key does not accept a bare dict".to_string(),
             ));
         }
     }
@@ -1196,12 +1196,12 @@ pub(crate) fn extract_routing_policy(
         .and_then(|v| v.as_int())
         .ok_or_else(|| {
             runtime_error(
-                "llm_call(... routing: ...): routing policy handle missing — re-create it with routing_policy({...})".to_string(),
+                "harness.llm.call(... routing: ...): routing policy handle missing — re-create it with routing_policy({...})".to_string(),
             )
         })?;
     let policy = lookup_policy(handle as u64).ok_or_else(|| {
         runtime_error(
-            "llm_call(... routing: ...): routing policy handle expired — re-create it with routing_policy({...})".to_string(),
+            "harness.llm.call(... routing: ...): routing policy handle expired — re-create it with routing_policy({...})".to_string(),
         )
     })?;
     Ok(Some(policy))

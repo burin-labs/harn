@@ -16,20 +16,47 @@
 import { probe, sample_registry } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
-  probe(harness, "surrogate pair escape", "run({ command: \"hi \\uD83D\\uDE00 there\" })", sample_registry())
-  probe(harness, "brace form non-bmp escape", "run({ command: \"hi \\u{1F600} there\" })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "surrogate pair escape",
+    "run({ command: \"hi \\uD83D\\uDE00 there\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "brace form non-bmp escape",
+    "run({ command: \"hi \\u{1F600} there\" })",
+    sample_registry(),
+  )
   // A lone high surrogate is genuinely invalid: no silent half-character.
-  probe(harness, "lone high surrogate", "run({ command: \"x \\uD83D y\" })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "lone high surrogate",
+    "run({ command: \"x \\uD83D y\" })",
+    sample_registry(),
+  )
   // Unknown escapes keep their backslash, identically across all three channels.
-  probe(harness, "unknown escape, quoted channel",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown escape, quoted channel",
     "edit({ action: \"create\", path: \"re.py\", content: \"p = '\\d+\\w*'\" })",
     sample_registry(),
   )
-  probe(harness, "unknown escape, template channel",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown escape, template channel",
     "edit({ action: \"create\", path: \"re.py\", content: `p = '\\d+\\w*'` })",
     sample_registry(),
   )
-  probe(harness, "unknown escape, heredoc channel",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown escape, heredoc channel",
     """edit({ action: "create", path: "re.py", content: <<EOF
 p = '\d+\w*'
 EOF
@@ -37,29 +64,68 @@ EOF
     sample_registry(),
   )
   // Known escapes still decode: no over-correction.
-  probe(harness, "known escapes in a quoted string",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "known escapes in a quoted string",
     "run({ command: \"a\\nb\\tc\\\\d\\\"e\" })",
     sample_registry(),
   )
   // Malformed known escapes degrade to the literal rather than dropping the call.
-  probe(harness, "perl hex brace regex", "run({ command: \"m/\\x{1F600}/\" })", sample_registry())
-  probe(harness, "backslash x then non-hex", "run({ command: \"C:\\xtra\\data\" })", sample_registry())
-  probe(harness, "trailing backslash x", "run({ command: \"ends with \\x\" })", sample_registry())
-  probe(harness, "short unicode escape", "run({ command: \"bad \\uAB stop\" })", sample_registry())
-  probe(harness, "unicode escape with a non-hex digit",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "perl hex brace regex",
+    "run({ command: \"m/\\x{1F600}/\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "backslash x then non-hex",
+    "run({ command: \"C:\\xtra\\data\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "trailing backslash x",
+    "run({ command: \"ends with \\x\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "short unicode escape",
+    "run({ command: \"bad \\uAB stop\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unicode escape with a non-hex digit",
     "run({ command: \"bad \\uABCG end\" })",
     sample_registry(),
   )
-  probe(harness, "windows path after backslash u",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "windows path after backslash u",
     "run({ command: \"path C:\\users\\me\" })",
     sample_registry(),
   )
   // The same malformed escape across all three channels.
-  probe(harness, "malformed escape, template channel",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "malformed escape, template channel",
     "run({ command: `m/\\x{1F600}/` })",
     sample_registry(),
   )
-  probe(harness, "malformed escape, heredoc channel",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "malformed escape, heredoc channel",
     """run({ command: <<EOF
 m/\x{1F600}/
 EOF
@@ -67,12 +133,24 @@ EOF
     sample_registry(),
   )
   // Well-formed `\xHH` and a literal multibyte scalar in source still decode.
-  probe(harness, "well formed hex escapes", "run({ command: \"\\x41\\x42\" })", sample_registry())
-  probe(harness, "literal multibyte scalar in source",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "well formed hex escapes",
+    "run({ command: \"\\x41\\x42\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "literal multibyte scalar in source",
     "run({ command: \"snow ☃ done\" })",
     sample_registry(),
   )
-  probe(harness, "brace form non-bmp escape again",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "brace form non-bmp escape again",
     "run({ command: \"emoji \\u{1F600} done\" })",
     sample_registry(),
   )

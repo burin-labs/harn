@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
 fn events_of(events, kind) {
@@ -61,7 +61,8 @@ pipeline default(harness: Harness) {
     allowed_tools ["run"]
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "look-1", name: "look", arguments: {}}]},
       {tool_calls: [{id: "search-1", name: "search", arguments: {}}]},
       {tool_calls: [{id: "look-2", name: "look", arguments: {}}]},
@@ -71,8 +72,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "tool-surface-narrowing-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Narrow unused tools.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Narrow unused tools.",
           nil,
           {
             provider: "mock",
@@ -114,7 +119,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "rewiden-look-1", name: "look", arguments: {}}]},
       {tool_calls: [{id: "rewiden-search-1", name: "search", arguments: {}}]},
       {tool_calls: [{id: "rewiden-look-2", name: "look", arguments: {}}]},
@@ -125,7 +131,9 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const rewiden_session = "tool-surface-rewiden-" + harness.random.uuid()
-      const rewidened = agent_loop(harness, "Narrow unused tools, then load runner.",
+      const rewidened = agent_loop(
+        harness,
+        "Narrow unused tools, then load runner.",
         nil,
         {
           provider: "mock",

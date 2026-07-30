@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+
 fn noisy_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -11,7 +12,9 @@ fn noisy_tools() {
 }
 
 pipeline default(harness: Harness) {
-  const result = agent_loop(harness, "Keep observing until the iteration budget is exhausted.",
+  const result = agent_loop(
+    harness,
+    "Keep observing until the iteration budget is exhausted.",
     "You are a compacting test agent.",
     {
       provider: "mock",

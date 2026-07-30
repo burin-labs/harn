@@ -42,7 +42,7 @@ fn ready_adapters(command_runner = nil) {
 
 @test
 pipeline test_success_runs_every_capability_and_cancels_watch(harness: Harness, task) {
-  const report = run_release_smoke(config(), ready_adapters())
+  const report = run_release_smoke(harness.tools, harness.clock, config(), ready_adapters())
   assert_eq(report.success, true)
   assert_eq(report.steps.count, 12)
   assert_eq(report.failed.count, 0)
@@ -50,7 +50,10 @@ pipeline test_success_runs_every_capability_and_cancels_watch(harness: Harness, 
 }
 
 @test
-pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(harness: Harness, task) {
+pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(
+  harness: Harness,
+  task,
+) {
   let calls = 0
   const adapters = ready_adapters(
     { _spec, _options ->
@@ -61,7 +64,7 @@ pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(harn
       return command_result_ok("ok")
     },
   )
-  const report = run_release_smoke(config(), adapters)
+  const report = run_release_smoke(harness.tools, harness.clock, config(), adapters)
   assert_eq(calls, 11)
   assert_eq(report.failed.count, 1)
   assert_eq(report.failed[0].name, "harn check tests/smoke/hello.harn")
@@ -80,7 +83,7 @@ pipeline test_multiple_failures_are_aggregated_in_source_order(harness: Harness,
       return command_result_ok("ok")
     },
   )
-  const report = run_release_smoke(config(), adapters)
+  const report = run_release_smoke(harness.tools, harness.clock, config(), adapters)
   assert_eq(report.failed.count, 2)
   assert_eq(report.failed[0].name, "harn --help")
   assert_eq(report.failed[1].name, "harn check --provider-matrix")
@@ -101,7 +104,7 @@ pipeline test_timeout_is_preserved_without_wall_clock_waiting(harness: Harness, 
       }
     },
   )
-  const report = run_release_smoke(config(), adapters)
+  const report = run_release_smoke(harness.tools, harness.clock, config(), adapters)
   assert_eq(report.failed.count, 11)
   assert_eq(report.failed[0].status, "timed_out")
   assert_eq(report.failed[0].timed_out, true)
@@ -118,7 +121,7 @@ pipeline test_watch_deadline_without_readiness_fails_after_cancellation(harness:
       {cancelled: true, result: command_result_fail(1, "stopped", {status: "cancelled"})}
     },
   }
-  const report = run_release_smoke(config(), adapters)
+  const report = run_release_smoke(harness.tools, harness.clock, config(), adapters)
   assert_eq(report.failed.count, 1)
   assert_eq(report.failed[0].name, "harn watch boot")
   assert_eq(report.failed[0].timed_out, true)
@@ -131,12 +134,12 @@ pipeline test_watch_early_exit_and_cleanup_failure_are_distinct_failures(harness
     wait: { _started, _options -> command_result_fail(9, "watch crashed") },
     cancel: { _started, _options -> {cancelled: false} },
   }
-  const early_report = run_release_smoke(config(), early_exit)
+  const early_report = run_release_smoke(harness.tools, harness.clock, config(), early_exit)
   assert_eq(early_report.failed[0].timed_out, false)
   assert_eq(contains(early_report.failed[0].stderr, "before reporting readiness"), true)
   const cleanup_failure = ready_adapters()
     + {cancel: { _started, _options -> {cancelled: false} }}
-  const cleanup_report = run_release_smoke(config(), cleanup_failure)
+  const cleanup_report = run_release_smoke(harness.tools, harness.clock, config(), cleanup_failure)
   assert_eq(cleanup_report.failed.count, 1)
   assert_eq(contains(cleanup_report.failed[0].stderr, "did not cancel cleanly"), true)
 }

@@ -66,13 +66,16 @@ pipeline default(harness: Harness) {
   //    parser does NOT lift from inside a fence, so the turn is genuinely
   //    toolless and the fenced nudge fires.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Here is the change:\n```tool_code\nedit(path=\"a.txt\")\n```"),
       llm_text("<tool_call>\nedit({ path: \"a.txt\" })\n</tool_call>"),
       llm_text("All set."),
     ],
     { ->
-      const r = agent_loop(harness, "Edit a.txt.",
+      const r = agent_loop(
+        harness,
+        "Edit a.txt.",
         nil,
         {
           provider: "mock",
@@ -85,7 +88,9 @@ pipeline default(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       harness.stdio.println("fenced.status=" + r.status)
-      harness.stdio.println("fenced.nudge=" + to_string(injected_kind_in(calls, 1, "fenced_call_attempt")))
+      harness.stdio.println(
+        "fenced.nudge=" + to_string(injected_kind_in(calls, 1, "fenced_call_attempt")),
+      )
       harness.stdio.println(
         "fenced.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
       )
@@ -93,13 +98,16 @@ pipeline default(harness: Harness) {
   )
   // 2. Missing tool call → missing_tool_call nudge on the next turn.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Voy a edittar el archivo ahora, un momento."),
       llm_text("<tool_call>\nedit({ path: \"b.txt\" })\n</tool_call>"),
       llm_text("Done."),
     ],
     { ->
-      const r = agent_loop(harness, "Edit b.txt.",
+      const r = agent_loop(
+        harness,
+        "Edit b.txt.",
         nil,
         {
           provider: "mock",
@@ -113,7 +121,9 @@ pipeline default(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       harness.stdio.println("missing.status=" + r.status)
-      harness.stdio.println("missing.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
+      harness.stdio.println(
+        "missing.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")),
+      )
       harness.stdio.println(
         "missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
       )
@@ -122,13 +132,16 @@ pipeline default(harness: Harness) {
   // 2b. Another typoed/non-English phrase depends on the classifier, not exact
   //     tool-name substrings in the assistant text.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Je vais corriger le fichier maintenant."),
       llm_text("<tool_call>\nedit({ path: \"b2.txt\" })\n</tool_call>"),
       llm_text("Listo."),
     ],
     { ->
-      const r = agent_loop(harness, "Edit b2.txt.",
+      const r = agent_loop(
+        harness,
+        "Edit b2.txt.",
         nil,
         {
           provider: "mock",
@@ -152,9 +165,12 @@ pipeline default(harness: Harness) {
   )
   // 3a. A real bare object-literal call does NOT trip either content nudge.
   with_llm_script(
-    harness.llm, [llm_text("<tool_call>\nedit({ path: \"c.txt\" })\n</tool_call>"), llm_text("Done.")],
+    harness.llm,
+    [llm_text("<tool_call>\nedit({ path: \"c.txt\" })\n</tool_call>"), llm_text("Done.")],
     { ->
-      const r = agent_loop(harness, "Edit c.txt.",
+      const r = agent_loop(
+        harness,
+        "Edit c.txt.",
         nil,
         {
           provider: "mock",
@@ -178,13 +194,16 @@ pipeline default(harness: Harness) {
   // 3b. A braceless `name(key=...)` call shape also does NOT false-fire the
   //     missing-tool-call recovery path (it carries real call shape).
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("edit(path=\"d.txt\")"),
       llm_text("<tool_call>\nedit({ path: \"d.txt\" })\n</tool_call>"),
       llm_text("Done."),
     ],
     { ->
-      const r = agent_loop(harness, "Edit d.txt.",
+      const r = agent_loop(
+        harness,
+        "Edit d.txt.",
         nil,
         {
           provider: "mock",
@@ -208,7 +227,8 @@ pipeline default(harness: Harness) {
   //    nudge. The prose avoids intent verbs / fences / bound-tool names so the
   //    content nudges do NOT match and the fallback streak nudge is exercised.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("<tool_call>\nedit({ path: \"e.txt\" })\n</tool_call>"),
       llm_text("The file was updated and the content looks consistent."),
       llm_text("The surrounding context appears coherent on a second pass."),
@@ -216,7 +236,9 @@ pipeline default(harness: Harness) {
       llm_text("Final summary of the result."),
     ],
     { ->
-      const r = agent_loop(harness, "Edit e.txt and review.",
+      const r = agent_loop(
+        harness,
+        "Edit e.txt and review.",
         nil,
         {
           provider: "mock",
@@ -245,7 +267,9 @@ pipeline default(harness: Harness) {
     agent_loop_options(harness, {missing_tool_call_recovery: {classifier: "yes"}})
   }
   harness.stdio.println("invalid_classifier=" + to_string(is_err(invalid_classifier)))
-  harness.stdio.println(contains(to_string(unwrap_err(invalid_classifier)), "missing_tool_call_recovery"))
+  harness.stdio.println(
+    contains(to_string(unwrap_err(invalid_classifier)), "missing_tool_call_recovery"),
+  )
   const invalid_enabled = try {
     agent_loop_options(harness, {missing_tool_call_recovery: {enabled: "yes"}})
   }
@@ -257,9 +281,11 @@ pipeline default(harness: Harness) {
     agent_loop_options(harness, {missing_tool_call_recovery: "yes"})
   }
   harness.stdio.println("invalid_options=" + to_string(is_err(invalid_options)))
-  harness.stdio.println(contains(to_string(unwrap_err(invalid_options)), "missing_tool_call_recovery"))
+  harness.stdio.println(
+    contains(to_string(unwrap_err(invalid_options)), "missing_tool_call_recovery"),
+  )
   const invalid_threshold = try {
-    missing_tool_call_classifier(harness, {confidence_threshold: 2.0})
+    missing_tool_call_classifier(harness.agent, harness.llm, {confidence_threshold: 2.0})
   }
   harness.stdio.println("invalid_threshold=" + to_string(is_err(invalid_threshold)))
   const threshold_error = unwrap_err(invalid_threshold)

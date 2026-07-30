@@ -25,5 +25,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(receipt.evidence.post_green_turns)
   harness.stdio.println(is_type(receipt, schema))
   harness.stdio.println(agent_event_report(receipt, schema).ok)
-  harness.stdio.println(!agent_event_report({schema: receipt.schema, kind: "convergence_guard"}, schema).ok)
+  harness.stdio.println(
+    !agent_event_report({schema: receipt.schema, kind: "convergence_guard"}, schema).ok,
+  )
 }

@@ -4,7 +4,8 @@ import { llm_stream_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_stream_text(["Hello ", "wor", "ld"])],
+    harness.llm,
+    [llm_stream_text(["Hello ", "wor", "ld"])],
     { ->
       const opts: AgentLoopOptions = {
         provider: "mock",

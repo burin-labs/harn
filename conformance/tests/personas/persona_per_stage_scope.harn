@@ -1,4 +1,5 @@
-import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
 /**
  * Per-stage policy scoping (harn#1701):
  * `@persona(stages: [...])` declares per-stage tool allowlists. While the
@@ -36,31 +37,39 @@ fn stage_tools() {
 }
 
 @persona(name: "scoped_persona", stages: [{name: "research", allowed_tools: ["read"]}, {name: "edit_phase", allowed_tools: ["edit"]}])
-fn scoped_persona(harness: Harness, ctx) {
-  const r = research_step(harness, ctx)
-  const e = edit_phase_step(harness, ctx)
+fn scoped_persona(tool_runtime: HarnessTools, ctx) {
+  const r = research_step(tool_runtime, ctx)
+  const e = edit_phase_step(tool_runtime, ctx)
   return {research: r, edit: e}
 }
 
 @step(name: "research")
-fn research_step(harness: Harness, ctx) {
-  const tools = ctx.tools
-  const in_scope = agent_dispatch_tool_call(harness, {name: "read", arguments: {}}, tools)
-  const out_of_scope = agent_dispatch_tool_call(harness, {name: "edit", arguments: {}}, tools)
+fn research_step(tool_runtime: HarnessTools, ctx) {
+  const registry = ctx.tools
+  const in_scope = agent_dispatch_tool_call(tool_runtime, {name: "read", arguments: {}}, registry)
+  const out_of_scope = agent_dispatch_tool_call(
+    tool_runtime,
+    {name: "edit", arguments: {}},
+    registry,
+  )
   return {in_scope: in_scope, out_of_scope: out_of_scope}
 }
 
 @step(name: "edit_phase")
-fn edit_phase_step(harness: Harness, ctx) {
-  const tools = ctx.tools
-  const in_scope = agent_dispatch_tool_call(harness, {name: "edit", arguments: {}}, tools)
-  const out_of_scope = agent_dispatch_tool_call(harness, {name: "read", arguments: {}}, tools)
+fn edit_phase_step(tool_runtime: HarnessTools, ctx) {
+  const registry = ctx.tools
+  const in_scope = agent_dispatch_tool_call(tool_runtime, {name: "edit", arguments: {}}, registry)
+  const out_of_scope = agent_dispatch_tool_call(
+    tool_runtime,
+    {name: "read", arguments: {}},
+    registry,
+  )
   return {in_scope: in_scope, out_of_scope: out_of_scope}
 }
 
 pipeline main(harness: Harness) {
   const tools = stage_tools()
-  const outcome = scoped_persona(harness, {tools: tools})
+  const outcome = scoped_persona(harness.tools, {tools: tools})
   harness.stdio.println(outcome.research.in_scope.ok)
   harness.stdio.println(outcome.research.in_scope.rendered_result)
   harness.stdio.println(outcome.research.out_of_scope.ok)
@@ -71,7 +80,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(outcome.edit.out_of_scope.error_category)
   // After every stage unwinds the per-stage policy is gone, so an ambient
   // dispatch should pass.
-  const ambient = agent_dispatch_tool_call(harness, {name: "edit", arguments: {}}, tools)
+  const ambient = agent_dispatch_tool_call(harness.tools, {name: "edit", arguments: {}}, tools)
   harness.stdio.println(ambient.ok)
   harness.stdio.println(ambient.rendered_result)
 }

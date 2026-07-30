@@ -17,7 +17,7 @@ pipeline main(harness: Harness) {
         purpose: "Add rate limiter",
         prompt: "Wire a token-bucket limiter around the auth middleware",
         tools: ["read", "edit"],
-        effects: ["writes_files"],
+        effects: ["workspace_write"],
         agent_loop: {max_iterations: 6, done_sentinel: "DONE"},
       },
       verify: {kind: "verify", verify: {command: "cargo test -p auth", expect_status: 0}},
@@ -28,7 +28,7 @@ pipeline main(harness: Harness) {
       total_cost_usd: 0.25,
       consecutive_failures: {max: 2, kinds: ["rate_limit"], paused_for_ms: 500},
     },
-    capabilities: {tools: ["read", "edit", "grep"], side_effect_level: "writes_files"},
+    capabilities: {tools: ["read", "edit", "grep"], side_effect_level: "workspace_write"},
     verification: {primary: "verify"},
     promotion_policy: {shadow_runs_required: 3, human_review_required: true},
   }

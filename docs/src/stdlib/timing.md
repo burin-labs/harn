@@ -13,10 +13,10 @@ the current span instead of a new one.
 import { agent_preset } from "std/agent/presets"
 import { timed } from "std/timing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const outcome = timed("benchmark.agent_loop", {case_id: "python-add"}, { ->
     const opts = agent_preset("repair")
-    return agent_loop(task, opts?.system, opts)
+    return agent_loop(harness, task, opts?.system, opts)
   })
   __io_println("duration_ms=${outcome.timing.duration_ms}")
   return outcome.result
@@ -30,7 +30,7 @@ branches, or async-ish lifecycle boundaries:
 ```harn,ignore
 import { start_timing, timing_event, end_timing } from "std/timing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const timing = start_timing("provider.preflight", {provider: "ollama"})
   timing_event(timing, "credentials.checked", {available: true})
   timing_event(timing, "model.warm", {cache: "hit"})
@@ -65,7 +65,7 @@ The dict returned from `timed(...).timing` and `end_timing(...)` looks like:
 ```
 
 `duration_ms` is always derived from the monotonic clock, so it stays
-deterministic under `mock_time(...)` / `advance_time(...)`. Wall-clock fields
+deterministic under `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)`. Wall-clock fields
 (`started_at_ms`, `ended_at_ms`) honor the mock as well, so testbench fixtures
 that pin wall time align with timing output.
 

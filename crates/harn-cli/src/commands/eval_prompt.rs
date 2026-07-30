@@ -635,7 +635,7 @@ fn build_run_script(
     let template_path_lit = json_string_literal(&template_path.to_string_lossy());
     let bindings_load = if let Some(path) = bindings_path {
         let path_lit = json_string_literal(path);
-        format!("    const bindings = json_parse(read_file({path_lit}))\n")
+        format!("    const bindings = json_parse(harness.fs.read_text({path_lit}))\n")
     } else {
         "    const bindings = {}\n".to_string()
     };
@@ -657,24 +657,24 @@ fn build_run_script(
     };
 
     format!(
-        "pipeline main() {{\n\
+        "pipeline main(harness: Harness) {{\n\
 {bindings_load}\
     const fleet = {fleet_list}\n\
     for entry in fleet {{\n\
-        const pushed = __push_llm_render_context(entry.provider, entry.model)\n\
+        const pushed = harness.agent.push_llm_render_context(entry.provider, entry.model)\n\
         const rendered = render({template_path_lit}, bindings)\n\
         try {{\n\
-            const resp = llm_call(rendered, nil, {{\n\
+            const resp = harness.llm.call(rendered, nil, {{\n\
                 provider: entry.provider,\n\
                 model: entry.model,\n\
                 max_tokens: {max_tokens}\n\
             }})\n\
-            __io_println(json_stringify({{selector: entry.selector, response: resp}}))\n\
+            harness.stdio.println(json_stringify({{selector: entry.selector, response: resp}}))\n\
         }} catch (err) {{\n\
-            __io_println(json_stringify({{selector: entry.selector, error: to_string(err)}}))\n\
+            harness.stdio.println(json_stringify({{selector: entry.selector, error: to_string(err)}}))\n\
         }}\n\
         if pushed {{\n\
-            __pop_llm_render_context()\n\
+            harness.agent.pop_llm_render_context()\n\
         }}\n\
     }}\n\
 }}\n",

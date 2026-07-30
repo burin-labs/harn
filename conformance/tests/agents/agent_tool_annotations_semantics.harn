@@ -40,7 +40,9 @@ pipeline default(harness: Harness) {
   )
   const multiple_writers = {tools: tools.tools.appending(entry("second_edit", {kind: "edit"}))}
   harness.stdio.println(agent_tool_resolve_workspace_write_name(multiple_writers, nil, "edit"))
-  harness.stdio.println(agent_tool_resolve_workspace_write_name(multiple_writers, nil, "read") == "")
+  harness.stdio.println(
+    agent_tool_resolve_workspace_write_name(multiple_writers, nil, "read") == "",
+  )
   harness.stdio.println(
     agent_tool_resolve_workspace_write_name(
       {tools: [entry("conflicting", {kind: "edit", side_effect_level: "read_only"})]},

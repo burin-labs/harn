@@ -1,5 +1,5 @@
-import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -62,7 +62,8 @@ fn apply_fix_call(id) {
 
 pipeline default(harness: Harness) {
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       run_test_call("r1", "42:5"),
       apply_fix_call("e1"),
       run_test_call("r2", "99:1"),
@@ -72,8 +73,12 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "repair-thrash-loc-" + harness.random.uuid()
-      const captured = agent_capture_events(harness, session,
-        fn() { return agent_loop(harness, "Make the failing test pass.",
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the failing test pass.",
           nil,
           {
             provider: "mock",

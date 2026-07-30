@@ -1163,7 +1163,7 @@ pub fn command_output_text(result, stream: string = "combined") -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn command_failure_text(harness: Harness, result, options = nil) -> string {
+pub fn command_failure_text(agent: HarnessAgent, result, options = nil) -> string {
   const opts = __command_options(options)
   const max_stdout = opts?.max_stdout_chars ?? 8000
   const max_stderr = opts?.max_stderr_chars ?? 4000
@@ -1174,14 +1174,14 @@ pub fn command_failure_text(harness: Harness, result, options = nil) -> string {
   }
   let lines = [heading]
   if trim(result?.stdout ?? "") != "" {
-    lines = lines + ["stdout:", prompt_cap(harness, result.stdout, max_stdout, "stdout")]
+    lines = lines + ["stdout:", prompt_cap(agent, result.stdout, max_stdout, "stdout")]
   }
   if trim(result?.stderr ?? "") != "" {
-    lines = lines + ["stderr:", prompt_cap(harness, result.stderr, max_stderr, "stderr")]
+    lines = lines + ["stderr:", prompt_cap(agent, result.stderr, max_stderr, "stderr")]
   }
   if len(lines) == 1 && trim(command_output_text(result)) != "" {
     lines = lines
-      + ["output:", prompt_cap(harness, command_output_text(result), max_stdout, "output")]
+      + ["output:", prompt_cap(agent, command_output_text(result), max_stdout, "output")]
   }
   return join(lines, "\n")
 }
@@ -1248,7 +1248,7 @@ fn __command_json_empty_error(label, stream, step) {
   )
 }
 
-fn __command_json_parse_error(harness: Harness, label, stream, text, parsed, step, options) {
+fn __command_json_parse_error(agent: HarnessAgent, label, stream, text, parsed, step, options) {
   const opts = __command_options(options)
   const reason = unwrap_err(parsed).message
   return __command_json_error(
@@ -1259,12 +1259,12 @@ fn __command_json_parse_error(harness: Harness, label, stream, text, parsed, ste
     {
       source: stream,
       reason: reason,
-      text_tail: prompt_cap(harness, text, opts?.parse_error_chars ?? 1000, "parse-error tail"),
+      text_tail: prompt_cap(agent, text, opts?.parse_error_chars ?? 1000, "parse-error tail"),
     },
   )
 }
 
-fn __command_json_annotate_step(harness: Harness, step, spec, options) {
+fn __command_json_annotate_step(agent: HarnessAgent, step, spec, options) {
   const opts = __command_options(options)
   const label = to_string(opts?.label ?? step?.name ?? __command_label(spec))
   if !(step?.success ?? step?.ok ?? false) {
@@ -1286,7 +1286,7 @@ fn __command_json_annotate_step(harness: Harness, step, spec, options) {
   if is_ok(parsed) {
     return step + {json: unwrap(parsed)}
   }
-  const error = __command_json_parse_error(harness, label, stream, text, parsed, step, opts)
+  const error = __command_json_parse_error(agent, label, stream, text, parsed, step, opts)
   return step
     + {
     success: false,
@@ -1335,7 +1335,8 @@ fn __command_json_uses_step(options) -> bool {
  * @errors: []
  * @example: command_json_step("gh repo", ["gh", "api", "repos/owner/repo"])
  */
-pub fn command_json_step(harness: Harness, 
+pub fn command_json_step(
+  agent: HarnessAgent,
   tools: HarnessTools,
   clock: HarnessClock,
   name: string,
@@ -1343,7 +1344,7 @@ pub fn command_json_step(harness: Harness,
   options = nil,
 ) -> dict {
   const step = command_step(tools, clock, name, spec, options)
-  return __command_json_annotate_step(harness, step, spec, options)
+  return __command_json_annotate_step(agent, step, spec, options)
 }
 
 /**
@@ -1353,7 +1354,13 @@ pub fn command_json_step(harness: Harness,
  * @errors: [command_failed, empty_output, invalid_json]
  * @example: command_json(["gh", "api", "repos/owner/repo"])
  */
-pub fn command_json(harness: Harness, tools: HarnessTools, clock: HarnessClock, spec, options = nil) {
+pub fn command_json(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  spec,
+  options = nil,
+) {
   const opts = __command_options(options)
   const result_mode = opts?.result ?? "throw"
   if result_mode != "throw" && result_mode != "record" {
@@ -1362,10 +1369,11 @@ pub fn command_json(harness: Harness, tools: HarnessTools, clock: HarnessClock, 
   let step = nil
   if __command_json_uses_step(opts) {
     const name = to_string(opts?.step_name ?? opts?.name ?? __command_label(spec))
-    step = command_json_step(harness, tools, clock, name, spec, opts)
+    step = command_json_step(agent, tools, clock, name, spec, opts)
   } else {
     const result = command_run(tools, spec, __command_run_options(opts))
-    step = __command_json_annotate_step(harness, 
+    step = __command_json_annotate_step(
+      agent,
       __command_step_from_result(tools, __command_label(spec), spec, result, opts, []),
       spec,
       opts,
@@ -1409,14 +1417,26 @@ fn __command_try_command_options(attempt, options) {
   return base
 }
 
-fn __command_try_raw(harness: Harness, tools: HarnessTools, clock: HarnessClock, attempt, options) {
+fn __command_try_raw(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  attempt,
+  options,
+) {
   if __command_is_callable(attempt) {
     return attempt()
   }
   if type_of(attempt) == "list" {
     return {
       ok: true,
-      value: command_json(harness, tools, clock, attempt, __command_try_command_options(attempt, options)),
+      value: command_json(
+        agent,
+        tools,
+        clock,
+        attempt,
+        __command_try_command_options(attempt, options),
+      ),
     }
   }
   if type_of(attempt) != "dict" {
@@ -1431,7 +1451,8 @@ fn __command_try_raw(harness: Harness, tools: HarnessTools, clock: HarnessClock,
   if attempt?.spec != nil {
     return {
       ok: true,
-      value: command_json(harness, 
+      value: command_json(
+        agent,
         tools,
         clock,
         attempt.spec,
@@ -1442,7 +1463,13 @@ fn __command_try_raw(harness: Harness, tools: HarnessTools, clock: HarnessClock,
   if attempt?.argv != nil || attempt?.command != nil {
     return {
       ok: true,
-      value: command_json(harness, tools, clock, attempt, __command_try_command_options(attempt, options)),
+      value: command_json(
+        agent,
+        tools,
+        clock,
+        attempt,
+        __command_try_command_options(attempt, options),
+      ),
     }
   }
   throw "command_try: attempt dict must contain run, spec, argv, or command"
@@ -1487,10 +1514,18 @@ fn __command_try_normalize(value, source, attempt, options) {
   return normalizer(value, source)
 }
 
-fn __command_try_attempt(harness: Harness, tools: HarnessTools, clock: HarnessClock, attempt, index, total, options) {
+fn __command_try_attempt(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  attempt,
+  index,
+  total,
+  options,
+) {
   const source = __command_try_source(attempt, index)
   const raw_result = try {
-    __command_try_raw(harness, tools, clock, attempt, options)
+    __command_try_raw(agent, tools, clock, attempt, options)
   }
   if is_err(raw_result) {
     const reason = to_string(unwrap_err(raw_result))
@@ -1555,7 +1590,13 @@ fn __command_try_attempt_record(attempt) {
  * @errors: []
  * @example: command_try([{source: "cli", spec: ["tool", "--json"]}])
  */
-pub fn command_try(harness: Harness, tools: HarnessTools, clock: HarnessClock, attempts, options = nil) -> dict {
+pub fn command_try(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  attempts,
+  options = nil,
+) -> dict {
   if type_of(attempts) != "list" {
     throw "command_try: attempts must be a list"
   }
@@ -1564,7 +1605,15 @@ pub fn command_try(harness: Harness, tools: HarnessTools, clock: HarnessClock, a
   let last = nil
   let index = 0
   while index < total {
-    const attempt = __command_try_attempt(harness, tools, clock, attempts[index], index, total, options)
+    const attempt = __command_try_attempt(
+      agent,
+      tools,
+      clock,
+      attempts[index],
+      index,
+      total,
+      options,
+    )
     records = records + [__command_try_attempt_record(attempt)]
     last = attempt
     if attempt.ok {

@@ -16,7 +16,10 @@ import { probe, sample_registry } from "_tool_parse_probe"
 pipeline main(harness: Harness) {
   // Sloppy terminator: no `EOF` tag, but the call's own `})` tail terminates
   // the body implicitly.
-  probe(harness, "missing tag with a structural close recovers",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "missing tag with a structural close recovers",
     """edit({
     action: "create",
     path: "main.go",
@@ -27,7 +30,10 @@ package main
     sample_registry(),
   )
   // Genuinely truncated mid-token with no call tail to anchor on.
-  probe(harness, "truncated mid body errors",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "truncated mid body errors",
     """edit({
     action: "create",
     path: "main.go",
@@ -40,7 +46,10 @@ func main() {
   )
   // A final standalone `}` is ambiguous — ordinary Go/Rust block close or a
   // botched call tail. With no `)` to anchor, do not guess.
-  probe(harness, "bare brace close stays ambiguous",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bare brace close stays ambiguous",
     """edit({
     action: "create",
     path: "main.go",
@@ -51,7 +60,10 @@ func main() {
     sample_registry(),
   )
   // `<<` with no tag at all.
-  probe(harness, "missing heredoc tag",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "missing heredoc tag",
     """edit({
     action: "create",
     path: "main.go",
@@ -62,13 +74,19 @@ EOF
     sample_registry(),
   )
   // `<<EOF` followed by end of input: no newline, no literal `\n`.
-  probe(harness, "heredoc opener at end of input",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc opener at end of input",
     "edit({ path: \"x.go\", content: <<EOF",
     sample_registry(),
   )
   // A quoted value that opens a heredoc and never closes the quote. The
   // heredoc reading is salvaged rather than dropping the call.
-  probe(harness, "quoted heredoc value without a closing quote",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "quoted heredoc value without a closing quote",
     """edit({
   path: "tests/unit/test_experiment_service.py",
   action: "replace_range",
@@ -85,13 +103,19 @@ EOF
   )
   // The degraded on-the-wire form: the body is one line and the breaks are the
   // literal bytes `\` + `n`. Decoded to real newlines, tabs, and quotes.
-  probe(harness, "json escaped literal newline body",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "json escaped literal newline body",
     "edit({ path: \"parser_test.go\", content: <<EOF\\npackage manifest\\n\\nimport (\\n\\t\\\"strings\\\"\\n\\t\\\"testing\\\"\\n)\\n\\nfunc TestX(t *testing.T) {\\n\\tif 1 != 1 {\\n\\t\\tt.Fatal(\\\"bad\\\")\\n\\t}\\n}\\nEOF\\n })",
     sample_registry(),
   )
   // GUARD: a REAL-newline body is never unescaped, so a literal `\n` typed
   // inside it (a Go format string `"%d\n"`) survives verbatim.
-  probe(harness, "real newline body is not unescaped",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "real newline body is not unescaped",
     """edit({ path: "main.go", content: <<EOF
 package main
 import "fmt"
@@ -102,13 +126,19 @@ EOF
   )
   // An escaped-backslash `\\n` on the wire is one decoded `\` then `n`, not the
   // escaped line separator: the close scan must not split there.
-  probe(harness, "escaped backslash n is not a line break",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "escaped backslash n is not a line break",
     "edit({ path: \"m.go\", content: <<EOF\\npackage main\\nvar s = \\\"x\\\\n\\\"\\nEOF\\n})",
     sample_registry(),
   )
   // The escaped form that never reaches a closing tag line must error rather
   // than swallow the rest of the call.
-  probe(harness, "unterminated escaped heredoc",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unterminated escaped heredoc",
     "edit({ path: \"x.go\", content: <<EOF\\npackage main\\nfunc main() {}",
     sample_registry(),
   )
@@ -123,7 +153,10 @@ EOF
   // in `title:` and shreds the call — a bare call may not carry an angle
   // bracket inside a quoted argument. The value parser this used to be tested
   // against never saw that boundary, so the shape looked safe.
-  probe(harness, "thinking tags inside arguments, wrapped",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "thinking tags inside arguments, wrapped",
     """<think>I should write a file documenting the think tags.</think>
 <tool_call>
 edit({
@@ -138,7 +171,10 @@ EOF
 </tool_call>""",
     sample_registry(),
   )
-  probe(harness, "thinking tags inside arguments, bare",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "thinking tags inside arguments, bare",
     """<think>I should write a file documenting the think tags.</think>
 edit({
     action: "create",
@@ -155,19 +191,28 @@ EOF
   // left unescaped. The strict scan closes at the first bare `"`, so the object
   // continuation lands on `s`/`#` instead of `,`/`}`; the greedy recovery
   // absorbs the embedded quotes and keeps the call dispatchable.
-  probe(harness, "over-closed object string recovers an embedded raw string",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "over-closed object string recovers an embedded raw string",
     "<tool_call>edit({ action: \"create\", path: \"t.rs\", content: \"let q = parse_query(r#\"sel\"#);\" })</tool_call>",
     sample_registry(),
   )
   // Over-capture guard: when the embedded-quote value is NOT the last key, the
   // greedy scan stops at the first close whose continuation validates.
-  probe(harness, "over-closed recovery stops at the true boundary",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "over-closed recovery stops at the true boundary",
     "<tool_call>edit({ content: \"x=r#\"a\"#y\", action: \"create\", path: \"t.rs\" })</tool_call>",
     sample_registry(),
   )
   // The recovery engages only after the strict continuation already failed, so
   // a cleanly escaped value parses identically.
-  probe(harness, "well formed escaped string untouched by recovery",
+  probe(
+    harness.agent,
+    harness.stdio,
+    "well formed escaped string untouched by recovery",
     "<tool_call>edit({ action: \"create\", path: \"t.rs\", content: \"line1\\nline2\" })</tool_call>",
     sample_registry(),
   )
