@@ -71,5 +71,7 @@ pipeline default() {
   __io_println(changeset.counts.signatures_changed == 1)
   __io_println(changeset.counts.exported_signatures_changed == 1)
   __io_println(changeset.counts.files_reshaped_only == 1)
-  __io_println(changeset.changes[0].after.name == "greet")
+  __io_println(
+    len(changeset.changes.filter({ change -> change.after?.name == "greet" })) == 1,
+  )
 }
