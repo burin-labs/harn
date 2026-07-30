@@ -194,7 +194,7 @@ fn execution_policy_rejects_unlisted_tool() {
     // reason carries the same text the model sees (#2780).
     assert_eq!(denial.gate, DenialGate::ToolCeiling);
     assert!(denial.capability.is_none());
-    assert!(denial.reason.contains("tool ceiling"));
+    assert!(denial.gate.owns_reason(&denial.reason));
 }
 
 #[test]

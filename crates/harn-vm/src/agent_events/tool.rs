@@ -292,6 +292,64 @@ impl DenialGate {
             Self::Unknown => "unknown",
         }
     }
+
+    /// Stable model-facing signature for this refusal class. The signature is
+    /// deliberately owned beside the typed gate so a denial's structured and
+    /// rendered projections cannot name different gates.
+    fn reason_prefix(self) -> &'static str {
+        match self {
+            Self::ToolCeiling => "Tool ceiling denial",
+            Self::MalformedToolWrapper => "Malformed tool wrapper denial",
+            Self::CapabilityCeiling => "Capability ceiling denial",
+            Self::SideEffectCeiling => "Side-effect ceiling denial",
+            Self::ArgConstraint => "Tool argument constraint denial",
+            Self::DynamicPermission => "Dynamic permission denial",
+            Self::ApprovalPolicy => "Approval policy denial",
+            Self::ApprovalUnavailable => "Approval unavailable denial",
+            Self::HostRejected => "Host rejection denial",
+            Self::HookDeny => "Pre-tool hook denial",
+            Self::DeterministicPrecheck => "Deterministic precheck denial",
+            Self::Unknown => "Unclassified tool denial",
+        }
+    }
+
+    /// Render gate-specific particulars under this gate's stable signature.
+    ///
+    /// Already-rendered text from the same gate is accepted so an owning
+    /// boundary can pass a denial through without double-prefixing it. Text
+    /// carrying any other gate's signature is a producer bug.
+    pub fn render_reason(self, particulars: impl Into<String>) -> String {
+        let particulars = particulars.into();
+        if self.owns_reason(&particulars) {
+            return particulars;
+        }
+        debug_assert!(
+            !Self::ALL
+                .iter()
+                .copied()
+                .any(|gate| gate.has_signature(&particulars)),
+            "{} denial particulars carry another gate signature: {particulars}",
+            self.as_str(),
+        );
+        let particulars = particulars.trim();
+        if particulars.is_empty() {
+            format!("{}: no further details were provided", self.reason_prefix())
+        } else {
+            format!("{}: {particulars}", self.reason_prefix())
+        }
+    }
+
+    fn has_signature(self, reason: &str) -> bool {
+        reason.contains(&format!("{}:", self.reason_prefix()))
+    }
+
+    pub(crate) fn owns_reason(self, reason: &str) -> bool {
+        reason.starts_with(&format!("{}:", self.reason_prefix()))
+            && !Self::ALL
+                .iter()
+                .copied()
+                .any(|gate| gate != self && gate.has_signature(reason))
+    }
 }
 
 /// The next action a host or operator can take after a side-effect ceiling
@@ -331,17 +389,15 @@ pub struct SideEffectCeilingDetails {
 /// without re-parsing human-readable command output (harn#2780). The
 /// `denied_paths` field captures any workspace paths the refused call
 /// declared, so a path-scoped denial names the offending path.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolDenial {
     /// Which gate refused the call.
     pub gate: DenialGate,
     /// Capability/operation that was exceeded, e.g. `workspace.read_text`
     /// or `process.exec`, when the gate identified one.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub capability: Option<String>,
     /// Workspace paths the denied call declared, when the tool annotates
     /// path arguments. Empty for tools that declare no paths.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub denied_paths: Vec<String>,
     /// Whether re-issuing the identical call could ever succeed. Capability
     /// and side-effect ceilings, argument allow-lists, and policy/approval
@@ -353,26 +409,21 @@ pub struct ToolDenial {
     pub reason: String,
     /// Stable terminal-denial class for gates that should suppress argument
     /// churn across equivalent call variants in one run.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub denial_class: Option<String>,
     /// One-based count for this terminal-denial class within the session.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub class_repeat_count: Option<u64>,
     /// Typed side-effect facts when the denied call exceeded the active
     /// ceiling. Other denial gates omit this field.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub side_effect_ceiling: Option<SideEffectCeilingDetails>,
     /// Machine-facing refusal fact — a stable, secret-free reason (e.g. the
     /// matched policy pattern) for audit records and structured logs. Distinct
     /// from `reason`, which is the model-facing text. Set by gates that split
     /// their refusal by audience (the deterministic pre-approval precheck);
     /// omitted otherwise.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub machine_reason: Option<String>,
     /// One plain sentence for a human reading an approval/denial surface, with
     /// no model-teaching prose. Set by audience-splitting gates; omitted
     /// otherwise, in which case an embedder falls back to `reason`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub human_summary: Option<String>,
 }
 
@@ -386,14 +437,14 @@ impl ToolDenial {
     pub fn terminal(
         gate: DenialGate,
         capability: Option<String>,
-        reason: impl Into<String>,
+        particulars: impl Into<String>,
     ) -> Self {
         Self {
             gate,
             capability,
             denied_paths: Vec::new(),
             retryable: false,
-            reason: reason.into(),
+            reason: gate.render_reason(particulars),
             denial_class: None,
             class_repeat_count: None,
             side_effect_ceiling: None,
@@ -412,20 +463,42 @@ impl ToolDenial {
     pub fn retryable(
         gate: DenialGate,
         capability: Option<String>,
-        reason: impl Into<String>,
+        particulars: impl Into<String>,
     ) -> Self {
         Self {
             gate,
             capability,
             denied_paths: Vec::new(),
             retryable: true,
-            reason: reason.into(),
+            reason: gate.render_reason(particulars),
             denial_class: None,
             class_repeat_count: None,
             side_effect_ceiling: None,
             machine_reason: None,
             human_summary: None,
         }
+    }
+
+    /// Replace every gate-owned projection when a dispatch denial is
+    /// reclassified. Context that is independent of the refusal class
+    /// (`denied_paths`) remains attached.
+    pub(crate) fn reclassify(
+        mut self,
+        gate: DenialGate,
+        capability: Option<String>,
+        retryable: bool,
+        particulars: impl Into<String>,
+    ) -> Self {
+        self.gate = gate;
+        self.capability = capability;
+        self.retryable = retryable;
+        self.reason = gate.render_reason(particulars);
+        self.denial_class = None;
+        self.class_repeat_count = None;
+        self.side_effect_ceiling = None;
+        self.machine_reason = None;
+        self.human_summary = None;
+        self
     }
 
     pub fn with_denial_class(mut self, denial_class: impl Into<String>, repeat_count: u64) -> Self {
@@ -458,6 +531,124 @@ impl ToolDenial {
 
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    }
+}
+
+impl Default for ToolDenial {
+    fn default() -> Self {
+        Self::terminal(DenialGate::Unknown, None, "")
+    }
+}
+
+impl Serialize for ToolDenial {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error, SerializeStruct};
+
+        if !self.gate.owns_reason(&self.reason) {
+            return Err(S::Error::custom(format!(
+                "{} denial carries unattributable reason text: {}",
+                self.gate.as_str(),
+                self.reason,
+            )));
+        }
+        let mut field_count = 3;
+        field_count += usize::from(self.capability.is_some());
+        field_count += usize::from(!self.denied_paths.is_empty());
+        field_count += usize::from(self.denial_class.is_some());
+        field_count += usize::from(self.class_repeat_count.is_some());
+        field_count += usize::from(self.side_effect_ceiling.is_some());
+        field_count += usize::from(self.machine_reason.is_some());
+        field_count += usize::from(self.human_summary.is_some());
+        let mut record = serializer.serialize_struct("ToolDenial", field_count)?;
+        record.serialize_field("gate", &self.gate)?;
+        if let Some(capability) = &self.capability {
+            record.serialize_field("capability", capability)?;
+        }
+        if !self.denied_paths.is_empty() {
+            record.serialize_field("denied_paths", &self.denied_paths)?;
+        }
+        record.serialize_field("retryable", &self.retryable)?;
+        record.serialize_field("reason", &self.reason)?;
+        if let Some(denial_class) = &self.denial_class {
+            record.serialize_field("denial_class", denial_class)?;
+        }
+        if let Some(class_repeat_count) = self.class_repeat_count {
+            record.serialize_field("class_repeat_count", &class_repeat_count)?;
+        }
+        if let Some(details) = &self.side_effect_ceiling {
+            record.serialize_field("side_effect_ceiling", details)?;
+        }
+        if let Some(machine_reason) = &self.machine_reason {
+            record.serialize_field("machine_reason", machine_reason)?;
+        }
+        if let Some(human_summary) = &self.human_summary {
+            record.serialize_field("human_summary", human_summary)?;
+        }
+        record.end()
+    }
+}
+
+#[derive(Deserialize)]
+struct ToolDenialRecord {
+    gate: DenialGate,
+    #[serde(default)]
+    capability: Option<String>,
+    #[serde(default)]
+    denied_paths: Vec<String>,
+    retryable: bool,
+    reason: String,
+    #[serde(default)]
+    denial_class: Option<String>,
+    #[serde(default)]
+    class_repeat_count: Option<u64>,
+    #[serde(default)]
+    side_effect_ceiling: Option<SideEffectCeilingDetails>,
+    #[serde(default)]
+    machine_reason: Option<String>,
+    #[serde(default)]
+    human_summary: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for ToolDenial {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let record = ToolDenialRecord::deserialize(deserializer)?;
+        let reason = if record.gate.owns_reason(&record.reason) {
+            record.reason
+        } else {
+            if DenialGate::ALL
+                .iter()
+                .copied()
+                .any(|gate| gate.has_signature(&record.reason))
+            {
+                return Err(D::Error::custom(format!(
+                    "{} denial carries another gate's reason signature",
+                    record.gate.as_str(),
+                )));
+            }
+            // Pre-signature persisted denials remain readable and acquire the
+            // typed gate's current rendering when replayed.
+            record.gate.render_reason(record.reason)
+        };
+        Ok(Self {
+            gate: record.gate,
+            capability: record.capability,
+            denied_paths: record.denied_paths,
+            retryable: record.retryable,
+            reason,
+            denial_class: record.denial_class,
+            class_repeat_count: record.class_repeat_count,
+            side_effect_ceiling: record.side_effect_ceiling,
+            machine_reason: record.machine_reason,
+            human_summary: record.human_summary,
+        })
     }
 }
 

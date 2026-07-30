@@ -291,12 +291,12 @@ impl From<PolicyDenial> for VmError {
 pub(super) fn reject_tool(
     gate: crate::agent_events::DenialGate,
     capability: Option<String>,
-    reason: String,
+    particulars: String,
 ) -> Result<(), PolicyDenial> {
     Err(PolicyDenial {
         gate,
         capability,
-        reason,
+        reason: gate.render_reason(particulars),
         side_effect_ceiling: None,
     })
 }
@@ -620,7 +620,7 @@ pub(crate) fn enforce_current_policy_for_tool_with_side_effect_grant(
         return reject_tool(
             DenialGate::ToolCeiling,
             None,
-            format!("tool '{tool_name}' exceeds tool ceiling"),
+            format!("tool '{tool_name}' is not in the active allowed-tool list"),
         );
     }
     if let Some(annotations) = policy.tool_annotations.get(tool_name) {
@@ -630,7 +630,7 @@ pub(crate) fn enforce_current_policy_for_tool_with_side_effect_grant(
                     return reject_tool(
                         DenialGate::CapabilityCeiling,
                         Some(format!("{capability}.{op}")),
-                        format!("tool '{tool_name}' exceeds capability ceiling: {capability}.{op}"),
+                        format!("tool '{tool_name}' requires {capability}.{op}"),
                     );
                 }
             }
@@ -654,11 +654,11 @@ pub(crate) fn enforce_current_policy_for_tool_with_side_effect_grant(
             return Err(PolicyDenial {
                 gate: DenialGate::SideEffectCeiling,
                 capability: None,
-                reason: format!(
+                reason: DenialGate::SideEffectCeiling.render_reason(format!(
                     "tool '{tool_name}' requires side-effect level '{}' but the active ceiling is '{}'",
                     requested_level.as_str(),
                     ceiling.as_str(),
-                ),
+                )),
                 side_effect_ceiling: Some(violation),
             });
         }

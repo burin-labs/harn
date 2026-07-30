@@ -2527,7 +2527,7 @@ mod denied_tool_routing_tests {
         assert_eq!(envelope["denial"]["retryable"], true);
         assert_eq!(result["denial"]["gate"], "malformed_tool_wrapper");
         assert_eq!(result["denial"]["retryable"], true);
-        assert_eq!(envelope["denial"]["reason"], result["reason"]);
+        assert!(DenialGate::MalformedToolWrapper.owns_reason(result["reason"].as_str().unwrap()));
         assert_eq!(result["denial"]["reason"], result["reason"]);
         assert_eq!(envelope["error"], result["reason"]);
         // The wire-level category is unchanged for host harnesses.

@@ -8,18 +8,24 @@ use std::collections::BTreeSet;
 use super::collect::ToolSchema;
 
 pub(crate) fn normalize_repaired_denial(
-    mut denial: crate::agent_events::ToolDenial,
+    denial: crate::agent_events::ToolDenial,
     repair: Option<&serde_json::Value>,
 ) -> crate::agent_events::ToolDenial {
     let Some(repair) = repair else {
         return denial;
     };
-    denial.gate = crate::agent_events::DenialGate::MalformedToolWrapper;
-    denial.retryable = true;
-    if let Some(reason) = repair.get("reason").and_then(serde_json::Value::as_str) {
-        denial.reason = reason.to_string();
-    }
-    denial
+    let particulars = repair
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(
+            "the provider emitted repairable text-format tool syntax through a native tool call",
+        );
+    denial.reclassify(
+        crate::agent_events::DenialGate::MalformedToolWrapper,
+        None,
+        true,
+        particulars,
+    )
 }
 
 /// The single tool whose required-parameter schema the arguments satisfy, or
@@ -309,6 +315,26 @@ mod tests {
         assert!(
             next_step.contains("look({\"path\":\"src/document.zig\"})"),
             "next_step shows the direct invocation: {next_step}"
+        );
+    }
+
+    #[test]
+    fn reclassification_without_repair_reason_replaces_the_prior_gate_text() {
+        use crate::agent_events::{DenialGate, ToolDenial};
+
+        let denial = ToolDenial::terminal(
+            DenialGate::ToolCeiling,
+            None,
+            "tool 'tool_call' exceeds tool ceiling",
+        );
+        let repaired = normalize_repaired_denial(denial, Some(&serde_json::json!({})));
+
+        assert_eq!(repaired.gate, DenialGate::MalformedToolWrapper);
+        assert!(repaired.retryable);
+        assert!(
+            !repaired.reason.contains("exceeds tool ceiling"),
+            "reclassified denial retained the prior gate's text: {}",
+            repaired.reason
         );
     }
 
