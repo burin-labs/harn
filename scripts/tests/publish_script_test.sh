@@ -4,6 +4,8 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 publish_script="$repo_root/scripts/publish.sh"
 
+"$repo_root/scripts/harn_bin.sh" -- check "$repo_root/scripts/publish.harn"
+
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
 
