@@ -9,6 +9,21 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.45
+
+### Added
+
+- Add `system: {mode: "replace", content}` as an exclusive system-prompt
+  assembly root for exact prompt ablations and conformance probes.
+
+### Fixed
+
+- **Tool-denial reasons now stay aligned with their typed refusal gate
+  (#5793).** Each gate owns a unique model-facing reason signature, repaired
+  wrapper calls replace every gate-owned projection when reclassified, and a
+  deterministic invariant catches contradictory producer output before it
+  reaches transports or transcripts.
+
 ## v0.10.44
 
 ### Added
