@@ -9,6 +9,23 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.44
+
+### Added
+
+- Add a typed `ast.changeset_summary` hostlib operation that classifies source
+  images as structural or reshaped-only and reports declaration, signature, and
+  name-matched caller facts for review clients.
+
+### Fixed
+
+- ### Fixed
+
+  - Run macOS nightly tests with the canonical Rust test environment and stack size.
+- **Linux release size ratchet now admits the measured CLI-AOT artifact
+  (#5790).** The 216 MiB ceiling leaves 0.41 MiB of headroom above the
+  215.59 MiB v0.10.43 candidate while continuing to fail closed on growth.
+
 ## v0.10.43
 
 ### Added
