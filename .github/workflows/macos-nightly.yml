@@ -65,7 +65,7 @@ jobs:
         # No package filter — the whole workspace runs. Tests gated to
         # `#![cfg(unix)]` still run here (macOS is Unix); the macOS-specific
         # surface is exactly what this nightly exists to exercise.
-        run: cargo nextest run --workspace --profile ci
+        run: scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci
       - name: Smoke test harn run
         shell: bash
         run: |
