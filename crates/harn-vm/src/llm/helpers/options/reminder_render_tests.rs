@@ -597,6 +597,33 @@ fn system_fragments_reject_unknown_bucket() {
 }
 
 #[test]
+fn system_replacement_rejects_noncanonical_shapes_at_the_assembly_boundary() {
+    let cases = [
+        (
+            dict(&[("mode", s("append")), ("content", s("prompt"))]),
+            "system.mode: expected \"replace\"",
+        ),
+        (
+            dict(&[("mode", s("replace")), ("text", s("prompt"))]),
+            "unknown replacement key `text`",
+        ),
+        (
+            dict(&[("mode", s("replace")), ("content", VmValue::Bool(true))]),
+            "system.content: expected a string",
+        ),
+    ];
+
+    for (system, expected) in cases {
+        let options = crate::value::DictMap::from_iter([("system".to_string(), system)]);
+        let error = assemble_system_prompt(None, Some(&options), &[]).unwrap_err();
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected:?}, got {error}"
+        );
+    }
+}
+
+#[test]
 fn context_profile_fragments_join_prompt_explain_provenance() {
     let options = crate::value::DictMap::from_iter([(
         "context_profile".to_string(),

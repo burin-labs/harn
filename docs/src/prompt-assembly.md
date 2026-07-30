@@ -1,10 +1,12 @@
 # Prompt assembly
 
 Every system prompt Harn sends to a model is the deterministic reduction of an
-ordered list of **fragments**. The public `system` option supplies a string
-or ordered `{content, title?, position?, enabled?}` list. Those fragments, the
-agent's primary system text, capability-gated tool
-guidance, project context profiles, and rendered
+ordered list of **fragments**, unless the caller selects an exclusive
+replacement root. The public `system` option supplies a string, an ordered
+`{content, title?, position?, enabled?}` list, or
+`{mode: "replace", content: string}`. In composed mode, those fragments, the
+agent's primary system text, capability-gated tool guidance, project context
+profiles, and rendered
 [system reminders](./system-reminders.md) all flow through one reducer. There is
 no parallel string-concatenation path, and there is no place where an
 instruction is glued on by hand and silently drifts from the rest of the prompt.
@@ -13,6 +15,33 @@ Because assembly is a single reduction, it is also fully **auditable**: the
 runtime can answer "why is this sentence in the prompt?" and "what would the
 prompt look like without tool X?" without anyone reverse-engineering a
 concatenation.
+
+## Exclusive replacement root
+
+Use an exclusive root when the caller needs the supplied bytes to be the
+entire system prompt:
+
+```harn
+agent_loop(task, nil, {
+  system: {
+    mode: "replace",
+    content: "You are the complete system prompt.",
+  },
+})
+```
+
+Replacement is structural, not a winning fragment or a list of fields to
+blank. It bypasses ordinary fragment reduction and suppresses the positional
+system argument, fragment lists, agent-loop contracts, context-profile
+fragments, skill and tool guidance, provider thinking directives, and
+conversation-level `system`/`developer` messages. The `content` bytes are not
+trimmed or joined. Tools and ordinary user/assistant history remain available;
+this contract replaces the system channel, not the capability or conversation
+surface.
+
+`prompt_explain` reports `root: "replacement"` and exactly one included
+`replacement` fragment. At the live boundary, `llm_mock_calls()[n].system`
+provides the served-byte proof.
 
 ## Fragments
 
@@ -99,6 +128,7 @@ const explained = prompt_explain({
   ],
 })
 // explained.system     → the assembled string
+// explained.root       → "composed" (or "replacement")
 // explained.fragments  → [{ id, source, bucket, included, reason, bytes }, …]
 // explained.included / explained.excluded → counts
 ```

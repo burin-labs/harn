@@ -422,9 +422,10 @@ fn agent_inject_host_event_builtin(
 /// "why is this in the prompt?" and "what changes if tool X is absent?".
 ///
 /// Pass the same `options` dict you would hand `agent_loop` (with `system`
-/// as a string or an ordered fragment list `{content, title?, position?}`,
-/// and `tools`). Returns `{ system, fragments: [{id, source, bucket, included,
-/// reason, bytes}], included, excluded }`. Each tool that carries a
+/// as a string, an ordered fragment list `{content, title?, position?}`, or
+/// `{mode: "replace", content}` for an exclusive root, and `tools`). Returns
+/// `{ system, root, fragments: [{id, source, bucket, included, reason, bytes}],
+/// included, excluded }`. Each tool that carries a
 /// `guidance` string contributes a fragment gated on the tool's own presence,
 /// so you can see exactly which capability-gated instructions are active and
 /// why. Session reminders are layered at live call time and are not included

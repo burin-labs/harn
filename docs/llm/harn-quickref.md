@@ -1250,10 +1250,14 @@ The `output` forms are:
 {output: {schema: Verdict, strict: true, validation: "error", stream_abort: true}}
 ```
 
-`system` is either a string or an ordered fragment list. Fragments use
-`{content, title?, position?: "before"|"after", enabled?}`; build them with
-`system_before`, `system_after`, and `with_system_fragments` from
-`std/llm/prompts`.
+`system` is a string, an ordered fragment list, or an exclusive replacement
+root. Fragments use `{content, title?, position?: "before"|"after", enabled?}`;
+build them with `system_before`, `system_after`, and `with_system_fragments`
+from `std/llm/prompts`. `{mode: "replace", content: string}` makes `content`
+the entire system channel: no positional system text, fragment, context
+profile, tool guidance, provider thinking directive, or conversation-level
+`system`/`developer` message is added. Tools and ordinary conversation history
+remain available.
 
 Provider-specific request fields live only below
 `provider_options: {<provider>: {...}}`. Use `effort` for reasoning intent,

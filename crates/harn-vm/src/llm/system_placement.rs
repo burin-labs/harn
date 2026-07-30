@@ -368,6 +368,17 @@ pub(crate) fn normalize_payload_system_messages(payload: &mut crate::llm::api::L
     normalize_conversation(&mut payload.messages, &mut payload.system, placement);
 }
 
+/// Remove every conversation-level system/developer contributor from an
+/// exclusive replacement request. The transcript keeps the original messages;
+/// this operates only on the send-safe provider payload.
+pub(crate) fn suppress_payload_system_messages(payload: &mut crate::llm::api::LlmRequestPayload) {
+    suppress_system_messages(&mut payload.messages);
+}
+
+fn suppress_system_messages(messages: &mut Vec<Value>) {
+    messages.retain(|message| !is_system_or_developer(message));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,6 +403,17 @@ mod tests {
         normalize_conversation(&mut messages, &mut system, SystemMessagePlacement::Inline);
         assert_eq!(messages, before);
         assert_eq!(system, None);
+    }
+
+    #[test]
+    fn replacement_suppression_removes_all_system_and_developer_messages() {
+        let mut messages = vec![
+            json!({"role": "system", "content": "drop"}),
+            json!({"role": "user", "content": "keep"}),
+            json!({"role": "developer", "content": "drop too"}),
+        ];
+        suppress_system_messages(&mut messages);
+        assert_eq!(messages, vec![json!({"role": "user", "content": "keep"})]);
     }
 
     #[test]

@@ -64,6 +64,13 @@ pub type SystemFragment = {
 }
 
 /**
+ * Exclusive system-prompt assembly root. `content` is served byte-for-byte;
+ * positional system text, fragment lists, context-profile fragments, tool
+ * guidance, and system/developer conversation messages are suppressed.
+ */
+pub type SystemReplacement = {mode: "replace", content: string}
+
+/**
  * The single structured-output contract accepted by the `output:` option:
  * "text" (default), "json" (provider JSON mode), a JSON-Schema dict, or the
  * config form `{schema, strict?, validation?, stream_abort?}`.
@@ -91,7 +98,7 @@ pub type LlmCallOptions = {
   models?: ModelLadder,
   ladder?: string,
   // Conversation and system prompt.
-  system?: string | list<string | SystemFragment>,
+  system?: string | list<string | SystemFragment> | SystemReplacement,
   messages?: list,
   session_id?: string,
   rate_limit_consumer_id?: string,

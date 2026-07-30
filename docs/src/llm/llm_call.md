@@ -222,7 +222,7 @@ route owners. Do not combine them.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `system` | string \| list | System text or ordered `SystemFragment` values. |
+| `system` | string \| list \| dict | System text, ordered `SystemFragment` values, or an exclusive `{mode: "replace", content}` root. |
 | `messages` | list | Full canonical message history; supersedes the positional prompt. |
 | `session_id` | string | Continue a session opened with `agent_session_open`. |
 | `rate_limit_consumer_id` | string | Stable fairness identity for shared provider quotas; defaults to `session_id`. |
@@ -234,7 +234,10 @@ route owners. Do not combine them.
 
 Each system fragment has `{content, title?, position?: "before"|"after",
 enabled?}`. Use `system_before`, `system_after`, and `with_system_fragments`
-from `std/llm/prompts` when composing fragments.
+from `std/llm/prompts` when composing fragments. Use
+`{mode: "replace", content: string}` when `content` must be the entire system
+channel; replacement suppresses every additive prompt contributor while
+preserving tools and ordinary conversation history.
 
 #### Generation
 
