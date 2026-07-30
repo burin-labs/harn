@@ -292,7 +292,7 @@ fn crates_io_probe(name: string, version: string) -> RegistryProbe {
   return {status: "error", detail: "crates.io returned HTTP " + to_string(response.status)}
 }
 
-fn command_output(result: dict) -> string {
+fn command_output(result: CommandResult) -> string {
   return result.stdout + result.stderr
 }
 
@@ -325,7 +325,7 @@ fn cargo_publish_env() -> dict {
   return env
 }
 
-fn run_cargo_publish(args: list<string>) -> dict {
+fn run_cargo_publish(args: list<string>) -> CommandResult {
   return command_run(args, {env: cargo_publish_env(), env_mode: "patch"})
 }
 

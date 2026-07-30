@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 publish_script="$repo_root/scripts/publish.sh"
 
+if [[ -z "${HARN_BIN:-}" || ! -x "$HARN_BIN" ]]; then
+  echo "publish_script_test requires an executable HARN_BIN built from the candidate source" >&2
+  exit 1
+fi
+"$HARN_BIN" check "$repo_root/scripts/publish.harn"
+
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
 
