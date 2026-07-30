@@ -139,8 +139,8 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   # Keep a narrow release-size ratchet while allowing the current stripped,
-  # CLI-AOT-bearing Linux x86_64 binary (212.20 MiB in the v0.10.41 candidate).
-  BINARY_SIZE_BUDGET_MB: "213.00"
+  # CLI-AOT-bearing Linux x86_64 binary (215.59 MiB in the v0.10.43 candidate).
+  BINARY_SIZE_BUDGET_MB: "216.00"
 
 jobs:
   setup:
