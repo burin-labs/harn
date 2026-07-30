@@ -406,6 +406,9 @@ pub(crate) struct LlmCallOptions {
     // --- Conversation ---
     pub messages: Vec<serde_json::Value>,
     pub system: Option<String>,
+    /// The assembly root selected at the script boundary. Replacement roots
+    /// stay exclusive through provider-bound normalization.
+    pub(crate) system_prompt_root: crate::llm::prompt::PromptRoot,
     /// Optional short summary string prepended to the system prompt.
     /// Populated by auto-compaction at mid-loop boundaries; callers
     /// typically leave this `None`.
@@ -552,6 +555,7 @@ impl Default for LlmCallOptions {
             reminder_lifecycle: Vec::new(),
             messages: Vec::new(),
             system: None,
+            system_prompt_root: crate::llm::prompt::PromptRoot::default(),
             transcript_summary: None,
             max_tokens: 0,
             temperature: None,
@@ -851,13 +855,22 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             cli_llm_mock_scope: crate::llm::mock::current_cli_llm_mock_scope(),
             mock_scope: opts.mock_scope.clone(),
         };
-        apply_thinking_disable_directive(&mut payload);
-        // Rewrite interleaved system/developer messages to the form this route
-        // accepts (native directive, inline, or folded `<system-reminder>`),
-        // so a mid-conversation operator instruction is portable instead of a
-        // per-provider footgun. Runs at the egress boundary only — the
-        // persisted transcript keeps the original roles.
-        crate::llm::system_placement::normalize_payload_system_messages(&mut payload);
+        if opts.system_prompt_root == crate::llm::prompt::PromptRoot::Replacement {
+            // A replacement is the entire system channel. Drop every
+            // system/developer conversation contributor before route-specific
+            // placement can keep it inline, hoist it, or fold it into a user
+            // reminder. Provider thinking directives are likewise additive
+            // and therefore intentionally suppressed.
+            crate::llm::system_placement::suppress_payload_system_messages(&mut payload);
+        } else {
+            apply_thinking_disable_directive(&mut payload);
+            // Rewrite interleaved system/developer messages to the form this route
+            // accepts (native directive, inline, or folded `<system-reminder>`),
+            // so a mid-conversation operator instruction is portable instead of a
+            // per-provider footgun. Runs at the egress boundary only — the
+            // persisted transcript keeps the original roles.
+            crate::llm::system_placement::normalize_payload_system_messages(&mut payload);
+        }
         payload
     }
 }

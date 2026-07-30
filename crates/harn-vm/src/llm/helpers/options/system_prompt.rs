@@ -56,6 +56,10 @@ const SYSTEM_FRAGMENT_SHAPE: &str =
     "a system fragment is a string, or {content: string, title?: string, \
      position?: \"before\"|\"after\", enabled?: bool}";
 
+const SYSTEM_REPLACEMENT_KEYS: &[&str] = &["mode", "content"];
+const SYSTEM_REPLACEMENT_SHAPE: &str =
+    "an exclusive system replacement is {mode: \"replace\", content: string}";
+
 fn system_fragment_alias_fix(key: &str) -> Option<&'static str> {
     match key {
         "text" | "prompt" => Some("content"),
@@ -83,6 +87,54 @@ fn validate_system_fragment_keys(
         }));
     }
     Ok(())
+}
+
+/// Parse the dict form of `system`, which is reserved for an exclusive
+/// replacement root. Validation happens once at the assembly boundary that
+/// owns prompt shape; downstream request normalization trusts the typed root.
+fn replacement_system_prompt(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Option<String>, VmError> {
+    let Some(VmValue::Dict(spec)) = options.and_then(|options| options.get("system")) else {
+        return Ok(None);
+    };
+    for (key, _) in spec.iter() {
+        let key: &str = key.as_ref();
+        if !SYSTEM_REPLACEMENT_KEYS.contains(&key) {
+            return Err(system_prompt_error(format!(
+                "system: unknown replacement key `{key}` — {SYSTEM_REPLACEMENT_SHAPE}."
+            )));
+        }
+    }
+    match spec.get("mode") {
+        Some(VmValue::String(mode)) if mode.as_str() == "replace" => {}
+        Some(VmValue::String(mode)) => {
+            return Err(system_prompt_error(format!(
+                "system.mode: expected \"replace\", got \"{mode}\""
+            )));
+        }
+        Some(other) => {
+            return Err(system_prompt_error(format!(
+                "system.mode: expected a string, got {}",
+                other.type_name()
+            )));
+        }
+        None => {
+            return Err(system_prompt_error(format!(
+                "system: replacement dict must include `mode` — {SYSTEM_REPLACEMENT_SHAPE}."
+            )));
+        }
+    }
+    match spec.get("content") {
+        Some(VmValue::String(content)) => Ok(Some(content.to_string())),
+        Some(other) => Err(system_prompt_error(format!(
+            "system.content: expected a string, got {}",
+            other.type_name()
+        ))),
+        None => Err(system_prompt_error(format!(
+            "system: replacement dict must include `content` — {SYSTEM_REPLACEMENT_SHAPE}."
+        ))),
+    }
 }
 
 /// Render one fragment dict into its block. An optional `title` becomes a
@@ -225,6 +277,10 @@ pub(crate) fn assemble_system_prompt(
     rendered_reminders: &[RenderedReminder],
 ) -> Result<crate::llm::prompt::AssembledPrompt, VmError> {
     use crate::llm::prompt::{assemble, FragmentBucket, PromptFragment};
+
+    if let Some(replacement) = replacement_system_prompt(options)? {
+        return Ok(crate::llm::prompt::replace(replacement));
+    }
 
     let mut fragments: Vec<PromptFragment> = Vec::new();
     // Host-provided surrounding fragments come from the LIST form of the

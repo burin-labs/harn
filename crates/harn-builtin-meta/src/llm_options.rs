@@ -40,6 +40,15 @@ const TY_NUM_OR_DICT: Ty = Ty::Union(&[TY_FLOAT, TY_INT, TY_DICT]);
 const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
 const TY_STRING_OR_LIST: Ty = Ty::Union(&[TY_STRING, TY_LIST]);
 
+const SYSTEM_REPLACEMENT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("mode", Ty::LitString("replace")),
+    ShapeFieldDescriptor::new("content", TY_STRING),
+]);
+
+/// Public system-prompt input: ordinary string, ordered fragment list, or an
+/// exclusive replacement root. Shared by every builtin option-bag projection.
+pub const SYSTEM_PROMPT: Ty = Ty::Union(&[TY_STRING, TY_LIST, SYSTEM_REPLACEMENT]);
+
 /// The complete public option surface, in documentation order. This array is
 /// the registry: the typechecker shape, the runtime unknown-key gate, the
 /// stdlib allowlist, and the docs tables all enumerate exactly these keys.
@@ -57,7 +66,7 @@ pub const LLM_CALL_OPTION_FIELDS: &[ShapeFieldDescriptor] = &[
     ShapeFieldDescriptor::optional("models", TY_LIST),
     ShapeFieldDescriptor::optional("ladder", TY_STRING),
     // --- Conversation ---
-    ShapeFieldDescriptor::optional("system", TY_STRING_OR_LIST),
+    ShapeFieldDescriptor::optional("system", SYSTEM_PROMPT),
     ShapeFieldDescriptor::optional("messages", TY_LIST),
     ShapeFieldDescriptor::optional("session_id", TY_STRING),
     ShapeFieldDescriptor::optional("rate_limit_consumer_id", TY_STRING),
@@ -188,7 +197,8 @@ pub const LLM_REMOVED_OPTIONS: &[RemovedLlmOption] = &[
         "use `output: {schema, stream_abort: ...}`",
     ),
     removed("llm_repair", "use `repair`"),
-    // System prompt: one `system` key (string or ordered fragment list).
+    // System prompt: one `system` key (string, ordered fragment list, or
+    // exclusive replacement root).
     removed(
         "system_preamble",
         "use `system: [{content, position: \"before\"}, ...]`",

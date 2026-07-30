@@ -175,8 +175,9 @@ pub(crate) fn extract_llm_options(
         &pending_reminders,
         &rendered_reminders,
     );
-    let system =
-        compose_system_prompt_with_reminders(system, options.as_ref(), &rendered_reminders)?;
+    let assembled_system = assemble_system_prompt(system, options.as_ref(), &rendered_reminders)?;
+    let system_prompt_root = assembled_system.root;
+    let system = assembled_system.system;
     let enforce_capability_gates = !crate::llm::mock::cli_llm_mock_replay_active()
         && !crate::llm::mock::builtin_llm_mock_active();
 
@@ -732,6 +733,7 @@ pub(crate) fn extract_llm_options(
         reminder_lifecycle,
         messages,
         system,
+        system_prompt_root,
         transcript_summary: None,
         max_tokens,
         temperature,

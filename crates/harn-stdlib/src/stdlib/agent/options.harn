@@ -252,7 +252,7 @@ pub type AgentLoopOptions = {
   mock_scope?: string,
   context_profile?: dict,
   capabilities?: any,
-  system?: string | list,
+  system?: string | list | {mode: "replace", content: string},
   structural_experiment?: any,
   metadata?: dict,
   profile?: string,

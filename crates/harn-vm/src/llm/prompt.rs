@@ -103,12 +103,25 @@ pub struct FragmentTrace {
     pub bytes: usize,
 }
 
+/// Which root produced the assembled prompt.
+///
+/// Composed roots reduce the ordinary ordered fragment list. A replacement
+/// root is exclusive: its bytes are the entire system prompt and no other
+/// contributor participates in assembly or provider-bound normalization.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PromptRoot {
+    #[default]
+    Composed,
+    Replacement,
+}
+
 /// Result of [`assemble`]: the system string (if any) plus full provenance
 /// for every fragment that was considered.
 #[derive(Clone, Debug, Default)]
 pub struct AssembledPrompt {
     pub system: Option<String>,
     pub provenance: Vec<FragmentTrace>,
+    pub(crate) root: PromptRoot,
 }
 
 impl AssembledPrompt {
@@ -116,10 +129,35 @@ impl AssembledPrompt {
     /// transcript audit metadata.
     pub fn provenance_json(&self) -> serde_json::Value {
         serde_json::json!({
+            "root": match self.root {
+                PromptRoot::Composed => "composed",
+                PromptRoot::Replacement => "replacement",
+            },
             "fragments": self.provenance,
             "included": self.provenance.iter().filter(|t| t.included).count(),
             "excluded": self.provenance.iter().filter(|t| !t.included).count(),
         })
+    }
+}
+
+/// Select an exclusive replacement root.
+///
+/// Unlike ordinary fragment assembly, replacement bytes are not trimmed or
+/// joined. This is the structural escape hatch for exact prompt ablations and
+/// conformance probes: the caller's content is the complete system prompt.
+pub(crate) fn replace(content: String) -> AssembledPrompt {
+    let bytes = content.len();
+    AssembledPrompt {
+        system: Some(content),
+        provenance: vec![FragmentTrace {
+            id: "replacement".to_string(),
+            source: "caller".to_string(),
+            bucket: "before",
+            included: true,
+            reason: "exclusive replacement root".to_string(),
+            bytes,
+        }],
+        root: PromptRoot::Replacement,
     }
 }
 
@@ -204,7 +242,11 @@ pub fn assemble(fragments: &[PromptFragment], ctx: &AssembleCtx) -> AssembledPro
     } else {
         Some(before.join("\n\n"))
     };
-    AssembledPrompt { system, provenance }
+    AssembledPrompt {
+        system,
+        provenance,
+        root: PromptRoot::Composed,
+    }
 }
 
 #[cfg(test)]
@@ -229,6 +271,16 @@ mod tests {
             out.system.as_deref(),
             Some("parts\n\nbase\n\nreminder\n\nappendix")
         );
+    }
+
+    #[test]
+    fn replacement_root_preserves_exact_bytes_and_has_single_provenance_entry() {
+        let out = replace("  exact replacement\n".to_string());
+        assert_eq!(out.system.as_deref(), Some("  exact replacement\n"));
+        assert_eq!(out.root, PromptRoot::Replacement);
+        assert_eq!(out.provenance.len(), 1);
+        assert_eq!(out.provenance[0].bytes, 20);
+        assert_eq!(out.provenance[0].reason, "exclusive replacement root");
     }
 
     #[test]

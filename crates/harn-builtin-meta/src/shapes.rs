@@ -94,7 +94,7 @@ pub const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     // Request envelope / worker controls.
     ShapeFieldDescriptor::optional("_type", TY_STRING),
     ShapeFieldDescriptor::optional("name", TY_STRING),
-    ShapeFieldDescriptor::optional("system", TY_STRING_OR_LIST),
+    ShapeFieldDescriptor::optional("system", crate::llm_options::SYSTEM_PROMPT),
     ShapeFieldDescriptor::optional("session_id", TY_STRING),
     ShapeFieldDescriptor::optional("background", TY_BOOL),
     ShapeFieldDescriptor::optional("carry", TY_DICT),
