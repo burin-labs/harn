@@ -23,8 +23,9 @@ use super::types::{Symbol, SymbolKind};
 pub(super) mod helpers;
 
 use helpers::{
-    field_text, has_anonymous_child, named_decl_with_keyword, point_pos, push_func, truncate_end,
-    walk_named, NamedDeclArgs, NodePos, PushFuncArgs,
+    explicit_access_level, field_text, has_anonymous_child, named_decl_with_keyword,
+    normalized_access_level, point_pos, push_func, truncate_end, walk_named, NamedDeclArgs,
+    NodePos, PushFuncArgs,
 };
 
 /// Extract a flat symbol list from a parsed tree.
@@ -67,35 +68,6 @@ pub(super) fn extract(tree: &Tree, source: &str, language: Language) -> Vec<Symb
     }
 
     out
-}
-
-fn normalized_access_level(raw: &str) -> Option<&'static str> {
-    match raw.trim().trim_end_matches(':') {
-        "pub" | "public" => Some("public"),
-        "private" | "priv" => Some("private"),
-        "protected" => Some("protected"),
-        "internal" => Some("internal"),
-        "fileprivate" => Some("fileprivate"),
-        "open" => Some("open"),
-        "package" => Some("package"),
-        _ => None,
-    }
-}
-
-fn explicit_access_level(node: Node<'_>, source: &str) -> Option<&'static str> {
-    for child in helpers::children(node) {
-        if let Some(level) = normalized_access_level(&helpers::node_text(child, source)) {
-            return Some(level);
-        }
-        if child.kind().contains("modifier") {
-            for token in helpers::children(child) {
-                if let Some(level) = normalized_access_level(&helpers::node_text(token, source)) {
-                    return Some(level);
-                }
-            }
-        }
-    }
-    None
 }
 
 fn child_text_by_kind(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {

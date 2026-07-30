@@ -1,7 +1,26 @@
 # Diff stdlib
 
-`import "std/diff"` exposes line-oriented diff helpers and a structural
-review diff backed by hostlib tree-sitter parsing.
+`import "std/diff"` exposes line-oriented diff helpers and structural
+review summaries backed by hostlib tree-sitter parsing.
+
+## `changeset_summary` — symbol-level review header
+
+`changeset_summary(files)` accepts bounded explicit file images shaped as
+`{path, before?, after?}` and returns `harn.review_changeset.v1`. The result
+names added, removed, moved, renamed, and signature-changed symbols; separates
+structural files from reshaped-only files; and labels name-matched candidate
+`CALLS` relations as heuristic.
+
+```harn,ignore
+import { changeset_summary } from "std/diff"
+
+const summary = changeset_summary([
+  {path: "src/lib.rs", before: old_source, after: new_source},
+])
+```
+
+Unsupported languages, parse failures, and resource limits produce explicit
+degraded file entries instead of semantic guesses.
 
 ## `structural_diff` — syntax-aware review diff
 

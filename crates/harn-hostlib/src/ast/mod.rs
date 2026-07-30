@@ -37,6 +37,7 @@ mod apply_node;
 mod batch_apply;
 mod bracket_balance;
 mod capabilities;
+mod changeset;
 mod dry_run;
 mod edit_common;
 mod function_body;
@@ -263,7 +264,8 @@ fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<Shar
         "batch_apply",
         batch_apply::run,
     );
-    register_dry_run(registry, code_index);
+    register_dry_run(registry, code_index.clone());
+    register_changeset_summary(registry, code_index);
     // Read-only structural search: shares the query machinery with
     // `apply_node` but never writes, so it carries no deterministic-tools
     // gate.
@@ -295,5 +297,26 @@ fn register_dry_run(registry: &mut BuiltinRegistry, code_index: Option<SharedInd
             });
         }
         None => registry.register_fn("ast", "hostlib_ast_dry_run", "dry_run", dry_run::run),
+    }
+}
+
+fn register_changeset_summary(registry: &mut BuiltinRegistry, code_index: Option<SharedIndex>) {
+    match code_index {
+        Some(index) => {
+            let handler: SyncHandler =
+                Arc::new(move |args| changeset::run_with_code_index(Some(&index), args));
+            registry.register(RegisteredBuiltin {
+                name: "hostlib_ast_changeset_summary",
+                module: "ast",
+                method: "changeset_summary",
+                handler,
+            });
+        }
+        None => registry.register_fn(
+            "ast",
+            "hostlib_ast_changeset_summary",
+            "changeset_summary",
+            changeset::run,
+        ),
     }
 }

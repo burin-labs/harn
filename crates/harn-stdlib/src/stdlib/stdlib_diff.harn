@@ -11,6 +11,67 @@ type DiffOptions = {
   color_mode?: string,
 }
 
+pub type ChangesetFileImage = {path: string, before?: string, after?: string}
+
+pub type ChangesetFileSummary = {
+  path: string,
+  classification: "structural" | "reshaped_only" | "unchanged" | "degraded",
+  language?: string,
+  reason?: string,
+}
+
+pub type ChangesetSymbolFact = {
+  name: string,
+  kind: string,
+  path: string,
+  line: int,
+  signature: string,
+  container?: string,
+  access_level?: string,
+  exported?: bool,
+}
+
+pub type ChangesetSymbolChange = {
+  kind: "added" | "removed" | "moved" | "renamed" | "signature_changed",
+  before?: ChangesetSymbolFact,
+  after?: ChangesetSymbolFact,
+}
+
+pub type ChangesetCaller = {path: string, line: int, signature: string}
+
+pub type ChangesetCandidateCallers = {
+  symbol_name: string,
+  relation: "CALLS",
+  match_kind: "name_matched_call",
+  precision: "heuristic",
+  callers: list<ChangesetCaller>,
+}
+
+pub type ChangesetCounts = {
+  files_structural: int,
+  files_reshaped_only: int,
+  files_unchanged: int,
+  files_degraded: int,
+  symbols_added: int,
+  symbols_removed: int,
+  symbols_moved: int,
+  symbols_renamed: int,
+  signatures_changed: int,
+  exported_signatures_changed: int,
+}
+
+pub type ChangesetWarning = {path: string, reason: string}
+
+pub type ChangesetSummary = {
+  schema: "harn.review_changeset.v1",
+  status: "complete" | "degraded",
+  files: list<ChangesetFileSummary>,
+  changes: list<ChangesetSymbolChange>,
+  candidate_callers: list<ChangesetCandidateCallers>,
+  counts: ChangesetCounts,
+  warnings: list<ChangesetWarning>,
+}
+
 fn __diff_lines_of(text) {
   return split(text ?? "", "\n")
 }
@@ -270,6 +331,25 @@ pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
       provenance: {module: "std/diff", helper: "structural_diff"},
     },
   )
+}
+
+/**
+ * Summarize explicit before/after file images as a symbol-level changeset.
+ *
+ * Each file is `{path, before?, after?}`. The host applies the shared
+ * tree-sitter language catalog and returns `harn.review_changeset.v1`,
+ * including structural versus reshaped-only files, named symbol changes,
+ * and name-matched candidate `CALLS` relations explicitly labeled heuristic
+ * when an index is available. Unsupported or unparseable files remain visible
+ * as degraded entries.
+ *
+ * @effects: [host]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: changeset_summary([{path: "src/lib.rs", before: old, after: next}])
+ */
+pub fn changeset_summary(files: list<ChangesetFileImage>) -> ChangesetSummary {
+  return hostlib_ast_changeset_summary({files: files})
 }
 
 /**

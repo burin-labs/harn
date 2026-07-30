@@ -1,4 +1,4 @@
-import { structural_diff } from "std/diff"
+import { changeset_summary, structural_diff } from "std/diff"
 
 fn write_fixture(dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
@@ -53,4 +53,23 @@ pipeline default() {
   __io_println(
     contains(fallback.line_diff.diff, "-    41") && contains(fallback.line_diff.diff, "+    42"),
   )
+  const changeset = changeset_summary(
+    [
+      {
+        path: "src/lib.rs",
+        before: "pub fn greet(name: &str) -> String { name.to_string() }\n",
+        after: "pub fn greet(name: &str, loud: bool) -> String { name.to_string() }\n",
+      },
+      {
+        path: "src/format.rs",
+        before: "fn add(a:i32,b:i32)->i32{a+b}\n",
+        after: "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+      },
+    ],
+  )
+  __io_println(changeset.schema == "harn.review_changeset.v1")
+  __io_println(changeset.counts.signatures_changed == 1)
+  __io_println(changeset.counts.exported_signatures_changed == 1)
+  __io_println(changeset.counts.files_reshaped_only == 1)
+  __io_println(len(changeset.changes.filter({ change -> change.after?.name == "greet" })) == 1)
 }

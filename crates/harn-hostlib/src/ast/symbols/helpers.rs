@@ -44,6 +44,35 @@ pub(super) fn point_pos(node: Node<'_>) -> NodePos {
     }
 }
 
+pub(super) fn normalized_access_level(raw: &str) -> Option<&'static str> {
+    match raw.trim().trim_end_matches(':') {
+        "pub" | "public" => Some("public"),
+        "private" | "priv" => Some("private"),
+        "protected" => Some("protected"),
+        "internal" => Some("internal"),
+        "fileprivate" => Some("fileprivate"),
+        "open" => Some("open"),
+        "package" => Some("package"),
+        _ => None,
+    }
+}
+
+pub(super) fn explicit_access_level(node: Node<'_>, source: &str) -> Option<&'static str> {
+    for child in children(node) {
+        if let Some(level) = normalized_access_level(&node_text(child, source)) {
+            return Some(level);
+        }
+        if child.kind().contains("modifier") {
+            for token in children(child) {
+                if let Some(level) = normalized_access_level(&node_text(token, source)) {
+                    return Some(level);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// UTF-8 source slice for a node. Tree-sitter byte ranges are guaranteed
 /// to land on UTF-8 boundaries, so the slice is always valid.
 pub(in crate::ast) fn node_text(node: Node<'_>, source: &str) -> String {
@@ -182,7 +211,7 @@ pub(super) struct PushFuncArgs<'src, 'tree, 'out> {
     pub out: &'out mut Vec<Symbol>,
 }
 
-/// Push a function-style symbol.
+/// Push a function-style symbol, retaining any explicit access modifier.
 pub(super) fn push_func(args: PushFuncArgs<'_, '_, '_>) {
     let Some(name_node) = args.node.child_by_field_name("name") else {
         return;
@@ -194,6 +223,7 @@ pub(super) fn push_func(args: PushFuncArgs<'_, '_, '_>) {
     } else {
         format!("{} {name}{}", args.prefix, truncate_end(&params, 80))
     };
-    args.out
-        .push(sym(&name, args.kind, args.container, sig, args.pos));
+    let mut symbol = sym(&name, args.kind, args.container, sig, args.pos);
+    symbol.access_level = explicit_access_level(args.node, args.source).map(str::to_string);
+    args.out.push(symbol);
 }

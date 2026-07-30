@@ -917,6 +917,7 @@ syntax-aware source review:
 | `diff_summary(before, after)` | Return compact changed/insertions/deletions counts |
 | `render_diff_stat(entries, options?)` | Render per-file diff stats from `{path, before, after}` or stat dicts |
 | `structural_diff(path_a, path_b, options?)` | Host-backed tree-sitter review diff with line-diff fallback |
+| `changeset_summary(files)` | Symbol-level review summary over `{path, before?, after?}` file images |
 
 The line helpers favor predictable, dependency-free rendering over competing
 with `git diff` for large repository diffs. For large file sets, call
@@ -926,6 +927,12 @@ with `git diff` for large repository diffs. For large file sets, call
 Use `structural_diff` when a UI or agent review pass needs changed syntax-node
 spans instead of a patch. It falls back to a unified line diff on unsupported
 languages, parse errors, or size limits.
+
+Use `changeset_summary` before rendering ordinary hunks when a review surface
+needs to distinguish behavior-bearing symbol changes from reshaping. The
+result schema is `harn.review_changeset.v1`; unsupported inputs are retained as
+degraded entries, and candidate `CALLS` relations are labeled as name-matched
+heuristics.
 
 ```harn
 import { unified_diff } from "std/diff"
