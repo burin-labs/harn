@@ -58,6 +58,17 @@
 //! To reconstruct the prompt sent at `call_id=X`, replay events in order
 //! and track the last `system_prompt`, the last `tool_schemas`, and every
 //! `message` up to (but not including) the matching `provider_call_request`.
+//!
+//! `system_prompt` and `tool_schemas` are emitted only when their payload
+//! changes, so a call's `served_context` hashes usually point at an earlier
+//! line. Two guarantees make those hashes receipts rather than labels, both
+//! enforced by
+//! `served_context_hashes_resolve_to_retained_bytes_across_a_multi_call_run`:
+//! every `served_context` hash resolves to a payload event earlier in the
+//! same transcript, and re-hashing that retained payload reproduces the hash
+//! (entries are redacted on write and the hash is taken over the redacted
+//! form). Forensics can therefore read the exact prompt and schemas a given
+//! call was served instead of inferring them from a later normalization.
 
 use std::future::Future;
 use std::path::PathBuf;

@@ -184,4 +184,146 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Every per-call `served_context` hash must resolve to retained bytes
+    /// earlier in the SAME transcript, and a reader must be able to re-derive
+    /// the hash from those bytes.
+    ///
+    /// Both halves matter for forensics. The prompt and schema payloads are
+    /// deduplicated against the LAST emitted hash, so most calls carry a hash
+    /// whose bytes live on an earlier line; if that line is ever missing, the
+    /// receipt is a dangling label and blame cannot be assigned to the schema
+    /// versus the tool. And because the persisted line is redacted while the
+    /// hash is taken over the redacted form, re-hashing the retained bytes must
+    /// reproduce the receipt — otherwise a reader cannot prove the bytes it is
+    /// reading are the bytes that were served.
+    #[test]
+    fn served_context_hashes_resolve_to_retained_bytes_across_a_multi_call_run() {
+        let _guard = crate::llm::env_guard();
+        let previous_verbose = set_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", None);
+        let dir = temp_transcript_dir("harn-served-context-join");
+        let dir_string = dir.to_string_lossy().to_string();
+        super::super::push_llm_transcript_dir(&dir_string);
+
+        let edit_tool = serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "edit",
+                "description": "Edit a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        });
+        let read_tool = serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "read",
+                "description": "Read a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        });
+
+        // The prompt and the schema set each oscillate (A -> B -> A) so
+        // deduplication is exercised in both directions: a repeat must be
+        // suppressed, and a revert must not resolve to the wrong line.
+        let plan = [
+            ("policy A", &edit_tool),
+            ("policy A", &edit_tool),
+            ("policy B", &edit_tool),
+            ("policy B", &read_tool),
+            ("policy A", &read_tool),
+            ("policy A", &edit_tool),
+        ];
+        for (index, (system, tool)) in plan.iter().enumerate() {
+            let mut opts = crate::llm::api::options::base_opts("openai");
+            opts.model = "gpt-test".to_string();
+            opts.system = Some((*system).to_string());
+            opts.messages = vec![serde_json::json!({
+                "role": "user",
+                "content": format!("turn {index}"),
+            })];
+            opts.native_tools = Some(vec![(*tool).clone()]);
+            super::super::dump_llm_request(index, &format!("call-{index}"), "native", &opts);
+        }
+
+        super::super::pop_llm_transcript_dir();
+        restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
+
+        let events = read_transcript_events(&dir);
+        let mut retained_prompts: std::collections::BTreeSet<String> = Default::default();
+        let mut retained_schemas: std::collections::BTreeSet<String> = Default::default();
+        let mut prompt_events = 0usize;
+        let mut schema_events = 0usize;
+        let mut checked_calls = 0usize;
+
+        for event in &events {
+            match event["type"].as_str().unwrap_or_default() {
+                "system_prompt" => {
+                    let hash = event["content_hash"].as_str().expect("prompt content hash");
+                    let content = event["content"].as_str().expect("retained prompt bytes");
+                    assert_eq!(
+                        stable_redacted_string_hash(content),
+                        hash,
+                        "retained prompt bytes must re-derive their receipt hash"
+                    );
+                    retained_prompts.insert(hash.to_string());
+                    prompt_events += 1;
+                }
+                "tool_schemas" => {
+                    let hash = event["content_hash"].as_str().expect("schema content hash");
+                    let schemas = &event["schemas"];
+                    assert!(
+                        schemas.is_array(),
+                        "served tool schemas must be retained as an array, got {schemas}"
+                    );
+                    assert_eq!(
+                        stable_redacted_json_hash(schemas),
+                        hash,
+                        "retained tool schemas must re-derive their receipt hash"
+                    );
+                    retained_schemas.insert(hash.to_string());
+                    schema_events += 1;
+                }
+                "provider_call_request" => {
+                    let call_id = event["call_id"].as_str().unwrap_or_default();
+                    let served = &event["served_context"];
+                    let prompt_hash = served["system_prompt_content_hash"]
+                        .as_str()
+                        .expect("served prompt hash");
+                    let schema_hash = served["tool_schemas_content_hash"]
+                        .as_str()
+                        .expect("served schema hash");
+                    assert!(
+                        retained_prompts.contains(prompt_hash),
+                        "{call_id} served prompt {prompt_hash} with no retained bytes in the transcript"
+                    );
+                    assert!(
+                        retained_schemas.contains(schema_hash),
+                        "{call_id} served schemas {schema_hash} with no retained bytes in the transcript"
+                    );
+                    checked_calls += 1;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(checked_calls, plan.len(), "every call must be attributable");
+        // Without suppression the join is trivially satisfied by one payload
+        // event per call, so the interesting case would go uncovered.
+        assert!(
+            prompt_events < plan.len() && schema_events < plan.len(),
+            "deduplication must have suppressed repeats \
+             (prompts {prompt_events}, schemas {schema_events}, calls {})",
+            plan.len()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
