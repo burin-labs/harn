@@ -9,6 +9,173 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.43
+
+### Added
+
+- **Provider tool-call campaigns now produce spend-capped, reproducible
+  scorecards (#4192).** Live repeats are accounted one request at a time,
+  stop on their configured dollar ceiling or missing price evidence, and emit
+  hashed JSON/Markdown scorecard inputs bound to the runtime revision and
+  provider-catalog identity.
+- Add an optional scheduled Harn workflow that turns trusted, transport-neutral
+  provider notices into fail-closed catalog patches or incomplete model proposals
+  and review-only draft pull requests.
+- **Agent tool batches now honor structural effect phases (#4397).** Harn
+  executes only the maximal independent observation, mutation,
+  process/verification, or terminal prefix before returning results to the
+  model, preserves read-only fanout, blocks verification behind unusable
+  mutation results, and emits typed disposition/timing receipts for every
+  executed, deferred, skipped, or re-proposed call.
+- Add opt-in, bounded JSON state for governed Code Mode snippets. State is scoped
+  to one agent session and binding-manifest tool window, audited through ordinary
+  composition child calls, replayable from receipts, and cleared at session end.
+- Add a typed, boundary-validated session model policy to the Agents API, with
+  provider/model/reasoning defaults that round-trip, update, fork, and reach
+  session execution.
+- Harn now owns a canonical collaborative plan-document contract with immutable
+  revisions, optimistic edit conflicts, anchored comment lifecycles, resolution
+  receipts, deterministic replay, ACP/A2A projections, JSON Schema, and generated
+  Swift, TypeScript, Rust, Python, and Go bindings.
+- Add fixed-arity `tuple<T0, T1, ...>` types with explicit and contextual
+  inference, precise constant indexing, safe widening and writes, positional
+  runtime guards, and static out-of-bounds diagnostics.
+- Ship `std/eval/remote_fanout` as the versioned, transport-neutral owner of
+  remote evaluation plans, checksummed receipts, quarantine, and ingest
+  readiness.
+- **Credentialed and local runtime providers now have scorecardable catalog
+  routes (#4829).** Vertex AI ships a stable Gemini route, while vLLM and TGI
+  model rows supplied through runtime, user, or project provider overlays flow
+  through the same catalog into provider tool-scorecard plans.
+- Add typed environment-unchanged futility decisions and a persisted
+  `SubagentStop` lifecycle event for terminal delegated runs.
+- `harn eval tool-calls` now produces fail-closed concurrent serving receipts for
+  LoRA adapter promotion, including served-model, adapter artifact, parser,
+  request-id, and usage/cost-knownness evidence.
+- Add a Gemini Interactions API provider path alongside `generateContent`. A new
+  typed `live_endpoint_family` capability (`gemini_generate_content` by default,
+  or `gemini_interactions`) selects which synchronous endpoint a Gemini route
+  dispatches to, independently of `message_wire_format` and of
+  `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way,
+  and Vertex is untouched. The Interactions path normalizes typed
+  `function_call` / `function_result` steps, streamed `step.delta` tool-call
+  arguments, thought signatures, and usage into the same transcript contract every
+  other provider uses, and adds provider-side conversation state
+  (`previous_response_id`), streaming, and `background` to Gemini routes. The
+  resolved family is visible in `provider_capabilities`, `harn dispatch-explain`,
+  the provider support matrix, and the dry-run request audit.
+- Expose read-only ambient host conditions through `std/host_conditions` and
+  `harn-hostlib`. The versioned contract answers portable contention questions
+  with distinct observed, unavailable, and not-observable states, supports
+  injected control-plane facts, and records per-sample cost.
+- Harn now rejects unknown `HARN_*` environment variables at startup with
+  key-only nearest-name diagnostics, validates registered scalar shapes, and
+  reserves `HARN_EXT_*` as the explicit embedder extension namespace.
+- Provider results and agent iteration events now expose the sanitized serving
+  base URL, and generated model catalog rows include a compact `display_name` for
+  persistent UI surfaces. Iteration usage also distinguishes routes that do not
+  report prompt-cache accounting from supported routes with zero cache hits.
+- `harn test` now supports named table cases and typed `@test_fixture(scope: file|case)` setup. Rows and fixture
+  values use ordinary callable checks, file-scoped data is copy-on-write isolated per case, and fail-fast prevents
+  queued cases or later fixture setup from starting after the first failure.
+- The reusable Harn runtime bump workflow now exposes a repository-owned
+  `refresh-command` before validation, so consumers with generated sources or
+  nonstandard dependency projections can use the canonical signed bump flow
+  without duplicating its release, branch, or pull-request orchestration. Refresh
+  failures now stop before validation or commit and are recorded explicitly in
+  the bump receipt. Callers whose owner commands require Node.js can request an
+  exact toolchain version without copying setup steps.
+
+### Changed
+
+- Complete the secure connector cutover: Harn packages now exclusively own
+  provider normalization and ingress verification, the runtime exposes a reusable
+  ephemeral runner-pool supervisor, and the generated operator matrix checks
+  package versions, Harn floors, setup commands, and security fixtures.
+- Consolidated replay, performance, and memory benchmark assets under the
+  top-level `bench/` directory. Existing benchmark commands retain their
+  behavior while documented fixture, baseline, and suite paths now use `bench/`.
+- Deferrable worker-queue jobs now receive a bounded starvation deadline on the
+  default FIFO scheduler path. Claim results include typed scheduling evidence
+  that distinguishes ordinary priority, fair-share, and deadline-promotion
+  decisions.
+- **Coordination channels now own append timestamps and ordering (#5005).**
+  `std/coordination` projects each signed channel append time as `ts` and its
+  monotonic per-room cursor as `seq`, rejects caller-supplied authoritative
+  metadata, and supports exact `since_seq` and `since_ts` reads.
+- Agent-loop recovery feedback now uses one reason-coded composition policy across
+  parser, stall, and completion-judge sources. Repeated full parse rejection enters
+  the bounded stall-recovery ladder, unchanged judge next steps are suppressed until
+  the run gains new evidence, and completion judges expose stable-prefix cache
+  telemetry while exhaustion remains visible through typed terminal checkpoints.
+- `std/command` results and typed process-spawn failures now carry the normalized
+  effective working directory, including inherited cwd values, so nonzero exits
+  and spawn errors retain the execution context needed to reproduce them.
+
+### Fixed
+
+- **MCP OAuth loopback redirects now follow one registration-aware policy
+  across CLI and protocol hosts (#4432).** Fixed-port conflicts fall back to an
+  OS-selected port only for compatible native registrations, dynamic clients
+  re-register the effective URI on every authorization, and compatibility
+  errors identify the redirect URI and client mode.
+- **Tree-sitter parser generation now has a deterministic drift gate (#4501).**
+  CI regenerates all three compiled parser artifacts with the lockfile-pinned
+  CLI in an isolated checkout and rejects byte-level differences.
+- Fix native-provider dispatch falling back to the OpenAI-compatible transport.
+  Provider registration is thread-local, but the thread serving an `llm_call` is
+  not necessarily the one that ran VM startup, so a built-in native route
+  (Gemini, Vertex, Bedrock, Azure OpenAI) could answer "unregistered" and be
+  dispatched as OpenAI-compatible — observed live as `POST /v1beta/models` with an
+  OpenAI-shaped `{"messages": [...]}` body for a `gemini` route. Registration now
+  self-heals at the dispatch boundary and survives a custom provider being
+  registered first, and the wire-dialect fallback is exhaustive so a dialect can
+  no longer be silently demoted to the OpenAI transport.
+- **Agent-event persistence no longer depends on live subscribers (#5629).**
+  Harn now retains streamed tool arguments and text-mode parser lifecycle events
+  in headless runs, and persistence barriers report a count when sink failures
+  drop emitted events.
+- Five documented stdlib agent events that were always rejected now reach typed
+  event sinks and live transcript journals. Host-event acceptance and journal
+  policy now come from one registry, preventing the two surfaces from drifting.
+- **Runtime content truncation now emits typed boundary events (#5631).**
+  Tool hooks preserve exact dropped-byte metadata across later rewrites,
+  transcript and grounded-review caps report their losses, and model-facing
+  stdlib caps emit the same `boundary_failure` contract.
+- Conformance now owns every helper-process lifetime, reaps detached helpers after
+  clean exit, failure, SIGINT, or SIGKILL, and fails if forced cleanup leaves one alive.
+- CI now invalidates workspace Cargo artifacts before strict Clippy runs, so a
+  restored cache cannot make changed source appear fresh and suppress lint
+  diagnostics.
+- **Cranelift-backed native code generation now works with Cranelift 0.134
+  (#5724).** Harn adapts function finalization, immediate comparisons, and
+  signed shifts to the updated frontend API.
+- **Git package locks now use a versioned, platform-independent tree identity
+  (#5730).** `harn.lock` version 5 records canonical `sha256-v2:` hashes with
+  normalized paths and text line endings, host-independent permission handling,
+  and host-independent Git symlink materialization. Run `harn install` once to
+  migrate version 4 locks; locked and offline installs fail closed until the
+  rewritten lock is committed.
+- Provider streaming now uses one typed liveness policy across `llm_call`,
+  `llm_stream`, and `llm_stream_call`: SSE and Ollama NDJSON distinguish total,
+  first-chunk, and idle deadlines, reject premature EOF, preserve partial-output
+  facts in errors and receipts, and close announced tool calls on every failure.
+- Restore the built-in A2A push ingress event kind, delivery-key, and timestamp
+  normalization after the pure-Harn connector cutover.
+- Box the shared persona compiler dispatch future so reviewed-receipt
+  materialization remains within the default macOS thread stack.
+- Prevent `command_risk_scan` from treating quoted destructive-command mentions
+  or named absolute deletes inside the active workspace as destructive executions.
+- Recover stale Cargo build-script outputs from the package-audit target in its
+  owning Cargo context before retrying the lane once.
+- ### Fixed
+
+  - Isolate release package verification build outputs from concurrent audit cleanup.
+- **Projected training examples now require a real terminal assistant turn
+  (#5785).** `harn runs export-training` and `harn models lora export` reject
+  examples that stop after a tool result instead of reaching a later no-tool
+  assistant completion proposal, regardless of prose completion markers.
+
 ## v0.10.42
 
 ### Breaking
