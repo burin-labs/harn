@@ -45,7 +45,7 @@ jobs:
   # the aggregate, because the lanes that `needs` it would all skip and their
   # skips are otherwise tolerated.
   runner-availability:
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@984be72c178c52a6e41a1a902a1d92faba8d80c5
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@3893a4d85cacad0faaafc06def738d999db2daab
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
