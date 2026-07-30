@@ -40,12 +40,21 @@ jobs:
   # the probe reports false and the lanes can never route to self-hosted
   # hardware (repo policy additionally requires approval for ALL outside-
   # collaborator workflow runs). Kill switch: set the repo/org variable
-  # HARN_CI_DISABLE_SELFHOSTED_LINUX=true to pin every lane back to hosted.
+  # HARN_CI_DISABLE_SELFHOSTED_LINUX=true to pin every lane back to hosted, or
+  # the org-wide variable CI_SELFHOSTED_DISABLED, which the detector owns.
+  #
+  # Keep this pin at or after burin-labs/.github#22. Earlier revisions resolved
+  # the runner_groups input with jq `from_entries`, and `burin-labs` has two
+  # groups named `Default` - the org-level one holding all 9 Linux runners, and
+  # an empty enterprise-inherited one. `from_entries` keeps the LAST duplicate
+  # key, so the detector probed only the empty group and reported `linux=false`
+  # and `linux_big=false` on every run. Nothing failed: falling through to
+  # hosted is indistinguishable from a busy fleet.
   # The probe is hard-required by ci-status: a probe hard-failure must fail
   # the aggregate, because the lanes that `needs` it would all skip and their
   # skips are otherwise tolerated.
   runner-availability:
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@3893a4d85cacad0faaafc06def738d999db2daab
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@15a3563fbfb0da497e1d5e409e64d5fe3b9acc25
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
