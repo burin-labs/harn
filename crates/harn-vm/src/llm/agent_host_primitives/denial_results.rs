@@ -128,7 +128,10 @@ pub(super) fn agent_primitive_denied_tool(
     // `deny_tool_call` is the sole owner of resolving repairs and normalizing
     // their typed denial. This result builder only projects that contract.
     let denial_json = denial.map(ToolDenial::to_json);
-    let mut result = if let Some(repair) = resolved_repair {
+    let mut result = if let Some(mut repair) = resolved_repair {
+        if let Some(repair) = repair.as_object_mut() {
+            repair.insert("reason".to_string(), reason.clone().into());
+        }
         repair
     } else if category.is_recoverable() || retryable_denial {
         super::agent_tools::recoverable_tool_result(tool_name, reason.clone())

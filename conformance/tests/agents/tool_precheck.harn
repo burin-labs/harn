@@ -69,8 +69,10 @@ pipeline default() {
     "human_summary rides the denial: ${denied.denial.human_summary}",
   )
   assert(
-    to_string(denied.denial.reason).starts_with("command denied by policy pattern 'ls *'"),
-    "model-facing reason keeps the teaching cue: ${denied.denial.reason}",
+    to_string(denied.denial.reason).starts_with(
+      "Deterministic precheck denial: command denied by policy pattern 'ls *'",
+    ),
+    "model-facing reason names the gate and keeps the teaching cue: ${denied.denial.reason}",
   )
   // 2. Control — SAME asking policy, NO precheck: the call is NOT resolved by
   //    the precheck gate (it either reaches the approval prompt or, under an

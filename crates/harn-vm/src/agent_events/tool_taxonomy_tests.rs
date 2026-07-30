@@ -62,6 +62,56 @@ fn denial_gate_serializes_as_snake_case() {
 }
 
 #[test]
+fn every_denial_gate_owns_a_unique_rendered_signature() {
+    for gate in DenialGate::ALL {
+        let reason = gate.render_reason("gate-specific particulars");
+        assert!(
+            gate.owns_reason(&reason),
+            "{} did not own its rendered reason: {reason}",
+            gate.as_str(),
+        );
+        for other in DenialGate::ALL {
+            if other != gate {
+                assert!(
+                    !other.owns_reason(&reason),
+                    "{} reason was also attributable to {}: {reason}",
+                    gate.as_str(),
+                    other.as_str(),
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn serialization_rejects_a_gate_reason_contradiction() {
+    let mut denial = ToolDenial::terminal(DenialGate::ToolCeiling, None, "tool 'edit'");
+    denial.gate = DenialGate::MalformedToolWrapper;
+    let error = serde_json::to_value(denial).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("denial carries unattributable reason text"));
+}
+
+#[test]
+fn deserialization_normalizes_legacy_text_and_rejects_a_foreign_signature() {
+    let legacy: ToolDenial = serde_json::from_value(serde_json::json!({
+        "gate": "tool_ceiling",
+        "retryable": false,
+        "reason": "tool 'edit' exceeds tool ceiling",
+    }))
+    .unwrap();
+    assert!(DenialGate::ToolCeiling.owns_reason(&legacy.reason));
+
+    let contradictory = serde_json::from_value::<ToolDenial>(serde_json::json!({
+        "gate": "malformed_tool_wrapper",
+        "retryable": true,
+        "reason": DenialGate::ToolCeiling.render_reason("tool 'edit'"),
+    }));
+    assert!(contradictory.is_err());
+}
+
+#[test]
 fn tool_denial_serializes_terminal_record_and_skips_empty_fields() {
     let denial = ToolDenial::terminal(
         DenialGate::CapabilityCeiling,
