@@ -3114,12 +3114,17 @@ Import with `import { pdf_bytes, write_pdf, extract_text, pdf_capabilities } fro
 ### Diff helpers
 
 `std/diff` exposes `diff_lines`, `unified_diff`, `colorize_diff`,
-`diff_summary`, `render_diff_stat`, and `structural_diff`.
+`diff_summary`, `render_diff_stat`, `structural_diff`, and
+`changeset_summary`.
 `structural_diff(path_a, path_b, language_or_options?)` parses both files
 with the hostlib tree-sitter registry and returns changed syntax-node spans
 for human review. It is not patch-applicable. On unsupported languages,
 parse errors, or `max_bytes` / `max_nodes` / `max_graph_edges` limits, it
 returns `result: "fallback"`, `mode: "line"`, and a `line_diff` payload.
+`changeset_summary(files)` accepts `{path, before?, after?}` file images and
+returns `harn.review_changeset.v1`: structural versus reshaped-only files,
+named symbol changes, and name-matched candidate `CALLS` relations explicitly
+labeled as heuristic. Unsupported inputs remain visible as degraded entries.
 
 ### CSV
 

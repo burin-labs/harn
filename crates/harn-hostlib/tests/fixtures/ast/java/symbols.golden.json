@@ -1,7 +1,7 @@
 [
   {"name":"Greeter", "kind":"class", "container":null, "access_level":null, "signature":"class Greeter", "start_row":0, "start_col":0, "end_row":10, "end_col":1},
   {"name":"name", "kind":"field", "container":"Greeter", "access_level":"private", "signature":"String name", "start_row":1, "start_col":4, "end_row":1, "end_col":30},
-  {"name":"Greeter", "kind":"method", "container":"Greeter", "access_level":null, "signature":"Greeter(String name)", "start_row":3, "start_col":4, "end_row":5, "end_col":5},
+  {"name":"Greeter", "kind":"method", "container":"Greeter", "access_level":"public", "signature":"Greeter(String name)", "start_row":3, "start_col":4, "end_row":5, "end_col":5},
   {"name":"greet", "kind":"method", "container":"Greeter", "access_level":null, "signature":"String greet()", "start_row":7, "start_col":4, "end_row":9, "end_col":5},
   {"name":"Speaker", "kind":"interface", "container":null, "access_level":null, "signature":"interface Speaker", "start_row":12, "start_col":0, "end_row":14, "end_col":1},
   {"name":"speak", "kind":"method", "container":"Speaker", "access_level":null, "signature":"String speak()", "start_row":13, "start_col":4, "end_row":13, "end_col":19},

@@ -273,6 +273,25 @@ pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
 }
 
 /**
+ * Summarize explicit before/after file images as a symbol-level changeset.
+ *
+ * Each file is `{path, before?, after?}`. The host applies the shared
+ * tree-sitter language catalog and returns `harn.review_changeset.v1`,
+ * including structural versus reshaped-only files, named symbol changes,
+ * and name-matched candidate `CALLS` relations explicitly labeled heuristic
+ * when an index is available. Unsupported or unparseable files remain visible
+ * as degraded entries.
+ *
+ * @effects: [host]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: changeset_summary([{path: "src/lib.rs", before: old, after: next}])
+ */
+pub fn changeset_summary(files: list) -> dict {
+  return hostlib_ast_changeset_summary({files: files})
+}
+
+/**
  * Render per-file diff stats from entries with `{path, before, after}` or stat fields.
  *
  * @effects: []

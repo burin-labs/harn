@@ -65,99 +65,87 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
 
-    let before_tree = match parse_valid_source(&before, language) {
-        Ok(tree) => tree,
-        Err(reason) => {
-            return Ok(line_fallback(
-                &path_a,
-                &path_b,
-                &before,
-                &after,
-                Some(language),
-                reason,
-                &limits,
-            ));
-        }
-    };
-    let after_tree = match parse_valid_source(&after, language) {
-        Ok(tree) => tree,
-        Err(reason) => {
-            return Ok(line_fallback(
-                &path_a,
-                &path_b,
-                &before,
-                &after,
-                Some(language),
-                reason,
-                &limits,
-            ));
-        }
-    };
-
-    let before_ast = match StructuralTree::build(&before_tree, &before, &path_a, &limits) {
-        Ok(tree) => tree,
-        Err(reason) => {
-            return Ok(line_fallback(
-                &path_a,
-                &path_b,
-                &before,
-                &after,
-                Some(language),
-                &reason,
-                &limits,
-            ));
-        }
-    };
-    let after_ast = match StructuralTree::build(&after_tree, &after, &path_b, &limits) {
-        Ok(tree) => tree,
-        Err(reason) => {
-            return Ok(line_fallback(
-                &path_a,
-                &path_b,
-                &before,
-                &after,
-                Some(language),
-                &reason,
-                &limits,
-            ));
-        }
-    };
-    if let Some(reason) =
-        limits.graph_fallback_reason(before_ast.nodes.len(), after_ast.nodes.len())
+    let comparison = match compare_structures(&before, &after, &path_a, &path_b, language, &limits)
     {
-        return Ok(line_fallback(
-            &path_a,
-            &path_b,
-            &before,
-            &after,
-            Some(language),
-            &reason,
-            &limits,
-        ));
-    }
-
-    let mut diff = TreeDiff::new(&before_ast, &after_ast, &limits);
-    if let Err(reason) = diff.diff_roots() {
-        return Ok(line_fallback(
-            &path_a,
-            &path_b,
-            &before,
-            &after,
-            Some(language),
-            &reason,
-            &limits,
-        ));
-    }
+        Ok(comparison) => comparison,
+        Err(reason) => {
+            return Ok(line_fallback(
+                &path_a,
+                &path_b,
+                &before,
+                &after,
+                Some(language),
+                &reason,
+                &limits,
+            ));
+        }
+    };
 
     Ok(structural_response(
         &path_a,
         &path_b,
         language,
-        &before_ast,
-        &after_ast,
-        &diff.changes,
+        &comparison.before,
+        &comparison.after,
+        &comparison.changes,
         &limits,
     ))
+}
+
+/// Compare two in-memory source images through the same structural engine used
+/// by `hostlib_ast_structural_diff`. `Ok(false)` means the bytes differ only in
+/// syntax trivia/shape; `Err` means the caller must degrade instead of making a
+/// semantic claim.
+pub(super) fn sources_have_structural_changes(
+    before: &str,
+    after: &str,
+    language: Language,
+) -> Result<bool, String> {
+    let limits = Limits {
+        max_bytes: DEFAULT_MAX_BYTES,
+        max_nodes: DEFAULT_MAX_NODES,
+        max_graph_edges: DEFAULT_MAX_GRAPH_EDGES,
+    };
+    if let Some(reason) = limits.byte_fallback_reason(before.len(), after.len()) {
+        return Err(reason);
+    }
+    let comparison = compare_structures(before, after, "<before>", "<after>", language, &limits)?;
+    Ok(!comparison.changes.is_empty())
+}
+
+struct StructuralComparison {
+    before: StructuralTree,
+    after: StructuralTree,
+    changes: Vec<Change>,
+}
+
+fn compare_structures(
+    before: &str,
+    after: &str,
+    path_a: &str,
+    path_b: &str,
+    language: Language,
+    limits: &Limits,
+) -> Result<StructuralComparison, String> {
+    let before_tree = parse_valid_source(before, language).map_err(str::to_string)?;
+    let after_tree = parse_valid_source(after, language).map_err(str::to_string)?;
+    let before_ast = StructuralTree::build(&before_tree, before, path_a, limits)?;
+    let after_ast = StructuralTree::build(&after_tree, after, path_b, limits)?;
+    if let Some(reason) =
+        limits.graph_fallback_reason(before_ast.nodes.len(), after_ast.nodes.len())
+    {
+        return Err(reason);
+    }
+    let changes = {
+        let mut diff = TreeDiff::new(&before_ast, &after_ast, limits);
+        diff.diff_roots()?;
+        diff.changes
+    };
+    Ok(StructuralComparison {
+        before: before_ast,
+        after: after_ast,
+        changes,
+    })
 }
 
 #[derive(Clone, Copy)]

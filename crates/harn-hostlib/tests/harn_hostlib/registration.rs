@@ -144,6 +144,7 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_insert_at_anchor",
             "hostlib_ast_batch_apply",
             "hostlib_ast_dry_run",
+            "hostlib_ast_changeset_summary",
             "hostlib_ast_search",
             "hostlib_ast_structural_diff",
             "hostlib_ast_capabilities",
