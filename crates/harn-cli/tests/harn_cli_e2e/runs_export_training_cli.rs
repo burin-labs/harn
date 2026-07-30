@@ -26,6 +26,10 @@ struct Run {
 
 /// Produce one real run on the requested tool-call channel.
 fn agent_run(channel: &str, run_id: &str) -> Run {
+    agent_run_with_terminal_turn(channel, run_id, true)
+}
+
+fn agent_run_with_terminal_turn(channel: &str, run_id: &str, has_terminal_turn: bool) -> Run {
     let temp = TempDir::new().expect("tempdir");
     let dir = temp.path().to_path_buf();
     let script = fixture("training_example_run.harn");
@@ -35,6 +39,10 @@ fn agent_run(channel: &str, run_id: &str) -> Run {
             ("TRAINING_RUN_DIR", dir.to_str().expect("utf8 dir")),
             ("TRAINING_RUN_CHANNEL", channel),
             ("TRAINING_RUN_ID", run_id),
+            (
+                "TRAINING_RUN_TERMINAL_TURN",
+                if has_terminal_turn { "true" } else { "false" },
+            ),
         ],
     );
     assert_eq!(
@@ -49,6 +57,17 @@ fn agent_run(channel: &str, run_id: &str) -> Run {
         dir,
         record,
     }
+}
+
+#[test]
+fn refuses_a_real_run_without_a_no_tool_terminal_assistant_turn() {
+    let run = agent_run_with_terminal_turn("text", "run_truncated_after_tool", false);
+    let error = export_error(&[run.record.to_str().unwrap(), "--json"]);
+
+    assert_eq!(
+        error["code"],
+        Value::String("missing_terminal_assistant".to_string())
+    );
 }
 
 fn export(args: &[&str]) -> HarnCliOutput {

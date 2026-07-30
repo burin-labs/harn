@@ -2489,11 +2489,12 @@ and provenance binding the run id, session id, route, tool format, token usage,
 terminal status, and the source transcript's SHA-256 and event span.
 
 The projection is strict. Malformed JSONL, a missing, orphaned, duplicated, or
-out-of-order tool result, an unknown event schema version, a truncated terminal
-record, a sidecar edited after the run finalized, and a mismatched run or
-session id each fail with a structured diagnostic instead of being skipped.
-Pass `--run-id` to name which run to project when the path is a directory
-holding several; nothing is selected by output length or a `DONE` marker.
+out-of-order tool result, a run without a final no-tool assistant completion
+turn, an unknown event schema version, a truncated terminal record, a sidecar
+edited after the run finalized, and a mismatched run or session id each fail
+with a structured diagnostic instead of being skipped. Pass `--run-id` to name
+which run to project when the path is a directory holding several; nothing is
+selected by output length or a `DONE` marker.
 
 `harn models lora export` consumes the projected example directly, carrying the
 served catalog through to the trainer rather than inferring one from prompt

@@ -213,7 +213,7 @@ fn exports_a_projected_example_and_keeps_the_served_catalog_exactly() {
 /// it must produce. None of these may be exported.
 #[test]
 fn refuses_projected_examples_that_break_the_pairing_invariant() {
-    let cases: [(&str, Value); 4] = [
+    let cases: [(&str, Value); 5] = [
         (
             "a generic placeholder standing in for a tool result",
             json!([
@@ -250,6 +250,14 @@ fn refuses_projected_examples_that_break_the_pairing_invariant() {
                 {"role": "assistant", "content": "done"},
             ]),
         ),
+        (
+            "a paired call whose result is the final turn",
+            json!([
+                {"role": "system", "content": "You are a coding agent."},
+                assistant_with_call(),
+                {"role": "tool", "content": "x", "tool_call_id": "tc_0", "name": "read_file"},
+            ]),
+        ),
     ];
 
     for (label, messages) in cases {
@@ -262,6 +270,7 @@ fn refuses_projected_examples_that_break_the_pairing_invariant() {
                 error.contains("unpaired_tool_call")
                     || error.contains("orphaned_tool_result")
                     || error.contains("duplicate_tool_call_id")
+                    || error.contains("missing_terminal_assistant")
             }),
             "{label}: expected a pairing refusal, got {errors:?}"
         );
