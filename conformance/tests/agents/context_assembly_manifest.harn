@@ -51,7 +51,7 @@ pipeline main(harness: Harness) {
       harness.stdio.println(request.served_context.manifest_content_hash == event.content_hash)
       harness.stdio.println(manifest.schema == "harn.llm.context_manifest.v1")
       harness.stdio.println(manifest.scope == "system_prompt")
-      harness.stdio.println(manifest.boundary == "observed_llm_call_pre_egress")
+      harness.stdio.println(manifest.boundary == "llm_request_payload_egress")
       harness.stdio.println(manifest.messages == "served_context_digest_only")
       harness.stdio.println(manifest.root == "replacement")
       harness.stdio.println(len(manifest.segments) == 1)

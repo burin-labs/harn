@@ -123,6 +123,33 @@ pub(crate) enum PromptRoot {
     Transformed,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ContextManifestBoundary {
+    #[default]
+    ObservedCallOptions,
+    RequestPayloadEgress,
+}
+
+impl ContextManifestBoundary {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ObservedCallOptions => "observed_llm_call_pre_egress",
+            Self::RequestPayloadEgress => "llm_request_payload_egress",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+struct EgressDelta {
+    producer: &'static str,
+    input_system_prompt_digest: String,
+    input_system_prompt_bytes: usize,
+    output_system_prompt_digest: String,
+    output_system_prompt_bytes: usize,
+    bytes_added: usize,
+    bytes_removed: usize,
+}
+
 impl PromptRoot {
     fn as_str(self) -> &'static str {
         match self {
@@ -135,18 +162,21 @@ impl PromptRoot {
 
 /// Typed bill of materials for one assembled system prompt.
 ///
-/// This value is carried unchanged from assembly to the provider-call
-/// transcript boundary. It intentionally scopes segment accounting to the
-/// top-level system prompt; the sibling messages channel remains covered by
-/// the served-context messages digest.
+/// This value is carried from assembly to the provider-call transcript
+/// boundary, where one egress projection reconciles it with the send-safe
+/// payload. It intentionally scopes segment accounting to the top-level system
+/// prompt; the sibling messages channel remains covered by the served-context
+/// messages digest.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ContextAssemblyManifest {
+    boundary: ContextManifestBoundary,
     root: PromptRoot,
     call_role: String,
     actor_chain: Option<serde_json::Value>,
     segments: Vec<FragmentTrace>,
     whole_prompt_digest: String,
     system_prompt_bytes: usize,
+    egress_delta: Option<EgressDelta>,
 }
 
 impl Default for ContextAssemblyManifest {
@@ -164,12 +194,14 @@ impl ContextAssemblyManifest {
     ) -> Self {
         let system = system.unwrap_or("");
         Self {
+            boundary: ContextManifestBoundary::ObservedCallOptions,
             root,
             call_role: call_role.into(),
             actor_chain: None,
             segments,
             whole_prompt_digest: crate::llm::content_hash::stable_redacted_string_hash(system),
             system_prompt_bytes: system.len(),
+            egress_delta: None,
         }
     }
 
@@ -258,6 +290,43 @@ impl ContextAssemblyManifest {
         self.system_prompt_bytes = content.len();
     }
 
+    /// Project the assembly manifest onto the exact send-safe system channel
+    /// produced by `LlmRequestPayload::from`. When egress normalization changes
+    /// the bytes, the final payload becomes one typed transform row while the
+    /// delta retains the input/output join needed to audit the transition.
+    pub(crate) fn for_request_payload_egress(&self, system: Option<&str>) -> Result<Self, String> {
+        let content = system.unwrap_or("");
+        let output_digest = crate::llm::content_hash::stable_redacted_string_hash(content);
+        let output_bytes = content.len();
+        let mut manifest = self.clone();
+        manifest.boundary = ContextManifestBoundary::RequestPayloadEgress;
+
+        if manifest.whole_prompt_digest != output_digest
+            || manifest.system_prompt_bytes != output_bytes
+        {
+            let input_digest = manifest.whole_prompt_digest.clone();
+            let input_bytes = manifest.system_prompt_bytes;
+            manifest.record_system_transform(
+                "egress:system",
+                "llm_request_payload",
+                "provider capability and system-placement normalization",
+                system,
+            );
+            manifest.egress_delta = Some(EgressDelta {
+                producer: "llm_request_payload",
+                input_system_prompt_digest: input_digest,
+                input_system_prompt_bytes: input_bytes,
+                output_system_prompt_digest: output_digest,
+                output_system_prompt_bytes: output_bytes,
+                bytes_added: output_bytes.saturating_sub(input_bytes),
+                bytes_removed: input_bytes.saturating_sub(output_bytes),
+            });
+        }
+
+        manifest.validate(system)?;
+        Ok(manifest)
+    }
+
     pub(crate) fn as_json(&self) -> serde_json::Value {
         let segments = self
             .segments
@@ -279,10 +348,10 @@ impl ContextAssemblyManifest {
             .iter()
             .filter(|segment| segment.included)
             .count();
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "schema": CONTEXT_MANIFEST_SCHEMA,
             "scope": "system_prompt",
-            "boundary": "observed_llm_call_pre_egress",
+            "boundary": self.boundary.as_str(),
             "messages": "served_context_digest_only",
             "call_role": self.call_role,
             "actor_chain": self.actor_chain,
@@ -293,7 +362,11 @@ impl ContextAssemblyManifest {
             "join_separator": JOIN_SEPARATOR,
             "join_separator_bytes": JOIN_SEPARATOR.len(),
             "join_separator_count": included.saturating_sub(1),
-        })
+        });
+        if let Some(delta) = &self.egress_delta {
+            value["egress_delta"] = serde_json::to_value(delta).unwrap_or_default();
+        }
+        value
     }
 
     /// Check that the manifest is a complete, non-contradictory account of

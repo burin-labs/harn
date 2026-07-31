@@ -205,13 +205,26 @@ pub type ContextManifestSegment = {
   digest: string,
 }
 
-pub type ContextManifestBoundary = "observed_llm_call_pre_egress"
+// Readers accept the historical options-side boundary, while current runtime
+// manifests certify the send-safe payload after provider egress normalization.
+pub type ContextManifestBoundary = "observed_llm_call_pre_egress" | "llm_request_payload_egress"
 
 pub type ContextManifestRoot = "composed" | "replacement" | "transformed"
 
+pub type ContextManifestEgressDelta = {
+  producer: "llm_request_payload",
+  input_system_prompt_digest: string,
+  input_system_prompt_bytes: int,
+  output_system_prompt_digest: string,
+  output_system_prompt_bytes: int,
+  bytes_added: int,
+  bytes_removed: int,
+}
+
 // Complete system-channel bill of materials. Conversation messages remain
-// covered by `ServedContext.messages_content_hash`; provider wire
-// serialization is outside this pre-egress contract.
+// covered by `ServedContext.messages_content_hash` at the same payload boundary.
+// Provider adapter and wire serialization below `LlmRequestPayload` remain out
+// of scope.
 pub type ContextAssemblyManifest = {
   schema: "harn.llm.context_manifest.v1",
   scope: "system_prompt",
@@ -226,6 +239,7 @@ pub type ContextAssemblyManifest = {
   join_separator: string,
   join_separator_bytes: int,
   join_separator_count: int,
+  egress_delta?: ContextManifestEgressDelta,
 }
 
 pub type ContextManifestEvent = {

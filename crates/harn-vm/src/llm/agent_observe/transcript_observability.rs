@@ -338,7 +338,7 @@ pub(super) fn dump_llm_request(
     call_id: &str,
     tool_format: &str,
     opts: &super::api::LlmCallOptions,
-) -> Result<(), VmError> {
+) -> Result<super::api::LlmRequestPayload, VmError> {
     opts.context_manifest
         .validate(opts.system.as_deref())
         .map_err(|error| {
@@ -346,8 +346,17 @@ pub(super) fn dump_llm_request(
                 "context assembly manifest validation failed before provider call: {error}"
             ))
         })?;
-    emit_system_prompt_if_changed(opts.system.as_deref());
-    emit_context_manifest_if_changed(&opts.context_manifest);
+    let payload = super::api::LlmRequestPayload::from(opts);
+    let served_manifest = opts
+        .context_manifest
+        .for_request_payload_egress(payload.system.as_deref())
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "context assembly manifest validation failed after request egress: {error}"
+            ))
+        })?;
+    emit_system_prompt_if_changed(payload.system.as_deref());
+    emit_context_manifest_if_changed(&served_manifest);
     let tool_schemas =
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
     emit_tool_schemas_if_changed(&tool_schemas);
@@ -390,13 +399,13 @@ pub(super) fn dump_llm_request(
         "call_id": call_id,
         "span_id": crate::tracing::current_span_id(),
         "timestamp": chrono_now(),
-        "model": opts.model,
-        "provider": opts.provider,
-        "call_role": opts.context_manifest.call_role(),
-        "actor_chain": opts.context_manifest.actor_chain(),
-        "max_tokens": opts.max_tokens,
-        "temperature": opts.temperature,
-        "thinking": match &opts.thinking {
+        "model": payload.model,
+        "provider": payload.provider,
+        "call_role": served_manifest.call_role(),
+        "actor_chain": served_manifest.actor_chain(),
+        "max_tokens": payload.max_tokens,
+        "temperature": payload.temperature,
+        "thinking": match &payload.thinking {
             super::api::ThinkingConfig::Disabled => serde_json::json!({
                 "mode": "disabled",
                 "enabled": false,
@@ -419,11 +428,15 @@ pub(super) fn dump_llm_request(
                 "budget_tokens": serde_json::Value::Null,
             }),
         },
-        "tool_choice": opts.tool_choice,
+        "tool_choice": payload.tool_choice,
         "tool_format": tool_format,
-        "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
-        "message_count": opts.messages.len(),
-        "served_context": served_context_receipts::served_context_receipt(opts, &tool_schemas),
+        "native_tool_count": payload.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
+        "message_count": payload.messages.len(),
+        "served_context": served_context_receipts::served_context_receipt(
+            &payload,
+            &served_manifest,
+            &tool_schemas,
+        ),
         "context_token_breakdown": context_token_breakdown,
         "structural_experiment": structural_experiment,
         "route_policy": opts.route_policy.as_label(),
@@ -432,15 +445,15 @@ pub(super) fn dump_llm_request(
     });
     if verbose_llm_transcript_enabled() {
         request_event["request_snapshot"] = serde_json::json!({
-            "system": opts.system,
-            "context_manifest": opts.context_manifest.as_json(),
-            "messages": opts.messages,
+            "system": payload.system,
+            "context_manifest": served_manifest.as_json(),
+            "messages": payload.messages,
             "tool_schemas": tool_schemas,
-            "native_tools": opts.native_tools,
+            "native_tools": payload.native_tools,
         });
     }
     append_llm_transcript_entry(&request_event);
-    Ok(())
+    Ok(payload)
 }
 
 pub(super) fn emit_context_token_breakdown_checkpoint(
