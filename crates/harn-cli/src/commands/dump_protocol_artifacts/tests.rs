@@ -254,6 +254,8 @@ fn generated_rust_includes_harn_wire_vocabularies() {
     assert!(rust.contains("pub enum ACPPermissionOutcome"));
     assert!(rust.contains("pub struct HarnAgentEventParams"));
     assert!(rust.contains("pub enum HarnAgentEventKind"));
+    assert!(rust.contains("pub struct HarnSessionTimelineNode"));
+    assert!(rust.contains("pub struct HarnSessionTimelineSnapshot"));
     // Dotted / slashed wire names must collapse to valid const identifiers.
     assert!(rust.contains(
         "pub const ACP_DISPATCHED_METHOD_HARN_HITL_RESPOND: &str = \"harn.hitl.respond\""
@@ -277,6 +279,34 @@ fn generated_rust_includes_harn_wire_vocabularies() {
     for value in all_acp_session_updates() {
         assert!(rust.contains(&value), "Rust artifact missing {value}");
     }
+}
+
+#[test]
+fn generated_bindings_expose_one_open_session_timeline_contract() {
+    let rust = generate_rust();
+    let swift = generate_swift();
+    let typescript = generate_typescript();
+    let python = generate_python();
+    let go = generate_go();
+
+    for type_name in [
+        "HarnSessionTimelineCursor",
+        "HarnSessionTimelineQuery",
+        "HarnSessionTimelineReference",
+        "HarnSessionTimelineLink",
+        "HarnSessionTimelineNode",
+        "HarnSessionTimelineSnapshot",
+        "HarnSessionTimelineUpdate",
+    ] {
+        assert!(rust.contains(&format!("struct {type_name}")));
+        assert!(swift.contains(&format!("struct {type_name}")));
+        assert!(typescript.contains(&format!("interface {type_name}")));
+        assert!(python.contains(&format!("class {type_name}")));
+        assert!(go.contains(&format!("type {type_name} struct")));
+    }
+    assert!(rust.contains("pub kind: String"));
+    assert!(swift.contains("public var kind: String"));
+    assert!(typescript.contains("kind: string"));
 }
 
 #[test]

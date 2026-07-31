@@ -90,6 +90,10 @@ async fn http_router_round_trips_events() {
     let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
         .await
         .unwrap();
+    let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(wire["nodes"][0]["children"], json!([]));
+    assert_eq!(wire["nodes"][0]["links"], json!([]));
+    assert!(wire["nodes"][0].get("attributes").is_some());
     let timeline: harn_vm::session_timeline::SessionTimelineSnapshot =
         serde_json::from_slice(&bytes).unwrap();
     assert_eq!(timeline.query.session_id.as_deref(), Some(meta.id.as_str()));

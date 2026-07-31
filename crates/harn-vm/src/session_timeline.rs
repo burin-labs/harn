@@ -109,7 +109,7 @@ pub struct SessionTimelineNode {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub children: Vec<String>,
     pub category: String,
     pub kind: String,
@@ -125,11 +125,11 @@ pub struct SessionTimelineNode {
     pub start_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    #[serde(default)]
     pub attributes: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub references: Vec<SessionTimelineReference>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub links: Vec<SessionTimelineLink>,
     pub order: u64,
 }

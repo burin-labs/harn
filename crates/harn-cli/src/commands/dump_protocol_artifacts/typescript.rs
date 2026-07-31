@@ -842,6 +842,70 @@ export function isNotification(msg: ACPMessage): msg is ACPNotification {
 }
 "#,
     );
+    out.push_str(
+        r#"
+export interface HarnSessionTimelineCursor {
+  topics: Record<string, number>
+}
+
+export interface HarnSessionTimelineQuery {
+  sessionId?: string | null
+  runId?: string | null
+  runPath?: string | null
+  projectId?: string | null
+  fromCursor: HarnSessionTimelineCursor
+  limit?: number | null
+}
+
+export interface HarnSessionTimelineReference {
+  kind: string
+  id?: string
+  topic?: string
+  eventId?: number
+}
+
+export interface HarnSessionTimelineLink {
+  kind: string
+  targetId?: string
+  traceId?: string
+  spanId?: string
+  eventId?: string
+}
+
+/** Harn-owned semantic chronology row. `kind` remains open for forward compatibility. */
+export interface HarnSessionTimelineNode {
+  id: string
+  parentId?: string
+  children: string[]
+  category: string
+  kind: string
+  name: string
+  status: string
+  traceId?: string
+  spanId?: string
+  occurredAtMs?: number
+  startMs?: number
+  durationMs?: number
+  attributes: ACPValue
+  references: HarnSessionTimelineReference[]
+  links: HarnSessionTimelineLink[]
+  order: number
+}
+
+export interface HarnSessionTimelineSnapshot {
+  schemaVersion: number
+  query: HarnSessionTimelineQuery
+  cursor: HarnSessionTimelineCursor
+  nodes: HarnSessionTimelineNode[]
+}
+
+export interface HarnSessionTimelineUpdate {
+  schemaVersion: number
+  cursor: HarnSessionTimelineCursor
+  node: HarnSessionTimelineNode
+}
+"#,
+    );
     out
 }
 
