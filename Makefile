@@ -218,7 +218,7 @@ bench-vm-clone:
 	cargo bench -p harn-vm-perf --bench bench_vmenv_clone -- --output-format bencher
 
 check-vm-rss-soak:
-	$(HARN_CMD) run scripts/check_vm_rss_soak.harn
+	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run scripts/check_vm_rss_soak.harn
 
 check-test-case-performance:
 	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run scripts/check_test_case_performance.harn

@@ -61,8 +61,8 @@ pub fn select_release_smoke_run(runs: list, tag: string, log_loader) {
   return matches.sort_by({ run -> to_string(run?.createdAt ?? "") }).reverse()[0]
 }
 
-fn gh(process: HarnessProcess, args: list<string>) -> string {
-  const result = process.run({program: "gh", args: args})
+fn gh(process: HarnessProcess, program: string, args: list<string>) -> string {
+  const result = process.run({program: program, args: args})
   if result.exit_code != 0 {
     throw "gh " + args.join(" ") + " failed: " + result.stderr.trim()
   }
@@ -83,7 +83,10 @@ fn arg_spec() {
   return parser(
     {
       name: "check_release_smoke",
-      args: [{kind: "positional", name: "tag", parse: "string", required: true}],
+      args: [
+        {kind: "positional", name: "tag", parse: "string", required: true},
+        {kind: "flag", name: "gh_bin", long: "--gh-bin", parse: "string", default: "gh"},
+      ],
     },
   )
 }
@@ -99,6 +102,7 @@ fn main(harness: Harness) -> int {
     return 2
   }
   const tag = to_string(unwrap(parsed_result).options?.tag ?? "")
+  const gh_bin = to_string(unwrap(parsed_result).options?.gh_bin ?? "gh")
   if regex_captures(r"^v\d+\.\d+\.\d+$", tag).count != 1 {
     harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vX.Y.Z")
     return 2
@@ -106,7 +110,9 @@ fn main(harness: Harness) -> int {
   try {
     let repo = to_string(harness.env.get("GITHUB_REPOSITORY") ?? "")
     if repo == "" {
-      const repo_doc = json_parse(gh(harness.process, ["repo", "view", "--json", "nameWithOwner"]))
+      const repo_doc = json_parse(
+        gh(harness.process, gh_bin, ["repo", "view", "--json", "nameWithOwner"]),
+      )
       repo = to_string(repo_doc?.nameWithOwner ?? "")
       if repo == "" {
         throw "gh repo view returned no nameWithOwner"
@@ -115,6 +121,7 @@ fn main(harness: Harness) -> int {
     const runs = json_parse(
       gh(
         harness.process,
+        gh_bin,
         [
           "run",
           "list",
@@ -137,7 +144,7 @@ fn main(harness: Harness) -> int {
       tag,
       { run_id ->
         const result = harness.process.run(
-          {program: "gh", args: ["run", "view", to_string(run_id), "--repo", repo, "--log"]},
+          {program: gh_bin, args: ["run", "view", to_string(run_id), "--repo", repo, "--log"]},
         )
         return result.exit_code == 0 ? result.stdout : nil
       },

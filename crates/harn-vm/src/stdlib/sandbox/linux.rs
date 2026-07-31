@@ -40,13 +40,13 @@ impl SandboxBackend for Backend {
     }
 
     fn prepare_std_command(
-        _program: &str,
+        program: &str,
         _args: &[String],
         command: &mut Command,
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        let prep = profile_setup(policy, profile)?;
+        let prep = profile_setup(program, policy, profile)?;
         // SAFETY: `pre_exec` may only call async-signal-safe functions
         // before exec. The raw syscalls here (`prctl`,
         // `landlock_*`, seccomp `prctl`) are async-signal-safe per
@@ -58,13 +58,13 @@ impl SandboxBackend for Backend {
     }
 
     fn prepare_tokio_command(
-        _program: &str,
+        program: &str,
         _args: &[String],
         command: &mut tokio::process::Command,
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        let prep = profile_setup(policy, profile)?;
+        let prep = profile_setup(program, policy, profile)?;
         // SAFETY: see Linux `prepare_std_command` above.
         unsafe {
             command.pre_exec(move || apply_profile(&prep));
@@ -100,6 +100,7 @@ impl Drop for LandlockProfile {
 }
 
 fn profile_setup(
+    program: &str,
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<ProcessProfile, VmError> {
@@ -108,7 +109,7 @@ fn profile_setup(
     // OsHardened "must engage" contract is enforced before fork rather
     // than racing the pre_exec callback.
     Ok(ProcessProfile {
-        landlock: landlock_profile(policy, profile)?,
+        landlock: landlock_profile(program, policy, profile)?,
         seccomp: compile_seccomp_program(&allowed_syscalls(policy))?,
     })
 }
@@ -129,6 +130,7 @@ fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
 }
 
 fn landlock_profile(
+    program: &str,
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<Option<LandlockProfile>, VmError> {
@@ -179,6 +181,19 @@ fn landlock_profile(
             &mut profile,
             path,
             LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE,
+            true,
+        )?;
+    }
+    // Naming an absolute executable is explicit authority to read and execute
+    // that file, even when it lives outside the workspace and standard system
+    // roots. This is common for verified CI/release artifacts under
+    // `$RUNNER_TEMP`. Grant only the selected file, not its parent directory.
+    let program_path = std::path::Path::new(program);
+    if program_path.is_absolute() {
+        push_rule(
+            &mut profile,
+            program_path.to_path_buf(),
+            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_EXECUTE,
             true,
         )?;
     }

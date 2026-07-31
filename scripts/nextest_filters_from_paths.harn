@@ -14,10 +14,8 @@ fn command_stdout(
 }
 
 fn repo_root(process: HarnessProcess) -> string {
-  return command_stdout(
-    process,
-    {program: "git", args: ["rev-parse", "--show-toplevel"], env: {}},
-  ).trim()
+  return command_stdout(process, {program: "git", args: ["rev-parse", "--show-toplevel"], env: {}})
+    .trim()
 }
 
 fn rel_path(path: string, root: string) -> string {
