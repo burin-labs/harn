@@ -9,6 +9,29 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.46
+
+### Added
+
+- Expose the VM's canonical fine-grained tool approval evaluator through a raw
+  host-request boundary, including typed matcher keys, environment-mode safety,
+  default guards, precedence, and audit receipts.
+
+### Fixed
+
+- Promote the complete producer-owned `data` map from structured agent tool
+  handler results into terminal lifecycle events, recorded session messages, and
+  ACP metadata without requiring per-fact runtime changes.
+- `harn test --timeout` now compiles a selected suite's import graph once before
+  per-test execution clocks start, so a cold module cache is not billed to an
+  arbitrary first test and timing reports attribute that work to compilation.
+- **Package-root prompt assets now resolve through deep import chains (#5810).**
+  Manifest discovery lexically normalizes accumulated module paths before
+  walking ancestors, so `@/...` and `@<alias>/...` renders no longer fail when
+  the caller was reached through imports containing `.` or `..`.
+- Tree-sitter corpus tests now rebuild the checked-in Harn grammar instead of
+  reusing an ambient compiled parser cache.
+
 ## v0.10.45
 
 ### Added
