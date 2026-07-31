@@ -14,46 +14,12 @@ use harn_vm::{Vm, VmError, VmValue};
 
 use crate::error::HostlibError;
 
-fn capability_for_module(module: &str) -> harn_builtin_meta::CapabilityId {
-    use harn_builtin_meta::CapabilityId;
-    match module {
-        "ast" => CapabilityId::Ast,
-        "code_index" => CapabilityId::CodeIndex,
-        "computer" => CapabilityId::Computer,
-        "embed" => CapabilityId::Embed,
-        "fs" => CapabilityId::Fs,
-        "fs_watch" => CapabilityId::FsWatch,
-        "host_lease" => CapabilityId::HostLease,
-        "host_conditions" => CapabilityId::System,
-        "scanner" => CapabilityId::Scanner,
-        "secret_store" => CapabilityId::SecretStore,
-        "session" => CapabilityId::Agent,
-        "terminal_session" => CapabilityId::TerminalSession,
-        "tools" => CapabilityId::Tools,
-        "verdict" => CapabilityId::Verdict,
-        "rules" => CapabilityId::Rules,
-        "lint" => CapabilityId::Lint,
-        unknown => panic!("hostlib module `{unknown}` has no typed capability id"),
-    }
-}
-
-fn capability_method_for_module(module: &str, method: &'static str) -> &'static str {
-    if module != "session" {
-        return method;
-    }
-    match method {
-        "open" => "session_open",
-        "update" => "session_update",
-        "append" => "session_append",
-        "close" => "session_close",
-        "get" => "session_get",
-        "list" => "session_list",
-        "fork" => "session_fork",
-        "search_fts" => "session_search_fts",
-        "search_semantic" => "session_search_semantic",
-        "search_hybrid" => "session_search_hybrid",
-        unknown => panic!("session hostlib method `{unknown}` has no typed capability method"),
-    }
+fn capability_binding(
+    module: &'static str,
+    method: &'static str,
+) -> (harn_builtin_meta::CapabilityId, &'static str) {
+    harn_builtin_meta::host_capabilities::capability_binding_for_schema(module, method)
+        .unwrap_or_else(|| panic!("hostlib schema `{module}.{method}` has no typed capability"))
 }
 
 /// Sync builtin handler signature. Mirrors the closure type accepted by
@@ -280,8 +246,7 @@ impl HostlibRegistry {
         for builtin in self.builtins.iter().cloned() {
             let module = builtin.module;
             let method = builtin.method;
-            let capability = capability_for_module(module);
-            let capability_method = capability_method_for_module(module, method);
+            let (capability, capability_method) = capability_binding(module, method);
             harn_vm::stdlib::host::register_callable_host_operation(
                 module,
                 method,
@@ -407,8 +372,7 @@ impl HostlibRegistry {
         for builtin in self.builtins.async_builtins.iter().cloned() {
             let module = builtin.module;
             let method = builtin.method;
-            let capability = capability_for_module(module);
-            let capability_method = capability_method_for_module(module, method);
+            let (capability, capability_method) = capability_binding(module, method);
             harn_vm::stdlib::host::register_callable_host_operation(
                 module,
                 method,

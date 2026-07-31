@@ -1126,19 +1126,22 @@ fn schemas_and_typed_capability_contracts_cannot_drift() {
     let schema_methods: BTreeSet<_> = schemas::SCHEMAS
         .iter()
         .filter(|(_, _, kind, _)| *kind == schemas::SchemaKind::Request)
-        .map(|(module, method, _, _)| (*module, *method))
+        .map(|(module, method, _, _)| {
+            harn_builtin_meta::host_capabilities::capability_binding_for_schema(module, method)
+                .unwrap_or_else(|| {
+                    panic!("schema {module}.{method} has no typed capability binding")
+                })
+        })
         .collect();
     let contract_methods: BTreeSet<_> =
         harn_builtin_meta::host_capabilities::HOST_CAPABILITY_GROUPS
             .iter()
             .filter(|group| group.capability != harn_builtin_meta::CapabilityId::Computer)
             .flat_map(|group| {
-                let module = match group.capability {
-                    harn_builtin_meta::CapabilityId::TerminalSession => "terminal_session",
-                    harn_builtin_meta::CapabilityId::System => "host_conditions",
-                    capability => capability.field_name(),
-                };
-                group.methods.iter().map(move |method| (module, *method))
+                group
+                    .methods
+                    .iter()
+                    .map(move |method| (group.capability, *method))
             })
             .collect();
 

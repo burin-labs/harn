@@ -145,6 +145,17 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 
+# This is an explicit 10,000-event wall-clock budget, not merely a functional
+# test. Reserve the runner while it measures so the result describes the FTS
+# query rather than whichever CPU-heavy workspace tests happen to overlap it.
+[[profile.default.overrides]]
+filter = 'package(harn-session-store) and test(sqlite_10k_event_fts_query_completes_under_500ms)'
+threads-required = "num-cpus"
+
+[[profile.ci.overrides]]
+filter = 'package(harn-session-store) and test(sqlite_10k_event_fts_query_completes_under_500ms)'
+threads-required = "num-cpus"
+
 # Bound aggregate parallelism for tests that spawn host processes. The group
 # includes harn-cli integration tests plus the harn-vm process, sandbox, and
 # installed-toolchain seams below. Keeping those projections on one budget is
