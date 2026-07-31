@@ -41,6 +41,51 @@ fn ready_adapters(command_runner = nil) {
 }
 
 @test
+pipeline test_default_adapters_use_typed_harness_tools_boundary(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond("tools", "run_command", command_result_ok("ok"), nil, true)
+  harness.testing.respond(
+    "tools",
+    "run_command",
+    command_result_ok("", {status: "running", handle_id: "watch-1"}),
+    {background: true},
+    true,
+  )
+  harness.testing.respond(
+    "tools",
+    "wait_command",
+    {
+      success: false,
+      ok: false,
+      status: "running",
+      exit_code: nil,
+      stdout: "watching /workspace for .harn changes\n",
+      stderr: "",
+      handle_id: "watch-1",
+    },
+  )
+  harness.testing.respond(
+    "tools",
+    "cancel_handle",
+    {
+      cancelled: true,
+      result: command_result_fail(
+        1,
+        "",
+        {status: "cancelled", stdout: "watching /workspace for .harn changes\n"},
+      ),
+    },
+  )
+  const report = run_release_smoke(harness.tools, harness.clock, config())
+  const calls = harness.testing.calls()
+  assert_eq(report.success, true)
+  assert_eq(report.steps.count, 12)
+  assert_eq(calls.filter({ call -> call.method == "run_command" }).count, 12)
+  assert_eq(calls.filter({ call -> call.method == "wait_command" }).count, 1)
+  assert_eq(calls.filter({ call -> call.method == "cancel_handle" }).count, 1)
+}
+
+@test
 pipeline test_success_runs_every_capability_and_cancels_watch(harness: Harness, task) {
   const report = run_release_smoke(harness.tools, harness.clock, config(), ready_adapters())
   assert_eq(report.success, true)

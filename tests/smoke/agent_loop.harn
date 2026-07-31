@@ -14,6 +14,7 @@
  * stays minimal and ASCII/LF-only so smoke output byte-compares on every
  * platform.
  */
+import { agent_loop } from "std/agent/loop"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn smoke_tools() {
