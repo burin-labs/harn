@@ -4,7 +4,7 @@
 //! spans and event-log topics into one stable, redacted shape that clients can
 //! query or subscribe to without learning Harn's storage internals.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -188,6 +188,7 @@ impl From<LogError> for SessionTimelineError {
 #[derive(Clone)]
 struct TimelineDraft {
     sort_ms: i128,
+    sequence: u64,
     node: SessionTimelineNode,
 }
 
@@ -260,18 +261,14 @@ pub async fn query_session_store_timeline(
     let Some(session_id) = query.session_id.as_deref() else {
         return Ok(None);
     };
-    match store.describe(session_id).await {
-        Ok(_) => {}
-        Err(harn_session_store::StoreError::NotFound(_)) => return Ok(None),
-        Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
-    }
 
     let topic = canonical_session_topic(session_id);
     let mut from = query.from_cursor.topics.get(&topic).copied();
     let mut builder = TimelineBuilder::new(query.clone());
+    let mut saw_event = false;
     loop {
         let remaining = query.limit().saturating_sub(builder.nodes.len()).max(1);
-        let page = store
+        let page = match store
             .read(
                 session_id,
                 ReadRange {
@@ -281,7 +278,12 @@ pub async fn query_session_store_timeline(
                 },
             )
             .await
-            .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))?;
+        {
+            Ok(page) => page,
+            Err(harn_session_store::StoreError::NotFound(_)) => return Ok(None),
+            Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
+        };
+        saw_event |= !page.events.is_empty();
         for event in page.events {
             builder.add_stored_event(&topic, event);
         }
@@ -289,6 +291,13 @@ pub async fn query_session_store_timeline(
             break;
         }
         from = page.next_cursor;
+    }
+    if !saw_event {
+        match store.describe(session_id).await {
+            Ok(_) => {}
+            Err(harn_session_store::StoreError::NotFound(_)) => return Ok(None),
+            Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
+        }
     }
     Ok(Some(builder.finish()))
 }
@@ -359,11 +368,12 @@ struct TimelineBuilder {
 
 impl TimelineBuilder {
     fn new(query: SessionTimelineQuery) -> Self {
+        let capacity = query.limit().min(10_000);
         Self {
             cursor: query.from_cursor.clone(),
             query,
-            nodes: Vec::new(),
-            node_positions: HashMap::new(),
+            nodes: Vec::with_capacity(capacity),
+            node_positions: HashMap::with_capacity(capacity),
         }
     }
 
@@ -381,6 +391,7 @@ impl TimelineBuilder {
             let node = span_node(span, policy);
             self.push(TimelineDraft {
                 sort_ms: i128::from(span.start_ms),
+                sequence: span.span_id,
                 node,
             });
         }
@@ -389,12 +400,11 @@ impl TimelineBuilder {
     fn add_stored_event(&mut self, topic: &str, event: StoredEvent) {
         self.cursor.bump(topic, event.event_id);
         let is_tool_result = matches!(&event.kind, SessionEventKind::ToolResult);
-        let mut node = stored_event_node(&event);
-        let sort_ms = i128::from(event.ts_ms);
-        if matches!(
-            &event.kind,
-            SessionEventKind::ToolCall | SessionEventKind::ToolResult
-        ) {
+        let sequence = event.event_id;
+        let event_ts_ms = event.ts_ms;
+        let sort_ms = i128::from(event_ts_ms);
+        let mut node = stored_event_node(event);
+        if node.category == "tool" {
             if let Some(index) = self.node_positions.get(&node.id).copied() {
                 let existing = &mut self.nodes[index];
                 if is_tool_result {
@@ -403,9 +413,9 @@ impl TimelineBuilder {
                         .start_ms
                         .or_else(|| existing.node.occurred_at_ms.and_then(nonnegative_u64));
                     node.duration_ms = node.start_ms.and_then(|start| {
-                        nonnegative_u64(event.ts_ms).map(|end| end.saturating_sub(start))
+                        nonnegative_u64(event_ts_ms).map(|end| end.saturating_sub(start))
                     });
-                    if node.name == event.kind.discriminator() {
+                    if node.name == node.kind {
                         node.name.clone_from(&existing.node.name);
                     }
                 }
@@ -414,7 +424,11 @@ impl TimelineBuilder {
                 return;
             }
         }
-        self.push(TimelineDraft { sort_ms, node });
+        self.push(TimelineDraft {
+            sort_ms,
+            sequence,
+            node,
+        });
     }
 
     async fn add_event_log(
@@ -439,7 +453,11 @@ impl TimelineBuilder {
                             .map(i128::from)
                             .or_else(|| node.start_ms.map(i128::from))
                             .unwrap_or(i128::from(event_id));
-                        self.push(TimelineDraft { sort_ms, node });
+                        self.push(TimelineDraft {
+                            sort_ms,
+                            sequence: event_id,
+                            node,
+                        });
                     }
                 }
                 if batch_len < READ_BATCH_SIZE || self.nodes.len() >= self.query.limit() {
@@ -454,25 +472,32 @@ impl TimelineBuilder {
         self.nodes.sort_by(|left, right| {
             left.sort_ms
                 .cmp(&right.sort_ms)
+                .then_with(|| left.sequence.cmp(&right.sequence))
                 .then_with(|| left.node.id.cmp(&right.node.id))
         });
         self.nodes.truncate(self.query.limit());
 
-        let visible_ids: BTreeSet<String> = self
+        let mut children_by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        if self
             .nodes
             .iter()
-            .map(|draft| draft.node.id.clone())
-            .collect();
-        let mut children_by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for draft in &self.nodes {
-            let Some(parent_id) = draft.node.parent_id.as_ref() else {
-                continue;
-            };
-            if visible_ids.contains(parent_id) {
-                children_by_parent
-                    .entry(parent_id.clone())
-                    .or_default()
-                    .push(draft.node.id.clone());
+            .any(|draft| draft.node.parent_id.is_some())
+        {
+            let visible_ids: HashSet<&str> = self
+                .nodes
+                .iter()
+                .map(|draft| draft.node.id.as_str())
+                .collect();
+            for draft in &self.nodes {
+                let Some(parent_id) = draft.node.parent_id.as_ref() else {
+                    continue;
+                };
+                if visible_ids.contains(parent_id.as_str()) {
+                    children_by_parent
+                        .entry(parent_id.clone())
+                        .or_default()
+                        .push(draft.node.id.clone());
+                }
             }
         }
 
@@ -502,7 +527,7 @@ fn canonical_session_topic(session_id: &str) -> String {
     format!("session-store:{session_id}")
 }
 
-fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
+fn stored_event_node(event: StoredEvent) -> SessionTimelineNode {
     let source_event_id = event.headers.get("source_event_id").cloned();
     let message_id = event.headers.get("message_id").cloned();
     let tool_call_id = event.headers.get("tool_call_id").cloned();
@@ -542,7 +567,7 @@ fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
     .to_string();
     let status = match &event.kind {
         SessionEventKind::ToolCall => "running",
-        SessionEventKind::ToolResult => tool_result_status(event),
+        SessionEventKind::ToolResult => tool_result_status(&event),
         SessionEventKind::Custom { custom_type } if custom_type == "agent_run_terminal" => event
             .payload
             .pointer("/transcript_event/metadata/final_status")
@@ -594,52 +619,51 @@ fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
         })
     })
     .collect();
-    let mut attributes = event.payload.clone();
+    let role = semantic_string(
+        &event.payload,
+        &["/transcript_event/role", "/raw_message/role"],
+    );
+    let semantic_attribute = match &event.kind {
+        SessionEventKind::ToolCall => semantic_value(
+            &event.payload,
+            &[
+                "/transcript_event/metadata/input",
+                "/raw_message/input",
+                "/raw_message/tool_calls/0/arguments",
+            ],
+        )
+        .map(|value| ("input", value)),
+        SessionEventKind::ToolResult => semantic_value(
+            &event.payload,
+            &[
+                "/transcript_event/metadata/output",
+                "/raw_message/content",
+                "/transcript_event/text",
+            ],
+        )
+        .map(|value| ("output", value)),
+        _ => None,
+    };
+    let is_error = matches!(&event.kind, SessionEventKind::ToolResult).then(|| {
+        event
+            .payload
+            .pointer("/transcript_event/metadata/is_error")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    });
+    let mut attributes = event.payload;
     if let serde_json::Value::Object(attributes) = &mut attributes {
         attributes.insert("sessionId".to_string(), event.session_id.clone().into());
         attributes.insert("revision".to_string(), event.event_id.into());
         attributes.insert("recordHash".to_string(), event.record_hash.clone().into());
-        if let Some(role) = semantic_string(
-            &event.payload,
-            &["/transcript_event/role", "/raw_message/role"],
-        ) {
+        if let Some(role) = role {
             attributes.insert("role".to_string(), role.into());
         }
-        match &event.kind {
-            SessionEventKind::ToolCall => {
-                if let Some(input) = semantic_value(
-                    &event.payload,
-                    &[
-                        "/transcript_event/metadata/input",
-                        "/raw_message/input",
-                        "/raw_message/tool_calls/0/arguments",
-                    ],
-                ) {
-                    attributes.insert("input".to_string(), input);
-                }
-            }
-            SessionEventKind::ToolResult => {
-                if let Some(output) = semantic_value(
-                    &event.payload,
-                    &[
-                        "/transcript_event/metadata/output",
-                        "/raw_message/content",
-                        "/transcript_event/text",
-                    ],
-                ) {
-                    attributes.insert("output".to_string(), output);
-                }
-                attributes.insert(
-                    "isError".to_string(),
-                    event
-                        .payload
-                        .pointer("/transcript_event/metadata/is_error")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                        .into(),
-                );
-            }
-            _ => {}
+        if let Some((key, value)) = semantic_attribute {
+            attributes.insert(key.to_string(), value);
+        }
+        if let Some(is_error) = is_error {
+            attributes.insert("isError".to_string(), is_error.into());
         }
     }
     let start_ms = matches!(&event.kind, SessionEventKind::ToolCall)

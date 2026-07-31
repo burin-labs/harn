@@ -123,6 +123,30 @@ async fn persisted_transcript_projects_stable_tool_revision_and_identity_links()
 }
 
 #[tokio::test]
+async fn persisted_timeline_distinguishes_an_empty_session_from_a_missing_one() {
+    let store = SqliteSessionStore::open_in_memory().expect("canonical store");
+    let missing =
+        query_session_store_timeline(&store, SessionTimelineQuery::for_session("missing-session"))
+            .await
+            .expect("query missing session");
+    assert!(missing.is_none());
+
+    store
+        .create(CreateSession {
+            id: Some("empty-session".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create empty session");
+    let empty =
+        query_session_store_timeline(&store, SessionTimelineQuery::for_session("empty-session"))
+            .await
+            .expect("query empty session")
+            .expect("empty session exists");
+    assert!(empty.nodes.is_empty());
+}
+
+#[tokio::test]
 async fn persisted_10k_event_tool_timeline_opens_under_500ms() {
     let temp = tempfile::tempdir().expect("project root");
     let store = SqliteSessionStore::open(temp.path().join("session-store.sqlite"))
@@ -184,6 +208,8 @@ async fn persisted_10k_event_tool_timeline_opens_under_500ms() {
     eprintln!("10k-event tool timeline elapsed: {elapsed:?}");
 
     assert_eq!(snapshot.nodes.len(), 5_000);
+    assert!(snapshot.nodes[0].id.ends_with(":tool:tool-0"));
+    assert!(snapshot.nodes[4_999].id.ends_with(":tool:tool-4999"));
     let timing_covered = snapshot
         .nodes
         .iter()
