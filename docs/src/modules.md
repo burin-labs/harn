@@ -196,8 +196,8 @@ Connector package helpers for common provider plumbing:
 
 | Function | Description |
 |---|---|
-| `connector_http_request(method, url, options?)` | Non-throwing HTTP policy wrapper returning `{ok, status, headers, body, retry_after_ms?, error?}` with normalized retry, idempotency, and error categories |
-| `connector_http_json(method, url, options?)` | `connector_http_request` plus response JSON parsing; invalid JSON returns `error.category == "invalid_json"` |
+| `connector_http_request(clock, net, method, url, options?)` | Capability-attenuated, non-throwing HTTP policy wrapper returning `{ok, status, headers, body, retry_after_ms?, error?}` with normalized retry, idempotency, and error categories |
+| `connector_http_json(clock, net, method, url, options?)` | `connector_http_request` plus response JSON parsing; invalid JSON returns `error.category == "invalid_json"` |
 | `connector_http_header(headers_or_response, name)` | Case-insensitive header lookup for response envelopes or raw header dicts |
 | `connector_http_rate_limit(headers_or_response)` | Extract `Retry-After`, `RateLimit-*`, and `X-RateLimit-*` metadata, including `retry_after_ms` when parseable |
 | `verify_hmac_signature(body, signature, secret, algorithm?, options?)` | Constant-time check for bare or `sha256=` signatures; legacy `sha1=` requires `options.allow_legacy_sha1` |

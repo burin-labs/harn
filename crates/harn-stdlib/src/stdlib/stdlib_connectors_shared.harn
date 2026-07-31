@@ -630,7 +630,7 @@ pub fn connector_http_request(clock: HarnessClock, net: HarnessNet, method, url,
  *
  * @effects: [net, time]
  * @errors: []
- * @example: connector_http_json(harness, "GET", url, {retry: {max_attempts: 3}})
+ * @example: connector_http_json(harness.clock, harness.net, "GET", url, {retry: {max_attempts: 3}})
  */
 pub fn connector_http_json(clock: HarnessClock, net: HarnessNet, method, url, options = nil) {
   const response = connector_http_request(clock, net, method, url, options)

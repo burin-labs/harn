@@ -584,21 +584,28 @@ metadata.
 ```harn
 import { connector_http_json } from "std/connectors/shared"
 
-fn api_json(method, url, token, body = nil, idempotency_key = nil) {
+fn api_json(clock: HarnessClock, net: HarnessNet, request) {
   return connector_http_json(
-    method,
-    url,
+    clock,
+    net,
+    request.method,
+    request.url,
     {
       provider: "example",
       operation: "api_json",
-      headers: {Authorization: "Bearer " + token, Accept: "application/json"},
-      body: if body == nil { nil } else { json_stringify(body) },
-      idempotency_key: idempotency_key,
+      headers: {Authorization: "Bearer " + request.token, Accept: "application/json"},
+      body: if request.body == nil { nil } else { json_stringify(request.body) },
+      idempotency_key: request.idempotency_key,
       retry: {max_attempts: 3, base_ms: 250, cap_ms: 30000},
     },
   )
 }
 ```
+
+Pass `harness.clock` and `harness.net` from an entrypoint; reusable helpers
+should accept those narrow handles instead of the root `Harness`. Grouping the
+request fields in a record keeps call sites self-describing as the interface
+evolves.
 
 `connector_http_request(...)` returns a non-throwing envelope. Successful
 responses contain `{ok: true, status, headers, body, retry_after_ms?}`.
