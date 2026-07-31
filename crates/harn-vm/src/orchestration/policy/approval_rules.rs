@@ -565,6 +565,7 @@ impl EvaluationContext {
 
     fn from_request(request: &ToolApprovalRequest) -> Self {
         let mut context = Self::new(&request.tool_name, &request.arguments, request.repeat_count);
+        context.absorb_host_value(&request.arguments);
         let policy_context = request
             .policy_decision
             .as_ref()
@@ -579,7 +580,6 @@ impl EvaluationContext {
             });
         let nested_policy_context =
             policy_context.and_then(|context| context.get("policy_context"));
-
         if let Some(policy_context) = policy_context {
             context.tool_name = first_string(policy_context, &["tool_name", "toolName"])
                 .unwrap_or(context.tool_name);

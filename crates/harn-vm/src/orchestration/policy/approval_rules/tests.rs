@@ -299,6 +299,36 @@ fn host_request_normalizes_harn_context_and_emits_canonical_receipt() {
 }
 
 #[test]
+fn host_request_normalizes_generic_argument_paths() {
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "allow_sensitive_paths": true,
+        "rules": [{
+            "id": "ask-source-read",
+            "ask": {"tool": "read", "path": "src/**"},
+            "reason": "source read"
+        }]
+    }))
+    .expect("policy");
+    let request = ToolApprovalRequest {
+        tool_name: "read".to_string(),
+        arguments: serde_json::json!({"path": "src/main.rs"}),
+        ..Default::default()
+    };
+
+    let decision = policy.evaluate_request(&request);
+
+    assert!(decision.is_ask());
+    assert_eq!(decision.reason, "source read");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("ask-source-read")
+    );
+}
+
+#[test]
 fn write_environment_allows_require_an_exact_mode_match() {
     let wildcard: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
         "allow_sensitive_paths": true,
