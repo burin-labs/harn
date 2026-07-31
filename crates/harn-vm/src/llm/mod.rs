@@ -34,6 +34,7 @@ pub(crate) mod compass_router;
 pub(crate) mod computer_use;
 pub(crate) mod config_builtins;
 pub(crate) mod content;
+pub(crate) mod content_hash;
 mod context_breakdown;
 mod conversation;
 pub(crate) mod cost;

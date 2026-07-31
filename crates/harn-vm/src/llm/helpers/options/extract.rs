@@ -159,7 +159,11 @@ pub(crate) fn extract_llm_options(
         .or_else(|| session_id.clone());
     // Mock fixture scope for this call. Consumed only when a mock provider
     // serves the request; real providers ignore it.
-    let mock_scope = opt_str(&options, "mock_scope").filter(|value| !value.trim().is_empty());
+    let declared_call_role =
+        opt_str(&options, "call_role").filter(|value| !value.trim().is_empty());
+    let mock_scope = opt_str(&options, "mock_scope")
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| declared_call_role.clone());
     // Provenance annotation supplied by the pipeline resolver (which resolved
     // field came from a pin vs. was inherited from the primary). Observability
     // only — emitted verbatim into the `resolved_dispatch` transcript record.
@@ -176,7 +180,8 @@ pub(crate) fn extract_llm_options(
         &rendered_reminders,
     );
     let assembled_system = assemble_system_prompt(system, options.as_ref(), &rendered_reminders)?;
-    let system_prompt_root = assembled_system.root;
+    let system_prompt_root = assembled_system.root();
+    let context_manifest = assembled_system.manifest().clone();
     let system = assembled_system.system;
     let enforce_capability_gates = !crate::llm::mock::cli_llm_mock_replay_active()
         && !crate::llm::mock::builtin_llm_mock_active();
@@ -734,6 +739,7 @@ pub(crate) fn extract_llm_options(
         messages,
         system,
         system_prompt_root,
+        context_manifest,
         transcript_summary: None,
         max_tokens,
         temperature,
@@ -1174,6 +1180,59 @@ mod cache_default_tests {
         assert_eq!(
             tenant_scoped.rate_limit_consumer_id.as_deref(),
             Some("tenant-7")
+        );
+    }
+
+    #[test]
+    fn semantic_call_role_is_shared_with_fixture_scope_and_never_inferred() {
+        let unattributed = opts_with(non_caching_route());
+        assert_eq!(
+            unattributed.context_manifest.call_role(),
+            "unattributed",
+            "absence must stay observable instead of masquerading as a valid purpose"
+        );
+        assert_eq!(unattributed.mock_scope, None);
+
+        let mut router_options = non_caching_route();
+        router_options.put_str("call_role", "model.router");
+        let router = opts_with(router_options);
+        assert_eq!(router.context_manifest.call_role(), "model.router");
+        assert_eq!(router.mock_scope.as_deref(), Some("model.router"));
+
+        let mut agent_options = non_caching_route();
+        agent_options.put_str("mock_scope", "agent.main");
+        let agent = opts_with(agent_options);
+        assert_eq!(agent.context_manifest.call_role(), "agent.main");
+
+        let mut judge_options = non_caching_route();
+        judge_options.put_str("mock_scope", "completion.judge");
+        let judge = opts_with(judge_options);
+        assert_eq!(judge.context_manifest.call_role(), "completion.judge");
+
+        let roles = [
+            router.context_manifest.call_role(),
+            agent.context_manifest.call_role(),
+            judge.context_manifest.call_role(),
+        ];
+        assert_eq!(
+            roles
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            3,
+            "router, agent-under-test, and completion judge must be distinguishable by role alone"
+        );
+    }
+
+    #[test]
+    fn call_role_and_fixture_scope_must_not_disagree() {
+        let mut options = non_caching_route();
+        options.put_str("call_role", "model.router");
+        options.put_str("mock_scope", "agent.main");
+        let error = try_opts_with(options).expect_err("semantic purpose mismatch must fail");
+        assert!(
+            thrown_message(error).contains("call_role `model.router` disagrees"),
+            "unexpected error"
         );
     }
 

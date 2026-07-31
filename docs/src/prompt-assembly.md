@@ -16,6 +16,13 @@ runtime can answer "why is this sentence in the prompt?" and "what would the
 prompt look like without tool X?" without anyone reverse-engineering a
 concatenation.
 
+Each provider-bound call carries that reduction as a typed
+`harn.llm.context_manifest.v1` value. The transcript retains it in a deduplicated
+`context_manifest` event before `provider_call_request`; the request's
+`served_context.manifest_content_hash` resolves to those exact retained manifest
+bytes. A stale or contradictory manifest fails the call before the request is
+journaled.
+
 ## Exclusive replacement root
 
 Use an exclusive root when the caller needs the supplied bytes to be the
@@ -50,11 +57,18 @@ A fragment is one contributor to the system string:
 | field | meaning |
 | --- | --- |
 | `id` | stable identifier, e.g. `host:system_before`, `primary:active_skills`, `tool:todo.guidance` |
-| `source` | who contributed it (`host:*`, `primary`, `reminder`, `tool:<name>`) |
+| `source` / `producer` | who contributed it (`host:*`, `primary`, `reminder`, `tool:<name>`) |
 | `bucket` | `before` (preamble … primary … reminders) or `after` (appendix/suffix and tail recitations) |
 | `requires_tools` | included only when every named tool is in the active tool set |
 | `requires_caps` | included only when every named capability flag is set |
 | `body` | the already-rendered text; trimmed, and skipped if empty |
+
+The retained projection adds `included`, `reason`, `bytes`, and a redacted
+`blake3:` `digest` for every segment. Included segment bytes plus the documented
+blank-line separator bytes must exactly equal `system_prompt_bytes`;
+`whole_prompt_digest` must equal the served-context system-prompt digest.
+Duplicate included `(id, digest)` pairs and replacement roots containing any
+extra segment are rejected.
 
 The reducer emits all included `before` fragments in declaration order, then all
 included `after` fragments, joined by a blank line.
@@ -129,7 +143,9 @@ const explained = prompt_explain({
 })
 // explained.system     → the assembled string
 // explained.root       → "composed" (or "replacement")
-// explained.fragments  → [{ id, source, bucket, included, reason, bytes }, …]
+// explained.fragments  → [{ id, source, producer, bucket, included, reason,
+//                           bytes, digest }, …]
+// explained.whole_prompt_digest / system_prompt_bytes → whole-prompt receipt
 // explained.included / explained.excluded → counts
 ```
 
@@ -144,6 +160,26 @@ Session **reminders** are layered at live call time from the active session, so
 capability-gated tool guidance). See [System reminders](./system-reminders.md)
 for the dynamic, turn-boundary layer that composes into the same reducer at call
 time.
+
+The manifest accounts for the top-level system-prompt channel. Conversation
+messages are explicitly marked `served_context_digest_only` and remain covered
+by `served_context.messages_content_hash`; their per-message assembly is not
+claimed here. Provider-specific wire serialization after Harn's pre-egress
+boundary is likewise outside this manifest. The manifest names that boundary
+as `observed_llm_call_pre_egress`; context-assembling dispatch tiers that do not
+flow through `observed_llm_call` produce no manifest rather than an empty one.
+Digests are computed after the active transcript redaction policy.
+
+Set `call_role` when a harness needs to distinguish semantic callers, for
+example `model.router`. Harn-owned paths already declare the same purpose
+vocabulary through `mock_scope` (`agent.main`, `completion.judge`,
+`step.judge`, and the guardrail/classifier roles); production telemetry and
+fixture routing project that one declaration. Supplying both keys with
+different values is an error, and `call_role` alone also routes mock fixtures
+to the same scope. An undeclared purpose is retained as `unattributed`, never
+inferred from `session_id`. Both the manifest and `provider_call_request`
+retain the resolved role and the current delegated-worker `actor_chain`, when
+one exists.
 
 ## Relationship to other primitives
 

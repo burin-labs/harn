@@ -306,5 +306,11 @@ async fn vm_call_completion_fallback(
         Some(system) => Some(format!("{system}\n\n{instruction}")),
         None => Some(instruction),
     };
+    fallback_opts.context_manifest.record_system_transform(
+        "completion_fallback",
+        "stdlib:completion_fallback",
+        "completion fallback appended its system instruction",
+        fallback_opts.system.as_deref(),
+    );
     super::vm_call_llm_full(&fallback_opts).await
 }

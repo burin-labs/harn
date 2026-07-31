@@ -177,6 +177,9 @@ pub type ThinkingConfig = {mode: string, enabled: bool, budget_tokens?: int?, le
 pub type ServedContext = {
   schema: string,
   redaction: string,
+  call_role?: string,
+  actor_chain?: unknown,
+  manifest_content_hash?: string,
   system_prompt_content_hash: string,
   system_prompt_bytes: int,
   messages_content_hash: string,
@@ -185,6 +188,53 @@ pub type ServedContext = {
   tool_schema_count: int,
   native_tools_content_hash: string,
   native_tool_count: int,
+}
+
+// One system-prompt contributor in wire order. `digest` and all whole-prompt
+// hashes are computed after the active transcript redaction policy.
+pub type ContextManifestBucket = "before" | "after"
+
+pub type ContextManifestSegment = {
+  id: string,
+  producer: string,
+  bucket: ContextManifestBucket,
+  included: bool,
+  reason: string,
+  bytes: int,
+  digest: string,
+}
+
+pub type ContextManifestBoundary = "observed_llm_call_pre_egress"
+
+pub type ContextManifestRoot = "composed" | "replacement" | "transformed"
+
+// Complete system-channel bill of materials. Conversation messages remain
+// covered by `ServedContext.messages_content_hash`; provider wire
+// serialization is outside this pre-egress contract.
+pub type ContextAssemblyManifest = {
+  schema: "harn.llm.context_manifest.v1",
+  scope: "system_prompt",
+  boundary: ContextManifestBoundary,
+  messages: "served_context_digest_only",
+  call_role: string,
+  actor_chain?: unknown,
+  root: ContextManifestRoot,
+  segments: list<ContextManifestSegment>,
+  whole_prompt_digest: string,
+  system_prompt_bytes: int,
+  join_separator: string,
+  join_separator_bytes: int,
+  join_separator_count: int,
+}
+
+pub type ContextManifestEvent = {
+  type: "context_manifest",
+  timestamp: string,
+  span_id?: int?,
+  hash: int,
+  content_hash: string,
+  manifest: ContextAssemblyManifest,
+  schema_version?: int,
 }
 
 // The redaction/change-detection hash carried by content checkpoint events.
@@ -233,6 +283,8 @@ pub type ProviderCallRequestEvent = {
   call_id: string,
   model: string,
   provider: string,
+  call_role?: string,
+  actor_chain?: unknown,
   message_count: int,
   tool_format: string,
   // OPTIONAL deterministic facts.
@@ -310,6 +362,7 @@ pub type ResolvedDispatchEvent = {
 // whose `type` is outside this set is preserved through the explicit `unknown`
 // envelope from `std/artifacts/typed`, never dropped or coerced.
 pub type TranscriptEvent = SystemPromptEvent \
+  | ContextManifestEvent \
   | ToolSchemasEvent \
   | RoutingDecisionEvent \
   | ProviderCallRequestEvent \
@@ -346,6 +399,11 @@ pub fn transcript_event_spec() -> DiscriminatedSpec {
         "system_prompt",
         "harn.transcript.system_prompt",
         schema_of(SystemPromptEvent),
+      ),
+      __event_family(
+        "context_manifest",
+        "harn.transcript.context_manifest",
+        schema_of(ContextManifestEvent),
       ),
       __event_family("tool_schemas", "harn.transcript.tool_schemas", schema_of(ToolSchemasEvent)),
       __event_family(

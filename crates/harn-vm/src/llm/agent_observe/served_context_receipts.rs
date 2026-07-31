@@ -1,17 +1,4 @@
-pub(super) fn stable_redacted_string_hash(value: &str) -> String {
-    let policy = crate::redact::current_policy();
-    let redacted = match policy.redact_json(&serde_json::Value::String(value.to_string())) {
-        serde_json::Value::String(redacted) => redacted,
-        other => serde_json::to_string(&other).unwrap_or_default(),
-    };
-    stable_content_hash(redacted.as_bytes())
-}
-
-pub(super) fn stable_redacted_json_hash(value: &serde_json::Value) -> String {
-    let redacted = crate::redact::current_policy().redact_json(value);
-    let encoded = serde_json::to_vec(&redacted).unwrap_or_default();
-    stable_content_hash(&encoded)
-}
+pub(super) use crate::llm::content_hash::{stable_redacted_json_hash, stable_redacted_string_hash};
 
 pub(super) fn served_context_receipt(
     opts: &super::super::api::LlmCallOptions,
@@ -25,10 +12,14 @@ pub(super) fn served_context_receipt(
         .as_ref()
         .map(|tools| serde_json::Value::Array(tools.clone()))
         .unwrap_or(serde_json::Value::Null);
+    let manifest = opts.context_manifest.as_json();
 
     serde_json::json!({
         "schema": "harn.llm.served_context.v1",
         "redaction": "current_policy",
+        "call_role": opts.context_manifest.call_role(),
+        "actor_chain": opts.context_manifest.actor_chain(),
+        "manifest_content_hash": stable_redacted_json_hash(&manifest),
         "system_prompt_content_hash": stable_redacted_string_hash(system_prompt),
         "system_prompt_bytes": system_prompt.len(),
         "messages_content_hash": stable_redacted_json_hash(&messages),
@@ -38,10 +29,6 @@ pub(super) fn served_context_receipt(
         "native_tools_content_hash": stable_redacted_json_hash(&native_tools),
         "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
     })
-}
-
-fn stable_content_hash(bytes: &[u8]) -> String {
-    format!("blake3:{}", blake3::hash(bytes).to_hex())
 }
 
 #[cfg(test)]
@@ -102,13 +89,20 @@ mod tests {
         let mut opts = crate::llm::api::options::base_opts("openai");
         opts.model = "gpt-test".to_string();
         opts.system = Some("System policy".to_string());
+        opts.context_manifest = crate::llm::prompt::ContextAssemblyManifest::internal(
+            "test:system",
+            "test",
+            "llm_call",
+            opts.system.as_deref(),
+        );
         opts.messages = vec![
             serde_json::json!({"role": "user", "content": "fix the bug"}),
             serde_json::json!({"role": "assistant", "content": "I will inspect it"}),
         ];
         opts.native_tools = Some(vec![native_tool.clone()]);
 
-        super::super::dump_llm_request(2, "call-served-context", "native", &opts);
+        super::super::dump_llm_request(2, "call-served-context", "native", &opts)
+            .expect("valid context manifest");
 
         super::super::pop_llm_transcript_dir();
         restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
@@ -118,6 +112,10 @@ mod tests {
             .iter()
             .find(|event| event["type"] == "system_prompt")
             .expect("system_prompt event");
+        let manifest_event = events
+            .iter()
+            .find(|event| event["type"] == "context_manifest")
+            .expect("context_manifest event");
         let schemas = events
             .iter()
             .find(|event| event["type"] == "tool_schemas")
@@ -136,6 +134,24 @@ mod tests {
             served_context["schema"],
             serde_json::json!("harn.llm.served_context.v1")
         );
+        assert_eq!(request["call_role"], serde_json::json!("llm_call"));
+        assert_eq!(served_context["call_role"], request["call_role"]);
+        assert_eq!(
+            served_context["manifest_content_hash"],
+            manifest_event["content_hash"]
+        );
+        assert_eq!(
+            stable_redacted_json_hash(&manifest_event["manifest"]),
+            manifest_event["content_hash"]
+        );
+        assert_eq!(
+            manifest_event["manifest"]["whole_prompt_digest"],
+            served_context["system_prompt_content_hash"]
+        );
+        assert_eq!(
+            manifest_event["manifest"]["system_prompt_bytes"],
+            served_context["system_prompt_bytes"]
+        );
         assert_eq!(served_context["message_count"], serde_json::json!(2));
         assert_eq!(served_context["native_tool_count"], serde_json::json!(1));
         assert_eq!(request["message_count"], serde_json::json!(2));
@@ -150,6 +166,7 @@ mod tests {
 
         for value in [
             &system["content_hash"],
+            &manifest_event["content_hash"],
             &schemas["content_hash"],
             &served_context["messages_content_hash"],
             &served_context["native_tools_content_hash"],
@@ -245,12 +262,19 @@ mod tests {
             let mut opts = crate::llm::api::options::base_opts("openai");
             opts.model = "gpt-test".to_string();
             opts.system = Some((*system).to_string());
+            opts.context_manifest = crate::llm::prompt::ContextAssemblyManifest::internal(
+                format!("test:system:{system}"),
+                "test",
+                "llm_call",
+                opts.system.as_deref(),
+            );
             opts.messages = vec![serde_json::json!({
                 "role": "user",
                 "content": format!("turn {index}"),
             })];
             opts.native_tools = Some(vec![(*tool).clone()]);
-            super::super::dump_llm_request(index, &format!("call-{index}"), "native", &opts);
+            super::super::dump_llm_request(index, &format!("call-{index}"), "native", &opts)
+                .expect("valid context manifest");
         }
 
         super::super::pop_llm_transcript_dir();
@@ -258,8 +282,10 @@ mod tests {
 
         let events = read_transcript_events(&dir);
         let mut retained_prompts: std::collections::BTreeSet<String> = Default::default();
+        let mut retained_manifests: std::collections::BTreeSet<String> = Default::default();
         let mut retained_schemas: std::collections::BTreeSet<String> = Default::default();
         let mut prompt_events = 0usize;
+        let mut manifest_events = 0usize;
         let mut schema_events = 0usize;
         let mut checked_calls = 0usize;
 
@@ -291,6 +317,19 @@ mod tests {
                     retained_schemas.insert(hash.to_string());
                     schema_events += 1;
                 }
+                "context_manifest" => {
+                    let hash = event["content_hash"]
+                        .as_str()
+                        .expect("manifest content hash");
+                    let manifest = &event["manifest"];
+                    assert_eq!(
+                        stable_redacted_json_hash(manifest),
+                        hash,
+                        "retained context manifest must re-derive its receipt hash"
+                    );
+                    retained_manifests.insert(hash.to_string());
+                    manifest_events += 1;
+                }
                 "provider_call_request" => {
                     let call_id = event["call_id"].as_str().unwrap_or_default();
                     let served = &event["served_context"];
@@ -300,6 +339,9 @@ mod tests {
                     let schema_hash = served["tool_schemas_content_hash"]
                         .as_str()
                         .expect("served schema hash");
+                    let manifest_hash = served["manifest_content_hash"]
+                        .as_str()
+                        .expect("served manifest hash");
                     assert!(
                         retained_prompts.contains(prompt_hash),
                         "{call_id} served prompt {prompt_hash} with no retained bytes in the transcript"
@@ -307,6 +349,10 @@ mod tests {
                     assert!(
                         retained_schemas.contains(schema_hash),
                         "{call_id} served schemas {schema_hash} with no retained bytes in the transcript"
+                    );
+                    assert!(
+                        retained_manifests.contains(manifest_hash),
+                        "{call_id} served context manifest {manifest_hash} with no retained bytes in the transcript"
                     );
                     checked_calls += 1;
                 }
@@ -318,12 +364,49 @@ mod tests {
         // Without suppression the join is trivially satisfied by one payload
         // event per call, so the interesting case would go uncovered.
         assert!(
-            prompt_events < plan.len() && schema_events < plan.len(),
+            prompt_events < plan.len()
+                && manifest_events < plan.len()
+                && schema_events < plan.len(),
             "deduplication must have suppressed repeats \
-             (prompts {prompt_events}, schemas {schema_events}, calls {})",
+             (prompts {prompt_events}, manifests {manifest_events}, \
+              schemas {schema_events}, calls {})",
             plan.len()
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stale_context_manifest_hard_fails_before_any_request_is_retained() {
+        let _guard = crate::llm::env_guard();
+        let dir = temp_transcript_dir("harn-stale-context-manifest");
+        let dir_string = dir.to_string_lossy().to_string();
+        super::super::push_llm_transcript_dir(&dir_string);
+
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.system = Some("assembled bytes".to_string());
+        opts.context_manifest = crate::llm::prompt::ContextAssemblyManifest::internal(
+            "test:system",
+            "test",
+            "llm_call",
+            opts.system.as_deref(),
+        );
+        opts.system = Some("mutated after assembly".to_string());
+
+        let error = super::super::dump_llm_request(0, "call-stale", "native", &opts)
+            .expect_err("stale manifest must fail closed");
+        super::super::pop_llm_transcript_dir();
+
+        assert!(
+            error
+                .to_string()
+                .contains("context assembly manifest validation failed"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !dir.join("llm_transcript.jsonl").exists(),
+            "validation must happen before retaining a provider request"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

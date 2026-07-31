@@ -670,10 +670,16 @@ fn dump_llm_request_emits_context_breakdown_typed_checkpoint_for_agent_dispatch(
     opts.session_id = Some(session_id.to_string());
     opts.model = "gpt-4o-mini".to_string();
     opts.system = Some("System policy".to_string());
+    opts.context_manifest = crate::llm::prompt::ContextAssemblyManifest::internal(
+        "test:system",
+        "test",
+        "agent_loop",
+        opts.system.as_deref(),
+    );
     opts.messages = vec![serde_json::json!({"role": "user", "content": "fix the bug"})];
     opts.max_tokens = 64;
 
-    dump_llm_request(3, "call-context-1", "json", &opts);
+    dump_llm_request(3, "call-context-1", "json", &opts).expect("valid context manifest");
 
     assert!(
         captured
@@ -697,7 +703,7 @@ fn dump_llm_request_emits_context_breakdown_typed_checkpoint_for_agent_dispatch(
         ),
     });
 
-    dump_llm_request(3, "call-context-2", "json", &opts);
+    dump_llm_request(3, "call-context-2", "json", &opts).expect("valid context manifest");
 
     let events = captured.lock().expect("captured sink mutex poisoned");
     let checkpoint = events

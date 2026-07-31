@@ -16,6 +16,9 @@
 //!
 //! - `system_prompt` `{content, hash, content_hash}` — deduped prompt;
 //!   `content_hash` is stable redacted `blake3:`.
+//! - `context_manifest` `{content_hash, manifest}` — deduped typed bill of
+//!   materials for the system prompt. `manifest.segments` records every
+//!   contributor and `whole_prompt_digest` names the served system bytes.
 //! - `tool_schemas` `{schemas, hash, content_hash}` — deduped schemas with a
 //!   stable redacted `blake3:` content hash.
 //! - `message` `{role, content, iteration?}` — single message appended to
@@ -27,11 +30,13 @@
 //!   emitted once before `provider_call_request` whenever a routing
 //!   decision was attached to the call (model/provider selection,
 //!   fallback chain, and the considered alternatives).
-//! - `provider_call_request` core `{call_id, iteration, model, provider,
+//! - `provider_call_request` core `{call_id, iteration, model, provider, call_role,
 //!   max_tokens, temperature, tool_choice, tool_format, context_token_breakdown}` —
 //!   slim metadata for a single model call.
 //!   No `messages`, `system`, or `tool_schemas` fields; those are reconstructable.
-//!   `served_context` carries stable redacted prompt/schema/tool hashes.
+//!   `served_context` carries stable redacted prompt/schema/tool hashes and
+//!   `manifest_content_hash`, which resolves to an earlier retained
+//!   `context_manifest` event.
 //!   Set `HARN_LLM_TRANSCRIPT_VERBOSE=1` to include a `request_snapshot`
 //!   object with the exact system prompt, message list, and tool schemas
 //!   attached to each request for debugging provider-context issues.
@@ -56,19 +61,21 @@
 //!   assistant turn.
 //!
 //! To reconstruct the prompt sent at `call_id=X`, replay events in order
-//! and track the last `system_prompt`, the last `tool_schemas`, and every
-//! `message` up to (but not including) the matching `provider_call_request`.
+//! and track the last `system_prompt`, `context_manifest`, and `tool_schemas`,
+//! plus every `message` up to (but not including) the matching
+//! `provider_call_request`.
 //!
-//! `system_prompt` and `tool_schemas` are emitted only when their payload
-//! changes, so a call's `served_context` hashes usually point at an earlier
-//! line. Two guarantees make those hashes receipts rather than labels, both
+//! `system_prompt`, `context_manifest`, and `tool_schemas` are emitted only
+//! when their payload changes, so a call's `served_context` hashes usually
+//! point at an earlier line. Two guarantees make those hashes receipts rather than labels, both
 //! enforced by
 //! `served_context_hashes_resolve_to_retained_bytes_across_a_multi_call_run`:
 //! every `served_context` hash resolves to a payload event earlier in the
 //! same transcript, and re-hashing that retained payload reproduces the hash
 //! (entries are redacted on write and the hash is taken over the redacted
-//! form). Forensics can therefore read the exact prompt and schemas a given
-//! call was served instead of inferring them from a later normalization.
+//! form). Forensics can therefore read the exact prompt, its assembly bill of
+//! materials, and schemas a given call was served instead of inferring them
+//! from a later normalization.
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -90,7 +97,9 @@ mod raw_tool_receipts;
 mod served_context_receipts;
 mod transcript_ambient;
 
-use transcript_ambient::{current_transcript_dir, system_prompt_changed, tool_schemas_changed};
+use transcript_ambient::{
+    context_manifest_changed, current_transcript_dir, system_prompt_changed, tool_schemas_changed,
+};
 pub(crate) use transcript_ambient::{
     pop_llm_transcript_dir, push_llm_transcript_dir, swap_llm_transcript_ambient,
     LlmTranscriptAmbient,
@@ -700,7 +709,7 @@ pub(crate) async fn observed_llm_call(
             &call_id,
             &effective_tool_format,
             opts,
-        );
+        )?;
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();

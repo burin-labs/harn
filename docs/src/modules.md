@@ -1426,7 +1426,7 @@ GUARANTEED / OPTIONAL / MODEL / REDACTED / UNSTABLE in the module source.
 | `transcript_context_contract()` / `read_transcript_context_result(path, options?)` | Contract + bounded fold reconstructing provider/model/system context |
 | `agent_transcript_path(run, name?)` | Resolve the standard `agent-llm/llm_transcript.jsonl` path for a run |
 
-Stable event families: `system_prompt`, `tool_schemas`, `routing_decision`,
+Stable event families: `system_prompt`, `context_manifest`, `tool_schemas`, `routing_decision`,
 `provider_call_request`, `provider_call_response`, `resolved_dispatch`. Legacy
 transcripts and results (no `schema_version`) read as version 1; the current
 typed contract is version 2.

@@ -69,6 +69,7 @@ pub const LLM_CALL_OPTION_FIELDS: &[ShapeFieldDescriptor] = &[
     ShapeFieldDescriptor::optional("system", SYSTEM_PROMPT),
     ShapeFieldDescriptor::optional("messages", TY_LIST),
     ShapeFieldDescriptor::optional("session_id", TY_STRING),
+    ShapeFieldDescriptor::optional("call_role", TY_STRING),
     ShapeFieldDescriptor::optional("rate_limit_consumer_id", TY_STRING),
     ShapeFieldDescriptor::optional("mock_scope", TY_STRING),
     ShapeFieldDescriptor::optional("context_profile", TY_DICT),

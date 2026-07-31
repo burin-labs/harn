@@ -429,12 +429,18 @@ fn assemble_records_provenance_for_every_fragment() {
     let assembled =
         assemble_system_prompt(Some("base".to_string()), Some(&options), &[]).expect("assembled");
     // system[0], primary, tool:todo.guidance — all included.
-    let ids: Vec<&str> = assembled.provenance.iter().map(|t| t.id.as_str()).collect();
+    let ids: Vec<&str> = assembled
+        .manifest()
+        .segments()
+        .iter()
+        .map(|t| t.id.as_str())
+        .collect();
     assert!(ids.contains(&"system[0]"));
     assert!(ids.contains(&"primary"));
     assert!(ids.contains(&"tool:todo.guidance"));
     let todo = assembled
-        .provenance
+        .manifest()
+        .segments()
         .iter()
         .find(|t| t.id == "tool:todo.guidance")
         .expect("todo guidance trace");
@@ -484,7 +490,12 @@ fn system_fragments_expand_in_place_of_the_single_primary() {
 
     // Each part is its own provenance entry; there is no opaque `primary`.
     let assembled = assemble_system_prompt(None, Some(&decomposed), &[]).expect("assembled");
-    let ids: Vec<&str> = assembled.provenance.iter().map(|t| t.id.as_str()).collect();
+    let ids: Vec<&str> = assembled
+        .manifest()
+        .segments()
+        .iter()
+        .map(|t| t.id.as_str())
+        .collect();
     assert!(ids.contains(&"primary:system"));
     assert!(ids.contains(&"primary:active_skills"));
     assert!(ids.contains(&"primary:loop_contract"));
@@ -533,7 +544,8 @@ fn system_fragments_honor_per_part_tool_gating() {
     let assembled = assemble_system_prompt(None, Some(&options), &[]).expect("assembled");
     assert_eq!(assembled.system, None);
     let trace = assembled
-        .provenance
+        .manifest()
+        .segments()
         .iter()
         .find(|t| t.id == "primary:todo_nudge")
         .expect("nudge trace");
@@ -572,7 +584,8 @@ fn system_fragments_can_target_the_tail_bucket() {
 
     let assembled = assemble_system_prompt(None, Some(&options), &[]).expect("assembled");
     let trace = assembled
-        .provenance
+        .manifest()
+        .segments()
         .iter()
         .find(|t| t.id == "primary:scratchpad")
         .expect("scratchpad trace");
@@ -647,10 +660,29 @@ fn context_profile_fragments_join_prompt_explain_provenance() {
         Some("Use GitHub-aware workflows.")
     );
     let trace = assembled
-        .provenance
+        .manifest()
+        .segments()
         .iter()
         .find(|trace| trace.id == "profile:github")
         .expect("profile trace");
     assert!(trace.included);
     assert!(trace.reason.contains("capabilit"));
+}
+
+#[test]
+fn context_manifest_carries_the_current_delegated_actor_chain() {
+    crate::reset_thread_local_state();
+    let chain = crate::ActorChain::new("user:test-owner").pushed("agent:reviewer");
+    let session_id = crate::agent_sessions::open_or_create_with_actor_chain(
+        Some("context-manifest-actor-chain".to_string()),
+        Some(chain.clone()),
+    );
+    let _session = crate::agent_sessions::enter_current_session(session_id);
+
+    let assembled =
+        assemble_system_prompt(Some("review carefully".to_string()), None, &[]).expect("assembled");
+    assert_eq!(
+        assembled.manifest().actor_chain(),
+        Some(&chain.to_json_value())
+    );
 }

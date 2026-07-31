@@ -6,6 +6,7 @@ thread_local! {
     /// Last-emitted hashes for the current transcript. These avoid writing
     /// identical prompt and schema payloads once per request.
     static LAST_SYSTEM_PROMPT_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
+    static LAST_CONTEXT_MANIFEST_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
     static LAST_TOOL_SCHEMAS_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
     static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
@@ -16,6 +17,7 @@ thread_local! {
 #[derive(Clone, Default)]
 pub(crate) struct LlmTranscriptAmbient {
     system_prompt_hash: Option<u64>,
+    context_manifest_hash: Option<u64>,
     tool_schemas_hash: Option<u64>,
     transcript_dirs: Vec<String>,
 }
@@ -27,6 +29,9 @@ pub(crate) fn swap_llm_transcript_ambient(
         system_prompt_hash: LAST_SYSTEM_PROMPT_HASH.with(|slot| {
             std::mem::replace(&mut *slot.borrow_mut(), replacement.system_prompt_hash)
         }),
+        context_manifest_hash: LAST_CONTEXT_MANIFEST_HASH.with(|slot| {
+            std::mem::replace(&mut *slot.borrow_mut(), replacement.context_manifest_hash)
+        }),
         tool_schemas_hash: LAST_TOOL_SCHEMAS_HASH
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.tool_schemas_hash)),
         transcript_dirs: TRANSCRIPT_DIR_STACK
@@ -36,11 +41,16 @@ pub(crate) fn swap_llm_transcript_ambient(
 
 fn reset_deduplication() {
     LAST_SYSTEM_PROMPT_HASH.with(|hash| *hash.borrow_mut() = None);
+    LAST_CONTEXT_MANIFEST_HASH.with(|hash| *hash.borrow_mut() = None);
     LAST_TOOL_SCHEMAS_HASH.with(|hash| *hash.borrow_mut() = None);
 }
 
 pub(super) fn system_prompt_changed(current: u64) -> bool {
     hash_changed(&LAST_SYSTEM_PROMPT_HASH, current)
+}
+
+pub(super) fn context_manifest_changed(current: u64) -> bool {
+    hash_changed(&LAST_CONTEXT_MANIFEST_HASH, current)
 }
 
 pub(super) fn tool_schemas_changed(current: u64) -> bool {

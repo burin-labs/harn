@@ -869,6 +869,23 @@ pub fn with_llm_script(turns, body) {
   return with_llm_mocks(turns, body)
 }
 
+/**
+ * Run a mocked delegated-agent fixture with a bounded nested-execution
+ * allowance. This is deliberately available only inside an active
+ * `with_llm_mocks` / `with_llm_script` scope, so it cannot waive production
+ * recursion policy or dispatch real provider work.
+ *
+ * `depth` counts remaining Harn-owned child descents. `agent_fanout` normally
+ * needs two: one for `sub_agent_run`, one for the child's `agent_loop`.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @example: with_llm_script([llm_done()], { -> with_nested_execution_budget(2, { -> agent_fanout(["check"]) }) })
+ */
+pub fn with_nested_execution_budget<T>(depth: int, body) -> T {
+  return __testing_with_nested_execution_budget(depth, body)
+}
+
 // -------------------------------------------------------------------------------------------------
 
 // Error assertions
