@@ -605,6 +605,64 @@ pipeline main(harness: Harness) {{
     harn_vm::reset_thread_local_state();
 }
 
+/// The runtime's implicit file-scoped process grant must survive an
+/// intermediate wrapper. This is the canonical shape used by performance
+/// checks (`sh` -> `/usr/bin/time` -> `harn`) and is materially different from
+/// naming Harn as the immediate `process.run` program.
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_run_allows_transitive_runtime_reexecution() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+
+    // During this integration test the current executable is the harn-cli
+    // test binary. It lives outside `project`, so the wrapper can execute it
+    // only if default_run_capability_policy supplied the exact implicit root.
+    let runtime = std::env::current_exe()
+        .expect("current executable")
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main(harness: Harness) {{
+  const result = harness.process.run({{
+    program: "sh",
+    args: ["-c", "\"$1\" --help >/dev/null", "_", "{runtime}"],
+  }})
+  if !result.success {{
+    throw "transitive runtime execution failed: exit=${{result.exit_code}} stderr=${{result.stderr}}"
+  }}
+}}
+"#
+        ),
+    )
+    .expect("write script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    harn_vm::reset_thread_local_state();
+}
+
 /// A `--grant NAME=env:SRC,expose=CHILD,for=sh` granted policy must inject the
 /// snapshotted value into a matching subprocess only — the least-privilege
 /// surface that lets a headless lane open its PR (`GH_TOKEN` for `gh`) without

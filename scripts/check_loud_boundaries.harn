@@ -92,7 +92,7 @@ pub fn is_exempt_site(path: string) -> bool {
 }
 
 /**
- * Parse `git grep -n` output into construction sites.
+ * Parse `rg --line-number` output into construction sites.
  *
  * Rust sites are `BoundaryId::Variant` mentions; the variant is mapped back to
  * its wire id through `wire_strings` so a rename cannot slip past by keeping the
@@ -388,23 +388,34 @@ pub fn evaluate(
   return findings + audited_findings(registry?.audited ?? [], existing_paths, contents)
 }
 
-fn git_grep(
+fn source_grep(
   process: HarnessProcess,
+  stdio: HarnessStdio,
   root: string,
   pattern: string,
   globs: list<string>,
 ) -> string? {
-  // `--untracked` is load-bearing, not a convenience. Without it the gate reads
-  // only committed files, so the exact case it exists for — a brand-new file
-  // that starts reporting a boundary nobody registered — would pass locally and
-  // only fail once CI saw the commit.
-  let args = ["-C", root, "grep", "-I", "-n", "-F", "--untracked", "-e", pattern, "--"]
+  // ripgrep respects repository ignore files while still scanning untracked
+  // source. The latter is load-bearing: a brand-new construction site must
+  // fail before it is committed, not only after CI sees it.
+  let args = ["--line-number", "--fixed-strings", "--no-heading", "--color", "never"]
   for glob in globs {
-    args = args.appending(glob)
+    args = args + ["--glob", glob]
   }
-  const result = process.run({program: "git", args: args})
+  args = args + [pattern, "crates"]
+  const result = process.run({program: "rg", args: args, cwd: root})
   // 1 means "no matches", which is a legitimate (if alarming) answer.
   if result.exit_code != 0 && result.exit_code != 1 {
+    const detail = result.stderr.trim()
+    if detail != "" {
+      stdio.eprintln(
+        "::error::source scan exited ${result.exit_code} while scanning `${pattern}`: ${detail}",
+      )
+    } else {
+      stdio.eprintln(
+        "::error::source scan exited ${result.exit_code} while scanning `${pattern}` with no stderr",
+      )
+    }
     return nil
   }
   return result.stdout
@@ -448,10 +459,16 @@ pipeline main(harness: Harness, task) {
     )
     return 1
   }
-  const rust_grep = git_grep(harness.process, root, "BoundaryId::", ["crates/*.rs"])
-  const harn_grep = git_grep(harness.process, root, HARN_SITE_MARKER, ["crates/*.harn"])
+  const rust_grep = source_grep(harness.process, harness.stdio, root, "BoundaryId::", ["**/*.rs"])
+  const harn_grep = source_grep(
+    harness.process,
+    harness.stdio,
+    root,
+    HARN_SITE_MARKER,
+    ["**/*.harn"],
+  )
   if rust_grep == nil || harn_grep == nil {
-    harness.stdio.eprintln("::error::git grep failed; cannot scan for boundary construction sites")
+    harness.stdio.eprintln("::error::source scan failed; cannot scan boundary construction sites")
     return 1
   }
   let sites: list<BoundarySite> = []

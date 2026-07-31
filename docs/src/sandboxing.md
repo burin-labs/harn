@@ -291,6 +291,13 @@ manager/proxy/CA variables at readable files, and keep network side effects
 disabled; if a tool must reach a corporate proxy, the active policy still needs
 to allow network side effects.
 
+The `harn run` boundary also grants subprocesses read/execute access to the
+exact Harn runtime executable for that invocation. This file-scoped grant lets
+scripts delegate back to the verified runtime through wrappers such as `sh` or
+`/usr/bin/time`, including when the binary came from a temporary CI artifact.
+It does not expose the runtime's containing directory and does not grant Harn
+filesystem builtins any additional authority.
+
 Direct CLI runs expose the same process-only policy without requiring a
 manifest edit:
 
