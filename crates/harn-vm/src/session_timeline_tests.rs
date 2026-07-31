@@ -3,7 +3,8 @@ use crate::event_log::{FileEventLog, MemoryEventLog};
 use crate::orchestration::{save_run_record, RunRecord};
 use futures::StreamExt;
 use harn_session_store::{
-    AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
+    AppendEvent, CreateSession, ImportSession, SessionEventKind, SessionImporter, SessionStore,
+    SqliteSessionStore,
 };
 use serde_json::json;
 
@@ -118,6 +119,74 @@ async fn persisted_transcript_projects_stable_tool_revision_and_identity_links()
             .get("session-store:session-1")
             .copied(),
         Some(2)
+    );
+}
+
+#[tokio::test]
+async fn persisted_10k_event_tool_timeline_opens_under_500ms() {
+    let temp = tempfile::tempdir().expect("project root");
+    let store = SqliteSessionStore::open(temp.path().join("session-store.sqlite"))
+        .expect("canonical store");
+    let mut events = Vec::with_capacity(10_000);
+    for index in 0..5_000 {
+        let tool_call_id = format!("tool-{index}");
+        let mut call = AppendEvent::new(
+            SessionEventKind::ToolCall,
+            json!({"transcript_event": {"metadata": {"tool_name": "read_file"}}}),
+        );
+        call.headers
+            .insert("tool_call_id".to_string(), tool_call_id.clone());
+        call.headers
+            .insert("run_id".to_string(), "perf-run".to_string());
+        call.headers
+            .insert("turn_id".to_string(), "perf-turn".to_string());
+        let mut result = AppendEvent::new(
+            SessionEventKind::ToolResult,
+            json!({"transcript_event": {"metadata": {"is_error": false}}}),
+        );
+        result
+            .headers
+            .insert("tool_call_id".to_string(), tool_call_id);
+        result
+            .headers
+            .insert("run_id".to_string(), "perf-run".to_string());
+        result
+            .headers
+            .insert("turn_id".to_string(), "perf-turn".to_string());
+        events.extend([call, result]);
+    }
+    store
+        .import(ImportSession {
+            source_id: "timeline-perf-corpus".to_string(),
+            source_digest: "sha256:timeline-perf-corpus".to_string(),
+            session: CreateSession {
+                id: Some("timeline-perf-session".to_string()),
+                project_scope: Some(temp.path().to_string_lossy().into_owned()),
+                ..CreateSession::default()
+            },
+            events,
+        })
+        .await
+        .expect("import timeline corpus");
+
+    let started = std::time::Instant::now();
+    let snapshot = query_session_store_timeline(
+        &store,
+        SessionTimelineQuery {
+            limit: Some(10_000),
+            ..SessionTimelineQuery::for_session("timeline-perf-session")
+        },
+    )
+    .await
+    .expect("project timeline")
+    .expect("session exists");
+    let elapsed = started.elapsed();
+    eprintln!("10k-event tool timeline elapsed: {elapsed:?}");
+
+    assert_eq!(snapshot.nodes.len(), 5_000);
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "10k-event timeline took {elapsed:?}"
     );
 }
 

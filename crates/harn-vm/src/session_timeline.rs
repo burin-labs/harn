@@ -4,7 +4,7 @@
 //! spans and event-log topics into one stable, redacted shape that clients can
 //! query or subscribe to without learning Harn's storage internals.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -354,6 +354,7 @@ struct TimelineBuilder {
     query: SessionTimelineQuery,
     cursor: SessionTimelineCursor,
     nodes: Vec<TimelineDraft>,
+    node_positions: HashMap<String, usize>,
 }
 
 impl TimelineBuilder {
@@ -362,7 +363,14 @@ impl TimelineBuilder {
             cursor: query.from_cursor.clone(),
             query,
             nodes: Vec::new(),
+            node_positions: HashMap::new(),
         }
+    }
+
+    fn push(&mut self, draft: TimelineDraft) {
+        self.node_positions
+            .insert(draft.node.id.clone(), self.nodes.len());
+        self.nodes.push(draft);
     }
 
     fn add_run_spans(&mut self, run: &RunRecord, policy: &RedactionPolicy) {
@@ -371,7 +379,7 @@ impl TimelineBuilder {
                 continue;
             }
             let node = span_node(span, policy);
-            self.nodes.push(TimelineDraft {
+            self.push(TimelineDraft {
                 sort_ms: i128::from(span.start_ms),
                 node,
             });
@@ -387,7 +395,8 @@ impl TimelineBuilder {
             &event.kind,
             SessionEventKind::ToolCall | SessionEventKind::ToolResult
         ) {
-            if let Some(existing) = self.nodes.iter_mut().find(|draft| draft.node.id == node.id) {
+            if let Some(index) = self.node_positions.get(&node.id).copied() {
+                let existing = &mut self.nodes[index];
                 if is_tool_result {
                     node.start_ms = existing
                         .node
@@ -405,7 +414,7 @@ impl TimelineBuilder {
                 return;
             }
         }
-        self.nodes.push(TimelineDraft { sort_ms, node });
+        self.push(TimelineDraft { sort_ms, node });
     }
 
     async fn add_event_log(
@@ -430,7 +439,7 @@ impl TimelineBuilder {
                             .map(i128::from)
                             .or_else(|| node.start_ms.map(i128::from))
                             .unwrap_or(i128::from(event_id));
-                        self.nodes.push(TimelineDraft { sort_ms, node });
+                        self.push(TimelineDraft { sort_ms, node });
                     }
                 }
                 if batch_len < READ_BATCH_SIZE || self.nodes.len() >= self.query.limit() {
