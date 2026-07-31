@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 
 use harn_session_store::{
-    AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionStore,
+    AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionStore, SessionType,
     SqliteSessionStore,
 };
 
@@ -85,7 +85,30 @@ pub(crate) async fn prepare(
     turn_id: String,
 ) -> Result<PreparedJournal, VmError> {
     let state_dir = session_store::canonical_store_state_dir(Some(options))?;
-    let store = session_store::open_canonical_agent_session(&state_dir, session_id).await?;
+    let parent_session_id = options
+        .get("parent_session_id")
+        .and_then(|value| match value {
+            crate::value::VmValue::String(value) if !value.trim().is_empty() => {
+                Some(value.to_string())
+            }
+            _ => None,
+        });
+    let session_type = match options.get("session_type") {
+        Some(crate::value::VmValue::String(value)) if value.as_str() == "subagent" => {
+            SessionType::Subagent
+        }
+        Some(crate::value::VmValue::String(value)) if value.as_str() == "scheduled" => {
+            SessionType::Scheduled
+        }
+        _ => SessionType::User,
+    };
+    let store = session_store::open_canonical_agent_session(
+        &state_dir,
+        session_id,
+        parent_session_id,
+        session_type,
+    )
+    .await?;
     let events = session_store::read_all_events(&store, session_id).await?;
     Ok(PreparedJournal {
         transcript: hydrate_events(events),
@@ -487,6 +510,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn journal_records_subagent_lineage_at_session_creation() {
+        let root = tempfile::tempdir().expect("temp root");
+        let mut options = options(root.path());
+        options.put_str("parent_session_id", "parent-session");
+        options.put_str("session_type", "subagent");
+
+        let prepared = prepare(
+            "child-session",
+            &options,
+            "child-run".to_string(),
+            "child-turn".to_string(),
+        )
+        .await
+        .expect("prepare child journal");
+        let meta = prepared
+            .state
+            .config
+            .store
+            .describe("child-session")
+            .await
+            .expect("describe child session");
+
+        assert_eq!(meta.parent_session_id.as_deref(), Some("parent-session"));
+        assert_eq!(meta.session_type, Some(SessionType::Subagent));
+        assert_eq!(
+            meta.project_scope.as_deref(),
+            Some(root.path().to_string_lossy().as_ref())
+        );
+    }
+
+    #[tokio::test]
     async fn journal_persists_identity_hydrates_and_replays_replacements() {
         crate::agent_sessions::reset_session_store();
         let root = tempfile::tempdir().expect("temp root");
@@ -521,6 +575,8 @@ mod tests {
         let store = session_store::open_canonical_agent_session(
             &session_store::SessionStoreDir::under_root(root.path()),
             session_id,
+            None,
+            SessionType::User,
         )
         .await
         .expect("open canonical store");
@@ -792,6 +848,8 @@ pipeline main(task) {{
         let store = session_store::open_canonical_agent_session(
             &session_store::SessionStoreDir::under_root(root.path()),
             session_id,
+            None,
+            SessionType::User,
         )
         .await
         .expect("open canonical store");

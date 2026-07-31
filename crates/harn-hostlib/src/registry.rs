@@ -187,6 +187,26 @@ impl BuiltinRegistry {
         });
     }
 
+    pub(crate) fn register_async_fn<F, Fut>(
+        &mut self,
+        module: &'static str,
+        name: &'static str,
+        method: &'static str,
+        runner: F,
+    ) where
+        F: Fn(Vec<VmValue>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<VmValue, HostlibError>> + Send + 'static,
+    {
+        let runner = Arc::new(runner);
+        let handler: AsyncHandler = Arc::new(move |args| Box::pin(runner(args)));
+        self.async_builtins.push(RegisteredAsyncBuiltin {
+            name,
+            module,
+            method,
+            handler,
+        });
+    }
+
     fn uses_command_policy(&self, name: &str) -> bool {
         self.command_policy_builtins.contains(name)
     }

@@ -10,6 +10,9 @@ use std::sync::Arc;
 
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
+use harn_session_store::{
+    ListFilter, ReadRange, SessionEventKind, SessionMeta, SessionStore, StoredEvent, MAX_READ_BATCH,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::event_log::{AnyEventLog, EventId, EventLog, LogError, LogEvent, Topic};
@@ -161,6 +164,7 @@ pub struct SessionTimelineLink {
 pub enum SessionTimelineError {
     EventLog(LogError),
     RunRecord(String),
+    SessionStore(String),
 }
 
 impl std::fmt::Display for SessionTimelineError {
@@ -168,6 +172,7 @@ impl std::fmt::Display for SessionTimelineError {
         match self {
             Self::EventLog(error) => error.fmt(f),
             Self::RunRecord(message) => f.write_str(message),
+            Self::SessionStore(message) => f.write_str(message),
         }
     }
 }
@@ -226,6 +231,75 @@ pub async fn query_session_timeline(
         builder.add_event_log(log, &policy).await?;
     }
     Ok(builder.finish())
+}
+
+/// Project durable canonical transcript rows into the same timeline contract
+/// used by live observability. Returns `None` when the project has no canonical
+/// store or the requested session does not exist.
+pub async fn query_persisted_session_timeline(
+    project_root: &Path,
+    query: SessionTimelineQuery,
+) -> Result<Option<SessionTimelineSnapshot>, SessionTimelineError> {
+    let Some(session_id) = query.session_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(store) = crate::stdlib::session_store::open_existing_canonical_store(project_root)
+        .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))?
+    else {
+        return Ok(None);
+    };
+    match store.describe(session_id).await {
+        Ok(_) => {}
+        Err(harn_session_store::StoreError::NotFound(_)) => return Ok(None),
+        Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
+    }
+
+    let topic = canonical_session_topic(session_id);
+    let mut from = query.from_cursor.topics.get(&topic).copied();
+    let mut builder = TimelineBuilder::new(query.clone());
+    loop {
+        let remaining = query.limit().saturating_sub(builder.nodes.len()).max(1);
+        let page = store
+            .read(
+                session_id,
+                ReadRange {
+                    from_event_id: from,
+                    limit: Some(remaining.min(MAX_READ_BATCH)),
+                    ..ReadRange::default()
+                },
+            )
+            .await
+            .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))?;
+        for event in page.events {
+            builder.add_stored_event(&topic, event);
+        }
+        if page.next_cursor.is_none() || builder.nodes.len() >= query.limit() {
+            break;
+        }
+        from = page.next_cursor;
+    }
+    Ok(Some(builder.finish()))
+}
+
+/// List canonical sessions for one project without exposing SQLite layout or
+/// schema policy to product clients.
+pub async fn list_persisted_sessions(
+    project_root: &Path,
+    limit: usize,
+) -> Result<Vec<SessionMeta>, SessionTimelineError> {
+    let Some(store) = crate::stdlib::session_store::open_existing_canonical_store(project_root)
+        .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))?
+    else {
+        return Ok(Vec::new());
+    };
+    store
+        .list(ListFilter {
+            project_scope: Some(project_root.to_string_lossy().into_owned()),
+            limit: Some(limit),
+            ..ListFilter::default()
+        })
+        .await
+        .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))
 }
 
 pub async fn subscribe_session_timeline(
@@ -290,6 +364,22 @@ impl TimelineBuilder {
                 node,
             });
         }
+    }
+
+    fn add_stored_event(&mut self, topic: &str, event: StoredEvent) {
+        self.cursor.bump(topic, event.event_id);
+        let node = stored_event_node(&event);
+        let sort_ms = i128::from(event.ts_ms);
+        if matches!(
+            &event.kind,
+            SessionEventKind::ToolCall | SessionEventKind::ToolResult
+        ) {
+            if let Some(existing) = self.nodes.iter_mut().find(|draft| draft.node.id == node.id) {
+                existing.node = node;
+                return;
+            }
+        }
+        self.nodes.push(TimelineDraft { sort_ms, node });
     }
 
     async fn add_event_log(
@@ -370,6 +460,135 @@ impl TimelineBuilder {
             cursor: self.cursor,
             nodes,
         }
+    }
+}
+
+fn canonical_session_topic(session_id: &str) -> String {
+    format!("session-store:{session_id}")
+}
+
+fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
+    let source_event_id = event.headers.get("source_event_id").cloned();
+    let message_id = event.headers.get("message_id").cloned();
+    let tool_call_id = event.headers.get("tool_call_id").cloned();
+    let run_id = event.headers.get("run_id").cloned();
+    let turn_id = event.headers.get("turn_id").cloned();
+    let id = tool_call_id
+        .as_ref()
+        .zip(run_id.as_ref())
+        .zip(turn_id.as_ref())
+        .filter(|_| {
+            matches!(
+                &event.kind,
+                SessionEventKind::ToolCall | SessionEventKind::ToolResult
+            )
+        })
+        .map(|((tool_call_id, run_id), turn_id)| {
+            format!(
+                "session:{}:run:{run_id}:turn:{turn_id}:tool:{tool_call_id}",
+                event.session_id
+            )
+        })
+        .or_else(|| {
+            source_event_id
+                .as_ref()
+                .map(|id| format!("session:{}:source:{id}", event.session_id))
+        })
+        .unwrap_or_else(|| format!("session:{}:event:{}", event.session_id, event.event_id));
+    let category = match &event.kind {
+        SessionEventKind::Message => "message",
+        SessionEventKind::ToolCall | SessionEventKind::ToolResult => "tool",
+        SessionEventKind::Plan => "plan",
+        SessionEventKind::Compaction => "compaction",
+        SessionEventKind::PermissionDecision => "permission",
+        SessionEventKind::Receipt => "receipt",
+        _ => "event",
+    }
+    .to_string();
+    let status = match &event.kind {
+        SessionEventKind::ToolCall => "running",
+        SessionEventKind::ToolResult => tool_result_status(event),
+        SessionEventKind::Custom { custom_type } if custom_type == "agent_run_terminal" => event
+            .payload
+            .pointer("/transcript_event/metadata/final_status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("completed"),
+        _ => "completed",
+    }
+    .to_string();
+    let name = event
+        .payload
+        .pointer("/transcript_event/text")
+        .and_then(serde_json::Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .or_else(|| {
+            event
+                .payload
+                .pointer("/raw_message/content")
+                .and_then(serde_json::Value::as_str)
+                .filter(|text| !text.trim().is_empty())
+        })
+        .unwrap_or_else(|| event.kind.discriminator())
+        .to_string();
+    let links = [
+        ("run", run_id),
+        ("turn", turn_id),
+        ("source_event", source_event_id),
+        ("message", message_id),
+        ("tool_call", tool_call_id),
+    ]
+    .into_iter()
+    .filter_map(|(kind, target_id)| {
+        target_id.map(|target_id| SessionTimelineLink {
+            kind: kind.to_string(),
+            target_id: Some(target_id),
+            trace_id: None,
+            span_id: None,
+            event_id: None,
+        })
+    })
+    .collect();
+    let mut attributes = event.payload.clone();
+    if let serde_json::Value::Object(attributes) = &mut attributes {
+        attributes.insert("sessionId".to_string(), event.session_id.clone().into());
+        attributes.insert("revision".to_string(), event.event_id.into());
+        attributes.insert("recordHash".to_string(), event.record_hash.clone().into());
+    }
+    SessionTimelineNode {
+        id,
+        parent_id: None,
+        children: Vec::new(),
+        category,
+        kind: event.kind.discriminator().to_string(),
+        name,
+        status,
+        trace_id: None,
+        span_id: None,
+        occurred_at_ms: Some(event.ts_ms),
+        start_ms: None,
+        duration_ms: None,
+        attributes,
+        references: vec![SessionTimelineReference {
+            kind: "session_event".to_string(),
+            id: Some(event.session_id.clone()),
+            topic: Some(canonical_session_topic(&event.session_id)),
+            event_id: Some(event.event_id),
+        }],
+        links,
+        order: 0,
+    }
+}
+
+fn tool_result_status(event: &StoredEvent) -> &'static str {
+    if event
+        .payload
+        .pointer("/transcript_event/metadata/is_error")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        "failed"
+    } else {
+        "completed"
     }
 }
 

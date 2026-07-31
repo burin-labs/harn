@@ -57,6 +57,37 @@ pub type SessionStoreVerifyReport = {
   reason?: string?,
 }
 
+pub type SessionStoreSearchMode = "fts" | "semantic" | "hybrid"
+
+pub type SessionStoreSearchOptions = {
+  root?: string,
+  tenant_id?: string,
+  project_scope?: string,
+  session_id?: string,
+  mode?: SessionStoreSearchMode,
+  limit?: int,
+}
+
+pub type SessionStoreSearchHit = {
+  session_id: string,
+  event_id: int,
+  kind: SessionStoreEventKind,
+  score: float,
+  fts_score?: float?,
+  semantic_score?: float?,
+  snippet: string,
+  event: SessionStoreEvent,
+}
+
+pub type SessionStoreSearchResponse = {
+  requested_mode: SessionStoreSearchMode,
+  effective_mode: SessionStoreSearchMode,
+  embedding_backend: string,
+  semantic_floor: bool,
+  fallback_reason?: string?,
+  hits: list<SessionStoreSearchHit>,
+}
+
 fn __session_store_event(raw: dict) -> SessionStoreEvent {
   return {
     event_id: raw.event_id,
@@ -86,6 +117,31 @@ fn __session_store_verify_report(raw: dict) -> SessionStoreVerifyReport {
     chain_root_hash: raw.chain_root_hash,
     broken_at: raw.broken_at,
     reason: raw.reason,
+  }
+}
+
+fn __session_store_search_response(raw: dict) -> SessionStoreSearchResponse {
+  return {
+    requested_mode: raw.requested_mode,
+    effective_mode: raw.effective_mode,
+    embedding_backend: raw.embedding_backend,
+    semantic_floor: raw.semantic_floor,
+    fallback_reason: raw.fallback_reason,
+    hits: raw.hits.map(
+      { hit ->
+        return {
+          session_id: hit.session_id,
+          event_id: hit.event_id,
+          kind: hit.kind,
+          score: hit.score,
+          fts_score: hit.fts_score,
+          semantic_score: hit.semantic_score,
+          snippet: hit.snippet,
+          event: __session_store_event(hit.event),
+        }
+      },
+    )
+      .to_list(),
   }
 }
 
@@ -228,6 +284,25 @@ pub fn session_store_verify(
   options: SessionStoreOptions? = nil,
 ) -> SessionStoreVerifyReport {
   return __session_store_verify_report(__session_store_verify(session_id, options))
+}
+
+/**
+ * Search canonical redacted session events. The store owns scope filtering,
+ * FTS ranking, semantic/hybrid fusion, and fallback reporting.
+ *
+ * `effective_mode` reports the ranking path that actually ran. With no
+ * semantic embedding backend, semantic and hybrid requests return the
+ * deterministic FTS-only fallback instead of failing or claiming semantic
+ * recall.
+ *
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read]
+ * @errors: [runtime]
+ */
+pub fn session_store_search(
+  query: string,
+  options: SessionStoreSearchOptions? = nil,
+) -> SessionStoreSearchResponse {
+  return __session_store_search_response(__session_store_search(query, options))
 }
 
 /**

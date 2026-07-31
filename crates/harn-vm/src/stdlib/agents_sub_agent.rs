@@ -130,6 +130,10 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
         .unwrap_or_else(|| "sub-agent".to_string());
     annotate_nested_execution_options(&mut options, NestedExecutionKind::SubAgentRun, &name);
     let parent_session_id = crate::llm::current_agent_session_id();
+    if let Some(parent_session_id) = parent_session_id.as_deref() {
+        options.put_str("parent_session_id", parent_session_id);
+    }
+    options.put_str("session_type", "subagent");
     let reminder_propagation = match parser.optional_list("reminder_propagation")? {
         Some(reminders) => reminders
             .iter()

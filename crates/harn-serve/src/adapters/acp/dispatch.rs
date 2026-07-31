@@ -266,7 +266,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_list(&id, &params);
+                self.handle_session_list(&id, &params).await;
             }
             "harn.session_workspace_roots" => {
                 if self.reject_unauthenticated(&id) {

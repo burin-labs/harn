@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/list.request.json",
+  "title": "session.list request",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string", "minLength": 1 },
+    "filter": { "type": "object" }
+  },
+  "required": ["root"],
+  "additionalProperties": false
+}

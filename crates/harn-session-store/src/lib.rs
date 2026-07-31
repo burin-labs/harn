@@ -25,6 +25,7 @@ pub mod memory;
 pub(crate) mod memory_helpers;
 pub mod redaction;
 pub mod retention;
+pub mod search;
 pub mod signing;
 pub mod sqlite;
 pub mod store;
@@ -37,6 +38,10 @@ pub use identity::{EventIdentity, EventIdentityError, EventIdentityField};
 pub use memory::MemorySessionStore;
 pub use redaction::{EventRedactor, SharedEventRedactor};
 pub use retention::{ArchiveSink, RetentionPolicy, SharedArchiveSink, Tombstone};
+pub use search::{
+    cosine, default_embedder, event_search_text, Embedder, LexicalEmbedder, SearchFilter,
+    SearchHit, SearchMode, SearchQuery, SearchResponse, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT,
+};
 pub use signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
     verify_event, verify_event_chain, verify_receipt_root, verify_session_chain, SessionSigner,
@@ -45,7 +50,7 @@ pub use signing::{
 pub use sqlite::SqliteSessionStore;
 pub use store::{
     CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
-    SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, SharedSessionStore,
-    Snapshot, SnapshotId, StoreContention, StoreError, StoreHooks, StoreResult, SweepReport,
-    TruncateResult, VerifyFailure, VerifyReport, MAX_READ_BATCH,
+    SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, SessionType,
+    SharedSessionStore, Snapshot, SnapshotId, StoreContention, StoreError, StoreHooks, StoreResult,
+    SweepReport, TruncateResult, UpdateSession, VerifyFailure, VerifyReport, MAX_READ_BATCH,
 };

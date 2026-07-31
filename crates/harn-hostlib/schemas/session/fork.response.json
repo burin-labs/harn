@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/fork.response.json",
+  "title": "session.fork response",
+  "type": "object",
+  "required": ["child_session_id", "forked_from_event_id", "copied_event_count"],
+  "additionalProperties": true
+}

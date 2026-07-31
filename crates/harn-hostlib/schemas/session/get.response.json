@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/get.response.json",
+  "title": "session.get response",
+  "type": "object",
+  "properties": {
+    "session": { "type": "object" },
+    "events": { "type": "array", "items": { "type": "object" } }
+  },
+  "required": ["session", "events"],
+  "additionalProperties": false
+}

@@ -117,6 +117,7 @@ grammar-data = [
 # the full CLI re-enable `pg.*` through its own direct harn-vm edge (Cargo
 # unifies the feature across the build graph).
 harn-flock = { path = "../harn-flock", version = "=0.10.46" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.46" }
 harn-vm = { path = "../harn-vm", version = "=0.10.46", default-features = false }
 harn-terminal = { path = "../harn-terminal", version = "=0.10.46", optional = true }
 async-trait = "0.1"

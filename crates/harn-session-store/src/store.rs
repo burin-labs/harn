@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::event::{AppendEvent, EventId, StoredEvent};
 use super::redaction::SharedEventRedactor;
 use super::retention::{RetentionPolicy, SharedArchiveSink, Tombstone};
+use super::search::{default_embedder, Embedder, SearchQuery, SearchResponse};
 use super::signing::SessionSigner;
 
 pub type SessionId = String;
@@ -40,12 +41,37 @@ pub enum SessionStatus {
     HardDeleted,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionType {
+    User,
+    Subagent,
+    Scheduled,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionMeta {
     pub id: SessionId,
     pub tenant_id: Option<String>,
     pub persona: Option<String>,
     pub parent_session_id: Option<SessionId>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub session_type: Option<SessionType>,
+    #[serde(default)]
+    pub project_scope: Option<String>,
+    #[serde(default)]
+    pub usage_input: u64,
+    #[serde(default)]
+    pub usage_output: u64,
+    /// Cost in millionths of a US dollar, avoiding floating-point drift.
+    #[serde(default)]
+    pub usage_cost_usd_micros: u64,
     pub created_at_ms: i64,
     pub created_at: String,
     /// Last `append`/`fork` timestamp; refreshed on every mutation.
@@ -74,11 +100,53 @@ pub struct CreateSession {
     #[serde(default)]
     pub parent_session_id: Option<SessionId>,
     #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub session_type: Option<SessionType>,
+    #[serde(default)]
+    pub project_scope: Option<String>,
+    #[serde(default)]
+    pub usage_input: u64,
+    #[serde(default)]
+    pub usage_output: u64,
+    #[serde(default)]
+    pub usage_cost_usd_micros: u64,
+    #[serde(default)]
     pub ttl_seconds: Option<u64>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub attributes: BTreeMap<String, serde_json::Value>,
+}
+
+/// Typed mutable facts for an existing session.
+///
+/// Omitted fields are preserved. Clearing metadata is deliberately not part of
+/// this contract; lifecycle operations own destructive state transitions.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateSession {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub parent_session_id: Option<SessionId>,
+    #[serde(default)]
+    pub session_type: Option<SessionType>,
+    #[serde(default)]
+    pub project_scope: Option<String>,
+    #[serde(default)]
+    pub usage_input: Option<u64>,
+    #[serde(default)]
+    pub usage_output: Option<u64>,
+    #[serde(default)]
+    pub usage_cost_usd_micros: Option<u64>,
 }
 
 /// One atomic, idempotent import into a new canonical session.
@@ -137,6 +205,12 @@ pub struct ListFilter {
     pub status: Option<SessionStatus>,
     #[serde(default)]
     pub tag: Option<String>,
+    #[serde(default)]
+    pub parent_session_id: Option<SessionId>,
+    #[serde(default)]
+    pub session_type: Option<SessionType>,
+    #[serde(default)]
+    pub project_scope: Option<String>,
     /// Inclusive lower bound on `created_at_ms`.
     #[serde(default)]
     pub created_after_ms: Option<i64>,
@@ -263,7 +337,7 @@ pub const MAX_READ_BATCH: usize = 1_000;
 /// Optional processors a host can plug in. Mutation hooks run inline before
 /// persistence; redaction is also reapplied to public retrieval projections
 /// as defense in depth for older stored data.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct StoreHooks {
     /// Applied to event payloads and headers before persistence and again
     /// when events are read, snapshotted, or replayed.
@@ -284,6 +358,23 @@ pub struct StoreHooks {
     /// tombstones here before the rows leave primary storage; see
     /// [`super::retention::ArchiveSink`].
     pub archive_sink: Option<SharedArchiveSink>,
+    /// Embedding implementation used to index and rank canonical redacted
+    /// transcript rows. The default deterministic lexical floor is
+    /// cross-platform and requires no model asset.
+    pub embedder: Arc<dyn Embedder>,
+}
+
+impl Default for StoreHooks {
+    fn default() -> Self {
+        Self {
+            redaction: None,
+            event_signer: None,
+            receipt_signer: None,
+            retention: RetentionPolicy::default(),
+            archive_sink: None,
+            embedder: default_embedder(),
+        }
+    }
 }
 
 #[async_trait]
@@ -295,6 +386,7 @@ pub trait SessionStore: Send + Sync {
     fn hooks(&self) -> &StoreHooks;
 
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta>;
+    async fn update(&self, session_id: &str, request: UpdateSession) -> StoreResult<SessionMeta>;
     async fn describe(&self, session_id: &str) -> StoreResult<SessionMeta>;
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>>;
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent>;
@@ -313,6 +405,7 @@ pub trait SessionStore: Send + Sync {
     async fn soft_delete(&self, session_id: &str) -> StoreResult<SessionMeta>;
     async fn hard_delete(&self, session_id: &str) -> StoreResult<()>;
     async fn verify(&self, session_id: &str) -> StoreResult<VerifyReport>;
+    async fn search(&self, query: SearchQuery) -> StoreResult<SearchResponse>;
 
     /// Sweep retention. Backends with native scheduling can override
     /// to skip the default loop; the default sweeps all sessions

@@ -19,10 +19,10 @@ use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, embed::EmbedCapability, fs::FsCapability,
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability,
     host_conditions::HostConditionsCapability, host_lease_capability::HostLeaseCapability,
-    scanner::ScannerCapability, schemas, secret_store::SecretStoreCapability, tools::permissions,
-    tools::ToolsCapability, BuiltinRegistry, HostLeasePriorityClass, HostLeaseRequest,
-    HostLeaseResourceClass, HostLeaseStore, HostlibCapability, HostlibError, HostlibRegistry,
-    HOST_LEASE_ROOT_ENV,
+    scanner::ScannerCapability, schemas, secret_store::SecretStoreCapability,
+    session::SessionCapability, tools::permissions, tools::ToolsCapability, BuiltinRegistry,
+    HostLeasePriorityClass, HostLeaseRequest, HostLeaseResourceClass, HostLeaseStore,
+    HostlibCapability, HostlibError, HostlibRegistry, HOST_LEASE_ROOT_ENV,
 };
 use harn_lexer::Lexer;
 use harn_parser::Parser;
@@ -582,6 +582,7 @@ fn install_default_wires_every_module_into_a_vm() {
         "code_index",
         "scanner",
         "embed",
+        "session",
         "fs",
         "fs",
         "fs_watch",
@@ -1178,6 +1179,7 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(CodeIndexCapability::new())
         .with(ScannerCapability)
         .with(EmbedCapability::default())
+        .with(SessionCapability::default())
         .with(FsCapability)
         .with(FsSnapshotCapability)
         .with(FsWatchCapability)

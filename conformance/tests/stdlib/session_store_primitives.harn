@@ -37,6 +37,12 @@ pipeline default() {
   const report = session_store_verify(sid, {root: root})
   __io_println(report.ok)
   __io_println(report.count)
+  // Search crosses the public Harn facade and reports the actual fallback.
+  const search = session_store_search("one v2", {root: root, session_id: sid, mode: "hybrid"})
+  __io_println(len(search.hits))
+  __io_println(unwrap(search.hits[0]).session_id)
+  __io_println(search.effective_mode)
+  __io_println(search.semantic_floor)
   // Value stream projection (replace / clear fold).
   const vsid = "example.value.stream"
   session_store_append(vsid, {operation: "replace", value: "hello"}, {root: root})

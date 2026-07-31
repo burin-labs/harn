@@ -19,6 +19,14 @@ impl EventRedactor for TestRedactor {
             if object.contains_key("api_key") {
                 object.insert("api_key".to_string(), json!("[redacted]"));
             }
+            for value in object.values_mut() {
+                if value
+                    .as_str()
+                    .is_some_and(|text| text.contains("known-secret-value"))
+                {
+                    *value = json!("[redacted]");
+                }
+            }
         }
     }
 
@@ -84,6 +92,32 @@ impl EventRedactor for SwitchableRedactor {
     }
 }
 
+#[derive(Clone)]
+struct TestSemanticEmbedder;
+
+impl Embedder for TestSemanticEmbedder {
+    fn embed(&self, text: &str) -> Vec<f32> {
+        let folded = text.to_ascii_lowercase();
+        if folded.contains("shipping")
+            || folded.contains("release")
+            || folded.contains("deployment")
+        {
+            vec![1.0, 0.0]
+        } else {
+            vec![0.0, 1.0]
+        }
+    }
+
+    fn dim(&self) -> usize {
+        2
+    }
+
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn name(&self) -> &str {
+        "test-semantic"
+    }
+}
+
 fn dummy_signer(seed: u8) -> SessionSigner {
     SessionSigner::from_seed([seed; 32])
 }
@@ -105,6 +139,445 @@ where
     body(fresh_memory(hooks.clone())).await;
     let dir = TempDir::new().expect("tempdir");
     body(fresh_sqlite(hooks, &dir)).await;
+}
+
+#[tokio::test]
+async fn typed_metadata_update_is_shared_by_memory_and_sqlite_and_reindexes_search() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let session = store
+            .create(CreateSession {
+                id: Some("metadata-update".into()),
+                project_scope: Some("project-alpha".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create session");
+        store
+            .append(
+                &session.id,
+                AppendEvent::new(SessionEventKind::Message, json!({"text": "body"})),
+            )
+            .await
+            .expect("append event");
+        let updated = store
+            .update(
+                &session.id,
+                UpdateSession {
+                    title: Some("searchable release title".into()),
+                    model: Some("model-v2".into()),
+                    usage_input: Some(120),
+                    usage_output: Some(45),
+                    usage_cost_usd_micros: Some(2_500),
+                    ..UpdateSession::default()
+                },
+            )
+            .await
+            .expect("update metadata");
+        assert_eq!(updated.title.as_deref(), Some("searchable release title"));
+        assert_eq!(updated.model.as_deref(), Some("model-v2"));
+        assert_eq!(
+            (
+                updated.usage_input,
+                updated.usage_output,
+                updated.usage_cost_usd_micros
+            ),
+            (120, 45, 2_500)
+        );
+        let search = store
+            .search(SearchQuery {
+                query: "searchable release title".into(),
+                mode: SearchMode::Fts,
+                filter: SearchFilter {
+                    project_scope: Some("project-alpha".into()),
+                    ..SearchFilter::default()
+                },
+                limit: None,
+            })
+            .await
+            .expect("search updated title");
+        assert_eq!(search.hits.len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "reference-hardware performance acceptance; run explicitly"]
+async fn sqlite_10k_event_fts_query_completes_under_500ms() {
+    let dir = TempDir::new().expect("tempdir");
+    let store =
+        SqliteSessionStore::open(dir.path().join("sessions.sqlite")).expect("open sqlite store");
+    let events = (0..10_000)
+        .map(|index| {
+            let marker = if index == 9_999 {
+                " unique-release-marker"
+            } else {
+                ""
+            };
+            AppendEvent::new(
+                SessionEventKind::Message,
+                json!({"text": format!("canonical transcript row {index}{marker}")}),
+            )
+        })
+        .collect();
+    store
+        .import(ImportSession {
+            source_id: "perf-corpus".into(),
+            source_digest: "sha256:perf-corpus".into(),
+            session: CreateSession {
+                id: Some("perf-session".into()),
+                project_scope: Some("perf-project".into()),
+                ..CreateSession::default()
+            },
+            events,
+        })
+        .await
+        .expect("import corpus");
+
+    let started = std::time::Instant::now();
+    let response = store
+        .search(SearchQuery {
+            query: "unique release marker".into(),
+            mode: SearchMode::Fts,
+            filter: SearchFilter {
+                project_scope: Some("perf-project".into()),
+                ..SearchFilter::default()
+            },
+            limit: Some(10),
+        })
+        .await
+        .expect("search corpus");
+    let elapsed = started.elapsed();
+    eprintln!("10k-event FTS query elapsed: {elapsed:?}");
+
+    assert_eq!(response.hits.len(), 1);
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "10k-event query took {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn canonical_search_is_scoped_redacted_and_reports_fts_fallback() {
+    let hooks = StoreHooks {
+        redaction: Some(Arc::new(TestRedactor)),
+        ..StoreHooks::default()
+    };
+    run_with_hooks(hooks, |store| async move {
+        let target = store
+            .create(CreateSession {
+                id: Some("search-target".into()),
+                tenant_id: Some("tenant-a".into()),
+                title: Some("Canonical migration known-secret-value".into()),
+                cwd: Some("/workspace/alpha".into()),
+                model: Some("test-model".into()),
+                session_type: Some(SessionType::User),
+                project_scope: Some("project-alpha".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create target");
+        let stored = store
+            .append(
+                &target.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({
+                        "text": "canonical needle lives here",
+                        "api_key": "known-secret-value"
+                    }),
+                ),
+            )
+            .await
+            .expect("append target");
+        let other = store
+            .create(CreateSession {
+                id: Some("search-other".into()),
+                tenant_id: Some("tenant-b".into()),
+                project_scope: Some("project-beta".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create other");
+        store
+            .append(
+                &other.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "canonical needle belongs elsewhere"}),
+                ),
+            )
+            .await
+            .expect("append other");
+
+        let response = store
+            .search(SearchQuery {
+                query: "canonical needle".into(),
+                mode: SearchMode::Hybrid,
+                filter: SearchFilter {
+                    tenant_id: Some("tenant-a".into()),
+                    project_scope: Some("project-alpha".into()),
+                    session_id: None,
+                },
+                limit: None,
+            })
+            .await
+            .expect("search");
+        assert_eq!(response.requested_mode, SearchMode::Hybrid);
+        assert_eq!(response.effective_mode, SearchMode::Fts);
+        assert!(response.semantic_floor);
+        assert_eq!(response.hits.len(), 1);
+        let hit = &response.hits[0];
+        assert_eq!(
+            (hit.session_id.as_str(), hit.event_id),
+            (target.id.as_str(), stored.event_id)
+        );
+        assert_eq!(
+            hit.event,
+            store
+                .read(&target.id, ReadRange::default())
+                .await
+                .expect("canonical read")
+                .events[0]
+        );
+        let projection = serde_json::to_string(&response).expect("serialize response");
+        assert!(!projection.contains("known-secret-value"));
+        assert!(projection.contains("[redacted]"));
+        let secret_search = store
+            .search(SearchQuery {
+                query: "known secret value".into(),
+                mode: SearchMode::Fts,
+                filter: SearchFilter {
+                    project_scope: Some("project-alpha".into()),
+                    ..SearchFilter::default()
+                },
+                limit: None,
+            })
+            .await
+            .expect("search secret");
+        assert!(secret_search.hits.is_empty());
+
+        let outside_scope = store
+            .search(SearchQuery {
+                query: "canonical needle".into(),
+                mode: SearchMode::Fts,
+                filter: SearchFilter {
+                    tenant_id: Some("tenant-b".into()),
+                    project_scope: Some("project-alpha".into()),
+                    session_id: None,
+                },
+                limit: None,
+            })
+            .await
+            .expect("cross-scope search");
+        assert!(outside_scope.hits.is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn canonical_search_index_tracks_fork_truncate_and_delete() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let parent = store
+            .create(CreateSession {
+                id: Some("search-parent".into()),
+                project_scope: Some("project-alpha".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create");
+        store
+            .append(
+                &parent.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "inherited marker"}),
+                ),
+            )
+            .await
+            .expect("append inherited");
+        let removable = store
+            .append(
+                &parent.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "removable marker"}),
+                ),
+            )
+            .await
+            .expect("append removable");
+        let child = store
+            .fork(&parent.id, removable.event_id, Some("search-child".into()))
+            .await
+            .expect("fork");
+
+        let inherited = store
+            .search(SearchQuery {
+                query: "inherited marker".into(),
+                mode: SearchMode::Fts,
+                filter: SearchFilter {
+                    project_scope: Some("project-alpha".into()),
+                    ..SearchFilter::default()
+                },
+                limit: None,
+            })
+            .await
+            .expect("search inherited");
+        assert_eq!(
+            inherited
+                .hits
+                .iter()
+                .map(|hit| hit.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["search-child", "search-parent"]
+        );
+
+        store
+            .truncate(&parent.id, 1)
+            .await
+            .expect("truncate parent");
+        let removable = store
+            .search(SearchQuery {
+                query: "removable marker".into(),
+                mode: SearchMode::Fts,
+                filter: SearchFilter {
+                    session_id: Some(parent.id.clone()),
+                    ..SearchFilter::default()
+                },
+                limit: None,
+            })
+            .await
+            .expect("search removed");
+        assert!(removable.hits.is_empty());
+
+        store
+            .hard_delete(&child.child_session_id)
+            .await
+            .expect("delete child");
+        let deleted = store
+            .search(SearchQuery {
+                query: "inherited marker".into(),
+                mode: SearchMode::Fts,
+                filter: SearchFilter {
+                    session_id: Some(child.child_session_id),
+                    ..SearchFilter::default()
+                },
+                limit: None,
+            })
+            .await
+            .expect("search deleted");
+        assert!(deleted.hits.is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn canonical_semantic_search_uses_the_injected_embedding_backend() {
+    let hooks = StoreHooks {
+        embedder: Arc::new(TestSemanticEmbedder),
+        ..StoreHooks::default()
+    };
+    run_with_hooks(hooks, |store| async move {
+        let session = store
+            .create(CreateSession {
+                id: Some("semantic-session".into()),
+                project_scope: Some("project-alpha".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create");
+        store
+            .append(
+                &session.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "prepare the release pipeline"}),
+                ),
+            )
+            .await
+            .expect("append related");
+        store
+            .append(
+                &session.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "review typography spacing"}),
+                ),
+            )
+            .await
+            .expect("append unrelated");
+
+        let response = store
+            .search(SearchQuery {
+                query: "shipping".into(),
+                mode: SearchMode::Semantic,
+                filter: SearchFilter {
+                    project_scope: Some("project-alpha".into()),
+                    ..SearchFilter::default()
+                },
+                limit: Some(1),
+            })
+            .await
+            .expect("semantic search");
+        assert_eq!(response.effective_mode, SearchMode::Semantic);
+        assert_eq!(response.embedding_backend, "test-semantic");
+        assert!(!response.semantic_floor);
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.hits[0].event_id, 1);
+        assert!(response.hits[0].fts_score.is_none());
+        assert_eq!(response.hits[0].semantic_score, Some(1.0));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_rebuilds_a_missing_search_index_on_reopen() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("search-rebuild.sqlite");
+    let store = SqliteSessionStore::open(&path).expect("open");
+    store
+        .create(CreateSession {
+            id: Some("rebuild-session".into()),
+            project_scope: Some("project-alpha".into()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create");
+    store
+        .append(
+            "rebuild-session",
+            AppendEvent::new(
+                SessionEventKind::Message,
+                json!({"text": "recoverable search marker"}),
+            ),
+        )
+        .await
+        .expect("append");
+    drop(store);
+
+    let connection = rusqlite::Connection::open(&path).expect("open raw sqlite");
+    connection
+        .execute("DELETE FROM session_events_fts", [])
+        .expect("remove fts index");
+    connection
+        .execute("DELETE FROM session_event_vectors", [])
+        .expect("remove vector index");
+    drop(connection);
+
+    let store = SqliteSessionStore::open(&path).expect("reopen and rebuild");
+    let response = store
+        .search(SearchQuery {
+            query: "recoverable marker".into(),
+            mode: SearchMode::Fts,
+            filter: SearchFilter {
+                project_scope: Some("project-alpha".into()),
+                ..SearchFilter::default()
+            },
+            limit: None,
+        })
+        .await
+        .expect("search rebuilt index");
+    assert_eq!(response.hits.len(), 1);
+    assert_eq!(response.hits[0].session_id, "rebuild-session");
 }
 
 #[tokio::test]
@@ -284,7 +757,7 @@ fn sqlite_create_maps_an_independent_connection_race_to_already_exists() {
 }
 
 #[tokio::test]
-async fn sqlite_upgrade_cleans_pre_foreign_key_orphans_and_records_v2() {
+async fn sqlite_upgrade_cleans_pre_foreign_key_orphans_and_records_current_version() {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("upgrade.sqlite");
     let store = SqliteSessionStore::open(&path).expect("open sqlite");
@@ -355,7 +828,7 @@ async fn sqlite_upgrade_cleans_pre_foreign_key_orphans_and_records_v2() {
         )
         .expect("legacy schema table state"),
     );
-    assert_eq!(schema_state, (2, false));
+    assert_eq!(schema_state, (4, false));
     let stale_children: i64 = conn
         .query_row(
             "SELECT
@@ -386,7 +859,7 @@ fn sqlite_rejects_a_newer_schema_version() {
     assert_eq!(
         error,
         StoreError::Backend(
-            "schema initialization failed: backend error: session store schema version 99 is newer than supported version 2"
+            "schema initialization failed: backend error: session store schema version 99 is newer than supported version 4"
                 .to_string()
         )
     );

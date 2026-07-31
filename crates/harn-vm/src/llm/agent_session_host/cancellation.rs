@@ -120,6 +120,8 @@ mod tests {
         let store = crate::stdlib::session_store::open_canonical_agent_session(
             &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),
             session_id,
+            None,
+            harn_session_store::SessionType::User,
         )
         .await
         .expect("open canonical session");

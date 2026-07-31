@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use harn_session_store::{
     AppendEvent, CreateSession, MemorySessionStore, SessionEventKind, SessionMeta,
-    SharedSessionStore,
+    SharedSessionStore, StoreHooks,
 };
 use serde_json::json;
 
@@ -120,4 +120,67 @@ async fn http_router_returns_session_view() {
         .as_str()
         .unwrap()
         .starts_with("sha256:"));
+}
+
+#[tokio::test]
+async fn http_router_searches_the_canonical_store() {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt as _;
+
+    let store: SharedSessionStore = Arc::new(MemorySessionStore::with_hooks(StoreHooks::default()));
+    let router = api::sessions_router(store.clone());
+    let meta = store
+        .create(CreateSession {
+            tenant_id: Some("tenant-a".to_string()),
+            project_scope: Some("project-a".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create");
+    store
+        .append(
+            &meta.id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                json!({"text": "canonical transcript needle"}),
+            ),
+        )
+        .await
+        .expect("append");
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/search")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "query": "transcript needle",
+                        "mode": "hybrid",
+                        "filter": {
+                            "tenant_id": "tenant-a",
+                            "project_scope": "project-a",
+                            "session_id": meta.id,
+                        },
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["requested_mode"], "hybrid");
+    assert_eq!(body["effective_mode"], "fts");
+    assert_eq!(body["semantic_floor"], true);
+    assert_eq!(body["hits"].as_array().unwrap().len(), 1);
+    assert_eq!(body["hits"][0]["session_id"], meta.id);
+    assert_eq!(body["hits"][0]["event_id"], 1);
 }
