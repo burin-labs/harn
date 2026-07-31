@@ -299,7 +299,7 @@ pub async fn query_session_store_timeline(
             Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
         }
     }
-    Ok(Some(builder.finish()))
+    Ok(Some(builder.finish_in_source_order()))
 }
 
 /// List canonical sessions for one project without exposing SQLite layout or
@@ -468,13 +468,23 @@ impl TimelineBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> SessionTimelineSnapshot {
-        self.nodes.sort_by(|left, right| {
-            left.sort_ms
-                .cmp(&right.sort_ms)
-                .then_with(|| left.sequence.cmp(&right.sequence))
-                .then_with(|| left.node.id.cmp(&right.node.id))
-        });
+    fn finish(self) -> SessionTimelineSnapshot {
+        self.finish_with_ordering(true)
+    }
+
+    fn finish_in_source_order(self) -> SessionTimelineSnapshot {
+        self.finish_with_ordering(false)
+    }
+
+    fn finish_with_ordering(mut self, sort: bool) -> SessionTimelineSnapshot {
+        if sort {
+            self.nodes.sort_by(|left, right| {
+                left.sort_ms
+                    .cmp(&right.sort_ms)
+                    .then_with(|| left.sequence.cmp(&right.sequence))
+                    .then_with(|| left.node.id.cmp(&right.node.id))
+            });
+        }
         self.nodes.truncate(self.query.limit());
 
         let mut children_by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
