@@ -342,6 +342,8 @@ pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
     register_llm_call_with_bridge,
 };
+#[cfg(test)]
+pub(crate) use self::agent_observe::{pop_llm_transcript_dir, push_llm_transcript_dir};
 pub use self::agent_runtime::{
     current_agent_session_id, register_session_end_hook, SessionEndHookRegistration,
 };
@@ -379,6 +381,8 @@ pub use self::mock::{
     install_cli_llm_mocks, set_replay_mode, take_cli_llm_recordings, LlmMock, LlmMockFixture,
     LlmReplayMode, MockError,
 };
+#[cfg(test)]
+pub(crate) use self::mock::{get_llm_mock_calls, push_llm_mock};
 pub use self::model_test::{run_model_smoke_test, ModelSmokeTestOptions, ModelSmokeTestResult};
 pub(crate) use self::provider_auth::provider_auth_status_with_definition;
 pub use self::provider_auth::{

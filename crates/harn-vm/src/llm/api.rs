@@ -155,27 +155,25 @@ fn routed_llm_call<'a>(
 }
 
 /// Execute a logical LLM call. A configured routing policy runs first; each
-/// routed link re-enters the single-route path with its policy cleared. Calls
-/// without routing always go through the streaming path with a discarding
-/// receiver so status/error handling stays shared.
+/// routed link re-enters the observed single-route path with its policy
+/// cleared. Calls without routing enter that same observation boundary
+/// directly, so no logical entry point can dispatch an unjournalled provider
+/// attempt.
 pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult, VmError> {
     if let Some(call) = routed_llm_call(opts, None) {
         return call.await;
     }
-    vm_call_llm_full_single_route(opts).await
+    Box::pin(super::agent_observe::observed_llm_call(
+        opts, None, None, None, false, false, None, None,
+    ))
+    .await
 }
 
-/// Execute exactly one provider/model route. Observability calls this primitive
-/// after it has established the physical-attempt span; routing calls back into
-/// observability with `routing_policy` cleared on each link.
-pub(crate) async fn vm_call_llm_full_single_route(
-    opts: &LlmCallOptions,
-) -> Result<LlmResult, VmError> {
-    let request = LlmRequestPayload::from(opts);
-    vm_call_llm_full_single_route_prepared(opts, &request).await
-}
-
+/// Execute exactly one prepared provider/model route. Observability calls this
+/// primitive after it emits the request receipt. The unforgeable token keeps
+/// every other caller on the logical, observed entry points above.
 pub(crate) async fn vm_call_llm_full_single_route_prepared(
+    _observed: &super::agent_observe::ObservedAttemptToken,
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
@@ -210,18 +208,21 @@ pub(crate) async fn vm_call_llm_full_streaming(
     if let Some(call) = routed_llm_call(opts, Some(delta_tx.clone())) {
         return call.await;
     }
-    vm_call_llm_full_streaming_single_route(opts, delta_tx).await
-}
-
-pub(crate) async fn vm_call_llm_full_streaming_single_route(
-    opts: &LlmCallOptions,
-    delta_tx: DeltaSender,
-) -> Result<LlmResult, VmError> {
-    let request = LlmRequestPayload::from(opts);
-    vm_call_llm_full_streaming_single_route_prepared(opts, &request, delta_tx).await
+    Box::pin(super::agent_observe::observed_llm_call(
+        opts,
+        None,
+        None,
+        None,
+        false,
+        false,
+        None,
+        Some(delta_tx),
+    ))
+    .await
 }
 
 pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
+    _observed: &super::agent_observe::ObservedAttemptToken,
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
     delta_tx: DeltaSender,
@@ -242,19 +243,21 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
     if let Some(call) = routed_llm_call(opts, Some(delta_tx.clone())) {
         return call.await;
     }
-    vm_call_llm_full_streaming_offthread_single_route(opts, delta_tx).await
-}
-
-#[cfg(test)]
-pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
-    opts: &LlmCallOptions,
-    delta_tx: DeltaSender,
-) -> Result<LlmResult, VmError> {
-    let request = LlmRequestPayload::from(opts);
-    vm_call_llm_full_streaming_offthread_single_route_prepared(opts, request, delta_tx).await
+    Box::pin(super::agent_observe::observed_llm_call(
+        opts,
+        None,
+        None,
+        None,
+        false,
+        true,
+        None,
+        Some(delta_tx),
+    ))
+    .await
 }
 
 pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
+    _observed: &super::agent_observe::ObservedAttemptToken,
     opts: &LlmCallOptions,
     request: LlmRequestPayload,
     delta_tx: DeltaSender,

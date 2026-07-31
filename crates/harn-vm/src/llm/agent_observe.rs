@@ -601,6 +601,11 @@ fn degrade_options_to_non_streaming_transport(
 // observed_llm_call — shared single-LLM-call wrapper with full observability
 // ---------------------------------------------------------------------------
 
+/// Capability proving that the transcript request event was emitted before a
+/// single-route provider primitive can run. Only this module can construct the
+/// token; logical callers must use the observed API entry points.
+pub(crate) struct ObservedAttemptToken(());
+
 /// Make one LLM call with full observability: call-id generation, bridge
 /// notifications (call_start / call_progress / call_end), span annotation,
 /// retry with exponential backoff, and tracing.
@@ -713,6 +718,7 @@ pub(crate) async fn observed_llm_call(
             &effective_tool_format,
             opts,
         )?;
+        let observed_attempt = ObservedAttemptToken(());
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();
@@ -744,6 +750,7 @@ pub(crate) async fn observed_llm_call(
                 };
                 if offthread {
                     Box::pin(vm_call_llm_full_streaming_offthread_single_route_prepared(
+                        &observed_attempt,
                         opts,
                         request.clone(),
                         delta_tx,
@@ -751,7 +758,10 @@ pub(crate) async fn observed_llm_call(
                     .await
                 } else {
                     Box::pin(vm_call_llm_full_streaming_single_route_prepared(
-                        opts, &request, delta_tx,
+                        &observed_attempt,
+                        opts,
+                        &request,
+                        delta_tx,
                     ))
                     .await
                 }
@@ -771,6 +781,7 @@ pub(crate) async fn observed_llm_call(
                     }
                 };
                 Box::pin(vm_call_llm_full_streaming_offthread_single_route_prepared(
+                    &observed_attempt,
                     opts,
                     request.clone(),
                     delta_tx,
@@ -785,17 +796,28 @@ pub(crate) async fn observed_llm_call(
                     None => sink,
                 };
                 Box::pin(vm_call_llm_full_streaming_single_route_prepared(
-                    opts, &request, delta_tx,
+                    &observed_attempt,
+                    opts,
+                    &request,
+                    delta_tx,
                 ))
                 .await
             } else if let Some(ctx) = detector_ctx {
                 let delta_tx = spawn_detector_only_forwarder(ctx, first_token);
                 Box::pin(vm_call_llm_full_streaming_single_route_prepared(
-                    opts, &request, delta_tx,
+                    &observed_attempt,
+                    opts,
+                    &request,
+                    delta_tx,
                 ))
                 .await
             } else {
-                Box::pin(vm_call_llm_full_single_route_prepared(opts, &request)).await
+                Box::pin(vm_call_llm_full_single_route_prepared(
+                    &observed_attempt,
+                    opts,
+                    &request,
+                ))
+                .await
             }
         })
         .await;

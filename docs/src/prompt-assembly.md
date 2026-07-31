@@ -170,15 +170,17 @@ route-specific system placement have produced the send-safe payload. When that
 conversion changes the system bytes, the manifest carries an `egress:system`
 segment and an `egress_delta` joining the options-side and payload-side byte
 counts and digests. Provider adapter transforms and wire serialization below
-`LlmRequestPayload` remain outside the contract. Context-assembling dispatch
-tiers that do not flow through `observed_llm_call` produce no manifest rather
-than an empty one. Digests are computed after the active transcript redaction
-policy. Readers continue to accept historical manifests whose boundary is
-`observed_llm_call_pre_egress`.
+`LlmRequestPayload` remain outside the contract. Every Harn logical LLM entry
+point flows through `observed_llm_call`, and the raw prepared single-route
+transport primitives require an observer-issued attempt token. Compaction,
+rerank, workflow, fallback, and streaming provider attempts therefore cannot
+silently bypass the manifest spine. Digests are computed after the active
+transcript redaction policy. Readers continue to accept historical manifests
+whose boundary is `observed_llm_call_pre_egress`.
 
 Set `call_role` when a harness needs to distinguish semantic callers, for
 example `model.router`. Harn-owned paths already declare the same purpose
-vocabulary through `mock_scope` (`agent.main`, `completion.judge`,
+vocabulary through `mock_scope` (`agent.main`, `compaction`, `completion.judge`,
 `step.judge`, and the guardrail/classifier roles); production telemetry and
 fixture routing project that one declaration. Supplying both keys with
 different values is an error, and `call_role` alone also routes mock fixtures

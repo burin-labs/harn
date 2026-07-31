@@ -8,6 +8,97 @@
 //! and reports recap metrics.
 
 use crate::orchestration::*;
+use crate::value::VmDictExt;
+
+#[tokio::test(flavor = "current_thread")]
+async fn llm_compaction_call_is_manifested_at_the_provider_boundary() {
+    crate::llm::reset_llm_state();
+    crate::llm::push_llm_mock(
+        crate::llm::parse_llm_mock_value(&serde_json::json!({
+            "text": "retained goal and latest evidence"
+        }))
+        .expect("valid compaction mock"),
+    );
+    let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+    crate::llm::push_llm_transcript_dir(
+        transcript_dir
+            .path()
+            .to_str()
+            .expect("utf8 transcript path"),
+    );
+
+    let mut options = crate::value::DictMap::new();
+    options.put_str("provider", "mock");
+    options.put_str("model", "mock");
+    options.put_str("call_role", "agent.main");
+    let llm_opts = crate::llm::extract_llm_options(&[
+        crate::value::VmValue::String(arcstr::ArcStr::from("current turn")),
+        crate::value::VmValue::String(arcstr::ArcStr::from("parent system prompt")),
+        crate::value::VmValue::dict(options),
+    ])
+    .expect("parent LLM options");
+    let mut messages = vec![
+        serde_json::json!({"role": "user", "content": "old task"}),
+        serde_json::json!({"role": "assistant", "content": "old investigation"}),
+        serde_json::json!({"role": "user", "content": "latest task"}),
+    ];
+    let config = AutoCompactConfig {
+        token_threshold: 1,
+        keep_last: 1,
+        compact_strategy: CompactStrategy::Llm,
+        ..Default::default()
+    };
+
+    let compacted = auto_compact_messages_with_result(&mut messages, &config, Some(&llm_opts))
+        .await
+        .expect("LLM compaction succeeds")
+        .expect("compaction fired");
+    crate::llm::pop_llm_transcript_dir();
+
+    assert_eq!(compacted.strategy, CompactStrategy::Llm);
+    assert!(
+        compacted
+            .summary
+            .contains("retained goal and latest evidence"),
+        "the mocked compaction result proves the LLM strategy fired"
+    );
+    let mock_calls = crate::llm::get_llm_mock_calls();
+    assert_eq!(mock_calls.len(), 1, "compaction reached the mock provider");
+    assert_eq!(mock_calls[0].mock_scope, "compaction");
+    assert_eq!(mock_calls[0].system, None);
+    assert_eq!(mock_calls[0].messages.len(), 1);
+
+    let transcript = std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+        .expect("LLM transcript");
+    let events = transcript
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("transcript JSON"))
+        .collect::<Vec<_>>();
+    let requests = events
+        .iter()
+        .filter(|event| event["type"] == "provider_call_request")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        requests.len(),
+        mock_calls.len(),
+        "every recorded provider call must have one request event"
+    );
+    let request = requests[0];
+    assert_eq!(request["call_role"], "compaction");
+    assert_eq!(request["served_context"]["system_prompt_bytes"], 0);
+    assert_eq!(request["message_count"], 1);
+    let manifest_hash = &request["served_context"]["manifest_content_hash"];
+    let manifest = events
+        .iter()
+        .find(|event| {
+            event["type"] == "context_manifest" && event["content_hash"] == *manifest_hash
+        })
+        .expect("request resolves its retained context manifest");
+    assert_eq!(manifest["manifest"]["call_role"], "compaction");
+    assert_eq!(manifest["manifest"]["root"], "transformed");
+    assert_eq!(manifest["manifest"]["system_prompt_bytes"], 0);
+}
+
 #[test]
 fn microcompact_snips_large_output() {
     let large = "x".repeat(50_000);
