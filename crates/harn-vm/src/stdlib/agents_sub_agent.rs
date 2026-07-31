@@ -1,16 +1,16 @@
-use crate::value::VmDictExt;
-
 use super::agents_workers;
-use super::sub_agent_lifecycle::{
-    emit_subagent_stop_once, stop_details_for_error, stop_details_for_result, SubagentStopDetails,
-};
+use super::sub_agent_lifecycle as lifecycle;
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
-use crate::orchestration::{
-    annotate_nested_execution_options, CapabilityPolicy, NestedExecutionKind,
-};
+use crate::orchestration::CapabilityPolicy;
+#[cfg(test)]
+use crate::orchestration::{annotate_nested_execution_options, NestedExecutionKind};
 use crate::stdlib::options::{ErrorKind, OptionsParser};
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
+use lifecycle::{
+    emit_subagent_stop_once, stop_details_for_error, stop_details_for_result, SubagentStopDetails,
+};
 
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
 
@@ -128,12 +128,8 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
         prepare_sub_agent_options(&mut parser, &session_id, policies.requested_policy.as_ref())?;
     let name = non_empty_raw_string(parser.optional_string_raw("name")?)
         .unwrap_or_else(|| "sub-agent".to_string());
-    annotate_nested_execution_options(&mut options, NestedExecutionKind::SubAgentRun, &name);
     let parent_session_id = crate::llm::current_agent_session_id();
-    if let Some(parent_session_id) = parent_session_id.as_deref() {
-        options.put_str("parent_session_id", parent_session_id);
-    }
-    options.put_str("session_type", "subagent");
+    lifecycle::annotate_subagent_session(&mut options, &name, parent_session_id.as_deref());
     let reminder_propagation = match parser.optional_list("reminder_propagation")? {
         Some(reminders) => reminders
             .iter()

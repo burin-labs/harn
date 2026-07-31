@@ -1,5 +1,18 @@
 use super::SubAgentRunSpec;
-use crate::value::VmError;
+use crate::orchestration::{annotate_nested_execution_options, NestedExecutionKind};
+use crate::value::{DictMap, VmDictExt, VmError};
+
+pub(super) fn annotate_subagent_session(
+    options: &mut DictMap,
+    name: &str,
+    parent_session_id: Option<&str>,
+) {
+    annotate_nested_execution_options(options, NestedExecutionKind::SubAgentRun, name);
+    if let Some(parent_session_id) = parent_session_id {
+        options.put_str("parent_session_id", parent_session_id);
+    }
+    options.put_str("session_type", "subagent");
+}
 
 #[derive(Clone)]
 pub(super) struct SubagentStopDetails {

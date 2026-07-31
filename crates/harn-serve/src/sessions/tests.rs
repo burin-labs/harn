@@ -39,6 +39,25 @@ async fn http_router_round_trips_events() {
         .unwrap();
     let meta: SessionMeta = serde_json::from_slice(&bytes).unwrap();
 
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/sessions/{}", meta.id))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"title": "Canonical title"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let updated: SessionMeta = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(updated.title.as_deref(), Some("Canonical title"));
+
     let body = json!({
         "kind": {"kind": "message"},
         "payload": {"text": "hello"},

@@ -32,6 +32,7 @@ use crate::permissions::{
 use crate::tls::HttpTlsConfig;
 
 mod artifacts;
+mod canonical_sessions;
 mod events;
 mod meta;
 mod permissions;
@@ -60,7 +61,7 @@ pub struct ApiServerConfig {
 impl ApiServerConfig {
     pub fn for_pipeline(path: impl Into<String>) -> Self {
         let path = path.into();
-        let root = api_workspace_root_for_pipeline(&path);
+        let root = canonical_sessions::workspace_root_for_pipeline(&path);
         Self {
             acp: AcpServerConfig::for_pipeline(path),
             auth_policy: AuthPolicy::allow_all(),
@@ -77,19 +78,6 @@ impl ApiServerConfig {
         self.acp.profile = profile;
         self
     }
-}
-
-fn api_workspace_root_for_pipeline(path: &str) -> PathBuf {
-    if let Ok(root) = std::env::var("HARN_PROJECT_ROOT") {
-        if !root.trim().is_empty() {
-            return PathBuf::from(root);
-        }
-    }
-    Path::new(path)
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 #[derive(Clone)]
@@ -111,6 +99,7 @@ impl ApiServer {
                 Ok(log) => (Some(log), None),
                 Err(error) => (None, Some(error.to_string())),
             };
+        let canonical_sessions = canonical_sessions::open(&config.workspace_root);
         let state = ApiState {
             acp: client.clone(),
             inner: Arc::new(Mutex::new(ApiStateInner::new(config.workspace_root))),
@@ -120,6 +109,7 @@ impl ApiServer {
             provider_catalog,
             event_log,
             event_log_error,
+            canonical_sessions,
         };
         client.spawn_output_loop(response_rx, state.clone());
         Self { state }
@@ -160,6 +150,7 @@ struct ApiState {
     provider_catalog: ProviderCatalogRuntime,
     event_log: Option<Arc<AnyEventLog>>,
     event_log_error: Option<String>,
+    canonical_sessions: Option<crate::sessions::SharedSessionStore>,
 }
 
 #[derive(Clone, Default)]
@@ -643,7 +634,8 @@ impl EventFilter {
 }
 
 fn api_router(state: ApiState) -> Router {
-    Router::new()
+    let canonical_sessions = state.canonical_sessions.clone();
+    let router = Router::new()
         .route("/health", get(meta::health))
         .route("/version", get(meta::version))
         .route("/openapi.json", get(meta::openapi_json))
@@ -747,7 +739,8 @@ fn api_router(state: ApiState) -> Router {
         .route(
             "/v1/permissions/policy",
             get(permissions::get_permissions_policy).put(permissions::put_permissions_policy),
-        )
+        );
+    canonical_sessions::mount(router, canonical_sessions)
         .route(
             "/v1/permissions/rules",
             get(permissions::list_permission_rules).post(permissions::create_permission_rule),

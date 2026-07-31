@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventSignature, ListFilter, ReadRange, SearchQuery,
     SessionEventKind, SessionId, SessionMeta, SessionStatus, SessionStore, SharedSessionStore,
-    SnapshotId, StoreError,
+    SnapshotId, StoreError, UpdateSession,
 };
 
 /// Build an unprefixed router. Callers nest it under whichever prefix
@@ -30,7 +30,9 @@ pub fn sessions_router(store: SharedSessionStore) -> Router {
         .route("/sessions/search", post(search_sessions))
         .route(
             "/sessions/{id}",
-            get(describe_session).delete(soft_delete_session),
+            get(describe_session)
+                .patch(update_session)
+                .delete(soft_delete_session),
         )
         .route("/sessions/{id}/view", get(session_view))
         .route("/sessions/{id}/events", post(append_event).get(read_events))
@@ -181,6 +183,22 @@ async fn describe_session(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.store.describe(&id).await {
+        Ok(meta) => (StatusCode::OK, Json(json!(meta))).into_response(),
+        Err(error) => map_error(error).into_response(),
+    }
+}
+
+#[tracing::instrument(
+    name = "harn.session.update",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
+async fn update_session(
+    State(state): State<SessionsState>,
+    Path(id): Path<String>,
+    Json(update): Json<UpdateSession>,
+) -> impl IntoResponse {
+    match state.store.update(&id, update).await {
         Ok(meta) => (StatusCode::OK, Json(json!(meta))).into_response(),
         Err(error) => map_error(error).into_response(),
     }
