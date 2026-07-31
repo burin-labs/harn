@@ -33,4 +33,12 @@ if [[ ! -x "$CLI_BIN" ]]; then
   exit 1
 fi
 
+if [[ "${1:-}" == "test" ]]; then
+  shift
+  # `tree-sitter test` otherwise reuses its ambient compiled-language cache.
+  # Pinning this repository's grammar path forces a rebuild, so corpus results
+  # always prove the checked-in parser rather than whichever library ran last.
+  exec "$CLI_BIN" test --grammar-path "$GRAMMAR_DIR" "$@"
+fi
+
 exec "$CLI_BIN" "$@"
