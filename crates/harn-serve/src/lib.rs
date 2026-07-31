@@ -113,9 +113,11 @@ pub use limits::{
 pub use mcp_host_bridge::install_mcp_host_allowlist;
 pub use mcp_prompts::FilePromptCatalog;
 pub use permissions::{
-    ActionClass, AuditEntry, AuditFilter, AuditOutcome, DecisionScope, InMemoryConfig,
-    InMemoryPermissionStore, LlmPolicy, PermissionDecision, PermissionPolicy, PermissionRequest,
-    PermissionStore, PolicyVersion, RedactionPolicy, RememberRule, RememberSpec, Risk, RuleId,
+    ActionClass, ApprovalShape, AuditEntry, AuditFilter, AuditOutcome, DecisionScope,
+    InMemoryConfig, InMemoryPermissionStore, LlmPolicy, PermissionDecision, PermissionPolicy,
+    PermissionRequest, PermissionStore, PolicyAction, PolicyEvaluation, PolicyMatchedRule,
+    PolicyRule, PolicyRuleMatch, PolicyVersion, RedactionPolicy, RememberRule, RememberSpec, Risk,
+    RuleId, ToolApprovalPolicy, ToolApprovalRequest,
 };
 pub use replay::{InMemoryReplayCache, NoReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 pub use sessions::{

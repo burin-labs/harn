@@ -12,6 +12,9 @@ use crate::workspace_path::{WorkspacePathInfo, WorkspacePathKind};
 
 use super::ToolApprovalPolicy;
 
+mod host_request;
+pub use host_request::ToolApprovalRequest;
+
 const POLICY_RECEIPT_TYPE: &str = "harn.permission_policy_decision.v1";
 
 thread_local! {
@@ -174,6 +177,12 @@ pub struct PolicyRuleMatch {
     )]
     pub mode: Vec<String>,
     #[serde(
+        alias = "env_modes",
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub env_mode: Vec<String>,
+    #[serde(
         alias = "capabilities",
         deserialize_with = "deserialize_string_list",
         skip_serializing_if = "Vec::is_empty"
@@ -184,6 +193,26 @@ pub struct PolicyRuleMatch {
 }
 
 impl PolicyRuleMatch {
+    /// Canonical persisted matcher names exposed to native host projections.
+    pub const KEYS: &'static [&'static str] = &[
+        "tool",
+        "tool_kind",
+        "side_effect",
+        "path",
+        "command",
+        "command_identity",
+        "url",
+        "domain",
+        "method",
+        "mcp_server",
+        "mcp_tool",
+        "agent",
+        "persona",
+        "mode",
+        "env_mode",
+        "capability",
+    ];
+
     fn from_shorthand(value: JsonValue) -> Result<Self, String> {
         match value {
             JsonValue::Null | JsonValue::Bool(true) => Ok(Self::default()),
@@ -230,6 +259,7 @@ impl PolicyRuleMatch {
             && self.agent.is_empty()
             && self.persona.is_empty()
             && self.mode.is_empty()
+            && self.env_mode.is_empty()
             && self.capability.is_empty()
             && self.repeat_count_at_least.is_none()
     }
@@ -266,6 +296,7 @@ impl PolicyRuleMatch {
                     .mode
                     .as_ref()
                     .is_some_and(|mode| any_glob_matches(&self.mode, std::slice::from_ref(mode))))
+            && host_request::env_modes_match(&self.env_mode, &ctx.env_modes)
             && (self.capability.is_empty() || any_glob_matches(&self.capability, &ctx.capabilities))
             && self
                 .repeat_count_at_least
@@ -459,6 +490,7 @@ struct EvaluationContext {
     agent: Option<String>,
     persona: Option<String>,
     mode: Option<String>,
+    env_modes: Vec<String>,
     repeat_count: Option<u64>,
 }
 
@@ -488,6 +520,7 @@ impl EvaluationContext {
         let mode = string_field(args, "mode")
             .or_else(|| string_field(args, "action"))
             .or_else(|| dispatch.as_ref().map(|context| context.action.clone()));
+        let env_modes = string_values(args, &["env_mode", "envMode"]);
         let capabilities = annotations
             .as_ref()
             .map(|annotations| {
@@ -525,8 +558,169 @@ impl EvaluationContext {
             agent,
             persona,
             mode,
+            env_modes,
             repeat_count,
         }
+    }
+
+    fn from_request(request: &ToolApprovalRequest) -> Self {
+        let mut context = Self::new(&request.tool_name, &request.arguments, request.repeat_count);
+        let policy_context = request
+            .policy_decision
+            .as_ref()
+            .and_then(|decision| decision.get("context"))
+            .or_else(|| {
+                request
+                    .approval_request
+                    .as_ref()
+                    .and_then(|approval| approval.get("undo_metadata"))
+                    .and_then(|metadata| metadata.get("policy_decision"))
+                    .and_then(|decision| decision.get("context"))
+            });
+        let nested_policy_context =
+            policy_context.and_then(|context| context.get("policy_context"));
+
+        if let Some(policy_context) = policy_context {
+            context.tool_name = first_string(policy_context, &["tool_name", "toolName"])
+                .unwrap_or(context.tool_name);
+            context.tool_kind =
+                first_string(policy_context, &["tool_kind", "toolKind"]).or(context.tool_kind);
+            context.side_effect = first_string(
+                policy_context,
+                &[
+                    "side_effect",
+                    "sideEffect",
+                    "requested_side_effect_level",
+                    "requestedSideEffectLevel",
+                ],
+            )
+            .or(context.side_effect);
+            context.agent = first_string(policy_context, &["agent", "agent_id"]).or(context.agent);
+            context.persona =
+                first_string(policy_context, &["persona", "persona_id"]).or(context.persona);
+            context.mode = first_string(policy_context, &["mode", "action"]).or(context.mode);
+            context.absorb_host_value(policy_context);
+        }
+        if let Some(nested_policy_context) = nested_policy_context {
+            if context.side_effect.is_none() {
+                context.side_effect = first_string(
+                    nested_policy_context,
+                    &[
+                        "side_effect",
+                        "sideEffect",
+                        "requested_side_effect_level",
+                        "requestedSideEffectLevel",
+                    ],
+                );
+            }
+            context.absorb_host_value(nested_policy_context);
+        }
+
+        for container in [policy_context, Some(&request.arguments)]
+            .into_iter()
+            .flatten()
+        {
+            for key in ["rawInput", "raw_input", "input"] {
+                if let Some(input) = container.get(key) {
+                    context.absorb_host_value(input);
+                }
+            }
+        }
+
+        context.finish_host_normalization();
+        context
+    }
+
+    fn absorb_host_value(&mut self, value: &JsonValue) {
+        self.capabilities
+            .extend(string_values(value, &["capability", "capabilities"]));
+        self.path_candidates.extend(path_values(value));
+
+        let commands = string_values(
+            value,
+            &[
+                "command",
+                "command_identity",
+                "command_identities",
+                "operation",
+            ],
+        );
+        for command in &commands {
+            if let Some(identity) = shell_command_identity(command) {
+                self.command_identities.push(identity);
+            }
+        }
+        self.command_candidates.extend(commands);
+        self.command_identities.extend(string_values(
+            value,
+            &["command_identity", "command_identities"],
+        ));
+        if let Some(argv) = value.get("argv").and_then(JsonValue::as_array) {
+            let parts = argv
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .collect::<Vec<_>>();
+            if !parts.is_empty() {
+                self.command_candidates.push(parts.join(" "));
+                self.command_identities.push(parts[0].to_string());
+            }
+        }
+
+        self.urls.extend(string_values(value, &["url", "urls"]));
+        self.domains
+            .extend(string_values(value, &["domain", "domains"]));
+        self.http_methods.extend(
+            string_values(value, &["method", "http_method", "http_methods"])
+                .into_iter()
+                .map(|method| method.to_ascii_uppercase()),
+        );
+        self.mcp_servers
+            .extend(string_values(value, &["mcp_server", "mcp_servers"]));
+        self.mcp_tools
+            .extend(string_values(value, &["mcp_tool", "mcp_tools"]));
+        self.env_modes
+            .extend(string_values(value, &["env_mode", "envMode"]));
+
+        if let Some(entries) = value.get("paths").and_then(JsonValue::as_array) {
+            self.path_entries.extend(
+                entries
+                    .iter()
+                    .filter_map(|entry| serde_json::from_value(entry.clone()).ok()),
+            );
+        }
+    }
+
+    fn finish_host_normalization(&mut self) {
+        for entry in &self.path_entries {
+            self.path_candidates.extend(entry.policy_candidates());
+        }
+        for url in &self.urls {
+            if let Ok(parsed) = url::Url::parse(url) {
+                if matches!(parsed.scheme(), "http" | "https") {
+                    if let Some(host) = parsed.host_str() {
+                        self.domains.push(host.to_ascii_lowercase());
+                    }
+                }
+            }
+        }
+        if let Some(rest) = self.tool_name.strip_prefix("mcp.") {
+            if let Some((server, tool)) = rest.split_once('.') {
+                if !server.is_empty() && !tool.is_empty() {
+                    self.mcp_servers.push(server.to_string());
+                    self.mcp_tools.push(tool.to_string());
+                }
+            }
+        }
+        dedup(&mut self.capabilities);
+        dedup(&mut self.path_candidates);
+        dedup(&mut self.command_candidates);
+        dedup(&mut self.command_identities);
+        dedup(&mut self.urls);
+        dedup(&mut self.domains);
+        dedup(&mut self.http_methods);
+        dedup(&mut self.mcp_servers);
+        dedup(&mut self.mcp_tools);
+        dedup(&mut self.env_modes);
     }
 
     fn tool_kinds(&self) -> Vec<String> {
@@ -553,6 +747,7 @@ impl EvaluationContext {
             "agent": self.agent,
             "persona": self.persona,
             "mode": self.mode,
+            "env_modes": self.env_modes,
             "repeat_count": self.repeat_count,
         })
     }
@@ -646,7 +841,20 @@ pub fn evaluate_tool_approval_policy(
     args: &JsonValue,
     repeat_count: Option<u64>,
 ) -> PolicyEvaluation {
-    let ctx = EvaluationContext::new(tool_name, args, repeat_count);
+    evaluate_context(
+        policy,
+        EvaluationContext::new(tool_name, args, repeat_count),
+    )
+}
+
+pub fn evaluate_tool_approval_request(
+    policy: &ToolApprovalPolicy,
+    request: &ToolApprovalRequest,
+) -> PolicyEvaluation {
+    evaluate_context(policy, EvaluationContext::from_request(request))
+}
+
+fn evaluate_context(policy: &ToolApprovalPolicy, ctx: EvaluationContext) -> PolicyEvaluation {
     if let Some(default) = default_guard(policy, &ctx) {
         return evaluation_from_candidate(default, &ctx);
     }
@@ -816,7 +1024,10 @@ fn rule_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Vec<
         .rules
         .iter()
         .enumerate()
-        .filter(|(_, rule)| rule.matches.is_empty() || rule.matches.matches(ctx))
+        .filter(|(_, rule)| {
+            (rule.matches.is_empty() || rule.matches.matches(ctx))
+                && host_request::exact_write_env_allow(rule, ctx)
+        })
         .map(|(index, rule)| Candidate {
             source: "rules".to_string(),
             index: Some(index),
@@ -1098,6 +1309,62 @@ fn string_field(args: &JsonValue, key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn first_string(value: &JsonValue, keys: &[&str]) -> Option<String> {
+    string_values(value, keys).into_iter().next()
+}
+
+fn string_values(value: &JsonValue, keys: &[&str]) -> Vec<String> {
+    let Some(object) = value.as_object() else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    for key in keys {
+        match object.get(*key) {
+            Some(JsonValue::String(value)) if !value.trim().is_empty() => {
+                values.push(value.clone());
+            }
+            Some(JsonValue::Array(items)) => {
+                values.extend(
+                    items
+                        .iter()
+                        .filter_map(JsonValue::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .map(ToOwned::to_owned),
+                );
+            }
+            _ => {}
+        }
+    }
+    values
+}
+
+fn path_values(value: &JsonValue) -> Vec<String> {
+    let mut paths = string_values(
+        value,
+        &[
+            "path",
+            "file",
+            "target",
+            "source_path",
+            "new_path",
+            "target_path",
+        ],
+    );
+    if let Some(entries) = value.get("paths").and_then(JsonValue::as_array) {
+        for entry in entries {
+            if let Some(path) = first_string(
+                entry,
+                &["workspace_path", "path", "host_absolute_path", "host_path"],
+            ) {
+                paths.push(path);
+            } else if let Some(path) = entry.as_str() {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    paths
+}
+
 fn collect_string_values(value: &JsonValue, out: &mut Vec<String>) {
     match value {
         JsonValue::String(text) => out.push(text.clone()),
@@ -1230,251 +1497,4 @@ fn stable_json_digest(value: &JsonValue) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use super::*;
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-    use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
-
-    fn policy_with_path_annotation(tool: &str, kind: ToolKind) {
-        let mut annotations = BTreeMap::new();
-        annotations.insert(
-            tool.to_string(),
-            ToolAnnotations {
-                kind,
-                side_effect_level: match kind {
-                    ToolKind::Fetch => SideEffectLevel::Network,
-                    ToolKind::Execute => SideEffectLevel::ProcessExec,
-                    ToolKind::Edit | ToolKind::Delete | ToolKind::Move => {
-                        SideEffectLevel::WorkspaceWrite
-                    }
-                    _ => SideEffectLevel::ReadOnly,
-                },
-                arg_schema: ToolArgSchema {
-                    path_params: vec!["path".to_string()],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-        push_execution_policy(CapabilityPolicy {
-            tool_annotations: annotations,
-            ..Default::default()
-        });
-    }
-
-    #[test]
-    fn compact_rule_shorthand_deserializes() {
-        let rule: PolicyRule = serde_json::from_value(serde_json::json!({
-            "deny": {"tool": "read_*", "path": "**/.env"},
-            "reason": "secret file"
-        }))
-        .expect("rule");
-        assert_eq!(rule.action, PolicyAction::Deny);
-        assert_eq!(rule.matches.tool, vec!["read_*"]);
-        assert_eq!(rule.matches.path, vec!["**/.env"]);
-        assert_eq!(rule.reason.as_deref(), Some("secret file"));
-    }
-
-    #[test]
-    fn ambiguous_or_invalid_rule_shapes_are_rejected() {
-        let invalid_action = serde_json::from_value::<PolicyRule>(serde_json::json!({
-            "action": "maybe",
-            "match": {"tool": "read_file"}
-        }));
-        assert!(invalid_action.is_err());
-
-        let mixed_matchers = serde_json::from_value::<PolicyRule>(serde_json::json!({
-            "action": "deny",
-            "match": {"tool": "read_file"},
-            "path": "**/.env"
-        }));
-        assert!(mixed_matchers.is_err());
-    }
-
-    #[test]
-    fn deny_beats_ask_and_allow_regardless_of_order() {
-        let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
-            "rules": [
-                {"allow": {"tool": "write_file"}},
-                {"ask": {"tool": "write_*"}},
-                {"deny": {"tool": "write_file"}, "reason": "blocked"}
-            ]
-        }))
-        .expect("policy");
-        let decision =
-            evaluate_tool_approval_policy(&policy, "write_file", &serde_json::json!({}), None);
-        assert!(decision.is_deny());
-        assert_eq!(decision.reason, "blocked");
-        assert_eq!(
-            decision.matched_rule.as_ref().and_then(|rule| rule.index),
-            Some(2)
-        );
-    }
-
-    #[test]
-    fn sensitive_paths_are_denied_by_default() {
-        let policy = ToolApprovalPolicy::default();
-        let decision = evaluate_tool_approval_policy(
-            &policy,
-            "read_file",
-            &serde_json::json!({"path": "config/.env"}),
-            None,
-        );
-        assert!(decision.is_deny());
-        assert!(decision.risk_labels.contains(&"sensitive_path".to_string()));
-    }
-
-    #[test]
-    fn explicit_sensitive_opt_out_allows_regular_evaluation() {
-        let policy = ToolApprovalPolicy {
-            allow_sensitive_paths: true,
-            ..Default::default()
-        };
-        let decision = evaluate_tool_approval_policy(
-            &policy,
-            "read_file",
-            &serde_json::json!({"path": "config/.env"}),
-            None,
-        );
-        assert!(decision.is_allow());
-        assert!(!decision.has_audit_signal());
-    }
-
-    #[test]
-    fn external_declared_paths_are_denied_without_root() {
-        let temp = tempfile::tempdir().unwrap();
-        crate::stdlib::process::set_thread_execution_context(Some(
-            crate::orchestration::RunExecutionRecord {
-                cwd: Some(temp.path().to_string_lossy().into_owned()),
-                project_root: None,
-                source_dir: Some(temp.path().to_string_lossy().into_owned()),
-                env: BTreeMap::new(),
-                adapter: None,
-                repo_path: None,
-                worktree_path: None,
-                branch: None,
-                base_ref: None,
-                cleanup: None,
-                environment_policy: Default::default(),
-                grants: Vec::new(),
-            },
-        ));
-        policy_with_path_annotation("read_file", ToolKind::Read);
-        let decision = evaluate_tool_approval_policy(
-            &ToolApprovalPolicy::default(),
-            "read_file",
-            &serde_json::json!({"path": "/tmp/outside.txt"}),
-            None,
-        );
-        assert!(decision.is_deny());
-        assert!(decision.risk_labels.contains(&"external_path".to_string()));
-        pop_execution_policy();
-        crate::stdlib::process::set_thread_execution_context(None);
-    }
-
-    #[test]
-    fn path_rule_uses_declared_path_params() {
-        policy_with_path_annotation("write_file", ToolKind::Edit);
-        let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
-            "allow_sensitive_paths": true,
-            "rules": [{"ask": {"tool": "write_*", "path": "src/**"}, "reason": "source edit"}]
-        }))
-        .expect("policy");
-        let decision = evaluate_tool_approval_policy(
-            &policy,
-            "write_file",
-            &serde_json::json!({"path": "src/lib.rs"}),
-            None,
-        );
-        assert!(decision.is_ask());
-        assert_eq!(decision.reason, "source edit");
-        pop_execution_policy();
-    }
-
-    #[test]
-    fn command_url_mcp_identity_and_repeat_rules_match() {
-        let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
-            "allow_sensitive_paths": true,
-            "rules": [
-                {"ask": {"tool": "run_command", "command_identity": "npm"}},
-                {"deny": {"tool": "fetch_url", "domain": "*.example.com", "method": "POST"}},
-                {"deny": {"mcp_server": "github", "mcp_tool": "create_issue"}},
-                {"deny": {"tool": "read_file", "repeat_count_gte": 3}}
-            ]
-        }))
-        .expect("policy");
-        assert!(evaluate_tool_approval_policy(
-            &policy,
-            "run_command",
-            &serde_json::json!({"argv": ["npm", "install"]}),
-            None,
-        )
-        .is_ask());
-        assert!(evaluate_tool_approval_policy(
-            &policy,
-            "fetch_url",
-            &serde_json::json!({"url": "https://api.example.com/v1", "method": "post"}),
-            None,
-        )
-        .is_deny());
-        assert!(evaluate_tool_approval_policy(
-            &policy,
-            "github__create_issue",
-            &serde_json::json!({}),
-            None,
-        )
-        .is_deny());
-        assert!(evaluate_tool_approval_policy(
-            &policy,
-            "read_file",
-            &serde_json::json!({"path": "README.md"}),
-            Some(3),
-        )
-        .is_deny());
-    }
-
-    #[test]
-    fn persona_agent_and_mode_rules_match_args() {
-        let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
-            "allow_sensitive_paths": true,
-            "rules": [{"deny": {"agent": "release-*", "persona": "shipper", "mode": "act"}}]
-        }))
-        .expect("policy");
-        let decision = evaluate_tool_approval_policy(
-            &policy,
-            "publish",
-            &serde_json::json!({"agent": "release-1", "persona": "shipper", "mode": "act"}),
-            None,
-        );
-        assert!(decision.is_deny());
-    }
-
-    #[test]
-    fn approval_unavailable_class_count_uses_sorted_risk_labels() {
-        clear_all_approval_policy_repeat_counts();
-        let labels = vec![
-            "package_install".to_string(),
-            "approval_required".to_string(),
-        ];
-        let reversed = vec![
-            "approval_required".to_string(),
-            "package_install".to_string(),
-        ];
-
-        let (class, count) = next_approval_unavailable_class_repeat_count("s1", &labels);
-        assert_eq!(class, "approval_required+package_install");
-        assert_eq!(count, 1);
-        let (class, count) = next_approval_unavailable_class_repeat_count("s1", &reversed);
-        assert_eq!(class, "approval_required+package_install");
-        assert_eq!(count, 2);
-        let (class, count) = next_approval_unavailable_class_repeat_count("s2", &[]);
-        assert_eq!(class, "approval_required");
-        assert_eq!(count, 1);
-
-        clear_approval_policy_repeat_counts("s1");
-        let (_, count) = next_approval_unavailable_class_repeat_count("s1", &labels);
-        assert_eq!(count, 1);
-    }
-}
+mod tests;
