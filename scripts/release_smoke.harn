@@ -127,10 +127,17 @@ fn first_result_output(results: list) -> string {
   return ""
 }
 
+fn release_smoke_adapters(tools: HarnessTools, overrides = nil) {
+  return {
+    run: { spec, options -> command_run(tools, spec, options) },
+    start: { spec, options -> command_run(tools, spec, options) },
+    wait: { started, options -> command_wait(tools, started, options) },
+    cancel: { started, options -> command_cancel(tools, started, options) },
+  }
+    + (overrides ?? {})
+}
+
 fn watch_step(config: ReleaseSmokeConfig, adapters) {
-  const start_fn = adapters?.start ?? { spec, options -> command_run(spec, options) }
-  const wait_fn = adapters?.wait ?? { started, options -> command_wait(started, options) }
-  const cancel_fn = adapters?.cancel ?? { started, options -> command_cancel(started, options) }
   const target = config.watch_target
   if target == nil {
     return command_result_fail(2, "release-smoke: watch_target is required")
@@ -139,7 +146,7 @@ fn watch_step(config: ReleaseSmokeConfig, adapters) {
       timed_out: false,
     }
   }
-  const started = start_fn(
+  const started = adapters.start(
     [config.candidate, "watch", target],
     {cwd: config.root, env: {HARN_LLM_CALLS_DISABLED: "1"}, background: true, capture: CAPTURE},
   )
@@ -150,8 +157,8 @@ fn watch_step(config: ReleaseSmokeConfig, adapters) {
       timed_out: started?.timed_out ?? false,
     }
   }
-  const waited = wait_fn(started, {timeout_ms: config.watch_timeout_ms})
-  const cancelled = cancel_fn(
+  const waited = adapters.wait(started, {timeout_ms: config.watch_timeout_ms})
+  const cancelled = adapters.cancel(
     started,
     {wait_result_ms: 5000, timed_out: waited?.status == "running"},
   )
@@ -197,13 +204,19 @@ pub fn run_release_smoke(
   config: ReleaseSmokeConfig,
   adapters = nil,
 ) -> ReleaseSmokeReport {
-  const runner = adapters?.run ?? { spec, options -> command_run(spec, options) }
+  const resolved_adapters = release_smoke_adapters(tools, adapters)
   let steps = []
   for spec in command_specs(config.candidate) {
-    steps = steps
-      + [command_step(tools, clock, spec.name, spec.argv, command_options(config, runner))]
+    const result = command_step(
+      tools,
+      clock,
+      spec.name,
+      spec.argv,
+      command_options(config, resolved_adapters.run),
+    )
+    steps = steps + [result]
   }
-  steps = steps + [watch_step(config, adapters ?? {})]
+  steps = steps + [watch_step(config, resolved_adapters)]
   const failed = steps.filter({ step -> !(step?.success ?? false) })
   return {platform: config.platform, steps: steps, failed: failed, success: failed.count == 0}
 }
