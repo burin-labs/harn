@@ -876,12 +876,6 @@ pub enum ToolApprovalDecision {
 }
 
 impl ToolApprovalPolicy {
-    /// Evaluate a raw host request through the same normalization, guards,
-    /// precedence, and audit receipt used by VM tool dispatch.
-    pub fn evaluate_request(&self, request: &ToolApprovalRequest) -> PolicyEvaluation {
-        approval_rules::evaluate_tool_approval_request(self, request)
-    }
-
     pub fn evaluate_detailed(&self, tool_name: &str, args: &serde_json::Value) -> PolicyEvaluation {
         approval_rules::evaluate_tool_approval_policy(self, tool_name, args, None)
     }
