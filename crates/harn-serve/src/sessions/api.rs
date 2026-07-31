@@ -35,6 +35,7 @@ pub fn sessions_router(store: SharedSessionStore) -> Router {
                 .delete(soft_delete_session),
         )
         .route("/sessions/{id}/view", get(session_view))
+        .route("/sessions/{id}/timeline", get(session_timeline))
         .route("/sessions/{id}/events", post(append_event).get(read_events))
         .route("/sessions/{id}/fork", post(fork_session))
         .route("/sessions/{id}/truncate", post(truncate_session))
@@ -76,6 +77,16 @@ struct ForkRequest {
 #[derive(Debug, Deserialize)]
 struct TruncateRequest {
     at_event_id: EventId,
+}
+
+#[derive(Debug, Deserialize)]
+struct TimelineQuery {
+    #[serde(default = "default_timeline_limit")]
+    limit: usize,
+}
+
+const fn default_timeline_limit() -> usize {
+    10_000
 }
 
 #[derive(Debug, Serialize)]
@@ -311,6 +322,26 @@ async fn read_events(
         )
             .into_response(),
         Err(error) => map_error(error).into_response(),
+    }
+}
+
+#[tracing::instrument(
+    name = "harn.session.timeline",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
+async fn session_timeline(
+    State(state): State<SessionsState>,
+    Path(id): Path<String>,
+    Query(options): Query<TimelineQuery>,
+) -> impl IntoResponse {
+    let mut query = harn_vm::session_timeline::SessionTimelineQuery::for_session(id);
+    query.limit = Some(options.limit.clamp(1, 100_000));
+    match harn_vm::session_timeline::query_session_store_timeline(state.store.as_ref(), query).await
+    {
+        Ok(Some(snapshot)) => (StatusCode::OK, Json(json!(snapshot))).into_response(),
+        Ok(None) => map_error(StoreError::NotFound("session".to_string())).into_response(),
+        Err(error) => map_error(StoreError::Backend(error.to_string())).into_response(),
     }
 }
 
