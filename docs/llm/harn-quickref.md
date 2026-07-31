@@ -1462,9 +1462,12 @@ registry = tool_define(registry, "tool_search", "...", {
 Harn handlers normally return the text shown to the model. When a producer also
 needs to expose typed facts to middleware or lifecycle consumers, return
 `agent_tool_handler_result(text, data)` from `std/agent/tool_lifecycle`. The
-dispatcher preserves the full `{schema, text, data}` record on `result` while
-`rendered_result` and the model-visible observation contain only `text`.
-Ordinary dict returns retain their existing display rendering.
+dispatcher preserves the full `{schema, text, data}` record on `result` and
+projects the complete `data` map onto the flat dispatch result, the terminal
+`tool_call_update`, and the stored session tool-result message. ACP exposes the
+same map at `_meta.harn.data`. `rendered_result` and the model-visible
+observation contain only `text`. Ordinary unmarked dict returns retain their
+existing display rendering and do not gain promoted `data`.
 
 `tool_define` rejects invalid combinations at definition time, and
 `agent_loop` refuses to start if the registry contains a tool with no

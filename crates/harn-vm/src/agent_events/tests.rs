@@ -123,6 +123,7 @@ fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
         error_category: None,
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: Some(serde_json::json!({"run_outcome": {"exit_code": 0}})),
         executor: None,
         parsing: None,
 
@@ -133,6 +134,7 @@ fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
     let value = serde_json::to_value(&terminal).unwrap();
     assert_eq!(value["duration_ms"], serde_json::json!(42));
     assert_eq!(value["execution_duration_ms"], serde_json::json!(7));
+    assert_eq!(value["data"]["run_outcome"]["exit_code"], 0);
 
     // In-progress update with `None` for both — both keys must be
     // absent (not `null`) so older ACP clients that key off
@@ -149,6 +151,7 @@ fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
         error_category: None,
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
 
@@ -165,6 +168,10 @@ fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
     assert!(
         !object.contains_key("execution_duration_ms"),
         "execution_duration_ms must be omitted when None: {value}"
+    );
+    assert!(
+        !object.contains_key("data"),
+        "data must be omitted when None: {value}"
     );
 }
 
@@ -241,6 +248,7 @@ fn tool_mutation_status_serde_and_terminal_update_round_trip() {
             error_category: None,
             mutation_status: status,
             changed_paths: None,
+            data: None,
             executor: None,
             parsing: None,
             raw_input: None,
@@ -291,6 +299,7 @@ fn tool_call_update_event_omits_error_category_when_none() {
         error_category: None,
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
 
@@ -317,6 +326,7 @@ fn tool_call_update_event_serializes_error_category_when_set() {
         error_category: Some(ToolCallErrorCategory::SchemaValidation),
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
 
@@ -346,6 +356,7 @@ fn tool_call_update_omits_executor_when_absent() {
         error_category: None,
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
 
@@ -536,6 +547,7 @@ fn tool_call_update_includes_executor_when_present() {
         error_category: None,
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: Some(ToolExecutor::McpServer {
             server_name: "github".into(),
         }),
@@ -564,6 +576,7 @@ fn tool_call_update_omits_audit_when_absent() {
         error_category: None,
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -595,6 +608,7 @@ fn tool_call_update_includes_audit_when_present() {
         error_category: None,
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,

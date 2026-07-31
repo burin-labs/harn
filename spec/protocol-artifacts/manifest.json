@@ -374,6 +374,7 @@
     "toolLifecycleExtensionFields": [
       "audit",
       "changedPaths",
+      "data",
       "durationMs",
       "error",
       "errorCategory",

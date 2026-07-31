@@ -65,15 +65,29 @@ fn from_host_tool_call_update_defaults_status_and_maps_executor_alias() {
             "tool_call_id": "t1",
             "tool_name": "read_file",
             "mutation_status": "unknown",
+            "data": {
+                "command_status": "succeeded",
+                "run_outcome": {"exit_code": 0}
+            },
             "executor": "harn",
         }),
     )
     .expect("tool_call_update");
     match event {
         AgentEvent::ToolCallUpdate {
-            status, executor, ..
+            status,
+            data,
+            executor,
+            ..
         } => {
             assert_eq!(status, ToolCallStatus::InProgress);
+            assert_eq!(
+                data,
+                Some(json!({
+                    "command_status": "succeeded",
+                    "run_outcome": {"exit_code": 0}
+                }))
+            );
             assert_eq!(executor, Some(ToolExecutor::HarnBuiltin));
         }
         other => panic!("expected ToolCallUpdate, got {other:?}"),

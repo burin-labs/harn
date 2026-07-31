@@ -453,6 +453,7 @@ export type ACPToolExecutor =
 export interface HarnToolLifecycleMeta {
   audit?: ACPValue
   changedPaths?: string[]
+  data?: ACPValue
   durationMs?: number
   error?: string
   errorCategory?: HarnToolCallErrorCategory

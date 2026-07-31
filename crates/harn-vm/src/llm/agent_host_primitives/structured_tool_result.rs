@@ -17,20 +17,24 @@ pub(super) fn changed_paths(result: &serde_json::Value) -> Option<Vec<&str>> {
     Some(paths)
 }
 
+pub(super) fn data(
+    result: &serde_json::Value,
+) -> Option<&serde_json::Map<String, serde_json::Value>> {
+    if result.get("schema").and_then(serde_json::Value::as_str)
+        != Some("harn.agent_tool_handler_result.v1")
+    {
+        return None;
+    }
+    result.get("data")?.as_object()
+}
+
 fn fact<'a>(result: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
-    result.get(key).or_else(|| {
-        if result.get("schema").and_then(serde_json::Value::as_str)
-            != Some("harn.agent_tool_handler_result.v1")
-        {
-            return None;
-        }
-        result.get("data")?.get(key)
-    })
+    result.get(key).or_else(|| data(result)?.get(key))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{changed_paths, mutation_status};
+    use super::{changed_paths, data, mutation_status};
 
     #[test]
     fn lifts_only_declared_mutation_outcomes() {
@@ -93,5 +97,35 @@ mod tests {
             "changed_paths": "src/lib.rs"
         }))
         .is_none());
+    }
+
+    #[test]
+    fn exposes_only_declared_handler_data_without_key_filtering() {
+        let result = serde_json::json!({
+            "schema": "harn.agent_tool_handler_result.v1",
+            "text": "Command wording is deliberately not machine-readable.",
+            "data": {
+                "command_status": "succeeded",
+                "run_outcome": {"exit_code": 0}
+            }
+        });
+        assert_eq!(
+            data(&result),
+            result["data"].as_object(),
+            "the producer-owned data map is projected whole"
+        );
+        for result in [
+            serde_json::json!({"data": {"run_outcome": {"exit_code": 0}}}),
+            serde_json::json!({
+                "schema": "another.result.v1",
+                "data": {"run_outcome": {"exit_code": 0}}
+            }),
+            serde_json::json!({
+                "schema": "harn.agent_tool_handler_result.v1",
+                "data": "not-a-map"
+            }),
+        ] {
+            assert!(data(&result).is_none());
+        }
     }
 }

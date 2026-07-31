@@ -155,6 +155,12 @@ pub enum AgentEvent {
         /// execution boundary can report them precisely.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         changed_paths: Option<Vec<String>>,
+        /// Producer-owned facts declared by an
+        /// `harn.agent_tool_handler_result.v1` envelope. The dispatcher
+        /// projects the complete map without interpreting producer-specific
+        /// keys or parsing rendered output.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data: Option<serde_json::Value>,
         /// Where the tool actually ran. `None` only for events emitted
         /// from sites that pre-date the dispatch decision (e.g. the
         /// pending → in-progress transition the loop emits before the

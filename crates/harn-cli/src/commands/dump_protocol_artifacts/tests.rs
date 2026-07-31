@@ -503,6 +503,7 @@ fn generated_python_includes_harn_wire_vocabularies() {
     assert!(py.contains("class HarnToolMutationStatus(str, Enum):"));
     assert!(py.contains("class HarnWorkerStatus(str, Enum):"));
     assert!(py.contains("changedPaths: Optional[List[str]] = None"));
+    assert!(py.contains("data: Optional[JsonValue] = None"));
     assert!(py.contains("mutationStatus: Optional[HarnToolMutationStatus] = None"));
     assert!(py.contains("class ToolCallReceipt(_HarnDataclass):"));
     assert!(py.contains("class ToolCallReceiptStatus(str, Enum):"));

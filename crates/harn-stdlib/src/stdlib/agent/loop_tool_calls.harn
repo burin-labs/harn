@@ -371,6 +371,9 @@ pub fn __emit_tool_lifecycle_finish(envelope, result) {
   if result?.changed_paths != nil {
     payload = payload + {changed_paths: result.changed_paths}
   }
+  if result?.data != nil {
+    payload = payload + {data: result.data}
+  }
   let _ = agent_emit_event(session_id, "tool_call_update", payload)
 }
 

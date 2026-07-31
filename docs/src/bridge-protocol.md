@@ -83,11 +83,14 @@ metadata keys are advertised during `initialize` under
 `agentCapabilities._meta.harn.toolLifecycleExtensionFields`:
 
 - `audit`
+- `changedPaths`
+- `data`
 - `durationMs`
 - `error`
 - `errorCategory`
 - `executionDurationMs`
 - `executor`
+- `mutationStatus`
 - `parsing`
 - `rawInputPartial`
 

@@ -177,37 +177,6 @@ fn has_progress_entries(entries: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-/// Merge `harn_meta` keys into `value._meta.harn`, creating intermediate
-/// objects as needed. Existing `_meta.harn` keys are preserved (unless
-/// overwritten by `harn_meta`). No-op when `harn_meta` is empty or
-/// `value` is not a JSON object.
-pub(super) fn merge_harn_meta(
-    value: &mut serde_json::Value,
-    harn_meta: serde_json::Map<String, serde_json::Value>,
-) {
-    if harn_meta.is_empty() {
-        return;
-    }
-    let Some(obj) = value.as_object_mut() else {
-        return;
-    };
-    let meta = obj
-        .entry("_meta".to_string())
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    let Some(meta_obj) = meta.as_object_mut() else {
-        return;
-    };
-    let harn = meta_obj
-        .entry("harn".to_string())
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    let Some(harn_obj) = harn.as_object_mut() else {
-        return;
-    };
-    for (k, v) in harn_meta {
-        harn_obj.insert(k, v);
-    }
-}
-
 impl AgentEventSink for AcpAgentEventSink {
     fn handle_event(&self, event: &AgentEvent) {
         match event {
@@ -314,6 +283,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 error_category,
                 mutation_status,
                 changed_paths,
+                data,
                 executor,
                 parsing,
                 raw_input,
@@ -354,6 +324,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 );
                 if let Some(paths) = changed_paths {
                     harn_meta.insert("changedPaths".to_string(), serde_json::json!(paths));
+                }
+                if let Some(data) = data {
+                    harn_meta.insert("data".to_string(), data.clone());
                 }
                 if let Some(exec) = executor {
                     harn_meta.insert("executor".to_string(), Self::executor_to_json(exec));
@@ -1802,7 +1775,10 @@ impl AgentEventSink for AcpAgentEventSink {
 #[cfg(test)]
 mod boundary_tests;
 mod ext_payloads;
+mod meta;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
+
+pub(super) use meta::merge_harn_meta;

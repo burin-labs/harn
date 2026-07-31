@@ -141,10 +141,15 @@ fn main() {
 }
 ```
 
-The dispatcher keeps the complete envelope on `result`. It uses only `text`
-for `rendered_result` and the model-visible observation, so changing the prose
-does not change the structured facts. Unmarked dict returns retain their
-historical display-string behavior.
+The dispatcher keeps the complete envelope on `result` and projects its
+producer-owned `data` map unchanged onto the flat dispatch result. The same map
+is available on the terminal `tool_call_update` event and the recorded session
+tool-result message; ACP clients receive it at `_meta.harn.data`. Harn does not
+maintain a key allowlist for this map, so producers can add typed outcome
+records without runtime changes. Only `text` is used for `rendered_result` and
+the model-visible observation, so changing the prose does not change the
+structured facts. Unmarked dict returns retain their historical display-string
+behavior and do not gain promoted `data`.
 
 Then hand the registry to `agent_loop(...)`:
 
