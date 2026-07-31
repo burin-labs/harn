@@ -457,13 +457,13 @@ fn main(harness: Harness) {
   const raw = harness.env.get_or("HARN_EVAL_PROMPT_REPORT_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_EVAL_PROMPT_REPORT_JSON not set by dispatch shim")
-    exit(70)
+    harness.runtime.exit(70)
   }
   const report = try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse PromptReport: " + e.message)
-    exit(70)
+    harness.runtime.exit(70)
   }
   const output = harness.env.get_or("HARN_EVAL_PROMPT_OUTPUT", "terminal")
   const payload = if output == "json" {
@@ -476,5 +476,5 @@ fn main(harness: Harness) {
   // Always print to stdout (no trailing newline — the rendered payloads
   // already include their own terminating newline). The Rust shim
   // intercepts captured stdout and writes it to `--out-file` if set.
-  __io_print(payload)
+  harness.stdio.print(payload)
 }

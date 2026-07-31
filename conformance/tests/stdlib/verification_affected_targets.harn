@@ -1,7 +1,8 @@
 import { verification_affected_targets } from "std/verification"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const fact = verification_affected_targets(
+    harness,
     ["crates/app/src/lib.rs", "apps/web/src/index.ts", "plugins/a/file.foo"],
     [
       {
@@ -51,6 +52,7 @@ pipeline test(task) {
   assert_eq(fact.adapters[2]?.target_count, 1)
   assert_eq(fact.fallback.enabled, false)
   const templated = verification_affected_targets(
+    harness,
     ["x/a.txt", "y/b.txt"],
     [
       {
@@ -64,5 +66,5 @@ pipeline test(task) {
   assert_eq(len(templated.targets), 2)
   assert_eq(templated.targets[0].id, "x/a.txt")
   assert_eq(templated.targets[1].id, "y/b.txt")
-  __io_println("verification affected targets ok")
+  harness.stdio.println("verification affected targets ok")
 }

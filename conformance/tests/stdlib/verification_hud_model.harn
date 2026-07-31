@@ -4,7 +4,7 @@ import {
   verification_snapshot_staleness,
 } from "std/verification"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const fresh = verification_snapshot_staleness({"src/a.tx": "h1"}, {"src/a.tx": "h1"})
   assert_eq(fresh.status, "bound_fresh")
   assert_eq(fresh.fresh, true)
@@ -19,7 +19,7 @@ pipeline test(task) {
   const unbound = verification_snapshot_staleness({}, {"src/a.tx": "h1"})
   assert_eq(unbound.status, "unbound")
   assert_eq(unbound.advisory, true)
-  verification_profiles_set(
+  harness.runtime.verification_profiles_set(
     {
       rows: [
         {
@@ -46,6 +46,8 @@ pipeline test(task) {
     },
   )
   const model = verification_hud_model(
+    harness.clock,
+    harness.runtime,
     {
       started_ms: 1000,
       last_edit_ms: 61000,
@@ -73,10 +75,10 @@ pipeline test(task) {
   assert_eq(model.next_check.p95, "0s")
   assert_eq(model.full_check.row_id, "tx/full")
   assert_eq(model.full_check.p95, "9s")
-  const text = verification_hud_text(model)
+  const text = verification_hud_text(harness.clock, harness.runtime, model)
   assert(contains(text, "[verification]"), "HUD text has header")
   assert(contains(text, "last check: R2 -> failed @11s ago - STALE"), "HUD text labels stale red")
   assert(contains(text, "next check: R0 toolchainx parse {file}"), "HUD text names next check")
   assert(contains(text, "full verify: R4 toolchainx test --all"), "HUD text names full verify")
-  __io_println("verification hud model ok")
+  harness.stdio.println("verification hud model ok")
 }

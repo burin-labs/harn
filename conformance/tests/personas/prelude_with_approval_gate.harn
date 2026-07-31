@@ -1,6 +1,6 @@
 import { with_approval_gate } from "std/personas/prelude"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const opts = {
     persona: "approval_captain",
     step: "merge",
@@ -8,27 +8,37 @@ pipeline test(task) {
     started_at: "2026-05-03T00:00:00Z",
     completed_at: "2026-05-03T00:00:00Z",
   }
-  const suspended_gate = with_approval_gate("merge", fn() { return "ran" }, opts)
+  const suspended_gate = with_approval_gate(
+    harness.clock,
+    harness.interaction,
+    "merge",
+    fn() { return "ran" },
+    opts,
+  )
   const suspended = suspended_gate()
-  __io_println(suspended.status)
-  __io_println(suspended.approval_required)
+  harness.stdio.println(suspended.status)
+  harness.stdio.println(suspended.approval_required)
   const approved_gate = with_approval_gate(
+    harness.clock,
+    harness.interaction,
     "merge",
     fn() { return "ran" },
     opts + {approval: {approved: true, reviewers: ["alice"], reason: "ok"}},
   )
   const approved = approved_gate()
-  __io_println(approved.status)
-  __io_println(approved.result)
-  __io_println(len(approved.receipt.approvals))
-  __io_println(approved.receipt.status)
+  harness.stdio.println(approved.status)
+  harness.stdio.println(approved.result)
+  harness.stdio.println(len(approved.receipt.approvals))
+  harness.stdio.println(approved.receipt.status)
   const denied_gate = with_approval_gate(
+    harness.clock,
+    harness.interaction,
     "merge",
     fn() { return "should-not-run" },
     opts + {approval: {approved: false, reviewers: ["alice"], reason: "unsafe"}},
   )
   const denied = denied_gate()
-  __io_println(denied.status)
-  __io_println(denied.result == nil)
-  __io_println(denied.error.message)
+  harness.stdio.println(denied.status)
+  harness.stdio.println(denied.result == nil)
+  harness.stdio.println(denied.error.message)
 }

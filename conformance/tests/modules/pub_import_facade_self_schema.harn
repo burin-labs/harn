@@ -7,13 +7,13 @@ fn downstream_ok(value: unknown) -> bool {
   return schema_is(value, Contract)
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Facade self-use of the re-exported type via `schema_is`.
-  __io_println(validate({label: "ok"}))
-  __io_println(validate({label: 12}))
+  harness.stdio.println(validate({label: "ok"}))
+  harness.stdio.println(validate({label: 12}))
   // Facade self-use via `schema_of` passed to a local generic `Schema<T>` helper.
-  __io_println(contract_kind())
+  harness.stdio.println(contract_kind())
   // Downstream use of the same re-exported type through the facade.
-  __io_println(downstream_ok({label: "down"}))
-  __io_println(downstream_ok({label: 12}))
+  harness.stdio.println(downstream_ok({label: "down"}))
+  harness.stdio.println(downstream_ok({label: 12}))
 }

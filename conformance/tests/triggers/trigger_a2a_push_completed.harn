@@ -1,8 +1,8 @@
-pipeline test(task) {
-  const result = trigger_test_harness("a2a_push_completed")
-  __io_println(result.ok)
-  __io_println(result.emitted[0].provider == "a2a-push")
-  __io_println(result.emitted[0].kind == "a2a.task.completed")
-  __io_println(result.details.task_id == "task-123")
-  __io_println(result.details.task_state == "completed")
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("a2a_push_completed")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(result.emitted[0].provider == "a2a-push")
+  harness.stdio.println(result.emitted[0].kind == "a2a.task.completed")
+  harness.stdio.println(result.details.task_id == "task-123")
+  harness.stdio.println(result.details.task_state == "completed")
 }

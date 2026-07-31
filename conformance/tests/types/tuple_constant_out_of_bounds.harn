@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(_harness: Harness) {
   const row = tuple("jobs", 3)
   __io_println(row[2])
 }

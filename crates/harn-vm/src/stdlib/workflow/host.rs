@@ -40,6 +40,8 @@ use super::usage::{llm_usage_delta, llm_usage_snapshot, UsageSnapshot};
 
 /// Prepare low-level workflow run state for the Harn stdlib workflow executor.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_prepare_run(task: string, graph: dict, artifacts?: list|nil, options?: dict|nil) -> dict",
     category = "workflow.host",
     runtime_only = true
@@ -66,6 +68,8 @@ pub(super) fn host_workflow_prepare_run_builtin(
 
 /// Prepare one low-level workflow stage and install its execution scope.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_stage_prepare(state_id: string, node_id: string, ready_nodes: list, options?: dict|nil) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -94,6 +98,8 @@ pub(super) async fn host_workflow_stage_prepare_builtin(
 
 /// Complete one prepared low-level workflow stage and tear down its execution scope.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_stage_complete(state_id: string, node_id: string, llm_result: any) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -131,6 +137,8 @@ pub(super) async fn host_workflow_stage_complete_builtin(
 
 /// Record workflow stage transitions and checkpoint low-level run state.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_record_transitions(state_id: string, ready_nodes: list, stage: dict, edges: list) -> dict",
     category = "workflow.host",
     runtime_only = true
@@ -167,6 +175,8 @@ pub(super) fn host_workflow_record_transitions_builtin(
 
 /// Finalize low-level workflow run state and persist the final checkpoint.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_finalize_run(state_id: string, ready_nodes: list) -> dict",
     category = "workflow.host",
     runtime_only = true
@@ -184,6 +194,8 @@ pub(super) fn host_workflow_finalize_run_builtin(
 
 /// Return the host-normalized execution plan for a workflow map stage.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_map_plan(node: dict, artifacts: list) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -202,6 +214,8 @@ pub(super) async fn host_workflow_map_plan_builtin(
 
 /// Build the synthesized input artifact for one Harn-owned workflow map branch.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_map_branch_artifact(node_id: string, item: any, lineage: dict) -> dict",
     category = "workflow.host",
     runtime_only = true
@@ -227,6 +241,8 @@ pub(super) fn host_workflow_map_branch_artifact_builtin(
 
 /// Execute one workflow map branch while Harn owns branch scheduling.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_map_execute_branch(node_id: string, plan: dict, item: any, branch_artifact: dict, options?: dict|nil) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -324,6 +340,8 @@ pub(super) async fn host_workflow_map_execute_branch_builtin(
 
 /// Finalize a Harn-owned workflow map stage after branch settlement.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_workflow_map_finalize(strategy: string, total_items: int, completed: list, failures: list, produced: list) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -390,6 +408,8 @@ pub(super) async fn host_workflow_map_finalize_builtin(
 /// Select the artifacts visible to one workflow stage and derive its
 /// consumed-artifact lineage ids.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_stage_select_artifacts(node: dict, artifacts: list) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -432,6 +452,8 @@ pub(super) async fn host_stage_select_artifacts_builtin(
 /// (never serialized to JSON): transcripts can be large and may reference
 /// session-backed message lists.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_stage_execute_once(node_id: string, node: dict, task: string, attempt: int, artifacts: list, selected_artifacts: list, transcript?: any) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -555,6 +577,8 @@ pub(super) async fn host_stage_execute_once_builtin(
 /// seam as raw fields and is re-canonicalized through the typed struct here
 /// before it can reach a persisted run record.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_stage_record_attempt(attempts: list, record: dict) -> list",
     category = "workflow.host",
     runtime_only = true
@@ -574,6 +598,8 @@ pub(super) fn host_stage_record_attempt_builtin(
 /// Snapshot the cumulative LLM usage counters used for per-stage usage
 /// accounting (tokens, duration, call count, cost, trace length).
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_llm_usage_snapshot() -> dict",
     category = "workflow.host",
     runtime_only = true
@@ -589,6 +615,8 @@ pub(super) fn host_llm_usage_snapshot_builtin(
 /// snapshots. `after` defaults to the current counters when omitted, so a
 /// stage-usage delta costs a single crossing.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_llm_usage_delta(before: dict, after?: dict|nil) -> dict",
     category = "workflow.host",
     runtime_only = true

@@ -6,9 +6,9 @@ accept a call dict such as `{prompt, system, opts}`.
 ```harn
 import { with_circuit_breaker } from "std/llm/handlers"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const raw_handler = fn(call) {
-    return llm_call(call.prompt, call?.system, call.opts)
+    return harness.llm.call(call.prompt, call?.system, call.opts)
   }
   const pooled = with_circuit_breaker(raw_handler)
   const shared = with_circuit_breaker(raw_handler, {name: "primary-llm", threshold: 3})

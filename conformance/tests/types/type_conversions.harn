@@ -1,34 +1,34 @@
 /** Test to_int and to_float builtins */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // to_int from int (passthrough)
-  __io_println(42)
+  harness.stdio.println(42)
   // to_int from float (truncates)
-  __io_println(to_int(3.9))
-  __io_println(to_int(-2.7))
+  harness.stdio.println(to_int(3.9))
+  harness.stdio.println(to_int(-2.7))
   // to_int from string
-  __io_println(to_int("123"))
-  __io_println(to_int("-5"))
+  harness.stdio.println(to_int("123"))
+  harness.stdio.println(to_int("-5"))
   // to_int from invalid string returns nil
-  __io_println(to_int("abc"))
+  harness.stdio.println(to_int("abc"))
   // to_int from nil returns nil
-  __io_println(to_int(nil))
+  harness.stdio.println(to_int(nil))
   // to_int from bool follows the documented 1/0 conversion
-  __io_println(to_int(true))
-  __io_println(to_int(false))
+  harness.stdio.println(to_int(true))
+  harness.stdio.println(to_int(false))
   // to_int from non-finite floats returns nil
-  __io_println(to_int(to_float("NaN")))
+  harness.stdio.println(to_int(to_float("NaN")))
   // to_float from float (passthrough)
-  __io_println(3.14)
+  harness.stdio.println(3.14)
   // to_float from int
-  __io_println(to_float(10))
+  harness.stdio.println(to_float(10))
   // to_float from string
-  __io_println(to_float("2.5"))
-  __io_println(to_float("-1.0"))
+  harness.stdio.println(to_float("2.5"))
+  harness.stdio.println(to_float("-1.0"))
   // to_float from invalid string returns nil
-  __io_println(to_float("xyz"))
+  harness.stdio.println(to_float("xyz"))
   // to_float from nil returns nil
-  __io_println(to_float(nil))
+  harness.stdio.println(to_float(nil))
   // to_string round-trips
-  __io_println(type_of(5))
-  __io_println(type_of(to_float(5)))
+  harness.stdio.println(type_of(5))
+  harness.stdio.println(type_of(to_float(5)))
 }

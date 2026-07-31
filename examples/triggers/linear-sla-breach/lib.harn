@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /** Plan a periodic Linear SLA scan. */
-pub fn scan_for_sla_breaches(event: TriggerEvent) -> dict {
+pub fn scan_for_sla_breaches(_harness: Harness, event: TriggerEvent) -> dict {
   return {
     provider: "linear",
     action: "scan_for_sla_breaches",

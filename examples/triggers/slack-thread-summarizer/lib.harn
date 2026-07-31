@@ -8,7 +8,7 @@ pub fn should_summarize(event: TriggerEvent) -> bool {
 }
 
 /** Create a thread-summary planning payload. */
-pub fn summarize_thread(event: TriggerEvent) -> dict {
+pub fn summarize_thread(_harness: Harness, event: TriggerEvent) -> dict {
   const raw = event.provider_payload.raw
   return {
     action: "summarize_thread",

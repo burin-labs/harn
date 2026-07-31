@@ -19,11 +19,7 @@ use axum::body::{to_bytes, Body};
 use axum::http::{header, Method, Request, StatusCode};
 use axum::response::Response;
 use axum::Router;
-use harn_serve::{
-    DispatchCore, DispatchCoreConfig, DispatchError, NoReplayCache, SiteServer, SiteServerConfig,
-    VmConfigurator,
-};
-use harn_vm::{HostCallBridge, Vm, VmValue};
+use harn_serve::{DispatchCore, DispatchCoreConfig, NoReplayCache, SiteServer, SiteServerConfig};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -135,60 +131,6 @@ fn router_trusting(path: &Path, proxies: &[&str]) -> Router {
     SiteServer::new(SiteServerConfig::new(build_core(path)).with_trusted_proxies(proxies))
         .router()
         .expect("site router")
-}
-
-struct HostReplyBridge;
-
-impl HostCallBridge for HostReplyBridge {
-    fn dispatch<'a>(
-        &'a self,
-        capability: &'a str,
-        operation: &'a str,
-        _params: &'a harn_vm::value::DictMap,
-    ) -> harn_vm::HostCallDispatchFuture<'a> {
-        if capability != "http_reply" || operation != "build" {
-            return harn_vm::host_call_ready(Ok(None));
-        }
-
-        let cookies = VmValue::List(Arc::new(vec![
-            VmValue::String(arcstr::ArcStr::from("sid=abc; Path=/; HttpOnly")),
-            VmValue::String(arcstr::ArcStr::from("theme=dark; Path=/; SameSite=Lax")),
-        ]));
-        let headers = harn_vm::value::DictMap::from_iter([
-            (
-                "Content-Type".to_string(),
-                VmValue::String(arcstr::ArcStr::from("application/octet-stream")),
-            ),
-            ("Set-Cookie".to_string(), cookies),
-            (
-                "X-Reply-Source".to_string(),
-                VmValue::String(arcstr::ArcStr::from("host-call")),
-            ),
-        ]);
-        let response = harn_vm::value::DictMap::from_iter([
-            ("status".to_string(), VmValue::Int(200)),
-            (
-                "body_kind".to_string(),
-                VmValue::String(arcstr::ArcStr::from("bytes")),
-            ),
-            (
-                "raw_body".to_string(),
-                VmValue::Bytes(Arc::new(vec![0x00, 0xff, 0xfe, 0x80])),
-            ),
-            ("headers".to_string(), VmValue::dict(headers)),
-        ]);
-
-        harn_vm::host_call_ready(Ok(Some(VmValue::dict(response))))
-    }
-}
-
-struct HostReplyBridgeConfigurator;
-
-impl VmConfigurator for HostReplyBridgeConfigurator {
-    fn configure(&self, _vm: &mut Vm) -> Result<(), DispatchError> {
-        harn_vm::set_host_call_bridge(Arc::new(HostReplyBridge));
-        Ok(())
-    }
 }
 
 /// A `GET /whoami` request carrying the given transport peer (mirroring
@@ -446,7 +388,7 @@ async fn binary_response_from_harn_handler_round_trips_byte_exact() {
 }
 
 #[tokio::test]
-async fn host_call_http_reply_from_preserves_bytes_and_repeated_set_cookie() {
+async fn http_reply_from_preserves_bytes_and_repeated_set_cookie() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("site.harn");
     std::fs::write(
@@ -454,14 +396,25 @@ async fn host_call_http_reply_from_preserves_bytes_and_repeated_set_cookie() {
         r#"
 @route("GET", "/host-reply")
 pub fn host_reply(req: dict) -> dict {
-  return http_reply_from(host_call("http_reply.build", {}))
+  return http_reply_from({
+    status: 200,
+    body_kind: "bytes",
+    raw_body: bytes_from_hex("00fffe80"),
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "Set-Cookie": [
+        "sid=abc; Path=/; HttpOnly",
+        "theme=dark; Path=/; SameSite=Lax",
+      ],
+      "X-Reply-Source": "typed-source",
+    },
+  })
 }
 "#,
     )
     .expect("write script");
     let mut config = DispatchCoreConfig::for_script(&path);
     config.replay_cache = Arc::new(NoReplayCache);
-    config.vm_configurator = Arc::new(HostReplyBridgeConfigurator);
     let router = SiteServer::new(SiteServerConfig::new(
         DispatchCore::new(config).expect("dispatch core"),
     ))
@@ -483,7 +436,7 @@ pub fn host_reply(req: dict) -> dict {
         response.headers()[header::CONTENT_TYPE],
         "application/octet-stream"
     );
-    assert_eq!(response.headers()["x-reply-source"], "host-call");
+    assert_eq!(response.headers()["x-reply-source"], "typed-source");
     let cookies = response
         .headers()
         .get_all(header::SET_COOKIE)

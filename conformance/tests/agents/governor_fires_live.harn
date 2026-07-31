@@ -8,6 +8,7 @@
 // this baseline (positive stop reason changes, positive run no longer stops at
 // the 2nd turn) instead of the governor silently never firing.
 import { governor_post_turn } from "std/agent/governors"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn noop_tools() {
@@ -25,23 +26,26 @@ fn noop_tools() {
   )
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // ---- POSITIVE: budget = 2 iterations, hard stop at 1.0x -> aborts on turn 2 ----
   with_llm_script(
+    harness.llm,
     [
       {text: "", tool_calls: [{arguments: {}, id: "n1", name: "noop"}]},
       {text: "", tool_calls: [{arguments: {}, id: "n2", name: "noop"}]},
       {text: "", tool_calls: [{arguments: {}, id: "n3", name: "noop"}]},
     ],
     { ->
-      const session = "governor-fires-" + uuid()
+      const session = "governor-fires-" + harness.random.uuid()
       const result = agent_loop(
+        harness,
         "Work until the budget governor stops you.",
         nil,
         {
           loop_until_done: true,
           max_iterations: 5,
           post_turn_callback: governor_post_turn(
+            harness.agent,
             {budget: 2.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"},
           ),
           provider: "mock",
@@ -50,36 +54,41 @@ pipeline default() {
           tools: noop_tools(),
         },
       )
-      __io_println(result.status)
-      __io_println(result.stop_reason)
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.stop_reason)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
   // ---- NEGATIVE: budget = 100 iterations -> never fires, run completes ----
   with_llm_script(
+    harness.llm,
     [
       {text: "", tool_calls: [{arguments: {}, id: "m1", name: "noop"}]},
       {text: "", tool_calls: [{arguments: {}, id: "m2", name: "noop"}]},
       llm_text("All done."),
     ],
     { ->
-      const session = "governor-nofire-" + uuid()
+      const session = "governor-nofire-" + harness.random.uuid()
       const result = agent_loop(
+        harness,
         "Finish well within the budget.",
         nil,
         {
           loop_until_done: true,
           max_iterations: 5,
-          post_turn_callback: governor_post_turn({budget: 100.0, signal: "iterations"}),
+          post_turn_callback: governor_post_turn(
+            harness.agent,
+            {budget: 100.0, signal: "iterations"},
+          ),
           provider: "mock",
           session_id: session,
           tool_format: "native",
           tools: noop_tools(),
         },
       )
-      __io_println(result.status)
-      __io_println(result.stop_reason)
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.stop_reason)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
 }

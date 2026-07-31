@@ -115,12 +115,19 @@ pub fn __scope_classifier_fail_open(session_id, iteration, err) {
   }
 }
 
-pub fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_index) {
+pub fn __run_input_guardrail(
+  agent: HarnessAgent,
+  guardrail,
+  session,
+  message,
+  turn_opts,
+  iteration_index,
+) {
   if guardrail == nil || iteration_index != 0 {
     return nil
   }
   let iteration = iteration_index + 1
-  const messages = agent_session_messages(session.session_id)
+  const messages = agent_session_messages(agent, session.session_id)
   const payload = {
     session_id: session.session_id,
     session: {id: session.session_id},
@@ -152,7 +159,7 @@ pub fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_i
       {session_id: session.session_id, iteration: iteration},
     )
   }
-  agent_emit_event(session.session_id, "input_guardrail_verdict", verdict)
+  agent_emit_event(agent, session.session_id, "input_guardrail_verdict", verdict)
   return verdict
 }
 
@@ -164,9 +171,16 @@ pub fn __input_guardrail_assistant_text(verdict) {
   return "Input guardrail stopped this request before the agent loop: " + reason
 }
 
-pub fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
+pub fn __input_guardrail_record_skip_turn(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  session,
+  verdict,
+  iteration_index,
+) {
   let text = __input_guardrail_assistant_text(verdict)
   agent_session_record_assistant(
+    agent,
     session.session_id,
     {
       text: text,
@@ -179,6 +193,7 @@ pub fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
     },
   )
   agent_emit_event(
+    agent,
     session.session_id,
     "iteration_end",
     {
@@ -203,6 +218,8 @@ pub fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
     },
   )
   let _ = __agent_loop_checkpoint(
+    agent,
+    llm,
     session.session_id,
     "iteration_end",
     {iteration: iteration_index + 1},
@@ -210,13 +227,20 @@ pub fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
   return text
 }
 
-pub fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iteration_index) {
+pub fn __run_pre_turn_scope_classifier(
+  agent: HarnessAgent,
+  classifier,
+  session,
+  message,
+  turn_opts,
+  iteration_index,
+) {
   if classifier == nil {
     return nil
   }
   let iteration = iteration_index + 1
-  const messages = agent_session_messages(session.session_id)
-  const anchor = agent_session_workspace_anchor(session.session_id)
+  const messages = agent_session_messages(agent, session.session_id)
+  const anchor = agent.workspace_anchor(session.session_id)
   const payload = {
     session_id: session.session_id,
     session: {id: session.session_id},
@@ -242,7 +266,7 @@ pub fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, 
     __scope_classifier_normalize(unwrap(outcome), session.session_id, iteration)
   }
   if verdict != nil {
-    agent_emit_event(session.session_id, "scope_classifier_verdict", verdict)
+    agent_emit_event(agent, session.session_id, "scope_classifier_verdict", verdict)
   }
   return verdict
 }
@@ -272,8 +296,8 @@ pub fn __scope_classifier_mounted_roots(anchor) {
   return join(lines, "\n")
 }
 
-pub fn __scope_classifier_alert_body(verdict, session) {
-  const anchor = verdict?.workspace_anchor ?? agent_session_workspace_anchor(session.session_id)
+pub fn __scope_classifier_alert_body(agent: HarnessAgent, verdict, session) {
+  const anchor = verdict?.workspace_anchor ?? agent.workspace_anchor(session.session_id)
   const primary = to_string(anchor?.primary ?? "(none)")
   return "<scope-alert>\nThe latest user turn appears outside the current workspace anchor. "
     + to_string(
@@ -284,9 +308,9 @@ pub fn __scope_classifier_alert_body(verdict, session) {
     + "\nMounted roots:\n"
     + __scope_classifier_mounted_roots(anchor)
     + "\n\nThree options:\n"
-    + "  - add_root: mount the target repo into this session with `agent_session_add_root(session_id, root, {mount_mode})`\n"
-    + "  - reanchor: switch the session primary anchor with `agent_session_reanchor(session_id, new_anchor)`\n"
-    + "  - fork: spawn a sub-agent against the target repo with `spawn_agent({anchor: new_anchor, ...})`\n\n"
+    + "  - add_root: mount the target repo into this session with `agent.add_root(session_id, root, {mount_mode})`\n"
+    + "  - reanchor: switch the session primary anchor with `agent.reanchor(session_id, new_anchor)`\n"
+    + "  - fork: spawn a sub-agent against the target repo with `spawn_agent(agent, {anchor: new_anchor, ...})`\n\n"
     + "Ask the user which handoff they prefer before doing workspace-mutating work.\n</scope-alert>"
 }
 
@@ -306,9 +330,16 @@ pub fn __scope_classifier_skip_main(verdict) {
   return verdict != nil && verdict?.label == "out_of_scope" && (verdict?.skip_main_turn ?? true)
 }
 
-pub fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
+pub fn __scope_classifier_record_skip_turn(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  session,
+  verdict,
+  iteration_index,
+) {
   let text = __scope_classifier_assistant_text(verdict)
   agent_session_record_assistant(
+    agent,
     session.session_id,
     {
       text: text,
@@ -320,11 +351,11 @@ pub fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
       scope_classifier_verdict: verdict,
     },
   )
-  agent_session_inject(
+  agent.inject(
     session.session_id,
     transcript_reminder_event(
       {
-        body: __scope_classifier_alert_body(verdict, session),
+        body: __scope_classifier_alert_body(agent, verdict, session),
         source: "in_pipeline",
         tags: ["scope_alert", "pre_turn_scope_classifier"],
         dedupe_key: "scope_alert:pre_turn:" + substring(sha256(session.session_id + text), 0, 16),
@@ -334,6 +365,7 @@ pub fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
     ),
   )
   agent_emit_event(
+    agent,
     session.session_id,
     "iteration_end",
     {
@@ -358,6 +390,8 @@ pub fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
     },
   )
   let _ = __agent_loop_checkpoint(
+    agent,
+    llm,
     session.session_id,
     "iteration_end",
     {iteration: iteration_index + 1},
@@ -365,8 +399,8 @@ pub fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
   return text
 }
 
-pub fn __agent_loop_pop_structural_veto_turn(session_id) {
-  const messages = agent_session_messages(session_id)
+pub fn __agent_loop_pop_structural_veto_turn(agent: HarnessAgent, session_id) {
+  const messages = agent_session_messages(agent, session_id)
   if len(messages) == 0 {
     return false
   }
@@ -374,7 +408,7 @@ pub fn __agent_loop_pop_structural_veto_turn(session_id) {
   if last?.role != "assistant" {
     return false
   }
-  return agent_session_pop_last_assistant(session_id)
+  return agent_session_pop_last_assistant(agent, session_id)
 }
 
 /**
@@ -659,6 +693,7 @@ pub fn __agent_loop_stall_warning_receipt(warning) {
 }
 
 pub fn __agent_loop_emit_thrash_recovery_checkpoint(
+  agent: HarnessAgent,
   session_id,
   iteration,
   tool_calls,
@@ -687,7 +722,7 @@ pub fn __agent_loop_emit_thrash_recovery_checkpoint(
   if outcome != nil {
     checkpoint = checkpoint + {outcome: outcome}
   }
-  agent_emit_event(session_id, "typed_checkpoint", checkpoint)
+  agent_emit_event(agent, session_id, "typed_checkpoint", checkpoint)
 }
 
 /**
@@ -705,7 +740,15 @@ pub fn __agent_loop_emit_thrash_recovery_checkpoint(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, iteration) {
+pub fn __agent_loop_final_wrapup(
+  harness: Harness,
+  message,
+  session,
+  opts,
+  final_status,
+  stop_reason,
+  iteration,
+) {
   const directive = __agent_loop_wrapup_directive(opts)
   // Disable tools for this turn so the model cannot dispatch: empty tool
   // surface + a system directive forbidding tool calls. Carry the tool format
@@ -719,7 +762,7 @@ pub fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reas
     _progress_tool_system_prompt_nudge: "",
     transcript_projection: opts?.transcript_projection,
   }
-  const turn_prompt = __agent_loop_build_turn_prompt(session, wrapup_opts, iteration)
+  const turn_prompt = __agent_loop_build_turn_prompt(harness, session, wrapup_opts, iteration)
   const host_wrapup = __agent_loop_has_host_wrapup_directive(wrapup_opts)
   // System prompt + message array. A host-supplied directive is delivered as a
   // trailing user message and the system prompt is left byte-identical to the
@@ -754,7 +797,7 @@ pub fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reas
   } else {
     turn_prompt.messages
   }
-  const llm_opts = __agent_loop_effective_llm_options(wrapup_opts)
+  const llm_opts = __agent_loop_effective_llm_options(harness.llm, wrapup_opts)
     + {
     messages: turn_messages,
     session_id: session.session_id,
@@ -763,22 +806,24 @@ pub fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reas
     _iteration: iteration + 1,
     _final_wrapup: true,
   }
-  let call = agent_invoke_llm(message, turn_system, llm_opts)
+  let call = agent_invoke_llm(harness, message, turn_system, llm_opts)
   if !call.ok {
     return false
   }
   const llm_result = call.value
   const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
-  const parsed = agent_parse_tool_calls(raw_text, nil, wrapup_opts?.tool_format)
+  const parsed = agent_parse_tool_calls(harness.agent, raw_text, nil, wrapup_opts?.tool_format)
   const wrapup_tool_calls = __resolve_tool_calls(llm_result, parsed)
   if len(wrapup_tool_calls) > 0 {
     agent_session_record_undispatched_tool_results(
+      harness.agent,
       session.session_id,
       wrapup_tool_calls,
       "skipped",
       "not dispatched: final wrap-up turns cannot call tools",
     )
     agent_emit_event(
+      harness.agent,
       session.session_id,
       "typed_checkpoint",
       {
@@ -801,9 +846,10 @@ pub fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reas
     return false
   }
   const normalized = llm_result + {text: visible_text, visible_text: visible_text}
-  agent_session_record_assistant(session.session_id, normalized)
+  agent_session_record_assistant(harness.agent, session.session_id, normalized)
   let _ = try {
     agent_emit_event(
+      harness.agent,
       session.session_id,
       "final_wrapup",
       {
@@ -892,14 +938,24 @@ pub fn __agent_loop_output_contract_repair_prompt(schema, text) -> string {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_apply_output_contract(final_result, opts, session, message, iteration) -> dict {
+pub fn __agent_loop_apply_output_contract(
+  harness: Harness,
+  final_result,
+  opts,
+  session,
+  message,
+  iteration,
+) -> dict {
   const schema = __agent_loop_output_contract(opts)?.schema
   let text = to_string(final_result?.visible_text ?? final_result?.text ?? "")
   const direct = __agent_loop_output_contract_value(text, schema)
   if direct.ok {
     return final_result + {output: direct.value, output_valid: true}
   }
-  const repair_opts = __agent_loop_effective_llm_options(opts + {_output_contract_repair: true})
+  const repair_opts = __agent_loop_effective_llm_options(
+    harness.llm,
+    opts + {_output_contract_repair: true},
+  )
     + {
     session_id: session.session_id,
     tools: nil,
@@ -909,7 +965,12 @@ pub fn __agent_loop_apply_output_contract(final_result, opts, session, message, 
     _output_contract_repair: true,
   }
   const repair = try {
-    agent_invoke_llm(__agent_loop_output_contract_repair_prompt(schema, text), nil, repair_opts)
+    agent_invoke_llm(
+      harness,
+      __agent_loop_output_contract_repair_prompt(schema, text),
+      nil,
+      repair_opts,
+    )
   }
   if is_err(repair) {
     return final_result + {output: direct.value, output_valid: false}

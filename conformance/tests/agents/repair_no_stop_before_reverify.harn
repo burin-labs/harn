@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -44,8 +45,9 @@ fn verify_once_then_confirm(info) {
   nil
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       // Turn 1: run the tests -> fail.
       {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
@@ -56,10 +58,12 @@ pipeline default() {
       llm_text("Done for real. ##DONE##"),
     ],
     { ->
-      const session = "repair-no-stop-" + uuid()
+      const session = "repair-no-stop-" + harness.random.uuid()
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "Make the tests pass, then finish.",
           nil,
           {
@@ -80,9 +84,11 @@ pipeline default() {
           },
         ) },
       )
-      __io_println(captured.result.status)
-      __io_println(captured.result.llm.iterations > 2)
-      __io_println(contains(json_stringify(llm_mock_calls()), "re-check before finishing"))
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(captured.result.llm.iterations > 2)
+      harness.stdio.println(
+        contains(json_stringify(harness.llm.mock_calls()), "re-check before finishing"),
+      )
     },
   )
 }

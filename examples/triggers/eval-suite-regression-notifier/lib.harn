@@ -15,13 +15,18 @@ const DEFAULT_SLACK_API_BASE_URL = "https://slack.com/api"
 /**
  * Run the scheduled eval, gate it against the prior ledger commit, and notify only on a gate flip.
  */
-pub fn notify_on_eval_gate_flip(event: TriggerEvent) -> dict {
-  const outcome = eval_gate_verdict(event)
+pub fn notify_on_eval_gate_flip(harness: Harness, event: TriggerEvent) -> dict {
+  const outcome = eval_gate_verdict(harness.fs, harness.runtime, event)
   if !(outcome.notify ?? false) {
     return outcome
   }
   const config = outcome.config
-  const posted = post_eval_verdict(outcome.verdict, slack_options(config))
+  const posted = post_eval_verdict(
+    harness.clock,
+    harness.net,
+    outcome.verdict,
+    slack_options(config),
+  )
   if is_err(posted) {
     return outcome + {notified: false, notify_error: unwrap_err(posted)}
   }
@@ -29,13 +34,13 @@ pub fn notify_on_eval_gate_flip(event: TriggerEvent) -> dict {
 }
 
 /** Run the eval pack and build the structured verdict without posting to Slack. */
-pub fn eval_gate_verdict(event: TriggerEvent) -> dict {
+pub fn eval_gate_verdict(fs: HarnessFs, runtime: HarnessRuntime, event: TriggerEvent) -> dict {
   const config = notifier_config(event)
-  const manifest = load_eval_manifest()
+  const manifest = load_eval_manifest(fs)
   const options = ledger_options(config)
-  const report = eval_pack_run(manifest, options)
+  const report = runtime.eval_pack_run(manifest, options)
   const current_rows = rows_for_split(report.stats_rows, config.split)
-  const prior = eval_ledger_prior_commit_rows(options)
+  const prior = runtime.eval_ledger_prior_commit_rows(options)
   if len(prior.rows) == 0 {
     return {
       notified: false,
@@ -77,9 +82,9 @@ pub fn eval_gate_verdict(event: TriggerEvent) -> dict {
   }
 }
 
-fn load_eval_manifest() -> dict {
-  const path = path_join(source_dir(), "harn.eval.toml")
-  return eval_pack_manifest(toml_parse(harness.fs.read_text(path)) + {base_dir: source_dir()})
+fn load_eval_manifest(fs: HarnessFs) -> dict {
+  const path = path_join(fs.source_dir(), "harn.eval.toml")
+  return eval_pack_manifest(toml_parse(fs.read_text(path)) + {base_dir: fs.source_dir()})
 }
 
 fn notifier_config(event) -> dict {
@@ -133,7 +138,7 @@ fn slack_options(config) -> dict {
   )
 }
 
-fn post_eval_verdict(verdict, options) {
+fn post_eval_verdict(clock: HarnessClock, net: HarnessNet, verdict, options) {
   const opts = options ?? {}
   const token = trim(to_string(opts?.bot_token ?? ""))
   if token == "" {
@@ -145,6 +150,8 @@ fn post_eval_verdict(verdict, options) {
   }
   const api_base_url = trim(to_string(opts?.api_base_url ?? DEFAULT_SLACK_API_BASE_URL))
   const response = connector_http_json(
+    clock,
+    net,
     "POST",
     api_base_url + "/chat.postMessage",
     {

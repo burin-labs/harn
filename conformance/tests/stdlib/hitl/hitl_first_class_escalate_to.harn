@@ -1,19 +1,20 @@
-// First-class HITL syntax: `escalate_to` as a reserved keyword. Named
-// args (`role:`, `reason:`) and the typed `EscalationHandle` envelope
-// returned by the runtime.
+// Escalation is explicit on the interaction capability and returns a typed
+// `EscalationHandle` envelope.
 import "std/hitl"
-import { clear_host_mocks, mock_host_response } from "std/testing"
 
-pipeline test(task) {
-  clear_host_mocks()
-  mock_host_response(
-    "hitl",
-    "escalation",
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction",
+    "escalation_response",
     {accepted: true, reviewer: "oncall-primary", reason: "took over"},
   )
-  const handle = escalate_to(role: "oncall", reason: "deploy failed during maintenance window")
-  __io_println(handle.role)
-  __io_println(handle.reason)
-  __io_println(handle.status)
-  __io_println(handle.reviewer)
+  const handle = harness.interaction.escalate_to(
+    "oncall",
+    "deploy failed during maintenance window",
+  )
+  harness.stdio.println(handle.role)
+  harness.stdio.println(handle.reason)
+  harness.stdio.println(handle.status)
+  harness.stdio.println(handle.reviewer)
 }

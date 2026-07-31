@@ -481,7 +481,7 @@ pub(crate) fn push_inline_llm_mock(mock: LlmMock) -> Result<(), String> {
         let queue = &mut state.builtin_queue;
         if queue.schema_version() > 0 {
             return Err(
-                "cannot append llm_mock() entries to an active versioned fixture; clear or load one complete document"
+                "cannot append harness.llm.mock_enqueue() entries to an active versioned fixture; clear or load one complete document"
                     .to_string(),
             );
         }
@@ -1291,7 +1291,7 @@ fn mock_auto_tool_candidate(tools: &[serde_json::Value]) -> Option<&serde_json::
 }
 
 /// Mock LLM provider -- deterministic responses for testing without API keys.
-/// When configurable mocks have been registered via `llm_mock()`, those are
+/// When configurable mocks have been registered via `harness.llm.mock_enqueue()`, those are
 /// checked first (FIFO queue, then pattern matching). Falls through to the
 /// default deterministic behavior when no mocks match.
 pub(crate) fn mock_llm_response(

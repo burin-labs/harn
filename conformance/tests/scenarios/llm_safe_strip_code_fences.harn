@@ -3,12 +3,12 @@
 // the content between fences are preserved.
 import { strip_code_fences } from "std/llm/safe"
 
-pipeline default() {
-  __io_println(strip_code_fences("```md\n# Title\n\nBody text.\n```"))
-  __io_println("---")
-  __io_println(strip_code_fences("```\nplain\n```"))
-  __io_println("---")
-  __io_println(strip_code_fences("has `inline` code, no fence"))
-  __io_println("---")
-  __io_println("[" + strip_code_fences(nil) + "]")
+pipeline default(harness: Harness) {
+  harness.stdio.println(strip_code_fences("```md\n# Title\n\nBody text.\n```"))
+  harness.stdio.println("---")
+  harness.stdio.println(strip_code_fences("```\nplain\n```"))
+  harness.stdio.println("---")
+  harness.stdio.println(strip_code_fences("has `inline` code, no fence"))
+  harness.stdio.println("---")
+  harness.stdio.println("[" + strip_code_fences(nil) + "]")
 }

@@ -6,9 +6,9 @@ import { register_guardrail } from "std/channel_guardrails"
  * return shapes (dict, string, nil) and verifies that the warn audit
  * is written before the durable append while the emit proceeds.
  */
-pipeline default() {
-  pipeline_lifecycle_audit_log_take()
-  channel_guardrail_clear()
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.channels.guardrail_clear()
   /* Closure scanner: blocks payloads with `secret_key`, warns when
    * the channel is `panic`, allows everything else. */
   const scan = { payload, ctx ->
@@ -20,25 +20,28 @@ pipeline default() {
     }
     return "allow"
   }
-  const id = register_guardrail({id: "policy", scan_fn: scan})
-  __io_println(id)
+  const id = register_guardrail(harness.channels, {id: "policy", scan_fn: scan})
+  harness.stdio.println(id)
   /* Block path: dict verdict drops the emit + writes blocked audit. */
-  const denied = emit_channel("ch.guardrail.policy", {ok: false, secret_key: "exfil-payload"})
-  __io_println(denied?.blocked)
-  __io_println(denied?.block_reason)
+  const denied = harness.channels.append(
+    "ch.guardrail.policy",
+    {ok: false, secret_key: "exfil-payload"},
+  )
+  harness.stdio.println(denied?.blocked)
+  harness.stdio.println(denied?.block_reason)
   /* Warn path: emit proceeds + writes a warning audit. */
-  const warned = emit_channel("ch.guardrail.panic", {reason: "drain timeout"})
-  __io_println(warned?.inserted)
-  __io_println(warned?.blocked ?? false)
+  const warned = harness.channels.append("ch.guardrail.panic", {reason: "drain timeout"})
+  harness.stdio.println(warned?.inserted)
+  harness.stdio.println(warned?.blocked ?? false)
   /* Allow path: emit proceeds silently. */
-  const normal = emit_channel("ch.guardrail.policy", {reason: "normal"})
-  __io_println(normal?.inserted)
-  __io_println(normal?.blocked ?? false)
+  const normal = harness.channels.append("ch.guardrail.policy", {reason: "normal"})
+  harness.stdio.println(normal?.inserted)
+  harness.stdio.println(normal?.blocked ?? false)
   /* Audit log: block then warn (in registration order). */
-  const audit = pipeline_lifecycle_audit_log_take()
-  __io_println(len(audit))
-  __io_println(audit[0].kind)
-  __io_println(audit[0].payload.fired[0].reason)
-  __io_println(audit[1].kind)
-  __io_println(audit[1].payload.fired[0].reason)
+  const audit = harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.stdio.println(len(audit))
+  harness.stdio.println(audit[0].kind)
+  harness.stdio.println(audit[0].payload.fired[0].reason)
+  harness.stdio.println(audit[1].kind)
+  harness.stdio.println(audit[1].payload.fired[0].reason)
 }

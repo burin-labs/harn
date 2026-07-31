@@ -9,7 +9,7 @@ type Msg = {kind: "ping", ttl: int} \
   | {kind: "pong", latency_ms: int} \
   | {kind: "close", reason: string}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   fn summarise(m: Msg) -> string {
     return match m.kind {
       "ping" | "pong" -> { "live:" + m.kind }
@@ -21,7 +21,7 @@ pipeline default() {
   }
   // Both variants share the `kind` discriminant; both narrowed
   // shapes carry it, so property access type-checks.
-  __io_println(summarise({kind: "ping", ttl: 30}))
-  __io_println(summarise({kind: "pong", latency_ms: 42}))
-  __io_println(summarise({kind: "close", reason: "done"}))
+  harness.stdio.println(summarise({kind: "ping", ttl: 30}))
+  harness.stdio.println(summarise({kind: "pong", latency_ms: 42}))
+  harness.stdio.println(summarise({kind: "close", reason: "done"}))
 }

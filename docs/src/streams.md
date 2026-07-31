@@ -14,7 +14,7 @@ gen fn numbers(start: int, end: int) -> Stream<int> {
 }
 
 for n in numbers(1, 4) {
-  log(n)
+  harness.stdio.log(n)
 }
 ```
 
@@ -24,12 +24,12 @@ emits each result as soon as that task completes:
 
 ```harn
 const results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
-  sleep(ms)
+  harness.clock.sleep_ms(ms)
   return ms
 } as stream
 
 for result in results {
-  log(result) // 5, then 10, then 30
+  harness.stdio.log(result) // 5, then 10, then 30
 }
 ```
 
@@ -56,8 +56,8 @@ gen fn chunks() -> Stream<string> {
 
 const s: Stream<string> = chunks()
 const first = s.next()
-log(first.value)  // one
-log(first.done)   // false
+harness.stdio.log(first.value)  // one
+harness.stdio.log(first.done)   // false
 ```
 
 Errors thrown inside a stream propagate to the consumer at the point
@@ -71,10 +71,10 @@ gen fn broken() -> Stream<int> {
 
 try {
   for n in broken() {
-    log(n)
+    harness.stdio.log(n)
   }
 } catch err {
-  log("caught ${err}")
+  harness.stdio.log("caught ${err}")
 }
 ```
 

@@ -6,10 +6,10 @@ fn ops(a: number, b: number) -> number {
   return a + b - a * b
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const n: number = 3
-  log(n)
-  log(add_one(3))
-  log(add_one(7.5))
-  log(ops(4, 2))
+  harness.stdio.log(n)
+  harness.stdio.log(add_one(3))
+  harness.stdio.log(add_one(7.5))
+  harness.stdio.log(ops(4, 2))
 }

@@ -4,7 +4,7 @@
  * discriminant narrows the object path. Both flow into typed positions
  * without coercion, and run correctly.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn describe(o: {val: string | int}) -> string {
     return match type_of(o.val) {
       "string" -> { "s:${o.val}" }
@@ -20,8 +20,8 @@ pipeline test(task) {
     }
     return 0
   }
-  log(describe({val: "hi"}))
-  log(describe({val: 7}))
-  log(latency({msg: {kind: "pong", lat: 42}}))
-  log(latency({msg: {kind: "ping", ttl: 9}}))
+  harness.stdio.log(describe({val: "hi"}))
+  harness.stdio.log(describe({val: 7}))
+  harness.stdio.log(latency({msg: {kind: "pong", lat: 42}}))
+  harness.stdio.log(latency({msg: {kind: "ping", ttl: 9}}))
 }

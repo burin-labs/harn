@@ -1,31 +1,31 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Ok and Err constructors
   const ok_val = Ok(42)
   const err_val = Err("something failed")
-  log(ok_val)
-  log(err_val)
+  harness.stdio.log(ok_val)
+  harness.stdio.log(err_val)
   // is_ok / is_err
-  log(is_ok(ok_val))
-  log(is_err(ok_val))
-  log(is_ok(err_val))
-  log(is_err(err_val))
+  harness.stdio.log(is_ok(ok_val))
+  harness.stdio.log(is_err(ok_val))
+  harness.stdio.log(is_ok(err_val))
+  harness.stdio.log(is_err(err_val))
   // unwrap
-  log(unwrap(ok_val))
-  log(unwrap_or(err_val, "default"))
+  harness.stdio.log(unwrap(ok_val))
+  harness.stdio.log(unwrap_or(err_val, "default"))
   // unwrap_err
-  log(unwrap_err(err_val))
+  harness.stdio.log(unwrap_err(err_val))
   // Result.Ok and Result.Err enum construction
   const r = Result.Ok("hello")
-  log(r)
+  harness.stdio.log(r)
   const e = Result.Err("oops")
-  log(e)
+  harness.stdio.log(e)
   // Pattern matching on Result
   match r {
-    Result.Ok(val) -> { log("ok: ${val}") }
-    Result.Err(err) -> { log("err: ${err}") }
+    Result.Ok(val) -> { harness.stdio.log("ok: ${val}") }
+    Result.Err(err) -> { harness.stdio.log("err: ${err}") }
   }
   match e {
-    Result.Ok(val) -> { log("ok: ${val}") }
-    Result.Err(err) -> { log("err: ${err}") }
+    Result.Ok(val) -> { harness.stdio.log("ok: ${val}") }
+    Result.Err(err) -> { harness.stdio.log("err: ${err}") }
   }
 }

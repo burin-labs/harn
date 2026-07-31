@@ -7,10 +7,10 @@
 //!   never silently half-supported.
 //!
 //! The battery exercises the REAL resolution layer harness authors hit:
-//!   - `agent_tool_format_resolution(opts)` / `agent_tool_format(opts)`
+//!   - `agent_tool_format_resolution(llm, opts)` / `agent_tool_format(llm, opts)`
 //!     (`std/agent/options`), which the agent-loop preset machinery and
 //!     preflight all route through.
-//!   - `provider_capabilities(provider, model)` / `provider_capabilities_install`
+//!   - `harness.llm.provider_capabilities(provider, model)` / `provider_capabilities_install`
 //!     (the capability matrix), used to set up synthetic parity cells so the
 //!     hard-reject path is covered without touching the shipped catalog.
 //!
@@ -55,7 +55,7 @@ fn run(source: &str) -> Result<String, String> {
     })
 }
 
-/// `log()` lines emitted by the snippet, stripped of the `[harn] ` prefix.
+/// `harness.stdio.log()` lines emitted by the snippet, stripped of the `[harn] ` prefix.
 fn lines(source: &str) -> Result<Vec<String>, String> {
     run(source).map(|raw| {
         raw.lines()
@@ -77,11 +77,11 @@ fn resolve_snippet(provider: &str, model: &str, requested: &str) -> String {
     format!(
         r#"
 import {{ agent_tool_format_resolution, agent_tool_format }} from "std/agent/options"
-pipeline main(task) {{
-  const r = agent_tool_format_resolution({opts})
-  log("tool_format=" + to_string(r.tool_format))
-  log("source=" + to_string(r.source))
-  log("effective=" + to_string(agent_tool_format({opts})))
+pipeline main(harness: Harness, task) {{
+  const r = agent_tool_format_resolution(harness.llm, {opts})
+  harness.stdio.log("tool_format=" + to_string(r.tool_format))
+  harness.stdio.log("source=" + to_string(r.source))
+  harness.stdio.log("effective=" + to_string(agent_tool_format(harness.llm, {opts})))
 }}
 "#
     )
@@ -220,11 +220,11 @@ fn requested_format_axis_rejects_or_resolves_concretely() {
 fn capability_facts(provider: &str, model: &str) -> (bool, bool, String) {
     let src = format!(
         r#"
-pipeline main(task) {{
-  const c = provider_capabilities("{provider}", "{model}")
-  log("native=" + to_string(c.native_tools))
-  log("text=" + to_string(c.text_tool_wire_format_supported))
-  log("parity=" + to_string(c.tool_mode_parity))
+pipeline main(harness: Harness, task) {{
+  const c = harness.llm.provider_capabilities("{provider}", "{model}")
+  harness.stdio.log("native=" + to_string(c.native_tools))
+  harness.stdio.log("text=" + to_string(c.text_tool_wire_format_supported))
+  harness.stdio.log("parity=" + to_string(c.tool_mode_parity))
 }}
 "#
     );
@@ -333,17 +333,17 @@ tool_mode_parity = "{parity}"
     let src = format!(
         r#"
 import {{ agent_tool_format_resolution }} from "std/agent/options"
-pipeline main(task) {{
-  provider_capabilities_install({install:?})
-  let r = agent_tool_format_resolution({{
+pipeline main(harness: Harness, task) {{
+  harness.llm.provider_capabilities_install({install:?})
+  let r = agent_tool_format_resolution(harness.llm, {{
     model: "{model}",
     provider: "bootcamp",
     tool_format: "{requested}",
     {override_line}
   }})
-  log("tool_format=" + to_string(r.tool_format))
-  log("source=" + to_string(r.source))
-  provider_capabilities_clear()
+  harness.stdio.log("tool_format=" + to_string(r.tool_format))
+  harness.stdio.log("source=" + to_string(r.source))
+  harness.llm.provider_capabilities_clear()
 }}
 "#
     );
@@ -435,20 +435,20 @@ text_tool_wire_format_supported = true
     let src = format!(
         r#"
 import {{ agent_tool_format_resolution, agent_tool_format }} from "std/agent/options"
-pipeline main(task) {{
-  provider_capabilities_install({install:?})
-  const auto = agent_tool_format_resolution({{
+pipeline main(harness: Harness, task) {{
+  harness.llm.provider_capabilities_install({install:?})
+  const auto = agent_tool_format_resolution(harness.llm, {{
     model: "bootcamp-unpinned-text-1",
     provider: "bootcamp",
     tool_format: "auto",
   }})
-  log("auto=" + to_string(auto.tool_format))
+  harness.stdio.log("auto=" + to_string(auto.tool_format))
   // An omitted tool_format must agree with the explicit `auto` sentinel.
-  log("effective=" + to_string(agent_tool_format({{
+  harness.stdio.log("effective=" + to_string(agent_tool_format(harness.llm, {{
     model: "bootcamp-unpinned-text-1",
     provider: "bootcamp",
   }})))
-  provider_capabilities_clear()
+  harness.llm.provider_capabilities_clear()
 }}
 "#
     );

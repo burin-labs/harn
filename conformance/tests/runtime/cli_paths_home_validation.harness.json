@@ -2,5 +2,6 @@
   "mode": "mock",
   "env": {
     "HOME": "relative/home"
-  }
+  },
+  "expect_stdio": "true\n"
 }

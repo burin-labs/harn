@@ -14,7 +14,7 @@
 // constructs a variant at import-init time (`DEFAULT_ENUM`).
 import { DEFAULT_ENUM, describe, make_cross_module_enum } from "cross_module_enum_construction_lib"
 
-pipeline default() {
-  __io_println(describe(make_cross_module_enum(3)))
-  __io_println(describe(DEFAULT_ENUM))
+pipeline default(harness: Harness) {
+  harness.stdio.println(describe(make_cross_module_enum(3)))
+  harness.stdio.println(describe(DEFAULT_ENUM))
 }

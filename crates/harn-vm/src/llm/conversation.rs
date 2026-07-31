@@ -1,20 +1,20 @@
 use crate::value::VmDictExt;
 
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
+use crate::vm::Vm;
 use harn_parser::diagnostic_codes::Code;
 
 use super::helpers::{
-    emit_reminder_lifecycle_event, extract_llm_options, is_transcript_value, new_transcript_with,
-    new_transcript_with_events, normalize_transcript_asset, project_llm_options,
-    reminder_from_event, reminder_lifecycle_payload, transcript_asset_list,
-    transcript_drain_decision_event_from_value, transcript_event, transcript_id,
-    transcript_message_list, transcript_reminder_event, transcript_reminder_event_from_value,
-    transcript_resumption_event_from_value, transcript_summary_text,
-    transcript_suspension_event_from_value, vm_add_role_message, vm_message_value,
-    vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder,
-    REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND, REMINDER_INJECTED_EVENT_KIND,
-    SYSTEM_REMINDER_EVENT_KIND,
+    emit_reminder_lifecycle_event, is_transcript_value, new_transcript_with,
+    new_transcript_with_events, normalize_transcript_asset, reminder_from_event,
+    reminder_lifecycle_payload, transcript_asset_list, transcript_drain_decision_event_from_value,
+    transcript_event, transcript_id, transcript_message_list, transcript_reminder_event,
+    transcript_reminder_event_from_value, transcript_resumption_event_from_value,
+    transcript_summary_text, transcript_suspension_event_from_value, vm_add_role_message,
+    vm_message_value, vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource,
+    SystemReminder, REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND,
+    REMINDER_INJECTED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
 };
 
 pub(crate) const INJECT_REMINDER_KEYS: &[&str] = &[
@@ -45,432 +45,197 @@ fn require_transcript<'a>(
     }
 }
 
-/// Register conversation management builtins.
-pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
-    vm.register_builtin("conversation", |_args, _out| {
-        Ok(VmValue::List(std::sync::Arc::new(Vec::new())))
-    });
+const CONVERSATION_BUILTINS: &[&VmBuiltinDef] = &[
+    &TRANSCRIPT_IMPL_DEF,
+    &TRANSCRIPT_FROM_MESSAGES_IMPL_DEF,
+    &TRANSCRIPT_MESSAGES_IMPL_DEF,
+    &TRANSCRIPT_ASSETS_IMPL_DEF,
+    &TRANSCRIPT_EVENTS_IMPL_DEF,
+    &TRANSCRIPT_REMINDER_EVENT_IMPL_DEF,
+    &TRANSCRIPT_SUSPENSION_EVENT_IMPL_DEF,
+    &TRANSCRIPT_RESUMPTION_EVENT_IMPL_DEF,
+    &TRANSCRIPT_DRAIN_DECISION_EVENT_IMPL_DEF,
+    &TRANSCRIPT_SUMMARY_IMPL_DEF,
+    &TRANSCRIPT_ID_IMPL_DEF,
+    &ADD_MESSAGE_IMPL_DEF,
+    &ADD_USER_IMPL_DEF,
+    &ADD_ASSISTANT_IMPL_DEF,
+    &ADD_SYSTEM_IMPL_DEF,
+    &ADD_TOOL_RESULT_IMPL_DEF,
+    &TRANSCRIPT_FORK_IMPL_DEF,
+    &TRANSCRIPT_RESET_IMPL_DEF,
+    &TRANSCRIPT_ARCHIVE_IMPL_DEF,
+    &TRANSCRIPT_ABANDON_IMPL_DEF,
+    &TRANSCRIPT_RESUME_IMPL_DEF,
+];
 
-    vm.register_builtin("transcript", |args, _out| {
-        let metadata = args.first().cloned();
-        Ok(new_transcript_with(None, Vec::new(), None, metadata))
-    });
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript(metadata?: dict) -> dict",
+    category = "transcript"
+)]
+fn transcript_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(new_transcript_with(
+        None,
+        Vec::new(),
+        None,
+        args.first().cloned(),
+    ))
+}
 
-    vm.register_builtin_with_metadata(
-        VmBuiltinMetadata::sync_static("transcript.inject_reminder")
-            .signature_static("transcript.inject_reminder(transcript, options) -> dict")
-            .arity(VmBuiltinArity::Exact(2))
-            .category_static("transcript")
-            .doc_static(
-                "Inject a pending system reminder and return {transcript, reminder_id, deduped_count}.",
-            ),
-        |args, _out| transcript_inject_reminder_builtin(args),
-    );
-
-    vm.register_builtin_with_metadata(
-        VmBuiltinMetadata::sync_static("transcript.clear_reminders")
-            .signature_static("transcript.clear_reminders(transcript, selector) -> dict")
-            .arity(VmBuiltinArity::Exact(2))
-            .category_static("transcript")
-            .doc_static(
-                "Remove pending system reminders by id, tag, and/or dedupe_key and return {transcript, removed_count}.",
-            ),
-        |args, _out| transcript_clear_reminders_builtin(args),
-    );
-
-    vm.register_builtin("transcript_from_messages", |args, _out| {
-        let messages = match args.first() {
-            Some(VmValue::List(list)) => (**list).clone(),
-            Some(VmValue::Dict(d)) if is_transcript_value(&VmValue::Dict(d.clone())) => {
-                transcript_message_list(d)?
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "transcript_from_messages: argument must be a message list or transcript",
-                ))));
-            }
-        };
-        Ok(new_transcript_with(None, messages, None, None))
-    });
-
-    vm.register_builtin("transcript_messages", |args, _out| {
-        let transcript = require_transcript(args, "transcript_messages")?;
-        Ok(VmValue::List(std::sync::Arc::new(transcript_message_list(
-            transcript,
-        )?)))
-    });
-
-    vm.register_builtin("transcript_assets", |args, _out| {
-        let transcript = require_transcript(args, "transcript_assets")?;
-        Ok(VmValue::List(std::sync::Arc::new(transcript_asset_list(
-            transcript,
-        )?)))
-    });
-
-    vm.register_builtin("transcript_add_asset", |args, _out| {
-        let transcript = require_transcript(args, "transcript_add_asset")?;
-        let asset_value = args.get(1).cloned().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "transcript_add_asset: missing asset",
-            )))
-        })?;
-        let normalized = normalize_transcript_asset(&asset_value);
-        let asset_id = normalized
-            .as_dict()
-            .and_then(|dict| dict.get("id"))
-            .map(|value| value.display())
-            .unwrap_or_default();
-        let mut assets = transcript_asset_list(transcript)?;
-        assets.retain(|asset| {
-            asset
-                .as_dict()
-                .and_then(|dict| dict.get("id"))
-                .map(|value| value.display())
-                .unwrap_or_default()
-                != asset_id
-        });
-        assets.push(normalized);
-        Ok(rebuild_transcript(
-            transcript,
-            transcript_message_list(transcript)?,
-            transcript_summary_text(transcript),
-            assets,
-            Vec::new(),
-            transcript_state(transcript),
-        ))
-    });
-
-    vm.register_builtin("transcript_events", |args, _out| {
-        let transcript = require_transcript(args, "transcript_events")?;
-        Ok(transcript
-            .get("events")
-            .cloned()
-            .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))))
-    });
-
-    // Build a normalized `system_reminder` transcript event from a dict
-    // describing the reminder lifecycle (body/tags/dedupe_key/ttl_turns/
-    // preserve_on_compact/propagate/role_hint/source/fired_at_turn).
-    // Defaults are applied per spec when fields are omitted. Returns the
-    // canonical event envelope so callers can pass the result straight
-    // to `agent_session_append_event` or splice it into an
-    // event list manually.
-    vm.register_builtin("transcript_reminder_event", |args, _out| {
-        let value = args.first().cloned().unwrap_or(VmValue::Nil);
-        Ok(transcript_reminder_event_from_value(&value))
-    });
-
-    vm.register_builtin("transcript_suspension_event", |args, _out| {
-        let value = args.first().cloned().unwrap_or(VmValue::Nil);
-        Ok(transcript_suspension_event_from_value(&value))
-    });
-
-    vm.register_builtin("transcript_resumption_event", |args, _out| {
-        let value = args.first().cloned().unwrap_or(VmValue::Nil);
-        Ok(transcript_resumption_event_from_value(&value))
-    });
-
-    vm.register_builtin("transcript_drain_decision_event", |args, _out| {
-        let value = args.first().cloned().unwrap_or(VmValue::Nil);
-        Ok(transcript_drain_decision_event_from_value(&value))
-    });
-
-    vm.register_builtin("transcript_summary", |args, _out| {
-        let transcript = require_transcript(args, "transcript_summary")?;
-        Ok(transcript.get("summary").cloned().unwrap_or(VmValue::Nil))
-    });
-
-    vm.register_builtin("transcript_id", |args, _out| {
-        let transcript = require_transcript(args, "transcript_id")?;
-        Ok(VmValue::String(arcstr::ArcStr::from(
-            transcript_id(transcript).unwrap_or_default(),
-        )))
-    });
-
-    vm.register_builtin("transcript_render_visible", |args, _out| {
-        let transcript = require_transcript(args, "transcript_render_visible")?;
-        let rendered = match transcript.get("events") {
-            Some(VmValue::List(events)) => events
-                .iter()
-                .filter_map(|event| {
-                    let dict = event.as_dict()?;
-                    let visibility = dict.get("visibility")?.display();
-                    if visibility != "public" {
-                        return None;
-                    }
-                    let role = dict
-                        .get("role")
-                        .map(|value| value.display())
-                        .unwrap_or_default();
-                    let text = dict
-                        .get("text")
-                        .map(|value| value.display())
-                        .unwrap_or_default();
-                    if text.is_empty() {
-                        None
-                    } else {
-                        Some(format!("{role}: {text}"))
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-            _ => String::new(),
-        };
-        Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
-    });
-
-    vm.register_builtin("transcript_render_full", |args, _out| {
-        let transcript = require_transcript(args, "transcript_render_full")?;
-        let rendered = match transcript.get("events") {
-            Some(VmValue::List(events)) => events
-                .iter()
-                .filter_map(|event| {
-                    let dict = event.as_dict()?;
-                    let role = dict
-                        .get("role")
-                        .map(|value| value.display())
-                        .unwrap_or_default();
-                    let visibility = dict
-                        .get("visibility")
-                        .map(|value| value.display())
-                        .unwrap_or_default();
-                    let text = dict
-                        .get("text")
-                        .map(|value| value.display())
-                        .unwrap_or_default();
-                    Some(format!("[{visibility}] {role}: {text}"))
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-            _ => String::new(),
-        };
-        Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
-    });
-
-    vm.register_builtin("transcript_export", |args, _out| {
-        let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
-        if !is_transcript_value(&transcript) {
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_from_messages(messages_or_transcript: list | dict) -> dict",
+    category = "transcript"
+)]
+fn transcript_from_messages_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let messages = match args.first() {
+        Some(VmValue::List(list)) => (**list).clone(),
+        Some(VmValue::Dict(dict)) if is_transcript_value(&VmValue::Dict(dict.clone())) => {
+            transcript_message_list(dict)?
+        }
+        _ => {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "transcript_export: argument must be a transcript",
+                "transcript_from_messages: argument must be a message list or transcript",
             ))));
         }
-        let json = serde_json::to_string_pretty(&vm_value_to_json(&transcript))
-            .map_err(|e| VmError::Runtime(format!("transcript_export: {e}")))?;
-        Ok(VmValue::String(arcstr::ArcStr::from(json)))
-    });
+    };
+    Ok(new_transcript_with(None, messages, None, None))
+}
 
-    vm.register_builtin("transcript_import", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        let json: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| VmError::Runtime(format!("transcript_import: {e}")))?;
-        Ok(crate::stdlib::json_to_vm_value(&json))
-    });
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_messages(transcript: list | dict | Transcript) -> list",
+    category = "transcript"
+)]
+fn transcript_messages_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_messages")?;
+    Ok(VmValue::List(std::sync::Arc::new(transcript_message_list(
+        transcript,
+    )?)))
+}
 
-    vm.register_builtin("transcript_fork", |args, _out| {
-        let transcript = require_transcript(args, "transcript_fork")?;
-        let options = args.get(1).and_then(|v| v.as_dict());
-        let retain_messages = options
-            .and_then(|d| d.get("retain_messages"))
-            .map(|v| v.is_truthy())
-            .unwrap_or(true);
-        let retain_summary = options
-            .and_then(|d| d.get("retain_summary"))
-            .map(|v| v.is_truthy())
-            .unwrap_or(true);
-        let messages = if retain_messages {
-            transcript_message_list(transcript)?
-        } else {
-            Vec::new()
-        };
-        let summary = if retain_summary {
-            transcript_summary_text(transcript)
-        } else {
-            None
-        };
-        Ok(rebuild_transcript(
-            transcript,
-            messages,
-            summary,
-            transcript_asset_list(transcript)?,
-            vec![transcript_event(
-                "transcript_fork",
-                "system",
-                "internal",
-                "transcript forked",
-                None,
-            )],
-            Some("forked"),
-        ))
-    });
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_assets(transcript: list | dict | Transcript) -> list",
+    category = "transcript"
+)]
+fn transcript_assets_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_assets")?;
+    Ok(VmValue::List(std::sync::Arc::new(transcript_asset_list(
+        transcript,
+    )?)))
+}
 
-    vm.register_builtin("transcript_reset", |args, _out| {
-        let metadata = args
-            .first()
-            .and_then(|value| value.as_dict())
-            .and_then(|dict| dict.get("metadata"))
-            .cloned();
-        Ok(new_transcript_with_events(
-            None,
-            Vec::new(),
-            None,
-            metadata,
-            vec![transcript_event(
-                "transcript_reset",
-                "system",
-                "internal",
-                "transcript reset",
-                None,
-            )],
-            Vec::new(),
-            Some("active"),
-        ))
-    });
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_events(transcript: list | dict | Transcript) -> list",
+    category = "transcript"
+)]
+fn transcript_events_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_events")?;
+    Ok(transcript
+        .get("events")
+        .cloned()
+        .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))))
+}
 
-    vm.register_builtin("transcript_archive", |args, _out| {
-        let transcript = require_transcript(args, "transcript_archive")?;
-        let messages = transcript_message_list(transcript)?;
-        Ok(rebuild_transcript(
-            transcript,
-            messages,
-            transcript_summary_text(transcript),
-            transcript_asset_list(transcript)?,
-            vec![transcript_event(
-                "transcript_archive",
-                "system",
-                "internal",
-                "transcript archived",
-                None,
-            )],
-            Some("archived"),
-        ))
-    });
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_reminder_event(reminder: dict) -> dict",
+    category = "transcript"
+)]
+fn transcript_reminder_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(transcript_reminder_event_from_value(
+        args.first().unwrap_or(&VmValue::Nil),
+    ))
+}
 
-    vm.register_builtin("transcript_abandon", |args, _out| {
-        let transcript = require_transcript(args, "transcript_abandon")?;
-        Ok(rebuild_transcript(
-            transcript,
-            transcript_message_list(transcript)?,
-            transcript_summary_text(transcript),
-            transcript_asset_list(transcript)?,
-            vec![transcript_event(
-                "transcript_abandon",
-                "system",
-                "internal",
-                "transcript abandoned",
-                None,
-            )],
-            Some("abandoned"),
-        ))
-    });
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_suspension_event(suspension: dict) -> dict",
+    category = "transcript"
+)]
+fn transcript_suspension_event_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(transcript_suspension_event_from_value(
+        args.first().unwrap_or(&VmValue::Nil),
+    ))
+}
 
-    vm.register_builtin("transcript_resume", |args, _out| {
-        let transcript = require_transcript(args, "transcript_resume")?;
-        Ok(rebuild_transcript(
-            transcript,
-            transcript_message_list(transcript)?,
-            transcript_summary_text(transcript),
-            transcript_asset_list(transcript)?,
-            vec![transcript_event(
-                "transcript_resume",
-                "system",
-                "internal",
-                "transcript resumed",
-                None,
-            )],
-            Some("active"),
-        ))
-    });
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_resumption_event(resumption: dict) -> dict",
+    category = "transcript"
+)]
+fn transcript_resumption_event_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(transcript_resumption_event_from_value(
+        args.first().unwrap_or(&VmValue::Nil),
+    ))
+}
 
-    vm.register_async_builtin("transcript_summarize", |_ctx, args| async move {
-        let transcript = require_transcript(&args, "transcript_summarize")?;
-        let llm_options = args
-            .get(1)
-            .and_then(VmValue::as_dict)
-            .map(project_llm_options)
-            .transpose()?
-            .unwrap_or_default();
-        let mut opts = extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("")),
-            VmValue::Nil,
-            VmValue::dict(llm_options),
-        ])?;
-        let keep_last = args
-            .get(1)
-            .and_then(|v| v.as_dict())
-            .and_then(|d| d.get("keep_last"))
-            .and_then(|v| v.as_int())
-            .unwrap_or(6)
-            .max(0) as usize;
-        let prompt_override = args
-            .get(1)
-            .and_then(|v| v.as_dict())
-            .and_then(|d| d.get("prompt"))
-            .map(|v| v.display())
-            .unwrap_or_default();
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_drain_decision_event(drain: dict) -> dict",
+    category = "transcript"
+)]
+fn transcript_drain_decision_event_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(transcript_drain_decision_event_from_value(
+        args.first().unwrap_or(&VmValue::Nil),
+    ))
+}
 
-        let messages = transcript_message_list(transcript)?;
-        let formatted = messages
-            .iter()
-            .map(|msg| {
-                let dict = msg.as_dict();
-                let role = dict
-                    .and_then(|d| d.get("role"))
-                    .map(|v| v.display())
-                    .unwrap_or_else(|| "user".to_string());
-                let content = dict
-                    .and_then(|d| d.get("content"))
-                    .map(|v| v.display())
-                    .unwrap_or_default();
-                format!("{}: {}", role.to_uppercase(), content)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_summary(transcript: list | dict | Transcript) -> string | nil",
+    category = "transcript"
+)]
+fn transcript_summary_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_summary")?;
+    Ok(transcript.get("summary").cloned().unwrap_or(VmValue::Nil))
+}
 
-        let mut bindings = crate::value::DictMap::new();
-        bindings.put_str("prompt", prompt_override);
-        bindings.put_str("formatted", formatted);
-        let user_message = crate::stdlib::template::render_stdlib_prompt_asset(
-            "llm/prompts/transcript_summarize_user.harn.prompt",
-            Some(&bindings),
-        )?;
-        opts.messages = vec![serde_json::json!({
-            "role": "user",
-            "content": user_message,
-        })];
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_id(transcript: list | dict | Transcript) -> string",
+    category = "transcript"
+)]
+fn transcript_id_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_id")?;
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        transcript_id(transcript).unwrap_or_default(),
+    )))
+}
 
-        let result = super::api::vm_call_llm_full(&opts).await?;
-        let retained = messages
-            .into_iter()
-            .rev()
-            .take(keep_last)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>();
-        let archived_count = transcript_message_list(transcript)?
-            .len()
-            .saturating_sub(retained.len());
-        let mut compacted = match rebuild_transcript(
-            transcript,
-            retained,
-            Some(result.text),
-            transcript_asset_list(transcript)?,
-            Vec::new(),
-            transcript_state(transcript),
-        ) {
-            VmValue::Dict(d) => (*d).clone(),
-            _ => crate::value::DictMap::new(),
-        };
-        compacted.insert(
-            crate::value::intern_key("archived_messages"),
-            VmValue::Int(archived_count as i64),
-        );
-        Ok(VmValue::dict(compacted))
-    });
-
-    vm.register_builtin("add_message", |args, _out| match args.first() {
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "add_message(messages_or_transcript: list | dict | Transcript, role: string, content: any) -> list | dict | Transcript",
+    category = "transcript"
+)]
+fn add_message_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    match args.first() {
         Some(VmValue::List(list)) => {
-            let role = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let role = args.get(1).map(VmValue::display).unwrap_or_default();
             let mut new_messages = (**list).clone();
             new_messages.push(vm_message_value(
                 &role,
@@ -480,11 +245,9 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             ));
             Ok(VmValue::List(std::sync::Arc::new(new_messages)))
         }
-        Some(VmValue::Dict(d))
-            if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-        {
-            let role = args.get(1).map(|a| a.display()).unwrap_or_default();
-            let mut new_messages = transcript_message_list(d)?;
+        Some(VmValue::Dict(dict)) if is_transcript_value(&VmValue::Dict(dict.clone())) => {
+            let role = args.get(1).map(VmValue::display).unwrap_or_default();
+            let mut new_messages = transcript_message_list(dict)?;
             new_messages.push(vm_message_value(
                 &role,
                 args.get(2)
@@ -492,65 +255,309 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                     .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
             ));
             Ok(rebuild_transcript(
-                d,
+                dict,
                 new_messages,
-                transcript_summary_text(d),
-                transcript_asset_list(d)?,
+                transcript_summary_text(dict),
+                transcript_asset_list(dict)?,
                 Vec::new(),
-                transcript_state(d),
+                transcript_state(dict),
             ))
         }
         _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "add_message: first argument must be a message list or transcript",
         )))),
-    });
+    }
+}
 
-    vm.register_builtin("add_user", |args, _out| vm_add_role_message(args, "user"));
+#[harn_builtin(exposure = "pure", effects = [], sig = "add_user(messages_or_transcript: list | dict | Transcript, content: any) -> list | dict | Transcript", category = "transcript")]
+fn add_user_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    vm_add_role_message(args, "user")
+}
 
-    vm.register_builtin("add_assistant", |args, _out| {
-        vm_add_role_message(args, "assistant")
-    });
+#[harn_builtin(exposure = "pure", effects = [], sig = "add_assistant(messages_or_transcript: list | dict | Transcript, content: any) -> list | dict | Transcript", category = "transcript")]
+fn add_assistant_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    vm_add_role_message(args, "assistant")
+}
 
-    vm.register_builtin("add_system", |args, _out| {
-        vm_add_role_message(args, "system")
-    });
+#[harn_builtin(exposure = "pure", effects = [], sig = "add_system(messages_or_transcript: list | dict | Transcript, content: any) -> list | dict | Transcript", category = "transcript")]
+fn add_system_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    vm_add_role_message(args, "system")
+}
 
-    vm.register_builtin("add_tool_result", |args, _out| match args.first() {
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "add_tool_result(messages_or_transcript: list | dict | Transcript, tool_use_id: string, content: any) -> list | dict | Transcript",
+    category = "transcript"
+)]
+fn add_tool_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let build_message = || {
+        let mut message = crate::value::DictMap::new();
+        message.put_str("role", "tool_result");
+        message.put_str(
+            "tool_use_id",
+            args.get(1).map(VmValue::display).unwrap_or_default(),
+        );
+        message.put_str(
+            "content",
+            args.get(2).map(VmValue::display).unwrap_or_default(),
+        );
+        VmValue::dict(message)
+    };
+    match args.first() {
         Some(VmValue::List(list)) => {
-            let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
-            let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
-            let mut msg = crate::value::DictMap::new();
-            msg.put_str("role", "tool_result");
-            msg.put_str("tool_use_id", tool_use_id);
-            msg.put_str("content", result_content);
-            let mut new_messages = (**list).clone();
-            new_messages.push(VmValue::dict(msg));
-            Ok(VmValue::List(std::sync::Arc::new(new_messages)))
+            let mut messages = (**list).clone();
+            messages.push(build_message());
+            Ok(VmValue::List(std::sync::Arc::new(messages)))
         }
-        Some(VmValue::Dict(d))
-            if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-        {
-            let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
-            let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
-            let mut msg = crate::value::DictMap::new();
-            msg.put_str("role", "tool_result");
-            msg.put_str("tool_use_id", tool_use_id);
-            msg.put_str("content", result_content);
-            let mut new_messages = transcript_message_list(d)?;
-            new_messages.push(VmValue::dict(msg));
+        Some(VmValue::Dict(dict)) if is_transcript_value(&VmValue::Dict(dict.clone())) => {
+            let mut messages = transcript_message_list(dict)?;
+            messages.push(build_message());
             Ok(rebuild_transcript(
-                d,
-                new_messages,
-                transcript_summary_text(d),
-                transcript_asset_list(d)?,
+                dict,
+                messages,
+                transcript_summary_text(dict),
+                transcript_asset_list(dict)?,
                 Vec::new(),
-                transcript_state(d),
+                transcript_state(dict),
             ))
         }
         _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "add_tool_result: first argument must be a message list or transcript",
         )))),
+    }
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_fork(transcript: list | dict | Transcript, options?: dict) -> dict",
+    category = "transcript"
+)]
+fn transcript_fork_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_fork")?;
+    let options = args.get(1).and_then(VmValue::as_dict);
+    let retain_messages = options
+        .and_then(|dict| dict.get("retain_messages"))
+        .map(VmValue::is_truthy)
+        .unwrap_or(true);
+    let retain_summary = options
+        .and_then(|dict| dict.get("retain_summary"))
+        .map(VmValue::is_truthy)
+        .unwrap_or(true);
+    Ok(rebuild_transcript(
+        transcript,
+        if retain_messages {
+            transcript_message_list(transcript)?
+        } else {
+            Vec::new()
+        },
+        if retain_summary {
+            transcript_summary_text(transcript)
+        } else {
+            None
+        },
+        transcript_asset_list(transcript)?,
+        vec![transcript_event(
+            "transcript_fork",
+            "system",
+            "internal",
+            "transcript forked",
+            None,
+        )],
+        Some("forked"),
+    ))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_reset(options?: dict) -> dict",
+    category = "transcript"
+)]
+fn transcript_reset_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let metadata = args
+        .first()
+        .and_then(VmValue::as_dict)
+        .and_then(|dict| dict.get("metadata"))
+        .cloned();
+    Ok(new_transcript_with_events(
+        None,
+        Vec::new(),
+        None,
+        metadata,
+        vec![transcript_event(
+            "transcript_reset",
+            "system",
+            "internal",
+            "transcript reset",
+            None,
+        )],
+        Vec::new(),
+        Some("active"),
+    ))
+}
+
+fn transcript_with_state(
+    args: &[VmValue],
+    builtin: &str,
+    event_text: &str,
+    state: &str,
+) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, builtin)?;
+    Ok(rebuild_transcript(
+        transcript,
+        transcript_message_list(transcript)?,
+        transcript_summary_text(transcript),
+        transcript_asset_list(transcript)?,
+        vec![transcript_event(
+            builtin, "system", "internal", event_text, None,
+        )],
+        Some(state),
+    ))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "transcript_archive(transcript: list | dict | Transcript) -> dict", category = "transcript")]
+fn transcript_archive_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    transcript_with_state(
+        args,
+        "transcript_archive",
+        "transcript archived",
+        "archived",
+    )
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "transcript_abandon(transcript: list | dict | Transcript) -> dict", category = "transcript")]
+fn transcript_abandon_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    transcript_with_state(
+        args,
+        "transcript_abandon",
+        "transcript abandoned",
+        "abandoned",
+    )
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "transcript_resume(transcript: list | dict | Transcript) -> dict", category = "transcript")]
+fn transcript_resume_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    transcript_with_state(args, "transcript_resume", "transcript resumed", "active")
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "conversation() -> list", category = "transcript")]
+fn conversation_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::List(std::sync::Arc::new(Vec::new())))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "transcript_add_asset(transcript: list | dict | Transcript, asset: dict) -> Transcript", category = "transcript")]
+fn transcript_add_asset_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_add_asset")?;
+    let asset_value = args.get(1).cloned().ok_or_else(|| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            "transcript_add_asset: missing asset",
+        )))
+    })?;
+    let normalized = normalize_transcript_asset(&asset_value);
+    let asset_id = normalized
+        .as_dict()
+        .and_then(|dict| dict.get("id"))
+        .map(VmValue::display)
+        .unwrap_or_default();
+    let mut assets = transcript_asset_list(transcript)?;
+    assets.retain(|asset| {
+        asset
+            .as_dict()
+            .and_then(|dict| dict.get("id"))
+            .map(VmValue::display)
+            .unwrap_or_default()
+            != asset_id
     });
+    assets.push(normalized);
+    Ok(rebuild_transcript(
+        transcript,
+        transcript_message_list(transcript)?,
+        transcript_summary_text(transcript),
+        assets,
+        Vec::new(),
+        transcript_state(transcript),
+    ))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "transcript_render_visible(transcript: list | dict | Transcript) -> string", category = "transcript")]
+fn transcript_render_visible_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_render_visible")?;
+    let rendered = match transcript.get("events") {
+        Some(VmValue::List(events)) => events
+            .iter()
+            .filter_map(|event| {
+                let dict = event.as_dict()?;
+                if dict.get("visibility")?.display() != "public" {
+                    return None;
+                }
+                let role = dict.get("role").map(VmValue::display).unwrap_or_default();
+                let text = dict.get("text").map(VmValue::display).unwrap_or_default();
+                (!text.is_empty()).then(|| format!("{role}: {text}"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    };
+    Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "transcript_render_full(transcript: list | dict | Transcript) -> string", category = "transcript")]
+fn transcript_render_full_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = require_transcript(args, "transcript_render_full")?;
+    let rendered = match transcript.get("events") {
+        Some(VmValue::List(events)) => events
+            .iter()
+            .filter_map(|event| {
+                let dict = event.as_dict()?;
+                let role = dict.get("role").map(VmValue::display).unwrap_or_default();
+                let visibility = dict
+                    .get("visibility")
+                    .map(VmValue::display)
+                    .unwrap_or_default();
+                let text = dict.get("text").map(VmValue::display).unwrap_or_default();
+                Some(format!("[{visibility}] {role}: {text}"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    };
+    Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "transcript_export(transcript: list | dict | Transcript) -> string", category = "transcript")]
+fn transcript_export_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
+    if !is_transcript_value(&transcript) {
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            "transcript_export: argument must be a transcript",
+        ))));
+    }
+    let json = serde_json::to_string_pretty(&vm_value_to_json(&transcript))
+        .map_err(|error| VmError::Runtime(format!("transcript_export: {error}")))?;
+    Ok(VmValue::String(arcstr::ArcStr::from(json)))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "transcript_import(text: string) -> Transcript", category = "transcript")]
+fn transcript_import_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(VmValue::display).unwrap_or_default();
+    let json = serde_json::from_str(&text)
+        .map_err(|error| VmError::Runtime(format!("transcript_import: {error}")))?;
+    Ok(crate::stdlib::json_to_vm_value(&json))
+}
+
+/// Register conversation management builtins.
+pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
+    register_builtin_defs(vm, CONVERSATION_BUILTINS);
+    vm.register_builtin_def(&CONVERSATION_IMPL_DEF);
+    vm.register_builtin_def(&TRANSCRIPT_ADD_ASSET_IMPL_DEF);
+    vm.register_builtin_def(&TRANSCRIPT_RENDER_VISIBLE_IMPL_DEF);
+    vm.register_builtin_def(&TRANSCRIPT_RENDER_FULL_IMPL_DEF);
+    vm.register_builtin_def(&TRANSCRIPT_EXPORT_IMPL_DEF);
+    vm.register_builtin_def(&TRANSCRIPT_IMPORT_IMPL_DEF);
+    vm.register_builtin_def(&TRANSCRIPT_INJECT_REMINDER_BUILTIN_DEF);
+    vm.register_builtin_def(&TRANSCRIPT_CLEAR_REMINDERS_BUILTIN_DEF);
 }
 
 fn transcript_state(transcript: &crate::value::DictMap) -> Option<&str> {
@@ -622,7 +629,11 @@ fn rebuild_transcript_with_preserved_events(
     )
 }
 
-fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(exposure = "privileged_wire", effects = ["state.mutate@arg0", "random.mutate@const=reminder-id", "observability.write@const=reminder-lifecycle"], sig = "__transcript_inject_reminder(transcript: list | dict | Transcript, options: dict) -> dict", category = "transcript")]
+fn transcript_inject_reminder_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
     let context = "transcript.inject_reminder";
     let transcript = require_transcript(args, context)?;
     let options = require_reminder_options(args, 1, context)?;
@@ -699,7 +710,11 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
     ])))
 }
 
-fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(exposure = "privileged_wire", effects = ["state.mutate@arg0", "observability.write@const=reminder-lifecycle"], sig = "__transcript_clear_reminders(transcript: list | dict | Transcript, selector: dict) -> dict", category = "transcript")]
+fn transcript_clear_reminders_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
     let context = "transcript.clear_reminders";
     let transcript = require_transcript(args, context)?;
     let options = require_reminder_options(args, 1, context)?;
@@ -1094,23 +1109,29 @@ mod tests {
     #[test]
     fn inject_replaces_pending_reminder_with_same_dedupe_key() {
         let base = new_transcript_with(None, Vec::new(), None, None);
-        let first = transcript_inject_reminder_builtin(&[
-            base,
-            dict(vec![
-                ("body", vm_string("first")),
-                ("tags", strings(&["context"])),
-                ("dedupe_key", vm_string("context")),
-            ]),
-        ])
+        let first = transcript_inject_reminder_builtin(
+            &[
+                base,
+                dict(vec![
+                    ("body", vm_string("first")),
+                    ("tags", strings(&["context"])),
+                    ("dedupe_key", vm_string("context")),
+                ]),
+            ],
+            &mut String::new(),
+        )
         .expect("first inject");
-        let second = transcript_inject_reminder_builtin(&[
-            result_transcript(&first),
-            dict(vec![
-                ("body", vm_string("second")),
-                ("tags", strings(&["context"])),
-                ("dedupe_key", vm_string("context")),
-            ]),
-        ])
+        let second = transcript_inject_reminder_builtin(
+            &[
+                result_transcript(&first),
+                dict(vec![
+                    ("body", vm_string("second")),
+                    ("tags", strings(&["context"])),
+                    ("dedupe_key", vm_string("context")),
+                ]),
+            ],
+            &mut String::new(),
+        )
         .expect("second inject");
 
         let second_dict = second.as_dict().expect("result dict");
@@ -1134,26 +1155,35 @@ mod tests {
     #[test]
     fn clear_reminders_filters_by_tag() {
         let base = new_transcript_with(None, Vec::new(), None, None);
-        let first = transcript_inject_reminder_builtin(&[
-            base,
-            dict(vec![
-                ("body", vm_string("keep")),
-                ("tags", strings(&["keep"])),
-            ]),
-        ])
+        let first = transcript_inject_reminder_builtin(
+            &[
+                base,
+                dict(vec![
+                    ("body", vm_string("keep")),
+                    ("tags", strings(&["keep"])),
+                ]),
+            ],
+            &mut String::new(),
+        )
         .expect("first inject");
-        let second = transcript_inject_reminder_builtin(&[
-            result_transcript(&first),
-            dict(vec![
-                ("body", vm_string("drop")),
-                ("tags", strings(&["drop"])),
-            ]),
-        ])
+        let second = transcript_inject_reminder_builtin(
+            &[
+                result_transcript(&first),
+                dict(vec![
+                    ("body", vm_string("drop")),
+                    ("tags", strings(&["drop"])),
+                ]),
+            ],
+            &mut String::new(),
+        )
         .expect("second inject");
-        let cleared = transcript_clear_reminders_builtin(&[
-            result_transcript(&second),
-            dict(vec![("tag", vm_string("drop"))]),
-        ])
+        let cleared = transcript_clear_reminders_builtin(
+            &[
+                result_transcript(&second),
+                dict(vec![("tag", vm_string("drop"))]),
+            ],
+            &mut String::new(),
+        )
         .expect("clear reminders");
         let cleared_dict = cleared.as_dict().expect("result dict");
         assert_eq!(
@@ -1176,13 +1206,16 @@ mod tests {
     #[test]
     fn unknown_reminder_option_reports_key() {
         let base = new_transcript_with(None, Vec::new(), None, None);
-        let err = transcript_inject_reminder_builtin(&[
-            base,
-            dict(vec![
-                ("body", vm_string("hello")),
-                ("typo_key", VmValue::Bool(true)),
-            ]),
-        ])
+        let err = transcript_inject_reminder_builtin(
+            &[
+                base,
+                dict(vec![
+                    ("body", vm_string("hello")),
+                    ("typo_key", VmValue::Bool(true)),
+                ]),
+            ],
+            &mut String::new(),
+        )
         .expect_err("unknown key should fail");
         match err {
             VmError::Thrown(VmValue::String(message)) => {
@@ -1196,9 +1229,11 @@ mod tests {
     #[test]
     fn invalid_reminder_option_type_reports_code() {
         let base = new_transcript_with(None, Vec::new(), None, None);
-        let err =
-            transcript_inject_reminder_builtin(&[base, dict(vec![("body", VmValue::Int(1))])])
-                .expect_err("invalid body type should fail");
+        let err = transcript_inject_reminder_builtin(
+            &[base, dict(vec![("body", VmValue::Int(1))])],
+            &mut String::new(),
+        )
+        .expect_err("invalid body type should fail");
         match err {
             VmError::Thrown(VmValue::String(message)) => {
                 assert!(message.contains(Code::ReminderUnknownOption.as_str()));
@@ -1211,13 +1246,16 @@ mod tests {
     #[test]
     fn unknown_reminder_propagate_reports_specific_code() {
         let base = new_transcript_with(None, Vec::new(), None, None);
-        let err = transcript_inject_reminder_builtin(&[
-            base,
-            dict(vec![
-                ("body", vm_string("hello")),
-                ("propagate", vm_string("workspace")),
-            ]),
-        ])
+        let err = transcript_inject_reminder_builtin(
+            &[
+                base,
+                dict(vec![
+                    ("body", vm_string("hello")),
+                    ("propagate", vm_string("workspace")),
+                ]),
+            ],
+            &mut String::new(),
+        )
         .expect_err("unknown propagate should fail");
         match err {
             VmError::Thrown(VmValue::String(message)) => {

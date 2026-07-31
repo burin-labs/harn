@@ -1,10 +1,10 @@
 /**
- * CH-03 (#1874): bare `emit_channel("foo", ...)` resolves to
+ * CH-03 (#1874): bare `harness.channels.append("foo", ...)` resolves to
  * `tenant:<current-or-default-tenant>:foo`.
  */
-pipeline default() {
-  const receipt = emit_channel("pr.merged", {n: 1}, {id: "bare-1"})
-  __io_println(receipt.scope)
-  __io_println(receipt.scope_id)
-  __io_println(receipt.name_resolved)
+pipeline default(harness: Harness) {
+  const receipt = harness.channels.append("pr.merged", {n: 1}, {id: "bare-1"})
+  harness.stdio.println(receipt.scope)
+  harness.stdio.println(receipt.scope_id)
+  harness.stdio.println(receipt.name_resolved)
 }

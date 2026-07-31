@@ -10,11 +10,11 @@
  * affinity, WAL pragmas, in-memory databases, and file-open modes are
  * SQLite-specific behavior.
  */
-type SqliteDb = {_type: "sqlite_db", id: string, read_only: bool, memory: bool, path?: string}
+type SqliteDb = resource
 
-type SqliteTx = {_type: "sqlite_tx", id: string}
+type SqliteTx = resource
 
-type SqliteMockDb = {_type: "sqlite_mock_db", id: string}
+type SqliteMockDb = resource
 
 type SqliteHandle = SqliteDb | SqliteTx | SqliteMockDb
 

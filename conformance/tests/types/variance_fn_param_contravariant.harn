@@ -3,8 +3,8 @@
  * declared `fn(float) -> int` (which accepts floats — a supertype
  * of int) is a valid substitute for an expected `fn(int) -> int`.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const wide = fn(x: float) { return 0 }
   const _cb: fn(int) -> int = wide
-  __io_println("ok")
+  harness.stdio.println("ok")
 }

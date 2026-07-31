@@ -9,11 +9,11 @@ import { client, token } from "std/oauth/client"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const topic = "oauth.client.audit"
-  const cursor = event_log.latest(topic) ?? 0
-  const _ = mock_time(1700000000000)
-  const store = memory()
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
+  const _ = harness.testing.clock_set(1700000000000)
+  const store = memory(harness.auth)
   const provider = custom(
     {
       id: "mockTTL",
@@ -35,11 +35,12 @@ pipeline test(task) {
     },
   )
   const cli = client(
+    harness,
     provider,
     {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/token",
     {
@@ -50,27 +51,27 @@ pipeline test(task) {
     },
   )
   // Well before 75% TTL: no refresh expected.
-  const _ = advance_time(60 * 60 * 1000 / 2)
+  const _ = harness.testing.clock_advance(60 * 60 * 1000 / 2)
   const access_before = token(cli)
   assert_eq(access_before, "ACCESS-1", "token() before TTL threshold returns cached access")
-  const calls_before = http_mock_calls({include_sensitive: true})
+  const calls_before = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls_before), 0, "no token endpoint call before threshold")
   // Past 75% TTL: pre-refresh must fire.
-  const _ = advance_time(60 * 60 * 1000 * 30 / 100)
+  const _ = harness.testing.clock_advance(60 * 60 * 1000 * 30 / 100)
   const access_after = token(cli)
   assert_eq(access_after, "ACCESS-2", "token() past 75% TTL returns rotated access")
-  const calls_after = http_mock_calls({include_sensitive: true})
+  const calls_after = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls_after), 1, "exactly one token endpoint call after threshold")
   assert(contains(calls_after[0].body, "grant_type=refresh_token"), "refresh grant used")
   assert(contains(calls_after[0].body, "refresh_token=REFRESH-1"), "old refresh token sent")
   const after = store.get("mockTTL")
   assert_eq(after.access_token, "ACCESS-2", "storage rotated")
   assert_eq(after.refresh_token, "REFRESH-2", "storage rotated refresh token")
-  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const logged = stream.next().value
   assert_eq(logged.kind, "token_refreshed", "audit kind near TTL")
   assert_eq(logged.payload.reason, "ttl_threshold", "audit reason for pre-refresh")
   assert(logged.payload.next?.access_token == nil, "audit never includes new access token")
-  const _ = unmock_time()
-  log("oauth client refresh near ttl ok")
+  const _ = harness.testing.clock_reset()
+  harness.stdio.log("oauth client refresh near ttl ok")
 }

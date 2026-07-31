@@ -3,7 +3,7 @@
 // Catches dead-since-inception drift: a pure function returning the right
 // dict is not enough (that class of bug got sibling R2 PRs bounced). This
 // drives a REAL `agent_loop` mock-provider turn and inspects the actual
-// outbound request the loop sent (`llm_mock_calls()[i].tools`), proving
+// outbound request the loop sent (`harness.llm.mock_calls()[i].tools`), proving
 // `lane_policy`'s narrowing reaches the wire — not just that
 // `lane_policy(...)` computes a plausible-looking dict nobody consults.
 //
@@ -25,6 +25,7 @@
 //      a config value nobody consults.
 import { agent_capture_events } from "std/agent/events"
 import { default_lane_rows, lane_policy, lane_scope_classifier } from "std/agent/lanes"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn lane_test_tools() {
@@ -60,9 +61,10 @@ fn tool_names(tools) {
   return names
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // --- A. explicit_patch lane narrows the FIRST outbound call ---
   with_llm_script(
+    harness.llm,
     [llm_text("done ##DONE##")],
     { ->
       const opts = lane_policy(
@@ -76,19 +78,20 @@ pipeline default() {
           tools: lane_test_tools(),
         },
       )
-      const result = agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts)
-      const first_tools = tool_names(llm_mock_calls()[0].tools)
-      __io_println("A.status=" + result.status)
-      __io_println("A.lane=" + opts._lane_verdict.lane)
-      __io_println("A.has_edit=" + to_string(contains(first_tools, "edit")))
-      __io_println("A.has_look=" + to_string(contains(first_tools, "look")))
-      __io_println("A.has_git=" + to_string(contains(first_tools, "git")))
-      __io_println("A.has_run_codemod=" + to_string(contains(first_tools, "run_codemod")))
-      __io_println("A.has_glob=" + to_string(contains(first_tools, "glob")))
+      const result = agent_loop(harness, "Fix the off-by-one bug in src/widget.py.", nil, opts)
+      const first_tools = tool_names(harness.llm.mock_calls()[0].tools)
+      harness.stdio.println("A.status=" + result.status)
+      harness.stdio.println("A.lane=" + opts._lane_verdict.lane)
+      harness.stdio.println("A.has_edit=" + to_string(contains(first_tools, "edit")))
+      harness.stdio.println("A.has_look=" + to_string(contains(first_tools, "look")))
+      harness.stdio.println("A.has_git=" + to_string(contains(first_tools, "git")))
+      harness.stdio.println("A.has_run_codemod=" + to_string(contains(first_tools, "run_codemod")))
+      harness.stdio.println("A.has_glob=" + to_string(contains(first_tools, "glob")))
     },
   )
   // --- B. general lane (no explicit target) leaves tools unrestricted ---
   with_llm_script(
+    harness.llm,
     [llm_text("done ##DONE##")],
     { ->
       const opts = lane_policy(
@@ -102,23 +105,24 @@ pipeline default() {
           tools: lane_test_tools(),
         },
       )
-      const result = agent_loop("Explain how the retry policy works.", nil, opts)
-      const first_tools = tool_names(llm_mock_calls()[0].tools)
-      __io_println("B.status=" + result.status)
-      __io_println("B.lane=" + opts._lane_verdict.lane)
-      __io_println("B.has_git=" + to_string(contains(first_tools, "git")))
-      __io_println("B.has_run_codemod=" + to_string(contains(first_tools, "run_codemod")))
+      const result = agent_loop(harness, "Explain how the retry policy works.", nil, opts)
+      const first_tools = tool_names(harness.llm.mock_calls()[0].tools)
+      harness.stdio.println("B.status=" + result.status)
+      harness.stdio.println("B.lane=" + opts._lane_verdict.lane)
+      harness.stdio.println("B.has_git=" + to_string(contains(first_tools, "git")))
+      harness.stdio.println("B.has_run_codemod=" + to_string(contains(first_tools, "run_codemod")))
     },
   )
   // --- C. a hidden tool is never NAMED to the model as an alternative ---
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{arguments: {}, id: "hidden-1", name: "git"}]},
       {tool_calls: [{arguments: {}, id: "edit-1", name: "edit"}]},
       llm_text("done ##DONE##"),
     ],
     { ->
-      const session = "lane-hidden-" + uuid()
+      const session = "lane-hidden-" + harness.random.uuid()
       const opts = lane_policy(
         default_lane_rows(),
         "Fix the off-by-one bug in src/widget.py.",
@@ -132,20 +136,25 @@ pipeline default() {
           tools: lane_test_tools(),
         },
       )
-      const result = agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts)
-      const feedback = json_stringify(llm_mock_calls()[1].messages)
-      __io_println("C.status=" + result.status)
-      __io_println("C.feedback_lists_available=" + to_string(contains(feedback, "Available tools")))
-      __io_println("C.feedback_offers_edit=" + to_string(contains(feedback, "edit")))
-      __io_println("C.feedback_names_run_codemod=" + to_string(contains(feedback, "run_codemod")))
-      __io_println("C.feedback_names_glob=" + to_string(contains(feedback, "glob")))
+      const result = agent_loop(harness, "Fix the off-by-one bug in src/widget.py.", nil, opts)
+      const feedback = json_stringify(harness.llm.mock_calls()[1].messages)
+      harness.stdio.println("C.status=" + result.status)
+      harness.stdio.println(
+        "C.feedback_lists_available=" + to_string(contains(feedback, "Available tools")),
+      )
+      harness.stdio.println("C.feedback_offers_edit=" + to_string(contains(feedback, "edit")))
+      harness.stdio.println(
+        "C.feedback_names_run_codemod=" + to_string(contains(feedback, "run_codemod")),
+      )
+      harness.stdio.println("C.feedback_names_glob=" + to_string(contains(feedback, "glob")))
     },
   )
   // --- D. lane_scope_classifier fires live on the pre_turn_scope_classifier seam ---
   with_llm_script(
+    harness.llm,
     [llm_text("still working"), llm_text("done ##DONE##")],
     { ->
-      const session = "lane-scope-classifier-" + uuid()
+      const session = "lane-scope-classifier-" + harness.random.uuid()
       const opts = lane_policy(
         default_lane_rows(),
         "Fix the off-by-one bug in src/widget.py.",
@@ -160,21 +169,22 @@ pipeline default() {
       )
         + lane_scope_classifier(default_lane_rows())
       const captured = agent_capture_events(
+        harness.agent,
         session,
-        fn() { return agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts) },
+        fn() { return agent_loop(harness, "Fix the off-by-one bug in src/widget.py.", nil, opts) },
       )
       const verdict_events = captured.events.filter(
         { event -> event.type == "scope_classifier_verdict" },
       )
-      __io_println("D.status=" + captured.result.status)
-      __io_println("D.verdict_count=" + to_string(len(verdict_events)))
-      __io_println(
+      harness.stdio.println("D.status=" + captured.result.status)
+      harness.stdio.println("D.verdict_count=" + to_string(len(verdict_events)))
+      harness.stdio.println(
         "D.evidence_names_lane="
           + to_string(
           contains(verdict_events[0].evidence, "lane=explicit_patch"),
         ),
       )
-      __io_println("D.label=" + verdict_events[0].label)
+      harness.stdio.println("D.label=" + verdict_events[0].label)
     },
   )
 }

@@ -1,6 +1,7 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn tools() {
+fn tools(stdio: HarnessStdio) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -16,16 +17,16 @@ fn tools() {
             reason: "Testing reminder propagation envelope",
           },
         )
-        __io_println(len(record.reminder_propagation))
-        __io_println(record.reminder_propagation[0].body)
-        __io_println(record.reminder_propagation[0].source)
-        __io_println(
+        stdio.println(len(record.reminder_propagation))
+        stdio.println(record.reminder_propagation[0].body)
+        stdio.println(record.reminder_propagation[0].source)
+        stdio.println(
           record.reminder_propagation[0].originating_agent_id
             == "reminder-propagate-handoff-parent",
         )
-        __io_println(record.reminder_propagation[1].body)
-        __io_println(record.reminder_propagation[1].source)
-        __io_println(
+        stdio.println(record.reminder_propagation[1].body)
+        stdio.println(record.reminder_propagation[1].source)
+        stdio.println(
           record.reminder_propagation[1].originating_agent_id
             == "reminder-propagate-handoff-parent",
         )
@@ -38,16 +39,16 @@ fn tools() {
   return registry
 }
 
-pipeline main() {
-  const parent = agent_session_open("reminder-propagate-handoff-parent")
-  agent_session_reset(parent)
-  agent_session_inject(
+pipeline main(harness: Harness) {
+  const parent = harness.agent.open("reminder-propagate-handoff-parent")
+  harness.agent.reset(parent)
+  harness.agent.inject(
     parent,
     transcript_reminder_event(
       {body: "all reminder", tags: ["all"], dedupe_key: "all-key", propagate: "all"},
     ),
   )
-  agent_session_inject(
+  harness.agent.inject(
     parent,
     transcript_reminder_event(
       {
@@ -58,22 +59,24 @@ pipeline main() {
       },
     ),
   )
-  agent_session_inject(
+  harness.agent.inject(
     parent,
     transcript_reminder_event(
       {body: "none reminder", tags: ["none"], dedupe_key: "none-key", propagate: "none"},
     ),
   )
   with_llm_script(
+    harness.llm,
     [{tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]}, llm_text("done")],
     { ->
       agent_loop(
+        harness,
         "Emit a handoff.",
         nil,
         {
           provider: "mock",
           session_id: parent,
-          tools: tools(),
+          tools: tools(harness.stdio),
           tool_format: "native",
           max_iterations: 2,
           done_judge: nil,

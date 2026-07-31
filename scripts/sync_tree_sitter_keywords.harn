@@ -84,7 +84,7 @@ pub fn grammar_keywords(text: string) -> list<string>? {
   if m.count == 0 {
     return nil
   }
-  const body = regex_replace_all(r"//[^\n]*", "", m[0].groups[0])
+  const body = regex_replace(r"//[^\n]*", "", m[0].groups[0])
   return dedup(quoted_strings(body))
 }
 
@@ -104,47 +104,51 @@ pub fn render_keywords_js(keywords: list<string>) -> string {
   return lines.join("\n") + "\n"
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   if !harness.fs.exists(TOKEN_RS) {
-    __io_eprintln("error: missing ${TOKEN_RS}")
+    harness.stdio.eprintln("error: missing ${TOKEN_RS}")
     return 1
   }
   if !harness.fs.exists(KEYWORDS_JS) {
-    __io_eprintln("error: missing ${KEYWORDS_JS}")
+    harness.stdio.eprintln("error: missing ${KEYWORDS_JS}")
     return 1
   }
   const lexer = lexer_keywords(harness.fs.read_text(TOKEN_RS))
   if lexer == nil {
-    __io_eprintln("error: could not find `pub const KEYWORDS` in ${TOKEN_RS}")
+    harness.stdio.eprintln("error: could not find `pub const KEYWORDS` in ${TOKEN_RS}")
     return 1
   }
   if argv.contains("--write") {
     harness.fs.write_text(KEYWORDS_JS, render_keywords_js(lexer))
-    __io_println("    Wrote ${lexer.count} keywords to ${KEYWORDS_JS}.")
+    harness.stdio.println("    Wrote ${lexer.count} keywords to ${KEYWORDS_JS}.")
     return 0
   }
   const grammar = grammar_keywords(harness.fs.read_text(KEYWORDS_JS))
   if grammar == nil {
-    __io_eprintln("error: could not find `module.exports = [ ... ]` in ${KEYWORDS_JS}")
+    harness.stdio.eprintln("error: could not find `module.exports = [ ... ]` in ${KEYWORDS_JS}")
     return 1
   }
   const missing = difference(lexer, grammar).sorted()
   const extra = difference(grammar, lexer).sorted()
   if missing.count > 0 || extra.count > 0 {
-    __io_eprintln(
+    harness.stdio.eprintln(
       "error: tree-sitter keyword list is out of sync with the lexer (crates/harn-lexer/src/token.rs KEYWORDS):",
     )
     if missing.count > 0 {
-      __io_eprintln("  - missing from tree-sitter-harn/grammar/keywords.js: ${missing.join(", ")}")
+      harness.stdio.eprintln(
+        "  - missing from tree-sitter-harn/grammar/keywords.js: ${missing.join(", ")}",
+      )
     }
     if extra.count > 0 {
-      __io_eprintln("  - present in keywords.js but not a lexer keyword: ${extra.join(", ")}")
+      harness.stdio.eprintln(
+        "  - present in keywords.js but not a lexer keyword: ${extra.join(", ")}",
+      )
     }
-    __io_eprintln(
+    harness.stdio.eprintln(
       "\nhint: run `make gen-tree-sitter-keywords` to regenerate from the lexer, or reconcile the lists by hand.",
     )
     return 1
   }
-  __io_println("    tree-sitter keyword list OK (${lexer.count} keywords).")
+  harness.stdio.println("    tree-sitter keyword list OK (${lexer.count} keywords).")
   return 0
 }

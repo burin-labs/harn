@@ -1,9 +1,9 @@
 import { stream_validate } from "std/json"
 
-pipeline default(task) {
-  const sv = stream_validate()
+pipeline default(harness: Harness, task) {
+  const sv = stream_validate(harness.runtime)
   const validator = sv.create({type: "list", items: {type: "int"}})
-  __io_println(sv.chunk(validator, "[1,").verdict)
-  __io_println(sv.chunk(validator, "2,3]").verdict)
-  __io_println(sv.finalize(validator).verdict)
+  harness.stdio.println(sv.chunk(validator, "[1,").verdict)
+  harness.stdio.println(sv.chunk(validator, "2,3]").verdict)
+  harness.stdio.println(sv.finalize(validator).verdict)
 }

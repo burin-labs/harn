@@ -1,6 +1,7 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -17,6 +18,7 @@ pipeline test(task) {
   const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   assert(contains(catalog, "rust-scripting"), "catalog contains the skill id")
   with_llm_script(
+    harness.llm,
     [
       {
         text: "Load the rust instructions.",
@@ -26,6 +28,7 @@ pipeline test(task) {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Help with rust scripting",
         catalog,
         {
@@ -40,7 +43,7 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "agent loop finishes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) == 2, "two llm calls happened")
       const first_tools = json_stringify(calls[0].tools)
       assert(contains(first_tools, "load_skill"), "load_skill is advertised")
@@ -62,7 +65,7 @@ pipeline test(task) {
       const second_tools = json_stringify(calls[1].tools)
       assert(contains(second_tools, "deploy_service"), "allowed tool remains visible")
       assert(!contains(second_tools, "query_metrics"), "out-of-scope tool is filtered")
-      log("skills_load_skill_roundtrip passed")
+      harness.stdio.log("skills_load_skill_roundtrip passed")
     },
   )
 }

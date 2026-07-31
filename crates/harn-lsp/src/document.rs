@@ -423,8 +423,8 @@ mod tests {
         let state = DocumentState::new(
             r#"
 @invariant("approval.reachability")
-fn handler() {
-  write_file("src/main.rs", "unsafe")
+fn handler(fs: HarnessFs) {
+  fs.write_text("src/main.rs", "unsafe")
 }
 "#
             .to_string(),

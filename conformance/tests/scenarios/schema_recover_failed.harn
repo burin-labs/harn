@@ -4,11 +4,11 @@
  * recovers and the LLM repair pass is disabled. Verifies the
  * `{repair: false}` knob keeps recovery fully deterministic.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
-  const r = schema_recover("nothing useful here at all", schema, {repair: false})
-  __io_println(r.ok)
-  __io_println(r.stage)
-  __io_println(r.error_category)
-  __io_println(r.data == nil)
+  const r = harness.llm.recover_schema("nothing useful here at all", schema, {repair: false})
+  harness.stdio.println(r.ok)
+  harness.stdio.println(r.stage)
+  harness.stdio.println(r.error_category)
+  harness.stdio.println(r.data == nil)
 }

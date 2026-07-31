@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // repeat
   assert_eq(repeat("ab", 3), "ababab", "repeat triples a string")
   assert_eq(repeat("x", 0), "", "repeat with zero gives empty")
@@ -36,5 +36,5 @@ pipeline test(task) {
   // five code points but four columns, so both words share a nine-column
   // line where a naive code-point count (five each) would have split them.
   assert_eq(word_wrap("café café", 9), "café café", "word_wrap ignores zero-width combining marks")
-  log("string helpers: all tests passed")
+  harness.stdio.log("string helpers: all tests passed")
 }

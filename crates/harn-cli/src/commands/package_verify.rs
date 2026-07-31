@@ -967,7 +967,9 @@ fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> PackageVer
     exports.sort();
     for export in exports {
         let smoke_path = consumer.join(format!("smoke-{export}.harn"));
-        let source = format!("import \"{package_name}/{export}\"\n\npipeline default() {{\n}}\n");
+        let source = format!(
+            "import \"{package_name}/{export}\"\n\npipeline default(harness: Harness) {{\n}}\n"
+        );
         if let Err(error) = fs::write(&smoke_path, source) {
             failures.push(format!("failed to write {}: {error}", smoke_path.display()));
             continue;

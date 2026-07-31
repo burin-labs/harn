@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -6,34 +7,37 @@ import { llm_text, with_llm_script } from "std/testing"
  * thread-local queue and drain at agent-loop turn boundaries so VM
  * closures invoke inside an async builtin context.
  */
-const edits_seen = atomic(0)
-
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  const edits_seen = harness.runtime.atomic(0)
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "file_edited",
-    { event ->
+    { _hook_harness, event ->
       const op = to_string(event?.metadata?.operation ?? "")
       if op == "write" || op == "append" {
-        atomic_add(edits_seen, 1)
+        harness.runtime.atomic_add(edits_seen, 1)
       }
       return nil
     },
   )
-  const tmp = path_join(harness.fs.temp_dir(), "hooks_session_file_edited-" + uuid() + ".txt")
+  const tmp = path_join(
+    harness.fs.workspace_temp_dir(),
+    "hooks_session_file_edited-" + harness.random.uuid() + ".txt",
+  )
   harness.fs.write_text(tmp, "hello")
   harness.fs.append(tmp, " world")
-  notify_file_edited(tmp, {operation: "append", bytes: 11})
+  harness.agent.notify_file_edited(tmp, {operation: "append", bytes: 11})
   with_llm_script(
+    harness.llm,
     [llm_text("ok")],
     { ->
-      const result = agent_loop("touch some files", nil, {provider: "mock"})
-      __io_println(result.status)
-      __io_println(atomic_get(edits_seen))
+      const result = agent_loop(harness, "touch some files", nil, {provider: "mock"})
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(edits_seen))
       if harness.fs.exists(tmp) {
         harness.fs.delete(tmp)
       }
-      clear_session_hooks()
+      harness.agent.clear_session_hooks()
     },
   )
 }

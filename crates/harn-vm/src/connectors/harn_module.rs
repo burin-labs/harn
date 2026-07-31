@@ -14,7 +14,6 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::sync::{oneshot, Notify};
 
-use crate::bridge::json_result_to_vm_value;
 use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
 use crate::orchestration::CapabilityPolicy;
@@ -31,6 +30,8 @@ use crate::{
     ProviderPayload, ProviderPayloadSchema, SignatureStatus, TenantId, TraceId, TriggerBinding,
     TriggerEvent, TriggerEventId, TriggerKind,
 };
+
+mod abi;
 
 thread_local! {
     static ACTIVE_HARN_CONNECTOR_CTX: RefCell<Vec<ConnectorCtx>> = const { RefCell::new(Vec::new()) };
@@ -490,6 +491,7 @@ async fn handle_worker_command(
 
 pub async fn load_contract(module_path: &Path) -> Result<HarnConnectorContract, ConnectorError> {
     let (base_vm, exports) = load_module_runtime(module_path).await?;
+    abi::validate_runtime_export_abi(&exports)?;
     let provider_id =
         parse_provider_id(required_export_call(&base_vm, &exports, "provider_id", &[]).await?)?;
     let kinds = parse_kinds(required_export_call(&base_vm, &exports, "kinds", &[]).await?)?;
@@ -525,11 +527,6 @@ impl Connector for HarnConnector {
         let init_payload = json!({
             "provider_id": self.provider_id.as_str(),
             "module_path": self.module_path.display().to_string(),
-            "capabilities": {
-                "secret_get": true,
-                "event_log_emit": true,
-                "metrics_inc": true,
-            }
         });
         worker.init(ctx, init_payload).await?;
         self.shared.install_worker(worker);
@@ -951,10 +948,7 @@ async fn call_provider_export(
     let mut child_vm = runtime.base_vm.child_vm_for_host();
     let _policy_guard = ConnectorExecutionPolicyGuard::push(policy);
     let _ctx_guard = ActiveHarnConnectorCtxGuard::push(runtime.ctx.clone());
-    let vm_args = args
-        .into_iter()
-        .map(|value| json_result_to_vm_value(&value))
-        .collect::<Vec<_>>();
+    let vm_args = abi::runtime_export_args(&child_vm, name, args)?;
     let result = child_vm.call_closure_pub(&closure, &vm_args).await;
     result
         .map(|value| Some(vm_value_to_json(&value)))

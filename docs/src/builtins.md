@@ -1,20 +1,28 @@
-# Builtin functions
+# Builtins and Harness capabilities
 
-Reference notes for commonly used Harn built-in functions. This page is a
-curated subset, not an exhaustive list. The complete, authoritative builtin
-registry — every function registered via `#[harn_builtin]` — is emitted by
+Reference notes for commonly used pure builtins and effectful Harness methods.
+This page is a curated subset, not an exhaustive list. The complete,
+authoritative registry—including source exposure, nominal handle type, static
+effect ceiling, and resource selectors—is emitted by
 `harn contracts builtins`.
+
+Effects flow from the harness capability object; imports are pure. Examples on
+this page that use `harness` assume an entrypoint such as
+`fn main(harness: Harness)`. Keep that root at entry/orchestration seams and
+pass helpers the narrowest coherent nominal handle (`HarnessFs`, `HarnessLlm`,
+`HarnessNet`, and so on). Pure computation remains available as ordinary
+globals.
 
 ## Output
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `log(msg)` | msg: any | nil | Print with `[harn]` prefix and newline |
-| `progress(phase, message, progress?, total?)` | phase: string, message: string, optional numeric progress | nil | Emit standalone progress output. Dict options support `mode: "spinner"` with `step`, or `mode: "bar"` with `current`, `total`, and optional `width` |
+| `harness.stdio.log(msg)` | msg: any | nil | Print with `[harn]` prefix and newline |
+| `harness.stdio.progress(phase, message, progress?, total?)` | phase: string, message: string, optional numeric progress | nil | Emit standalone progress output. Dict options support `mode: "spinner"` with `step`, or `mode: "bar"` with `current`, `total`, and optional `width` |
 | `color(text, name)` | text: any, name: string | string | Wrap text with an ANSI foreground color code |
 | `bold(text)` | text: any | string | Wrap text with ANSI bold styling |
 | `dim(text)` | text: any | string | Wrap text with ANSI dim styling |
-| `set_color_mode(mode)` | mode: `"auto"`, `"always"`, or `"never"` | nil | Configure process-local ANSI color behavior for `color`, `bold`, `dim`, and `std/ansi`; `auto` honors TTY detection, `NO_COLOR`, and `FORCE_COLOR` |
+| `harness.term.set_color_mode(mode)` | mode: `"auto"`, `"always"`, or `"never"` | nil | Configure process-local ANSI color behavior for `color`, `bold`, `dim`, and `std/ansi`; `auto` honors TTY detection, `NO_COLOR`, and `FORCE_COLOR` |
 
 ## Type conversion
 
@@ -39,7 +47,7 @@ body executes.
 
 ```harn,ignore
 fn greet(u: {name: string, age: int}) {
-  log("${u.name} is ${u.age}")
+  harness.stdio.log("${u.name} is ${u.age}")
 }
 
 greet({name: "Alice", age: 30})   // OK
@@ -72,12 +80,12 @@ Example:
 const good = Ok(42)
 const bad = Err("something went wrong")
 
-log(is_ok(good))             // true
-log(is_err(bad))             // true
+harness.stdio.log(is_ok(good))             // true
+harness.stdio.log(is_err(bad))             // true
 
-log(unwrap(good))            // 42
-log(unwrap_or(bad, 0))       // 0
-log(unwrap_err(bad))         // something went wrong
+harness.stdio.log(unwrap(good))            // 42
+harness.stdio.log(unwrap_or(bad, 0))       // 0
+harness.stdio.log(unwrap_err(bad))         // something went wrong
 ```
 
 ## JSON
@@ -196,9 +204,9 @@ const user_schema = {
 }
 
 const parsed = schema_parse({name: "Ada", age: 36}, user_schema)
-log(is_ok(parsed))
-log(unwrap(parsed).role)
-log(schema_to_json_schema(user_schema).type)
+harness.stdio.log(is_ok(parsed))
+harness.stdio.log(unwrap(parsed).role)
+harness.stdio.log(schema_to_json_schema(user_schema).type)
 ```
 
 `schema_is(...)` is useful for dynamic checks and can participate in static
@@ -224,7 +232,7 @@ import { parse_json_typed } from "std/schema"
 type User = {name: string}
 
 const user = parse_json_typed("{\"name\":\"Ada\"}", User, {name: "fallback"})
-log(user?.name)
+harness.stdio.log(user?.name)
 ```
 
 Use `SchemaContract<T>` when a structurally valid value also has relational
@@ -280,7 +288,7 @@ and bare JSON with surrounding text. Uses balanced bracket matching to
 correctly extract nested objects and arrays from mixed prose.
 
 ```harn
-const result = llm_call("Return JSON with name and age")
+const result = harness.llm.call("Return JSON with name and age")
 const data = json_extract(result.text)         // parse, stripping fences
 const name = json_extract(result.text, "name") // extract just one key
 ```
@@ -340,8 +348,8 @@ const form = multipart_parse(fixture.body, fixture.content_type, {
 
 const title = multipart_field_text(form.fields[0])
 const uploaded = multipart_field_bytes(form.fields[1])
-log(title)
-log(bytes_to_hex(uploaded))
+harness.stdio.log(title)
+harness.stdio.log(bytes_to_hex(uploaded))
 ```
 
 ## Math
@@ -357,14 +365,14 @@ log(bytes_to_hex(uploaded))
 | `min(a, b)` | a: number, b: number | int or float | Minimum of two values. Returns float if either argument is float |
 | `max(a, b)` | a: number, b: number | int or float | Maximum of two values. Returns float if either argument is float |
 | `rng_seed(seed)` | seed: int | rng | Create a reproducible RNG handle |
-| `random()` | none | float | Random float in [0, 1) |
-| `random(rng)` | rng: rng | float | Random float from a seeded RNG handle |
-| `random_int(min, max)` | min: int, max: int | int | Random integer in [min, max] inclusive |
-| `random_int(rng, min, max)` | rng: rng, min: int, max: int | int | Random integer from a seeded RNG handle |
-| `random_choice(list)` | list: list | any or nil | Random element from a list, or nil for an empty list |
-| `random_choice(rng, list)` | rng: rng, list: list | any or nil | Random element using a seeded RNG handle |
-| `random_shuffle(list)` | list: list | list | Shuffled copy of a list |
-| `random_shuffle(rng, list)` | rng: rng, list: list | list | Shuffled copy using a seeded RNG handle |
+| `harness.random.f64()` | none | float | Random float in [0, 1) |
+| `harness.random.f64(rng)` | rng: rng | float | Random float from a seeded RNG handle |
+| `harness.random.range(min, max)` | min: int, max: int | int | Random integer in [min, max] inclusive |
+| `harness.random.range(rng, min, max)` | rng: rng, min: int, max: int | int | Random integer from a seeded RNG handle |
+| `harness.random.choice(list)` | list: list | any or nil | Random element from a list, or nil for an empty list |
+| `harness.random.choice(rng, list)` | rng: rng, list: list | any or nil | Random element using a seeded RNG handle |
+| `harness.random.shuffle(list)` | list: list | list | Shuffled copy of a list |
+| `harness.random.shuffle(rng, list)` | rng: rng, list: list | list | Shuffled copy using a seeded RNG handle |
 | `mean(items)` | items: list[number] | float | Arithmetic mean of a numeric list |
 | `median(items)` | items: list[number] | float | Median of a numeric list |
 | `variance(items, sample?)` | items: list[number], sample: bool | float | Population variance, or sample variance when `sample = true` |
@@ -588,7 +596,7 @@ On a dict, `.iter()` yields `Pair(key, value)` values (use `.first` /
 `.second`, or destructure in a for-loop). String iteration yields
 chars (Unicode scalar values).
 
-Printing with `log(it)` renders `<iter>` or `<iter (exhausted)>` and
+Printing with `harness.stdio.log(it)` renders `<iter>` or `<iter (exhausted)>` and
 does **not** drain the iterator.
 
 #### Lazy combinators (return a new `Iter`)
@@ -640,81 +648,73 @@ does **not** drain the iterator.
 
 ## File I/O
 
-Capability-aware scripts should call the `harness.fs.*` methods. The free
-filesystem builtins remain supported as thin aliases for existing scripts.
+Filesystem authority lives on `HarnessFs`; the former ambient filesystem
+builtins were deleted.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `read_file(path)` | path: string | string | Read entire file as UTF-8 string, or return raw source for embedded `std/...harn.prompt` assets. Filesystem I/O failures throw structured `{error: "io_error", kind, message}`; policy denials remain categorized runtime errors. **Deprecated in favor of `read_file_result` for new code; the throwing form remains supported.** |
-| `read_file_result(path)` | path: string | `Result<string, {error, kind, message}>` | Non-throwing read: returns content or a structured `{error: "io_error", kind, message}` failure. Shares `read_file`'s cache and supports embedded `std/...harn.prompt` assets |
-| `read_lines_page_result(path, options?)` | path: string, options?: dict | `Result<{lines, next_offset, next_line, done}, {error, kind, message}>` | Read a byte- and line-bounded page of complete UTF-8 lines. Options are `offset`, `line`, `max_lines`, and `max_bytes`; oversized lines are rejected rather than split |
-| `package_snapshot_open(project_root)` | project_root: string | `{handle, generation, packages_root, lock_path, lock_digest, packages}` or nil | Acquire the current immutable package generation and exact locked package names while holding its reader lease. Pair every non-nil receipt with `package_snapshot_close(receipt.handle)`, normally in `defer` |
-| `package_snapshot_close(handle)` | handle: string | bool | Release a package-generation reader lease; returns false when the handle was not open |
-| `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
-| `replace_file(path, content, options?)` / `harness.fs.replace_text(...)` | path: string, content: string, options?: dict | receipt | Atomically replace complete text. An optional `expected_sha256` lease returns a non-mutating `stale` receipt when outdated. Options also control create, overwrite, parent creation, and `namespace`/`flush` durability |
-| `replace_file_result(path, content, options?)` / `harness.fs.replace_text_result(...)` | path: string, content: string, options?: dict | `Result<receipt, failure>` | Non-throwing text replacement |
-| `replace_file_bytes(path, content, options?)` / `harness.fs.replace_bytes(...)` | path: string, content: bytes, options?: dict | receipt | Byte form of conditional replacement |
-| `replace_file_bytes_result(path, content, options?)` / `harness.fs.replace_bytes_result(...)` | path: string, content: bytes, options?: dict | `Result<receipt, failure>` | Non-throwing byte replacement |
-| `append_file(path, content)` | path: string, content: string | nil | Append string to file, creating it if it doesn't exist. Throws on failure |
-| `append_file_locked(path, content, options?)` | path: string, content: string, options?: dict | nil | Append string to file while holding a cross-process advisory lock. Options: `timeout_ms` (default 10000), `sync_data` (default false) |
-| `copy_file(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |
-| `delete_file(path)` | path: string | nil | Delete a file or directory (recursive). Throws on failure |
-| `file_exists(path)` | path: string | bool | Check if a file or directory exists |
-| `path_status(path, access?)` / `harness.fs.status(path, access?)` | path: string, access: `"read"`/`"write"`/`"delete"` (default `"read"`) | dict | Structured path visibility probe. Returns statuses such as `present_file`, `present_dir`, `present_other`, `missing`, `scope_denied`, `read_only_denied`, or `stat_error` without collapsing sandbox scope denial into absence |
-| `list_dir(path?)` | path: string (default `"."`) | list | List directory contents as sorted list of file names. Throws on failure |
-| `walk_dir(path, options?)` | path: string, options: dict | list or handle dict | Recursively list files/directories, honoring the project ignore stack. Options: `ignore_policy` (`none`, `builtin`, `project`; default `project`), `max_depth`, `follow_symlinks`, `background`. Dotfiles are always listed; hidden-file filtering is a separate axis from the ignore stack |
-| `glob(pattern, base_or_options?, options?)` / `harness.fs.glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory, honoring the project ignore stack. Options: `ignore_policy` (`none`, `builtin`, `project`; default `project`), `background`. Dotfiles are always matched |
-| `find_text(root, pattern, options?)` / `harness.fs.find_text(root, pattern, options?)` | root: string, pattern: string, options: dict | list, bool, int, or handle dict | Search files under a root and return `{path, line, col, column, text}` hits. Options: `mode` (`hits`, `exists`, `count`), `preset` (`default`, `source`), `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `parallel`, `follow_symlinks`, `include_hidden`, `case_sensitive`/`case_insensitive`, `fixed_strings`, `max_matches`, `background` |
-| `find_evidence(roots, patterns, options?)` | roots: list, patterns: list, options: dict | receipt or handle dict | Walk labeled roots once for labeled literal patterns. Returns deterministic path-relative hits and settled per-root status. Options: `preset`, `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `follow_symlinks`, `include_hidden`, ASCII `case_insensitive`, `max_matches`, `max_matches_per_root`, `background` |
-| `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
-| `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
-| `temp_dir()` | none | string | System temporary directory path |
-| `workspace_temp_dir()` / `harness.fs.workspace_temp_dir()` | none | string | Return a workspace-local scratch directory, creating it lazily. In sandboxed runs this is inside the active workspace root; outside a sandbox it resolves to `.harn-tmp` relative to the script source root |
-| `mkdtemp_in_workspace(prefix?)` / `harness.fs.mkdtemp_in_workspace(prefix?)` | prefix: string (default `"harn-"`) | string | Create a new uniquely-named directory under `workspace_temp_dir()` and return its path. Prefer this for scratch files used by sandboxed workflows. Path separators in `prefix` are stripped |
-| `mkdtemp(prefix?)` / `harness.fs.mkdtemp(prefix?)` | prefix: string (default `"harn-"`) | string | Create a new uniquely-named directory under the host temp dir and return its absolute path. Prefer `mkdtemp_in_workspace` for sandbox-visible scratch files. The caller owns the directory's lifecycle — it is **not** cleaned up automatically; pair with `harness.fs.delete(path)` when finished. Path separators in `prefix` are stripped so callers cannot smuggle subdirectory trees |
-| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template asset and render it. `path` may be source-relative, `@/<rel>` (anchored at the calling file's project root), `@<alias>/<rel>` (anchored at a `[asset_roots]` entry in `harn.toml`), or an embedded `std/...harn.prompt` stdlib prompt asset — see [Package-root prompt assets](./modules.md#package-root-prompt-assets). The template language supports `{{ name }}` interpolation (with nested paths and filters), `{{ if }} / {{ elif }} / {{ else }} / {{ end }}`, `{{ for item in xs }} ... {{ end }}` (with `{{ loop.index }}` etc.), `{{ include "..." }}` partials, logical `{{ section "task" }} ... {{ endsection }}` prompt sections, `{{# comments #}}`, `{{ raw }} ... {{ endraw }}` verbatim blocks, and `{{- -}}` whitespace trim markers. See the [Prompt templating reference](./prompt-templating.md) for the full grammar and filter list. Source-relative paths called from an imported module resolve relative to that module's directory, not the entry pipeline. Without bindings, just reads the file |
-| `render_prompt(path, bindings?)` | path: string, bindings: dict | string | Prompt-oriented alias of `render(...)`. Use this for `.harn.prompt` / `.prompt` assets when you want the asset to be surfaced explicitly in bundle manifests and preflight output. Accepts the same `@/<rel>`, `@<alias>/<rel>`, and embedded `std/...harn.prompt` forms as `render(...)` |
-| `render_string(template, bindings?)` | template: string, bindings: dict | string | Render an inline template string with the same template engine as `render(...)`. Useful when a library wants to embed a template directly in source instead of shipping a separate `.prompt` file. `{{ include "..." }}` resolves relative to the current module's asset root, with `@/<rel>` and `@<alias>/<rel>` supported |
+| `harness.fs.read_text(path)` | path: string | string | Read an entire file as UTF-8, or return raw source for embedded `std/...harn.prompt` assets. Filesystem failures throw structured `{error: "io_error", kind, message}`; policy denials remain categorized runtime errors |
+| `harness.fs.read_text_result(path)` | path: string | `Result<string, {error, kind, message}>` | Non-throwing read with the same cache and embedded-asset behavior |
+| `harness.fs.read_lines_page_result(path, options?)` | path: string, options?: dict | `Result<{lines, next_offset, next_line, done}, {error, kind, message}>` | Read a byte- and line-bounded page of complete UTF-8 lines. Options are `offset`, `line`, `max_lines`, and `max_bytes`; oversized lines are rejected rather than split |
+| `harness.fs.package_snapshot_open(project_root)` | project_root: string | `{handle, generation, packages_root, lock_path, lock_digest, packages}` or nil | Acquire the current immutable package generation and exact locked package names while holding its reader lease. Pair every non-nil receipt with `harness.fs.package_snapshot_close(receipt.handle)`, normally in `defer` |
+| `harness.fs.package_snapshot_close(handle)` | handle: string | bool | Release a package-generation reader lease; returns false when the handle was not open |
+| `harness.fs.write_text(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
+| `harness.fs.replace_text(path, content, options?)` | path: string, content: string, options?: dict | receipt | Atomically replace complete text. An optional `expected_sha256` lease returns a non-mutating `stale` receipt when outdated. Options also control create, overwrite, parent creation, and `namespace`/`flush` durability |
+| `harness.fs.replace_text_result(path, content, options?)` | path: string, content: string, options?: dict | `Result<receipt, failure>` | Non-throwing text replacement |
+| `harness.fs.replace_bytes(path, content, options?)` | path: string, content: bytes, options?: dict | receipt | Byte form of conditional replacement |
+| `harness.fs.replace_bytes_result(path, content, options?)` | path: string, content: bytes, options?: dict | `Result<receipt, failure>` | Non-throwing byte replacement |
+| `harness.fs.append(path, content)` | path: string, content: string | nil | Append string to file, creating it if it doesn't exist. Throws on failure |
+| `harness.fs.append_locked(path, content, options?)` | path: string, content: string, options?: dict | nil | Append string to file while holding a cross-process advisory lock. Options: `timeout_ms` (default 10000), `sync_data` (default false) |
+| `harness.fs.copy(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |
+| `harness.fs.delete(path)` | path: string | nil | Delete a file or directory (recursive). Throws on failure |
+| `harness.fs.exists(path)` | path: string | bool | Check if a file or directory exists |
+| `harness.fs.status(path, access?)` | path: string, access: `"read"`/`"write"`/`"delete"` (default `"read"`) | dict | Structured path visibility probe. Returns statuses such as `present_file`, `present_dir`, `present_other`, `missing`, `scope_denied`, `read_only_denied`, or `stat_error` without collapsing sandbox scope denial into absence |
+| `harness.fs.list_dir(path?)` | path: string (default `"."`) | list | List directory contents as sorted list of file names. Throws on failure |
+| `harness.fs.walk(path, options?)` | path: string, options: dict | list or handle dict | Recursively list files/directories, honoring the project ignore stack. Options: `ignore_policy` (`none`, `builtin`, `project`; default `project`), `max_depth`, `follow_symlinks`, `background`. Dotfiles are always listed; hidden-file filtering is a separate axis from the ignore stack |
+| `harness.fs.glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory, honoring the project ignore stack. Options: `ignore_policy` (`none`, `builtin`, `project`; default `project`), `background`. Dotfiles are always matched |
+| `harness.fs.find_text(root, pattern, options?)` | root: string, pattern: string, options: dict | list, bool, int, or handle dict | Search files under a root and return `{path, line, col, column, text}` hits. Options: `mode` (`hits`, `exists`, `count`), `preset` (`default`, `source`), `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `parallel`, `follow_symlinks`, `include_hidden`, `case_sensitive`/`case_insensitive`, `fixed_strings`, `max_matches`, `background` |
+| `harness.fs.find_evidence(roots, patterns, options?)` | roots: list, patterns: list, options: dict | receipt or handle dict | Walk labeled roots once for labeled literal patterns. Returns deterministic path-relative hits and settled per-root status. Options: `preset`, `ignore_policy` (`none`, `builtin`, `project`; default `project`), `include`, `exclude`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `follow_symlinks`, `include_hidden`, ASCII `case_insensitive`, `max_matches`, `max_matches_per_root`, `background` |
+| `harness.fs.mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
+| `harness.fs.stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
+| `harness.fs.temp_dir()` | none | string | System temporary directory path |
+| `harness.fs.workspace_temp_dir()` | none | string | Return a workspace-local scratch directory, creating it lazily |
+| `harness.fs.mkdtemp_in_workspace(prefix?)` | prefix: string (default `"harn-"`) | string | Create a uniquely named directory under `harness.fs.workspace_temp_dir()` |
+| `harness.fs.mkdtemp(prefix?)` | prefix: string (default `"harn-"`) | string | Create a uniquely named host-temp directory. The caller owns cleanup; prefer the workspace form for sandbox-visible scratch files |
+| `harness.fs.render_prompt(path, bindings?)` | path: string, bindings: dict | string | Read and render a prompt asset. Supports source-relative, `@/<rel>`, `@<alias>/<rel>`, and embedded `std/...harn.prompt` paths |
+| `harness.fs.render_template(template, bindings?)` | template: string, bindings: dict | string | Render an inline template through the same engine |
+| `harness.fs.render_prompt_with_provenance(path, bindings?)` | path: string, bindings: dict | dict | Render a prompt asset and return provenance alongside the text |
 
 ## Environment and system
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `env(name)` | name: string | string or nil | Read environment variable |
-| `env_or(name, default)` | name: string, default: any | string or default | Read environment variable, or return `default` when unset. One-line replacement for the common `let v = env(K); if v { v } else { default }` pattern |
-| `timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
-| `elapsed()` | none | int | Milliseconds since VM startup |
-| `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns stdout/stderr plus status metadata and `success` |
-| `exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute external command inside a specific directory |
-| `exec_opts(command, options?)` | command: list of strings, options: dict | dict | Options form of `exec`: `command` is an argv list, `options` is `{env?, env_mode?, cwd?, timeout?}`. `env` overlays the inherited parent environment by default (`env_mode: "merge"`); pass `env_mode: "replace"` to clear the parent env first. `timeout` is milliseconds. Returns the same `{stdout, stderr, status, success}` shape as `exec`, plus `timed_out`/`duration_ms` |
-| `exec_at_opts(dir, command, options?)` | dir: string, command: list of strings, options: dict | dict | Options form of `exec_at`: run argv `command` in `dir` with the same `{env?, env_mode?, cwd?, timeout?}` options as `exec_opts`. An explicit `options.cwd` overrides the positional `dir` |
-| `shell(cmd)` | cmd: string | dict | Execute command via shell. Returns stdout/stderr plus status metadata and `success` |
-| `shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute shell command inside a specific directory |
-| `harness.process.spawn_captured(opts)` | opts: dict | dict | Run an external command synchronously through the `Harness` process capability. `opts` is `{cmd, args?, cwd?, env?, stdin?, timeout_ms?}` and supports feeding a stdin payload plus a per-call timeout. Returns `{exit_code, stdout, stderr, duration_ms, success, timed_out}`. On timeout the child is killed, `exit_code = -1`, `success = false`, and `timed_out = true` |
-| `spawn_captured(opts)` | opts: dict | dict | Legacy alias for `harness.process.spawn_captured(opts)` when no `Harness` handle is available |
-| `term_width()` | none | int | Current terminal column count. Alias for the canonical `harness.term.width()` surface; reads `COLUMNS` env first, falls back to the platform window size, then to `80` |
-| `term_height()` | none | int | Current terminal row count. Alias for the canonical `harness.term.height()` surface; reads `LINES` env first, falls back to the platform window size, then to `24` |
-| `exit(code)` | code: int (default 0) | never | Terminate the process |
-| `username()` | none | string | Current OS username |
-| `hostname()` | none | string | Machine hostname |
-| `platform()` | none | string | OS name: `"darwin"`, `"linux"`, or `"windows"` |
-| `arch()` | none | string | CPU architecture (e.g., `"aarch64"`, `"x86_64"`) |
-| `uuid()` | none | string | Generate a random v4 UUID |
+| `harness.env.get(name)` | name: string | string or nil | Read environment variable |
+| `harness.env.get_or(name, default)` | name: string, default: any | string or default | Read environment variable, or return `default` when unset. One-line replacement for the common `let v = harness.env.get(K); if v { v } else { default }` pattern |
+| `harness.clock.timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
+| `harness.clock.elapsed()` | none | int | Milliseconds since VM startup |
+| `harness.process.exec(cmd, args...)` | cmd: string, args: strings | dict | Execute argv and return stdout/stderr plus status metadata and `success` |
+| `harness.process.exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute argv inside a specific directory |
+| `harness.process.shell(cmd)` | cmd: string | dict | Execute a user-authored shell command |
+| `harness.process.shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute a shell command inside a specific directory |
+| `harness.process.run(command)` | command: dict | dict | Run an external command synchronously through the `Harness` process capability. `command` is `{program, args?, cwd?, env?, stdin?, timeout_ms?}` and supports feeding a stdin payload plus a per-call timeout. Returns `{exit_code, stdout, stderr, duration_ms, success, timed_out}`. On timeout the child is killed, `exit_code = -1`, `success = false`, and `timed_out = true` |
+| `harness.term.width()` | none | int | Current terminal column count |
+| `harness.term.height()` | none | int | Current terminal row count |
+| `harness.runtime.exit(code)` | code: int (default 0) | never | Terminate the process |
+| `harness.system.identity()` | none | dict | Host identity projection, including username, hostname, process id, and architecture |
+| `harness.system.platform()` | none | string | OS name: `"darwin"`, `"linux"`, or `"windows"` |
+| `harness.random.uuid()` | none | string | Generate a random v4 UUID |
 | `uuid_parse(str)` | str: string | string or nil | Parse and canonicalize a UUID string, or return nil if invalid |
 | `uuid_v5(namespace, name)` | namespace: UUID or `"dns"\|"url"\|"oid"\|"x500"`, name: string | string | Generate a deterministic namespaced v5 UUID |
-| `uuid_v7()` | none | string | Generate a time-ordered v7 UUID |
+| `harness.random.uuid_v7()` | none | string | Generate a time-ordered v7 UUID |
 | `uuid_nil()` | none | string | Return the all-zero nil UUID |
-| `home_dir()` | none | string | User's home directory path |
-| `pid()` | none | int | Current process ID |
-| `cwd()` | none | string | Current working directory |
-| `execution_root()` | none | string | Directory used for source-relative execution helpers such as `exec_at(...)` / `shell_at(...)` |
-| `asset_root()` | none | string | Directory used for source-relative asset helpers such as `render(...)` / `render_prompt(...)` |
-| `source_dir()` | none | string | Directory of the currently-executing `.harn` file (falls back to cwd) |
-| `project_root()` | none | string or nil | Nearest ancestor directory containing `harn.toml` |
-| `runtime_paths()` | none | `{execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}` | Resolved runtime path model. `state_root` / `run_root` / `worktree_root` honor `HARN_STATE_DIR` / `HARN_RUN_DIR` / `HARN_WORKTREE_DIR`, so ask here instead of writing `.harn` by hand |
-| `date_iso()` | none | string | Current UTC time in ISO 8601 format (e.g., `"2026-03-29T14:30:00.123Z"`) |
+| `harness.fs.home_dir()` | none | string | User home directory |
+| `harness.fs.cwd()` | none | string | Current working directory |
+| `harness.fs.source_dir()` | none | string | Directory of the currently-executing `.harn` file (falls back to cwd) |
+| `harness.fs.project_root()` | none | string or nil | Nearest ancestor directory containing `harn.toml` |
+| `harness.fs.runtime_paths()` | none | `{execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}` | Resolved runtime path model. `state_root` / `run_root` / `worktree_root` honor `HARN_STATE_DIR` / `HARN_RUN_DIR` / `HARN_WORKTREE_DIR`, so ask here instead of writing `.harn` by hand |
+| `harness.clock.date_iso()` | none | string | Current UTC time in ISO 8601 format |
 
-When the OS cannot start an argv-style process, `exec` and its options variants
+When the OS cannot start an argv-style process, `harness.process.exec`
 throw `{error: "io_error", kind, message, category: "environment"}`. `kind`
 uses stable values such as `not_found` and `permission_denied`; branch on it
 instead of matching platform-specific prose. A process that starts and exits
@@ -783,25 +783,25 @@ Example:
 
 ```harn
 const encoded = base64_encode("Hello, World!")
-log(encoded)                  // SGVsbG8sIFdvcmxkIQ==
-log(base64_decode(encoded))   // Hello, World!
+harness.stdio.log(encoded)                  // SGVsbG8sIFdvcmxkIQ==
+harness.stdio.log(base64_decode(encoded))   // Hello, World!
 ```
 
 ```harn
-log(base64url_encode(">>>???///"))     // Pj4-Pz8_Ly8v
+harness.stdio.log(base64url_encode(">>>???///"))     // Pj4-Pz8_Ly8v
 const raw = bytes_from_hex("0001ff80")
-log(bytes_to_base64url(raw))           // AAH_gA
-log(bytes_to_hex(bytes_from_base64url("AAH_gA=="))) // 0001ff80 (padded ok)
-log(base32_encode("foobar"))           // MZXW6YTBOI======
-log(hex_encode("hello"))               // 68656c6c6f
-log(hex_decode("68656c6c6f"))          // hello
+harness.stdio.log(bytes_to_base64url(raw))           // AAH_gA
+harness.stdio.log(bytes_to_hex(bytes_from_base64url("AAH_gA=="))) // 0001ff80 (padded ok)
+harness.stdio.log(base32_encode("foobar"))           // MZXW6YTBOI======
+harness.stdio.log(hex_encode("hello"))               // 68656c6c6f
+harness.stdio.log(hex_decode("68656c6c6f"))          // hello
 ```
 
 ```harn
-log(url_encode("hello world"))         // hello%20world
-log(url_decode("hello%20world"))       // hello world
-log(url_encode("a=1&b=2"))             // a%3D1%26b%3D2
-log(url_decode("hello+world"))         // hello world
+harness.stdio.log(url_encode("hello world"))         // hello%20world
+harness.stdio.log(url_decode("hello%20world"))       // hello world
+harness.stdio.log(url_encode("a=1&b=2"))             // a%3D1%26b%3D2
+harness.stdio.log(url_decode("hello+world"))         // hello world
 ```
 
 ## Hashing
@@ -817,9 +817,9 @@ Example:
 
 ```harn
 fn main(harness: Harness) {
-  log(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
-  log(harness.crypto.sha256(bytes_from_string("hello")))
-  log(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
+  harness.stdio.log(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+  harness.stdio.log(harness.crypto.sha256(bytes_from_string("hello")))
+  harness.stdio.log(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 }
 ```
 
@@ -864,7 +864,7 @@ const signed = aws_sigv4_headers({
     "Content-Type": "application/x-amz-json-1.0",
     "X-Amz-Target": "DynamoDB_20120810.DescribeTable",
   },
-  timestamp: date_format(date_now().timestamp, "%Y%m%dT%H%M%SZ"),
+  timestamp: date_format(harness.clock.now().timestamp, "%Y%m%dT%H%M%SZ"),
 })
 
 const response = harness.net.request("POST", url, {
@@ -888,7 +888,7 @@ redaction treat
 Example (short-lived receipt or artifact link):
 
 ```harn
-const expires_at = timestamp() + 300
+const expires_at = harness.clock.timestamp() + 300
 const link = signed_url(
   "https://portal.example.test/receipts/r_123",
   {artifact: "transcript.json"},
@@ -900,7 +900,7 @@ const link = signed_url(
 const verified = verify_signed_url(
   link,
   {v1: old_receipt_secret, v2: receipt_secret},
-  timestamp(),
+  harness.clock.timestamp(),
   {skew_seconds: 30},
 )
 if !verified.valid {
@@ -930,8 +930,8 @@ keys throw runtime errors.
 ```harn
 const token = jwt_sign(
   "ES256",
-  {iss: app_id, iat: timestamp(), exp: timestamp() + 600},
-  read_file("github-app-private-key.pem"),
+  {iss: app_id, iat: harness.clock.timestamp(), exp: harness.clock.timestamp() + 600},
+  harness.fs.read_text("github-app-private-key.pem"),
 )
 ```
 
@@ -958,8 +958,8 @@ all observed values in wire order.
 
 ```harn
 const parsed = cookie_parse("sid=abc; theme=light; sid=old")
-log(parsed.cookies.sid)       // abc
-log(parsed.duplicates.sid[1]) // old
+harness.stdio.log(parsed.cookies.sid)       // abc
+harness.stdio.log(parsed.duplicates.sid[1]) // old
 ```
 
 `cookie_serialize` delegates RFC parsing and serialization to the maintained
@@ -999,8 +999,8 @@ helpers such as `add_business_days` and `next_business_day`.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `date_now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `timestamp`, and `iso8601` fields |
-| `date_now_iso()` | none | string | Current UTC datetime as RFC 3339 / ISO 8601 string |
+| `harness.clock.now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `timestamp`, and `iso8601` fields |
+| `harness.clock.date_iso()` | none | string | Current UTC datetime as RFC 3339 / ISO 8601 string |
 | `date_parse(str)` | str: string | int or float | Parse RFC 3339 / ISO 8601 strings (including offsets and fractional seconds) into a Unix timestamp. Falls back to legacy numeric-component extraction for malformed legacy inputs, but validates the resulting calendar date |
 | `date_format(dt, format?, tz?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`); tz: IANA timezone string | string | Format a timestamp or date dict using chrono/strftime format codes such as `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%A`, `%B`, `%Z`, `%z`, `%:z`, `%f`, `%3f`, and `%s`. Negative pre-epoch timestamps are supported |
 | `date_in_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | dict | Convert a timestamp into timezone-local fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `zone`, `offset_seconds`, `timestamp`, and `iso8601` |
@@ -1038,9 +1038,9 @@ Example:
 import "std/vision"
 
 const text = ocr("fixtures/receipt.png", {language: "eng"})
-log(text.text)
-log(text.tokens[0]?.text)
-log(text.source.sha256)
+harness.stdio.log(text.text)
+harness.stdio.log(text.tokens[0]?.text)
+harness.stdio.log(text.source.sha256)
 ```
 
 ## Testing
@@ -1072,13 +1072,13 @@ cargo-nextest's JUnit dialect. Each returned dict has the shape:
 | `stderr` | string or nil | Captured `<system-err>` content |
 
 ```harn
-pipeline summarize() {
-  const xml = read_file("build/test-results/test-results.xml")
+pipeline summarize(harness: Harness) {
+  const xml = harness.fs.read_text("build/test-results/test-results.xml")
   const cases = parse_junit_xml(xml)
   const failed = cases.filter({ case -> case.status == "failed" || case.status == "errored" })
-  log("failures: ${len(failed)} of ${len(cases)}")
+  harness.stdio.log("failures: ${len(failed)} of ${len(cases)}")
   for case in failed {
-    log("  ${case.name}: ${case.message}")
+    harness.stdio.log("  ${case.name}: ${case.message}")
   }
 }
 ```
@@ -1087,66 +1087,66 @@ pipeline summarize() {
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `http_get(url, options?)` | url: string, options: dict | dict | GET request |
-| `http_post(url, body, options?)` | url: string, body: string, options: dict | dict | POST request |
-| `http_put(url, body, options?)` | url: string, body: string, options: dict | dict | PUT request |
-| `http_patch(url, body, options?)` | url: string, body: string, options: dict | dict | PATCH request |
-| `http_delete(url, options?)` | url: string, options: dict | dict | DELETE request |
-| `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
-| `http_download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
-| `egress_policy(config)` | config: dict | dict | Install the run- or test-pipeline-scoped egress policy used by HTTP, SSE, WebSocket, and connector outbound calls, including DNS-resolved private-address blocking |
-| `security_policy(config)` | config: dict | dict | Install the prompt-injection defense policy (spotlighting of untrusted output + lethal-trifecta gate + MCP schema pinning + `local-ml` injection detection). See `std/security`. |
-| `http_server_tls_plain()` | none | dict | Build HTTP-server TLS config for intentional cleartext/local listener mode |
-| `http_server_tls_edge(options?)` | options: dict | dict | Build HTTP-server TLS config for edge-terminated HTTPS; local listener stays plain and HSTS is enabled by default |
-| `http_server_tls_pem(cert_path, key_path)` | cert_path: string, key_path: string | dict | Build in-process HTTPS config from PEM files; missing files throw before startup |
-| `http_server_tls_self_signed_dev(hosts?)` | hosts: string or list | dict | Generate a self-signed development cert/key config for local HTTPS testing. HSTS is disabled |
-| `http_server_security_headers(tls_config)` | tls_config: dict | dict | Return TLS-aware response headers such as `strict-transport-security`; edge and PEM modes enable HSTS by default, plain and self-signed dev do not |
-| `http_session(options?)` | options: dict | string | Create a reusable host-managed HTTP client/session handle |
-| `http_session_request(session, method, url, options?)` | session: string, method: string, url: string, options: dict | dict | Run an HTTP request through a reusable session |
-| `http_session_close(session)` | session: string | bool | Close a reusable HTTP session handle |
-| `http_stream_open(url, options?)` | url: string, options: dict | string | Open a streaming HTTP response handle |
-| `http_stream_read(stream, max_bytes?)` | stream: string, max_bytes: int | bytes or nil | Read the next response chunk |
-| `http_stream_info(stream)` | stream: string | dict | Return `{status, headers, ok}` for an open stream |
-| `http_stream_close(stream)` | stream: string | bool | Close a streaming HTTP response handle |
-| `sse_connect(method, url, options?)` | method: string, url: string, options: dict | string | Open an SSE/Streamable HTTP receive handle |
-| `sse_receive(stream, timeout_ms?)` | stream: string, timeout_ms: int | dict or nil | Receive one SSE event with timeout/backpressure |
-| `sse_close(stream)` | stream: string | bool | Close an SSE handle |
+| `harness.net.get(url, options?)` | url: string, options: dict | dict | GET request |
+| `harness.net.post(url, body, options?)` | url: string, body: string, options: dict | dict | POST request |
+| `harness.net.put(url, body, options?)` | url: string, body: string, options: dict | dict | PUT request |
+| `harness.net.patch(url, body, options?)` | url: string, body: string, options: dict | dict | PATCH request |
+| `harness.net.delete(url, options?)` | url: string, options: dict | dict | DELETE request |
+| `harness.net.request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
+| `harness.net.download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
+| `harness.net.egress_policy(config)` | config: dict | dict | Install this Harness's destination policy for HTTP, SSE, WebSocket, and connector outbound calls, including DNS-resolved private-address blocking |
+| `harness.system.security_policy(config)` | config: dict | dict | Install the prompt-injection defense policy (spotlighting of untrusted output + lethal-trifecta gate + MCP schema pinning + `local-ml` injection detection). See `std/security`. |
+| `harness.net.server_tls_plain()` | none | dict | Build HTTP-server TLS config for intentional cleartext/local listener mode |
+| `harness.net.server_tls_edge(options?)` | options: dict | dict | Build HTTP-server TLS config for edge-terminated HTTPS; local listener stays plain and HSTS is enabled by default |
+| `harness.net.server_tls_pem(cert_path, key_path)` | cert_path: string, key_path: string | dict | Build in-process HTTPS config from PEM files; missing files throw before startup |
+| `harness.net.server_tls_self_signed_dev(hosts?)` | hosts: string or list | dict | Generate a self-signed development cert/key config for local HTTPS testing. HSTS is disabled |
+| `harness.net.server_security_headers(tls_config)` | tls_config: dict | dict | Return TLS-aware response headers such as `strict-transport-security`; edge and PEM modes enable HSTS by default, plain and self-signed dev do not |
+| `harness.net.session(options?)` | options: dict | string | Create a reusable host-managed HTTP client/session handle |
+| `harness.net.session_request(session, method, url, options?)` | session: string, method: string, url: string, options: dict | dict | Run an HTTP request through a reusable session |
+| `harness.net.session_close(session)` | session: string | bool | Close a reusable HTTP session handle |
+| `harness.net.stream_open(url, options?)` | url: string, options: dict | string | Open a streaming HTTP response handle |
+| `harness.net.stream_read(stream, max_bytes?)` | stream: string, max_bytes: int | bytes or nil | Read the next response chunk |
+| `harness.net.stream_info(stream)` | stream: string | dict | Return `{status, headers, ok}` for an open stream |
+| `harness.net.stream_close(stream)` | stream: string | bool | Close a streaming HTTP response handle |
+| `harness.net.sse_connect(method, url, options?)` | method: string, url: string, options: dict | string | Open an SSE/Streamable HTTP receive handle |
+| `harness.net.sse_receive(stream, timeout_ms?)` | stream: string, timeout_ms: int | dict or nil | Receive one SSE event with timeout/backpressure |
+| `harness.net.sse_close(stream)` | stream: string | bool | Close an SSE handle |
 | `sse_event(event, options?)` | event: any, options: dict | string | Format a server-sent event frame |
-| `sse_server_response(options?)` | options: dict | dict | Create a `text/event-stream` response handle |
-| `sse_server_send(stream, event, options?)` | stream: string or dict, event: any, options: dict | bool | Write one event frame to a server SSE response |
-| `sse_server_heartbeat(stream, comment?)` | stream: string or dict, comment: string | bool | Write an SSE comment/heartbeat frame |
-| `sse_server_flush(stream)` | stream: string or dict | bool | Flush pending server SSE frames when the client is still connected |
-| `sse_server_status(stream)` | stream: string or dict | dict | Inspect buffered event count, close, cancel, and disconnect state |
-| `sse_server_disconnected(stream)` | stream: string or dict | bool | Return whether the mock/client side disconnected |
-| `sse_server_cancelled(stream)` | stream: string or dict | bool | Return whether the response was cancelled |
-| `sse_server_cancel(stream, reason?)` | stream: string or dict, reason: string | bool | Mark the response cancelled and closed |
-| `sse_server_close(stream)` | stream: string or dict | bool | Close a server SSE response |
-| `sse_server_mock_receive(stream)` | stream: string or dict | dict | Deterministically read the next buffered server SSE frame in tests |
-| `sse_server_mock_disconnect(stream)` | stream: string or dict | bool | Simulate a client disconnecting from a server SSE response |
-| `websocket_connect(url, options?)` | url: string, options: dict | string | Open a WebSocket client handle |
-| `websocket_server(bind?, options?)` | bind: string, options: dict | dict | Start a host-managed WebSocket server and return `{id, addr, url}` |
-| `websocket_route(server, path, options?)` | server: string or dict, path: string, options: dict | bool | Register an HTTP upgrade route on a WebSocket server |
-| `websocket_accept(server, timeout_ms?)` | server: string or dict, timeout_ms: int | dict or nil | Accept one upgraded connection and return its socket handle plus peer metadata |
-| `websocket_send(socket, message, options?)` | socket: string, message: string or bytes, options: dict | bool | Send a WebSocket text/binary/ping/pong/close message |
-| `websocket_receive(socket, timeout_ms?)` | socket: string, timeout_ms: int | dict or nil | Receive one WebSocket message with timeout/backpressure |
-| `websocket_close(socket)` | socket: string | bool | Close a WebSocket handle |
-| `http_server(options?)` | options: dict | dict | Create an in-process inbound HTTP server definition for host adapters or synthetic tests |
-| `http_server_route(server, method, path_template, handler, options?)` | server: dict/string, method: string, path_template: string, handler: closure, options: dict | dict | Register a route. Templates support `{name}` and `:name` path params |
-| `http_server_before(server, handler)` | server: dict/string, handler: closure | dict | Register before middleware. Return a request to continue or a response dict to short-circuit |
-| `http_server_after(server, handler)` | server: dict/string, handler: closure | dict | Register after middleware. Receives `(response, request)` and may return a replacement response |
-| `http_server_request(server, request)` | server: dict/string, request: dict | dict | Dispatch a synthetic or host-adapted request through the server |
-| `http_server_test(server, request)` | server: dict/string, request: dict | dict | Alias for `http_server_request`, intended for script-level tests |
-| `http_server_set_ready(server, ready)` | server: dict/string, ready: bool | bool | Set the server readiness gate used by request dispatch |
-| `http_server_readiness(server, handler)` | server: dict/string, handler: closure | dict | Register a readiness callback for `http_server_ready` |
-| `http_server_ready(server)` | server: dict/string | bool | Return readiness, invoking the readiness callback when present |
-| `http_server_on_shutdown(server, handler)` | server: dict/string, handler: closure | dict | Register a shutdown lifecycle callback |
-| `http_server_shutdown(server)` | server: dict/string | bool | Mark the server shut down and run shutdown callbacks |
+| `harness.net.sse_server_response(options?)` | options: dict | dict | Create a `text/event-stream` response handle |
+| `harness.net.sse_server_send(stream, event, options?)` | stream: string or dict, event: any, options: dict | bool | Write one event frame to a server SSE response |
+| `harness.net.sse_server_heartbeat(stream, comment?)` | stream: string or dict, comment: string | bool | Write an SSE comment/heartbeat frame |
+| `harness.net.sse_server_flush(stream)` | stream: string or dict | bool | Flush pending server SSE frames when the client is still connected |
+| `harness.net.sse_server_status(stream)` | stream: string or dict | dict | Inspect buffered event count, close, cancel, and disconnect state |
+| `harness.net.sse_server_disconnected(stream)` | stream: string or dict | bool | Return whether the mock/client side disconnected |
+| `harness.net.sse_server_cancelled(stream)` | stream: string or dict | bool | Return whether the response was cancelled |
+| `harness.net.sse_server_cancel(stream, reason?)` | stream: string or dict, reason: string | bool | Mark the response cancelled and closed |
+| `harness.net.sse_server_close(stream)` | stream: string or dict | bool | Close a server SSE response |
+| `harness.testing.sse_server_mock_receive(stream)` | stream: string or dict | dict | Deterministically read the next buffered server SSE frame in tests |
+| `harness.testing.sse_server_mock_disconnect(stream)` | stream: string or dict | bool | Simulate a client disconnecting from a server SSE response |
+| `harness.net.websocket_connect(url, options?)` | url: string, options: dict | string | Open a WebSocket client handle |
+| `harness.net.websocket_server(bind?, options?)` | bind: string, options: dict | dict | Start a host-managed WebSocket server and return `{id, addr, url}` |
+| `harness.net.websocket_route(server, path, options?)` | server: string or dict, path: string, options: dict | bool | Register an HTTP upgrade route on a WebSocket server |
+| `harness.net.websocket_accept(server, timeout_ms?)` | server: string or dict, timeout_ms: int | dict or nil | Accept one upgraded connection and return its socket handle plus peer metadata |
+| `harness.net.websocket_send(socket, message, options?)` | socket: string, message: string or bytes, options: dict | bool | Send a WebSocket text/binary/ping/pong/close message |
+| `harness.net.websocket_receive(socket, timeout_ms?)` | socket: string, timeout_ms: int | dict or nil | Receive one WebSocket message with timeout/backpressure |
+| `harness.net.websocket_close(socket)` | socket: string | bool | Close a WebSocket handle |
+| `harness.net.server(options?)` | options: dict | dict | Create an in-process inbound HTTP server definition for host adapters or synthetic tests |
+| `harness.net.server_route(server, method, path_template, handler, options?)` | server: dict/string, method: string, path_template: string, handler: closure, options: dict | dict | Register a route. Templates support `{name}` and `:name` path params |
+| `harness.net.server_before(server, handler)` | server: dict/string, handler: closure | dict | Register before middleware. Return a request to continue or a response dict to short-circuit |
+| `harness.net.server_after(server, handler)` | server: dict/string, handler: closure | dict | Register after middleware. Receives `(response, request)` and may return a replacement response |
+| `harness.net.server_request(server, request)` | server: dict/string, request: dict | dict | Dispatch a synthetic or host-adapted request through the server |
+| `harness.net.server_test(server, request)` | server: dict/string, request: dict | dict | Alias for `http_server_request`, intended for script-level tests |
+| `harness.net.server_set_ready(server, ready)` | server: dict/string, ready: bool | bool | Set the server readiness gate used by request dispatch |
+| `harness.net.server_readiness(server, handler)` | server: dict/string, handler: closure | dict | Register a readiness callback for `http_server_ready` |
+| `harness.net.server_ready(server)` | server: dict/string | bool | Return readiness, invoking the readiness callback when present |
+| `harness.net.server_on_shutdown(server, handler)` | server: dict/string, handler: closure | dict | Register a shutdown lifecycle callback |
+| `harness.net.server_shutdown(server)` | server: dict/string | bool | Mark the server shut down and run shutdown callbacks |
 | `http_response(status, body?, headers?)` | status: int, body: any, headers: dict | dict | Build a response dict |
 | `http_response_text(text, options?)` | text: any, options: dict | dict | Build a text response. Options include `status` and `headers` |
 | `http_response_json(value, options?)` | value: any, options: dict | dict | Build a JSON response with a JSON content type |
 | `http_response_bytes(bytes, options?)` | bytes: bytes/string, options: dict | dict | Build a bytes response |
 | `http_header(headers_or_message, name)` | headers/request/response: dict, name: string | string or nil | Read a header case-insensitively from a header dict, request, or response |
-| `websocket_server_close(server)` | server: string or dict | bool | Stop a WebSocket server handle |
+| `harness.net.websocket_server_close(server)` | server: string or dict | bool | Stop a WebSocket server handle |
 
 `http_get/post/put/patch/delete/request/session_request` return
 `{status: int, headers: dict, body: string, ok: bool, final_url: string}`.
@@ -1166,15 +1166,16 @@ and `decompress` (bool, default `true`). `timeout_ms` and `total_timeout_ms`
 apply per attempt.
 Retryable responses default to `408`, `429`, `500`, `502`, `503`, and
 `504`; `Retry-After` is honored on `429` and `503` when retries are
-enabled. Throws on network errors. `http_request(..., {session: handle})`
+enabled. Throws on network errors. `harness.net.request(..., {session: handle})`
 routes through an existing session when one is provided. `http_post`,
 `http_put`, and `http_patch` accept an options dict as the second argument
 when you want to send multipart without a separate string body.
 
-`egress_policy({allow, deny, default, block_private, allow_loopback})` installs
-an outbound network policy before user code opens real connections. The policy
-is process-scoped under `harn run` and isolated per pipeline under `harn test`,
-including with `--parallel`. Rules accept exact hosts (`api.example.com`),
+`harness.net.egress_policy({allow, deny, default, block_private,
+allow_loopback})` installs an outbound destination policy before that Harness
+opens real connections. The host seeds each root Harness from its run
+environment; `harn test` gives every pipeline an isolated root, including with
+`--parallel`. Rules accept exact hosts (`api.example.com`),
 suffix wildcards (`*.example.com`), IP literals or CIDR ranges
 (`127.0.0.0/8`), and optional port restrictions (`api.example.com:443`). Deny
 rules override allow rules; `default: "deny"` turns the policy into an
@@ -1190,23 +1191,32 @@ metadata and other private ranges remain blocked.
 Operators can seed the same policy without editing scripts via comma-separated
 `HARN_EGRESS_ALLOW`, `HARN_EGRESS_DENY`, `HARN_EGRESS_DEFAULT=deny`,
 `HARN_EGRESS_BLOCK_PRIVATE=private|off`, and `HARN_EGRESS_ALLOW_LOOPBACK=1`.
-Environment policy is installed first; a subsequent `egress_policy(...)` call
-fails rather than replacing it. Each `harn test` pipeline receives its own
-deterministic environment-derived policy.
+Environment policy is installed first; a subsequent
+`harness.net.egress_policy(...)` call fails rather than replacing it. Each
+`harn test` pipeline receives its own deterministic environment-derived
+policy.
 Under default `harn run`, the worktree sandbox denies network side effects
-before destination policy is consulted; use `egress_policy(...)` for
-network-enabled host policies or explicit `--no-sandbox` runs.
+before destination policy is consulted; use
+`harness.net.egress_policy(...)` for network-enabled host policies or explicit
+`--no-sandbox` runs.
+
+For reusable helpers, prefer capability attenuation over mutating the root
+policy: construct a `NetPolicy` from `std/net_policy`, call
+`harness.with_net_policy(policy)`, and pass the resulting Harness or its
+`restricted.net` handle inward. A helper that receives the narrowed
+`HarnessNet` cannot reach filesystem, process, LLM, or other ungranted
+capabilities.
 
 ```harn
-pipeline main(task) {
-  egress_policy({
+pipeline main(harness: Harness) {
+  const restricted = harness.with_net_policy({
     allow: ["api.example.com:443", "*.trusted.example", "10.0.0.0/8"],
     deny: ["blocked.trusted.example"],
     default: "deny",
   })
 
-  const response = http_get("https://api.example.com/v1/status")
-  log(response.status)
+  const response = restricted.net.get("https://api.example.com/v1/status")
+  restricted.stdio.log(response.status)
 }
 ```
 
@@ -1219,7 +1229,7 @@ active. The same policy is checked by `http_request` and friends,
 
 `http_stream_open` uses the same request options as `http_request`. The
 returned handle can be inspected with `http_stream_info`, drained with
-repeated `http_stream_read(stream, max_bytes)`, and closed explicitly with
+repeated `harness.net.stream_read(stream, max_bytes)`, and closed explicitly with
 `http_stream_close`. Reads return `bytes`; once the stream is exhausted they
 return `nil`.
 
@@ -1288,8 +1298,8 @@ const store = mem_cache({namespace: "weekly-doc-monitor"})
 const page = web_fetch("https://docs.example.com/models", {store: store})
 if page.cache_status != "not_modified" && robots_allowed(page.final_url) {
   const parsed = web_parse_html(page.body, page.final_url)
-  log(parsed.title)
-  log(sitemap_urls(page.final_url))
+  harness.stdio.log(parsed.title)
+  harness.stdio.log(sitemap_urls(page.final_url))
 }
 
 const docs = web_search("fastapi dependency injection", {
@@ -1311,7 +1321,7 @@ HTTP server TLS helper builtins only describe listener/security policy. Runtime
 hosts such as `harn serve` consume the same modes: `plain` for deliberate
 cleartext, `edge` when a proxy/load balancer terminates public TLS, `pem` for
 in-process HTTPS with certificate/key files, and `self_signed_dev` for local
-HTTPS testing. `http_server_security_headers(...)` emits HSTS for edge and PEM
+HTTPS testing. `harness.net.server_security_headers(...)` emits HSTS for edge and PEM
 configs so edge-terminated deployments can still set browser-facing security
 headers from the Harn layer; it deliberately omits HSTS for plain and
 self-signed dev configs.
@@ -1340,22 +1350,22 @@ metadata.
 Minimal inbound echo:
 
 ```harn
-pipeline websocket_echo() {
-  const server = websocket_server("127.0.0.1:8787", {})
-  websocket_route(server, "/acp", {auth: {bearer: env("ACP_TOKEN")}})
+pipeline websocket_echo(harness: Harness) {
+  const server = harness.net.websocket_server("127.0.0.1:8787", {})
+  harness.net.websocket_route(server, "/acp", {auth: {bearer: harness.env.get("ACP_TOKEN")}})
 
   while true {
-    const accepted = websocket_accept(server, 30000)
+    const accepted = harness.net.websocket_accept(server, 30000)
     if accepted == nil || accepted?.type == "timeout" {
       continue
     }
     const conn = accepted ?? {}
 
-    const frame = websocket_receive(conn, 30000) ?? {}
+    const frame = harness.net.websocket_receive(conn, 30000) ?? {}
     if frame?.type == "text" {
-      websocket_send(conn, frame.data, {})
+      harness.net.websocket_send(conn, frame.data, {})
     }
-    websocket_close(conn)
+    harness.net.websocket_close(conn)
   }
 }
 ```
@@ -1364,8 +1374,8 @@ pipeline websocket_echo() {
 
 The server builtins define a Harn-native request router without binding a
 socket themselves. A host adapter can translate real HTTP requests into
-`http_server_request(...)`; tests can use the same path with
-`http_server_test(...)`.
+`harness.net.server_request(...)`; tests can use the same path with
+`harness.net.server_test(...)`.
 
 Requests passed to route handlers include:
 
@@ -1374,24 +1384,24 @@ Requests passed to route handlers include:
 - `body` as text plus `raw_body` bytes when retained
 - `body_bytes`, `remote_addr`, and `client_ip`
 
-`http_server({max_body_bytes, retain_raw_body, ready})` sets defaults.
+`harness.net.server({max_body_bytes, retain_raw_body, ready})` sets defaults.
 Routes can override `max_body_bytes` and `retain_raw_body`. Body-limit
 rejections return status `413` before middleware or handlers run.
 
 Minimal webhook example:
 
 ```harn
-pipeline default() {
-  const server = http_server({max_body_bytes: 1048576, retain_raw_body: true})
+pipeline default(harness: Harness) {
+  const server = harness.net.server({max_body_bytes: 1048576, retain_raw_body: true})
 
-  http_server_before(server, { req ->
+  harness.net.server_before(server, { req ->
     if http_header(req, "origin") != nil {
       return http_response_text("browser origins are rejected", {status: 403})
     }
     req
   })
 
-  http_server_after(server, { response, _req ->
+  harness.net.server_after(server, { response, _req ->
     response + {
       headers: response.headers + {
         ["strict-transport-security"]: "max-age=31536000",
@@ -1399,9 +1409,10 @@ pipeline default() {
     }
   })
 
-  http_server_route(server, "POST", "/hooks/{tenant}/{trigger}", { req ->
+  harness.net.server_route(server, "POST", "/hooks/{tenant}/{trigger}", { req ->
     const signature = http_header(req, "x-hub-signature-256")
-    const expected = "sha256=" + hmac_sha256(secret_get("github/webhook-secret"), req.body)
+    const expected = "sha256="
+      + hmac_sha256(harness.secrets.read("github/webhook-secret"), req.body)
     if signature != expected {
       return http_response_text("invalid signature", {status: 401})
     }
@@ -1417,39 +1428,39 @@ pipeline default() {
     http_response_json({accepted: true}, {status: 202, headers: {["retry-after"]: "0"}})
   })
 
-  const probe = http_server_test(server, {
+  const probe = harness.net.server_test(server, {
     method: "POST",
     path: "/hooks/acme/push",
     headers: {["x-hub-signature-256"]: "sha256=..."},
     body: "{\"ok\":true}",
     client_ip: "203.0.113.10",
   })
-  log(probe.status)
+  harness.stdio.log(probe.status)
 }
 ```
 
 ### Server-side SSE primitives
 
-Server-side SSE responses are VM-owned handles. `sse_server_response()` returns
+Server-side SSE responses are VM-owned handles. `harness.net.sse_server_response()` returns
 `{id, type: "sse_response", status, headers, body: nil, streaming: true}` with
 `content-type: text/event-stream; charset=utf-8`, `cache-control: no-cache`,
 `connection: keep-alive`, and `x-accel-buffering: no` unless overridden.
-`sse_server_send()` formats fields as UTF-8 SSE lines: `event`, `id`, `retry`
-or `retry_ms`, and multi-line `data`. `sse_server_heartbeat()` writes comment
+`harness.net.sse_server_send()` formats fields as UTF-8 SSE lines: `event`, `id`, `retry`
+or `retry_ms`, and multi-line `data`. `harness.net.sse_server_heartbeat()` writes comment
 frames. `max_event_bytes` rejects oversized frames before buffering, and
 `max_buffered_events` rejects writes when the client is not draining quickly
-enough. `sse_server_flush()` reports whether the stream is still writable after
+enough. `harness.net.sse_server_flush()` reports whether the stream is still writable after
 marking currently buffered events flushed. Writes return `false` after close,
-cancel, or disconnect. Use `sse_server_status()`, `sse_server_disconnected()`,
-and `sse_server_cancelled()` to observe shutdown state.
+cancel, or disconnect. Use `harness.net.sse_server_status()`, `harness.net.sse_server_disconnected()`,
+and `harness.net.sse_server_cancelled()` to observe shutdown state.
 
 ```harn
-pipeline progress_stream(task) {
-  const stream = sse_server_response({max_event_bytes: 4096})
-  sse_server_send(stream, {event: "progress", id: "1", data: "queued"})
-  sse_server_heartbeat(stream, "still working")
-  sse_server_send(stream, {event: "progress", id: "2", data: "done"})
-  sse_server_flush(stream)
+pipeline progress_stream(harness: Harness, task) {
+  const stream = harness.net.sse_server_response({max_event_bytes: 4096})
+  harness.net.sse_server_send(stream, {event: "progress", id: "1", data: "queued"})
+  harness.net.sse_server_heartbeat(stream, "still working")
+  harness.net.sse_server_send(stream, {event: "progress", id: "2", data: "done"})
+  harness.net.sse_server_flush(stream)
   return stream
 }
 ```
@@ -1475,7 +1486,7 @@ http_mock("GET", "https://api.example.com/users", {
     {status: 200, body: "{\"users\": [\"alice\"]}", headers: {}},
   ]
 })
-const resp = http_get("https://api.example.com/users", {
+const resp = harness.net.get("https://api.example.com/users", {
   retry: {max: 1, backoff_ms: 0}
 })
 assert_eq(resp.status, 200)
@@ -1485,7 +1496,7 @@ Mocks match and record the final request URL after `query` options are appended:
 
 ```harn
 http_mock("GET", "https://api.example.com/users?limit=2", {status: 200})
-http_get("https://api.example.com/users", {
+harness.net.get("https://api.example.com/users", {
   headers: {Authorization: "Bearer test-token"},
   query: {limit: 2},
 })
@@ -1495,22 +1506,22 @@ assert_eq(call.headers.authorization, "Bearer test-token")
 ```
 
 ```harn
-const stream = http_stream_open("https://example.com/archive.tar.gz", {
+const stream = harness.net.stream_open("https://example.com/archive.tar.gz", {
   decompress: false,
   connect_timeout_ms: 5000,
   read_timeout_ms: 30000,
 })
-const meta = http_stream_info(stream)
-const chunk = http_stream_read(stream, 65536)
-http_stream_close(stream)
+const meta = harness.net.stream_info(stream)
+const chunk = harness.net.stream_read(stream, 65536)
+harness.net.stream_close(stream)
 ```
 
 ## Postgres
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `pg_pool(source, options?)` | source: string or dict, options: dict | dict | Open a pooled Postgres connection |
-| `pg_connect(source, options?)` | source: string or dict, options: dict | dict | Open a single-connection Postgres pool |
+| `harness.postgres.pool(source, options?)` | source: string or dict, options: dict | dict | Open a pooled Postgres connection |
+| `harness.postgres.connect(source, options?)` | source: string or dict, options: dict | dict | Open a single-connection Postgres pool |
 | `pg_query(handle, sql, params?)` | handle: dict, sql: string, params: list | list | Run a parameterized query and return decoded rows |
 | `pg_query_one(handle, sql, params?)` | handle: dict, sql: string, params: list | dict or nil | Return the first decoded row, or nil when no row matches |
 | `pg_execute(handle, sql, params?)` | handle: dict, sql: string, params: list | dict | Execute a parameterized statement and return `{rows_affected}` |
@@ -1566,8 +1577,8 @@ examples.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `read_stdin()` | — | string or nil | Read the remaining stdin contents |
-| `is_stdin_tty()` / `is_stdout_tty()` / `is_stderr_tty()` | — | bool | Return whether the corresponding process stream is attached to a terminal |
+| `harness.stdio.read_stdin()` | — | string or nil | Read the remaining stdin contents |
+| `harness.stdio.is_stdin_tty()` / `harness.stdio.is_stdout_tty()` / `harness.stdio.is_stderr_tty()` | — | bool | Return whether the corresponding process stream is attached to a terminal |
 
 Ambient stdio helpers were removed. Use `harness.stdio.print`,
 `harness.stdio.println`, `harness.stdio.eprint`,
@@ -1579,115 +1590,27 @@ password input. For structured interactive input outside a harness entrypoint,
 import `read_line`, `read_password`, `is_tty`, and `write_stderr` from
 `std/io`.
 
-## Host interop
+## Privileged host wire and dynamic tools
 
-| Function | Parameters | Returns | Description |
-|---|---|---|---|
-| `host_call(name, args)` | name: string, args: any | any | Call a host capability operation using `capability.operation` naming |
-| `host_capabilities()` | — | dict | Typed host capability manifest |
-| `host_has(capability, op?)` | capability: string, op: string | bool | Check whether a typed host capability/operation exists |
-| `host_tool_list()` | — | list | List host-exposed bridge tools as `{name, description, schema, deprecated}` |
-| `host_tool_call(name, args)` | name: string, args: any | any | Invoke a bridge-exposed host tool by name using the existing `builtin_call` path |
-| `host_mock(capability, op, response_or_config, params?)` | capability: string, op: string, response_or_config: any or dict, params: dict | nil | Register a runtime mock for a typed host operation |
-| `host_mock_clear()` | — | nil | Clear registered typed host mocks and recorded mock invocations |
-| `host_mock_calls()` | — | list | Return recorded typed host mock invocations |
+`host_call` is not a user-script effect surface. It exists only inside modules
+stamped as privileged wire artifacts by the host, and that provenance is checked
+transitively across imports. Privileged modules cannot re-export closures that
+recover `host_call`; only explicit capability values may cross into user code.
+See [Host boundary](./host-boundary.md).
 
-`host_capabilities()` returns the capability manifest surfaced by the active
-host bridge. The local runtime exposes generic `process`, `template`, and
-`interaction` capabilities. Product hosts can add capabilities such as
-`workspace`, `project`, `runtime`, `editor`, `git`, or `diagnostics`.
+Ordinary scripts use the typed Harness projection:
 
-The `process` capability includes the shell discovery contract used by
-shell-mode command runners:
+| Operation | Source interface |
+|---|---|
+| Inspect the host manifest | `harness.runtime.host_capabilities()` |
+| Test for an operation | `harness.runtime.host_has(capability, operation?)` |
+| Discover bridge tools | `harness.tools.list_registered()` |
+| Invoke a discovered bridge tool | `harness.tools.invoke(name, args)` |
+| Register deterministic test responses | `harness.testing.respond(...)` / `harness.testing.respond_error(...)` |
+| Inspect deterministic calls | `harness.testing.calls()` |
 
-- `process.list_shells` returns `{shells, default_shell_id}` with stable shell
-  IDs, paths, platform, availability, invocation args, and source.
-- `process.get_default_shell` returns the selected shell object for the
-  current host/session.
-- `process.set_default_shell` selects a shell by `shell_id` for stateful hosts.
-- `process.shell_invocation` resolves `{shell_id?, shell?, command?, login?,
-  interactive?}` to `{program, args, command_arg_index, shell}`. When neither
-  `shell_id` nor `shell` is supplied, it uses the selected default shell.
-
-Programmatic execution should prefer argv mode (`process.exec` with
-`mode: "argv"`). Shell mode is for user-authored commands; callers can pass a
-shell object or shell ID discovered through this capability, or omit both to use
-the selected default shell.
-
-`process.exec` accepts an optional `env` dict and an `env_mode` that controls
-how those keys combine with the parent environment:
-
-- `env_mode: "merge"` (the default) overlays the provided `env` keys on the
-  inherited parent environment, so PATH/HOME and the rest survive. This is the
-  least-surprising behavior: `env: {ONE_VAR: "x"}` adds one variable rather than
-  wiping the child's entire environment.
-- `env_mode: "replace"` clears the parent environment first, so the child sees
-  only the keys you provide (plus any `env_remove` exclusions). Use this when you
-  need a fully hermetic environment.
-
-For convenience-builtin callers, `exec_opts`/`exec_at_opts` expose the same
-`{env, env_mode, cwd, timeout}` options without dropping to the verbose
-`host_call("process.exec", {...})` form.
-
-Prefer `host_call("capability.operation", args)` in shared wrappers and
-host-owned `.harn` modules so capability names stay consistent across the
-runtime, host manifest, and preflight validation.
-
-`host_tool_list()` is the discovery surface for host-native tools such as
-`Read`, `Edit`, `Bash`, or IDE actions exposed by the active bridge host.
-Without a bridge it returns `[]`. `host_tool_call(name, args)` uses that same
-bridge host's existing dynamic builtin dispatch path, so scripts can discover a
-tool at runtime and then call it by name without hard-coding it into the
-initial prompt. Import `std/host` when you want small helpers such as
-`host_tool_lookup(name)` or `host_tool_available(name)`.
-
-`host_mock(...)` is intended for tests and local conformance runs. Mock
-registration is strict by default: the capability/operation must be part of
-Harn's first-party host surface or a hostlib operation registered by the active
-embedder. For a deliberately synthetic test-only operation, pass
-`unregistered_ok: true` in the config dict. The third argument may be either a
-direct result value or a config dict containing `result`, `params`, `error`,
-and/or `unregistered_ok`. Mock matching is last-write-wins and only requires
-the declared `params` subset to match the actual host call. Matched calls are
-recorded in `host_mock_calls()` as
-`{capability, operation, params}` dictionaries.
-
-Hostlib builtins that take a request dict also consult this registry by their
-schema module/method pair before they run. For example,
-`hostlib_tools_run_command(...)` can be mocked as
-`{capability: "tools", operation: "run_command", ...}`. To support direct
-cutovers from `host_call("process.exec", ...)`, that run-command builtin also
-honors existing `{capability: "process", operation: "exec", ...}` mocks when
-the declared `params` subset matches.
-
-For higher-level test helpers, import `std/testing`:
-
-```harn
-import {
-  assert_host_called,
-  clear_host_mocks,
-  mock_host_error,
-  mock_host_result,
-} from "std/testing"
-
-clear_host_mocks()
-mock_host_result("project", "metadata_get", "hello", {dir: ".", namespace: "facts"})
-assert_eq(host_call("project.metadata_get", {dir: ".", namespace: "facts"}), "hello")
-assert_host_called("project", "metadata_get", {dir: ".", namespace: "facts"}, nil)
-
-mock_host_error("project", "metadata_set", "write denied", nil)
-const result = try { host_call("project.metadata_set", {}) }
-assert(is_err(result))
-
-host_mock("test_only", "op", {result: "ok", unregistered_ok: true})
-```
-
-`std/testing` also includes persona steel-thread assertions:
-`step_assertions_begin`, `step_events`, `assert_steps_ran`,
-`assert_step_received`, `assert_step_emitted`, `assert_handoff_emitted`,
-`assert_receipt_field`, and `assert_golden_transcript`. These helpers record
-existing `PreStep` / `PostStep` hook payloads and assert Harn-level step,
-handoff, receipt, and structured transcript boundaries.
+These methods have typed contracts and resolved effect receipts. Tests configure
+one Harness instance rather than mutating a process/thread registry.
 
 ## Git stdlib
 
@@ -1753,10 +1676,10 @@ id. Mutating operations stay unavailable unless the toolbox is configured with
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `command_policy(config)` | config: dict | dict | Normalize a command-runner policy with workspace roots, deterministic deny/approval rules, optional pre/post closures, and an optional `consent` gate |
-| `command_policy_push(policy)` | policy: dict | nil | Install a command policy for the current VM scope |
-| `command_policy_pop()` | — | nil | Remove the most recently installed command policy |
+| `harness.runtime.command_policy_push(policy)` | policy: dict | nil | Install a command policy for the current VM scope |
+| `harness.runtime.command_policy_pop()` | — | nil | Remove the most recently installed command policy |
 | `with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
-| `with_execution_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped capability policy; the policy is popped on success or throw |
+| `harness.runtime.with_execution_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped capability policy; the policy is popped on success or throw |
 | `with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
 | `with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |
 | `with_dynamic_permissions(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped dynamic permission policy; the policy is popped on success or throw |
@@ -1766,7 +1689,7 @@ id. Mutating operations stay unavailable unless the toolbox is configured with
 
 Install policies directly or pass them to `agent_loop` with
 `command_policy: policy` / `policy: {command_policy: policy}`. Active policies
-wrap `host_call("process.exec", ...)`: pre-hooks run before spawn, blocked
+wrap `harness.process.*` calls: pre-hooks run before spawn, blocked
 decisions return a `status: "blocked"` envelope without starting a child
 process, post-hooks can annotate the command audit, and hook recursion is
 denied unless `allow_recursive: true`. A `require_approval` risk class hard-denies
@@ -1798,7 +1721,7 @@ consent-eligible).
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `sleep(duration)` | duration: int (ms) or duration literal | nil | Pause execution |
+| `harness.clock.sleep_ms(duration)` | duration: int (ms) or duration literal | nil | Pause execution |
 
 ## Durable agent channels
 
@@ -1808,14 +1731,14 @@ be visible to trigger orchestration, later workers, or audit readers.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `emit_channel(name, payload, options?)` | name: string, payload: any, options: `{id?: string, scope?: "session" \| "pipeline" \| "tenant" \| "org", tenant_id?: string, session_id?: string, pipeline_id?: string, ttl?: duration}` | dict | Append a durable channel event and return `{event_id, id, name_resolved, scope, scope_id, emitted_at, emitted_by, retention, duplicate}`. Bare names default to tenant scope. Reusing the same `id` on the same resolved channel is a no-op and returns the original `event_id`. |
-| `channel_events(name, options?)` | name: string, options: `{scope?: string, from_cursor?: int, cursor?: int, limit?: int}` | list | Read stored channel events for the resolved channel, oldest first. Intended for tests, diagnostics, and local orchestration inspection. |
-| `channel_subscribe(name, options?)` | name: string, options: `{scope?: string, from_cursor?: int, cursor?: int}` | stream | Subscribe to events for the resolved channel. Unlike raw `event_log.subscribe`, this resolves `session`, `pipeline`, and `tenant` scopes through the channel layer, so it observes the same log that `emit_channel` writes. |
-| `channel_consumer_cursor(name, consumer_id, options?)` | name: string, consumer_id: string, options: `{scope?: string}` | int or nil | Return the last acknowledged event cursor for one consumer on the resolved channel, or `nil` before that consumer has acknowledged anything. |
-| `channel_ack(name, consumer_id, cursor, options?)` | name: string, consumer_id: string, cursor: int, options: `{scope?: string}` | dict | Persist one consumer's acknowledged cursor for the resolved channel without deleting events for other consumers. |
+| `harness.channels.append(name, payload, options?)` | name: string, payload: any, options: `{id?: string, scope?: "session" \| "pipeline" \| "tenant" \| "org", tenant_id?: string, session_id?: string, pipeline_id?: string, ttl?: duration}` | dict | Append a durable channel event and return `{event_id, id, name_resolved, scope, scope_id, emitted_at, emitted_by, retention, duplicate}`. Bare names default to tenant scope. Reusing the same `id` on the same resolved channel is a no-op and returns the original `event_id`. |
+| `harness.channels.events(name, options?)` | name: string, options: `{scope?: string, from_cursor?: int, cursor?: int, limit?: int}` | list | Read stored channel events for the resolved channel, oldest first. Intended for tests, diagnostics, and local orchestration inspection. |
+| `harness.channels.subscribe(name, options?)` | name: string, options: `{scope?: string, from_cursor?: int, cursor?: int}` | stream | Subscribe to events for the resolved channel. Unlike raw `event_log.subscribe`, this resolves `session`, `pipeline`, and `tenant` scopes through the channel layer, so it observes the same log that `emit_channel` writes. |
+| `harness.channels.consumer_cursor(name, consumer_id, options?)` | name: string, consumer_id: string, options: `{scope?: string}` | int or nil | Return the last acknowledged event cursor for one consumer on the resolved channel, or `nil` before that consumer has acknowledged anything. |
+| `harness.channels.ack(name, consumer_id, cursor, options?)` | name: string, consumer_id: string, cursor: int, options: `{scope?: string}` | dict | Persist one consumer's acknowledged cursor for the resolved channel without deleting events for other consumers. |
 
 Channel names resolve to `scope:scope_id:name`. Bare
-`emit_channel("pr.merged", payload)` resolves to
+`harness.channels.append("pr.merged", payload)` resolves to
 `tenant:<current-or-default-tenant>:pr.merged`. Prefixes select a scope:
 `session:foo`, `pipeline:foo`, `tenant:foo`, `tenant:<tenant_id>:foo`, and
 `org:<org_id>:foo`. Session events are retained in the current process,
@@ -1877,12 +1800,12 @@ emitted by the resolver:
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `store_get(key)` | key: string | any | Retrieve value from store, nil if missing |
-| `store_set(key, value)` | key: string, value: any | nil | Store value, auto-saves to `.harn/store.json` |
-| `store_delete(key)` | key: string | nil | Remove key from store |
-| `store_list()` | none | list | List all keys (sorted) |
-| `store_save()` | none | nil | Explicitly flush store to disk |
-| `store_clear()` | none | nil | Remove all keys from store |
+| `harness.runtime.store_get(key)` | key: string | any | Retrieve value from store, nil if missing |
+| `harness.runtime.store_set(key, value)` | key: string, value: any | nil | Store value, auto-saves to `.harn/store.json` |
+| `harness.runtime.store_delete(key)` | key: string | nil | Remove key from store |
+| `harness.runtime.store_list()` | none | list | List all keys (sorted) |
+| `harness.runtime.store_save()` | none | nil | Explicitly flush store to disk |
+| `harness.runtime.store_clear()` | none | nil | Remove all keys from store |
 
 The store is backed by `.harn/store.json` relative to the script's
 directory. The file is created lazily on first `store_set`. In bridge mode,
@@ -1894,24 +1817,24 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
-| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
-| `llm_stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `llm_call`; the `stream` option remains the transport toggle |
-| `with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
-| `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `llm_call` |
-| `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with natural completion for native-tool loops, cooperative worker suspension (`status: "suspended"` with a resumable `handle`), sentinel completion for text/no-tool loops (`<done>##DONE##</done>` in tagged text-tool stages), daemon/idling support, optional per-turn context filtering, session-local scratchpad recitation/reorganization, opt-in repeated-tool-call stall diagnostics, and structured provider/tool-protocol failure capture. Returns `{status, error?, text, visible_text, llm: {iterations, duration_ms, input_tokens, output_tokens}, tools: {calls, successful, rejected, mode}, transcript, task_ledger, trace, …}` |
-| `agent_progress(input)` | input: dict | nil | Emit a `progress_reported` agent event for the current session. `input` requires either `message: string` or `entries: [{content, status, priority?}]`; `replace` defaults to `true`, and `metadata` defaults to `{}` |
-| `agent_turn(prompt, options?)` | prompt: string, options: dict | dict | High-level agent turn wrapper around `agent_loop`. It installs generic user-visible progress guidance, requires the completion judge (`done_judge`), defaults to loop-until-done completion (natural for native-tool turns, sentinel-based for text/no-tool turns), and returns the normal loop result plus `iterations` and `judge_decisions` summaries |
-| `agent_llm_turn(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Low-level one-turn LLM request used by stdlib orchestration; equivalent to `llm_call` but intentionally lives under the agent primitive surface |
-| `agent_parse_tool_calls(text, tools?)` | text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}`; each protocol violation is `{kind, message, excerpt?, dropped_reason?}` |
-| `agent_dispatch_tool_call(call, tools?, options?)` | call: dict, tools: registry or nil, options: dict | dict | Dispatch one normalized tool call through the runtime parser/enforcement path and return `{ok, status, rendered_result, error_category, executor, ...}` |
-| `agent_dispatch_tool_batch(calls, tools?, options?)` | calls: list, tools: registry or nil, options: dict | list | Dispatch a list of normalized tool calls through the host batch primitive and return one result envelope per call; a leading read-only run may execute in parallel |
+| `harness.llm.call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
+| `harness.llm.call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
+| `harness.llm.stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `llm_call`; the `stream` option remains the transport toggle |
+| `harness.llm.with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
+| `harness.llm.completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `llm_call` |
+| `agent_loop(harness, prompt, system?, options?)` | harness: `Harness`, prompt: string, system: string, options: dict | dict | Multi-turn agent loop with natural completion for native-tool loops, cooperative worker suspension (`status: "suspended"` with a resumable `handle`), sentinel completion for text/no-tool loops (`<done>##DONE##</done>` in tagged text-tool stages), daemon/idling support, optional per-turn context filtering, session-local scratchpad recitation/reorganization, opt-in repeated-tool-call stall diagnostics, and structured provider/tool-protocol failure capture. Returns `{status, error?, text, visible_text, llm: {iterations, duration_ms, input_tokens, output_tokens}, tools: {calls, successful, rejected, mode}, transcript, task_ledger, trace, …}` |
+| `agent_progress(agent, input)` | agent: `HarnessAgent`, input: dict | nil | Emit a `progress_reported` agent event for the current session. `input` requires either `message: string` or `entries: [{content, status, priority?}]`; `replace` defaults to `true`, and `metadata` defaults to `{}` |
+| `agent_turn(harness, prompt, options?)` | harness: `Harness`, prompt: string, options: dict | dict | High-level agent turn wrapper around `agent_loop`. It installs generic user-visible progress guidance, requires the completion judge (`done_judge`), defaults to loop-until-done completion (natural for native-tool turns, sentinel-based for text/no-tool turns), and returns the normal loop result plus `iterations` and `judge_decisions` summaries |
+| `agent_llm_turn(llm, prompt, system?, options?)` | llm: `HarnessLlm`, prompt: string, system: string, options: dict | dict | Low-level one-turn LLM request used by stdlib orchestration |
+| `agent_parse_tool_calls(agent, text, tools?, tool_format?)` | agent: `HarnessAgent`, text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}`; each protocol violation is `{kind, message, excerpt?, dropped_reason?}` |
+| `agent_dispatch_tool_call(tools, call, registry?, options?)` | tools: `HarnessTools`, call: dict, registry: registry or nil, options: dict | dict | Dispatch one normalized tool call through the runtime parser/enforcement path and return `{ok, status, rendered_result, error_category, executor, ...}` |
+| `agent_dispatch_tool_batch(tools, calls, registry?, options?)` | tools: `HarnessTools`, calls: list, registry: registry or nil, options: dict | list | Dispatch normalized tool calls through the host batch primitive and return one result envelope per call; a leading read-only run may execute in parallel |
 | `daemon_spawn(config)` | config: dict | dict | Start a daemon-mode agent and return a daemon handle with persisted state + queue metadata |
 | `daemon_trigger(handle, event)` | handle: dict or string, event: any | dict | Enqueue a durable FIFO trigger event for a running daemon; throws `VmError::DaemonQueueFull` on overflow |
 | `daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |
 | `daemon_stop(handle)` | handle: dict or string | dict | Stop a daemon and preserve queued trigger state for resume |
 | `daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
-| `external_agent_delegate(target, task, options?)` | target: string, task: string, options: dict | dict | Delegate to an open A2A external agent using `harn.external_agent.v1`; returns a checkpoint envelope before dispatch, enforces hard budget/idempotency capability checks, and normalizes completed work into reviewable handoff/diff artifacts |
+| `external_agent_delegate(agent, random, target, task, options?)` | agent: `HarnessAgent`, random: `HarnessRandom`, target: string, task: string, options: dict | dict | Delegate to an open A2A external agent using `harn.external_agent.v1`; returns a checkpoint envelope before dispatch, enforces hard budget/idempotency capability checks, and normalizes completed work into reviewable handoff/diff artifacts |
 | `trigger_list()` | — | list | Return the live trigger registry snapshot as `list<TriggerBinding>` |
 | `trigger_register(config)` | config: dict | dict | Dynamically register a trigger and return its `TriggerHandle` |
 | `trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; execution routes through the trigger dispatcher |
@@ -1920,7 +1843,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trigger_inspect_lifecycle(kind?)` | kind: string or nil | list | Return trigger lifecycle event-log records, optionally filtered by event kind |
 | `trigger_inspect_action_graph(trace_id?)` | trace_id: string or nil | list | Return streamed `observability.action_graph` records, optionally filtered to one trace id |
 | `trigger_test_harness(fixture)` | fixture: string or `{fixture: string}` | dict | Run a named trigger-system harness fixture and return a structured report. Intended for Rust/unit/conformance coverage of cron, webhook, retry, DLQ, dedupe, rate-limit, cost-guard, recovery, and dead-man-switch scenarios |
-| `handler_context()` | — | dict or nil | Return the active trigger dispatch context (`agent`, `action`, `trace_id`, `replay_of_event_id`, `autonomy_tier`, `trigger_event`) or `nil` outside dispatch |
+| `harness.runtime.handler_context()` | — | dict or nil | Return the active trigger dispatch context (`agent`, `action`, `trace_id`, `replay_of_event_id`, `autonomy_tier`, `trigger_event`) or `nil` outside dispatch |
 | `trust_record(agent, action, approver, outcome, tier)` | agent: string, action: string, approver: string or nil, outcome: string, tier: string | dict | Append a manual hash-chained `TrustRecord` to `trust_graph` and per-agent topics |
 | `trust_graph_record(decision)` | decision: dict | string | Append a hash-chained trust decision and return its `TrustEntryId` |
 | `trust_graph_query(agent, action)` | agent: string, action: string or nil | dict | Return a `TrustScore` summary and recommended capability policy for an agent/action pair |
@@ -1932,45 +1855,39 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trust.score(actor_id, action)` | actor_id: string, action: string or nil | dict | Return aggregate trust counters and the derived capability policy |
 | `trust.policy_for(actor_id)` | actor_id: string | dict | Return only the derived capability policy |
 | `trust.verify_chain()` | none | dict | Verify the underlying OpenTrustGraph hash chain |
-| `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
-| `runtime_introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
-| `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
-| `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
-| `llm_execution_contract(selector)` | selector: string | dict | Return secret-free resolved route facts for durable receipts: `{schema, selector, model_id, provider, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
-| `llm_model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
-| `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
-| `llm_complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost |
-| `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
-| `llm_model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
-| `llm_healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
-| `llm_apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `effort` |
-| `llm_rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
-| `llm_providers()` | — | list | List all configured provider names |
+| `harness.obs.llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
+| `harness.runtime.introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
+| `harness.obs.llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
+| `harness.llm.resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
+| `harness.llm.execution_contract(selector)` | selector: string | dict | Return secret-free resolved route facts for durable receipts: `{schema, selector, model_id, provider, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
+| `harness.llm.model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
+| `harness.llm.pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
+| `harness.llm.complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost |
+| `harness.llm.infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
+| `harness.llm.model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
+| `harness.llm.healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
+| `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `effort` |
+| `harness.llm.rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
+| `harness.llm.providers()` | — | list | List all configured provider names |
 | `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"` |
-| `llm_provider_status()` | — | list | Free-builtin alias for `harness.llm.providers()`, available to scripts that do not receive a `Harness` parameter |
-| `llm_available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
-| `llm_known_models()` | — | list | List configured model alias names |
-| `llm_qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
-| `llm_provider_catalog()` | — | dict | Return the loaded provider/model catalog: providers, aliases, model metadata, normalized family/lineage, pricing, QC defaults, and availability |
-| `llm_equivalent_models(selector)` | selector: string | list | Return capability-compatible provider/model routes in the same logical-model equivalence group, excluding the source route |
+| `harness.llm.available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
+| `harness.llm.known_models()` | — | list | List configured model alias names |
+| `harness.llm.qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
+| `harness.llm.provider_catalog()` | — | dict | Return the loaded provider/model catalog: providers, aliases, model metadata, normalized family/lineage, pricing, QC defaults, and availability |
+| `harness.llm.equivalent_models(selector)` | selector: string | list | Return capability-compatible provider/model routes in the same logical-model equivalence group, excluding the source route |
 | `harness.llm.catalog()` | — | list | Return the full configured model catalog as a list of dicts: `[{id, name, provider, context_window, runtime_context_window, capabilities, quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`. Read-only view used by `harn models list` / `harn models recommend` |
 | `harness.llm.catalog_refresh(options?)` | `options?: dict\|nil` | dict | Refresh the process-wide provider/model catalog overlay from the configured hosted catalog, validating the remote document before installing it |
-| `llm_catalog()` | — | list | Free-builtin alias for `harness.llm.catalog()`, available to scripts that do not receive a `Harness` parameter |
-| `llm_catalog_refresh(options?)` | `options?: dict\|nil` | dict | Free-builtin alias for `harness.llm.catalog_refresh(options?)`, available to scripts that do not receive a `Harness` parameter |
-| `llm_config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
+| `harness.llm.config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
 | `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | decimal | Estimate USD cost (exact `decimal`) from catalog pricing, falling back to embedded pricing |
-| `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
-| `llm_budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls pre-flight and throw if projected cost would exceed it |
-| `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
+| `harness.llm.session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `harness.llm.budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls pre-flight and throw if projected cost would exceed it |
+| `harness.llm.budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
 | `tiktoken_tokenizer_info(model)` | model: string | dict | Return `{model, model_family, source, exact, known_model_family, encoder}` for the encoder or heuristic fallback used by a model ID |
-| `llm_mock(config)` | config: dict | nil | Queue one legacy v0 mock response. Supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}`. v0 entries always use the shared default scope. |
-| `llm_mock_load_jsonl(text)` | text: string | dict | Parse and atomically replace the deterministic fixture store from a complete JSONL document. Returns producer-owned `{schema_version, strict_scopes, count, scopes, warnings}` facts. The caller owns filesystem reads; malformed text leaves the active fixture unchanged. |
-| `llm_mock_snapshot()` | — | dict | Return the pure queue snapshot `{schema, schema_version, strict_scopes, queue_remaining, warnings}` for turn-end checkpoints. |
-| `llm_mock_known_scopes()` | — | list | Return Harn's advisory purpose vocabulary. Fixture scopes remain open strings, so custom scopes are still valid. |
-| `llm_mock_calls()` | — | list | Return calls made to the mock provider, including each call's `mock_scope`, messages, system, and tools |
-| `llm_mock_receipts()` | — | list | Return typed receipts `{id, requested_scope, resolved_scope, matched, consume, fell_through, remaining}`, one per mock-provider dispatch while a fixture is active |
-| `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
+| `harness.llm.mock_enqueue(config)` | config: dict | nil | Queue one legacy v0 mock response. Supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}`. v0 entries always use the shared default scope. |
+| `harness.llm.mock_snapshot()` | — | dict | Return the pure queue snapshot `{schema, schema_version, strict_scopes, queue_remaining, warnings}` for turn-end checkpoints. |
+| `harness.llm.mock_calls()` | — | list | Return calls made to the mock provider, including each call's `mock_scope`, messages, system, and tools |
+| `harness.llm.mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
 
 FIFO mocks (no `match` field) are consumed in order. Pattern-matched mocks
 (with `match`) are checked in declaration order against the request transcript
@@ -1988,52 +1905,41 @@ event-log topics, bridge contract, and replay semantics.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `ask_user(prompt, options?)` | prompt: string, options: `{schema?: Schema<T>, timeout?: duration, default?: T}` | `T` | Pause the current dispatch until the host supplies a response. Validates against `schema` when present, otherwise coerces toward `default` when possible. Defaults to a 24-hour timeout; on timeout, returns `default` or throws `HumanTimeoutError` |
-| `request_approval(action, options?)` | action: string, options: `{detail?: any, args?: any, quorum?: int, reviewers?: list<string>, deadline?: duration, principal?: string, evidence_refs?: list<dict>, undo_metadata?: dict, capabilities_requested?: list<string>}` | `{approved, reviewers, approved_at, reason, signatures}` | Emit a durable approval request, wait for quorum, and return the approval record with signed reviewer timestamp receipts. Defaults to quorum 1 and a 24-hour deadline. Denial throws `ApprovalDeniedError` |
-| `dual_control(n, m, action, approvers?)` | `n: int, m: int, action: fn() -> T, approvers: list<string> or nil` | `T` | n-of-m approval gate for executing `action`. Commonly used for destructive or privileged operations. Denial throws `ApprovalDeniedError` |
-| `escalate_to(role, reason)` | role: string, reason: string | `{request_id, role, reason, trace_id, status, accepted_at, reviewer}` | Raise the current dispatch to a higher-trust role and wait for host acceptance. The host or operator resolves it with `harn.hitl.respond` / `harn orchestrator resume` |
+| `harness.interaction.ask_user(prompt, options?)` | prompt: string, options: `{schema?: Schema<T>, timeout?: duration, default?: T}` | `T` | Pause the current dispatch until the host supplies a response. Validates against `schema` when present, otherwise coerces toward `default` when possible. Defaults to a 24-hour timeout; on timeout, returns `default` or throws `HumanTimeoutError` |
+| `harness.interaction.request_approval(action, options?)` | action: string, options: `{detail?: any, args?: any, quorum?: int, reviewers?: list<string>, deadline?: duration, principal?: string, evidence_refs?: list<dict>, undo_metadata?: dict, capabilities_requested?: list<string>}` | `{approved, reviewers, approved_at, reason, signatures}` | Emit a durable approval request, wait for quorum, and return the approval record with signed reviewer timestamp receipts. Defaults to quorum 1 and a 24-hour deadline. Denial throws `ApprovalDeniedError` |
+| `harness.interaction.dual_control(n, m, action, approvers?)` | `n: int, m: int, action: fn() -> T, approvers: list<string> or nil` | `T` | n-of-m approval gate for executing `action`. Commonly used for destructive or privileged operations. Denial throws `ApprovalDeniedError` |
+| `harness.interaction.escalate_to(role, reason)` | role: string, reason: string | `{request_id, role, reason, trace_id, status, accepted_at, reviewer}` | Raise the current dispatch to a higher-trust role and wait for host acceptance. The host or operator resolves it with `harn.hitl.respond` / `harn orchestrator resume` |
 | `hitl_pending(filters?)` | filters: `{since?: string, until?: string, kinds?: list<string>, agent?: string, limit?: int}` or `nil` | `list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>` | Read the active event log's pending HITL requests as typed rows, newest first. Returns `[]` when no event log is attached. |
 
 ```harn
 // Queue specific responses for the mock provider
-llm_mock({text: "The answer is 42."})
-llm_mock({
+harness.llm.mock_enqueue({text: "The answer is 42."})
+harness.llm.mock_enqueue({
   text: "Let me check that.",
   tool_calls: [{name: "read_file", arguments: {path: "main.rs"}}],
 })
-const r = llm_call("question", nil, {provider: "mock"})
+const r = harness.llm.call("question", nil, {provider: "mock"})
 assert_eq(r.text, "The answer is 42.")
 
 // Pattern-matched mocks (reusable, not consumed)
-llm_mock({text: "Hello!", match: "*greeting*"})
-llm_mock({text: "step 1", match: "*planner*", consume_match: true})
-llm_mock({text: "step 2", match: "*planner*", consume_match: true})
+harness.llm.mock_enqueue({text: "Hello!", match: "*greeting*"})
+harness.llm.mock_enqueue({text: "step 1", match: "*planner*", consume_match: true})
+harness.llm.mock_enqueue({text: "step 2", match: "*planner*", consume_match: true})
 
 // Error injection for testing resilient code paths. The mock
 // surfaces as a real `VmError::CategorizedError`, so `error_category`,
 // `try { ... } catch`, `llm_call_safe`, and `with_rate_limit` all see
 // it the same way they would a live provider failure.
-llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
-llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+harness.llm.mock_enqueue({error: {category: "rate_limit", message: "429 Too Many Requests"}})
+harness.llm.mock_enqueue({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
 
-// A v1 fixture is one complete document, installed atomically. Scopes isolate
-// concurrent main/judge calls; strictScopes forbids default fallback.
-const fixture = """
-{"schemaVersion":1,"strictScopes":true}
-{"id":"main-1","scope":"agent.main","consume":"once","text":"Implement the change."}
-{"id":"judge-1","scope":"completion.judge","consume":"sticky","match":"*","text":"PASS"}
-"""
-const loaded = llm_mock_load_jsonl(fixture)
-assert_eq(loaded.count, 2)
-
-// Requested scopes match first. With strictScopes false, only `default` is a
-// legal fallback; an unknown scope never consumes another purpose's queue.
-const snapshot = llm_mock_snapshot()
-assert_eq(snapshot.queue_remaining.agent.main, 1)
+// Scope larger fixtures with std/testing::with_llm_script so installation and
+// cleanup stay attached to this HarnessLlm instead of process state.
+const snapshot = harness.llm.mock_snapshot()
 
 // Inspect what was sent
-const calls = llm_mock_calls()
-llm_mock_clear()
+const calls = harness.llm.mock_calls()
+harness.llm.mock_clear()
 ```
 
 ### Transcript helpers
@@ -2113,9 +2019,9 @@ temperature = 0.0
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `timer_start(name?)` | name: string | dict | Start a named timer |
-| `timer_end(timer)` | timer: dict | int | Stop timer, prints elapsed, returns milliseconds |
-| `elapsed()` | — | int | Milliseconds since process start |
+| `harness.runtime.timer_start(name?)` | name: string | dict | Start a named timer |
+| `harness.runtime.timer_end(timer)` | timer: dict | int | Stop timer, prints elapsed, returns milliseconds |
+| `harness.clock.elapsed()` | — | int | Milliseconds since process start |
 
 ## Circuit breakers
 
@@ -2124,11 +2030,11 @@ a circuit when a threshold is reached.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `circuit_breaker(name, threshold?, reset_ms?)` | name: string, threshold: int (default 5), reset_ms: int (default 30000) | string | Create a named circuit breaker. Returns the name |
-| `circuit_check(name)` | name: string | string | Check state: `"closed"`, `"open"`, or `"half_open"` (after reset period) |
-| `circuit_record_failure(name)` | name: string | bool | Record a failure. Returns true if the circuit just opened |
-| `circuit_record_success(name)` | name: string | nil | Record a success, resetting failure count and closing the circuit |
-| `circuit_reset(name)` | name: string | nil | Manually reset the circuit to closed |
+| `harness.runtime.circuit_breaker(name, threshold?, reset_ms?)` | name: string, threshold: int (default 5), reset_ms: int (default 30000) | string | Create a named circuit breaker. Returns the name |
+| `harness.runtime.circuit_check(name)` | name: string | string | Check state: `"closed"`, `"open"`, or `"half_open"` (after reset period) |
+| `harness.runtime.circuit_record_failure(name)` | name: string | bool | Record a failure. Returns true if the circuit just opened |
+| `harness.runtime.circuit_record_success(name)` | name: string | nil | Record a success, resetting failure count and closing the circuit |
+| `harness.runtime.circuit_reset(name)` | name: string | nil | Manually reset the circuit to closed |
 
 Example:
 
@@ -2137,10 +2043,10 @@ circuit_breaker("api", 3, 10000)
 
 for i in 0 to 5 exclusive {
   if circuit_check("api") == "open" {
-    log("circuit open, skipping call")
+    harness.stdio.log("circuit open, skipping call")
   } else {
     try {
-      const resp = http_get("https://api.example.com/data")
+      const resp = harness.net.get("https://api.example.com/data")
       circuit_record_success("api")
     } catch e {
       circuit_record_failure("api")
@@ -2187,7 +2093,7 @@ const span = trace_start("fetch_data")
 // ... do work ...
 trace_end(span)
 
-log(trace_summary())
+harness.stdio.log(trace_summary())
 ```
 
 ### Agent trace events
@@ -2204,10 +2110,10 @@ after the loop completes.
 Example:
 
 ```harn,ignore
-const result = agent_loop("summarize this file", tools: [read_file])
+const result = agent_loop(harness, "summarize this file", tools: [read_file])
 const summary = agent_trace_summary()
-log("LLM calls: " + str(summary.llm_calls))
-log("Tools used: " + str(summary.tools_used))
+harness.stdio.log("LLM calls: " + str(summary.llm_calls))
+harness.stdio.log("Tools used: " + str(summary.tools_used))
 ```
 
 ## Error classification
@@ -2224,7 +2130,7 @@ Structured error throwing and classification for retry logic and error handling.
 ### Error categories
 
 Every categorized error carries one of these strings. This table is the
-canonical list — `error_category()`, `llm_call_safe()`'s `error.category`, and
+canonical list — `error_category()`, `harness.llm.call_safe()`'s `error.category`, and
 `throw_error()`'s `category` argument all draw from it. Code that switches on a
 category should keep a default branch: the set grows as the runtime learns to
 distinguish new failure modes.
@@ -2259,9 +2165,9 @@ try {
   throw_error("request timed out", "timeout")
 } catch e {
   if is_timeout(e) {
-    log("will retry after backoff")
+    harness.stdio.log("will retry after backoff")
   }
-  log(error_category(e))  // "timeout"
+  harness.stdio.log(error_category(e))  // "timeout"
 }
 ```
 
@@ -2300,7 +2206,7 @@ prompt-visible Code Mode API. The default manifest hides denied tools; pass
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `log_json(key, value)` | key: string, value: any | nil | Emit a JSON log line with timestamp |
+| `harness.obs.log_json(key, value)` | key: string, value: any | nil | Emit a JSON log line with timestamp |
 
 ## Metadata
 
@@ -2310,13 +2216,10 @@ from parents). The default filesystem backend persists namespace shards
 under `.harn/metadata/<namespace>/entries.json` and still reads the legacy
 monolithic `root.json` shard.
 
-Standalone `host_call("project.metadata_*", ...)` calls use this same store
-when no attached host bridge handles the operation. This lets CLI, debugger,
-and conformance runs share the project metadata path used by hosted runs while
-still giving an attached product host precedence for product-owned metadata.
-The standalone fallback covers `metadata_get`, `metadata_inspect`,
-`metadata_set`, `metadata_save`, `metadata_stale`, and
-`metadata_refresh_hashes`.
+The `HarnessProject` adapter uses this same store when no attached host bridge
+handles an operation. CLI, debugger, and conformance runs therefore share the
+project metadata path used by hosted runs while still giving an attached
+product host precedence for product-owned metadata.
 
 Directory entries inherit; file entries do not. The shard schema is shared:
 each namespace shard has a directory map under `entries` and an optional
@@ -2325,20 +2228,19 @@ without a `files` section load unchanged.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `metadata_get(dir, namespace?)` | dir: string, namespace: string | dict \| nil | Read metadata with inheritance |
-| `metadata_resolve(dir, namespace?)` | dir: string, namespace: string | dict \| nil | Read resolved metadata while preserving namespaces |
-| `metadata_entries(namespace?)` | namespace: string | list | List stored directories with local and resolved metadata |
-| `metadata_set(dir, namespace, data)` | dir: string, namespace: string, data: dict | nil | Write metadata for directory/namespace |
-| `metadata_save()` | — | nil | Flush metadata to disk |
-| `metadata_stale(project)` | project: string | dict | Check staleness: `{any_stale, tier1, tier2}` |
-| `metadata_status(namespace?)` | namespace: string | dict | Summarize directory counts, namespaces, missing hashes, and stale state |
-| `metadata_refresh_hashes()` | — | nil | Recompute content hashes |
-| `compute_content_hash(dir)` | dir: string | string | Hash of directory contents |
-| `invalidate_facts(dir)` | dir: string | nil | Mark cached facts as stale |
-| `path_metadata_get(path, namespace?, opts?)` | path: string, namespace: string, opts: `{kind?: "file"\|"dir"}` | dict \| nil | Read metadata at an exact path. File entries (default) do not inherit; `{kind: "dir"}` falls back to hierarchical resolution. |
-| `path_metadata_set(path, namespace, data, opts?)` | path: string, namespace: string, data: dict, opts: `{kind?: "file"\|"dir"}` | nil | Write metadata at an exact path. Defaults to `{kind: "file"}`. |
-| `path_metadata_entries(namespace?, opts?)` | namespace: string, opts: `{kind?: "file"\|"dir"\|"all"}` | list | List stored entries keyed by normalized relative path. Defaults to files only. |
-| `scan_directory(path?, pattern_or_options?, options?)` | path: string, pattern: string or options: dict | list | Enumerate files and directories with optional `pattern`, `max_depth`, `include_hidden`, `include_dirs`, `include_files` |
+| `harness.project.metadata_get(request)` | request: `{dir, namespace?}` | dict \| nil | Read metadata with inheritance |
+| `harness.project.metadata_inspect(request)` | request: `{dir, namespace?}` | dict \| nil | Read resolved metadata while preserving namespaces |
+| `harness.project.metadata_entries(request?)` | request: `{namespace?}` | list | List stored directories with local and resolved metadata |
+| `harness.project.metadata_set(request)` | request: `{dir, namespace, value}` | nil | Write metadata for directory/namespace |
+| `harness.project.metadata_save(request)` | request: dict | nil | Flush metadata to disk |
+| `harness.project.metadata_stale(request?)` | request: `{project?}` | dict | Check staleness: `{any_stale, tier1, tier2}` |
+| `harness.project.metadata_status(request?)` | request: `{namespace?}` | dict | Summarize directory counts, namespaces, missing hashes, and stale state |
+| `harness.project.metadata_refresh_hashes(request)` | request: dict | nil | Recompute content hashes |
+| `harness.project.content_hash(dir)` | dir: string | string | Hash of directory contents |
+| `harness.project.path_metadata_get(request)` | request: `{path, namespace?, kind?}` | dict \| nil | Read metadata at an exact path. File entries (default) do not inherit; `kind: "dir"` falls back to hierarchical resolution. |
+| `harness.project.path_metadata_set(request)` | request: `{path, namespace, value, kind?}` | nil | Write metadata at an exact path. Defaults to `kind: "file"`. |
+| `harness.project.path_metadata_entries(request?)` | request: `{namespace?, kind?}` | list | List stored entries keyed by normalized relative path. Defaults to files only. |
+| `harness.project.scan_directory(path?, options?)` | path: string, options: dict | list | Enumerate files and directories with optional `pattern`, `max_depth`, `include_hidden`, `include_dirs`, and `include_files` |
 
 ## Verification profiles
 
@@ -2371,8 +2273,8 @@ advisory only), or `unbound` (no binding; advisory only).
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `project_fingerprint(path?)` | path: string | `ProjectFingerprint` | Return a normalized shallow project profile for the current working directory or the supplied path |
-| `project_context_profile(path?, options?)` | path: string, options: `{signals?: dict, fingerprint?: dict, remote?: string \| dict, credentials?: list \| dict, include_env_credentials?: bool}` | `ProjectContextProfile` | Resolve project signals into active profile IDs, prompt fragments, skills, tool groups, MCP preset candidates, caps, redacted signal provenance, and token-delta metadata |
+| `harness.project.fingerprint(path?)` | path: string | `ProjectFingerprint` | Return a normalized shallow project profile for the current working directory or the supplied path |
+| `harness.project.context_profile(path?, options?)` | path: string, options: `{signals?: dict, fingerprint?: dict, remote?: string \| dict, credentials?: list \| dict, include_env_credentials?: bool}` | `ProjectContextProfile` | Resolve project signals into active profile IDs, prompt fragments, skills, tool groups, MCP preset candidates, caps, redacted signal provenance, and token-delta metadata |
 
 `ProjectFingerprint` has these fields:
 
@@ -2444,33 +2346,33 @@ MCP servers.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `mcp_roots()` / `harn.mcp.roots()` | none | list | Return the MCP roots Harn exposes to connected servers (`uri`, `name`, `path`) |
-| `mcp_client_roots()` / `harn.mcp.client_roots()` | none | list | From a Harn-served MCP handler, ask the connected client for its `roots/list` result |
-| `mcp_configure(config)` / `harn.mcp.configure(config)` | config: dict | dict | Opt into experimental MCP behavior for the current VM, including draft SEP-2356 file inputs |
-| `mcp_file_input(options?)` / `harn.mcp.file_input(options?)` | options: dict | dict | Return a JSON Schema property using the draft `x-mcp-file` annotation |
-| `mcp_upload_file(server, file_path, options?)` / `harn.mcp.upload_file(server, file_path, options?)` | server: mcp\_client, file\_path: string, options: dict | string | Encode a local file as an RFC 2397 `data:` URI for an experimental MCP file input |
-| `mcp_connect(command, args?, options?)` | command: string, args: list, options: dict | mcp\_client | Spawn an MCP server and connect with the legacy or opt-in RC client profile |
-| `mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
-| `mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |
-| `mcp_list_resources(client)` | client: mcp\_client | list | List available resources from the server |
-| `mcp_list_resource_templates(client)` | client: mcp\_client | list | List resource templates (URI templates) from the server |
-| `mcp_read_resource(client, uri)` | client: mcp\_client, uri: string | string or list | Read a resource by URI |
-| `mcp_list_prompts(client)` | client: mcp\_client | list | List available prompts from the server |
-| `mcp_get_prompt(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | dict | Get a prompt with optional arguments |
-| `mcp_server_info(client)` | client: mcp\_client | dict | Get connection info (`name`, `connected`) plus the server initialize response and extracted advisory `instructions` when supplied |
-| `mcp_disconnect(client)` | client: mcp\_client | nil | Kill the server process and release resources |
+| `harness.tools.mcp_roots()` / `harn.mcp.roots()` | none | list | Return the MCP roots Harn exposes to connected servers (`uri`, `name`, `path`) |
+| `harness.tools.mcp_client_roots()` / `harn.mcp.client_roots()` | none | list | From a Harn-served MCP handler, ask the connected client for its `roots/list` result |
+| `harness.tools.mcp_configure(config)` / `harn.mcp.configure(config)` | config: dict | dict | Opt into experimental MCP behavior for the current VM, including draft SEP-2356 file inputs |
+| `harness.tools.mcp_file_input(options?)` / `harn.mcp.file_input(options?)` | options: dict | dict | Return a JSON Schema property using the draft `x-mcp-file` annotation |
+| `harness.tools.mcp_upload_file(server, file_path, options?)` / `harn.mcp.upload_file(server, file_path, options?)` | server: mcp\_client, file\_path: string, options: dict | string | Encode a local file as an RFC 2397 `data:` URI for an experimental MCP file input |
+| `harness.tools.mcp_connect(command, args?, options?)` | command: string, args: list, options: dict | mcp\_client | Spawn an MCP server and connect with the legacy or opt-in RC client profile |
+| `harness.tools.mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
+| `harness.tools.mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |
+| `harness.tools.mcp_list_resources(client)` | client: mcp\_client | list | List available resources from the server |
+| `harness.tools.mcp_list_resource_templates(client)` | client: mcp\_client | list | List resource templates (URI templates) from the server |
+| `harness.tools.mcp_read_resource(client, uri)` | client: mcp\_client, uri: string | string or list | Read a resource by URI |
+| `harness.tools.mcp_list_prompts(client)` | client: mcp\_client | list | List available prompts from the server |
+| `harness.tools.mcp_get_prompt(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | dict | Get a prompt with optional arguments |
+| `harness.tools.mcp_server_info(client)` | client: mcp\_client | dict | Get connection info (`name`, `connected`) plus the server initialize response and extracted advisory `instructions` when supplied |
+| `harness.tools.mcp_disconnect(client)` | client: mcp\_client | nil | Kill the server process and release resources |
 
 Example:
 
 ```harn
-const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
-const tools = mcp_list_tools(client)
-log(tools)
+const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const tools = harness.tools.mcp_list_tools(client)
+harness.stdio.log(tools)
 
-const result = mcp_call(client, "read_file", {"path": "/tmp/hello.txt"})
-log(result)
+const result = harness.tools.mcp_call(client, "read_file", {"path": "/tmp/hello.txt"})
+harness.stdio.log(result)
 
-mcp_disconnect(client)
+harness.tools.mcp_disconnect(client)
 ```
 
 Notes:
@@ -2550,12 +2452,12 @@ client-auth fields `client_id`, `client_secret`, and
 The connected clients are available as properties on the `mcp` global dict:
 
 ```harn
-pipeline default() {
-  const tools = mcp_list_tools(mcp.filesystem)
-  log(tools)
+pipeline default(harness: Harness) {
+  const tools = harness.tools.mcp_list_tools(mcp.filesystem)
+  harness.stdio.log(tools)
 
-  const result = mcp_call(mcp.github, "list_issues", {repo: "harn"})
-  log(result)
+  const result = harness.tools.mcp_call(mcp.github, "list_issues", {repo: "harn"})
+  harness.stdio.log(result)
 }
 ```
 
@@ -2613,11 +2515,11 @@ tool registry dict.
 | `composition_harn_api(manifest)` | manifest: dict | string | Emit typed Harn wrapper declarations for a Code Mode binding manifest |
 | `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
 | `composition_crystallization_trace(report, options?)` | report: dict, options?: dict | dict | Convert a composition report into crystallization trace input |
-| `mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
-| `mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
-| `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?, completions?}`); `completions` maps URI variable names to static suggestion lists or completion closures |
-| `mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`); prompt arguments may include `suggestions`/`completions` or a `complete` closure for MCP `completion/complete` |
-| `mcp_report_progress(progress, opts?)` | progress: number, opts?: dict | bool | Emit a `notifications/progress` update for the in-flight MCP tool call (no-op when the client did not opt in via `_meta.progressToken`). `opts`: `{total?: number, message?: string, token?: string\|number}` |
+| `harness.tools.mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
+| `harness.tools.mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
+| `harness.tools.mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?, completions?}`); `completions` maps URI variable names to static suggestion lists or completion closures |
+| `harness.tools.mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`); prompt arguments may include `suggestions`/`completions` or a `complete` closure for MCP `completion/complete` |
+| `harness.tools.mcp_report_progress(progress, opts?)` | progress: number, opts?: dict | bool | Emit a `notifications/progress` update for the in-flight MCP tool call (no-op when the client did not opt in via `_meta.progressToken`). `opts`: `{total?: number, message?: string, token?: string\|number}` |
 
 The `composition_*` builtins back [Governed Code Mode](./code-mode.md). The
 executor is read-only: it rejects imports, writes, process execution, network
@@ -2715,7 +2617,7 @@ execution time.
 `approval_policy` option that declaratively gates tool calls:
 
 ```harn
-agent_loop("task", "system", {
+agent_loop(harness, "task", "system", {
   approval_policy: {
     rules: [
       {deny: {path: "**/.env*"}, reason: "credential file"},
@@ -2808,28 +2710,28 @@ deny/ask/allow precedence; repeat limits keep the smaller threshold.
 Example (`agent.harn`):
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(tools, "greet", "Greet someone", {
     parameters: { name: {type: "string"} },
     returns: {type: "string"},
     handler: { args -> "Hello, ${args.name}!" }
   })
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
 
-  mcp_resource({
+  harness.tools.mcp_resource({
     uri: "docs://readme",
     name: "README",
     text: "# My Agent\nA demo MCP server."
   })
 
-  mcp_resource_template({
+  harness.tools.mcp_resource_template({
     uri_template: "config://{key}",
     name: "Config Values",
     handler: { args -> "value for ${args.key}" }
   })
 
-  mcp_prompt({
+  harness.tools.mcp_prompt({
     name: "review",
     description: "Code review prompt",
     arguments: [{ name: "code", required: true }],
@@ -2859,7 +2761,7 @@ Configure in Claude Desktop (`claude_desktop_config.json`):
 
 Notes:
 
-- `mcp_tools(registry)` (or the alias `mcp_serve`) must be called to register tools.
+- `harness.tools.mcp_tools(registry)` (or the alias `mcp_serve`) must be called to register tools.
 - Resources, resource templates, and prompts are registered individually.
 - All `print`/`println` output goes to stderr (stdout is the MCP transport in stdio mode).
 - The server supports the `2025-11-25` MCP protocol version over stdio and Streamable HTTP.
@@ -2994,13 +2896,15 @@ directory. `workflow.update(...)` polls for a response until
 
 ### Session lifecycle hooks
 
-`register_session_hook(event, handler)` (or
-`register_session_hook(event, pattern, handler)`) wires a callback
+`harness.agent.register_session_hook(event, handler)` (or
+`harness.agent.register_session_hook(event, pattern, handler)`) wires a callback
 into the whole-session turn loop. Events: `session_start`,
 `session_end`, `user_prompt_submit`, `pre_compact`, `post_compact`,
 `post_turn`, `permission_asked`, `permission_replied`, `file_edited`,
-`session_error`, `session_idle`. The handler receives a typed event
-dict (`{event, session: {id}, ...}`) and returns:
+`session_error`, `session_idle`. The handler receives `(harness, event)`, where
+`harness` is the root `Harness` authority for this runtime entry boundary and
+`event` is a typed dict (`{event, session: {id}, ...}`). Pass the narrowest
+sub-handle needed by any helper the callback invokes. The handler returns:
 
 - `nil` or `true` — allow the operation to proceed.
 - `{block: true, reason}` — veto the operation (honoured for
@@ -3016,21 +2920,21 @@ For slow background context work, return a receipt from
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `register_session_hook(event, pattern?, handler)` | event: string, pattern: string?, handler: closure | nil | Register a session-level lifecycle hook |
-| `clear_session_hooks()` | none | nil | Remove all registered session-level hooks |
-| `notify_file_edited(path, metadata?)` | path: string, metadata: dict? | nil | Explicitly queue a `file_edited` notification; successful standard filesystem mutations also queue automatically. Hooks fire at the next agent-loop turn boundary. |
+| `harness.agent.register_session_hook(event, pattern?, handler)` | event: string, pattern: string?, handler: `(Harness, event) -> value` | nil | Register a session-level lifecycle hook |
+| `harness.agent.clear_session_hooks()` | none | nil | Remove all registered session-level hooks |
+| `harness.fs.notify_file_edited(path, metadata?)` | path: string, metadata: dict? | nil | Explicitly queue a `file_edited` notification; successful standard filesystem mutations also queue automatically. Hooks fire at the next agent-loop turn boundary. |
 
 ### Reminder providers
 
-`agent_loop(...)` enables canonical reminder providers by default.
+`agent_loop(harness, ...)` enables canonical reminder providers by default.
 Use `reminders: false` to disable all providers or
 `reminders: {providers: ["-token_pressure"]}` to opt out by provider id.
-Bare `llm_call(...)` does not fire reminder providers.
+Bare `harness.llm.call(...)` does not fire reminder providers.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `register_reminder_provider(config)` | config: dict | nil | Register a Harn-defined reminder provider. `config.id` is a string, `config.subscribes_to` is an event string or list, and `config.evaluate(ctx)` returns a reminder effect/spec/list or `nil`. |
-| `clear_reminder_providers()` | none | nil | Remove user-defined reminder providers. Canonical stdlib providers remain available through `agent_loop` unless disabled with `reminders`. |
+| `harness.agent.register_reminder_provider(config)` | config: dict | nil | Register a Harn-defined reminder provider. `config.id` is a string, `config.subscribes_to` is an event string or list, and `config.evaluate(ctx)` returns a reminder effect/spec/list or `nil`. |
+| `harness.agent.clear_reminder_providers()` | none | nil | Remove user-defined reminder providers. Canonical stdlib providers remain available through `agent_loop` unless disabled with `reminders`. |
 
 ### Context and compaction utilities
 
@@ -3149,8 +3053,8 @@ Worker configs may also include `carry` to control continuation behavior:
 
 To give a spawned worker prior conversation context, open a session
 before spawning and set `model_policy.session_id` on the worker's node.
-Use `agent_session_fork(parent)` if the worker should start from a
-branch of an existing conversation; `agent_session_reset(id)` before
+Use `harness.agent.fork(parent)` if the worker should start from a
+branch of an existing conversation; `harness.agent.reset(id)` before
 the call if you want a fresh run with the same id.
 
 Workers return handle dicts with an `id`, lifecycle timestamps, `status`,
@@ -3226,27 +3130,27 @@ See the [Sessions](./sessions.md) chapter for the full model.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `agent_session_open(id?)` | id: string or nil | string | Idempotent open; `nil` mints a UUIDv7 |
-| `agent_session_exists(id)` | id | bool | Safe on unknown ids |
-| `agent_session_current_id()` | none | string or nil | Returns the innermost active session id, or `nil` outside any active session |
-| `agent_session_length(id)` | id | int | Message count; errors on unknown id |
-| `agent_session_snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index` |
-| `agent_session_ancestry(id)` | id | dict or nil | Returns `{parent_id, child_ids, root_id}` for the current in-VM lineage |
-| `agent_session_actor_chain(id?)` | id: string or nil | dict or nil | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted |
+| `harness.agent.open(id?)` | id: string or nil | string | Idempotent open; `nil` mints a UUIDv7 |
+| `harness.agent.exists(id)` | id | bool | Safe on unknown ids |
+| `harness.agent.current_id()` | none | string or nil | Returns the innermost active session id, or `nil` outside any active session |
+| `harness.agent.length(id)` | id | int | Message count; errors on unknown id |
+| `harness.agent.snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index` |
+| `harness.agent.ancestry(id)` | id | dict or nil | Returns `{parent_id, child_ids, root_id}` for the current in-VM lineage |
+| `harness.agent.actor_chain(id?)` | id: string or nil | dict or nil | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted |
 | `actor_chain_validate_scope_attenuation(chain, opts?)` | chain: dict, opts: dict | dict | Validates monotonic actor-chain scopes. `opts` accepts `policy`, `raise`, `alert`, and `trace_id`; violations raise an auth error unless `raise` is `false` |
-| `agent_session_reset(id)` | id | nil | Wipes history; preserves id and subscribers |
-| `agent_session_fork(src, dst?)` | src, dst | string | Copies transcript, sets `dst.parent_id`, and appends `dst` to `src.child_ids` |
-| `agent_session_fork_at(src, keep_first, dst?)` | src, keep_first: int, dst | string | Forks then keeps the first `keep_first` messages on the child; records `branched_at_event_index` |
-| `agent_session_scratchpad(id)` | id | dict or nil | Returns the small session-local agent scratchpad |
-| `agent_session_set_scratchpad(id, scratchpad, opts?)` | id, scratchpad: dict, opts: dict | dict | Stores a dict scratchpad and returns `{ok, version, scratchpad}`. `opts` may include `source`, `reason`, and `metadata` |
-| `agent_session_clear_scratchpad(id, opts?)` | id, opts: dict | dict | Clears the scratchpad and returns `{ok, version, scratchpad: nil}` |
-| `agent_session_trim(id, keep_last)` | id, keep_last: int | int | Retain last `keep_last` messages; returns kept count |
-| `agent_session_compact(id, opts)` | id, opts: dict | int | Runs the LLM/truncate/observation-mask/custom compactor; custom strategies use `custom_compactor`, `mask_callback`, or `compress_callback` closures |
-| `agent_session_inject(id, message)` | id, message: dict | nil | Appends `{role, content, …}`; missing `role` errors |
-| `agent_session_seed_from_jsonl(jsonl_path, opts?)` | jsonl_path: string, opts: dict | dict | Create a new session from a replayable `llm_transcript.jsonl` sidecar. Options: `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`, `provider`, `model`, `source_agent`, `source_session_id`, `source_kind`, `source_label`, `source_provenance`, `recommend_compaction` |
-| `agent_session_close(id, status?)` | id, optional status string/dict | nil | Evicts immediately regardless of LRU cap and records an `agent_session_closed` event with the close reason |
+| `harness.agent.reset(id)` | id | nil | Wipes history; preserves id and subscribers |
+| `harness.agent.fork(src, dst?)` | src, dst | string | Copies transcript, sets `dst.parent_id`, and appends `dst` to `src.child_ids` |
+| `harness.agent.fork_at(src, keep_first, dst?)` | src, keep_first: int, dst | string | Forks then keeps the first `keep_first` messages on the child; records `branched_at_event_index` |
+| `harness.agent.scratchpad(id)` | id | dict or nil | Returns the small session-local agent scratchpad |
+| `harness.agent.set_scratchpad(id, scratchpad, opts?)` | id, scratchpad: dict, opts: dict | dict | Stores a dict scratchpad and returns `{ok, version, scratchpad}`. `opts` may include `source`, `reason`, and `metadata` |
+| `harness.agent.clear_scratchpad(id, opts?)` | id, opts: dict | dict | Clears the scratchpad and returns `{ok, version, scratchpad: nil}` |
+| `harness.agent.trim(id, keep_last)` | id, keep_last: int | int | Retain last `keep_last` messages; returns kept count |
+| `harness.agent.compact(id, opts)` | id, opts: dict | int | Runs the LLM/truncate/observation-mask/custom compactor; custom strategies use `custom_compactor`, `mask_callback`, or `compress_callback` closures |
+| `harness.agent.inject(id, message)` | id, message: dict | nil | Appends `{role, content, …}`; missing `role` errors |
+| `harness.agent.seed_from_jsonl(jsonl_path, opts?)` | jsonl_path: string, opts: dict | dict | Create a new session from a replayable `llm_transcript.jsonl` sidecar. Options: `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`, `provider`, `model`, `source_agent`, `source_session_id`, `source_kind`, `source_label`, `source_provenance`, `recommend_compaction` |
+| `harness.agent.close(id, status?)` | id, optional status string/dict | nil | Evicts immediately regardless of LRU cap and records an `agent_session_closed` event with the close reason |
 
-Pair with `agent_loop(..., {session_id: id, ...})`: prior messages load
+Pair with `agent_loop(harness, ..., {session_id: id, ...})`: prior messages load
 as prefix and the final transcript is persisted back on exit.
 
 ### Transcript lifecycle

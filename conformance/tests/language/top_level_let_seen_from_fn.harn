@@ -15,7 +15,7 @@ pub fn full_greeting() -> string {
  * raised "Undefined variable: GREETING" — the compiler silently dropped
  * module-level bindings in pipeline mode.
  */
-pipeline default() {
-  __io_println(greet())
-  __io_println(full_greeting())
+pipeline default(harness: Harness) {
+  harness.stdio.println(greet())
+  harness.stdio.println(full_greeting())
 }

@@ -83,8 +83,8 @@ fn __verdict_prompt(claim, contexts_text) -> string {
   )
 }
 
-fn __structured_value(prompt, schema, llm_opts) -> dict {
-  const envelope = safe_structured_call(prompt, schema, llm_opts)
+fn __structured_value(llm: HarnessLlm, prompt, schema, llm_opts) -> dict {
+  const envelope = safe_structured_call(llm, prompt, schema, llm_opts)
   if !(envelope?.ok ?? false) {
     throw {
       kind: "faithfulness",
@@ -100,8 +100,8 @@ fn __structured_value(prompt, schema, llm_opts) -> dict {
   return {}
 }
 
-fn __decompose_claims(answer, llm_opts) -> list {
-  const value = __structured_value(__decompose_prompt(answer), __CLAIM_SCHEMA, llm_opts)
+fn __decompose_claims(llm: HarnessLlm, answer, llm_opts) -> list {
+  const value = __structured_value(llm, __decompose_prompt(answer), __CLAIM_SCHEMA, llm_opts)
   const raw = value?.claims ?? []
   if type_of(raw) != "list" {
     return []
@@ -116,8 +116,9 @@ fn __decompose_claims(answer, llm_opts) -> list {
   return claims
 }
 
-fn __judge_claim(claim, contexts_text, llm_opts) -> dict {
+fn __judge_claim(llm: HarnessLlm, claim, contexts_text, llm_opts) -> dict {
   const value = __structured_value(
+    llm,
     __verdict_prompt(claim, contexts_text),
     __VERDICT_SCHEMA,
     llm_opts,
@@ -161,7 +162,7 @@ fn __judge_claim(claim, contexts_text, llm_opts) -> dict {
  * @effects: [llm.call]
  * @errors: [faithfulness]
  */
-pub fn faithfulness_guard(answer, contexts, opts = nil) -> dict {
+pub fn faithfulness_guard(llm: HarnessLlm, answer, contexts, opts = nil) -> dict {
   const cfg = if type_of(opts) == "dict" {
     opts
   } else {
@@ -174,12 +175,12 @@ pub fn faithfulness_guard(answer, contexts, opts = nil) -> dict {
   }
   const max_concurrent = cfg?.max_concurrent
   const contexts_text = __contexts_text(contexts)
-  const claims = __decompose_claims(answer, llm_opts)
+  const claims = __decompose_claims(llm, answer, llm_opts)
   if len(claims) == 0 {
     return {score: 1.0, supported: [], unsupported: [], claims: [], verdicts: []}
   }
   const verdicts = parallel each claims with { max_concurrent: max_concurrent } { claim ->
-    __judge_claim(claim, contexts_text, llm_opts)
+    __judge_claim(llm, claim, contexts_text, llm_opts)
   }
   let supported = []
   let unsupported = []

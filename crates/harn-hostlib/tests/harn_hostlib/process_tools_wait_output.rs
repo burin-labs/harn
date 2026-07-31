@@ -20,7 +20,6 @@ fn registry() -> BuiltinRegistry {
 }
 
 fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
-    harn_hostlib::tools::permissions::enable_for_test();
     let registry = registry();
     let entry = registry.find(builtin).expect("sync builtin registered");
     (entry.handler)(&[VmValue::dict(request)])
@@ -30,7 +29,6 @@ async fn call_async(
     builtin: &str,
     request: harn_vm::value::DictMap,
 ) -> Result<VmValue, HostlibError> {
-    harn_hostlib::tools::permissions::enable_for_test();
     let registry = registry();
     let entry = registry
         .find_async(builtin)
@@ -103,19 +101,6 @@ fn finish(controller: &MockHandleController, handle_id: &str) {
     let completion = register_completion_notifier(handle_id).expect("live handle");
     controller.complete_with(ExitStatus::from_code(0));
     completion.recv().expect("background finalization");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn output_wait_requires_deterministic_tools_gate() {
-    harn_hostlib::tools::permissions::reset();
-    let registry = registry();
-    let entry = registry
-        .find_async("hostlib_tools_wait_command_output")
-        .expect("async builtin registered");
-    let error = (entry.handler)(vec![VmValue::dict(dict())])
-        .await
-        .expect_err("disabled capability must fail before request handling");
-    assert!(matches!(error, HostlibError::Backend { .. }));
 }
 
 #[tokio::test(flavor = "current_thread")]

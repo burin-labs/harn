@@ -1,10 +1,10 @@
-pipeline test(task) {
-  log(abs(-5))
-  log(min(3, 7))
-  log(max(3, 7))
-  log(floor(3.7))
-  log(ceil(3.2))
-  log(round(3.5))
-  log(sqrt(16.0))
-  log(pow(2, 10))
+pipeline test(harness: Harness, task) {
+  harness.stdio.log(abs(-5))
+  harness.stdio.log(min(3, 7))
+  harness.stdio.log(max(3, 7))
+  harness.stdio.log(floor(3.7))
+  harness.stdio.log(ceil(3.2))
+  harness.stdio.log(round(3.5))
+  harness.stdio.log(sqrt(16.0))
+  harness.stdio.log(pow(2, 10))
 }

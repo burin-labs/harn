@@ -1,3 +1,5 @@
+import { sub_agent_request } from "std/agent/workers"
+
 fn worker_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -15,10 +17,11 @@ fn worker_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const tools = worker_tools()
   tool_bind(tools)
   const request = sub_agent_request(
+    harness,
     "Inspect notes.",
     {
       name: "note-reader",
@@ -30,18 +33,18 @@ pipeline main() {
       policy: {tools: ["read_note", "write_note"]},
     },
   )
-  __io_println(request?._type)
-  __io_println(request?.name)
-  __io_println(request?.system)
-  __io_println(request?.background)
-  __io_println(request?.options?.provider)
-  __io_println(starts_with(request?.session_id, "sub_agent_session_"))
-  __io_println(len(request?.allowed_tools) == 1)
-  __io_println(tool_count(request?.options?.tools))
-  __io_println(tool_find(request?.options?.tools, "read_note")?.name)
-  __io_println(tool_find(request?.options?.tools, "write_note") == nil)
-  __io_println(request?.options?.policy == nil)
-  __io_println(request?.policy?.tools[0])
-  __io_println(request?.returns_schema?.type)
+  harness.stdio.println(request?._type)
+  harness.stdio.println(request?.name)
+  harness.stdio.println(request?.system)
+  harness.stdio.println(request?.background)
+  harness.stdio.println(request?.options?.provider)
+  harness.stdio.println(starts_with(request?.session_id, "sub_agent_session_"))
+  harness.stdio.println(len(request?.allowed_tools) == 1)
+  harness.stdio.println(tool_count(request?.options?.tools))
+  harness.stdio.println(tool_find(request?.options?.tools, "read_note")?.name)
+  harness.stdio.println(tool_find(request?.options?.tools, "write_note") == nil)
+  harness.stdio.println(request?.options?.policy == nil)
+  harness.stdio.println(request?.policy?.tools[0])
+  harness.stdio.println(request?.returns_schema?.type)
   tool_bind(nil)
 }

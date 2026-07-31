@@ -1,7 +1,8 @@
 import { verification_ladder_plan, verification_warm_state_facts } from "std/verification"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const facts = verification_warm_state_facts(
+    harness.tools,
     [
       {
         id: "svc/warm",
@@ -43,7 +44,7 @@ pipeline test(task) {
   assert_eq(facts[1]?.warm, false)
   assert_eq(facts[1]?.timing_kind, "cold")
   assert_eq(facts[1]?.probe.exit, 7)
-  verification_profiles_set(
+  harness.runtime.verification_profiles_set(
     {
       rows: [
         {
@@ -70,6 +71,7 @@ pipeline test(task) {
     },
   )
   const plan = verification_ladder_plan(
+    harness.runtime,
     {language: "toolchainy", task: "post_edit"},
     {timing_kind: "auto", warm_state_facts: facts},
   )
@@ -83,11 +85,12 @@ pipeline test(task) {
   assert_eq(plan.selected[1].p95_ms, 7000)
   assert_eq(plan.selected[1].warm_state.id, "svc/cold")
   const cold_override = verification_ladder_plan(
+    harness.runtime,
     {language: "toolchainy", task: "post_edit"},
     {timing_kind: "cold", warm_state_facts: facts},
   )
   assert_eq(cold_override.selected[0].row_id, "svc/warm")
   assert_eq(cold_override.selected[0].p95_ms, 5000)
   assert_eq(cold_override.selected[0].timing_kind, "cold")
-  __io_println("verification warm state ok")
+  harness.stdio.println("verification warm state ok")
 }

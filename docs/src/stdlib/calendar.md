@@ -20,16 +20,16 @@ Public calendar helpers use reusable shapes instead of anonymous records:
 ```harn
 import { iso_week, next_weekday, quarter, start_of_day } from "std/calendar"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const now = date_parse("2026-05-11T17:00:00-04:00")
   const next_monday = start_of_day(
     next_weekday(now, "monday", "America/New_York"),
     "America/New_York",
   )
 
-  log(date_to_zone(next_monday, "America/New_York"))
-  log(json_stringify(iso_week(next_monday, "America/New_York")))
-  log(quarter(next_monday, "America/New_York"))
+  harness.stdio.log(date_to_zone(next_monday, "America/New_York"))
+  harness.stdio.log(json_stringify(iso_week(next_monday, "America/New_York")))
+  harness.stdio.log(quarter(next_monday, "America/New_York"))
 }
 ```
 
@@ -59,7 +59,7 @@ fields.
 ```harn
 import { local_datetime } from "std/calendar"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const first = local_datetime(
     {year: 2024, month: 11, day: 3, hour: 1, minute: 30},
     "America/New_York",
@@ -71,8 +71,8 @@ pipeline default() {
     "later",
   )
 
-  log(date_to_zone(first, "UTC"))
-  log(date_to_zone(second, "UTC"))
+  harness.stdio.log(date_to_zone(first, "UTC"))
+  harness.stdio.log(date_to_zone(second, "UTC"))
 }
 ```
 
@@ -92,15 +92,15 @@ import {
   next_business_day,
 } from "std/calendar"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const calendar = "US-FEDERAL"
   const timezone = "America/New_York"
   const window = {timezone: timezone, start: "09:00", end: "17:00"}
 
-  log(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
-  log(date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone))
-  log(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
-  log(is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, window))
+  harness.stdio.log(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
+  harness.stdio.log(date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone))
+  harness.stdio.log(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
+  harness.stdio.log(is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, window))
 }
 ```
 
@@ -109,14 +109,14 @@ Custom calendar example:
 ```harn
 import { is_business_day } from "std/calendar"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const company_calendar = {
     timezone: "UTC",
     holiday_calendar: "US-FEDERAL",
     holidays: [{date: "2026-12-24", name: "Company winter closure"}],
   }
 
-  log(is_business_day("2026-12-24", company_calendar))
+  harness.stdio.log(is_business_day("2026-12-24", company_calendar))
 }
 ```
 
@@ -130,11 +130,11 @@ instead of picking an arbitrary default.
 ```harn
 import { country_info, country_timezones, default_timezone_for_country } from "std/calendar"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const us = country_info("US")
-  log(us.name)
-  log(default_timezone_for_country("US") == nil)
-  log(country_timezones("GB")?.[0])
-  log(default_timezone_for_country("GB"))
+  harness.stdio.log(us.name)
+  harness.stdio.log(default_timezone_for_country("US") == nil)
+  harness.stdio.log(country_timezones("GB")?.[0])
+  harness.stdio.log(default_timezone_for_country("GB"))
 }
 ```

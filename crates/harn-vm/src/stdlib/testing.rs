@@ -39,6 +39,8 @@ impl Drop for ExecutionPolicyPopGuard {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__testing_call_body(body: any) -> any",
     kind = "async",
     category = "testing"
@@ -86,6 +88,8 @@ async fn testing_call_body_impl(
 /// to broaden the nested-execution allowance. Every other field of the
 /// current capability policy is preserved.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__testing_with_nested_execution_budget(depth: int, body: any) -> any",
     kind = "async",
     category = "testing"
@@ -156,6 +160,8 @@ fn assert_message(args: &[VmValue], index: usize, default: impl FnOnce() -> Stri
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "assert(condition: any, message?: string) -> nil",
     category = "testing"
 )]
@@ -216,6 +222,8 @@ impl<'a> Comparison<'a> {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "assert_eq(actual: any, expected: any, message?: string) -> nil",
     category = "testing"
 )]
@@ -228,6 +236,8 @@ fn assert_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "assert_ne(actual: any, expected: any, message?: string) -> nil",
     category = "testing"
 )]
@@ -244,6 +254,8 @@ fn assert_ne_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 const DEFAULT_APPROX_TOLERANCE: f64 = 1e-9;
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "assert_approx(actual: any, expected: any, tolerance?: float, message?: string) -> nil",
     category = "testing"
 )]
@@ -301,6 +313,8 @@ fn assert_approx_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "assert_matches(actual: any, pattern: string, message?: string) -> string",
     category = "testing"
 )]
@@ -345,6 +359,8 @@ fn assert_matches_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "value_diff(actual: any, expected: any) -> string | nil",
     category = "testing"
 )]
@@ -356,7 +372,11 @@ fn value_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     })
 }
 
-#[harn_builtin(sig = "error_category(error: any) -> string", category = "testing")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "error_category(error: any) -> string", category = "testing"
+)]
 fn error_category_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     match val {
@@ -378,6 +398,8 @@ fn error_category_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "throw_error(message: string, category?: string) -> never",
     category = "testing"
 )]
@@ -394,7 +416,11 @@ fn throw_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Err(VmError::Thrown(VmValue::dict(err_dict)))
 }
 
-#[harn_builtin(sig = "is_timeout(error: any) -> bool", category = "testing")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "is_timeout(error: any) -> bool", category = "testing"
+)]
 fn is_timeout_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(error_has_category(
         args.first().unwrap_or(&VmValue::Nil),
@@ -402,7 +428,11 @@ fn is_timeout_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     )))
 }
 
-#[harn_builtin(sig = "is_rate_limited(error: any) -> bool", category = "testing")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "is_rate_limited(error: any) -> bool", category = "testing"
+)]
 fn is_rate_limited_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(error_has_category(
         args.first().unwrap_or(&VmValue::Nil),
@@ -415,6 +445,8 @@ fn is_rate_limited_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 /// author can assert any category (`cancelled`, `budget_exceeded`,
 /// `server_error`, ...) without the VM hand-wiring a predicate per variant.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "error_is(error: any, category: string) -> bool",
     category = "testing"
 )]
@@ -437,7 +469,11 @@ fn error_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 /// Whether the error's category is one the agent loop treats as a transient,
 /// worth-retrying provider failure — the exact `ErrorCategory::is_transient`
 /// oracle, surfaced so tests can assert the retry decision directly.
-#[harn_builtin(sig = "error_is_transient(error: any) -> bool", category = "testing")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "error_is_transient(error: any) -> bool", category = "testing"
+)]
 fn error_is_transient_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(
         error_category_of(args.first().unwrap_or(&VmValue::Nil))

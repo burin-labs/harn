@@ -53,6 +53,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
     &[&CSV_PARSE_IMPL_DEF, &CSV_STRINGIFY_IMPL_DEF];
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "csv_parse(text: string?, options?: dict) -> list",
     category = "csv"
 )]
@@ -114,6 +116,8 @@ fn csv_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "csv_stringify(rows: list, options?: dict) -> string",
     category = "csv"
 )]

@@ -262,7 +262,7 @@ fn test_sequential_decision_contract() {
   require unresolved.no_decision, "unresolved is explicitly not a baseline confirmation"
 }
 
-fn test_anytime_valid_null_and_broken_control() {
+fn test_anytime_valid_null_and_broken_control(stdio: HarnessStdio) {
   const delta = 0.1
   const simulations = 12
   let corrected_winners = 0
@@ -280,7 +280,7 @@ fn test_anytime_valid_null_and_broken_control() {
   }
   const corrected_rate = to_float(corrected_winners) / to_float(simulations)
   const broken_rate = to_float(broken_winners) / to_float(simulations)
-  harness.stdio.eprintln(
+  stdio.eprintln(
     "sequential null control: corrected=" + to_string(corrected_rate) + " broken="
       + to_string(
       broken_rate,
@@ -290,9 +290,9 @@ fn test_anytime_valid_null_and_broken_control() {
   require broken_rate > delta, "known-broken repeated-look racer must visibly inflate false winners"
 }
 
-pipeline test(_task) {
+pipeline test(harness: Harness, _task) {
   test_sequential_primitives()
   test_sequential_decision_contract()
-  test_anytime_valid_null_and_broken_control()
+  test_anytime_valid_null_and_broken_control(harness.stdio)
   harness.stdio.println("[harn] stdlib eval sequential ok")
 }

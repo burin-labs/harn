@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const data = {
     name: "alice",
     NAME: "BOB",
@@ -7,5 +7,5 @@ pipeline default() {
     obj: {a: 1, b: 2},
     block: "line1\nline2\nline3",
   }
-  __io_println(render("fixtures/template/filters.prompt", data))
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/filters.prompt", data))
 }

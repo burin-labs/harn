@@ -3,7 +3,7 @@
  *
  * Import: import "std/code_librarian"
  *
- * Wraps the `hostlib_code_index_*` builtin family (issue #2434, PR #2441)
+ * Wraps the `code_index.*` builtin family (issue #2434, PR #2441)
  * behind ergonomic functions returning typed records. Consumers call
  * one library instead of stitching outputs from many primitives. The
  * natural-language entry point `code_librarian_query_nl` (issue #2439)
@@ -11,7 +11,7 @@
  * over the graph when the compile path misses.
  *
  * The library never rebuilds the index; callers are expected to drive
- * `hostlib_code_index_rebuild` (or its lifecycle equivalent) themselves.
+ * `code_index.rebuild` (or its lifecycle equivalent) themselves.
  *
  * Underlying executor docs: docs/src/stdlib/code-librarian.md
  * A typed Cypher row — keys are projected column names from `RETURN`.
@@ -19,7 +19,7 @@
 import { agent_emit_event } from "std/agent/state"
 import { with_cache_envelope } from "std/cache"
 import { safe_structured_call } from "std/llm/safe"
-import { schema_object, schema_string } from "std/schema"
+import { schema_list, schema_object, schema_string } from "std/schema"
 import { verification_file_hash_snapshot } from "std/verification"
 
 type LibrarianRecord = dict
@@ -143,8 +143,8 @@ fn __code_librarian_optional_string(value) -> string? {
  * @api_stability: experimental
  * @example: code_librarian_query("MATCH (f:Function {name: 'main'}) RETURN f.path AS path")
  */
-pub fn code_librarian_query(cypher: string) -> LibrarianCypherResult {
-  const raw = hostlib_code_index_cypher({query: cypher})
+pub fn code_librarian_query(code_index: HarnessCodeIndex, cypher: string) -> LibrarianCypherResult {
+  const raw = code_index.cypher({query: cypher})
   return {rows: raw?.rows ?? [], overlay: raw?.overlay}
 }
 
@@ -159,17 +159,30 @@ pub fn code_librarian_query(cypher: string) -> LibrarianCypherResult {
  * @api_stability: experimental
  * @example: code_librarian_outline("src/util.ts")
  */
-pub fn code_librarian_outline(path: string, depth: int = 1) -> LibrarianOutline {
+pub fn code_librarian_outline(
+  code_index: HarnessCodeIndex,
+  path: string,
+  depth: int = 1,
+) -> LibrarianOutline {
   if depth < 1 {
     throw "code_librarian_outline: depth must be >= 1"
   }
-  const file_id = hostlib_code_index_path_to_id({path: path})
+  const file_id = to_int(code_index.path_to_id({path: path}))
   if file_id == nil || file_id == 0 {
     return {file_id: 0, importers: [], imports: [], known: false, path: path, symbols: []}
   }
-  const symbols = hostlib_code_index_outline_get({file_id: file_id})
-  const imps = hostlib_code_index_imports_for({path: path})
-  const users = hostlib_code_index_importers_of({module: path})
+  const symbols = schema_expect(
+    code_index.outline_get({file_id: file_id}),
+    schema_list(schema_of(LibrarianOutlineSymbol)),
+  )
+  const imps = schema_expect(
+    code_index.imports_for({path: path}),
+    schema_object({imports: schema_list()}),
+  )
+  const users = schema_expect(
+    code_index.importers_of({module: path}),
+    schema_object({importers: schema_list(schema_string())}),
+  )
   return {
     file_id: file_id,
     importers: users?.importers ?? [],
@@ -193,14 +206,18 @@ pub fn code_librarian_outline(path: string, depth: int = 1) -> LibrarianOutline 
  * @api_stability: experimental
  * @example: code_librarian_who_calls("formatDate")
  */
-pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<LibrarianCallSite> {
+pub fn code_librarian_who_calls(
+  code_index: HarnessCodeIndex,
+  symbol: string,
+  max_hops: int = 2,
+) -> list<LibrarianCallSite> {
   if max_hops < 1 {
     throw "code_librarian_who_calls: max_hops must be >= 1"
   }
   const safe_symbol = __code_librarian_cypher_literal(symbol)
   const cypher = "MATCH (f:Function {name: '" + safe_symbol
     + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.caller AS caller, f.name AS symbol"
-  const raw = hostlib_code_index_cypher({query: cypher})
+  const raw = code_index.cypher({query: cypher})
   const rows = raw?.rows ?? []
   let out: list<LibrarianCallSite> = []
   for row in rows {
@@ -223,6 +240,7 @@ pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<Libra
  * @example: code_librarian_member_surface("StatusOr", "include/status.hpp")
  */
 pub fn code_librarian_member_surface(
+  code_index: HarnessCodeIndex,
   container: string,
   defining_path: string? = nil,
 ) -> LibrarianMemberSurface {
@@ -232,7 +250,7 @@ pub fn code_librarian_member_surface(
     return {container: target, definitions: [], members: [], ambiguous: false}
   }
   const safe_target = __code_librarian_cypher_literal(target)
-  const definition_raw = hostlib_code_index_cypher(
+  const definition_raw = code_index.cypher(
     {
       query:
         "MATCH (d {name: '${safe_target}'}) WHERE d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path, d.line AS line, d.kind AS kind",
@@ -258,7 +276,7 @@ pub fn code_librarian_member_surface(
   if len(definitions) == 0 {
     return {container: target, definitions: [], members: [], ambiguous: false}
   }
-  const member_raw = hostlib_code_index_cypher(
+  const member_raw = code_index.cypher(
     {
       query:
         "MATCH (owner {name: '${safe_target}'})-[:CONTAINS]->(member) RETURN owner.path AS owner_path, member.name AS name, member.kind AS kind, member.path AS path, member.line AS line, member.signature AS signature, member.access_level AS access_level",
@@ -315,6 +333,7 @@ pub fn code_librarian_member_surface(
  * @example: code_librarian_external_consumers("greet", "src/greeter.rs")
  */
 pub fn code_librarian_external_consumers(
+  code_index: HarnessCodeIndex,
   symbol: string,
   defining_path: string,
   max_sites: int = 20,
@@ -335,7 +354,7 @@ pub fn code_librarian_external_consumers(
     }
   }
   const safe_target = __code_librarian_cypher_literal(target)
-  const call_raw = hostlib_code_index_cypher(
+  const call_raw = code_index.cypher(
     {
       query:
         "MATCH (c:CallSite) WHERE c.name = '${safe_target}' RETURN c.path AS path, c.line AS line",
@@ -359,7 +378,7 @@ pub fn code_librarian_external_consumers(
       site_keys = site_keys + {[key]: true}
     }
   }
-  const definition_raw = hostlib_code_index_cypher(
+  const definition_raw = code_index.cypher(
     {
       query:
         "MATCH (d {name: '${safe_target}'}) WHERE d.kind = 'Function' OR d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path",
@@ -397,8 +416,11 @@ pub fn code_librarian_external_consumers(
  * @api_stability: experimental
  * @example: code_librarian_what_imports("src/util.ts")
  */
-pub fn code_librarian_what_imports(path: string) -> list<LibrarianImport> {
-  const users = hostlib_code_index_importers_of({module: path})
+pub fn code_librarian_what_imports(
+  code_index: HarnessCodeIndex,
+  path: string,
+) -> list<LibrarianImport> {
+  const users = code_index.importers_of({module: path})
   const importers = users?.importers ?? []
   let out: list<LibrarianImport> = []
   for item in importers {
@@ -411,10 +433,10 @@ pub fn code_librarian_what_imports(path: string) -> list<LibrarianImport> {
  * Recent changes since `since_seq` in the version log. The issue spec
  * names this `recent_changes(window: Duration)`; Harn has no native
  * Duration primitive yet, so the library accepts the same monotonic
- * sequence number used by `hostlib_code_index_current_seq` /
+ * sequence number used by `code_index.current_seq` /
  * `changes_since`. `since_seq = 0` returns every recorded change.
  *
- * Pair with `hostlib_code_index_current_seq({})` to checkpoint and
+ * Pair with `code_index.current_seq({})` to checkpoint and
  * resume.
  *
  * @effects: [host]
@@ -422,17 +444,20 @@ pub fn code_librarian_what_imports(path: string) -> list<LibrarianImport> {
  * @api_stability: experimental
  * @example: code_librarian_recent_changes(0)
  */
-pub fn code_librarian_recent_changes(since_seq: int = 0) -> list<LibrarianFileChange> {
+pub fn code_librarian_recent_changes(
+  code_index: HarnessCodeIndex,
+  since_seq: int = 0,
+) -> list<LibrarianFileChange> {
   if since_seq < 0 {
     throw "code_librarian_recent_changes: since_seq must be >= 0"
   }
-  const raw = hostlib_code_index_changes_since({seq: since_seq})
-  return raw ?? []
+  const raw = code_index.changes_since({seq: since_seq})
+  return schema_expect(raw ?? [], schema_list(schema_of(LibrarianFileChange)))
 }
 
 /**
  * Staleness signal for `path`: did the on-disk content drift away from
- * the indexed snapshot? Wraps `hostlib_code_index_freshness` directly,
+ * the indexed snapshot? Wraps `code_index.freshness` directly,
  * preserving the `{known, stale, indexed_hash, disk_hash, ...}` shape.
  *
  * @effects: [host, fs]
@@ -440,8 +465,8 @@ pub fn code_librarian_recent_changes(since_seq: int = 0) -> list<LibrarianFileCh
  * @api_stability: experimental
  * @example: code_librarian_freshness("src/util.ts")
  */
-pub fn code_librarian_freshness(path: string) -> LibrarianFreshness {
-  return hostlib_code_index_freshness({path: path})
+pub fn code_librarian_freshness(code_index: HarnessCodeIndex, path: string) -> LibrarianFreshness {
+  return schema_expect(code_index.freshness({path: path}), schema_of(LibrarianFreshness))
 }
 
 /**
@@ -455,8 +480,11 @@ pub fn code_librarian_freshness(path: string) -> LibrarianFreshness {
  * @api_stability: experimental
  * @example: code_librarian_file_hash_snapshot(["src/util.ts"])
  */
-pub fn code_librarian_file_hash_snapshot(paths: list<string>) -> LibrarianFileHashSnapshot {
-  return verification_file_hash_snapshot(paths)
+pub fn code_librarian_file_hash_snapshot(
+  code_index: HarnessCodeIndex,
+  paths: list<string>,
+) -> LibrarianFileHashSnapshot {
+  return verification_file_hash_snapshot(code_index, paths)
 }
 
 /**
@@ -470,11 +498,20 @@ pub fn code_librarian_file_hash_snapshot(paths: list<string>) -> LibrarianFileHa
  * @api_stability: experimental
  * @example: code_librarian_branch_overlay("topic/cypher")
  */
-pub fn code_librarian_branch_overlay(branch: string?) -> LibrarianOverlay {
+pub fn code_librarian_branch_overlay(
+  code_index: HarnessCodeIndex,
+  branch: string?,
+) -> LibrarianOverlay {
   if branch == nil {
-    return hostlib_code_index_branch_overlay({action: "deactivate"})
+    return schema_expect(
+      code_index.branch_overlay({action: "deactivate"}),
+      schema_of(LibrarianOverlay),
+    )
   }
-  return hostlib_code_index_branch_overlay({action: "activate", branch: branch})
+  return schema_expect(
+    code_index.branch_overlay({action: "activate", branch: branch}),
+    schema_of(LibrarianOverlay),
+  )
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -527,22 +564,29 @@ const __DEFAULT_LLM_OPTIONS = {
  * @effects: [host, llm.call]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: code_librarian_query_nl("which file defines formatDate?")
+ * @example: code_librarian_query_nl(harness, "which file defines formatDate?")
  */
-pub fn code_librarian_query_nl(text: string, options = nil) -> dict {
+pub fn code_librarian_query_nl(
+  harness: Harness,
+  code_index: HarnessCodeIndex,
+  clock: HarnessClock,
+  text: string,
+  options = nil,
+) -> dict {
   const opts = options ?? {}
-  const started_ms = __timing_now_monotonic_ms()
+  const started_ms = clock.monotonic_ms()
   const cache_key = "v1:" + lowercase(trim(text))
   const envelope = with_cache_envelope(
+    harness,
     cache_key,
-    { -> __nl_resolve(text, opts) },
+    { -> __nl_resolve(harness.agent, harness.llm, code_index, text, opts) },
     {store: {backend: "mem", namespace: __NL_CACHE_NAMESPACE}, ttl_seconds: __NL_CACHE_TTL_SECONDS},
   )
   const result = envelope.value
   return {
     cache_hit: envelope.hit,
     cypher: result?.cypher,
-    elapsed_ms: __timing_now_monotonic_ms() - started_ms,
+    elapsed_ms: clock.monotonic_ms() - started_ms,
     mcts_depth: to_int(result?.mcts_depth ?? 0),
     mcts_expansions: to_int(result?.mcts_expansions ?? 0),
     path: result.path,
@@ -550,11 +594,17 @@ pub fn code_librarian_query_nl(text: string, options = nil) -> dict {
   }
 }
 
-fn __nl_resolve(text, opts) -> dict {
-  const compiled = __nl_compile(text, opts)
+fn __nl_resolve(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  code_index: HarnessCodeIndex,
+  text,
+  opts,
+) -> dict {
+  const compiled = __nl_compile(llm, text, opts)
   if compiled.ok {
     const rows = try {
-      const raw = hostlib_code_index_cypher({query: compiled.cypher})
+      const raw = code_index.cypher({query: compiled.cypher})
       raw?.rows ?? []
     } catch (_) {
       []
@@ -570,8 +620,8 @@ fn __nl_resolve(text, opts) -> dict {
     }
   }
   // Compile-path missed (parse error or zero rows). Fall back to MCTS.
-  const mcts = __nl_mcts(text, opts)
-  __nl_emit_fallback(opts, text, compiled?.cypher, mcts)
+  const mcts = __nl_mcts(code_index, text, opts)
+  __nl_emit_fallback(agent, opts, text, compiled?.cypher, mcts)
   return {
     cypher: compiled?.cypher,
     mcts_depth: mcts.depth,
@@ -581,13 +631,14 @@ fn __nl_resolve(text, opts) -> dict {
   }
 }
 
-fn __nl_emit_fallback(opts, text, attempted_cypher, mcts) {
+fn __nl_emit_fallback(agent: HarnessAgent, opts, text, attempted_cypher, mcts) {
   const session_id = to_string(opts?.session_id ?? "")
   if session_id == "" {
     return
   }
   const _ = try {
     agent_emit_event(
+      agent,
       session_id,
       "code_librarian_query_nl_fallback",
       {
@@ -617,12 +668,12 @@ const __CYPHER_TEMPLATES = [
 const __CYPHER_PROMPT_PREAMBLE =
   "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Field, EnumCase, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, access_level, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
 
-fn __nl_compile(text, opts) -> dict {
+fn __nl_compile(llm: HarnessLlm, text, opts) -> dict {
   const prompt = __nl_compile_prompt(text)
   const schema = schema_object({cypher: schema_string()})
   const call_opts = __nl_llm_options(opts)
   const envelope = try {
-    safe_structured_call(prompt, schema, call_opts)
+    safe_structured_call(llm, prompt, schema, call_opts)
   } catch (_) {
     return {cypher: nil, ok: false}
   }
@@ -673,7 +724,7 @@ fn __nl_llm_options(opts) -> dict {
  * the precision tool. Bounded, deterministic exploration with a token-
  * overlap heuristic suffices for the 30-question NL fixture.
  */
-fn __nl_mcts(text, opts) -> dict {
+fn __nl_mcts(code_index: HarnessCodeIndex, text, opts) -> dict {
   const depth_cap = to_int(opts?.mcts_depth_max ?? __MCTS_DEPTH_MAX_DEFAULT)
   const expansion_cap = to_int(opts?.mcts_expansions_max ?? __MCTS_EXPANSIONS_MAX_DEFAULT)
   const terms = __nl_terms(text)
@@ -683,7 +734,14 @@ fn __nl_mcts(text, opts) -> dict {
   let depth_reached = 0
   for term in terms {
     if expansions < expansion_cap {
-      const probe = __nl_mcts_probe(term, terms, depth_cap, expansion_cap - expansions, seen)
+      const probe = __nl_mcts_probe(
+        code_index,
+        term,
+        terms,
+        depth_cap,
+        expansion_cap - expansions,
+        seen,
+      )
       seen = probe.seen
       expansions = expansions + probe.expansions
       depth_reached = max(depth_reached, probe.depth_reached)
@@ -706,12 +764,12 @@ fn __nl_mcts(text, opts) -> dict {
   }
 }
 
-fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
+fn __nl_mcts_probe(code_index: HarnessCodeIndex, term, all_terms, depth_cap, budget, seen) -> dict {
   if budget <= 0 {
     return {candidates: [], depth_reached: 0, expansions: 0, seen: seen}
   }
   const seeds = try {
-    const raw = hostlib_code_index_cypher(
+    const raw = code_index.cypher(
       {
         query: "MATCH (n) WHERE n.name = '" + __nl_escape(term)
           + "' RETURN n.path AS path, n.name AS name, n.kind AS kind",
@@ -751,7 +809,7 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
     )
       + "]->(n) RETURN n.path AS path, n.name AS name, n.kind AS kind"
     const hop = try {
-      const raw = hostlib_code_index_cypher({query: cypher})
+      const raw = code_index.cypher({query: cypher})
       raw?.rows ?? []
     } catch (_) {
       []
@@ -782,7 +840,7 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
   const callers_cypher = "MATCH (s:Function {name: '" + __nl_escape(term)
     + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.name AS name, c.kind AS kind"
   const callers = try {
-    const raw = hostlib_code_index_cypher({query: callers_cypher})
+    const raw = code_index.cypher({query: callers_cypher})
     raw?.rows ?? []
   } catch (_) {
     []

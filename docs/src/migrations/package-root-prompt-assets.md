@@ -6,7 +6,7 @@ Harn supports two refactor-safe forms for addressing `.harn.prompt` assets:
   `harn.toml` ancestor).
 - `@<alias>/<rel>` — anchored at a `[asset_roots]` entry in `harn.toml`.
 
-Existing `render(...)` / `render_prompt(...)` calls keep their
+Existing `harness.fs.render_prompt(...)` calls keep their
 source-relative behavior unchanged. Migrating brittle `../../...`
 paths to package-root form is optional but stops asset references from
 breaking when callers move.
@@ -15,7 +15,7 @@ breaking when callers move.
 
 ```harn,ignore
 // pipelines/lib/runtime/workflow/graph-stages.harn
-render_prompt("../../../partials/tool-examples.harn.prompt", bindings)
+harness.fs.render_prompt("../../../partials/tool-examples.harn.prompt", bindings)
 ```
 
 A pure refactor that relocates `graph-stages.harn` silently breaks the
@@ -26,7 +26,7 @@ at a non-existent file.
 ## After — project-root form
 
 ```harn,ignore
-render_prompt("@/pipelines/partials/tool-examples.harn.prompt", bindings)
+harness.fs.render_prompt("@/pipelines/partials/tool-examples.harn.prompt", bindings)
 ```
 
 Verbose but resilient: the path resolves the same regardless of where
@@ -44,7 +44,7 @@ partials = "pipelines/partials"
 Then:
 
 ```harn,ignore
-render_prompt("@partials/tool-examples.harn.prompt", bindings)
+harness.fs.render_prompt("@partials/tool-examples.harn.prompt", bindings)
 ```
 
 Aliases are resolved against the project root, so they work from any
@@ -52,7 +52,7 @@ file in the workspace.
 
 ## What changed in the runtime
 
-- `render(...)`, `render_prompt(...)`, `render_with_provenance(...)`,
+- `harness.fs.render_prompt(...)`, `harness.fs.render_prompt_with_provenance(...)`,
   the `template.render` host capability, and `{{ include "..." }}`
   directives now recognize the `@/...` and `@<alias>/...` forms.
 - `harn check` reports a `preflight: ...` diagnostic when:
@@ -64,12 +64,12 @@ file in the workspace.
   `prompt_assets` so packagers don't need to maintain a separate file
   list.
 - The Harn LSP go-to-definition jumps from a literal
-  `render_prompt("@/...")` argument straight to the target prompt file.
+  `harness.fs.render_prompt("@/...")` argument straight to the target prompt file.
 
 ## Safety
 
 Both forms reject `..` segments and absolute targets. A
-`render_prompt("@/../escape")` call fails with `invalid project-root
+`harness.fs.render_prompt("@/../escape")` call fails with `invalid project-root
 asset path`, so a package-rooted asset cannot reach outside the
 project root.
 

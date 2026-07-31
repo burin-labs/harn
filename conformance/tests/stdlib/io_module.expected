@@ -1,8 +1,8 @@
 [harn] warn
-[harn] true
-[harn] true
-[harn] false
-[harn] true
+true
+true
+false
+true
 [harn] true
 [harn] ok
 [harn] [  alpha  ]

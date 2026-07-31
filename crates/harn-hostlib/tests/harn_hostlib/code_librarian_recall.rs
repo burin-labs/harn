@@ -36,6 +36,7 @@ fn run_harn(source: &str) -> VmValue {
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
+                vm.set_harness(harn_vm::Harness::real());
                 vm.execute(&chunk).await.expect("execute")
             })
             .await
@@ -89,7 +90,7 @@ fn librarian_query_meets_ground_truth_recall() {
             "match_key contains chars that need escaping: {match_key}"
         );
         query_lines.push_str(&format!(
-            "rows = rows + [project(code_librarian_query(\"{cypher}\").rows, \"{match_key}\")]\n"
+            "rows = rows + [project(code_librarian_query(harness.code_index, \"{cypher}\").rows, \"{match_key}\")]\n"
         ));
     }
     let source = format!(
@@ -107,10 +108,12 @@ fn project(rows, key) {{
   return out
 }}
 
-const _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
-let rows = []
-{query_lines}
-return rows
+pipeline default(harness: Harness, _task) {{
+  const _ = harness.code_index.rebuild({{ root: "{root_str}" }})
+  let rows = []
+  {query_lines}
+  return rows
+}}
 "#
     );
 
@@ -171,20 +174,22 @@ fn librarian_who_calls_returns_call_sites() {
     let source = format!(
         r#"
 import "std/code_librarian"
-const _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
-const callers = code_librarian_who_calls("fetchUser")
-let paths = []
-for c in callers {{
-  paths = paths + [c.path]
-}}
-let symbols = []
-for c in callers {{
-  symbols = symbols + [c.symbol]
-}}
-return {{
-  count: len(callers),
-  paths: paths,
-  symbols: symbols,
+pipeline default(harness: Harness, _task) {{
+  const _ = harness.code_index.rebuild({{ root: "{root_str}" }})
+  const callers = code_librarian_who_calls(harness.code_index, "fetchUser")
+  let paths = []
+  for c in callers {{
+    paths = paths + [c.path]
+  }}
+  let symbols = []
+  for c in callers {{
+    symbols = symbols + [c.symbol]
+  }}
+  return {{
+    count: len(callers),
+    paths: paths,
+    symbols: symbols,
+  }}
 }}
 "#
     );
@@ -230,17 +235,19 @@ fn librarian_freshness_and_overlay_roundtrip() {
     let source = format!(
         r#"
 import "std/code_librarian"
-const _ = hostlib_code_index_rebuild({{ root: "{root_str}" }})
-const fresh = code_librarian_freshness("src/util.ts")
-const unknown = code_librarian_freshness("src/no-such-file.ts")
-const on = code_librarian_branch_overlay("topic/test")
-const off = code_librarian_branch_overlay(nil)
-return {{
-  fresh_known: fresh.known,
-  fresh_stale: fresh.stale,
-  unknown_known: unknown.known,
-  on_active: on.active,
-  off_active: off.active,
+pipeline default(harness: Harness, _task) {{
+  const _ = harness.code_index.rebuild({{ root: "{root_str}" }})
+  const fresh = code_librarian_freshness(harness.code_index, "src/util.ts")
+  const unknown = code_librarian_freshness(harness.code_index, "src/no-such-file.ts")
+  const on = code_librarian_branch_overlay(harness.code_index, "topic/test")
+  const off = code_librarian_branch_overlay(harness.code_index, nil)
+  return {{
+    fresh_known: fresh.known,
+    fresh_stale: fresh.stale,
+    unknown_known: unknown.known,
+    on_active: on.active,
+    off_active: off.active,
+  }}
 }}
 "#
     );

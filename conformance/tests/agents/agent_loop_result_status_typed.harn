@@ -4,7 +4,7 @@ import {
   __tool_result_product_error,
 } from "std/agent/loop_result_status"
 
-pipeline test() {
+pipeline test(harness: Harness) {
   // Host denial envelope: typed error_category on the outer result, rejection
   // code nested under `result.error`. No prose sniffing required.
   const denied = {
@@ -79,5 +79,5 @@ pipeline test() {
   }
   assert_eq(__tool_result_product_error(diagnostics), false)
   assert_eq(__tool_result_ok(diagnostics), true)
-  log("agent loop result status typed ok")
+  harness.stdio.log("agent loop result status typed ok")
 }

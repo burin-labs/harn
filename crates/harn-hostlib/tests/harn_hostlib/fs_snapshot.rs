@@ -13,7 +13,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use harn_hostlib::tools::permissions;
 use harn_hostlib::{
     fs_snapshot::FsSnapshotCapability, tools::ToolsCapability, BuiltinRegistry, HostlibCapability,
 };
@@ -22,7 +21,6 @@ use harn_vm::VmValue;
 use tempfile::TempDir;
 
 fn registry() -> BuiltinRegistry {
-    permissions::enable_for_test();
     let mut registry = BuiltinRegistry::new();
     FsSnapshotCapability.register_builtins(&mut registry);
     ToolsCapability.register_builtins(&mut registry);

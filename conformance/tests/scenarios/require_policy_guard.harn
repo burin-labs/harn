@@ -5,30 +5,36 @@
 // missing-auth HTTP 401.
 import { require_policy } from "std/harness/policy"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // kinds clause: an anonymous principal can never satisfy a non-empty
   // allow-set, so it is denied before kind details are considered.
-  const kind_denial = require_policy({kinds: ["operator", "platform_admin"]})
+  const kind_denial = require_policy(
+    harness.auth,
+    harness.tenant,
+    {kinds: ["operator", "platform_admin"]},
+  )
   assert(kind_denial != nil, "unclassified principal must be denied")
   assert_eq(kind_denial.status, 401)
   assert_eq(kind_denial.body.code, "unauthorized")
   assert_eq(kind_denial.body.details.kind, "missing_auth")
   // Tenant-safe: the denial never echoes the caller's own kind.
   assert_eq(kind_denial.body.details["caller_kind"], nil)
-  log("kind missing auth ok")
+  harness.stdio.log("kind missing auth ok")
   // scopes clause: anonymous callers fail as missing-auth, not as a
   // principal-specific missing-scope denial.
-  const scope_denial = require_policy({scopes: ["secrets:write"]})
+  const scope_denial = require_policy(harness.auth, harness.tenant, {scopes: ["secrets:write"]})
   assert(scope_denial != nil, "missing scope must be denied")
   assert_eq(scope_denial.status, 401)
   assert_eq(scope_denial.body.details.kind, "missing_auth")
-  log("scope missing auth ok")
+  harness.stdio.log("scope missing auth ok")
   const req = {
     method: "POST",
     path_params: {tenant: "acme"},
     body: "{\"method\":\"doc.write\",\"owner\":\"user_1\"}",
   }
   const mismatch = require_policy(
+    harness.auth,
+    harness.tenant,
     {
       matches: [
         {
@@ -48,14 +54,29 @@ pipeline test(task) {
   // Mismatch denials describe the failing guard but never echo compared values.
   assert_eq(mismatch.body.details["left_value"], nil)
   assert_eq(mismatch.body.details["right_value"], nil)
-  log("tenant mismatch ok")
-  assert_eq(require_policy({matches: [{left: "body.owner", right: {value: "user_1"}}]}, req), nil)
-  log("body match ok")
-  const auth_match = require_policy({matches: [{left: "body.owner", right: "auth.subject"}]}, req)
+  harness.stdio.log("tenant mismatch ok")
+  assert_eq(
+    require_policy(
+      harness.auth,
+      harness.tenant,
+      {matches: [{left: "body.owner", right: {value: "user_1"}}]},
+      req,
+    ),
+    nil,
+  )
+  harness.stdio.log("body match ok")
+  const auth_match = require_policy(
+    harness.auth,
+    harness.tenant,
+    {matches: [{left: "body.owner", right: "auth.subject"}]},
+    req,
+  )
   assert_eq(auth_match.status, 401)
   assert_eq(auth_match.body.details.kind, "missing_auth")
-  log("auth match missing auth ok")
+  harness.stdio.log("auth match missing auth ok")
   const method_denial = require_policy(
+    harness.auth,
+    harness.tenant,
     {
       method_path: "body.method",
       methods: {
@@ -76,9 +97,9 @@ pipeline test(task) {
   assert_eq(method_denial.status, 403)
   assert_eq(method_denial.body.details.kind, "resource_mismatch")
   assert_eq(method_denial.body.details.label, "owner")
-  log("json-rpc method policy ok")
+  harness.stdio.log("json-rpc method policy ok")
   // No clauses (or an empty allow-set) → nothing to enforce → allowed (nil).
-  assert_eq(require_policy({}), nil)
-  assert_eq(require_policy({kinds: []}), nil)
-  log("noop allow ok")
+  assert_eq(require_policy(harness.auth, harness.tenant, {}), nil)
+  assert_eq(require_policy(harness.auth, harness.tenant, {kinds: []}), nil)
+  harness.stdio.log("noop allow ok")
 }

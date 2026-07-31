@@ -4,7 +4,7 @@
 // on_text_json parses JSON-shaped value.text into value.data.
 import { with_coerce } from "std/llm/handlers"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const synthetic_with_data = { _call ->
     return {
       ok: true,
@@ -22,19 +22,19 @@ pipeline default() {
   const env_data = caller_data(
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )
-  __io_println(env_data.value.data.verdict)
-  __io_println(env_data.value.data.bullets[0])
-  __io_println(env_data.value.data.nested.keyone)
+  harness.stdio.println(env_data.value.data.verdict)
+  harness.stdio.println(env_data.value.data.bullets[0])
+  harness.stdio.println(env_data.value.data.nested.keyone)
   // Original mixed-case data preserved at raw_data.
-  __io_println(env_data.value.raw_data.Verdict)
+  harness.stdio.println(env_data.value.raw_data.Verdict)
   // Failure envelope passes through unchanged.
   const failing = { _call -> return {ok: false, status: "rate_limited", error: "429"} }
   const failing_caller = with_coerce(failing, {})
   const failing_env = failing_caller(
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )
-  __io_println(failing_env.ok)
-  __io_println(failing_env.status)
+  harness.stdio.println(failing_env.ok)
+  harness.stdio.println(failing_env.status)
   // on_text_json parses JSON-shaped value.text into value.data.
   const synthetic_text = { _call ->
     return {
@@ -52,5 +52,5 @@ pipeline default() {
   const env_text = caller_text(
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )
-  __io_println(env_text.value.data.decision)
+  harness.stdio.println(env_text.value.data.decision)
 }

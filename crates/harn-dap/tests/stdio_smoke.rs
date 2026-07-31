@@ -145,7 +145,7 @@ fn dap_stdio_hits_breakpoint_and_reads_a_local_variable() {
     // both `x` and `y` are in scope.
     std::fs::write(
         &program,
-        "pipeline test(task) {\n  const x = 42\n  const y = x + 1\n  log(y)\n}\n",
+        "pipeline test(harness: Harness, task) {\n  const x = 42\n  const y = x + 1\n  harness.stdio.log(y)\n}\n",
     )
     .unwrap();
     let program_path = program.to_string_lossy().to_string();

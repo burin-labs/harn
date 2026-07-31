@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -5,8 +6,6 @@ import { llm_text, with_llm_script } from "std/testing"
  * policy by returning a `{decision: "allow"|"deny", reason}` dict.
  * `permission_replied` is advisory and observes the final decision.
  */
-const replies = atomic(0)
-
 fn make_tools() {
   const registry = tool_registry()
   return tool_define(
@@ -17,30 +16,33 @@ fn make_tools() {
   )
 }
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  const replies = harness.runtime.atomic(0)
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "permission_asked",
-    { event ->
+    { _hook_harness, event ->
       if to_string(event?.tool?.name ?? "") == "guarded_tool" {
         return {decision: "deny", reason: "session hook says no"}
       }
       return nil
     },
   )
-  register_session_hook(
+  harness.agent.register_session_hook(
     "permission_replied",
-    { event ->
+    { _hook_harness, event ->
       if to_string(event?.decision ?? "") == "deny" {
-        atomic_add(replies, 1)
+        harness.runtime.atomic_add(replies, 1)
       }
       return nil
     },
   )
   with_llm_script(
+    harness.llm,
     [{tool_calls: [{id: "call_1", name: "guarded_tool", arguments: {}}]}, llm_text("done")],
     { ->
       const result = agent_loop(
+        harness,
         "use guarded tool",
         nil,
         {
@@ -51,9 +53,9 @@ pipeline default() {
           permissions: {deny: ["guarded_tool"], on_escalation: { _req -> return false }},
         },
       )
-      __io_println(result.status)
-      __io_println(atomic_get(replies))
-      clear_session_hooks()
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(replies))
+      harness.agent.clear_session_hooks()
     },
   )
 }

@@ -5,7 +5,7 @@
  *
  * `harness.net.*` is the ambient-free entry point for network I/O in
  * Harn scripts. By default it is gated only by the process-wide
- * `egress_policy(...)` allowlist (when configured). A `NetPolicy`
+ * `harness.net.egress_policy(...)` allowlist (when configured). A `NetPolicy`
  * value layered on top of an individual harness lets the script
  * declare an allowlist / denylist / default action and pick what
  * happens on a violation (throw, audit-only allow, quarantine the
@@ -17,7 +17,7 @@
  *   import { NetPolicy } from "std/net_policy"
  *
  *   pipeline default() {
- *     pipeline_on_finish({ harness, return_value ->
+ *     harness.agent.pipeline_on_finish({ harness, return_value ->
  *       let policy = NetPolicy.create({
  *         allow: [
  *           NetPolicy.domain("github.com"),

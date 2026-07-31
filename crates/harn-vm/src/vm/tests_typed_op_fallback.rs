@@ -58,10 +58,10 @@ fn typed_param_fed_dynamic_float_falls_back() {
     // `n: int` is a static guess; the `any` argument is actually a float. The
     // typed `MulInt` must fall back to generic multiply, not throw.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(task) {
+        r#"pipeline default(harness: Harness, task) {
   fn f(n: int) { return n * 2 }
-  const cell = shared_cell("k", 2.5)
-  log("${f(shared_get(cell))}")
+  const cell = harness.runtime.shared_cell("k", 2.5)
+  harness.stdio.log("${f(harness.runtime.shared_get(cell))}")
 }"#,
     );
     assert_eq!(result.unwrap(), "[harn] 5.0");
@@ -72,10 +72,10 @@ fn annotated_let_initializer_from_dynamic_float_falls_back() {
     // `let x: int = <any float>` — the annotation is not runtime-enforced, so
     // the initializer is really a float. `x + 1` must fall back to generic add.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(task) {
-  const cell = shared_cell("k", 2.5)
-  const x: int = shared_get(cell)
-  log("${x + 1}")
+        r#"pipeline default(harness: Harness, task) {
+  const cell = harness.runtime.shared_cell("k", 2.5)
+  const x: int = harness.runtime.shared_get(cell)
+  harness.stdio.log("${x + 1}")
 }"#,
     );
     assert_eq!(result.unwrap(), "[harn] 3.5");
@@ -87,10 +87,10 @@ fn annotated_var_initializer_from_dynamic_float_falls_back() {
     // is a dynamic float. (The monomorphic-binding analysis trusts it because it
     // is never reassigned; the runtime guard is what keeps it sound.)
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(task) {
-  const cell = shared_cell("k", 4.5)
-  let x: int = shared_get(cell)
-  log("${x - 1}")
+        r#"pipeline default(harness: Harness, task) {
+  const cell = harness.runtime.shared_cell("k", 4.5)
+  let x: int = harness.runtime.shared_get(cell)
+  harness.stdio.log("${x - 1}")
 }"#,
     );
     assert_eq!(result.unwrap(), "[harn] 3.5");
@@ -101,10 +101,10 @@ fn typed_comparison_fed_dynamic_float_falls_back() {
     // A typed `LessInt` fed a float operand must fall back to the generic
     // comparison rather than throwing.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(task) {
-  const cell = shared_cell("k", 2.5)
-  const x: int = shared_get(cell)
-  log("${x < 3}")
+        r#"pipeline default(harness: Harness, task) {
+  const cell = harness.runtime.shared_cell("k", 2.5)
+  const x: int = harness.runtime.shared_get(cell)
+  harness.stdio.log("${x < 3}")
 }"#,
     );
     assert_eq!(result.unwrap(), "[harn] true");
@@ -115,10 +115,10 @@ fn typed_string_equality_fed_dynamic_int_falls_back() {
     // `EqualString` guarded: comparing a declared-string binding that actually
     // holds an int against a string literal is `false` generically, not a throw.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(task) {
-  const cell = shared_cell("k", 7)
-  const s: string = shared_get(cell)
-  log("${s == "7"}")
+        r#"pipeline default(harness: Harness, task) {
+  const cell = harness.runtime.shared_cell("k", 7)
+  const s: string = harness.runtime.shared_get(cell)
+  harness.stdio.log("${s == "7"}")
 }"#,
     );
     assert_eq!(result.unwrap(), "[harn] false");
@@ -130,18 +130,18 @@ fn genuinely_incompatible_operands_error_identically() {
     // incompatible operands (int + string) — and with the same error in both
     // builds, so no optimized-only crash and no silent wrong answer.
     let optimized = run(
-        r#"pipeline default(task) {
-  const cell = shared_cell("k", "hi")
-  const x: int = shared_get(cell)
-  log("${x + 1}")
+        r#"pipeline default(harness: Harness, task) {
+  const cell = harness.runtime.shared_cell("k", "hi")
+  const x: int = harness.runtime.shared_get(cell)
+  harness.stdio.log("${x + 1}")
 }"#,
         CompilerOptions::optimized(),
     );
     let baseline = run(
-        r#"pipeline default(task) {
-  const cell = shared_cell("k", "hi")
-  const x: int = shared_get(cell)
-  log("${x + 1}")
+        r#"pipeline default(harness: Harness, task) {
+  const cell = harness.runtime.shared_cell("k", "hi")
+  const x: int = harness.runtime.shared_get(cell)
+  harness.stdio.log("${x + 1}")
 }"#,
         CompilerOptions::without_optimizations(),
     );
@@ -153,14 +153,14 @@ fn genuinely_incompatible_operands_error_identically() {
 fn monomorphic_fast_path_still_correct() {
     // The hot path (operands match the static guess) is unaffected.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(task) {
+        r#"pipeline default(harness: Harness, task) {
   let i = 0
   let total = 0
   while i < 10 {
     total = total + (i + 3) * 2 - 1
     i = i + 1
   }
-  log("${total}")
+  harness.stdio.log("${total}")
 }"#,
     );
     assert_eq!(result.unwrap(), "[harn] 140");

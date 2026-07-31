@@ -746,7 +746,7 @@ fn admin_merge(ctx) {
   return ctx
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   register_persona_hook("merge_*", "PreStep", { ctx -> nil })
   register_step_hook("merge_captain", "admin_merge", "PostStep", { ctx ->
     {output: ctx.output}

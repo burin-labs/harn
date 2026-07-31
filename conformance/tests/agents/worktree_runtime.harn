@@ -1,30 +1,39 @@
 import "std/worktree"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const base = path_join(harness.fs.temp_dir(), "harn-worktree-runtime-" + unique)
+  const base = path_join(harness.fs.workspace_temp_dir(), "harn-worktree-runtime-" + unique)
   harness.fs.mkdir(base)
   const repo = path_join(base, "repo")
   harness.fs.mkdir(repo)
-  __io_println(exec_at(repo, "git", "init")?.success)
+  harness.stdio.println(harness.process.exec_at(repo, "git", "init")?.success)
   harness.fs.write_text(path_join(repo, "README.md"), "hello\n")
-  __io_println(exec_at(repo, "git", "add", "README.md")?.success)
-  __io_println(
-    shell_at(repo, "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init")
-      ?.success,
+  harness.stdio.println(harness.process.exec_at(repo, "git", "add", "README.md")?.success)
+  harness.stdio.println(
+    harness.process.shell_at(
+      repo,
+      "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init",
+    )?.success,
   )
-  const worktree = worktree_create(repo, "feature_runtime", "HEAD", nil)
-  __io_println(worktree?.success)
-  __io_println(harness.fs.exists(path_join(worktree?.path, "README.md")))
+  const worktree = worktree_create(
+    harness.fs,
+    harness.process,
+    repo,
+    "feature_runtime",
+    "HEAD",
+    nil,
+  )
+  harness.stdio.println(worktree?.success)
+  harness.stdio.println(harness.fs.exists(path_join(worktree?.path, "README.md")))
   harness.fs.write_text(path_join(worktree?.path, "README.md"), "hello\nworld\n")
-  const diff = worktree_diff(worktree?.path, nil)
-  __io_println(diff?.success)
-  __io_println(contains(diff?.stdout, "README"))
-  const status = worktree_status(worktree?.path)
-  __io_println(status?.success)
-  __io_println(contains(status?.stdout, "feature_runtime"))
-  __io_println(worktree_remove(repo, worktree?.path, true)?.success)
+  const diff = worktree_diff(harness.process, worktree?.path, nil)
+  harness.stdio.println(diff?.success)
+  harness.stdio.println(contains(diff?.stdout, "README"))
+  const status = worktree_status(harness.process, worktree?.path)
+  harness.stdio.println(status?.success)
+  harness.stdio.println(contains(status?.stdout, "feature_runtime"))
+  harness.stdio.println(worktree_remove(harness.process, repo, worktree?.path, true)?.success)
 }

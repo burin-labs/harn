@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn lookup_tools() {
@@ -27,9 +28,10 @@ fn lookup_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Case A: required tool not yet succeeded near cap → default policy extends.
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "look_a", name: "lookup", arguments: {query: "first"}}]},
       {tool_calls: [{id: "look_b", name: "lookup", arguments: {query: "second"}}]},
@@ -38,6 +40,7 @@ pipeline default() {
     ],
     { ->
       const required_path = agent_loop(
+        harness,
         "Run the release",
         nil,
         {
@@ -49,13 +52,14 @@ pipeline default() {
           require_successful_tools: ["release_run"],
         },
       )
-      __io_println(required_path.status)
-      __io_println(required_path.adaptive_budget.extensions_used)
-      __io_println(required_path.adaptive_budget.final_limit >= 4)
-      __io_println(required_path?.missing_required_tools == nil)
+      harness.stdio.println(required_path.status)
+      harness.stdio.println(required_path.adaptive_budget.extensions_used)
+      harness.stdio.println(required_path.adaptive_budget.final_limit >= 4)
+      harness.stdio.println(required_path?.missing_required_tools == nil)
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "tk1", name: "lookup", arguments: {query: "a"}}]},
       {tool_calls: [{id: "tk2", name: "lookup", arguments: {query: "b"}}]},
@@ -64,6 +68,7 @@ pipeline default() {
     ],
     { ->
       const custom_policy = agent_loop(
+        harness,
         "Iterate until policy says stop",
         nil,
         {
@@ -83,18 +88,20 @@ pipeline default() {
           },
         },
       )
-      __io_println(custom_policy.status)
-      __io_println(custom_policy.adaptive_budget.extensions_used)
-      __io_println(custom_policy.adaptive_budget.decisions[0].reason)
+      harness.stdio.println(custom_policy.status)
+      harness.stdio.println(custom_policy.adaptive_budget.extensions_used)
+      harness.stdio.println(custom_policy.adaptive_budget.decisions[0].reason)
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "t_nil", name: "lookup", arguments: {query: "noop"}}]},
       llm_text("<user_response>quick stop</user_response>"),
     ],
     { ->
       const no_op_policy = agent_loop(
+        harness,
         "Stop quickly",
         nil,
         {
@@ -106,12 +113,13 @@ pipeline default() {
           loop_control: { _state -> nil },
         },
       )
-      __io_println(no_op_policy.status)
-      __io_println(no_op_policy.adaptive_budget.extensions_used)
-      __io_println(len(no_op_policy.adaptive_budget.decisions))
+      harness.stdio.println(no_op_policy.status)
+      harness.stdio.println(no_op_policy.adaptive_budget.extensions_used)
+      harness.stdio.println(len(no_op_policy.adaptive_budget.decisions))
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "u1", name: "lookup", arguments: {query: "1"}}]},
       {tool_calls: [{id: "u2", name: "lookup", arguments: {query: "2"}}]},
@@ -120,6 +128,7 @@ pipeline default() {
     ],
     { ->
       const until_policy = agent_loop(
+        harness,
         "Until-target extension",
         nil,
         {
@@ -137,8 +146,8 @@ pipeline default() {
           },
         },
       )
-      __io_println(until_policy.status)
-      __io_println(until_policy.adaptive_budget.decisions[0].new_limit)
+      harness.stdio.println(until_policy.status)
+      harness.stdio.println(until_policy.adaptive_budget.decisions[0].new_limit)
     },
   )
 }

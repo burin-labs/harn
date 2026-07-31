@@ -68,8 +68,14 @@ fn build_tools() -> dict {
   return registry
 }
 
-fn run_variant(label: string, mode: string, sentinel: string, registry: dict) -> dict {
-  log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
+fn run_variant(
+  harness: Harness,
+  label: string,
+  mode: string,
+  sentinel: string,
+  registry: dict,
+) -> dict {
+  harness.stdio.log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
   const task =
     "Investigate this small repo and tell me what the compute function does and how it is used in main."
   const system_prompt =
@@ -78,7 +84,7 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
     let names = info?.tool_names ?? []
     let count = info?.tool_count ?? 0
     let iter = info?.iteration ?? 0
-    log("  [${label}] iter=${iter} tools=${count} names=${names}")
+    harness.stdio.log("  [${label}] iter=${iter} tools=${count} names=${names}")
     nil
   }
   let opts = {
@@ -93,10 +99,10 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
   if sentinel != "(default)" {
     opts = opts + {done_sentinel: sentinel}
   }
-  const result = agent_loop(task, system_prompt, opts)
+  const result = agent_loop(harness, task, system_prompt, opts)
   const visible = result?.visible_text ?? ""
   const visible_len = len(visible)
-  log(
+  harness.stdio.log(
     "  [${label}] DONE status=${result.status} iters=${result.llm.iterations} visible_len=${visible_len}",
   )
   if visible_len > 0 {
@@ -105,7 +111,7 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
     } else {
       400
     }
-    log("  [${label}] visible=${visible[:head_len]}")
+    harness.stdio.log("  [${label}] visible=${visible[:head_len]}")
   }
   return {
     label: label,
@@ -115,15 +121,17 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
   }
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const registry = build_tools()
   const results = [
-    run_variant("E:persistent+native+default", "native", "(default)", registry),
-    run_variant("F:persistent+text+default", "text", "(default)", registry),
-    run_variant("G:persistent+native+empty", "native", "", registry),
+    run_variant(harness, "E:persistent+native+default", "native", "(default)", registry),
+    run_variant(harness, "F:persistent+text+default", "text", "(default)", registry),
+    run_variant(harness, "G:persistent+native+empty", "native", "", registry),
   ]
-  log("\n========== EXP2b SUMMARY ==========")
+  harness.stdio.log("\n========== EXP2b SUMMARY ==========")
   for r in results {
-    log("${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}")
+    harness.stdio.log(
+      "${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}",
+    )
   }
 }

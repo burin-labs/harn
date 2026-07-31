@@ -28,8 +28,8 @@ type CacheEnvelope = {value: unknown, hit: bool, key: string, metrics: dict}
  * @effects: []
  * @errors: []
  */
-pub fn cache_get(key: string, options = nil) -> dict {
-  return __cache_get(key, options ?? {})
+pub fn cache_get(llm: HarnessLlm, key: string, options = nil) -> dict {
+  return llm.cache_get(key, options ?? {})
 }
 
 /**
@@ -38,8 +38,8 @@ pub fn cache_get(key: string, options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn cache_put(key: string, value, options = nil) -> dict {
-  return __cache_put(key, value, options ?? {})
+pub fn cache_put(llm: HarnessLlm, key: string, value, options = nil) -> dict {
+  return llm.cache_put(key, value, options ?? {})
 }
 
 /**
@@ -49,8 +49,8 @@ pub fn cache_put(key: string, value, options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn cache_clear(options = nil) {
-  return __cache_clear(options ?? {})
+pub fn cache_clear(llm: HarnessLlm, options = nil) {
+  return llm.cache_clear(options ?? {})
 }
 
 /**
@@ -59,8 +59,8 @@ pub fn cache_clear(options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn cache_stats(options = nil) -> dict {
-  return __cache_stats(options ?? {})
+pub fn cache_stats(llm: HarnessLlm, options = nil) -> dict {
+  return llm.cache_stats(options ?? {})
 }
 
 /**
@@ -70,8 +70,8 @@ pub fn cache_stats(options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn cache_stats_reset(options = nil) {
-  return __cache_stats_reset(options ?? {})
+pub fn cache_stats_reset(llm: HarnessLlm, options = nil) {
+  return llm.cache_stats_reset(options ?? {})
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -187,8 +187,8 @@ fn __cache_store_dict(backend, path, opts) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn with_cache(key: string, compute, options = nil) {
-  return with_cache_envelope(key, compute, options).value
+pub fn with_cache(harness: Harness, key: string, compute, options = nil) {
+  return with_cache_envelope(harness, key, compute, options).value
 }
 
 /**
@@ -202,15 +202,16 @@ pub fn with_cache(key: string, compute, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn with_cache_envelope(key: string, compute, options = nil) -> CacheEnvelope {
+pub fn with_cache_envelope(harness: Harness, key: string, compute, options = nil) -> CacheEnvelope {
   const opts = options ?? {}
   const store_opts = __with_cache_store_opts(opts)
   const session_id = to_string(opts?.session_id ?? "")
-  const cached = cache_get(key, store_opts)
+  const cached = cache_get(harness.llm, key, store_opts)
   if cached.hit {
     const metrics = __with_cache_hit_metrics(opts)
     if session_id != "" {
       __with_cache_emit(
+        harness.agent,
         session_id,
         "cache_hit",
         {
@@ -224,15 +225,17 @@ pub fn with_cache_envelope(key: string, compute, options = nil) -> CacheEnvelope
     return {value: cached.value, hit: true, key: key, metrics: metrics}
   }
   const outcome = timed(
+    harness.clock,
     "cache.compute",
     {key: key, backend: cached?.backend ?? "", namespace: cached?.namespace ?? ""},
     compute,
   )
   const value = outcome.result
   const compute_ms = outcome.timing.duration_ms
-  cache_put(key, value, store_opts)
+  cache_put(harness.llm, key, value, store_opts)
   if session_id != "" {
     __with_cache_emit(
+      harness.agent,
       session_id,
       "cache_miss",
       {
@@ -275,8 +278,8 @@ fn __with_cache_hit_metrics(opts) -> dict {
   return metrics
 }
 
-fn __with_cache_emit(session_id, name, payload) {
+fn __with_cache_emit(agent: HarnessAgent, session_id, name, payload) {
   const _ = try {
-    agent_emit_event(session_id, name, payload)
+    agent_emit_event(agent, session_id, name, payload)
   }
 }

@@ -972,12 +972,20 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
     mod session_model_policy;
+
+    fn write_test_pipeline(path: &Path) {
+        std::fs::write(
+            path,
+            "pipeline main(harness: Harness) { harness.stdio.println(prompt) }\n",
+        )
+        .expect("write script");
+    }
+
     #[tokio::test]
     async fn openapi_json_is_served_from_canonical_spec() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -1003,8 +1011,7 @@ mod tests {
     async fn local_api_creates_session_and_accepts_task() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -1056,8 +1063,7 @@ mod tests {
     async fn local_api_registers_and_downloads_file_artifact() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let report = dir.path().join("report.pdf");
         std::fs::write(&report, b"%PDF-1.7\n").expect("write report");
         let report_uri = url::Url::from_file_path(&report)
@@ -1146,8 +1152,7 @@ mod tests {
     async fn local_api_indexes_harn_artifact_updates() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -1198,8 +1203,7 @@ mod tests {
     async fn local_api_returns_session_view() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -1249,8 +1253,7 @@ mod tests {
     async fn local_api_truncates_session_messages() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -1335,8 +1338,7 @@ mod tests {
     async fn authenticated_api_rejects_missing_key() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let config = ApiServerConfig::for_pipeline(script.to_string_lossy().to_string())
             .with_auth_policy(AuthPolicy {
                 methods: vec![crate::auth::AuthMethodConfig::ApiKey(
@@ -1361,8 +1363,7 @@ mod tests {
     async fn workflow_trigger_runs_endpoint_projects_dispatch_events() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -1453,8 +1454,7 @@ mod tests {
     async fn build_test_router() -> axum::Router {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -1479,8 +1479,7 @@ mod tests {
         let capability_overlay = crate::test_support::fixture_capability_overlay();
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
-            .expect("write script");
+        write_test_pipeline(&script);
         let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().to_string());
         config.acp = config
             .acp

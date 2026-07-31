@@ -19,16 +19,21 @@ pub fn reset() {
   linear_connector_config = {}
 }
 
-fn __call(method, params = {}) {
-  return connector_call("linear", method, filter_nil(merge(linear_connector_config, params ?? {})))
+fn __call(net: HarnessNet, method, params = {}) {
+  return net.connector_call(
+    "linear",
+    method,
+    filter_nil(merge(linear_connector_config, params ?? {})),
+  )
 }
 
 pub fn operation(name, document, options = nil) {
   return graphql_operation(name, document, options)
 }
 
-pub fn execute(operation, variables = nil, options = nil) {
+pub fn execute(net: HarnessNet, operation, variables = nil, options = nil) {
   const raw = graphql(
+    net,
     operation.document,
     variables,
     merge(options ?? {}, {operation_name: operation.operation_name ?? operation.name}),
@@ -79,7 +84,7 @@ fn __search_issues_operation() {
   )
 }
 
-pub fn list_issues(filter = nil, options = nil) {
+pub fn list_issues(net: HarnessNet, filter = nil, options = nil) {
   const variables = filter_nil(
     {
       filter: filter,
@@ -88,25 +93,30 @@ pub fn list_issues(filter = nil, options = nil) {
       includeArchived: options?.include_archived ?? options?.includeArchived,
     },
   )
-  const connection = execute(__list_issues_operation(), variables, options).result
+  const connection = execute(net, __list_issues_operation(), variables, options).result
   return merge(connection, {page: graphql_page_info(connection)})
 }
 
-pub fn update_issue(id, changes, options = nil) {
-  return execute(__update_issue_operation(), {id: id, input: changes}, options).result
+pub fn update_issue(net: HarnessNet, id, changes, options = nil) {
+  return execute(net, __update_issue_operation(), {id: id, input: changes}, options).result
 }
 
-pub fn create_comment(issue_id, body, options = nil) {
-  return execute(__create_comment_operation(), {input: {issueId: issue_id, body: body}}, options)
+pub fn create_comment(net: HarnessNet, issue_id, body, options = nil) {
+  return execute(
+    net,
+    __create_comment_operation(),
+    {input: {issueId: issue_id, body: body}},
+    options,
+  ).result
+}
+
+pub fn search(net: HarnessNet, query, options = nil) {
+  return execute(net, __search_issues_operation(), {query: query, first: options?.first}, options)
     .result
 }
 
-pub fn search(query, options = nil) {
-  return execute(__search_issues_operation(), {query: query, first: options?.first}, options).result
-}
-
-pub fn graphql(query, variables = nil, options = nil) {
-  return __call("graphql", filter_nil((options ?? {}) + {query: query, variables: variables}))
+pub fn graphql(net: HarnessNet, query, variables = nil, options = nil) {
+  return __call(net, "graphql", filter_nil((options ?? {}) + {query: query, variables: variables}))
 }
 
 fn __linear_event(log_event) {
@@ -137,7 +147,7 @@ fn __linear_state_matches(issue, target_state) {
  * @effects: []
  * @errors: []
  */
-pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
+pub fn issue_state_source(net: HarnessNet, issue_id, target_state = nil, options = nil) {
   return {
     label: "linear.issue_state:" + to_string(issue_id) + ":" + to_string(target_state ?? "*"),
     prefers_push: true,
@@ -152,6 +162,7 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
         }
       }
       const response = graphql(
+        net,
         "query HarnMonitorIssue($id: String!) { issue(id: $id) { id identifier title state { id name type } } }",
         {id: issue_id},
         options,
@@ -184,12 +195,19 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn wait_until_issue_state(issue_id, target_state, options = nil) {
+pub fn wait_until_issue_state(
+  net: HarnessNet,
+  runtime: HarnessRuntime,
+  issue_id,
+  target_state,
+  options = nil,
+) {
   return wait_for(
+    runtime,
     merge(
       options ?? {},
       {
-        source: issue_state_source(issue_id, target_state, options),
+        source: issue_state_source(net, issue_id, target_state, options),
         condition: { state -> state.matched },
       },
     ),

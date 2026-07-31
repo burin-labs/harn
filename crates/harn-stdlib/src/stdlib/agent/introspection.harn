@@ -33,7 +33,7 @@
  * let reg = tool_registry()
  * reg = runtime_introspection_tools(reg)
  * reg = tool_define(reg, "my_tool", "...", { ... })
- * agent_loop(prompt, system, {tools: reg})
+ * agent_loop(harness, prompt, system, {tools: reg})
  * ```
  *
  * Options: pass `{only: ["current_model", "current_provider"]}` to

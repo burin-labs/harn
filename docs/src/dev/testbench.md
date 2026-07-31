@@ -19,7 +19,7 @@ them, leaving production behavior untouched.
 
 | Capability | Default | Testbench override |
 |---|---|---|
-| Wall-clock + monotonic time | Real `tokio::time` | `MockClock` — `now_ms()`, `sleep(...)`, cron, and the trigger dispatcher all honor it |
+| Wall-clock + monotonic time | Real `tokio::time` | `MockClock` — `harness.clock.now_ms()`, `harness.clock.sleep_ms(...)`, cron, and the trigger dispatcher all honor it |
 | LLM responses | Configured providers | JSONL fixture replay (same format as `harn run --llm-mock`) or scripted recording |
 | Filesystem (read/write/append/delete) | Real disk | Read-through, copy-on-write `OverlayFs` with diff emission |
 | Subprocess invocations | Real `std::process::Command` | `ProcessTape` records `(program, args, cwd) → (stdout, stderr, exit, virtual Δt)` for replay; `WasiToolchain` runs WASM modules under wasmtime with `clock_time_get` and `poll_oneoff` virtualized into the mock clock |
@@ -46,7 +46,7 @@ Flag reference:
 
 | Flag | Behavior |
 |---|---|
-| `--clock paused` (default) | Pin the unified mock clock; `sleep(...)` advances it. `--clock real` skips this layer |
+| `--clock paused` (default) | Pin the unified mock clock; `harness.clock.sleep_ms(...)` advances it. `--clock real` skips this layer |
 | `--start-at <unix_ms>` | Initial wall-clock time. Defaults to `2026-01-01T00:00:00Z` |
 | `--llm-fixture <path>` | Replay scripted LLM responses (same JSONL format as `harn run --llm-mock`) |
 | `--llm-record <path>` | Capture executed responses for a future replay |
@@ -339,7 +339,7 @@ when sidecar files are present next to the `.harn` test:
 | `<name>.testbench-tape` | Records a fresh unified tape during the run and compares `user_script` records byte-for-byte, with runtime-finalize records checked semantically |
 
 Any sidecar's presence also activates a paused clock pinned at
-`2026-01-01T00:00:00Z` so `now_ms()`, `sleep(...)`, and recorded
+`2026-01-01T00:00:00Z` so `harness.clock.now_ms()`, `harness.clock.sleep_ms(...)`, and recorded
 durations stay deterministic across runs.
 
 Two script-side builtins are wired for tests that need to introspect the
@@ -356,8 +356,8 @@ testbench from inside a pipeline:
 - `harn run --llm-mock` is a strict subset: it activates only the LLM
   axis. `harn test-bench run --llm-fixture` does the same plus pins the
   clock and denies network egress.
-- The unified mock clock (`mock_time(...)` / `advance_time(...)` /
-  `unmock_time()` script builtins) is the same clock testbench mode
+- The unified mock clock (`harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)` /
+  `harness.testing.clock_reset()` script builtins) is the same clock testbench mode
   pins; mixing the two is supported.
 - `OrchestratorHarness` accepts a `Clock`; testbench mode pre-installs
   the same `MockClock` trait the harness uses.

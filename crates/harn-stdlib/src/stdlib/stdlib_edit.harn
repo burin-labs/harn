@@ -22,8 +22,8 @@ pub import { edit_dry_run, edit_rename_symbol, edit_safe_text_patch } from "std/
  * Higher-level, compound, language-aware edits composed on top of the
  * B.1-B.5 primitives above (`edit_apply_node`, `edit_insert_at_anchor`,
  * `edit_rename_symbol`, `edit_safe_text_patch`, `edit_dry_run`) plus the
- * host AST analyzers (`hostlib_ast_symbols`, `hostlib_ast_function_body`,
- * `hostlib_ast_undefined_names`).
+ * host AST analyzers (`ast.symbols`, `ast.function_body`,
+ * `ast.undefined_names`).
  *
  * Every refactoring shares one driver, `__refactor_run`, which lowers a
  * list of typed ops into staged-fs writes (#1722): a `dry_run` previews
@@ -125,8 +125,8 @@ fn __refactor_common_root(paths) {
   return root
 }
 
-fn __refactor_new_session(operation) {
-  return "harn-refactor-" + operation + "-" + uuid_v7()
+fn __refactor_new_session(random: HarnessRandom, operation) {
+  return "harn-refactor-" + operation + "-" + random.uuid_v7()
 }
 
 fn __refactor_leading_ws(line) {
@@ -197,11 +197,11 @@ fn __refactor_conflict(operation, language, conflicts) {
   )
 }
 
-fn __refactor_exec_op(op, session_id, before_map) {
+fn __refactor_exec_op(fs: HarnessFs, ast: HarnessAst, op, session_id, before_map) {
   const kind = op?.kind
   if kind == "content" {
     const before = before_map.get(op.path, "")
-    const res = hostlib_fs_safe_text_patch(
+    const res = fs.safe_text_patch(
       {
         path: op.path,
         content: op.after,
@@ -219,7 +219,7 @@ fn __refactor_exec_op(op, session_id, before_map) {
     }
   }
   if kind == "node_apply" {
-    const res = edit_apply_node((op?.params ?? {}).merging({session_id: session_id}))
+    const res = edit_apply_node(ast, (op?.params ?? {}).merging({session_id: session_id}))
     return {
       ok: res.result == "applied",
       result: res.result,
@@ -231,7 +231,7 @@ fn __refactor_exec_op(op, session_id, before_map) {
     }
   }
   if kind == "node_insert" {
-    const res = edit_insert_at_anchor((op?.params ?? {}).merging({session_id: session_id}))
+    const res = edit_insert_at_anchor(ast, (op?.params ?? {}).merging({session_id: session_id}))
     return {
       ok: res.result == "applied",
       result: res.result,
@@ -255,7 +255,16 @@ fn __refactor_exec_op(op, session_id, before_map) {
  * writes, previewing or committing atomically per the contract above.
  * Not part of the public API surface.
  */
-fn __refactor_run(operation, language, ops, params, warnings) {
+fn __refactor_run(
+  fs: HarnessFs,
+  random: HarnessRandom,
+  ast: HarnessAst,
+  operation,
+  language,
+  ops,
+  params,
+  warnings,
+) {
   const p = params ?? {}
   const dry_run = p?.dry_run ?? false
   const warns = warnings ?? []
@@ -270,7 +279,7 @@ fn __refactor_run(operation, language, ops, params, warnings) {
   const caller_session = p?.session_id
   const manage_session = dry_run || caller_session == nil
   const session_id = if manage_session {
-    __refactor_new_session(operation)
+    __refactor_new_session(random, operation)
   } else {
     caller_session
   }
@@ -279,24 +288,24 @@ fn __refactor_run(operation, language, ops, params, warnings) {
       // A preview never commits, so leave the overlay state at the host
       // default (cwd-relative) rather than scattering `.harn/state` next
       // to the target files — same as `edit_dry_run`.
-      hostlib_fs_set_mode({session_id: session_id, mode: "staged"})
+      fs.set_mode({session_id: session_id, mode: "staged"})
     } else {
       // An apply must commit to disk, so root the overlay at the tightest
       // directory enclosing every touched path.
-      hostlib_fs_set_mode(
+      fs.set_mode(
         {session_id: session_id, mode: "staged", root: p?.root ?? __refactor_common_root(touched)},
       )
     }
   }
   let before_map = {}
   for path in touched {
-    const r = hostlib_fs_read_text({path: path, session_id: session_id})
+    const r = fs.staged_read_text({path: path, session_id: session_id})
     before_map = before_map.merging({[path]: r?.content ?? ""})
   }
   let conflicts = []
   let ok_all = true
   for op in ops {
-    const outcome = __refactor_exec_op(op, session_id, before_map)
+    const outcome = __refactor_exec_op(fs, ast, op, session_id, before_map)
     if !outcome.ok {
       conflicts = conflicts + [outcome.conflict]
       ok_all = false
@@ -310,7 +319,7 @@ fn __refactor_run(operation, language, ops, params, warnings) {
   if ok_all {
     for path in touched {
       const before = before_map.get(path, "")
-      const after_read = hostlib_fs_read_text({path: path, session_id: session_id})
+      const after_read = fs.staged_read_text({path: path, session_id: session_id})
       const after = after_read?.content ?? before
       if after != before {
         const stat = diff_summary(before, after)
@@ -331,9 +340,9 @@ fn __refactor_run(operation, language, ops, params, warnings) {
   }
   if manage_session {
     if dry_run || !ok_all {
-      hostlib_fs_discard_staged({session_id: session_id})
+      fs.discard_staged({session_id: session_id})
     } else {
-      hostlib_fs_commit_staged({session_id: session_id})
+      fs.commit_staged({session_id: session_id})
     }
   }
   const result_tag = if !ok_all {
@@ -404,7 +413,7 @@ fn __refactor_var_decl_syntax(language) {
  * @api_stability: experimental
  * @example: edit_extract_variable({path: "src/lib.rs", range: {start_line: 4, start_col: 13, end_line: 4, end_col: 24}, new_name: "total"})
  */
-pub fn edit_extract_variable(params) {
+pub fn edit_extract_variable(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const syntax = __refactor_var_decl_syntax(language)
@@ -436,7 +445,7 @@ pub fn edit_extract_variable(params) {
       "multi-line ranges are not supported; select an expression on one line",
     )
   }
-  const read = hostlib_fs_read_text({path: path, session_id: p?.session_id})
+  const read = fs.staged_read_text({path: path, session_id: p?.session_id})
   const content = read?.content ?? ""
   const lines = split(content, "\n")
   if start_line < 0 || start_line >= len(lines) {
@@ -461,6 +470,9 @@ pub fn edit_extract_variable(params) {
   }
   const after = join(new_lines, "\n")
   return __refactor_run(
+    fs,
+    random,
+    ast,
     "extract_variable",
     language,
     [{kind: "content", path: path, after: after}],
@@ -634,8 +646,9 @@ fn __refactor_call_query(spec, fn_name) {
     + "\"))"
 }
 
-fn __refactor_probe(query, path, session_id) {
+fn __refactor_probe(ast: HarnessAst, query, path, session_id) {
   return edit_apply_node(
+    ast,
     {
       path: path,
       query: query,
@@ -648,8 +661,9 @@ fn __refactor_probe(query, path, session_id) {
   )
 }
 
-fn __refactor_read_def_params(spec, path, fn_name, session_id) {
+fn __refactor_read_def_params(ast: HarnessAst, spec, path, fn_name, session_id) {
   const r = edit_apply_node(
+    ast,
     {
       path: path,
       query: __refactor_def_query(spec, fn_name),
@@ -672,8 +686,8 @@ fn __refactor_read_def_params(spec, path, fn_name, session_id) {
   return {ok: true, result: "applied", inner: inner, params: __refactor_split_top_level(inner)}
 }
 
-fn __refactor_call_sites(spec, path, fn_name, session_id) {
-  const r = __refactor_probe(__refactor_call_query(spec, fn_name), path, session_id)
+fn __refactor_call_sites(ast: HarnessAst, spec, path, fn_name, session_id) {
+  const r = __refactor_probe(ast, __refactor_call_query(spec, fn_name), path, session_id)
   if r.result == "applied" {
     return {count: r.match_count, originals: r.edits.map({ e -> e.original })}
   }
@@ -727,7 +741,7 @@ fn __refactor_def_op(spec, path, fn_name, new_inner) {
  * @api_stability: experimental
  * @example: edit_change_signature({path: "src/lib.rs", symbol: {name: "add"}, new_params: "a: i64, b: i64, c: i64", callsite_strategy: "strict"})
  */
-pub fn edit_change_signature(params) {
+pub fn edit_change_signature(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -755,7 +769,7 @@ pub fn edit_change_signature(params) {
     p?.session_id
   }
   const def_op = __refactor_def_op(spec, path, fn_name, new_params)
-  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  const calls = __refactor_call_sites(ast, spec, path, fn_name, probe_session)
   if strategy == "strict" {
     if calls.count > 0 {
       return __refactor_conflict(
@@ -772,7 +786,7 @@ pub fn edit_change_signature(params) {
         ],
       )
     }
-    return __refactor_run("change_signature", language, [def_op], p, [])
+    return __refactor_run(fs, random, ast, "change_signature", language, [def_op], p, [])
   }
   if strategy == "manual" {
     const warns = if calls.count > 0 {
@@ -785,7 +799,7 @@ pub fn edit_change_signature(params) {
     } else {
       []
     }
-    return __refactor_run("change_signature", language, [def_op], p, warns)
+    return __refactor_run(fs, random, ast, "change_signature", language, [def_op], p, warns)
   }
   if strategy == "default_fill" {
     const fill = p?.fill
@@ -808,7 +822,7 @@ pub fn edit_change_signature(params) {
       ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
       i = i + 1
     }
-    return __refactor_run("change_signature", language, ops, p, [])
+    return __refactor_run(fs, random, ast, "change_signature", language, ops, p, [])
   }
   return __refactor_unsupported(
     "change_signature",
@@ -833,7 +847,7 @@ pub fn edit_change_signature(params) {
  * @api_stability: experimental
  * @example: edit_add_parameter({path: "src/lib.rs", symbol: {name: "add"}, param: "c: i64", default: "0"})
  */
-pub fn edit_add_parameter(params) {
+pub fn edit_add_parameter(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -859,7 +873,7 @@ pub fn edit_add_parameter(params) {
   } else {
     p?.session_id
   }
-  const def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  const def = __refactor_read_def_params(ast, spec, path, fn_name, probe_session)
   if !def.ok {
     return __refactor_conflict(
       "add_parameter",
@@ -870,9 +884,9 @@ pub fn edit_add_parameter(params) {
   const index = p?.index ?? len(def.params)
   const new_inner = join(__refactor_insert_at(def.params, index, param), ", ")
   const def_op = __refactor_def_op(spec, path, fn_name, new_inner)
-  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  const calls = __refactor_call_sites(ast, spec, path, fn_name, probe_session)
   if calls.count == 0 {
-    return __refactor_run("add_parameter", language, [def_op], p, [])
+    return __refactor_run(fs, random, ast, "add_parameter", language, [def_op], p, [])
   }
   const strategy = p?.callsite_strategy ?? "default_fill"
   if strategy == "strict" {
@@ -906,7 +920,7 @@ pub fn edit_add_parameter(params) {
     ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
     i = i + 1
   }
-  return __refactor_run("add_parameter", language, ops, p, [])
+  return __refactor_run(fs, random, ast, "add_parameter", language, ops, p, [])
 }
 
 /**
@@ -923,7 +937,7 @@ pub fn edit_add_parameter(params) {
  * @api_stability: experimental
  * @example: edit_reorder_parameters({path: "src/lib.rs", symbol: {name: "add"}, order: [1, 0]})
  */
-pub fn edit_reorder_parameters(params) {
+pub fn edit_reorder_parameters(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -949,7 +963,7 @@ pub fn edit_reorder_parameters(params) {
   } else {
     p?.session_id
   }
-  const def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  const def = __refactor_read_def_params(ast, spec, path, fn_name, probe_session)
   if !def.ok {
     return __refactor_conflict(
       "reorder_parameters",
@@ -976,7 +990,7 @@ pub fn edit_reorder_parameters(params) {
   }
   const new_inner = join(order.map({ oi -> def.params[oi] }), ", ")
   let ops = [__refactor_def_op(spec, path, fn_name, new_inner)]
-  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  const calls = __refactor_call_sites(ast, spec, path, fn_name, probe_session)
   let i = 0
   while i < calls.count {
     const arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
@@ -1000,7 +1014,7 @@ pub fn edit_reorder_parameters(params) {
     ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
     i = i + 1
   }
-  return __refactor_run("reorder_parameters", language, ops, p, [])
+  return __refactor_run(fs, random, ast, "reorder_parameters", language, ops, p, [])
 }
 
 /**
@@ -1019,7 +1033,7 @@ pub fn edit_reorder_parameters(params) {
  * @api_stability: experimental
  * @example: edit_change_return_type({path: "src/lib.rs", symbol: {name: "add"}, new_type: "i32"})
  */
-pub fn edit_change_return_type(params) {
+pub fn edit_change_return_type(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -1056,7 +1070,7 @@ pub fn edit_change_return_type(params) {
     path: path,
     params: {path: path, query: query, replacement: spec.ret_prefix + new_type, select: "unique"},
   }
-  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  const calls = __refactor_call_sites(ast, spec, path, fn_name, probe_session)
   const warns = if calls.count > 0 {
     [
       {
@@ -1068,7 +1082,7 @@ pub fn edit_change_return_type(params) {
   } else {
     []
   }
-  return __refactor_run("change_return_type", language, [op], p, warns)
+  return __refactor_run(fs, random, ast, "change_return_type", language, [op], p, warns)
 }
 
 /** --- extract_function ------------------------------------------------------- */
@@ -1122,8 +1136,8 @@ fn __refactor_indent_lines(lines, prefix) {
   )
 }
 
-fn __refactor_undef_names(src, language) {
-  const r = hostlib_ast_undefined_names({content: src, language: language})
+fn __refactor_undef_names(ast: HarnessAst, src, language) {
+  const r = ast.undefined_names({content: src, language: language})
   if !(r?.supported ?? false) {
     return []
   }
@@ -1181,7 +1195,7 @@ fn __refactor_wrap_probe(kind, body_lines) {
  * function `new_name`, replacing the range with a call to it.
  *
  * Captured free variables become parameters: the selection's free names
- * (computed via `hostlib_ast_undefined_names` over the block) minus the
+ * (computed via `ast.undefined_names` over the block) minus the
  * enclosing function's free names (so module-level / imported names stay
  * referenced, not parameterized). Pass `params_order` to fix the order.
  *
@@ -1202,7 +1216,7 @@ fn __refactor_wrap_probe(kind, body_lines) {
  * @api_stability: experimental
  * @example: edit_extract_function({path: "app.py", range: {start_line: 3, end_line: 5}, new_name: "summarize"})
  */
-pub fn edit_extract_function(params) {
+pub fn edit_extract_function(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const kind = __refactor_fn_synth_kind(language)
@@ -1228,7 +1242,7 @@ pub fn edit_extract_function(params) {
   } else {
     p?.session_id
   }
-  const read = hostlib_fs_read_text({path: path, session_id: probe_session})
+  const read = fs.staged_read_text({path: path, session_id: probe_session})
   const content = read?.content ?? ""
   const lines = split(content, "\n")
   if start_line < 0 || end_line >= len(lines) || end_line < start_line {
@@ -1237,7 +1251,7 @@ pub fn edit_extract_function(params) {
   const block_lines = lines[start_line:end_line + 1]
   const dedent = __refactor_min_indent(block_lines)
   const dedented = block_lines.map({ l -> __refactor_strip_n(l, dedent) })
-  const symbols = hostlib_ast_symbols({path: path, language: language})?.symbols ?? []
+  const symbols = ast.symbols({path: path, language: language})?.symbols ?? []
   const enclosing = __refactor_enclosing_fn(symbols, start_line, end_line)
   if enclosing == nil {
     return __refactor_result(
@@ -1252,14 +1266,14 @@ pub fn edit_extract_function(params) {
       },
     )
   }
-  const block_undef = __refactor_undef_names(__refactor_wrap_probe(kind, dedented), language)
+  const block_undef = __refactor_undef_names(ast, __refactor_wrap_probe(kind, dedented), language)
   const enclosing_lines = lines[enclosing.start_row:enclosing.end_row + 1]
   const enclosing_dedent = __refactor_min_indent(enclosing_lines)
   const enclosing_src = join(
     enclosing_lines.map({ l -> __refactor_strip_n(l, enclosing_dedent) }),
     "\n",
   )
-  const enclosing_undef = __refactor_undef_names(enclosing_src, language)
+  const enclosing_undef = __refactor_undef_names(ast, enclosing_src, language)
   let captures = []
   for nm in block_undef {
     if !__refactor_member(enclosing_undef, nm) && nm != new_name
@@ -1306,6 +1320,9 @@ pub fn edit_extract_function(params) {
   }
   const after = join(new_lines, "\n")
   return __refactor_run(
+    fs,
+    random,
+    ast,
     "extract_function",
     language,
     [{kind: "content", path: path, after: after}],
@@ -1324,7 +1341,7 @@ fn __refactor_inline_kind(language) {
 
 fn __refactor_inline_expr(body_text, kind) {
   const lines = split(body_text ?? "", "\n")
-  // `hostlib_ast_function_body` returns the indented body only for Python,
+  // `ast.function_body` returns the indented body only for Python,
   // but the whole `fn …{ … }` text for brace languages — so brace bodies
   // drop the signature/opening-brace line and the closing-brace line.
   const inner = if kind == "python" {
@@ -1373,7 +1390,7 @@ fn __refactor_inline_expr(body_text, kind) {
  * @api_stability: experimental
  * @example: edit_inline({path: "src/lib.rs", symbol: {name: "answer"}})
  */
-pub fn edit_inline(params) {
+pub fn edit_inline(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -1394,10 +1411,8 @@ pub fn edit_inline(params) {
   } else {
     p?.session_id
   }
-  const content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
-  const fb = hostlib_ast_function_body(
-    {source: content, language: language, function_name: fn_name},
-  )
+  const content = fs.staged_read_text({path: path, session_id: probe_session})?.content ?? ""
+  const fb = ast.function_body({source: content, language: language, function_name: fn_name})
   if !(fb?.found ?? false) {
     return __refactor_conflict(
       "inline",
@@ -1405,7 +1420,7 @@ pub fn edit_inline(params) {
       [{code: "symbol_not_found", message: "no function `" + fn_name + "` found", path: path}],
     )
   }
-  const def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  const def = __refactor_read_def_params(ast, spec, path, fn_name, probe_session)
   if def.ok && len(def.params) != 0 {
     return __refactor_unsupported(
       "inline",
@@ -1421,7 +1436,7 @@ pub fn edit_inline(params) {
       "inline requires a body of exactly one `return <expr>` statement",
     )
   }
-  const calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  const calls = __refactor_call_sites(ast, spec, path, fn_name, probe_session)
   let i = 0
   while i < calls.count {
     if trim(__refactor_paren_inner(calls.originals[i])) != "" {
@@ -1463,7 +1478,7 @@ pub fn edit_inline(params) {
       params: {path: path, query: def_target, replacement: "", select: "unique"},
     },
   ]
-  return __refactor_run("inline", language, ops, p, [])
+  return __refactor_run(fs, random, ast, "inline", language, ops, p, [])
 }
 
 /**
@@ -1472,8 +1487,8 @@ pub fn edit_inline(params) {
  * (default, appended) or `"start"` (prepended). Both files are written in
  * one atomic staged-fs transaction.
  *
- * The declaration text is lifted with `hostlib_ast_symbol_extract` and
- * removed with `hostlib_ast_symbol_delete`, so language support follows
+ * The declaration text is lifted with `ast.symbol_extract` and
+ * removed with `ast.symbol_delete`, so language support follows
  * those builtins (`result: "unsupported"` otherwise). Cross-file import /
  * export references are NOT rewritten yet — that is reported in
  * `warnings`; combine with `edit_rename_symbol` for re-export safety.
@@ -1483,7 +1498,7 @@ pub fn edit_inline(params) {
  * @api_stability: experimental
  * @example: edit_move_decl({path: "src/a.rs", symbol: {name: "helper"}, target_file: "src/b.rs"})
  */
-pub fn edit_move_decl(params) {
+pub fn edit_move_decl(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const path = p?.path ?? ""
@@ -1501,8 +1516,8 @@ pub fn edit_move_decl(params) {
   } else {
     p?.session_id
   }
-  const src_content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
-  const extracted = hostlib_ast_symbol_extract(
+  const src_content = fs.staged_read_text({path: path, session_id: probe_session})?.content ?? ""
+  const extracted = ast.symbol_extract(
     {symbol_name: fn_name, source: src_content, language: language},
   )
   if extracted.result == "unsupported_language" {
@@ -1525,9 +1540,7 @@ pub fn edit_move_decl(params) {
       ],
     )
   }
-  const deleted = hostlib_ast_symbol_delete(
-    {symbol_name: fn_name, source: src_content, language: language},
-  )
+  const deleted = ast.symbol_delete({symbol_name: fn_name, source: src_content, language: language})
   if deleted.result != "removed" {
     return __refactor_conflict(
       "move_decl",
@@ -1536,7 +1549,7 @@ pub fn edit_move_decl(params) {
     )
   }
   const moved = extracted.text
-  const target_content = hostlib_fs_read_text({path: target_path, session_id: probe_session})
+  const target_content = fs.staged_read_text({path: target_path, session_id: probe_session})
     ?.content
     ?? ""
   const position = p?.target_position ?? "end"
@@ -1557,6 +1570,9 @@ pub fn edit_move_decl(params) {
     },
   ]
   return __refactor_run(
+    fs,
+    random,
+    ast,
     "move_decl",
     language,
     [

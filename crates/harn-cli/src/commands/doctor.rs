@@ -1798,8 +1798,8 @@ secrets = { signing_secret = "webhook/signing-secret" }
             r#"
 import "std/triggers"
 
-pub fn on_new_issue(event: TriggerEvent) {
-  log(event.kind)
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
+  harness.stdio.log(event.kind)
 }
 "#,
         )

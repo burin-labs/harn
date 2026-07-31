@@ -13,6 +13,8 @@ async fn run_harn(base_dir: &std::path::Path, source: &str) -> Vec<String> {
     let chunk = compile_source(source).expect("compile source");
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
+    let (harness, _clock) = crate::Harness::test();
+    vm.set_harness(harness);
     vm.set_source_dir(base_dir);
     vm.execute(&chunk).await.expect("execute source");
     vm.output()
@@ -418,16 +420,15 @@ async fn harn_builtin_returns_structured_timeout_without_real_sleep() {
             let temp = tempfile::tempdir().expect("tempdir");
             let state_path = harn_string_path(temp.path().join("rate.sqlite"));
             let source = r#"
-pipeline main(task) {
-  mock_time(1000)
-  const first = durable_rate_limit_acquire({
+pipeline main(harness: Harness, task) {
+  const first = harness.runtime.durable_rate_limit_acquire({
     state_path: "__STATE_PATH__",
     key: "provider:rpm",
     limit: 1,
     units: 1,
     window_ms: 1000,
   })
-  const second = durable_rate_limit_acquire({
+  const second = harness.runtime.durable_rate_limit_acquire({
     state_path: "__STATE_PATH__",
     key: "provider:rpm",
     limit: 1,
@@ -435,10 +436,10 @@ pipeline main(task) {
     window_ms: 1000,
     timeout_ms: 0,
   })
-  __io_println(to_string(first.ok))
-  __io_println(to_string(second.ok))
-  __io_println(to_string(second.timed_out))
-  __io_println(to_string(second.retry_after_ms))
+  harness.stdio.println(to_string(first.ok))
+  harness.stdio.println(to_string(second.ok))
+  harness.stdio.println(to_string(second.timed_out))
+  harness.stdio.println(to_string(second.retry_after_ms))
 }
 "#
             .replace("__STATE_PATH__", &state_path);
@@ -455,10 +456,9 @@ async fn harn_parallel_tasks_share_one_durable_bucket() {
             let temp = tempfile::tempdir().expect("tempdir");
             let state_path = harn_string_path(temp.path().join("rate.sqlite"));
             let source = r#"
-pipeline main(task) {
-  mock_time(1000)
+pipeline main(harness: Harness, task) {
   const attempts = parallel each [1, 2, 3, 4] with { max_concurrent: 4 } { _ ->
-    durable_rate_limit_acquire({
+    harness.runtime.durable_rate_limit_acquire({
       state_path: "__STATE_PATH__",
       key: "provider:rpm",
       limit: 1,
@@ -477,8 +477,8 @@ pipeline main(task) {
       timeouts = timeouts + 1
     }
   }
-  __io_println(to_string(successes))
-  __io_println(to_string(timeouts))
+  harness.stdio.println(to_string(successes))
+  harness.stdio.println(to_string(timeouts))
 }
 "#
             .replace("__STATE_PATH__", &state_path);
@@ -495,8 +495,8 @@ fn harn_vms_on_multiple_threads_share_one_durable_bucket() {
     let state_path = harn_string_path(temp.path().join("rate.sqlite"));
     let source = Arc::new(
         r#"
-pipeline main(task) {
-  const attempt = durable_rate_limit_acquire({
+pipeline main(harness: Harness, task) {
+  const attempt = harness.runtime.durable_rate_limit_acquire({
     state_path: "__STATE_PATH__",
     key: "provider:rpm",
     limit: 1,
@@ -504,8 +504,8 @@ pipeline main(task) {
     window_ms: 60000,
     timeout_ms: 0,
   })
-  __io_println(to_string(attempt.ok))
-  __io_println(to_string(attempt.timed_out))
+  harness.stdio.println(to_string(attempt.ok))
+  harness.stdio.println(to_string(attempt.timed_out))
 }
 "#
         .replace("__STATE_PATH__", &state_path),

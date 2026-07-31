@@ -1,6 +1,6 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const topic = "transcript.reminder.lifecycle"
-  const cursor = event_log.latest(topic)
+  const cursor = harness.obs.event_log_latest(topic)
   const base = transcript_from_messages(
     [
       {role: "user", content: "one"},
@@ -9,23 +9,23 @@ pipeline main() {
       {role: "assistant", content: "four"},
     ],
   )
-  const with_reminder = transcript.inject_reminder(
+  const with_reminder = harness.agent.transcript_inject_reminder(
     base,
     {body: "expire now", dedupe_key: "ttl", ttl_turns: 1, preserve_on_compact: true},
   ).transcript
-  const compacted = transcript_compact(
+  const compacted = harness.agent.compact_transcript(
     with_reminder,
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
-  const stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const injected = stream.next().value
   const logged = stream.next().value
-  __io_println(len(reminders))
-  __io_println(injected.kind)
-  __io_println(logged.kind)
-  __io_println(logged.payload.reminder_id != "")
-  __io_println(logged.payload.reason)
-  __io_println(logged.payload.ttl_turns_before)
-  __io_println(logged.payload.expired_at_boundary)
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(injected.kind)
+  harness.stdio.println(logged.kind)
+  harness.stdio.println(logged.payload.reminder_id != "")
+  harness.stdio.println(logged.payload.reason)
+  harness.stdio.println(logged.payload.ttl_turns_before)
+  harness.stdio.println(logged.payload.expired_at_boundary)
 }

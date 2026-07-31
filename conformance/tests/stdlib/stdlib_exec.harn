@@ -1,11 +1,11 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // exec with args
-  const result = exec("echo", "hello from exec")
-  __io_println(result.success)
-  __io_println(result.stdout.trim())
-  __io_println(result.status)
+  const result = harness.process.exec("echo", "hello from exec")
+  harness.stdio.println(result.success)
+  harness.stdio.println(result.stdout.trim())
+  harness.stdio.println(result.status)
   // shell command
-  const result2 = shell("echo 'shell works'")
-  __io_println(result2.success)
-  __io_println(result2.stdout.trim())
+  const result2 = harness.process.shell("echo 'shell works'")
+  harness.stdio.println(result2.success)
+  harness.stdio.println(result2.stdout.trim())
 }

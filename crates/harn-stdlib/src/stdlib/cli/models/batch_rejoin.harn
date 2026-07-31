@@ -17,18 +17,25 @@ import { ensure_parent_dir, replace_text } from "std/fs"
 
 pub type BatchRejoinRun = {receipt: dict, normalized_rows: list<dict>, errors: list<string>}
 
+pub type BatchRejoinInput = {
+  execution_path: string,
+  manifest_path: string,
+  download_path: string,
+  out_dir: string,
+}
+
 type BatchRejoinLoaded = {value: dict, sha256: string, errors: list<string>}
 
 type BatchRejoinParsed = {rows: list<dict>, errors: list<string>}
 
-fn __load_object(harness: Harness, path: string, label: string) -> BatchRejoinLoaded {
+fn __load_object(fs: HarnessFs, path: string, label: string) -> BatchRejoinLoaded {
   if path == "" {
     return {value: {}, sha256: "", errors: [label + " path is required"]}
   }
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     return {value: {}, sha256: "", errors: [label + " not found: " + path]}
   }
-  const text = harness.fs.read_text(path)
+  const text = fs.read_text(path)
   const parsed = try {
     json_parse(text)
   } catch (failure) {
@@ -53,7 +60,7 @@ fn __expect_kind(value: dict, expected: string, label: string) -> list<string> {
 }
 
 fn __verify_source(
-  harness: Harness,
+  fs: HarnessFs,
   source: dict,
   expected_path: string,
   label: string,
@@ -63,10 +70,10 @@ fn __verify_source(
   if path != expected_path {
     errors = errors.appending(label + " path mismatch")
   }
-  if path == "" || !harness.fs.exists(path) {
+  if path == "" || !fs.exists(path) {
     return errors.appending(label + " not found: " + path)
   }
-  const actual_sha256 = sha256(harness.fs.read_text(path))
+  const actual_sha256 = sha256(fs.read_text(path))
   if safe_string(source["sha256"], "") != actual_sha256 {
     errors = errors.appending(label + " hash mismatch")
   }
@@ -95,17 +102,17 @@ fn __same_strings(left: list<string>, right: list<string>) -> bool {
   return true
 }
 
-fn __execution_artifact_errors(harness: Harness, execution: dict) -> list<string> {
+fn __execution_artifact_errors(fs: HarnessFs, execution: dict) -> list<string> {
   let errors = []
   for raw_artifact in safe_list(execution["artifacts"]) {
     const artifact = safe_dict(raw_artifact)
     const path = safe_string(artifact["path"], "")
     const role = safe_string(artifact["role"], "artifact")
-    if path == "" || !harness.fs.exists(path) {
+    if path == "" || !fs.exists(path) {
       errors = errors.appending("execution " + role + " not found: " + path)
       continue
     }
-    if sha256(harness.fs.read_text(path)) != safe_string(artifact["sha256"], "") {
+    if sha256(fs.read_text(path)) != safe_string(artifact["sha256"], "") {
       errors = errors.appending("execution " + role + " hash mismatch: " + path)
     }
   }
@@ -163,11 +170,11 @@ fn __rows_from_json(value) -> list<dict> {
   return [object]
 }
 
-fn __parse_result_artifact(harness: Harness, path: string) -> BatchRejoinParsed {
-  if !harness.fs.exists(path) {
+fn __parse_result_artifact(fs: HarnessFs, path: string) -> BatchRejoinParsed {
+  if !fs.exists(path) {
     return {rows: [], errors: ["result_artifact_missing: " + path]}
   }
-  const text = harness.fs.read_text(path)
+  const text = fs.read_text(path)
   const trimmed = trim(text)
   if trimmed == "" {
     return {rows: [], errors: []}
@@ -402,14 +409,14 @@ fn __quarantine_reasons(base: dict) -> list<string> {
 }
 
 fn __validate_lineage(
-  harness: Harness,
+  fs: HarnessFs,
   execution_path: string,
   manifest_path: string,
   download_path: string,
 ) -> dict {
-  const execution_loaded = __load_object(harness, execution_path, "batch execution")
-  const manifest_loaded = __load_object(harness, manifest_path, "batch manifest")
-  const download_loaded = __load_object(harness, download_path, "batch download receipt")
+  const execution_loaded = __load_object(fs, execution_path, "batch execution")
+  const manifest_loaded = __load_object(fs, manifest_path, "batch manifest")
+  const download_loaded = __load_object(fs, download_path, "batch download receipt")
   let errors = execution_loaded.errors + manifest_loaded.errors + download_loaded.errors
   const execution = execution_loaded.value
   const manifest = manifest_loaded.value
@@ -432,9 +439,9 @@ fn __validate_lineage(
   if safe_string(execution["executionId"], "") != expected_execution_id {
     errors = errors.appending("wrong_execution_identity")
   }
-  errors = errors + __execution_artifact_errors(harness, execution)
+  errors = errors + __execution_artifact_errors(fs, execution)
   const status_path = safe_string(safe_dict(download["source"])["path"], "")
-  const status_loaded = __load_object(harness, status_path, "batch status receipt")
+  const status_loaded = __load_object(fs, status_path, "batch status receipt")
   errors = errors
     + status_loaded.errors
     + __expect_kind(
@@ -442,9 +449,9 @@ fn __validate_lineage(
     "harn.model_batch_status_receipt",
     "batch status receipt",
   )
-    + __verify_source(harness, safe_dict(download["source"]), status_path, "download status source")
+    + __verify_source(fs, safe_dict(download["source"]), status_path, "download status source")
   const submission_path = safe_string(safe_dict(status_loaded.value["source"])["path"], "")
-  const submission_loaded = __load_object(harness, submission_path, "batch submission receipt")
+  const submission_loaded = __load_object(fs, submission_path, "batch submission receipt")
   errors = errors
     + submission_loaded.errors
     + __expect_kind(
@@ -453,13 +460,13 @@ fn __validate_lineage(
     "batch submission receipt",
   )
     + __verify_source(
-    harness,
+    fs,
     safe_dict(status_loaded.value["source"]),
     submission_path,
     "status submission source",
   )
   const prepare_path = safe_string(safe_dict(submission_loaded.value["source"])["path"], "")
-  const prepare_loaded = __load_object(harness, prepare_path, "batch prepare receipt")
+  const prepare_loaded = __load_object(fs, prepare_path, "batch prepare receipt")
   errors = errors
     + prepare_loaded.errors
     + __expect_kind(
@@ -468,14 +475,14 @@ fn __validate_lineage(
     "batch prepare receipt",
   )
     + __verify_source(
-    harness,
+    fs,
     safe_dict(submission_loaded.value["source"]),
     prepare_path,
     "submission prepare source",
   )
   errors = errors
     + __verify_source(
-    harness,
+    fs,
     safe_dict(prepare_loaded.value["manifest"]),
     manifest_path,
     "prepare manifest source",
@@ -506,14 +513,12 @@ fn __validate_lineage(
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn batch_rejoin(
-  harness: Harness,
-  execution_path: string,
-  manifest_path: string,
-  download_path: string,
-  out_dir: string,
-) -> BatchRejoinRun {
-  const lineage = __validate_lineage(harness, execution_path, manifest_path, download_path)
+pub fn batch_rejoin(fs: HarnessFs, input: BatchRejoinInput) -> BatchRejoinRun {
+  const execution_path = input.execution_path
+  const manifest_path = input.manifest_path
+  const download_path = input.download_path
+  const out_dir = input.out_dir
+  const lineage = __validate_lineage(fs, execution_path, manifest_path, download_path)
   let errors: list<string> = safe_list(lineage["errors"])
   const execution = safe_dict(lineage["execution"])
   const manifest = safe_dict(lineage["manifest"])
@@ -550,14 +555,14 @@ pub fn batch_rejoin(
       artifact_count = artifact_count + 1
       const path = safe_string(artifact["path"], "")
       let artifact_errors = []
-      if !harness.fs.exists(path) {
+      if !fs.exists(path) {
         artifact_errors = artifact_errors.appending("result_artifact_missing: " + path)
-      } else if sha256(harness.fs.read_text(path)) != safe_string(artifact["sha256"], "") {
+      } else if sha256(fs.read_text(path)) != safe_string(artifact["sha256"], "") {
         artifact_errors = artifact_errors.appending("result_artifact_hash_mismatch: " + path)
       }
       errors = errors + artifact_errors
       const parsed = if len(artifact_errors) == 0 {
-        __parse_result_artifact(harness, path)
+        __parse_result_artifact(fs, path)
       } else {
         {rows: [], errors: []}
       }
@@ -690,14 +695,14 @@ pub fn batch_rejoin(
   return {receipt: receipt, normalized_rows: normalized_rows, errors: errors}
 }
 
-fn __render_rejoin_human(harness: Harness, receipt: dict) {
-  harness.stdio.println("Batch result rejoin: " + safe_string(receipt["status"], ""))
-  harness.stdio.println("  consumable: " + to_string(safe_bool(receipt["consumable"], false)))
-  harness.stdio.println("  matched: " + safe_int_string(receipt["matchedCount"], "0"))
-  harness.stdio.println("  missing: " + safe_int_string(receipt["missingCount"], "0"))
-  harness.stdio.println("  duplicate: " + safe_int_string(receipt["duplicateCount"], "0"))
-  harness.stdio.println("  unexpected: " + safe_int_string(receipt["unexpectedCount"], "0"))
-  print_list(harness, "quarantine", safe_list(safe_dict(receipt["quarantine"])["reasons"]))
+fn __render_rejoin_human(stdio: HarnessStdio, receipt: dict) {
+  stdio.println("Batch result rejoin: " + safe_string(receipt["status"], ""))
+  stdio.println("  consumable: " + to_string(safe_bool(receipt["consumable"], false)))
+  stdio.println("  matched: " + safe_int_string(receipt["matchedCount"], "0"))
+  stdio.println("  missing: " + safe_int_string(receipt["missingCount"], "0"))
+  stdio.println("  duplicate: " + safe_int_string(receipt["duplicateCount"], "0"))
+  stdio.println("  unexpected: " + safe_int_string(receipt["unexpectedCount"], "0"))
+  print_list(stdio, "quarantine", safe_list(safe_dict(receipt["quarantine"])["reasons"]))
 }
 
 /**
@@ -712,7 +717,15 @@ pub fn __run_rejoin(harness: Harness) -> int {
   const manifest_path = trim(harness.env.get_or("HARN_MODELS_BATCH_MANIFEST", ""))
   const download_path = trim(harness.env.get_or("HARN_MODELS_BATCH_DOWNLOAD_RECEIPT", ""))
   const out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_REJOIN_OUT_DIR", ""))
-  const run = batch_rejoin(harness, execution_path, manifest_path, download_path, out_dir)
+  const run = batch_rejoin(
+    harness.fs,
+    {
+      execution_path: execution_path,
+      manifest_path: manifest_path,
+      download_path: download_path,
+      out_dir: out_dir,
+    },
+  )
   let receipt = run.receipt
   if out_dir == "" {
     receipt = receipt
@@ -729,19 +742,21 @@ pub fn __run_rejoin(harness: Harness) -> int {
       },
     }
   } else {
-    ensure_parent_dir(path_join(out_dir, "normalized.jsonl"))
+    ensure_parent_dir(harness.fs, path_join(out_dir, "normalized.jsonl"))
     const normalized = safe_dict(receipt["normalized"])
     let normalized_text = ""
     for row in run.normalized_rows {
       normalized_text = normalized_text + json_stringify(row) + "\n"
     }
     replace_text(
+      harness.fs,
       safe_string(normalized["path"], ""),
       normalized_text,
       {create: true, overwrite: true, create_parents: true, durability: "namespace"},
     )
     const receipt_text = json_stringify_pretty(receipt) + "\n"
     replace_text(
+      harness.fs,
       path_join(out_dir, "receipt.json"),
       receipt_text,
       {create: true, overwrite: true, create_parents: true, durability: "namespace"},
@@ -767,7 +782,7 @@ pub fn __run_rejoin(harness: Harness) -> int {
       ),
     )
   } else {
-    __render_rejoin_human(harness, receipt)
+    __render_rejoin_human(harness.stdio, receipt)
   }
   return 0
 }

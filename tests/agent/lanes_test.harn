@@ -20,12 +20,12 @@ import {
 } from "std/agent/lanes"
 import { agent_preset } from "std/agent/presets"
 
-pipeline test_zero_targets_falls_back_to_general(task) {
+pipeline test_zero_targets_falls_back_to_general(harness: Harness, task) {
   const row = agent_lane_match(default_lane_rows(), "Investigate why the build is slow.")
   assert_eq(row.name, "general")
 }
 
-pipeline test_one_to_four_targets_matches_explicit_patch(task) {
+pipeline test_one_to_four_targets_matches_explicit_patch(harness: Harness, task) {
   for targets in [1, 2, 3, 4] {
     let files = []
     let i = 0
@@ -39,7 +39,7 @@ pipeline test_one_to_four_targets_matches_explicit_patch(task) {
   }
 }
 
-pipeline test_more_than_four_targets_escalates_to_general(task) {
+pipeline test_more_than_four_targets_escalates_to_general(harness: Harness, task) {
   // burin: > 4 explicit targets escalates back to the general lane rather
   // than staying on the narrow patch lane.
   const described = "Update src/a.rs, src/b.rs, src/c.rs, src/d.rs, and src/e.rs"
@@ -47,7 +47,7 @@ pipeline test_more_than_four_targets_escalates_to_general(task) {
   assert_eq(row.name, "general")
 }
 
-pipeline test_target_path_detector_ignores_urls(task) {
+pipeline test_target_path_detector_ignores_urls(harness: Harness, task) {
   const targets = agent_lane_explicit_target_paths("See https://example.com/docs.html for context.")
   // A URL still contains a dot-extension-looking token; this fixture pins
   // today's detector behavior (it is a heuristic, not a URL parser) so a
@@ -55,7 +55,7 @@ pipeline test_target_path_detector_ignores_urls(task) {
   assert(len(targets) >= 0, "detector never throws on a URL-bearing task")
 }
 
-pipeline test_classify_reports_reason(task) {
+pipeline test_classify_reports_reason(harness: Harness, task) {
   const verdict = agent_lane_classify(
     default_lane_rows(),
     "Patch src/widget.py to fix the off-by-one.",
@@ -68,7 +68,7 @@ pipeline test_classify_reports_reason(task) {
   assert_eq(fallback.reason, "default_lane")
 }
 
-pipeline test_custom_classifier_overrides_heuristic(task) {
+pipeline test_custom_classifier_overrides_heuristic(harness: Harness, task) {
   const verdict = agent_lane_classify(
     default_lane_rows(),
     "Explain how the scheduler works.",
@@ -78,7 +78,7 @@ pipeline test_custom_classifier_overrides_heuristic(task) {
   assert_eq(verdict.reason, "custom_classifier")
 }
 
-pipeline test_unrecognized_custom_classifier_result_falls_back(task) {
+pipeline test_unrecognized_custom_classifier_result_falls_back(harness: Harness, task) {
   const verdict = agent_lane_classify(
     default_lane_rows(),
     "Patch src/widget.py.",
@@ -90,7 +90,7 @@ pipeline test_unrecognized_custom_classifier_result_falls_back(task) {
   assert_eq(verdict.reason, "matched_row")
 }
 
-pipeline test_general_lane_leaves_tools_unrestricted(task) {
+pipeline test_general_lane_leaves_tools_unrestricted(harness: Harness, task) {
   let tools = tool_registry()
   tools = tool_define(tools, "look", "Read a file.", {handler: { _a -> "ok" }})
   tools = tool_define(tools, "run_codemod", "Run a codemod.", {handler: { _a -> "ok" }})
@@ -99,7 +99,7 @@ pipeline test_general_lane_leaves_tools_unrestricted(task) {
   assert_eq(len(result.tools.tools), 2)
 }
 
-pipeline test_general_lane_with_hard_keep_stays_unrestricted(task) {
+pipeline test_general_lane_with_hard_keep_stays_unrestricted(harness: Harness, task) {
   // Regression: `hard_keep` must never turn the non-narrowing `general` lane
   // into a restricted surface. A general classification contributes no lane
   // tools of its own, so the surface stays fully open even with hard_keep set
@@ -121,7 +121,7 @@ pipeline test_general_lane_with_hard_keep_stays_unrestricted(task) {
   assert_eq(len(result.tools.tools), 5)
 }
 
-pipeline test_explicit_patch_lane_narrows_tools_and_policy(task) {
+pipeline test_explicit_patch_lane_narrows_tools_and_policy(harness: Harness, task) {
   let tools = tool_registry()
   for name in ["look", "search", "edit", "run", "git", "run_codemod", "glob"] {
     tools = tool_define(tools, name, "tool " + name, {handler: { _a -> "ok" }})
@@ -145,7 +145,7 @@ pipeline test_explicit_patch_lane_narrows_tools_and_policy(task) {
   assert(!contains(result.policy.tools, "git"), "policy allowlist hides git")
 }
 
-pipeline test_hard_keep_survives_narrowing(task) {
+pipeline test_hard_keep_survives_narrowing(harness: Harness, task) {
   let tools = tool_registry()
   for name in ["look", "edit", "ask_user"] {
     tools = tool_define(tools, name, "tool " + name, {handler: { _a -> "ok" }})
@@ -163,7 +163,7 @@ pipeline test_hard_keep_survives_narrowing(task) {
   assert(contains(kept, "ask_user"), "hard_keep survives the explicit_patch lane")
 }
 
-pipeline test_tool_kinds_resolve_against_registry_annotations(task) {
+pipeline test_tool_kinds_resolve_against_registry_annotations(harness: Harness, task) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -191,38 +191,38 @@ pipeline test_tool_kinds_resolve_against_registry_annotations(task) {
   assert_eq(kept, ["look"])
 }
 
-pipeline test_rows_require_exactly_one_default(task) {
+pipeline test_rows_require_exactly_one_default(harness: Harness, task) {
   const outcome = try {
     lane_policy([{name: "only_row"}], "anything", {})
   }
   assert(is_err(outcome), "lane_policy throws without a default row")
 }
 
-pipeline test_rows_reject_duplicate_names(task) {
+pipeline test_rows_reject_duplicate_names(harness: Harness, task) {
   const outcome = try {
     lane_policy([{default: true, name: "dup"}, {name: "dup"}], "anything", {})
   }
   assert(is_err(outcome), "lane_policy throws on a duplicate lane name")
 }
 
-pipeline test_repair_preset_carries_lane_policy_pack(task) {
-  const opts = agent_preset("repair", {})
+pipeline test_repair_preset_carries_lane_policy_pack(harness: Harness, task) {
+  const opts = agent_preset(harness, "repair", {})
   const pack = opts?.lane_policy
   assert(pack != nil, "repair preset ships a lane_policy pack row")
   const result = lane_policy(pack.rows, "Fix the off-by-one in src/widget.py.", opts, pack)
   assert_eq(result._lane_verdict.lane, "explicit_patch")
 }
 
-pipeline test_explicit_preset_lane_policy_wins_over_pack_default(task) {
+pipeline test_explicit_preset_lane_policy_wins_over_pack_default(harness: Harness, task) {
   // Fill-nil precedence: an explicit caller `lane_policy` value is never
   // overwritten by the preset's pack default.
   const custom = {rows: [{default: true, name: "only_lane"}]}
-  const opts = agent_preset("repair", {lane_policy: custom})
+  const opts = agent_preset(harness, "repair", {lane_policy: custom})
   assert_eq(opts.lane_policy, custom)
 }
 
 /** --- Per-stage tool-gate (additive; default-off) ------------------------------- */
-pipeline test_stage_gate_parity_lane_policy_unchanged(task) {
+pipeline test_stage_gate_parity_lane_policy_unchanged(harness: Harness, task) {
   // ANTI-REGRESSION: adding the stage-gate seam must not perturb the existing
   // `lane_policy` decision path. Re-pin the canonical narrowing + no-narrowing
   // verdicts so any accidental change to shared module state is caught here.
@@ -248,7 +248,7 @@ pipeline test_stage_gate_parity_lane_policy_unchanged(task) {
   assert_eq(len(open.tools.tools), 7)
 }
 
-pipeline test_stage_gate_inert_without_marker(task) {
+pipeline test_stage_gate_inert_without_marker(harness: Harness, task) {
   // Default-off: text with no marker parses to an empty gate, and an empty gate
   // never denies — the seam is invisible unless a marker is rendered.
   assert_eq(stage_gate_parse("Fix the off-by-one in src/widget.py."), {})
@@ -263,7 +263,7 @@ pipeline test_stage_gate_inert_without_marker(task) {
   assert_eq(stage_gate_label(base, {}), base)
 }
 
-pipeline test_stage_gate_label_roundtrips(task) {
+pipeline test_stage_gate_label_roundtrips(harness: Harness, task) {
   const gate = {
     allowed_kinds: ["edit"],
     allowed_tools: ["edit", "look"],
@@ -279,7 +279,7 @@ pipeline test_stage_gate_label_roundtrips(task) {
   assert_eq(recovered.allowed_kinds, ["edit"])
 }
 
-pipeline test_stage_gate_denies_by_tool_with_suggestion(task) {
+pipeline test_stage_gate_denies_by_tool_with_suggestion(harness: Harness, task) {
   const gate = stage_gate_parse(
     stage_gate_label("t", {allowed_tools: ["edit", "look"], lane: "repair_local", stage: "repair"}),
   )
@@ -292,7 +292,7 @@ pipeline test_stage_gate_denies_by_tool_with_suggestion(task) {
   assert(denial.contains("suggestion=use edit or look"), "denial suggests the allowed tools")
 }
 
-pipeline test_stage_gate_kind_gate_uses_resolver(task) {
+pipeline test_stage_gate_kind_gate_uses_resolver(harness: Harness, task) {
   const gate = {allowed_kinds: ["search"], allowed_tools: [], lane: "read_only", stage: "plan"}
   const kinds = {edit: "edit", look: "search", search: "search"}
   const resolver = { name -> kinds[name] ?? "other" }
@@ -320,7 +320,7 @@ fn _stage_gate_named_suggest(_gate) {
   return "switch to a search tool"
 }
 
-pipeline test_stage_gate_accepts_named_function_callbacks(task) {
+pipeline test_stage_gate_accepts_named_function_callbacks(harness: Harness, task) {
   const gate = {allowed_kinds: ["search"], allowed_tools: [], lane: "read_only", stage: "plan"}
   assert(
     stage_gate_allows(gate, "look", {kind_of: _stage_gate_named_kind}),
@@ -338,7 +338,7 @@ pipeline test_stage_gate_accepts_named_function_callbacks(task) {
   )
 }
 
-pipeline test_stage_gate_rejects_bad_callbacks(task) {
+pipeline test_stage_gate_rejects_bad_callbacks(harness: Harness, task) {
   const bad_kind_of = try {
     stage_gate_allows({allowed_kinds: ["x"], lane: "l", stage: "s"}, "t", {kind_of: "not-callable"})
   }
@@ -349,7 +349,7 @@ pipeline test_stage_gate_rejects_bad_callbacks(task) {
   assert(is_err(bad_suggest), "non-string/non-callable suggest throws loudly")
 }
 
-pipeline test_stage_gate_label_rejects_delimiter_components(task) {
+pipeline test_stage_gate_label_rejects_delimiter_components(harness: Harness, task) {
   // A well-formed gate round-trips through label -> parse byte-for-byte.
   const label = stage_gate_label(
     "do it",
@@ -385,7 +385,7 @@ pipeline test_stage_gate_label_rejects_delimiter_components(task) {
   assert(is_err(bad_kind_eq), "an `=` in an allowed_kinds token is rejected")
 }
 
-pipeline test_stage_gate_default_prefix_byte_identical(task) {
+pipeline test_stage_gate_default_prefix_byte_identical(harness: Harness, task) {
   // Omitting the prefix option renders the SAME marker as passing the explicit
   // default — the adoption seam adds no drift for callers that never set a prefix.
   const gate = {allowed_tools: ["edit"], lane: "repair_local", stage: "repair"}
@@ -395,7 +395,7 @@ pipeline test_stage_gate_default_prefix_byte_identical(task) {
   assert(implicit.contains("[lane_gate lane=repair_local"), "default marker prefix rendered")
 }
 
-pipeline test_stage_gate_custom_prefix_roundtrips(task) {
+pipeline test_stage_gate_custom_prefix_roundtrips(harness: Harness, task) {
   // A host prefix (burin-code's existing "[burin_gate ") round-trips through
   // label -> parse when the SAME prefix is supplied to both.
   const opts = {prefix: "[burin_gate "}
@@ -417,7 +417,7 @@ pipeline test_stage_gate_custom_prefix_roundtrips(task) {
   assert_eq(stage_gate_parse(label), {})
 }
 
-pipeline test_stage_gate_prefix_validated_loudly(task) {
+pipeline test_stage_gate_prefix_validated_loudly(harness: Harness, task) {
   // A custom prefix must be a well-formed marker opener: start with "[", end with a
   // space, and carry none of the "=", ",", "]" structural delimiters.
   const gate = {lane: "l", stage: "s"}

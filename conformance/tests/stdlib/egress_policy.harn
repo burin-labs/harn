@@ -1,7 +1,7 @@
-pipeline test(task) {
-  http_mock_clear()
-  transport_mock_clear()
-  egress_policy(
+pipeline test(harness: Harness, task) {
+  harness.testing.http_mock_clear()
+  harness.testing.transport_mock_clear()
+  harness.net.egress_policy(
     {
       allow: [
         "allowed.example.test",
@@ -13,16 +13,20 @@ pipeline test(task) {
       default: "deny",
     },
   )
-  http_mock("GET", "https://allowed.example.test/ok", {status: 200, body: "allowed"})
+  harness.testing.http_mock(
+    "GET",
+    "https://allowed.example.test/ok",
+    {status: 200, body: "allowed"},
+  )
   const allowed = harness.net.get("https://allowed.example.test/ok")
   assert_eq(allowed.status, 200)
-  http_mock("GET", "https://api.wild.example.test/ok", {status: 200, body: "wild"})
+  harness.testing.http_mock("GET", "https://api.wild.example.test/ok", {status: 200, body: "wild"})
   const wildcard = harness.net.get("https://api.wild.example.test/ok")
   assert_eq(wildcard.body, "wild")
-  http_mock("GET", "http://127.0.0.1:9/ok", {status: 200, body: "cidr"})
+  harness.testing.http_mock("GET", "http://127.0.0.1:9/ok", {status: 200, body: "cidr"})
   const cidr = harness.net.get("http://127.0.0.1:9/ok")
   assert_eq(cidr.body, "cidr")
-  http_mock("GET", "https://port.example.test:8443/ok", {status: 200, body: "port"})
+  harness.testing.http_mock("GET", "https://port.example.test:8443/ok", {status: 200, body: "port"})
   const port_ok = harness.net.get("https://port.example.test:8443/ok")
   assert_eq(port_ok.body, "port")
   const port_blocked = try {
@@ -39,22 +43,22 @@ pipeline test(task) {
   }
   assert(is_err(deny_blocked))
   assert_eq(unwrap_err(deny_blocked).type, "EgressBlocked")
-  const session = http_session({timeout_ms: 100})
+  const session = harness.net.session({timeout_ms: 100})
   const session_blocked = try {
-    http_session_request(session, "GET", "https://blocked.example.test/session", {})
+    harness.net.session_request(session, "GET", "https://blocked.example.test/session", {})
   }
   assert(is_err(session_blocked))
   assert_eq(unwrap_err(session_blocked).type, "EgressBlocked")
-  assert(http_session_close(session))
+  assert(harness.net.session_close(session))
   const sse_blocked = try {
-    sse_connect("GET", "https://blocked.example.test/events", {})
+    harness.net.sse_connect("GET", "https://blocked.example.test/events", {})
   }
   assert(is_err(sse_blocked))
   assert_eq(unwrap_err(sse_blocked).type, "EgressBlocked")
   const ws_blocked = try {
-    websocket_connect("wss://blocked.example.test/socket", {})
+    harness.net.websocket_connect("wss://blocked.example.test/socket", {})
   }
   assert(is_err(ws_blocked))
   assert_eq(unwrap_err(ws_blocked).type, "EgressBlocked")
-  __io_println("egress_policy_ok")
+  harness.stdio.println("egress_policy_ok")
 }

@@ -1,8 +1,8 @@
 import "std/agents"
 
-pipeline main() {
-  friction_clear()
-  const disabled = friction_record(
+pipeline main(harness: Harness) {
+  harness.obs.friction_clear()
+  const disabled = harness.obs.friction_record(
     {
       kind: "repeated_query",
       source: "incident-triage",
@@ -13,8 +13,8 @@ pipeline main() {
     },
     {enabled: false},
   )
-  __io_println(!disabled.recorded && len(friction_events()) == 0)
-  const first = friction_record(
+  harness.stdio.println(!disabled.recorded && len(harness.obs.friction_events()) == 0)
+  const first = harness.obs.friction_record(
     {
       kind: "repeated_query",
       source: "incident-triage",
@@ -34,7 +34,7 @@ pipeline main() {
       },
     },
   )
-  friction_record(
+  harness.obs.friction_record(
     {
       kind: "repeated_query",
       source: "incident-triage",
@@ -53,7 +53,7 @@ pipeline main() {
       },
     },
   )
-  const events = friction_events()
+  const events = harness.obs.friction_events()
   const suggestions = context_pack_suggestions(events, {min_occurrences: 2, owner: "sre"})
   const pack = context_pack_manifest(
     {
@@ -83,8 +83,8 @@ pipeline main() {
       ],
     },
   )
-  __io_println(first.recorded && first.sink == "memory")
-  __io_println(
+  harness.stdio.println(first.recorded && first.sink == "memory")
+  harness.stdio.println(
     len(events) == 2
       && contains(events[0].redacted_summary, "redacted")
       && !contains(
@@ -92,10 +92,14 @@ pipeline main() {
       "token=secret",
     ),
   )
-  __io_println(events[0].metadata.api_key == "[redacted]")
-  __io_println(len(suggestions) == 1 && suggestions[0].recommended_artifact == "context_pack")
-  __io_println(suggestions[0].candidate_manifest.capabilities[0] == "splunk.search")
-  __io_println(suggestions[0].estimated_savings.estimated_time_saved_ms == 240000)
-  __io_println(pack.id == "checkout_incident_context" && pack.refresh_policy.mode == "on_demand")
-  __io_println(eval.pass && eval.suggestion_count == 1)
+  harness.stdio.println(events[0].metadata.api_key == "[redacted]")
+  harness.stdio.println(
+    len(suggestions) == 1 && suggestions[0].recommended_artifact == "context_pack",
+  )
+  harness.stdio.println(suggestions[0].candidate_manifest.capabilities[0] == "splunk.search")
+  harness.stdio.println(suggestions[0].estimated_savings.estimated_time_saved_ms == 240000)
+  harness.stdio.println(
+    pack.id == "checkout_incident_context" && pack.refresh_policy.mode == "on_demand",
+  )
+  harness.stdio.println(eval.pass && eval.suggestion_count == 1)
 }

@@ -6,7 +6,6 @@ pub mod builtin_signatures;
 pub mod const_eval;
 pub mod diagnostic;
 pub mod diagnostic_codes;
-pub mod harness_methods;
 pub mod lexical;
 mod parser;
 pub mod stdlib_metadata;
@@ -28,7 +27,7 @@ pub use typechecker::{
     TypeDiagnostic,
 };
 
-pub use builtin_signatures::install_builtin_signatures;
+pub use builtin_signatures::install_builtin_manifest;
 
 /// Returns `true` if `name` is a builtin recognized by the parser's static analyzer.
 pub fn is_known_builtin(name: &str) -> bool {

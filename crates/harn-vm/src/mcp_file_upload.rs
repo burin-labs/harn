@@ -41,27 +41,23 @@ pub fn reset_for_tests() {
 }
 
 pub fn register_mcp_file_upload_builtins(vm: &mut Vm) {
-    vm.register_builtin("mcp_configure", |args, _out| {
-        configure(args.first().unwrap_or(&VmValue::Nil))
-    });
-    vm.register_builtin("harn.mcp.configure", |args, _out| {
-        configure(args.first().unwrap_or(&VmValue::Nil))
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_configure",
+        |args, _out| configure(args.first().unwrap_or(&VmValue::Nil)),
+    );
 
-    vm.register_builtin("mcp_file_input", |args, _out| {
-        file_input_schema(args.first().unwrap_or(&VmValue::Nil))
-    });
-    vm.register_builtin("harn.mcp.file_input", |args, _out| {
-        file_input_schema(args.first().unwrap_or(&VmValue::Nil))
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_file_input",
+        |args, _out| file_input_schema(args.first().unwrap_or(&VmValue::Nil)),
+    );
 
-    vm.register_async_builtin(
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
         "mcp_upload_file",
         |_ctx, args| async move { upload_file(&args) },
     );
-    vm.register_async_builtin("harn.mcp.upload_file", |_ctx, args| async move {
-        upload_file(&args)
-    });
 }
 
 fn configure(config: &VmValue) -> Result<VmValue, VmError> {

@@ -5,16 +5,17 @@ import { with_llm_script } from "std/testing"
  * combining it with a standalone `model:` pin is ambiguous and must error
  * before any provider work happens.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [{text: "should never run", model: "mock", provider: "mock"}],
     { ->
       const out = try {
-        llm_call("hi", nil, {models: ["mock-a", "mock-b"], model: "pinned"})
+        harness.llm.call("hi", nil, {models: ["mock-a", "mock-b"], model: "pinned"})
       } catch (e) {
         {msg: to_string(e)}
       }
-      __io_println(contains(out.msg, "cannot be combined"))
+      harness.stdio.println(contains(out.msg, "cannot be combined"))
     },
   )
 }

@@ -5,46 +5,46 @@
  * compound forms, an aliasing right-hand side, dict merge, and the scalar
  * path the optimization must leave untouched.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Plain `x = x + [item]` accumulator.
   let xs = []
   for i in [1, 2, 3, 4] {
     xs = xs + [i]
   }
-  log(xs)
+  harness.stdio.log(xs)
   // Compound `x += [item]`.
   let ys = []
   for i in [10, 20, 30] {
     ys += [i]
   }
-  log(ys)
+  harness.stdio.log(ys)
   // Prepend / non-accumulator concats still work.
   const combined = [0] + xs + [99]
-  log(combined)
+  harness.stdio.log(combined)
   // Aliasing RHS: `x = x + x` must duplicate, not corrupt.
   let z = [1, 2]
   z = z + z
-  log(z)
+  harness.stdio.log(z)
   // Aliasing via a separate binding: the in-place extend must observe that
   // `a`'s buffer is still shared with `b` and copy instead of mutating it.
   let a = [1]
   const b = a
   a = a + [2]
-  log(a)
-  log(b)
+  harness.stdio.log(a)
+  harness.stdio.log(b)
   // Dict merge accumulator.
   let d = {a: 1}
   d = d + {b: 2}
   d += {c: 3}
-  log(d)
+  harness.stdio.log(d)
   // Scalar arithmetic-assign is unaffected (no list gate).
   let n = 0
   n += 5
   n = n + 3
-  log(n)
+  harness.stdio.log(n)
   // String concat-assign stays correct (not list-optimized).
   let s = ""
   s = s + "ab"
   s += "cd"
-  log(s)
+  harness.stdio.log(s)
 }

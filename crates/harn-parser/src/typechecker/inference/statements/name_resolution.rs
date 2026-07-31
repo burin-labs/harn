@@ -9,6 +9,17 @@ impl TypeChecker {
         span: Span,
         scope: &TypeScope,
     ) {
+        // Root authority is never ambient. Enforce this even in parser-only
+        // checks that have no resolved import catalog; treating the canonical
+        // spelling as a magical global would defeat capability attenuation.
+        if matches!(name, "harness" | "_harness") && scope.get_var(name).is_none() {
+            self.error_at(
+                Code::UndefinedVariable,
+                format!("undefined value `{name}`; pass it explicitly as `Harness`"),
+                span,
+            );
+            return;
+        }
         let Some(imported) = self.imported_names.as_ref() else {
             return;
         };
@@ -23,7 +34,6 @@ impl TypeChecker {
             || imported.contains(name)
             || scope.is_generic_type_param(name)
             || name.starts_with("__")
-            || name.starts_with("hostlib_")
             || matches!(name, "Ok" | "Err" | "Some" | "None")
         {
             return;

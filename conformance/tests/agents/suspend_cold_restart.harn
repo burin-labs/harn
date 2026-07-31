@@ -1,5 +1,5 @@
 /**
- * S-11 (#1847): a top-level `agent_loop(...)` that self-parks
+ * S-11 (#1847): a top-level `agent_loop(harness, ...)` that self-parks
  * persists a snapshot file on disk, the process exits cleanly with
  * `status=suspended`, and a second `harn run --resume <snapshot>`
  * invocation continues the same loop to completion.
@@ -29,27 +29,30 @@ fn first_snapshot_line(text) {
   return matches[0].groups[0]
 }
 
-pipeline main() {
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+pipeline main(harness: Harness) {
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn-suspend-cold-restart-" + uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-suspend-cold-restart-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   const script = path_join(root, "cold_restart_suspend.harn")
   harness.fs.write_text(
     script,
-    "pipeline main() {\n"
-      + "  llm_mock({tool_calls: [{id: \"park_cold\", name: \"agent_await_resumption\", arguments: {reason: \"cold restart park\"}}]})\n"
-      + "  let result = agent_loop(\"Park until a cold restart resumes you.\", nil, {provider: \"mock\", tool_format: \"native\", max_iterations: 2, session_id: \"cold-restart-\" + uuid_v7()})\n"
-      + "  __io_println(\"status=\" + result.status)\n"
-      + "  __io_println(\"snapshot=\" + result.handle.snapshot_path)\n"
+    "import { agent_loop } from \"std/agent/loop\"\n\npipeline main(harness: Harness) {\n"
+      + "  harness.llm.mock_enqueue({tool_calls: [{id: \"park_cold\", name: \"agent_await_resumption\", arguments: {reason: \"cold restart park\"}}]})\n"
+      + "  let result = agent_loop(harness, \"Park until a cold restart resumes you.\", nil, {provider: \"mock\", tool_format: \"native\", max_iterations: 2, session_id: \"cold-restart-\" + harness.random.uuid_v7()})\n"
+      + "  harness.stdio.println(\"status=\" + result.status)\n"
+      + "  harness.stdio.println(\"snapshot=\" + result.handle.snapshot_path)\n"
       + "}\n",
   )
-  const first = exec_at(root, harn_bin, "run", script)
-  __io_println("first_ok=" + to_string(first.success))
-  __io_println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
+  const first = harness.process.exec_at(root, harn_bin, "run", script)
+  harness.stdio.println("first_ok=" + to_string(first.success))
+  harness.stdio.println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
   const snapshot = first_snapshot_line(first.stdout)
   require snapshot != nil, "cold restart suspend did not print a snapshot path"
   const snapshot_path = if path_is_absolute(snapshot) {
@@ -57,14 +60,14 @@ pipeline main() {
   } else {
     path_join(root, snapshot)
   }
-  __io_println("snapshot_exists=" + to_string(harness.fs.exists(snapshot_path)))
+  harness.stdio.println("snapshot_exists=" + to_string(harness.fs.exists(snapshot_path)))
   const snapshot_text = harness.fs.read_text(snapshot_path)
-  __io_println("snapshot_nonempty=" + to_string(len(snapshot_text) > 0))
-  const second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
-  __io_println("second_ok=" + to_string(second.success))
+  harness.stdio.println("snapshot_nonempty=" + to_string(len(snapshot_text) > 0))
+  const second = harness.process.exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
+  harness.stdio.println("second_ok=" + to_string(second.success))
   const lines = second.stdout.trim().split("\n")
   const final = json_parse(lines[len(lines) - 1])
-  __io_println("event_type=" + to_string(final.data.event_type))
-  __io_println("resumed_status=" + to_string(final.data.value.status))
-  __io_println("has_transcript=" + to_string(final.data.value.has_transcript))
+  harness.stdio.println("event_type=" + to_string(final.data.event_type))
+  harness.stdio.println("resumed_status=" + to_string(final.data.value.status))
+  harness.stdio.println("has_transcript=" + to_string(final.data.value.has_transcript))
 }

@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface Stringable {
     fn to_str(self) -> string
   }
@@ -14,5 +14,5 @@ pipeline test(task) {
     return item.to_str()
   }
   const n = Name({value: "hello"})
-  log(show(n))
+  harness.stdio.log(show(n))
 }

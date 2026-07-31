@@ -1,7 +1,7 @@
-pipeline test(task) {
-  __io_println(2 + 3 * 4)
-  __io_println("ha" * 2)
-  __io_println(([1] + [2, 3])[2])
-  __io_println(({a: 1} + {b: 2}).b)
-  __io_println(false || !false)
+pipeline test(harness: Harness, task) {
+  harness.stdio.println(2 + 3 * 4)
+  harness.stdio.println("ha" * 2)
+  harness.stdio.println(([1] + [2, 3])[2])
+  harness.stdio.println(({a: 1} + {b: 2}).b)
+  harness.stdio.println(false || !false)
 }

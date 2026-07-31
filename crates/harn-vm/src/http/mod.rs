@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -31,6 +32,14 @@ pub(crate) async fn execute_http_request(
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     client::vm_execute_http_request(method, url, options).await
+}
+
+pub(crate) async fn execute_http_verb(
+    method: &str,
+    has_body: bool,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    client::http_verb_handler(method, has_body, args).await
 }
 #[cfg(test)]
 use mock::{mock_call_headers_value, redact_mock_call_url};
@@ -641,7 +650,6 @@ async fn run_http_server_request(
 /// Register HTTP builtins on a VM.
 pub fn register_http_builtins(vm: &mut Vm) {
     register_http_tls_builtins(vm);
-    client::register_http_verb_builtins(vm);
     register_http_server_builtins(vm);
     register_http_mock_builtins(vm);
     client::register_http_client_builtins(vm);
@@ -649,7 +657,7 @@ pub fn register_http_builtins(vm: &mut Vm) {
 }
 
 fn register_http_tls_builtins(vm: &mut Vm) {
-    vm.register_builtin("http_server_tls_plain", |_args, _out| {
+    vm.register_builtin("__http_server_tls_plain", |_args, _out| {
         Ok(http_server_tls_config_value(
             "plain",
             false,
@@ -658,7 +666,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             crate::value::DictMap::new(),
         ))
     });
-    vm.register_builtin("http_server_tls_edge", |args, _out| {
+    vm.register_builtin("__http_server_tls_edge", |args, _out| {
         let options = get_options_arg(args, 0);
         Ok(http_server_tls_config_value(
             "edge",
@@ -668,7 +676,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             hsts_options(&options),
         ))
     });
-    vm.register_builtin("http_server_tls_pem", |args, _out| {
+    vm.register_builtin("__http_server_tls_pem", |args, _out| {
         if args.len() < 2 {
             return Err(vm_error(
                 "http_server_tls_pem: requires cert path and key path",
@@ -693,7 +701,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             "pem", true, "https", true, extra,
         ))
     });
-    vm.register_builtin("http_server_tls_self_signed_dev", |args, _out| {
+    vm.register_builtin("__http_server_tls_self_signed_dev", |args, _out| {
         let hosts = tls_hosts_arg(args.first())?;
         let cert = rcgen::generate_simple_self_signed(hosts.clone()).map_err(|error| {
             vm_error(format!(
@@ -720,7 +728,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             extra,
         ))
     });
-    vm.register_builtin("http_server_security_headers", |args, _out| {
+    vm.register_builtin("__http_server_security_headers", |args, _out| {
         let Some(VmValue::Dict(config)) = args.first() else {
             return Err(vm_error(
                 "http_server_security_headers: requires a TLS config dict",
@@ -733,7 +741,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
 fn register_http_server_builtins(vm: &mut Vm) {
     // --- Inbound HTTP server primitives ---
 
-    vm.register_builtin("http_server", |args, _out| {
+    vm.register_builtin("__http_server", |args, _out| {
         let options = get_options_arg(args, 0);
         let server = HttpServer {
             routes: Vec::new(),
@@ -764,7 +772,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&id))
     });
 
-    vm.register_builtin("http_server_route", |args, _out| {
+    vm.register_builtin("__http_server_route", |args, _out| {
         if args.len() < 4 {
             return Err(vm_error(
                 "http_server_route: requires server, method, path template, and handler",
@@ -804,7 +812,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_builtin("http_server_before", |args, _out| {
+    vm.register_builtin("__http_server_before", |args, _out| {
         if args.len() < 2 {
             return Err(vm_error("http_server_before: requires server and handler"));
         }
@@ -821,7 +829,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_builtin("http_server_after", |args, _out| {
+    vm.register_builtin("__http_server_after", |args, _out| {
         if args.len() < 2 {
             return Err(vm_error("http_server_after: requires server and handler"));
         }
@@ -838,7 +846,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_request", |ctx, args| async move {
+    vm.register_async_builtin("__http_server_request", |ctx, args| async move {
         if args.len() < 2 {
             return Err(vm_error("http_server_request: requires server and request"));
         }
@@ -846,7 +854,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         run_http_server_request(&ctx, &server_id, args[1].clone()).await
     });
 
-    vm.register_async_builtin("http_server_test", |ctx, args| async move {
+    vm.register_async_builtin("__http_server_test", |ctx, args| async move {
         if args.len() < 2 {
             return Err(vm_error("http_server_test: requires server and request"));
         }
@@ -854,7 +862,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         run_http_server_request(&ctx, &server_id, args[1].clone()).await
     });
 
-    vm.register_builtin("http_server_set_ready", |args, _out| {
+    vm.register_builtin("__http_server_set_ready", |args, _out| {
         if args.len() < 2 {
             return Err(vm_error(
                 "http_server_set_ready: requires server and ready bool",
@@ -875,7 +883,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(VmValue::Bool(ready))
     });
 
-    vm.register_builtin("http_server_readiness", |args, _out| {
+    vm.register_builtin("__http_server_readiness", |args, _out| {
         if args.len() < 2 {
             return Err(vm_error(
                 "http_server_readiness: requires server and readiness closure",
@@ -896,7 +904,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_ready", |ctx, args| async move {
+    vm.register_async_builtin("__http_server_ready", |ctx, args| async move {
         let Some(server_arg) = args.first() else {
             return Err(vm_error("http_server_ready: requires server"));
         };
@@ -923,7 +931,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(VmValue::Bool(result.is_truthy()))
     });
 
-    vm.register_builtin("http_server_on_shutdown", |args, _out| {
+    vm.register_builtin("__http_server_on_shutdown", |args, _out| {
         if args.len() < 2 {
             return Err(vm_error(
                 "http_server_on_shutdown: requires server and handler",
@@ -944,7 +952,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_shutdown", |ctx, args| async move {
+    vm.register_async_builtin("__http_server_shutdown", |ctx, args| async move {
         let Some(server_arg) = args.first() else {
             return Err(vm_error("http_server_shutdown: requires server"));
         };
@@ -971,124 +979,136 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(VmValue::Bool(true))
     });
 
-    vm.register_builtin("http_response", |args, _out| {
-        let status = args.first().and_then(VmValue::as_int).unwrap_or(200);
-        let body = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        let headers = args
-            .get(2)
-            .and_then(VmValue::as_dict)
-            .cloned()
-            .unwrap_or_default();
-        Ok(response_with_kind(status, headers, body, "text"))
-    });
+    vm.register_builtin_def(&HTTP_RESPONSE_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_RESPONSE_TEXT_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_RESPONSE_JSON_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_RESPONSE_BYTES_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_HEADER_IMPL_DEF);
+}
 
-    vm.register_builtin("http_response_text", |args, _out| {
-        let body = args.first().cloned().unwrap_or(VmValue::Nil);
-        let options = get_options_arg(args, 1);
-        let status = options
-            .get("status")
-            .and_then(VmValue::as_int)
-            .unwrap_or(200);
-        let headers = options
-            .get("headers")
-            .and_then(VmValue::as_dict)
-            .cloned()
-            .unwrap_or_default();
-        Ok(response_with_kind(status, headers, body, "text"))
-    });
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_response(status?: int, body?: any, headers?: dict) -> dict", category = "http")]
+fn http_response_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let status = args.first().and_then(VmValue::as_int).unwrap_or(200);
+    let body = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let headers = args
+        .get(2)
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    Ok(response_with_kind(status, headers, body, "text"))
+}
 
-    vm.register_builtin("http_response_json", |args, _out| {
-        let body = args
-            .first()
-            .map(crate::stdlib::json::vm_value_to_json)
-            .map(VmValue::string)
-            .unwrap_or_else(|| VmValue::string("null"));
-        let options = get_options_arg(args, 1);
-        let status = options
-            .get("status")
-            .and_then(VmValue::as_int)
-            .unwrap_or(200);
-        let headers = options
-            .get("headers")
-            .and_then(VmValue::as_dict)
-            .cloned()
-            .unwrap_or_default();
-        Ok(response_with_kind(status, headers, body, "json"))
-    });
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_response_text(body?: any, options?: dict) -> dict", category = "http")]
+fn http_response_text_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let body = args.first().cloned().unwrap_or(VmValue::Nil);
+    let options = get_options_arg(args, 1);
+    let status = options
+        .get("status")
+        .and_then(VmValue::as_int)
+        .unwrap_or(200);
+    let headers = options
+        .get("headers")
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    Ok(response_with_kind(status, headers, body, "text"))
+}
 
-    vm.register_builtin("http_response_bytes", |args, _out| {
-        let body = match args.first() {
-            Some(VmValue::Bytes(bytes)) => VmValue::Bytes(bytes.clone()),
-            Some(value) => VmValue::Bytes(std::sync::Arc::new(value.display().into_bytes())),
-            None => VmValue::Bytes(std::sync::Arc::new(Vec::new())),
-        };
-        let options = get_options_arg(args, 1);
-        let status = options
-            .get("status")
-            .and_then(VmValue::as_int)
-            .unwrap_or(200);
-        let headers = options
-            .get("headers")
-            .and_then(VmValue::as_dict)
-            .cloned()
-            .unwrap_or_default();
-        Ok(response_with_kind(status, headers, body, "bytes"))
-    });
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_response_json(body?: any, options?: dict) -> dict", category = "http")]
+fn http_response_json_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let body = args
+        .first()
+        .map(crate::stdlib::json::vm_value_to_json)
+        .map(VmValue::string)
+        .unwrap_or_else(|| VmValue::string("null"));
+    let options = get_options_arg(args, 1);
+    let status = options
+        .get("status")
+        .and_then(VmValue::as_int)
+        .unwrap_or(200);
+    let headers = options
+        .get("headers")
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    Ok(response_with_kind(status, headers, body, "json"))
+}
 
-    vm.register_builtin("http_header", |args, _out| {
-        if args.len() < 2 {
-            return Err(vm_error(
-                "http_header: requires headers/request/response and name",
-            ));
-        }
-        let headers = headers_from_value(&args[0]);
-        Ok(header_lookup_value(&headers, &args[1].display()))
-    });
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_response_bytes(body?: any, options?: dict) -> dict", category = "http")]
+fn http_response_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let body = match args.first() {
+        Some(VmValue::Bytes(bytes)) => VmValue::Bytes(bytes.clone()),
+        Some(value) => VmValue::Bytes(std::sync::Arc::new(value.display().into_bytes())),
+        None => VmValue::Bytes(std::sync::Arc::new(Vec::new())),
+    };
+    let options = get_options_arg(args, 1);
+    let status = options
+        .get("status")
+        .and_then(VmValue::as_int)
+        .unwrap_or(200);
+    let headers = options
+        .get("headers")
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    Ok(response_with_kind(status, headers, body, "bytes"))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_header(source: dict | list, name: string) -> string?", category = "http")]
+fn http_header_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(vm_error(
+            "http_header: requires headers/request/response and name",
+        ));
+    }
+    Ok(header_lookup_value(
+        &headers_from_value(&args[0]),
+        &args[1].display(),
+    ))
 }
 
 fn register_http_mock_builtins(vm: &mut Vm) {
-    // --- Mock HTTP builtins ---
-
-    // http_mock(method, url_pattern, response) -> nil
-    //
-    // Calling http_mock again with the same (method, url_pattern) tuple
-    // *replaces* the prior mock for that target — tests can override a
-    // per-case response without first calling http_mock_clear().
-    vm.register_builtin("http_mock", |args, _out| {
-        let method = args.first().map(|a| a.display()).unwrap_or_default();
-        let url_pattern = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let response = args
-            .get(2)
-            .and_then(|a| a.as_dict())
-            .cloned()
-            .unwrap_or_default();
-        let responses = parse_mock_responses(&response);
-
-        register_http_mock(method, url_pattern, responses);
-        Ok(VmValue::Nil)
-    });
-
-    // http_mock_clear() -> nil
-    vm.register_builtin("http_mock_clear", |_args, _out| {
-        clear_http_mocks();
-        client::clear_http_streams();
-        Ok(VmValue::Nil)
-    });
-
-    // http_mock_calls(options?) -> list of {method, url, headers, body}
-    vm.register_builtin("http_mock_calls", |args, _out| {
-        let options = get_options_arg(args, 0);
-        let include_sensitive = get_bool_option(&options, "include_sensitive", false)
-            || get_bool_option(&options, "include_sensitive_headers", false);
-        let redact_sensitive = get_bool_option(
-            &options,
-            "redact_sensitive",
-            get_bool_option(&options, "redact_headers", true),
-        ) && !include_sensitive;
-        Ok(VmValue::List(std::sync::Arc::new(http_mock_calls_value(
-            redact_sensitive,
-        ))))
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "http_mock",
+        |args, _out| {
+            let method = args.first().map(VmValue::display).unwrap_or_default();
+            let url_pattern = args.get(1).map(VmValue::display).unwrap_or_default();
+            let response = args
+                .get(2)
+                .and_then(VmValue::as_dict)
+                .cloned()
+                .unwrap_or_default();
+            register_http_mock(method, url_pattern, parse_mock_responses(&response));
+            Ok(VmValue::Nil)
+        },
+    );
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "http_mock_clear",
+        |_args, _out| {
+            clear_http_mocks();
+            client::clear_http_streams();
+            Ok(VmValue::Nil)
+        },
+    );
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "http_mock_calls",
+        |args, _out| {
+            let options = get_options_arg(args, 0);
+            let include_sensitive = get_bool_option(&options, "include_sensitive", false)
+                || get_bool_option(&options, "include_sensitive_headers", false);
+            let redact_sensitive = get_bool_option(
+                &options,
+                "redact_sensitive",
+                get_bool_option(&options, "redact_headers", true),
+            ) && !include_sensitive;
+            Ok(VmValue::List(std::sync::Arc::new(http_mock_calls_value(
+                redact_sensitive,
+            ))))
+        },
+    );
 }
 
 fn http_server_tls_config_value(

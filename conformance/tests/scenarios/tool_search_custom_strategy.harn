@@ -1,6 +1,7 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -15,12 +16,14 @@ pipeline test(task) {
     {parameters: {}, defer_loading: true, handler: { _ -> "deployed" }},
   )
   with_llm_script(
+    harness.llm,
     [
       {text: "search", tool_calls: [{id: "s1", name: "find_tool", arguments: {query: "ship"}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(
+        harness,
         "ship",
         nil,
         {
@@ -57,7 +60,7 @@ pipeline test(task) {
       }
       assert(saw_fixture, "custom strategy label recorded")
       assert(promoted, "custom strategy promoted deploy_tool")
-      log("tool_search_custom_strategy tests passed")
+      harness.stdio.log("tool_search_custom_strategy tests passed")
     },
   )
 }

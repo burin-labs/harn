@@ -524,14 +524,19 @@ pub fn ui_select_for_host(
   const resource = result.ui_resource
   const resource_ok = resource != nil && resource.validation.ok
   if supports_apps && resource_ok {
-    return result.merging({selected: "ui_resource"})
+    let selected_result: UiToolResult = result
+    selected_result.selected = "ui_resource"
+    return selected_result
   }
   const selected = if result.structured_fallback != nil {
     "structured_fallback"
   } else {
     "text_fallback"
   }
-  return result.merging({ui_resource: nil, selected: selected})
+  let selected_result: UiToolResult = result
+  selected_result.ui_resource = nil
+  selected_result.selected = selected
+  return selected_result
 }
 
 /**

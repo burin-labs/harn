@@ -70,24 +70,21 @@ fn make_acp_test_message(role: &str, content: &str) -> VmValue {
     ]))
 }
 
-async fn start_acp_channel_session() -> (
+type AcpTestSession = (
     mpsc::UnboundedSender<serde_json::Value>,
     mpsc::UnboundedReceiver<String>,
     tokio::task::JoinHandle<()>,
     String,
-) {
+);
+
+async fn start_acp_channel_session() -> AcpTestSession {
     start_acp_channel_session_with_config(AcpServerConfig::new(None), serde_json::json!(".")).await
 }
 
 async fn start_acp_channel_session_with_config(
     config: AcpServerConfig,
     cwd: serde_json::Value,
-) -> (
-    mpsc::UnboundedSender<serde_json::Value>,
-    mpsc::UnboundedReceiver<String>,
-    tokio::task::JoinHandle<()>,
-    String,
-) {
+) -> AcpTestSession {
     let (request_tx, request_rx) = mpsc::unbounded_channel();
     let (response_tx, mut response_rx) = mpsc::unbounded_channel();
     let server = tokio::task::spawn_local(super::run_acp_channel_server(
@@ -116,12 +113,7 @@ async fn start_acp_channel_session_with_config(
 async fn start_acp_code_session_with_config(
     config: AcpServerConfig,
     cwd: serde_json::Value,
-) -> (
-    mpsc::UnboundedSender<serde_json::Value>,
-    mpsc::UnboundedReceiver<String>,
-    tokio::task::JoinHandle<()>,
-    String,
-) {
+) -> AcpTestSession {
     let (request_tx, mut response_rx, server, session_id) =
         start_acp_channel_session_with_config(config, cwd).await;
     request_tx
@@ -136,6 +128,10 @@ async fn start_acp_code_session_with_config(
     let _mode_notification = recv_json(&mut response_rx).await;
     let _config_notification = recv_json(&mut response_rx).await;
     (request_tx, response_rx, server, session_id)
+}
+
+async fn start_acp_code_session() -> AcpTestSession {
+    start_acp_code_session_with_config(AcpServerConfig::new(None), serde_json::json!(".")).await
 }
 
 #[tokio::test]
@@ -1093,11 +1089,7 @@ async fn session_inject_rejects_cross_actor_mutation() {
 #[cfg(feature = "hostlib")]
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_rollback_and_redo_move_transcript_and_filesystem_together() {
-    use harn_hostlib::tools::permissions;
-
     harn_vm::reset_thread_local_state();
-    permissions::reset();
-    permissions::enable_for_test();
 
     let dir = tempfile::TempDir::new().unwrap();
     let file = dir.path().join("note.txt");
@@ -1187,10 +1179,6 @@ async fn acp_session_rollback_and_redo_move_transcript_and_filesystem_together()
 #[cfg(feature = "hostlib")]
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
-    use harn_hostlib::tools::permissions;
-
-    permissions::enable_for_test();
-
     let dir = tempfile::TempDir::new().unwrap();
     let file = dir.path().join("subject.txt");
     std::fs::write(&file, b"pre").unwrap();

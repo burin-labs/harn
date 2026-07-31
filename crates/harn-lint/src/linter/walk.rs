@@ -456,7 +456,7 @@ impl<'a> Linter<'a> {
                 method,
                 args,
             } => {
-                self.check_redundant_clone_args(method, args);
+                self.check_harness_method_effect_policy(object, method, args, snode.span);
                 self.lint_node(object);
                 for arg in args {
                     self.lint_node(arg);

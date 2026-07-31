@@ -1,8 +1,7 @@
-//! JSON-RPC 2.0 bridge for host communication.
-//!
-//! When `harn run --bridge` is used, the VM delegates builtins (llm_call,
-//! file I/O, tool execution) to a host process over stdin/stdout JSON-RPC.
-//! The host application handles these requests using its own providers.
+//! JSON-RPC 2.0 bridge that delegates VM effects to a host process over
+//! stdin/stdout when `harn run --bridge` is active.
+
+mod authority;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
@@ -170,7 +169,8 @@ impl InProcessHost {
         };
 
         let mut vm = self.vm.child_vm_for_host();
-        let result = vm.call_closure_pub(closure, args).await?;
+        let call_args = authority::inject_export_authority(&vm, closure, args, name)?;
+        let result = vm.call_closure_pub(closure, &call_args).await?;
         Ok(crate::llm::vm_value_to_json(&result))
     }
 

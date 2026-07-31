@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -5,7 +6,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * `allowed_tools` list match any tool declared with that namespace,
  * instead of requiring an exact tool-name enumeration.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -43,9 +44,11 @@ pipeline test(task) {
     allowed_tools ["namespace:read"]
   }
   with_llm_script(
+    harness.llm,
     [llm_text("On it.")],
     { ->
       const result = agent_loop(
+        harness,
         "Investigate the auth flow",
         "You are a code explorer.",
         {
@@ -58,7 +61,7 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "agent loop completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) >= 1, "LLM was called")
       const first_tools = calls[0].tools
       let seen_read = false
@@ -96,7 +99,7 @@ pipeline test(task) {
         threw_typo = true
       }
       assert(threw_typo, "unrecognized colon-prefixed entry rejected")
-      log("skill_lifecycle_namespace_scope tests passed")
+      harness.stdio.log("skill_lifecycle_namespace_scope tests passed")
     },
   )
 }

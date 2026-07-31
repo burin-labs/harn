@@ -1378,12 +1378,11 @@ fn test_builtin_return_type_inference() {
 }
 
 #[test]
-fn test_harness_crypto_sha256_type_inference() {
+fn test_pure_sha256_type_inference() {
     let errs = errors(
         r#"fn main(harness: Harness) {
-  let crypto: HarnessCrypto = harness.crypto
-  let digest: string = crypto.sha256("")
-  let wrong: int = harness.crypto.sha256("hello")
+  let digest: string = sha256_hex("")
+  let wrong: int = sha256_hex("hello")
 }"#,
     );
     assert_eq!(errs.len(), 1, "expected one mismatch, got: {errs:?}");
@@ -1430,7 +1429,7 @@ fn test_harness_llm_method_return_type_inference() {
     let errs = errors(
         r"fn main(harness: Harness) {
   let catalog: list = harness.llm.catalog()
-  let refresh: dict = harness.llm.catalog_refresh({force: true})
+  let refresh: list = harness.llm.catalog_refresh()
   let providers: list = harness.llm.providers()
 }",
     );

@@ -1,15 +1,21 @@
 import "../_common"
 
-pipeline default() {
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+pipeline default(harness: Harness) {
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn_pack_det_" + uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_pack_det_" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
-  harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"determinism\")\n")
-  const pack_a = exec_at(
+  harness.fs.write_text(
+    path_join(root, "hello.harn"),
+    "fn main(harness: Harness) { harness.stdio.println(\"determinism\") }\n",
+  )
+  const pack_a = harness.process.exec_at(
     root,
     harn_bin,
     "pack",
@@ -19,7 +25,7 @@ pipeline default() {
     path_join(root, "a.harnpack"),
     "--json",
   )
-  const pack_b = exec_at(
+  const pack_b = harness.process.exec_at(
     root,
     harn_bin,
     "pack",
@@ -29,14 +35,14 @@ pipeline default() {
     path_join(root, "b.harnpack"),
     "--json",
   )
-  __io_println(pack_a.success)
-  __io_println(pack_b.success)
+  harness.stdio.println(pack_a.success)
+  harness.stdio.println(pack_b.success)
   const data_a = json_parse(pack_a.stdout)
   const data_b = json_parse(pack_b.stdout)
-  __io_println(data_a.data.bundle_hash == data_b.data.bundle_hash)
-  const bytes_a = exec("shasum", "-a", "256", path_join(root, "a.harnpack")).stdout
-  const bytes_b = exec("shasum", "-a", "256", path_join(root, "b.harnpack")).stdout
+  harness.stdio.println(data_a.data.bundle_hash == data_b.data.bundle_hash)
+  const bytes_a = harness.process.exec("shasum", "-a", "256", path_join(root, "a.harnpack")).stdout
+  const bytes_b = harness.process.exec("shasum", "-a", "256", path_join(root, "b.harnpack")).stdout
   const hash_a = split(bytes_a, " ")[0]
   const hash_b = split(bytes_b, " ")[0]
-  __io_println(hash_a == hash_b)
+  harness.stdio.println(hash_a == hash_b)
 }

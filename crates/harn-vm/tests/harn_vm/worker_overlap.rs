@@ -121,10 +121,12 @@ fn background_workers_overlap_by_peak_in_flight_count() {
     // side observes the peak number of concurrently-parked stubs.
     let source = format!(
         r#"
-fn make_caller() {{
+import {{ sub_agent_run, wait_agent }} from "std/agent/workers"
+
+fn make_caller(clock: HarnessClock) {{
   return {{ call ->
     __overlap_enter()
-    sleep({STALL_MS})
+    clock.sleep_ms({STALL_MS})
     __overlap_exit()
     return {{
       ok: true,
@@ -139,11 +141,11 @@ fn make_caller() {{
   }}
 }}
 
-fn base_opts() {{
+fn base_opts(clock: HarnessClock) {{
   return {{
     provider: "mock",
     model: "overlap-model",
-    llm_caller: make_caller(),
+    llm_caller: make_caller(clock),
     loop_until_done: true,
     done_judge: false,
     max_iterations: 1,
@@ -152,12 +154,12 @@ fn base_opts() {{
   }}
 }}
 
-pipeline main(task) {{
+pipeline main(harness: Harness, task) {{
   let handles = []
   for i in 0 to {WORKER_COUNT} exclusive {{
-    handles = handles.appending(sub_agent_run("bg worker " + to_string(i), base_opts() + {{background: true}}))
+    handles = handles.appending(sub_agent_run(harness, "bg worker " + to_string(i), base_opts(harness.clock) + {{background: true}}))
   }}
-  const results = wait_agent(handles)
+  const results = wait_agent(harness.agent, handles)
 
   let conc_done = 0
   for r in results {{
@@ -167,8 +169,8 @@ pipeline main(task) {{
     }}
   }}
 
-  log("CONC_RESULTS=" + to_string(len(results)))
-  log("CONC_DONE=" + to_string(conc_done))
+  harness.stdio.log("CONC_RESULTS=" + to_string(len(results)))
+  harness.stdio.log("CONC_DONE=" + to_string(conc_done))
 }}
 "#,
     );

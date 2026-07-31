@@ -153,9 +153,9 @@ fn llm_mock_replays_fifo_fixtures_for_non_mock_provider() {
         temp.path(),
         "script.harn",
         r#"
-pipeline default() {
-  __io_println(llm_call("same prompt", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
-  __io_println(llm_call("same prompt", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
+pipeline default(harness: Harness) {
+  harness.stdio.println(harness.llm.call("same prompt", nil, {provider: harness.env.get_or("TEST_PROVIDER", "mock")}).text)
+  harness.stdio.println(harness.llm.call("same prompt", nil, {provider: harness.env.get_or("TEST_PROVIDER", "mock")}).text)
 }
 "#,
     );
@@ -194,9 +194,9 @@ fn llm_mock_reuses_glob_matches() {
         temp.path(),
         "script.harn",
         r#"
-pipeline default() {
-  __io_println(llm_call("say hello please", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
-  __io_println(llm_call("say hello again", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
+pipeline default(harness: Harness) {
+  harness.stdio.println(harness.llm.call("say hello please", nil, {provider: harness.env.get_or("TEST_PROVIDER", "mock")}).text)
+  harness.stdio.println(harness.llm.call("say hello again", nil, {provider: harness.env.get_or("TEST_PROVIDER", "mock")}).text)
 }
 "#,
     );
@@ -234,8 +234,8 @@ fn llm_mock_reports_unmatched_prompt_snippet() {
         temp.path(),
         "script.harn",
         r#"
-pipeline default() {
-  __io_println(llm_call("this prompt is intentionally unmatched for fixture coverage", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
+pipeline default(harness: Harness) {
+  harness.stdio.println(harness.llm.call("this prompt is intentionally unmatched for fixture coverage", nil, {provider: harness.env.get_or("TEST_PROVIDER", "mock")}).text)
 }
 "#,
     );
@@ -282,10 +282,10 @@ fn llm_mock_record_replays_identical_output() {
         temp.path(),
         "script.harn",
         r#"
-pipeline default() {
-  const provider = env_or("TEST_PROVIDER", "mock")
-  const result = llm_call("hello world", nil, {provider: provider, mock_scope: "main"})
-  __io_println(transcript_render_full(result.transcript))
+pipeline default(harness: Harness) {
+  const provider = harness.env.get_or("TEST_PROVIDER", "mock")
+  const result = harness.llm.call("hello world", nil, {provider: provider, mock_scope: "main"})
+  harness.stdio.println(transcript_render_full(result.transcript))
 }
 "#,
     );
@@ -354,11 +354,11 @@ pub fn build_prompt(task) {
         temp.path(),
         "pipeline.harn",
         r#"
-pipeline default() {
-  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {
-    provider: env_or("TEST_PROVIDER", "mock"),
+pipeline default(harness: Harness) {
+  const result = harness.llm.call(build_prompt(harness.env.get_or("HARN_TASK", "")), nil, {
+    provider: harness.env.get_or("TEST_PROVIDER", "mock"),
   })
-  __io_println(result.text)
+  harness.stdio.println(result.text)
 }
 "#,
     );
@@ -403,10 +403,10 @@ pub fn build_prompt(task) {
         temp.path(),
         "pipeline.harn",
         r#"
-pipeline default() {
-  const provider = env_or("TEST_PROVIDER", "mock")
-  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {provider: provider, mock_scope: "playground"})
-  __io_println(transcript_render_full(result.transcript))
+pipeline default(harness: Harness) {
+  const provider = harness.env.get_or("TEST_PROVIDER", "mock")
+  const result = harness.llm.call(build_prompt(harness.env.get_or("HARN_TASK", "")), nil, {provider: provider, mock_scope: "playground"})
+  harness.stdio.println(transcript_render_full(result.transcript))
 }
 "#,
     );
@@ -459,17 +459,17 @@ fn playground_llm_mock_sub_agent_tool_calls_mutate_host_workspace() {
         temp.path(),
         "host.harn",
         r"
-pub fn workspace_root() {
-  return source_dir()
+pub fn workspace_root(fs: HarnessFs) {
+  return fs.source_dir()
 }
 
-pub fn read_workspace(path) {
-  return read_file(path_join(workspace_root(), path))
+pub fn read_workspace(fs: HarnessFs, path) {
+  return fs.read_text(path_join(workspace_root(fs), path))
 }
 
-pub fn write_workspace(path, content) {
-  const resolved = path_join(workspace_root(), path)
-  write_file(resolved, content)
+pub fn write_workspace(fs: HarnessFs, path, content) {
+  const resolved = path_join(workspace_root(fs), path)
+  fs.write_text(resolved, content)
   return resolved
 }
 ",
@@ -478,6 +478,8 @@ pub fn write_workspace(path, content) {
         temp.path(),
         "pipeline.harn",
         r#"
+import { sub_agent_run } from "std/agent/workers"
+
 fn tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -496,19 +498,20 @@ fn tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const result = sub_agent_run(
+    harness,
     "Write note.txt with the text hello from fixture.",
     {
-      provider: env_or("TEST_PROVIDER", "mock"),
+      provider: harness.env.get_or("TEST_PROVIDER", "mock"),
       tools: tools(),
       allowed_tools: ["write"],
       tool_format: "native",
       max_iterations: 2,
     },
   )
-  __io_println(result.summary)
-  __io_println(json_stringify(result))
+  harness.stdio.println(result.summary)
+  harness.stdio.println(json_stringify(result))
 }
 "#,
     );
@@ -535,8 +538,9 @@ pipeline default() {
     )
     .expect("playground run succeeds");
 
-    let note_contents = fs::read_to_string(temp.path().join("note.txt"))
-        .expect("note.txt was written by sub-agent");
+    let note_contents = fs::read_to_string(temp.path().join("note.txt")).unwrap_or_else(|error| {
+        panic!("note.txt was written by sub-agent: {error}; stdout={stdout}")
+    });
     assert_eq!(note_contents, "hello from fixture");
     assert!(stdout.contains("write complete"), "stdout={stdout}");
 }
@@ -549,17 +553,17 @@ fn playground_llm_mock_sub_agent_handles_multiple_tool_calls_in_one_turn() {
         temp.path(),
         "host.harn",
         r"
-pub fn workspace_root() {
-  return source_dir()
+pub fn workspace_root(fs: HarnessFs) {
+  return fs.source_dir()
 }
 
-pub fn read_workspace(path) {
-  return read_file(path_join(workspace_root(), path))
+pub fn read_workspace(fs: HarnessFs, path) {
+  return fs.read_text(path_join(workspace_root(fs), path))
 }
 
-pub fn write_workspace(path, content) {
-  const resolved = path_join(workspace_root(), path)
-  write_file(resolved, content)
+pub fn write_workspace(fs: HarnessFs, path, content) {
+  const resolved = path_join(workspace_root(fs), path)
+  fs.write_text(resolved, content)
   return resolved
 }
 ",
@@ -568,6 +572,8 @@ pub fn write_workspace(path, content) {
         temp.path(),
         "pipeline.harn",
         r#"
+import { sub_agent_run } from "std/agent/workers"
+
 fn tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -596,18 +602,19 @@ fn tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const result = sub_agent_run(
+    harness,
     "Read seed.txt and then write note.txt with hello from fixture.",
     {
-      provider: env_or("TEST_PROVIDER", "mock"),
+      provider: harness.env.get_or("TEST_PROVIDER", "mock"),
       tools: tools(),
       allowed_tools: ["read", "write"],
       tool_format: "native",
       max_iterations: 2,
     },
   )
-  __io_println(result.summary)
+  harness.stdio.println(result.summary)
 }
 "#,
     );
@@ -635,7 +642,8 @@ pipeline default() {
     .expect("playground run succeeds");
 
     assert_eq!(
-        fs::read_to_string(temp.path().join("note.txt")).unwrap(),
+        fs::read_to_string(temp.path().join("note.txt"))
+            .unwrap_or_else(|error| panic!("note.txt missing: {error}; stdout={stdout}")),
         "hello from fixture"
     );
     assert!(stdout.contains("multi tool complete"), "stdout={stdout}");
@@ -648,13 +656,13 @@ fn playground_llm_mock_consume_match_advances_between_identical_patterns() {
         temp.path(),
         "host.harn",
         r"
-pub fn workspace_root() {
-  return source_dir()
+pub fn workspace_root(fs: HarnessFs) {
+  return fs.source_dir()
 }
 
-pub fn write_workspace(path, content) {
-  const resolved = path_join(workspace_root(), path)
-  write_file(resolved, content)
+pub fn write_workspace(fs: HarnessFs, path, content) {
+  const resolved = path_join(workspace_root(fs), path)
+  fs.write_text(resolved, content)
   return resolved
 }
 ",
@@ -663,6 +671,8 @@ pub fn write_workspace(path, content) {
         temp.path(),
         "pipeline.harn",
         r#"
+import { sub_agent_run } from "std/agent/workers"
+
 fn tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -681,18 +691,19 @@ fn tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const result = sub_agent_run(
+    harness,
     "[demo][token=write-note]",
     {
-      provider: env_or("TEST_PROVIDER", "mock"),
+      provider: harness.env.get_or("TEST_PROVIDER", "mock"),
       tools: tools(),
       allowed_tools: ["write"],
       tool_format: "native",
       max_iterations: 2,
     },
   )
-  __io_println(result.summary)
+  harness.stdio.println(result.summary)
 }
 "#,
     );

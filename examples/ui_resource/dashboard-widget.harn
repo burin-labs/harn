@@ -41,7 +41,7 @@ fn render_dashboard_html(metrics) {
     + "</script></main></body></html>"
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const metrics = {signups: 42, churn: 3, mrr: 18400}
   const resource = ui_resource(
     "ui://harn-examples/kpi-tile@v1",
@@ -60,11 +60,11 @@ pipeline default() {
     {visibility: "app_only", initial_view: {window: "7d", focus: "signups"}},
   )
   const mcp_meta = ui_tool_meta_to_mcp(meta)
-  __io_println("ui_resource.uri=" + resource.uri)
-  __io_println("ui_resource.validation.ok=" + to_string(resource.validation.ok))
-  __io_println("ui_resource.size_bytes=" + to_string(resource.size_bytes))
-  __io_println("mcp_meta.resourceUri=" + mcp_meta.ui.resourceUri)
-  __io_println("mcp_meta.visibility=" + mcp_meta.ui.visibility)
+  harness.stdio.println("ui_resource.uri=" + resource.uri)
+  harness.stdio.println("ui_resource.validation.ok=" + to_string(resource.validation.ok))
+  harness.stdio.println("ui_resource.size_bytes=" + to_string(resource.size_bytes))
+  harness.stdio.println("mcp_meta.resourceUri=" + mcp_meta.ui.resourceUri)
+  harness.stdio.println("mcp_meta.visibility=" + mcp_meta.ui.visibility)
   const result = ui_tool_result(
     resource,
     {structured_fallback: ui_structured_fallback(metrics, {text: "signups=42 churn=3 mrr=18400"})},
@@ -76,6 +76,6 @@ pipeline default() {
     {label: "plain-text host", caps: {apps: false}},
   ] {
     const rendered = ui_select_for_host(result, host.caps)
-    __io_println(host.label + " -> selected=" + rendered.selected)
+    harness.stdio.println(host.label + " -> selected=" + rendered.selected)
   }
 }

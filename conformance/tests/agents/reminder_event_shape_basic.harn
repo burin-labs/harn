@@ -3,7 +3,7 @@
  * (id/tags/dedupe_key/ttl_turns/preserve_on_compact/propagate/role_hint
  * /source/body/fired_at_turn) on a normalized transcript event.
  */
-pipeline main() {
+pipeline main(harness: Harness) {
   const evt = transcript_reminder_event(
     {
       body: "Approaching context window cap.",
@@ -19,28 +19,28 @@ pipeline main() {
   )
   // Canonical envelope mirrors every other transcript event so existing
   // consumers keep working without learning a new shape.
-  __io_println(evt?.kind == "system_reminder")
-  __io_println(evt?.role == "developer")
-  __io_println(evt?.visibility == "public")
-  __io_println(evt?.text == "Approaching context window cap.")
-  __io_println(len(evt?.blocks) == 1)
-  __io_println(evt?.blocks[0]?.type == "text")
-  __io_println(evt?.blocks[0]?.text == "Approaching context window cap.")
+  harness.stdio.println(evt?.kind == "system_reminder")
+  harness.stdio.println(evt?.role == "developer")
+  harness.stdio.println(evt?.visibility == "public")
+  harness.stdio.println(evt?.text == "Approaching context window cap.")
+  harness.stdio.println(len(evt?.blocks) == 1)
+  harness.stdio.println(evt?.blocks[0]?.type == "text")
+  harness.stdio.println(evt?.blocks[0]?.text == "Approaching context window cap.")
   // Typed `reminder` lifecycle slot carries the full envelope.
-  __io_println(evt?.reminder?.body == "Approaching context window cap.")
-  __io_println(evt?.reminder?.tags[0] == "token_pressure")
-  __io_println(evt?.reminder?.tags[1] == "memory")
-  __io_println(evt?.reminder?.dedupe_key == "token_pressure")
-  __io_println(evt?.reminder?.ttl_turns == 3)
-  __io_println(evt?.reminder?.preserve_on_compact)
-  __io_println(evt?.reminder?.propagate == "session")
-  __io_println(evt?.reminder?.role_hint == "developer")
-  __io_println(evt?.reminder?.source == "stdlib_provider")
-  __io_println(evt?.reminder?.fired_at_turn == 4)
-  __io_println(len(evt?.reminder?.id) > 0)
+  harness.stdio.println(evt?.reminder?.body == "Approaching context window cap.")
+  harness.stdio.println(evt?.reminder?.tags[0] == "token_pressure")
+  harness.stdio.println(evt?.reminder?.tags[1] == "memory")
+  harness.stdio.println(evt?.reminder?.dedupe_key == "token_pressure")
+  harness.stdio.println(evt?.reminder?.ttl_turns == 3)
+  harness.stdio.println(evt?.reminder?.preserve_on_compact)
+  harness.stdio.println(evt?.reminder?.propagate == "session")
+  harness.stdio.println(evt?.reminder?.role_hint == "developer")
+  harness.stdio.println(evt?.reminder?.source == "stdlib_provider")
+  harness.stdio.println(evt?.reminder?.fired_at_turn == 4)
+  harness.stdio.println(len(evt?.reminder?.id) > 0)
   // Metadata mirrors the reminder envelope so hosts that already key
   // off `event.metadata` see reminder context without learning a
   // second field.
-  __io_println(evt?.metadata?.body == "Approaching context window cap.")
-  __io_println(evt?.metadata?.source == "stdlib_provider")
+  harness.stdio.println(evt?.metadata?.body == "Approaching context window cap.")
+  harness.stdio.println(evt?.metadata?.source == "stdlib_provider")
 }

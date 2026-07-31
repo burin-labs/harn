@@ -1,19 +1,16 @@
 // Provider catalog refresh entry script.
 //
 // Runs a configured set of source adapters, normalizes the
-// observations against `llm_provider_catalog()`, and writes:
+// observations against `harness.llm.provider_catalog()`, and writes:
 //
 //   .harn-runs/provider_catalog/drift-report.md
 //   .harn-runs/provider_catalog/candidate.toml
 //
 // Usage:
 //
-//   harn run scripts/update_provider_catalog.harn               # fixtures
-//   harn run scripts/update_provider_catalog.harn -- --live     # live sources
-//   harn run scripts/update_provider_catalog.harn -- --check    # compare
-//                                                                 against
-//                                                                 committed
-//                                                                 golden
+//   harn run --allow-process-network scripts/update_provider_catalog.harn
+//   harn run --allow-process-network scripts/update_provider_catalog.harn -- --live
+//   harn run --allow-process-network scripts/update_provider_catalog.harn -- --check
 //
 // `--check` is the CI gate that powers `make check-provider-catalog-drift`.
 // It runs with the bundled fixtures and verifies the generated
@@ -21,6 +18,7 @@
 // `scripts/provider_catalog_fixtures/expected_drift_report.md`. Run
 // `--check --update` to refresh the golden after intentional adapter
 // or library changes.
+import { create, domain } from "std/net_policy"
 import "./provider_catalog_refresh.harn"
 import "./provider_catalog_sources.harn"
 
@@ -38,12 +36,17 @@ const FIXED_OBSERVED_AT = "2026-05-11T00:00:00Z"
 
 const FIXED_FETCHED_AT = "fixture-time"
 
-fn __install_fixture_mocks(harness: Harness) {
-  http_mock_clear()
-  egress_policy(
-    {allow: ["www.anthropic.com", "platform.openai.com", "openrouter.ai"], default: "deny"},
-  )
-  http_mock(
+fn __domain_rules(names: list<string>) -> list {
+  let rules = []
+  for name in names {
+    rules = rules + [domain(name)]
+  }
+  return rules
+}
+
+fn __install_fixture_mocks(harness: Harness) -> Harness {
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://www.anthropic.com/pricing",
     {
@@ -56,7 +59,7 @@ fn __install_fixture_mocks(harness: Harness) {
       body: harness.fs.read_text(path_join(FIXTURE_DIR, "anthropic_pricing.html")),
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "GET",
     "https://platform.openai.com/docs/pricing",
     {
@@ -69,7 +72,7 @@ fn __install_fixture_mocks(harness: Harness) {
       body: harness.fs.read_text(path_join(FIXTURE_DIR, "openai_pricing.html")),
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "GET",
     "https://openrouter.ai/api/v1/models",
     {
@@ -82,49 +85,61 @@ fn __install_fixture_mocks(harness: Harness) {
       body: harness.fs.read_text(path_join(FIXTURE_DIR, "openrouter_models.json")),
     },
   )
+  return harness.with_net_policy(
+    create(
+      {
+        allow: __domain_rules(["www.anthropic.com", "platform.openai.com", "openrouter.ai"]),
+        default: "deny",
+      },
+    ),
+  )
 }
 
-fn __install_live_egress_policy() {
-  egress_policy(
-    {
-      allow: [
-        "www.anthropic.com",
-        "anthropic.com",
-        "claude.com",
-        "platform.openai.com",
-        "developers.openai.com",
-        "openai.com",
-        "openrouter.ai",
-        "api.anthropic.com",
-        "api.openai.com",
-        "router.huggingface.co",
-        "generativelanguage.googleapis.com",
-        "api.mistral.ai",
-        "api.cohere.ai",
-        "api.x.ai",
-        "api.together.xyz",
-        "api.groq.com",
-        "api.cerebras.ai",
-        "api.deepseek.com",
-        "api.fireworks.ai",
-        "dashscope-intl.aliyuncs.com",
-        "api.minimax.io",
-        "api.z.ai",
-        "api.moonshot.ai",
-        "inference.baseten.co",
-        "api.deepinfra.com",
-        "api.sambanova.ai",
-        "integrate.api.nvidia.com",
-        "api.tokenfactory.nebius.com",
-        "tokens.flex.ai",
-        "api.hyperbolic.xyz",
-        "api.siliconflow.com",
-        "api.siliconflow.cn",
-        "api.parasail.io",
-        "api.atlascloud.ai",
-      ],
-      default: "deny",
-    },
+fn __install_live_egress_policy(harness: Harness) -> Harness {
+  return harness.with_net_policy(
+    create(
+      {
+        allow: __domain_rules(
+          [
+            "www.anthropic.com",
+            "anthropic.com",
+            "claude.com",
+            "platform.openai.com",
+            "developers.openai.com",
+            "openai.com",
+            "openrouter.ai",
+            "api.anthropic.com",
+            "api.openai.com",
+            "router.huggingface.co",
+            "generativelanguage.googleapis.com",
+            "api.mistral.ai",
+            "api.cohere.ai",
+            "api.x.ai",
+            "api.together.xyz",
+            "api.groq.com",
+            "api.cerebras.ai",
+            "api.deepseek.com",
+            "api.fireworks.ai",
+            "dashscope-intl.aliyuncs.com",
+            "api.minimax.io",
+            "api.z.ai",
+            "api.moonshot.ai",
+            "inference.baseten.co",
+            "api.deepinfra.com",
+            "api.sambanova.ai",
+            "integrate.api.nvidia.com",
+            "api.tokenfactory.nebius.com",
+            "tokens.flex.ai",
+            "api.hyperbolic.xyz",
+            "api.siliconflow.com",
+            "api.siliconflow.cn",
+            "api.parasail.io",
+            "api.atlascloud.ai",
+          ],
+        ),
+        default: "deny",
+      },
+    ),
   )
 }
 
@@ -262,7 +277,7 @@ fn __fireworks_mapper(payload) {
   return entries
 }
 
-fn __fireworks_adapter(env) {
+fn __fireworks_adapter(harness: Harness, env) {
   const config = {
     id: "fireworks-models-api",
     provider: "fireworks",
@@ -272,7 +287,7 @@ fn __fireworks_adapter(env) {
     terms_notes: "Requires FIREWORKS_API_KEY; uses the standard /models endpoint.",
     mapper: __fireworks_mapper,
   }
-  return json_api_adapter(env, config)
+  return json_api_adapter(harness, env, config)
 }
 
 fn __keyed_models_spec(
@@ -298,13 +313,15 @@ fn __keyed_models_spec(
   }
   return {
     key_envs: config.key_envs,
-    run_fn: { env ->
+    run_fn: { harness, env ->
       key_required_adapter(
+        harness,
         env,
         config
           + {
-          adapter: { adapter_env ->
+          adapter: { adapter_harness, adapter_env ->
             json_api_adapter(
+              adapter_harness,
               adapter_env,
               {
                 id: config.id,
@@ -339,7 +356,7 @@ fn __anthropic_spec() {
       {header: "Context", field: "context_window"},
     ],
   }
-  return {run_fn: { env -> html_pricing_table_adapter(env, config) }}
+  return {run_fn: { harness, env -> html_pricing_table_adapter(harness, env, config) }}
 }
 
 fn __openai_spec() {
@@ -357,7 +374,7 @@ fn __openai_spec() {
       {header: "Context", field: "context_window"},
     ],
   }
-  return {run_fn: { env -> html_pricing_table_adapter(env, config) }}
+  return {run_fn: { harness, env -> html_pricing_table_adapter(harness, env, config) }}
 }
 
 fn __openrouter_spec() {
@@ -370,7 +387,7 @@ fn __openrouter_spec() {
     terms_notes: "OpenRouter public /models index; secondary triangulation source.",
     mapper: __openrouter_mapper,
   }
-  return {run_fn: { env -> json_api_adapter(env, config) }}
+  return {run_fn: { harness, env -> json_api_adapter(harness, env, config) }}
 }
 
 fn __fireworks_spec() {
@@ -382,7 +399,10 @@ fn __fireworks_spec() {
     key_envs: ["FIREWORKS_API_KEY"],
     adapter: __fireworks_adapter,
   }
-  return {key_envs: config.key_envs, run_fn: { env -> key_required_adapter(env, config) }}
+  return {
+    key_envs: config.key_envs,
+    run_fn: { harness, env -> key_required_adapter(harness, env, config) },
+  }
 }
 
 fn __adapter_specs(live) {
@@ -583,14 +603,14 @@ fn __live_adapter_specs() {
   ]
 }
 
-fn __load_secrets(harness: Harness, live: bool, specs: list<dict>) -> dict {
+fn __load_secrets(env: HarnessEnv, live: bool, specs: list<dict>) -> dict {
   if !live {
     return {}
   }
   let secrets = {}
   for spec in specs {
     for name in spec?.key_envs ?? [] {
-      const value = harness.env.get(name)
+      const value = env.get(name)
       if value != nil {
         secrets = secrets + {[name]: value}
       }
@@ -603,11 +623,11 @@ fn __load_secrets(harness: Harness, live: bool, specs: list<dict>) -> dict {
  * Run every configured adapter, returning the per-source `run` rows
  * plus the flat list of raw observations they emitted.
  */
-pub fn run_adapters(env: dict, specs: list<dict>) -> dict {
+pub fn run_adapters(harness: Harness, env: dict, specs: list<dict>) -> dict {
   let runs = []
   let raw = []
   for spec in specs {
-    const result = spec.run_fn(env)
+    const result = spec.run_fn(harness, env)
     runs = runs + [result.run]
     for obs in result.observations {
       raw = raw + [obs]
@@ -616,9 +636,9 @@ pub fn run_adapters(env: dict, specs: list<dict>) -> dict {
   return {runs: runs, observations: raw}
 }
 
-fn __ensure_run_dir(harness: Harness) {
-  if !harness.fs.exists(RUN_OUTPUT_DIR) {
-    harness.fs.mkdir(RUN_OUTPUT_DIR)
+fn __ensure_run_dir(fs: HarnessFs) {
+  if !fs.exists(RUN_OUTPUT_DIR) {
+    fs.mkdir(RUN_OUTPUT_DIR)
   }
 }
 
@@ -626,8 +646,14 @@ fn __build_meta(run_mode: string, observed_at: string) -> dict {
   return {generated_at: observed_at, run_mode: run_mode}
 }
 
-fn __compose_report(env: dict, specs: list<dict>, catalog: dict, run_mode: string) -> dict {
-  const adapter_outcome = run_adapters(env, specs)
+fn __compose_report(
+  harness: Harness,
+  env: dict,
+  specs: list<dict>,
+  catalog: dict,
+  run_mode: string,
+) -> dict {
+  const adapter_outcome = run_adapters(harness, env, specs)
   const normalized = normalize_observations(adapter_outcome.observations)
   const drift = build_drift(normalized.observations, catalog)
   const meta = __build_meta(run_mode, env.observed_at)
@@ -640,44 +666,44 @@ fn __compose_report(env: dict, specs: list<dict>, catalog: dict, run_mode: strin
   }
 }
 
-fn __write_outputs(harness: Harness, outcome: dict) {
-  __ensure_run_dir(harness)
-  harness.fs.write_text(path_join(RUN_OUTPUT_DIR, "drift-report.md"), outcome.report)
-  harness.fs.write_text(path_join(RUN_OUTPUT_DIR, "candidate.toml"), outcome.candidate)
+fn __write_outputs(fs: HarnessFs, outcome: dict) {
+  __ensure_run_dir(fs)
+  fs.write_text(path_join(RUN_OUTPUT_DIR, "drift-report.md"), outcome.report)
+  fs.write_text(path_join(RUN_OUTPUT_DIR, "candidate.toml"), outcome.candidate)
 }
 
-fn __check_against_golden(harness: Harness, outcome: dict, update: bool) -> int {
+fn __check_against_golden(fs: HarnessFs, stdio: HarnessStdio, outcome: dict, update: bool) -> int {
   if update {
-    harness.fs.write_text(EXPECTED_REPORT_PATH, outcome.report)
-    harness.fs.write_text(EXPECTED_CANDIDATE_PATH, outcome.candidate)
-    __io_println("Updated " + EXPECTED_REPORT_PATH)
-    __io_println("Updated " + EXPECTED_CANDIDATE_PATH)
+    fs.write_text(EXPECTED_REPORT_PATH, outcome.report)
+    fs.write_text(EXPECTED_CANDIDATE_PATH, outcome.candidate)
+    stdio.println("Updated " + EXPECTED_REPORT_PATH)
+    stdio.println("Updated " + EXPECTED_CANDIDATE_PATH)
     return 0
   }
-  const expected_report = if harness.fs.exists(EXPECTED_REPORT_PATH) {
-    harness.fs.read_text(EXPECTED_REPORT_PATH)
+  const expected_report = if fs.exists(EXPECTED_REPORT_PATH) {
+    fs.read_text(EXPECTED_REPORT_PATH)
   } else {
     ""
   }
-  const expected_candidate = if harness.fs.exists(EXPECTED_CANDIDATE_PATH) {
-    harness.fs.read_text(EXPECTED_CANDIDATE_PATH)
+  const expected_candidate = if fs.exists(EXPECTED_CANDIDATE_PATH) {
+    fs.read_text(EXPECTED_CANDIDATE_PATH)
   } else {
     ""
   }
   if outcome.report != expected_report {
-    __io_eprintln("provider catalog drift report drifted from " + EXPECTED_REPORT_PATH)
-    __io_eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
+    stdio.eprintln("provider catalog drift report drifted from " + EXPECTED_REPORT_PATH)
+    stdio.eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
     return 1
   }
   if outcome.candidate != expected_candidate {
-    __io_eprintln("provider catalog candidate TOML drifted from " + EXPECTED_CANDIDATE_PATH)
-    __io_eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
+    stdio.eprintln("provider catalog candidate TOML drifted from " + EXPECTED_CANDIDATE_PATH)
+    stdio.eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
     return 1
   }
   return 0
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const live = argv.contains("--live")
   const check = argv.contains("--check")
   const update = argv.contains("--update")
@@ -687,18 +713,18 @@ pipeline main(task) {
     __adapter_specs(live)
   }
   const observed_at = if live {
-    date_now_iso()
+    harness.clock.date_iso()
   } else {
     FIXED_OBSERVED_AT
   }
-  if !live {
+  const scoped_harness = if !live {
     __install_fixture_mocks(harness)
   } else {
-    __install_live_egress_policy()
+    __install_live_egress_policy(harness)
   }
   const env_data = {
     observed_at: observed_at,
-    secrets: __load_secrets(harness, live, specs),
+    secrets: __load_secrets(harness.env, live, specs),
     http_options: if live {
       {max_response_bytes: 8388608}
     } else {
@@ -711,16 +737,16 @@ pipeline main(task) {
     "fixtures"
   }
   const catalog = if live {
-    llm_provider_catalog()
+    scoped_harness.llm.provider_catalog()
   } else {
-    json_parse(harness.fs.read_text(BASELINE_CATALOG_PATH))
+    json_parse(scoped_harness.fs.read_text(BASELINE_CATALOG_PATH))
   }
-  const outcome = __compose_report(env_data, specs, catalog, run_mode)
+  const outcome = __compose_report(scoped_harness, env_data, specs, catalog, run_mode)
   if check {
-    return __check_against_golden(harness, outcome, update)
+    return __check_against_golden(harness.fs, harness.stdio, outcome, update)
   }
-  __write_outputs(harness, outcome)
-  __io_println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
-  __io_println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
+  __write_outputs(harness.fs, outcome)
+  harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
+  harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
   return 0
 }

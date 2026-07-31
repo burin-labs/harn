@@ -2,7 +2,7 @@ import { agent_convergence_guard_receipt_schema, agent_event_report } from "std/
 import { convergence_guard_decision, convergence_guard_receipt } from "std/agent/governors"
 import { is_type } from "std/schema"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const decision = convergence_guard_decision(
     {},
     {
@@ -18,12 +18,14 @@ pipeline default() {
     {iteration: 4, session_id: "convergence-receipt"},
   )
   const schema = agent_convergence_guard_receipt_schema()
-  __io_println(receipt.schema)
-  __io_println(receipt.status)
-  __io_println(receipt.shape)
-  __io_println(receipt.recovery.verb)
-  __io_println(receipt.evidence.post_green_turns)
-  __io_println(is_type(receipt, schema))
-  __io_println(agent_event_report(receipt, schema).ok)
-  __io_println(!agent_event_report({schema: receipt.schema, kind: "convergence_guard"}, schema).ok)
+  harness.stdio.println(receipt.schema)
+  harness.stdio.println(receipt.status)
+  harness.stdio.println(receipt.shape)
+  harness.stdio.println(receipt.recovery.verb)
+  harness.stdio.println(receipt.evidence.post_green_turns)
+  harness.stdio.println(is_type(receipt, schema))
+  harness.stdio.println(agent_event_report(receipt, schema).ok)
+  harness.stdio.println(
+    !agent_event_report({schema: receipt.schema, kind: "convergence_guard"}, schema).ok,
+  )
 }

@@ -1,14 +1,14 @@
 import { agent_preset } from "std/agent/presets"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // No model supplied — `tool_format` should be absent so the VM can derive
   // it at the llm_call boundary.
-  const bare = agent_preset("audit")
-  __io_println(bare?.tool_format == nil)
+  const bare = agent_preset(harness, "audit")
+  harness.stdio.println(bare?.tool_format == nil)
   // Native-capable model — preset derives `tool_format: "native"` from the
   // capability matrix via `llm_resolve_model`.
-  const native_audit = agent_preset("audit", {model: "claude-sonnet-4-5"})
-  __io_println(native_audit.tool_format)
+  const native_audit = agent_preset(harness, "audit", {model: "claude-sonnet-4-5"})
+  harness.stdio.println(native_audit.tool_format)
   // Text-only local route — preset derives the GLOBAL text-channel default,
   // which is now fenced-json (`tool_format: "json"`), so the VM capability gate
   // accepts the request instead of rejecting with
@@ -16,17 +16,22 @@ pipeline default() {
   // auto-derived; it is the reverse safety valve, reached only via a pin or an
   // explicit request — see `forced_text` below.)
   const text_audit = agent_preset(
+    harness,
     "audit",
     {provider: "ollama", model: "qwen3.6:35b-a3b-coding-nvfp4"},
   )
-  __io_println(text_audit.tool_format)
+  harness.stdio.println(text_audit.tool_format)
   // Caller explicit `tool_format` wins over the derived default — even if the
   // capability matrix disagrees. An explicit `text` still yields heredoc (the
   // format is demoted to opt-in, not removed).
-  const forced_text = agent_preset("audit", {model: "claude-sonnet-4-5", tool_format: "text"})
-  __io_println(forced_text.tool_format)
+  const forced_text = agent_preset(
+    harness,
+    "audit",
+    {model: "claude-sonnet-4-5", tool_format: "text"},
+  )
+  harness.stdio.println(forced_text.tool_format)
   // Summary preset does not opt into tool semantics, so the derivation is
   // skipped and `tool_format` stays absent regardless of model.
-  const summary = agent_preset("summary", {model: "claude-sonnet-4-5"})
-  __io_println(summary?.tool_format == nil)
+  const summary = agent_preset(harness, "summary", {model: "claude-sonnet-4-5"})
+  harness.stdio.println(summary?.tool_format == nil)
 }

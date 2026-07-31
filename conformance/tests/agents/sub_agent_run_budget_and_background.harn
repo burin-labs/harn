@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn search_tools() {
@@ -15,8 +16,9 @@ fn search_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [{id: "budget_1", name: "search", arguments: {query: "token budget"}}],
@@ -26,6 +28,7 @@ pipeline main() {
     ],
     { ->
       const budgeted = sub_agent_run(
+        harness,
         "Investigate under a tiny budget.",
         {
           provider: "mock",
@@ -36,31 +39,35 @@ pipeline main() {
           token_budget: 8,
         },
       )
-      __io_println(budgeted?.budget_exceeded)
-      __io_println(budgeted?.tokens_used >= 32)
+      harness.stdio.println(budgeted?.budget_exceeded)
+      harness.stdio.println(budgeted?.tokens_used >= 32)
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("background summary")],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Summarize in the background.",
         {provider: "mock", background: true},
       )
-      __io_println(handle?.mode == "sub_agent")
-      const done = wait_agent(handle)
-      __io_println(done?.status == "completed")
-      __io_println(done?.result?.ok)
-      __io_println(contains(done?.result?.summary ?? "", "background summary"))
+      harness.stdio.println(handle?.mode == "sub_agent")
+      const done = wait_agent(harness.agent, handle)
+      harness.stdio.println(done?.status == "completed")
+      harness.stdio.println(done?.result?.ok)
+      harness.stdio.println(contains(done?.result?.summary ?? "", "background summary"))
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "bg_search_1", name: "search", arguments: {query: "background tool"}}]},
       llm_text("background tool summary"),
     ],
     { ->
       const tool_handle = sub_agent_run(
+        harness,
         "Search in the background with a Harn-owned tool.",
         {
           provider: "mock",
@@ -71,11 +78,11 @@ pipeline main() {
           max_iterations: 3,
         },
       )
-      __io_println(tool_handle?.mode == "sub_agent")
-      const tool_done = wait_agent(tool_handle)
-      __io_println(tool_done?.status == "completed")
-      __io_println(tool_done?.result?.ok)
-      __io_println(contains(tool_done?.result?.summary ?? "", "background tool summary"))
+      harness.stdio.println(tool_handle?.mode == "sub_agent")
+      const tool_done = wait_agent(harness.agent, tool_handle)
+      harness.stdio.println(tool_done?.status == "completed")
+      harness.stdio.println(tool_done?.result?.ok)
+      harness.stdio.println(contains(tool_done?.result?.summary ?? "", "background tool summary"))
     },
   )
 }

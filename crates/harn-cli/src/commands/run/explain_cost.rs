@@ -69,8 +69,20 @@ impl CostAnalyzer {
                 self.walk_node(callee);
                 self.walk_nodes(args);
             }
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            }
+            | Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
+                if method == "call" && is_harness_llm_handle(object) {
+                    self.rows
+                        .push(self.analyze_call(node, "harness.llm.call", args));
+                }
                 self.walk_node(object);
                 self.walk_nodes(args);
             }
@@ -329,6 +341,15 @@ impl CostAnalyzer {
             },
         }
     }
+}
+
+fn is_harness_llm_handle(node: &SNode) -> bool {
+    matches!(
+        &node.node,
+        Node::PropertyAccess { object, property }
+            if property == "llm"
+                && matches!(&object.node, Node::Identifier(root) if root == "harness")
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -764,13 +785,13 @@ mod tests {
         let out = render(
             r#"
 pipeline main() {
-  llm_call("hello world", "sys", {model: "gpt-4o"})
+  harness.llm.call("hello world", "sys", {model: "gpt-4o"})
   agent_loop("do it", "sys", {provider: "ollama", model: "llama3.2", max_iterations: 3})
 }
 "#,
         );
 
-        assert!(out.contains("main.harn:3:3 llm_call"));
+        assert!(out.contains("main.harn:3:3 harness.llm.call"));
         assert!(out.contains("openai:gpt-4o"));
         assert!(out.contains("main.harn:4:3 agent_loop"));
         let row: Vec<_> = out

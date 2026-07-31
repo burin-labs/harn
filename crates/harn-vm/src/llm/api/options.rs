@@ -33,7 +33,7 @@ impl ReasoningEffort {
     }
 }
 
-/// Typed `llm_call(..., { thinking: ... })` configuration.
+/// Typed `harness.llm.call(..., { thinking: ... })` configuration.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub(crate) enum ThinkingConfig {
@@ -370,7 +370,7 @@ pub(crate) struct LlmCallOptions {
     /// Forwarded to the SSE transport so streaming native tool-call deltas
     /// (#693) can emit `AgentEvent::ToolCall` / `AgentEvent::ToolCallUpdate`
     /// against the right session even before the dispatch phase fires its
-    /// own lifecycle events. `None` for raw `llm_call(...)` invocations
+    /// own lifecycle events. `None` for raw `harness.llm.call(...)` invocations
     /// from script context — those have no agent session to attach to.
     pub session_id: Option<String>,
     /// Stable fairness identity for shared provider rate-limit admission.
@@ -390,11 +390,11 @@ pub(crate) struct LlmCallOptions {
     /// (via an internal `_dispatch_provenance` entry in the agent-loop options dict) and
     /// emitted verbatim into the `resolved_dispatch` transcript record so a
     /// consumer can tell an operator pin from a value silently
-    /// `inherited_from_primary`. `None` for raw `llm_call(...)` invocations
+    /// `inherited_from_primary`. `None` for raw `harness.llm.call(...)` invocations
     /// and internal calls that no resolver annotated.
     pub dispatch_provenance: Option<crate::llm::resolved_dispatch::DispatchProvenance>,
     /// Agent-loop reminder provider configuration. Parsed for option-table
-    /// visibility and transcript/replay fidelity; raw `llm_call(...)` does
+    /// visibility and transcript/replay fidelity; raw `harness.llm.call(...)` does
     /// not evaluate reminder providers.
     #[allow(dead_code)]
     pub reminders: Option<serde_json::Value>,

@@ -67,11 +67,11 @@ pub fn run() {
 
 async fn serve() {
     // Defeat rlib dead-code stripping of the linkme distributed slice
-    // (linkme issue #36) before reading `all_builtin_signatures()`.
+    // (linkme issue #36) before reading `all_builtin_manifest()`.
     harn_vm::stdlib::force_link();
     // Install the macro-emitted builtin signature slice into the parser
     // registry so hover/completion/diagnostics see the full builtin set.
-    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+    harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

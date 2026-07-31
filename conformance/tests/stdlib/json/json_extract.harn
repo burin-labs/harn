@@ -1,26 +1,26 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Extract from plain JSON
   const data = json_extract("{\"name\": \"alice\", \"age\": 30}")
-  __io_println(data.name)
-  __io_println(data.age)
+  harness.stdio.println(data.name)
+  harness.stdio.println(data.age)
   // Extract from markdown code fence
   const fenced = "Here is the result:\n```json\n{\"color\": \"blue\"}\n```\nDone."
   const result = json_extract(fenced)
-  __io_println(result.color)
+  harness.stdio.println(result.color)
   // Extract from code fence without language tag
   const plain_fence = "```\n{\"x\": 42}\n```"
   const result2 = json_extract(plain_fence)
-  __io_println(result2.x)
+  harness.stdio.println(result2.x)
   // Extract with key parameter
   const name = json_extract("{\"name\": \"bob\", \"age\": 25}", "name")
-  __io_println(name)
+  harness.stdio.println(name)
   const age = json_extract("{\"name\": \"bob\", \"age\": 25}", "age")
-  __io_println(age)
+  harness.stdio.println(age)
   // Extract JSON array
   const arr = json_extract("[1, 2, 3]")
-  __io_println(arr)
+  harness.stdio.println(arr)
   // Extract from text with surrounding prose
   const prose = "The answer is {\"result\": true} as expected"
   const extracted = json_extract(prose)
-  __io_println(extracted.result)
+  harness.stdio.println(extracted.result)
 }

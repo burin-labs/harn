@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn divide(a, b) {
     if b == 0 {
       return Err("division by zero")
@@ -15,15 +15,15 @@ pipeline test(task) {
   }
   // Success path: ? unwraps Ok
   const r1 = compute(20)
-  log(r1)
+  harness.stdio.log(r1)
   // Error path: ? propagates Err
   const r2 = compute_fail(20)
-  log(r2)
+  harness.stdio.log(r2)
   // Chained ?
   fn chain() {
     const a = divide(100, 5)?
     const b = divide(a, 2)?
     return Ok(b)
   }
-  log(chain())
+  harness.stdio.log(chain())
 }

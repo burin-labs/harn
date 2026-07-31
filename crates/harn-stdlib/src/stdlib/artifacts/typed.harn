@@ -170,13 +170,16 @@ pub fn check_versioned<T>(
 ) -> Result<VersionedValue<T>, ArtifactReadFailure> {
   const found = __version_of(value, versioned)
   if found == nil || !__list_has_int(versioned.supported, found) {
-    const failure: ArtifactReadFailure = {
-      kind: "version_mismatch",
+    const failure_kind: ArtifactReadFailureKind = "version_mismatch"
+    let failure: ArtifactReadFailure = {
+      kind: failure_kind,
       detail: versioned.id
         + ": unsupported schema version "
         + to_string(found ?? "nil"),
-      found_version: found,
       supported_versions: versioned.supported,
+    }
+    if found != nil {
+      failure.found_version = found
     }
     return Err(failure)
   }
@@ -219,10 +222,11 @@ fn __malformed_failure(path: string, raw: string, detail: string) -> ArtifactRea
  * @example: read_versioned_json_result(path, agent_result_contract())
  */
 pub fn read_versioned_json_result<T>(
+  fs: HarnessFs,
   path: string,
   versioned: VersionedContract<T>,
 ) -> Result<VersionedValue<T>, ArtifactReadFailure> {
-  const read = harness.fs.read_text_result(path)
+  const read = fs.read_text_result(path)
   if !is_ok(read) {
     return Err(__missing_failure(path, unwrap_err(read)))
   }
@@ -339,14 +343,15 @@ pub fn decode_event(
  *
  * @effects: [fs.read]
  * @errors: []
- * @example: read_typed_events_page_result(path, transcript_event_spec(), {max_records: 128})
+ * @example: read_typed_events_page_result(harness.fs, path, transcript_event_spec(), {max_records: 128})
  */
 pub fn read_typed_events_page_result(
+  fs: HarnessFs,
   path: string,
   spec: DiscriminatedSpec,
   options: JsonlPageOptions = {},
 ) -> TypedEventPageResult {
-  const source = read_jsonl_page_result(path, options)
+  const source = read_jsonl_page_result(fs, path, options)
   if !is_ok(source) {
     return Err(unwrap_err(source))
   }

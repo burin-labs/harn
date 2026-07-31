@@ -740,9 +740,12 @@ pub(crate) async fn observed_llm_call(
                     None => delta_tx,
                 };
                 if offthread {
-                    vm_call_llm_full_streaming_offthread_single_route(opts, delta_tx).await
+                    Box::pin(vm_call_llm_full_streaming_offthread_single_route(
+                        opts, delta_tx,
+                    ))
+                    .await
                 } else {
-                    vm_call_llm_full_streaming_single_route(opts, delta_tx).await
+                    Box::pin(vm_call_llm_full_streaming_single_route(opts, delta_tx)).await
                 }
             } else if offthread {
                 let delta_tx = match detector_ctx {
@@ -759,7 +762,10 @@ pub(crate) async fn observed_llm_call(
                         tx
                     }
                 };
-                vm_call_llm_full_streaming_offthread_single_route(opts, delta_tx).await
+                Box::pin(vm_call_llm_full_streaming_offthread_single_route(
+                    opts, delta_tx,
+                ))
+                .await
             } else if let Some(sink) = delta_sink.clone() {
                 let delta_tx = match detector_ctx {
                     Some(ctx) => tee_delta_sender(vec![
@@ -768,12 +774,12 @@ pub(crate) async fn observed_llm_call(
                     ]),
                     None => sink,
                 };
-                vm_call_llm_full_streaming_single_route(opts, delta_tx).await
+                Box::pin(vm_call_llm_full_streaming_single_route(opts, delta_tx)).await
             } else if let Some(ctx) = detector_ctx {
                 let delta_tx = spawn_detector_only_forwarder(ctx, first_token);
-                vm_call_llm_full_streaming_single_route(opts, delta_tx).await
+                Box::pin(vm_call_llm_full_streaming_single_route(opts, delta_tx)).await
             } else {
-                vm_call_llm_full_single_route(opts).await
+                Box::pin(vm_call_llm_full_single_route(opts)).await
             }
         })
         .await;

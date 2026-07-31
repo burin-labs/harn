@@ -404,25 +404,25 @@ fn __render_model_line(model: dict) -> string {
     + live
 }
 
-fn __render_human(harness: Harness, report: dict) {
+fn __render_human(stdio: HarnessStdio, report: dict) {
   const workload = safe_string(report["workload"], "generic")
   const models = safe_list(report["models"])
   if len(models) == 0 {
-    harness.stdio.println("(no batch-capable models match)")
+    stdio.println("(no batch-capable models match)")
   } else {
-    harness.stdio.println("Batch-capable models for " + workload)
+    stdio.println("Batch-capable models for " + workload)
     const groups = __provider_group(models)
     for provider in __sorted_strings(keys(groups)) {
-      harness.stdio.println(provider)
+      stdio.println(provider)
       for model in groups[provider] {
-        harness.stdio.println(__render_model_line(safe_dict(model)))
-        print_list(harness, "constraints", safe_list(safe_dict(model)["constraints"]))
+        stdio.println(__render_model_line(safe_dict(model)))
+        print_list(stdio, "constraints", safe_list(safe_dict(model)["constraints"]))
       }
-      harness.stdio.println("")
+      stdio.println("")
     }
   }
-  print_list(harness, "planner constraints", safe_list(report["constraints"]))
-  print_list(harness, "warnings", safe_list(report["warnings"]))
+  print_list(stdio, "planner constraints", safe_list(report["constraints"]))
+  print_list(stdio, "warnings", safe_list(report["warnings"]))
 }
 
 fn __render_json(report: dict) -> string {
@@ -973,20 +973,20 @@ fn __build_manifest(
   return {manifest: manifest, errors: errors, warnings: warnings}
 }
 
-fn __render_manifest_human(harness: Harness, report: dict) {
+fn __render_manifest_human(stdio: HarnessStdio, report: dict) {
   if !safe_bool(report["ok"], false) {
-    harness.stdio.eprintln("Batch manifest failed")
-    print_list(harness, "errors", safe_list(report["errors"]))
-    print_list(harness, "warnings", safe_list(report["warnings"]))
+    stdio.eprintln("Batch manifest failed")
+    print_list(stdio, "errors", safe_list(report["errors"]))
+    print_list(stdio, "warnings", safe_list(report["warnings"]))
     return
   }
-  harness.stdio.println("Batch manifest written: " + safe_string(report["out"], ""))
-  harness.stdio.println("  requests: " + safe_int_string(report["request_count"], "0"))
-  harness.stdio.println("  groups: " + safe_int_string(report["group_count"], "0"))
-  harness.stdio.println("  manifest sha256: " + safe_string(report["manifest_sha256"], ""))
+  stdio.println("Batch manifest written: " + safe_string(report["out"], ""))
+  stdio.println("  requests: " + safe_int_string(report["request_count"], "0"))
+  stdio.println("  groups: " + safe_int_string(report["group_count"], "0"))
+  stdio.println("  manifest sha256: " + safe_string(report["manifest_sha256"], ""))
   for group in safe_list(report["groups"]) {
     const g = safe_dict(group)
-    harness.stdio.println(
+    stdio.println(
       "  "
         + safe_string(g["id"], "")
         + " "
@@ -999,7 +999,7 @@ fn __render_manifest_human(harness: Harness, report: dict) {
         + safe_int_string(g["request_count"], "0"),
     )
   }
-  print_list(harness, "warnings", safe_list(report["warnings"]))
+  print_list(stdio, "warnings", safe_list(report["warnings"]))
 }
 
 fn __render_manifest_json(report: dict) -> string {
@@ -1041,7 +1041,7 @@ fn __run_manifest(
   } else {
     id_prefix_raw
   }
-  const loaded = __batch_request_rows_read(harness, requests_path)
+  const loaded = __batch_request_rows_read(harness.fs, requests_path)
   const built = __build_manifest(
     catalog,
     loaded.rows,
@@ -1079,7 +1079,7 @@ fn __run_manifest(
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(__render_manifest_json(report))
   } else {
-    __render_manifest_human(harness, report)
+    __render_manifest_human(harness.stdio, report)
   }
   if len(errors) == 0 {
     return 0
@@ -1087,20 +1087,20 @@ fn __run_manifest(
   return 1
 }
 
-fn __render_prepare_human(harness: Harness, report: dict) {
+fn __render_prepare_human(stdio: HarnessStdio, report: dict) {
   if !safe_bool(report["ok"], false) {
-    harness.stdio.eprintln("Batch prepare failed")
-    print_list(harness, "errors", safe_list(report["errors"]))
-    print_list(harness, "warnings", safe_list(report["warnings"]))
+    stdio.eprintln("Batch prepare failed")
+    print_list(stdio, "errors", safe_list(report["errors"]))
+    print_list(stdio, "warnings", safe_list(report["warnings"]))
     return
   }
-  harness.stdio.println("Batch prepare receipt written: " + safe_string(report["receipt"], ""))
-  harness.stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
-  harness.stdio.println("  requests: " + safe_int_string(report["request_count"], "0"))
-  harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+  stdio.println("Batch prepare receipt written: " + safe_string(report["receipt"], ""))
+  stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
+  stdio.println("  requests: " + safe_int_string(report["request_count"], "0"))
+  stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
   for job in safe_list(report["jobs"]) {
     const j = safe_dict(job)
-    harness.stdio.println(
+    stdio.println(
       "  "
         + safe_string(j["id"], "")
         + " "
@@ -1115,7 +1115,7 @@ fn __render_prepare_human(harness: Harness, report: dict) {
         + safe_string(j["request_file"], ""),
     )
   }
-  print_list(harness, "warnings", safe_list(report["warnings"]))
+  print_list(stdio, "warnings", safe_list(report["warnings"]))
 }
 
 fn __render_prepare_json(report: dict) -> string {
@@ -1141,7 +1141,7 @@ fn __render_prepare_json(report: dict) -> string {
 fn __run_prepare(harness: Harness) -> int {
   const manifest_path = trim(harness.env.get_or("HARN_MODELS_BATCH_MANIFEST", ""))
   const out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT_DIR", ""))
-  const loaded = __batch_artifact_read(harness, manifest_path, "manifest")
+  const loaded = __batch_artifact_read(harness.fs, manifest_path, "manifest")
   let errors = loaded.errors
   let warnings = []
   if out_dir == "" {
@@ -1207,7 +1207,7 @@ fn __run_prepare(harness: Harness) -> int {
     warnings: warnings,
   }
   if len(errors) == 0 {
-    __mkdirp(harness, out_dir)
+    __mkdirp(harness.fs, out_dir)
     for artifact in artifacts {
       harness.fs.write_text(safe_string(artifact["path"], ""), safe_string(artifact["text"], ""))
     }
@@ -1219,7 +1219,7 @@ fn __run_prepare(harness: Harness) -> int {
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(__render_prepare_json(report))
   } else {
-    __render_prepare_human(harness, report)
+    __render_prepare_human(harness.stdio, report)
   }
   if len(errors) == 0 {
     return 0
@@ -1305,7 +1305,7 @@ fn main(harness: Harness) -> int {
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness, report)
+    __render_human(harness.stdio, report)
   }
   return 0
 }

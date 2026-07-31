@@ -137,6 +137,8 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
 ];
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_dynreg_store_handle() -> dict",
     category = "oauth_dynreg"
 )]
@@ -156,7 +158,9 @@ fn oauth_dynreg_store_handle_impl(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    sig = "__oauth_dynreg_validate_metadata(metadata: dict) -> dict",
+    exposure = "pure",
+    effects = [],
+    sig = "oauth_dynreg_validate_metadata(metadata: dict) -> dict",
     category = "oauth_dynreg"
 )]
 fn oauth_dynreg_validate_metadata_impl(
@@ -168,7 +172,9 @@ fn oauth_dynreg_validate_metadata_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    sig = "__oauth_dynreg_build_client_metadata(metadata: dict) -> dict",
+    exposure = "pure",
+    effects = [],
+    sig = "oauth_dynreg_build_client_metadata(metadata: dict) -> dict",
     category = "oauth_dynreg"
 )]
 fn oauth_dynreg_build_client_metadata_impl(
@@ -180,7 +186,9 @@ fn oauth_dynreg_build_client_metadata_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    sig = "__oauth_dynreg_build_authorization_server_metadata(provider: dict, overrides?: dict) -> dict",
+    exposure = "pure",
+    effects = [],
+    sig = "oauth_dynreg_build_authorization_server_metadata(provider: dict, overrides?: dict) -> dict",
     category = "oauth_dynreg"
 )]
 fn oauth_dynreg_build_authorization_server_metadata_impl(
@@ -203,6 +211,8 @@ fn oauth_dynreg_build_authorization_server_metadata_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_dynreg_register(handle: dict, metadata: dict) -> dict",
     category = "oauth_dynreg"
 )]
@@ -213,6 +223,8 @@ fn oauth_dynreg_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_dynreg_get(handle: dict, client_id: string) -> dict",
     category = "oauth_dynreg"
 )]
@@ -223,6 +235,8 @@ fn oauth_dynreg_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_dynreg_list(handle: dict) -> list",
     category = "oauth_dynreg"
 )]

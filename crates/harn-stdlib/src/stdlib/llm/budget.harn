@@ -55,7 +55,7 @@ fn __ceil_int(x) {
 /**
  * token_count_encoder returns the encoder metadata used for a model token count.
  *
- * @effects: [llm.call]
+ * @effects: []
  * @errors: []
  */
 pub fn token_count_encoder(model) {
@@ -65,7 +65,7 @@ pub fn token_count_encoder(model) {
 /**
  * estimate_text_tokens returns a model-aware text-token estimate.
  *
- * @effects: [llm.call]
+ * @effects: []
  * @errors: []
  */
 pub fn estimate_text_tokens(text, model = nil) {
@@ -81,7 +81,7 @@ pub fn estimate_text_tokens(text, model = nil) {
 /**
  * estimate_text_tokens_detail returns token count plus the encoder or heuristic source.
  *
- * @effects: [llm.call]
+ * @effects: []
  * @errors: []
  */
 pub fn estimate_text_tokens_detail(text, model = nil) {
@@ -103,9 +103,9 @@ pub fn estimate_text_tokens_detail(text, model = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn context_window_for(model) {
+pub fn context_window_for(llm: HarnessLlm, model) {
   const info = try {
-    llm_model_info(model)
+    llm.model_info(model)
   }
   if is_err(info) {
     return 8192
@@ -125,9 +125,9 @@ pub fn context_window_for(model) {
   return to_int(cw)
 }
 
-fn __model_max_output_tokens(model) {
+fn __model_max_output_tokens(llm: HarnessLlm, model) {
   const info = try {
-    llm_model_info(model)
+    llm.model_info(model)
   }
   if is_err(info) {
     return 16384
@@ -184,7 +184,7 @@ fn __task_clamp(kind, capped, used, summary_ratio) {
  * @effects: []
  * @errors: []
  */
-pub fn recommend_max_output_tokens(opts) {
+pub fn recommend_max_output_tokens(llm: HarnessLlm, opts) {
   if type_of(opts) != "dict" {
     throw "recommend_max_output_tokens: opts must be a dict"
   }
@@ -198,13 +198,13 @@ pub fn recommend_max_output_tokens(opts) {
   const headroom = opts?.headroom ?? 0.1
   const kind = opts?.task_kind ?? "chat"
   const summary_ratio = opts?.summary_ratio ?? 0.3
-  const ctx = context_window_for(model)
+  const ctx = context_window_for(llm, model)
   const prompt_tokens = estimate_text_tokens(opts.prompt, model)
   const system_tokens = estimate_text_tokens(opts?.system ?? "", model)
   const used = prompt_tokens + system_tokens
   const headroom_tokens = __ceil_int(ctx * headroom)
   const raw_remaining = ctx - used - headroom_tokens
-  const model_cap = __model_max_output_tokens(model)
+  const model_cap = __model_max_output_tokens(llm, model)
   const capped = min(raw_remaining, model_cap)
   const clamped = __task_clamp(kind, capped, used, summary_ratio)
   if clamped < 64 {
@@ -220,12 +220,12 @@ pub fn recommend_max_output_tokens(opts) {
  * @effects: []
  * @errors: []
  */
-pub fn budget_summary(opts) {
+pub fn budget_summary(llm: HarnessLlm, opts) {
   if type_of(opts) != "dict" {
     throw "budget_summary: opts must be a dict"
   }
   const model = opts?.model ?? ""
-  const info = llm_model_info(model)
+  const info = llm.model_info(model)
   const provider = if type_of(info) == "dict" {
     to_string(info?.provider ?? "")
   } else {
@@ -250,7 +250,7 @@ pub fn budget_summary(opts) {
   const system_tokens = estimate_text_tokens(opts?.system ?? "", model)
   const headroom_tokens = __ceil_int(ctx * headroom)
   const remaining = ctx - prompt_tokens - system_tokens - headroom_tokens
-  const model_cap = __model_max_output_tokens(model)
+  const model_cap = __model_max_output_tokens(llm, model)
   const capped = min(remaining, model_cap)
   let clamped = __task_clamp(kind, capped, prompt_tokens + system_tokens, summary_ratio)
   if clamped < 64 {
@@ -277,8 +277,8 @@ pub fn budget_summary(opts) {
  * @effects: []
  * @errors: []
  */
-pub fn fits_in_context(text, model, headroom = 0.1) {
-  const ctx = context_window_for(model)
+pub fn fits_in_context(llm: HarnessLlm, text, model, headroom = 0.1) {
+  const ctx = context_window_for(llm, model)
   const used = estimate_text_tokens(text, model)
   const reserved = __ceil_int(ctx * headroom)
   return used + reserved <= ctx

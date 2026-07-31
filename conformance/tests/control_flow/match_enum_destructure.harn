@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   enum Result {
     Ok(value)
     Err(message)
@@ -9,12 +9,12 @@ pipeline default() {
     Result.Ok(v) -> { output = "got: " + to_string(v) }
     Result.Err(msg) -> { output = "error: " + msg }
   }
-  __io_println(output)
+  harness.stdio.println(output)
   const err = Result.Err("not found")
   let output2 = ""
   match err {
     Result.Ok(v) -> { output2 = "got: " + to_string(v) }
     Result.Err(msg) -> { output2 = "error: " + msg }
   }
-  __io_println(output2)
+  harness.stdio.println(output2)
 }

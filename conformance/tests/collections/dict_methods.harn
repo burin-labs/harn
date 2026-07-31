@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const d = {a: 1, b: 2}
-  log(d.keys())
-  log(d.values())
-  log(d.has("a"))
-  log(d.has("z"))
+  harness.stdio.log(d.keys())
+  harness.stdio.log(d.values())
+  harness.stdio.log(d.has("a"))
+  harness.stdio.log(d.has("z"))
 }

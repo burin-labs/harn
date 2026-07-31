@@ -2,8 +2,8 @@
 // `pub const` / `pub let` bindings become available by name, same as `pub fn`.
 import "pub_const_lib"
 
-pipeline test(task) {
-  log(MAX_RETRIES)
-  log(GREETING)
-  log(scaled())
+pipeline test(harness: Harness, task) {
+  harness.stdio.log(MAX_RETRIES)
+  harness.stdio.log(GREETING)
+  harness.stdio.log(scaled())
 }

@@ -14,7 +14,7 @@ pub fn payload_schema() {
 }
 
 /** Normalize one Render-style log delivery into a Harn trigger event. */
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(_harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
   return {
     type: "event",
@@ -36,6 +36,6 @@ pub fn normalize_inbound(raw) {
 }
 
 /** Reject outbound methods that this fixture does not implement. */
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }

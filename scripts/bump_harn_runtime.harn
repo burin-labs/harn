@@ -25,8 +25,8 @@ import { bump_options, run_bump } from "std/bump/runtime"
 //   HARN_BUMP_READINESS_*     optional poll bounds (attempts/interval_ms/timeout_ms)
 import { gha_append_summary, gha_write_output } from "std/gha"
 
-fn env_or(name: string, fallback: string) -> string {
-  const value = trim(harness.env.get_or(name, ""))
+fn env_or(env: HarnessEnv, name: string, fallback: string) -> string {
+  const value = trim(env.get_or(name, ""))
   return if value == "" {
     fallback
   } else {
@@ -34,34 +34,40 @@ fn env_or(name: string, fallback: string) -> string {
   }
 }
 
-fn env_int(name: string, fallback: int) -> int {
-  return to_int(env_or(name, to_string(fallback))) ?? fallback
+fn env_int(env: HarnessEnv, name: string, fallback: int) -> int {
+  return to_int(env_or(env, name, to_string(fallback))) ?? fallback
 }
 
-pipeline main() {
-  const repo = env_or("GITHUB_REPOSITORY", "")
+pipeline main(harness: Harness) {
+  const repo = env_or(harness.env, "GITHUB_REPOSITORY", "")
   const token = harness.env.get_or("HARN_BUMP_TOKEN", "")
   if trim(repo) == "" || trim(token) == "" {
     harness.stdio.eprintln("bump_harn_runtime: GITHUB_REPOSITORY and HARN_BUMP_TOKEN are required")
     return 2
   }
-  const branch = env_or("HARN_BUMP_BRANCH", "automation/bump-harn-runtime")
-  const base = env_or("HARN_BUMP_BASE", "main")
-  const enable_auto_merge = env_or("HARN_BUMP_ENABLE_AUTOMERGE", "true") != "false"
+  const branch = env_or(harness.env, "HARN_BUMP_BRANCH", "automation/bump-harn-runtime")
+  const base = env_or(harness.env, "HARN_BUMP_BASE", "main")
+  const enable_auto_merge = env_or(harness.env, "HARN_BUMP_ENABLE_AUTOMERGE", "true") != "false"
   const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
     {
       repo: repo,
       // Readiness + latest-release resolution gate on the HARN release repo,
       // not the consumer repo being bumped (which may publish no releases).
-      release_repo: env_or("HARN_BUMP_RELEASE_REPO", "burin-labs/harn"),
+      release_repo: env_or(harness.env, "HARN_BUMP_RELEASE_REPO", "burin-labs/harn"),
       token: token,
       branch: branch,
       base: base,
-      validation_command: env_or("HARN_BUMP_VALIDATE", ""),
-      refresh_command: env_or("HARN_BUMP_REFRESH", "harn install --locked || harn install"),
-      readiness_max_attempts: env_int("HARN_BUMP_READINESS_ATTEMPTS", 1),
-      readiness_interval_ms: env_int("HARN_BUMP_READINESS_INTERVAL_MS", 20000),
-      readiness_timeout_ms: env_int("HARN_BUMP_READINESS_TIMEOUT_MS", 20000),
+      validation_command: env_or(harness.env, "HARN_BUMP_VALIDATE", ""),
+      refresh_command: env_or(
+        harness.env,
+        "HARN_BUMP_REFRESH",
+        "harn install --locked || harn install",
+      ),
+      readiness_max_attempts: env_int(harness.env, "HARN_BUMP_READINESS_ATTEMPTS", 1),
+      readiness_interval_ms: env_int(harness.env, "HARN_BUMP_READINESS_INTERVAL_MS", 20000),
+      readiness_timeout_ms: env_int(harness.env, "HARN_BUMP_READINESS_TIMEOUT_MS", 20000),
     },
   )
   const options = bump_options(
@@ -69,21 +75,23 @@ pipeline main() {
       repo: repo,
       branch: branch,
       base: base,
-      tag: env_or("HARN_BUMP_TARGET_TAG", ""),
+      tag: env_or(harness.env, "HARN_BUMP_TARGET_TAG", ""),
       enable_auto_merge: enable_auto_merge,
     },
   )
   const receipt = run_bump(options, adapter)
   harness.stdio.println(json_stringify_pretty(receipt))
-  gha_write_output("outcome", receipt.outcome)
-  gha_write_output("ok", receipt.ok)
-  gha_write_output("target_tag", receipt.target_tag)
-  gha_write_output("ready", receipt.ready)
+  gha_write_output(harness, "outcome", receipt.outcome)
+  gha_write_output(harness, "ok", receipt.ok)
+  gha_write_output(harness, "target_tag", receipt.target_tag)
+  gha_write_output(harness, "ready", receipt.ready)
   if receipt.pr_number != nil {
-    gha_write_output("pr_number", receipt.pr_number)
-    gha_write_output("pr_url", receipt.pr_url ?? "")
+    gha_write_output(harness, "pr_number", receipt.pr_number)
+    gha_write_output(harness, "pr_url", receipt.pr_url ?? "")
   }
   gha_append_summary(
+    harness.env,
+    harness.fs,
     "### bump-harn: ${receipt.outcome}\n\n"
       + "- target: `${receipt.target_tag}` (was `${receipt.previous_version}`)\n"
       + "- ready: ${receipt.ready}\n"

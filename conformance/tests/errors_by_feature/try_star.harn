@@ -8,7 +8,7 @@
  *                      guard is_ok(_r) else { throw unwrap_err(_r) }
  *                      unwrap(_r) }
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn ok() {
     return 42
   }
@@ -17,7 +17,7 @@ pipeline test(task) {
   }
   // --- Success path: try* returns the operand's value. ---
   const v = try* ok()
-  log("ok: ${v}")
+  harness.stdio.log("ok: ${v}")
   // --- Error path: try* rethrows; outer try/catch catches it. ---
   const caught = try {
     let _ = try* boom()
@@ -25,7 +25,7 @@ pipeline test(task) {
   } catch (e) {
     "caught:${e}"
   }
-  log("caught: ${caught}")
+  harness.stdio.log("caught: ${caught}")
   // --- Nested try* inside a try/catch expression: the inner throw
   //     short-circuits the let and lands in the outer catch with the
   //     original thrown value. ---
@@ -35,7 +35,7 @@ pipeline test(task) {
   } catch (e) {
     "nested-catch:${e}"
   }
-  log("nested: ${nested}")
+  harness.stdio.log("nested: ${nested}")
   // --- try* on an expression embedded mid-expression: error path
   //     short-circuits before the surrounding expression evaluates. ---
   const composed = try {
@@ -43,13 +43,13 @@ pipeline test(task) {
   } catch (e) {
     "composed-ok"
   }
-  log("composed: ${composed}")
+  harness.stdio.log("composed: ${composed}")
   const composed_err = try {
     "value=${try* boom()}"
   } catch (e) {
     "composed-err:${e}"
   }
-  log("composed_err: ${composed_err}")
+  harness.stdio.log("composed_err: ${composed_err}")
   // --- Rethrow targets the *innermost* enclosing catch; outer is not
   //     touched when inner handles the rethrow. ---
   const outer_untouched = try {
@@ -63,5 +63,5 @@ pipeline test(task) {
   } catch (e) {
     "outer:${e}"
   }
-  log("targets-inner: ${outer_untouched}")
+  harness.stdio.log("targets-inner: ${outer_untouched}")
 }

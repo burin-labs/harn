@@ -25,12 +25,14 @@ fn lexical_block_runs_cleanup_before_the_outer_statement() {
 fn lexical_block_auto_drops_owned_bindings_on_exit() {
     let error = run_harn_result_display_with_options(
         r#"
-        let alias = nil
-        block {
-          const ch: owned<channel> = channel("lexical-block-drop", 1)
-          alias = ch
+        fn main(harness: Harness) {
+          let alias = nil
+          block {
+            const ch: owned<channel> = harness.runtime.channel("lexical-block-drop", 1)
+            alias = ch
+          }
+          harness.runtime.send(alias, "after exit")
         }
-        send(alias, "after exit")
         "#,
         CompilerOptions::optimized(),
     )

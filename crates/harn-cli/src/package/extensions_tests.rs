@@ -428,8 +428,8 @@ filter = "event.kind"
             r#"
 import "std/triggers"
 
-pub fn on_new_issue(event: TriggerEvent) {
-  log(event.kind)
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
+  harness.stdio.log(event.kind)
 }
 
 pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
@@ -525,7 +525,7 @@ secrets = { signing_secret = "webhook/signing-secret" }
             r#"
 import "std/triggers"
 
-pub fn on_new_issue(event: TriggerEvent) -> string {
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -624,7 +624,7 @@ secrets = { signing_secret = "webhook/signing-secret" }
             r#"
 import "std/triggers"
 
-pub fn on_new_issue(event: TriggerEvent) -> string {
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -705,7 +705,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
   return event.provider == "cron" || event.provider == "kafka"
 }
 
-pub fn on_market_event(event: TriggerEvent) -> string {
+pub fn on_market_event(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -763,7 +763,7 @@ secrets = { signing_secret = "webhook/signing-secret" }
             r#"
 import "std/triggers"
 
-pub fn on_new_issue(event: TriggerEvent) -> string {
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -804,7 +804,7 @@ topic = "quotes"
             r#"
 import "std/triggers"
 
-pub fn on_market_event(event: TriggerEvent) -> string {
+pub fn on_market_event(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -1221,7 +1221,7 @@ secrets = { signing_secret = "webhook/signing-secret" }
             r#"
 import "std/triggers"
 
-pub fn on_new_issue(event: TriggerEvent) -> string {
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -1335,8 +1335,8 @@ secrets = { signing_secret = "webhook/signing-secret" }
             r#"
 import "std/triggers"
 
-pub fn on_new_issue(event: TriggerEvent) {
-  log(event.kind)
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
+  harness.stdio.log(event.kind)
 }
 "#,
         ),

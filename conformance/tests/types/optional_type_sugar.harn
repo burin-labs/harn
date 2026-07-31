@@ -18,21 +18,21 @@ fn unwrap_int(value: int?) -> int {
   return 0
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Plain optional values.
   const a: int? = nil
   const b: int? = 7
-  log(a)
-  log(b)
+  harness.stdio.log(a)
+  harness.stdio.log(b)
   // Optional generic and dict types format/parse round-trip.
   const words: list<int>? = [1, 2, 3]
   const lookup: dict<string, int>? = nil
-  log(words)
-  log(lookup)
+  harness.stdio.log(words)
+  harness.stdio.log(lookup)
   // Sugar interoperates with `T | nil` callers.
   const mixed: string? = first_word("hello")
-  log(mixed)
-  log(first_word(nil))
-  log(unwrap_int(nil))
-  log(unwrap_int(42))
+  harness.stdio.log(mixed)
+  harness.stdio.log(first_word(nil))
+  harness.stdio.log(unwrap_int(nil))
+  harness.stdio.log(unwrap_int(42))
 }

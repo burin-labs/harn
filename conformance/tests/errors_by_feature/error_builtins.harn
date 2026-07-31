@@ -1,32 +1,32 @@
 /** Test error category builtins */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // throw_error and error_category
   try {
     throw_error("request timed out", "timeout")
   } catch (e) {
-    __io_println(error_category(e))
-    __io_println(is_timeout(e))
-    __io_println(is_rate_limited(e))
+    harness.stdio.println(error_category(e))
+    harness.stdio.println(is_timeout(e))
+    harness.stdio.println(is_rate_limited(e))
   }
   // rate limit error
   try {
     throw_error("slow down", "rate_limit")
   } catch (e2) {
-    __io_println(error_category(e2))
-    __io_println(is_rate_limited(e2))
-    __io_println(is_timeout(e2))
+    harness.stdio.println(error_category(e2))
+    harness.stdio.println(is_rate_limited(e2))
+    harness.stdio.println(is_timeout(e2))
   }
   // generic error
   try {
     throw_error("something broke")
   } catch (e3) {
-    __io_println(error_category(e3))
+    harness.stdio.println(error_category(e3))
   }
   // error_category on string uses API-specific heuristics
-  __io_println(error_category("Deadline exceeded"))
-  __io_println(error_category("overloaded_error"))
-  __io_println(error_category("some random error"))
+  harness.stdio.println(error_category("Deadline exceeded"))
+  harness.stdio.println(error_category("overloaded_error"))
+  harness.stdio.println(error_category("some random error"))
   // is_timeout / is_rate_limited on non-errors
-  __io_println(is_timeout("not an error"))
-  __io_println(is_rate_limited(42))
+  harness.stdio.println(is_timeout("not an error"))
+  harness.stdio.println(is_rate_limited(42))
 }

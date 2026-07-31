@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_first_tool_format_override_warning_text } from "std/agent/options"
 
 /**
@@ -13,8 +14,8 @@ import { agent_first_tool_format_override_warning_text } from "std/agent/options
  *   HARN_TRY_TOOL_FORMAT — optional forced tool_format
  *   HARN_TRY_OVERRIDE_REASON — optional rationale for a forced tool_format
  */
-fn __trimmed_env(harness: Harness, key: string) {
-  const value = trim(harness.env.get_or(key, ""))
+fn __trimmed_env(env: HarnessEnv, key: string) {
+  const value = trim(env.get_or(key, ""))
   if value == "" {
     return nil
   }
@@ -24,7 +25,7 @@ fn __trimmed_env(harness: Harness, key: string) {
 fn main(harness: Harness) {
   if len(argv) < 1 {
     harness.stdio.eprintln("try: prompt is required")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const prompt = argv[0]
   const max_iters = to_int(harness.env.get_or("HARN_TRY_MAX_ITERS", "5")) ?? 5
@@ -33,25 +34,25 @@ fn main(harness: Harness) {
   // smoke test. Users wanting tool-augmented loops should use `harn
   // run` with a script that builds the options explicitly.
   let options = {max_iterations: max_iters}
-  const provider = __trimmed_env(harness, "HARN_TRY_PROVIDER")
-  const model = __trimmed_env(harness, "HARN_TRY_MODEL")
+  const provider = __trimmed_env(harness.env, "HARN_TRY_PROVIDER")
+  const model = __trimmed_env(harness.env, "HARN_TRY_MODEL")
   if provider != nil && model != nil {
     options = options + {provider: provider, model: model}
   }
-  const tool_format = __trimmed_env(harness, "HARN_TRY_TOOL_FORMAT")
+  const tool_format = __trimmed_env(harness.env, "HARN_TRY_TOOL_FORMAT")
   if tool_format != nil {
     options = options + {tool_format: tool_format}
   }
-  const override_reason = __trimmed_env(harness, "HARN_TRY_OVERRIDE_REASON")
+  const override_reason = __trimmed_env(harness.env, "HARN_TRY_OVERRIDE_REASON")
   if override_reason != nil {
     options = options + {tool_format_override_reason: override_reason}
   }
-  const result = agent_loop(prompt, nil, options)
+  const result = agent_loop(harness, prompt, nil, options)
   const warning = agent_first_tool_format_override_warning_text(
     transcript_events(result?.transcript),
   )
   if warning != nil {
-    __io_eprintln(warning)
+    harness.stdio.eprintln(warning)
   }
   harness.stdio.println(result.text)
 }

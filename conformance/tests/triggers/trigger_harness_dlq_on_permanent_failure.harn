@@ -1,7 +1,7 @@
-pipeline test(task) {
-  const result = trigger_test_harness("dlq_on_permanent_failure")
-  __io_println(result.ok)
-  __io_println(len(result.dlq) == 1)
-  __io_println(result.dlq[0].state == "pending")
-  __io_println(result.attempts[0].status == "dlq")
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("dlq_on_permanent_failure")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(len(result.dlq) == 1)
+  harness.stdio.println(result.dlq[0].state == "pending")
+  harness.stdio.println(result.attempts[0].status == "dlq")
 }

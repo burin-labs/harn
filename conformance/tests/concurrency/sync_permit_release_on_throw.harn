@@ -1,12 +1,12 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let escaped = nil
   const result = try {
-    escaped = sync_mutex_acquire("raii-throw")
+    escaped = harness.runtime.sync_mutex_acquire("raii-throw")
     throw "boom"
   }
-  __io_println(is_err(result))
-  const reacquired = sync_mutex_acquire("raii-throw", 0)
-  __io_println(reacquired != nil)
-  __io_println(sync_release(escaped))
-  __io_println(sync_release(reacquired))
+  harness.stdio.println(is_err(result))
+  const reacquired = harness.runtime.sync_mutex_acquire("raii-throw", 0)
+  harness.stdio.println(reacquired != nil)
+  harness.stdio.println(harness.runtime.sync_release(escaped))
+  harness.stdio.println(harness.runtime.sync_release(reacquired))
 }

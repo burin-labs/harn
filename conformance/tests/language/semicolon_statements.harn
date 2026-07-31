@@ -11,7 +11,7 @@ skill deploy {
   prompt "Follow the runbook."
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const x = 1
   const y = 2
   const meta = skill_find(deploy, "deploy")
@@ -19,5 +19,5 @@ pipeline test(task) {
   assert(second() == "two", "second function should parse on one line")
   assert(x + y == 3, "semicolon should separate let bindings")
   assert(meta.prompt == "Follow the runbook.", "skill fields should accept semicolons")
-  log("semicolon statements passed")
+  harness.stdio.log("semicolon statements passed")
 }

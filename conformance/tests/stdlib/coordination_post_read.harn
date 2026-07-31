@@ -1,8 +1,11 @@
 import { coord_post, coord_read } from "std/coordination"
 
-pipeline default() {
-  mock_time(2000)
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(2000)
   const receipt = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "release",
     {
@@ -15,28 +18,45 @@ pipeline default() {
     },
     {id: "coord-release-1", session_id: "coord-session"},
   )
-  const messages = coord_read("session", "release", {session_id: "coord-session"})
-  __io_println(receipt.schema)
-  __io_println(receipt.id)
-  __io_println(receipt.kind)
-  __io_println(receipt.scope)
-  __io_println(receipt.scope_id)
-  __io_println(receipt.channel.name_resolved)
-  __io_println(receipt.duplicate)
-  __io_println(len(messages))
-  __io_println(messages[0].schema)
-  __io_println(messages[0].kind)
-  __io_println(messages[0].from.agent)
-  __io_println(messages[0].data.repo)
-  __io_println(messages[0].refs[0].ref)
+  const messages = coord_read(
+    harness.runtime,
+    harness.channels,
+    "session",
+    "release",
+    {session_id: "coord-session"},
+  )
+  harness.stdio.println(receipt.schema)
+  harness.stdio.println(receipt.id)
+  harness.stdio.println(receipt.kind)
+  harness.stdio.println(receipt.scope)
+  harness.stdio.println(receipt.scope_id)
+  harness.stdio.println(receipt.channel.name_resolved)
+  harness.stdio.println(receipt.duplicate)
+  harness.stdio.println(len(messages))
+  harness.stdio.println(messages[0].schema)
+  harness.stdio.println(messages[0].kind)
+  harness.stdio.println(messages[0].from.agent)
+  harness.stdio.println(messages[0].data.repo)
+  harness.stdio.println(messages[0].refs[0].ref)
   const duplicate = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "release",
     {kind: "claim", subject: "ignored duplicate"},
     {id: "coord-release-1", session_id: "coord-session"},
   )
-  __io_println(duplicate.event_id == receipt.event_id)
-  __io_println(duplicate.duplicate)
-  __io_println(coord_read("session", "release", {session_id: "coord-session"})[0].subject)
-  unmock_time()
+  harness.stdio.println(duplicate.event_id == receipt.event_id)
+  harness.stdio.println(duplicate.duplicate)
+  harness.stdio.println(
+    coord_read(
+      harness.runtime,
+      harness.channels,
+      "session",
+      "release",
+      {session_id: "coord-session"},
+    )[0].subject,
+  )
+  harness.testing.clock_reset()
 }

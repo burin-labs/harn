@@ -13,7 +13,7 @@ fn describe(rec: Identified & {kind: string}) -> string {
   return rec.kind + ":" + rec.id + ":" + rec.name
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const rec = {id: "i-1", name: "alpha", kind: "node"}
-  __io_println(describe(rec))
+  harness.stdio.println(describe(rec))
 }

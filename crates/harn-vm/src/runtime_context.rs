@@ -111,40 +111,11 @@ fn current_overlay() -> RuntimeContextOverlay {
     })
 }
 
-pub fn register_runtime_context_builtins(vm: &mut crate::vm::Vm) {
-    for name in [
-        "runtime_context",
-        "task_current",
-        "runtime_context_values",
-        "runtime_context_get",
-        "runtime_context_set",
-        "runtime_context_clear",
-    ] {
-        vm.register_builtin(name, move |_args, _out| {
-            Err(VmError::Runtime(format!(
-                "{name}: internal runtime context builtin was not intercepted"
-            )))
-        });
-    }
-}
-
-pub(crate) fn dispatch_runtime_context_builtin(
-    vm: &mut crate::vm::Vm,
-    name: &str,
+pub(crate) fn runtime_context_get(
+    vm: &crate::vm::Vm,
     args: &[VmValue],
-) -> Option<Result<VmValue, VmError>> {
-    match name {
-        "runtime_context" | "task_current" => Some(Ok(runtime_context_value(vm))),
-        "runtime_context_values" => Some(Ok(VmValue::dict(vm.runtime_context.values.clone()))),
-        "runtime_context_get" => Some(runtime_context_get(vm, args)),
-        "runtime_context_set" => Some(runtime_context_set(vm, args)),
-        "runtime_context_clear" => Some(runtime_context_clear(vm, args)),
-        _ => None,
-    }
-}
-
-fn runtime_context_get(vm: &crate::vm::Vm, args: &[VmValue]) -> Result<VmValue, VmError> {
-    let key = require_key(args, "runtime_context_get")?;
+) -> Result<VmValue, VmError> {
+    let key = require_key(args, "HarnessRuntime.context_get")?;
     Ok(vm
         .runtime_context
         .values
@@ -154,8 +125,11 @@ fn runtime_context_get(vm: &crate::vm::Vm, args: &[VmValue]) -> Result<VmValue, 
         .unwrap_or(VmValue::Nil))
 }
 
-fn runtime_context_set(vm: &mut crate::vm::Vm, args: &[VmValue]) -> Result<VmValue, VmError> {
-    let key = require_key(args, "runtime_context_set")?;
+pub(crate) fn runtime_context_set(
+    vm: &mut crate::vm::Vm,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
+    let key = require_key(args, "HarnessRuntime.context_set")?;
     let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
     Ok(vm
         .runtime_context
@@ -164,8 +138,11 @@ fn runtime_context_set(vm: &mut crate::vm::Vm, args: &[VmValue]) -> Result<VmVal
         .unwrap_or(VmValue::Nil))
 }
 
-fn runtime_context_clear(vm: &mut crate::vm::Vm, args: &[VmValue]) -> Result<VmValue, VmError> {
-    let key = require_key(args, "runtime_context_clear")?;
+pub(crate) fn runtime_context_clear(
+    vm: &mut crate::vm::Vm,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
+    let key = require_key(args, "HarnessRuntime.context_clear")?;
     Ok(vm
         .runtime_context
         .values

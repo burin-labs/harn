@@ -73,8 +73,8 @@ pub type SourceLengthReport = {
   findings: list<SourceLengthFinding>,
 }
 
-fn repo_root() -> string {
-  return path_normalize(path_join(source_dir(), ".."))
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
 }
 
 /** Count logical lines, including a final line without a trailing newline. */
@@ -124,23 +124,28 @@ fn standard_cargo_target_dir_name(name: string) -> bool {
   return false
 }
 
-fn root_worktree_cargo_target_dir(root: string, rel_dir: string, name: string) -> bool {
+fn root_worktree_cargo_target_dir(
+  fs: HarnessFs,
+  root: string,
+  rel_dir: string,
+  name: string,
+) -> bool {
   if rel_dir != "" || !name.starts_with(WORKTREE_CARGO_TARGET_DIR_PREFIX) {
     return false
   }
   const dir = path_join(root, name)
   for artifact_dir in CARGO_TARGET_ARTIFACT_DIR_NAMES {
-    if harness.fs.exists(path_join(dir, artifact_dir)) {
+    if fs.exists(path_join(dir, artifact_dir)) {
       return true
     }
   }
   return false
 }
 
-fn skip_dir(root: string, rel_dir: string, name: string) -> bool {
+fn skip_dir(fs: HarnessFs, root: string, rel_dir: string, name: string) -> bool {
   return SKIP_DIR_NAMES.contains(name)
     || standard_cargo_target_dir_name(name)
-    || root_worktree_cargo_target_dir(root, rel_dir, name)
+    || root_worktree_cargo_target_dir(fs, root, rel_dir, name)
 }
 
 /**
@@ -155,7 +160,7 @@ fn skip_dir(root: string, rel_dir: string, name: string) -> bool {
  * `test_inventory_covers_every_tracked_in_scope_source` is what makes such a
  * hole loud, by reconciling the inventory against git rather than a fixture.
  */
-fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
+fn files_below(harness: Harness, root: string, rel_dir: string, suffix: string) -> list<string> {
   const dir = if rel_dir == "" {
     root
   } else {
@@ -165,14 +170,14 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
     return []
   }
   let paths: list<string> = []
-  const entries = harness.fs.walk_dir(dir, {max_depth: 1, follow_symlinks: false}).filter(
+  const entries = harness.fs.walk(dir, {max_depth: 1, follow_symlinks: false}).filter(
     { entry -> entry.depth == 1 },
   )
     .to_list()
     .sorted_by({ entry -> entry.path })
   for entry in entries {
     const name = basename(entry.path)
-    if skip_dir(root, rel_dir, name) {
+    if skip_dir(harness.fs, root, rel_dir, name) {
       continue
     }
     const rel = normalize_source_path(
@@ -185,7 +190,7 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
     if entry.is_file && rel.ends_with(suffix) {
       paths = paths.appending(rel)
     } else if entry.is_dir {
-      for child in files_below(root, rel, suffix) {
+      for child in files_below(harness, root, rel, suffix) {
         paths = paths.appending(child)
       }
     }
@@ -204,28 +209,30 @@ pub fn is_generated_source(path: string) -> bool {
 }
 
 /** Inventory all repo Rust plus the canonical stdlib Harn source. */
-pub fn source_files(root: string = "") -> list<string> {
+pub fn source_files(harness: Harness, root: string = "") -> list<string> {
   const resolved_root = if root == "" {
-    repo_root()
+    repo_root(harness.fs)
   } else {
     path_normalize(root)
   }
-  let paths = files_below(resolved_root, "", ".rs").filter({ path -> !is_generated_source(path) })
+  let paths = files_below(harness, resolved_root, "", ".rs").filter(
+    { path -> !is_generated_source(path) },
+  )
     .to_list()
-  for path in files_below(resolved_root, STDLIB_SOURCE_DIR, ".harn") {
+  for path in files_below(harness, resolved_root, STDLIB_SOURCE_DIR, ".harn") {
     paths = paths.appending(path)
   }
   return paths.sorted()
 }
 
-pub fn source_inventory(root: string = "") -> list<SourceCount> {
+pub fn source_inventory(harness: Harness, root: string = "") -> list<SourceCount> {
   const resolved_root = if root == "" {
-    repo_root()
+    repo_root(harness.fs)
   } else {
     path_normalize(root)
   }
   let sources: list<SourceCount> = []
-  for path in source_files(resolved_root) {
+  for path in source_files(harness, resolved_root) {
     sources = sources.appending(
       {path: path, lines: logical_line_count(harness.fs.read_text(path_join(resolved_root, path)))},
     )
@@ -257,14 +264,14 @@ pub fn parse_baseline(shard_path: string, text: string) -> BaselineCount {
   return {kind: "valid", shard_path: shard_path, source_path: source_path, lines: parsed}
 }
 
-pub fn baseline_inventory(root: string = "") -> list<BaselineCount> {
+pub fn baseline_inventory(harness: Harness, root: string = "") -> list<BaselineCount> {
   const resolved_root = if root == "" {
-    repo_root()
+    repo_root(harness.fs)
   } else {
     path_normalize(root)
   }
   let baselines: list<BaselineCount> = []
-  for shard_path in files_below(resolved_root, BASELINE_DIR, BASELINE_SUFFIX) {
+  for shard_path in files_below(harness, resolved_root, BASELINE_DIR, BASELINE_SUFFIX) {
     baselines = baselines.appending(
       parse_baseline(shard_path, harness.fs.read_text(path_join(resolved_root, shard_path))),
     )
@@ -434,23 +441,23 @@ pub fn plan_baseline_update(
   return edits.sorted_by({ edit -> edit.shard_path })
 }
 
-fn ensure_dir(path: string) -> nil {
+fn ensure_dir(harness: Harness, path: string) -> nil {
   if path == "" || path == "." || harness.fs.exists(path) {
     return nil
   }
   const parent = dirname(path) ?? ""
   if parent != "" && parent != path {
-    ensure_dir(parent)
+    ensure_dir(harness, parent)
   }
   harness.fs.mkdir(path)
   return nil
 }
 
-pub fn apply_baseline_edits(root: string, edits: list<BaselineEdit>) -> nil {
+pub fn apply_baseline_edits(harness: Harness, root: string, edits: list<BaselineEdit>) -> nil {
   for edit in edits {
     const full_path = path_join(root, edit.shard_path)
     if edit.kind == "write" {
-      ensure_dir(dirname(full_path) ?? root)
+      ensure_dir(harness, dirname(full_path) ?? root)
       harness.fs.write_text(full_path, to_string(edit.lines) + "\n")
     } else if harness.fs.exists(full_path) {
       harness.fs.delete(full_path)
@@ -459,10 +466,10 @@ pub fn apply_baseline_edits(root: string, edits: list<BaselineEdit>) -> nil {
   return nil
 }
 
-/** In-scope source paths git tracks under `root`, empty when git cannot answer. */
-fn git_tracked_sources(root: string) -> list<string> {
-  const res = harness.process.spawn_captured(
-    {cmd: "git", args: ["-C", root, "ls-files", "*.rs", STDLIB_SOURCE_DIR + "/*.harn"]},
+/** In-scope, present source paths git tracks under `root`, empty when git cannot answer. */
+fn git_tracked_sources(fs: HarnessFs, process: HarnessProcess, root: string) -> list<string> {
+  const res = process.run(
+    {program: "git", args: ["-C", root, "ls-files", "*.rs", STDLIB_SOURCE_DIR + "/*.harn"]},
   )
   if !res.success {
     return []
@@ -470,7 +477,7 @@ fn git_tracked_sources(root: string) -> list<string> {
   let out: list<string> = []
   for line in res.stdout.lines() {
     const path = line.trim()
-    if path != "" {
+    if path != "" && fs.exists(path_join(root, path)) {
       out = out.appending(normalize_source_path(path))
     }
   }
@@ -498,21 +505,21 @@ pub fn unscanned_sources(scanned: list<string>, tracked: list<string>) -> list<s
   return missing.sorted()
 }
 
-pub fn check_source_file_lengths(root: string = "") -> SourceLengthReport {
+pub fn check_source_file_lengths(harness: Harness, root: string = "") -> SourceLengthReport {
   const resolved_root = if root == "" {
-    repo_root()
+    repo_root(harness.fs)
   } else {
     path_normalize(root)
   }
-  const sources = source_inventory(resolved_root)
-  const baselines = baseline_inventory(resolved_root)
+  const sources = source_inventory(harness, resolved_root)
+  const baselines = baseline_inventory(harness, resolved_root)
   let findings = evaluate_inventory(sources, baselines)
   // Reuses the inventory walk that just ran, so the reconciliation costs one
   // `git ls-files`. Under a synthetic root nothing is tracked, so this is a
   // no-op for fixture tests rather than something they have to opt out of.
   for path in unscanned_sources(
     sources.map({ source -> source.path }).to_list(),
-    git_tracked_sources(resolved_root),
+    git_tracked_sources(harness.fs, harness.process, resolved_root),
   ) {
     findings = findings.appending(
       {
@@ -580,23 +587,23 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const resolved_root = if to_string(parsed?.root ?? "") == "" {
-    repo_root()
+    repo_root(harness.fs)
   } else {
     path_normalize(to_string(parsed.root))
   }
   if parsed?.update ?? false {
     const edits = plan_baseline_update(
-      source_inventory(resolved_root),
-      baseline_inventory(resolved_root),
+      source_inventory(harness, resolved_root),
+      baseline_inventory(harness, resolved_root),
     )
-    apply_baseline_edits(resolved_root, edits)
+    apply_baseline_edits(harness, resolved_root, edits)
     harness.stdio.println("updated ${edits.count} source file-length baseline shard(s)")
   }
-  const report = check_source_file_lengths(resolved_root)
+  const report = check_source_file_lengths(harness, resolved_root)
   if parsed?.json ?? false {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
@@ -608,7 +615,7 @@ fn main(harness: Harness) {
     }
   }
   if report.findings.count > 0 {
-    exit(1)
+    harness.runtime.exit(1)
   }
   return nil
 }

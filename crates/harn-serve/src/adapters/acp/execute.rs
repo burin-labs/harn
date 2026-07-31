@@ -477,7 +477,7 @@ mod tests {
 
         let cwd = tempfile::tempdir().expect("cwd");
         let source =
-            "pipeline main() {\n  __io_println(json_stringify({cancelled: is_cancelled()}))\n}\n"
+            "pipeline main(harness: Harness) {\n  harness.stdio.println(json_stringify({cancelled: is_cancelled()}))\n}\n"
                 .to_string();
         let chunk = harn_vm::compile_source(&source).expect("compile inline pipeline");
 

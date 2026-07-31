@@ -9,15 +9,15 @@
 import { render_table } from "std/table"
 
 /**
- * Wraps the llm_model_info(selector) Rust builtin. The runtime always
+ * Wraps the harness.llm.model_info(selector) Rust builtin. The runtime always
  * returns a dict; when the selector is unknown, the dict's `catalog`
  * field will be nil and the inferred provider will be the default.
  *
  * @effects: []
  * @errors: []
  */
-pub fn model_info(selector) {
-  return llm_model_info(selector)
+pub fn model_info(llm: HarnessLlm, selector) {
+  return llm.model_info(selector)
 }
 
 /**
@@ -29,24 +29,24 @@ pub fn model_info(selector) {
  * @effects: []
  * @errors: ["llm_execution_contract: selector is required"]
  */
-pub fn execution_contract(selector) -> dict {
-  return llm_execution_contract(selector)
+pub fn execution_contract(llm: HarnessLlm, selector) -> dict {
+  return llm.execution_contract(selector)
 }
 
 /**
- * Wraps llm_resolved_options(opts). opts.model is required; throws otherwise.
+ * Wraps harness.llm.resolved_options(opts). opts.model is required; throws otherwise.
  *
  * @effects: []
  * @errors: []
  */
-pub fn resolved_options(opts) {
+pub fn resolved_options(llm: HarnessLlm, opts) {
   if type_of(opts) != "dict" {
     throw "resolved_options: opts must be a dict"
   }
   if opts?.model == nil || opts.model == "" {
     throw "resolved_options: opts.model is required"
   }
-  return llm_resolved_options(opts)
+  return llm.resolved_options(opts)
 }
 
 fn __capability_field(caps, capability) {
@@ -97,8 +97,8 @@ fn __capability_field(caps, capability) {
  * @effects: []
  * @errors: []
  */
-pub fn has_capability(model, capability) {
-  const info = llm_model_info(model)
+pub fn has_capability(llm: HarnessLlm, model, capability) {
+  const info = llm.model_info(model)
   if type_of(info) != "dict" {
     return false
   }
@@ -117,8 +117,8 @@ pub fn has_capability(model, capability) {
  * @effects: []
  * @errors: []
  */
-pub fn family_of(model_id) {
-  const info = llm_model_info(model_id)
+pub fn family_of(llm: HarnessLlm, model_id) {
+  const info = llm.model_info(model_id)
   if type_of(info) != "dict" {
     return "unknown"
   }
@@ -133,8 +133,8 @@ pub fn family_of(model_id) {
  * @effects: []
  * @errors: []
  */
-pub fn routing_routes() {
-  const catalog = llm_provider_catalog()
+pub fn routing_routes(llm: HarnessLlm) {
+  const catalog = llm.provider_catalog()
   return catalog?.routing_routes ?? []
 }
 
@@ -145,8 +145,8 @@ pub fn routing_routes() {
  * @effects: []
  * @errors: []
  */
-pub fn lineage_of(model_id) {
-  const info = llm_model_info(model_id)
+pub fn lineage_of(llm: HarnessLlm, model_id) {
+  const info = llm.model_info(model_id)
   if type_of(info) != "dict" {
     return "unknown"
   }
@@ -175,8 +175,8 @@ pub fn lineage_of(model_id) {
  * @api_stability: experimental
  * @example: complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
  */
-pub fn complementary_reviewer(opts) {
-  return llm_complementary_reviewer(opts)
+pub fn complementary_reviewer(llm: HarnessLlm, opts) {
+  return llm.complementary_reviewer(opts)
 }
 
 /**
@@ -189,8 +189,8 @@ pub fn complementary_reviewer(opts) {
  * @api_stability: experimental
  * @example: equivalent_models("cerebras/gpt-oss-120b")
  */
-pub fn equivalent_models(selector) {
-  return llm_equivalent_models(selector)
+pub fn equivalent_models(llm: HarnessLlm, selector) {
+  return llm.equivalent_models(selector)
 }
 
 /**
@@ -210,8 +210,8 @@ pub fn equivalent_models(selector) {
  * `pick_model(opts)` is the one-shot convenience: returns the top
  * candidate from `best_available_model`, or nil if there is none.
  */
-fn __available_provider_set() {
-  const status = llm_provider_status()
+fn __available_provider_set(llm: HarnessLlm) {
+  const status = llm.providers()
   let available = {}
   for entry in status {
     if entry?.available {
@@ -346,10 +346,10 @@ fn __model_matches_catalog_constraints(model, opts, available) {
   return true
 }
 
-fn __filter_models(opts) {
-  const catalog = llm_catalog()
+fn __filter_models(llm: HarnessLlm, opts) {
+  const catalog = llm.catalog()
   const available = if opts?.available_only ?? false {
-    __available_provider_set()
+    __available_provider_set(llm)
   } else {
     nil
   }
@@ -399,8 +399,8 @@ fn __filter_models(opts) {
  * @api_stability: experimental
  * @example: models_with({tier: "frontier", strengths: ["coding"], available_only: true})
  */
-pub fn models_with(opts = nil) {
-  return __filter_models(opts ?? {})
+pub fn models_with(llm: HarnessLlm, opts = nil) {
+  return __filter_models(llm, opts ?? {})
 }
 
 fn __relax_step(opts, step) {
@@ -458,12 +458,12 @@ fn __relax_step(opts, step) {
  * @api_stability: experimental
  * @example: best_available_models({tier: "frontier", strengths: ["vision"]})
  */
-pub fn best_available_models(opts = nil) {
+pub fn best_available_models(llm: HarnessLlm, opts = nil) {
   const original = opts ?? {}
   let step = 0
   while step <= 7 {
     const attempt = __relax_step(original, step)
-    const candidates = __filter_models(attempt)
+    const candidates = __filter_models(llm, attempt)
     if len(candidates) > 0 {
       return {models: candidates, relaxed_from: original, relaxed_step: step, relaxed_opts: attempt}
     }
@@ -485,8 +485,8 @@ pub fn best_available_models(opts = nil) {
  * @api_stability: experimental
  * @example: pick_model({tier: "frontier", strengths: ["coding"], available_only: true})
  */
-pub fn pick_model(opts = nil) {
-  const result = best_available_models(opts)
+pub fn pick_model(llm: HarnessLlm, opts = nil) {
+  const result = best_available_models(llm, opts)
   if len(result.models) == 0 {
     return nil
   }

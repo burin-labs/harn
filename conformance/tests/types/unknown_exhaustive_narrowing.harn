@@ -3,7 +3,7 @@
  * variants are covered before an `unreachable()` fallback, the type
  * checker emits no warning and the program runs end-to-end.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn describe(v: unknown) -> string {
     if type_of(v) == "string" {
       return "string:${v.upper()}"
@@ -34,13 +34,13 @@ pipeline test(task) {
     }
     unreachable("unknown type_of variant")
   }
-  log(describe("hi"))
-  log(describe(41))
-  log(describe(nil))
-  log(describe([1, 2, 3]))
-  log(describe({a: 1}))
-  log(describe(true))
-  log(describe(bytes_from_string("ab")))
+  harness.stdio.log(describe("hi"))
+  harness.stdio.log(describe(41))
+  harness.stdio.log(describe(nil))
+  harness.stdio.log(describe([1, 2, 3]))
+  harness.stdio.log(describe({a: 1}))
+  harness.stdio.log(describe(true))
+  harness.stdio.log(describe(bytes_from_string("ab")))
   // Partial narrowing with a plain `return` fallback is NOT an
   // exhaustiveness claim — it compiles silently and runs fine.
   fn categorize(v: unknown) -> string {
@@ -52,9 +52,9 @@ pipeline test(task) {
     }
     return "other"
   }
-  log(categorize("x"))
-  log(categorize(1))
-  log(categorize([1]))
+  harness.stdio.log(categorize("x"))
+  harness.stdio.log(categorize(1))
+  harness.stdio.log(categorize([1]))
   // Nested narrowing inside a covered branch doesn't leak coverage out.
   fn shape(v: unknown) -> string {
     if type_of(v) == "string" {
@@ -89,6 +89,6 @@ pipeline test(task) {
     }
     unreachable("unknown type_of variant")
   }
-  log(shape([]))
-  log(shape([1, 2]))
+  harness.stdio.log(shape([]))
+  harness.stdio.log(shape([1, 2]))
 }

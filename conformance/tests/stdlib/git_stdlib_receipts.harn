@@ -1,92 +1,103 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 import "std/git"
 import "std/triggers"
 
-fn run_git(cwd, argv) {
-  const result: {success: bool, stderr?: string, stdout?: string} = host_call(
-    "process.exec",
-    {mode: "argv", argv: argv, cwd: cwd},
-  )
+fn run_git(process: HarnessProcess, cwd, argv) {
+  const result = process.run({program: argv[0], args: argv[1:len(argv)], cwd: cwd})
   if !result.success {
     throw "git command failed: " + (result.stderr ?? result.stdout ?? "")
   }
   return result
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const root = path_join(
-    harness.fs.temp_dir(),
-    "harn_git_stdlib_" + to_string(harness.random.gen_range(100000, 999999)),
+    harness.fs.workspace_temp_dir(),
+    "harn_git_stdlib_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
-  run_git(root, ["git", "init", "-b", "main"])
-  run_git(root, ["git", "config", "user.email", "harn@example.test"])
-  run_git(root, ["git", "config", "user.name", "Harn Test"])
+  run_git(harness.process, root, ["git", "init", "-b", "main"])
+  run_git(harness.process, root, ["git", "config", "user.email", "harn@example.test"])
+  run_git(harness.process, root, ["git", "config", "user.name", "Harn Test"])
   harness.fs.write_text(path_join(root, "README.md"), "initial\n")
-  run_git(root, ["git", "add", "README.md"])
-  run_git(root, ["git", "commit", "-m", "initial"])
-  run_git(root, ["git", "tag", "v1.0.0"])
+  run_git(harness.process, root, ["git", "add", "README.md"])
+  run_git(harness.process, root, ["git", "commit", "-m", "initial"])
+  run_git(harness.process, root, ["git", "tag", "v1.0.0"])
   harness.fs.write_text(path_join(root, "README.md"), "changed\n")
-  const status: GitReceipt = git.status(root)
-  const status_fn: GitStatusReceipt = git_status(root)
+  const status: GitReceipt = harness.process.git_status(root)
+  const status_fn: GitStatusReceipt = git_status(harness.process, root)
   const status_entry: GitStatusEntry = status_fn.data.entries[0]
-  const records: list<TrustRecord> = trust_query({action: "git.status"})
-  const remove: GitReceipt = git.worktree_remove(path_join(root, "missing-worktree"), {force: true})
-  __io_println(status.schema == "harn-stdlib-git-receipt-v1")
-  __io_println(status.operation == "git.status" && status.success)
-  __io_println(
+  const records: list<TrustRecord> = harness.runtime.trust_query({action: "git.status"})
+  const remove: GitReceipt = git_worktree_remove(
+    harness.process,
+    path_join(root, "missing-worktree"),
+    {force: true},
+  )
+  harness.stdio.println(status.schema == "harn-stdlib-git-receipt-v1")
+  harness.stdio.println(status.operation == "git.status" && status.success)
+  harness.stdio.println(
     status.data.dirty && status_entry.path == "README.md" && status_entry.original_path == nil,
   )
-  __io_println(
+  harness.stdio.println(
     status_fn.operation == "git.status"
       && status_fn.data.dirty
       && status_fn.encoding_error == nil,
   )
-  __io_println(len(records) >= 1 && records[len(records) - 1]?.action == "git.status")
-  __io_println(remove.status == "no_op" && remove.data.idempotent)
-  const branch = git_current_branch(root)
-  __io_println(branch.success && branch.branch == "main")
-  const merge_base: GitMergeBaseReceipt = git_merge_base("HEAD", "HEAD", root)
-  __io_println(merge_base.success && merge_base.data.oid != "")
-  const log_result = git_log(root, {max_count: 1})
-  __io_println(log_result.success && contains(log_result.stdout, "initial"))
-  const tags: GitTagListReceipt = git_tag_list(root, {pattern: "v*", sort: "-v:refname"})
-  __io_println(tags.success && tags.data.tags == ["v1.0.0"])
+  harness.stdio.println(len(records) >= 1 && records[len(records) - 1]?.action == "git.status")
+  harness.stdio.println(remove.status == "no_op" && remove.data.idempotent)
+  const branch = git_current_branch(harness.process, root)
+  harness.stdio.println(branch.success && branch.branch == "main")
+  const merge_base: GitMergeBaseReceipt = git_merge_base(harness.process, "HEAD", "HEAD", root)
+  harness.stdio.println(merge_base.success && merge_base.data.oid != "")
+  const log_result = git_log(harness.process, root, {max_count: 1})
+  harness.stdio.println(log_result.success && contains(log_result.stdout, "initial"))
+  const tags: GitTagListReceipt = git_tag_list(
+    harness.process,
+    root,
+    {pattern: "v*", sort: "-v:refname"},
+  )
+  harness.stdio.println(tags.success && tags.data.tags == ["v1.0.0"])
   const invalid_sort = try {
-    git_tag_list(root, {sort: "version:refname\n--format=unsafe"})
+    git_tag_list(harness.process, root, {sort: "version:refname\n--format=unsafe"})
   }
-  __io_println(
+  harness.stdio.println(
     is_err(invalid_sort)
       && contains(
       to_string(unwrap_err(invalid_sort)),
       "sort must not contain newlines",
     ),
   )
-  const described: GitDescribeReceipt = git_describe(root, {tags: true, match: "v*"})
-  __io_println(
+  const described: GitDescribeReceipt = git_describe(
+    harness.process,
+    root,
+    {tags: true, match: "v*"},
+  )
+  harness.stdio.println(
     described.success
       && described.data.tag == "v1.0.0"
       && described.data.distance == 0
       && described.data.dirty,
   )
-  run_git(root, ["git", "checkout", "--", "README.md"])
-  const switch_result = git_switch("feature/std-git", root, {create: true})
-  __io_println(switch_result.success)
-  __io_println(git_current_branch(root).branch == "feature/std-git")
-  __io_println(git_switch("main", root).success)
+  run_git(harness.process, root, ["git", "checkout", "--", "README.md"])
+  const switch_result = git_switch(harness.process, "feature/std-git", root, {create: true})
+  harness.stdio.println(switch_result.success)
+  harness.stdio.println(git_current_branch(harness.process, root).branch == "feature/std-git")
+  harness.stdio.println(git_switch(harness.process, "main", root).success)
   const remote = path_join(
-    harness.fs.temp_dir(),
-    "harn_git_remote_" + to_string(harness.random.gen_range(100000, 999999)) + ".git",
+    harness.fs.workspace_temp_dir(),
+    "harn_git_remote_" + to_string(harness.random.range(100000, 999999)) + ".git",
   )
-  run_git(root, ["git", "init", "--bare", remote])
-  run_git(root, ["git", "remote", "add", "origin", remote])
-  run_git(root, ["git", "push", "-u", "origin", "main"])
-  run_git(root, ["git", "push", "origin", "v1.0.0"])
+  run_git(harness.process, root, ["git", "init", "--bare", remote])
+  run_git(harness.process, root, ["git", "remote", "add", "origin", remote])
+  run_git(harness.process, root, ["git", "push", "-u", "origin", "main"])
+  run_git(harness.process, root, ["git", "push", "origin", "v1.0.0"])
   const remote_refs: GitLsRemoteReceipt = git_ls_remote(
+    harness.process,
     "origin",
     {repo: root, tags: true, refs: ["refs/tags/v*"]},
   )
   const remote_ref: GitRemoteRef = remote_refs.data.refs[0]
-  __io_println(
+  harness.stdio.println(
     remote_refs.success
       && remote_refs.data.remote == "origin"
       && remote_ref.name == "refs/tags/v1.0.0"
@@ -94,56 +105,62 @@ pipeline default() {
       { row -> row.ref == "refs/tags/v1.0.0" },
     ),
   )
-  const pull = git_pull_ff_only(root, "origin", "main", {quiet: true})
-  __io_println(pull.success)
+  const pull = git_pull_ff_only(harness.process, root, "origin", "main", {quiet: true})
+  harness.stdio.println(pull.success)
   const read_tools = git_tools(
+    harness.process,
     nil,
     {repo: root, enabled_tools: ["git_status", "git_log"], names: {git_log: "release_git_log"}},
   )
   const read_surface = tool_surface_validate(
     {tools: read_tools, policy: {side_effect_level: "read_only"}},
   )
-  __io_println(read_surface.valid)
+  harness.stdio.println(read_surface.valid)
   const status_call = agent_dispatch_tool_call(
+    harness.tools,
     {id: "status", name: "git_status", arguments: {}},
     read_tools,
   )
-  __io_println(status_call.ok)
+  harness.stdio.println(status_call.ok)
   const log_call = agent_dispatch_tool_call(
+    harness.tools,
     {id: "log", name: "release_git_log", arguments: {max_count: 1}},
     read_tools,
   )
-  __io_println(log_call.ok)
-  const switch_tools = git_tools(nil, {repo: root, enabled_tools: ["git_switch"]})
+  harness.stdio.println(log_call.ok)
+  const switch_tools = git_tools(harness.process, nil, {repo: root, enabled_tools: ["git_switch"]})
   const switch_surface = tool_surface_validate(
     {tools: switch_tools, policy: {side_effect_level: "process_exec"}},
   )
-  __io_println(switch_surface.valid)
+  harness.stdio.println(switch_surface.valid)
   const deferred_tools = git_tools(
+    harness.process,
     nil,
     {repo: root, defer_loading: true, tool_config: {git_status: {defer_loading: false}}},
   )
-  __io_println(tool_find(deferred_tools, "git_log").defer_loading)
-  __io_println(!tool_find(deferred_tools, "git_status").defer_loading)
+  harness.stdio.println(tool_find(deferred_tools, "git_log").defer_loading)
+  harness.stdio.println(!tool_find(deferred_tools, "git_status").defer_loading)
   const found = git_find_tool("recent commits", {})
-  __io_println(found.operations[0] == "log")
+  harness.stdio.println(found.operations[0] == "log")
   const blocked_switch = try {
-    git_run_tool("switch", {repo: root, branch: "main"})
+    git_run_tool(harness.process, "switch", {repo: root, branch: "main"})
   }
-  __io_println(is_err(blocked_switch))
-  const toolbox = git_toolbox_tools(nil, {repo: root, include_mutations: true})
+  harness.stdio.println(is_err(blocked_switch))
+  const toolbox = git_toolbox_tools(harness.process, nil, {repo: root, include_mutations: true})
   const toolbox_surface = tool_surface_validate(
     {tools: toolbox, policy: {side_effect_level: "process_exec"}},
   )
-  __io_println(toolbox_surface.valid)
+  harness.stdio.println(toolbox_surface.valid)
   const find_call = agent_dispatch_tool_call(
+    harness.tools,
     {id: "find", name: "find_git_tool", arguments: {query: "what branch am I on"}},
     toolbox,
   )
-  __io_println(find_call.ok)
+  harness.stdio.println(find_call.ok)
   const run_call = agent_dispatch_tool_call(
+    harness.tools,
     {id: "run", name: "run_git_tool", arguments: {operation: "current_branch"}},
     toolbox,
   )
-  __io_println(run_call.ok && contains(run_call.rendered_result, "main"))
+  harness.stdio.println(run_call.ok && contains(run_call.rendered_result, "main"))
 }

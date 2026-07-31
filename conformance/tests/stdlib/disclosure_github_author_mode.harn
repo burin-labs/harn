@@ -1,6 +1,6 @@
 import { render } from "std/disclosure"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
   const config = {
     identities: {
@@ -17,37 +17,52 @@ pipeline default() {
     },
   }
   const options = {project: false, env: false, config: config}
-  const human = render(chain, "github", options)
-  __io_println(human.author_mode)
-  __io_println(human.mode)
-  __io_println(human.required_auth_identity)
-  __io_println(human.commit_auth_identity)
-  __io_println(human.pull_request_auth_identity)
-  __io_println(human.author.subject)
-  __io_println(human.co_author.subject)
-  __io_println(human.commit_author.name)
-  __io_println(human.commit_author.email)
-  __io_println(to_string(human.commit_committer == nil))
-  __io_println(to_string(human.append_git_trailers))
-  __io_println(human.trailers)
-  const root = path_join(harness.fs.temp_dir(), "harn-disclosure-github-mode-" + uuid())
+  const human = render(harness.env, harness.fs, chain, "github", options)
+  harness.stdio.println(human.author_mode)
+  harness.stdio.println(human.mode)
+  harness.stdio.println(human.required_auth_identity)
+  harness.stdio.println(human.commit_auth_identity)
+  harness.stdio.println(human.pull_request_auth_identity)
+  harness.stdio.println(human.author.subject)
+  harness.stdio.println(human.co_author.subject)
+  harness.stdio.println(human.commit_author.name)
+  harness.stdio.println(human.commit_author.email)
+  harness.stdio.println(to_string(human.commit_committer == nil))
+  harness.stdio.println(to_string(human.append_git_trailers))
+  harness.stdio.println(human.trailers)
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-disclosure-github-mode-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(root)
   const project_config = "[disclosure.surfaces.github]\n" + "author_mode = \"bot\"\n"
   harness.fs.write_text(path_join(root, "harn.toml"), project_config)
-  const bot = render(chain, "github", options + {project: true, project_root: root})
-  __io_println(bot.author_mode)
-  __io_println(bot.mode)
-  __io_println(bot.required_auth_identity)
-  __io_println(bot.commit_auth_identity)
-  __io_println(bot.pull_request_auth_identity)
-  __io_println(bot.author.subject)
-  __io_println(to_string(bot.co_author == nil))
-  __io_println(to_string(bot.commit_author == nil))
-  __io_println(to_string(bot.omit_custom_commit_author))
-  __io_println(to_string(bot.append_git_trailers))
+  const bot = render(
+    harness.env,
+    harness.fs,
+    chain,
+    "github",
+    options + {project: true, project_root: root},
+  )
+  harness.stdio.println(bot.author_mode)
+  harness.stdio.println(bot.mode)
+  harness.stdio.println(bot.required_auth_identity)
+  harness.stdio.println(bot.commit_auth_identity)
+  harness.stdio.println(bot.pull_request_auth_identity)
+  harness.stdio.println(bot.author.subject)
+  harness.stdio.println(to_string(bot.co_author == nil))
+  harness.stdio.println(to_string(bot.commit_author == nil))
+  harness.stdio.println(to_string(bot.omit_custom_commit_author))
+  harness.stdio.println(to_string(bot.append_git_trailers))
   const invalid = try {
-    render(chain, "github", options + {config: {surfaces: {github: {author_mode: "robot"}}}})
+    render(
+      harness.env,
+      harness.fs,
+      chain,
+      "github",
+      options + {config: {surfaces: {github: {author_mode: "robot"}}}},
+    )
   }
   require is_err(invalid), "invalid github author_mode must fail"
-  __io_println(unwrap_err(invalid))
+  harness.stdio.println(unwrap_err(invalid))
 }

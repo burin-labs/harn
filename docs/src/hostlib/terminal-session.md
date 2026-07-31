@@ -5,15 +5,11 @@ host operations. The implementation is cross-platform and terminal-native:
 `harn-terminal` owns the pseudo-terminal and VT parser, while the hostlib
 adapter owns policy, secret custody, session limits, and VM values.
 
-The Cargo feature is `terminal-session`. It is included by `full`, but the
-runtime capability remains disabled until the pipeline opts in:
-
-```harn,ignore
-hostlib_enable("terminal:session")
-```
-
-Compiling the feature does not expose it as an agent tool or enable any agent
-policy automatically.
+The Cargo feature is `terminal-session` and is included by `full`. Compiling
+the feature does not grant terminal authority: scripts reach it only through
+the nominal `HarnessTerminal` handle at `harness.terminal`, and the active
+capability policy can still deny every operation. No thread-local enable step
+or ambient builtin exists.
 
 ## Safety boundary
 
@@ -40,7 +36,7 @@ separate capability from this initial contract.
 Start a process with an argv vector and terminal dimensions:
 
 ```harn,ignore
-let started = hostlib_terminal_session_start({
+let started = harness.terminal.start({
   argv: ["./target/debug/my-tui", "--offline"],
   cwd: project_root,
   rows: 30,
@@ -56,7 +52,7 @@ is dropped.
 Send literal text and typed keys as one atomically validated batch:
 
 ```harn,ignore
-hostlib_terminal_session_send_keys({
+harness.terminal.send_keys({
   session_id: started.session_id,
   events: [
     {type: "text", text: "alpha beta"},
@@ -75,8 +71,8 @@ Alt, Shift, and Super modifiers are represented structurally. Combinations
 without a portable terminal encoding are rejected before any bytes are sent.
 
 Resize both the native PTY and parser with
-`hostlib_terminal_session_resize`. Wait for output to settle with
-`hostlib_terminal_session_wait_idle`; it uses terminal revision notifications,
+`harness.terminal.resize`. Wait for output to settle with
+`harness.terminal.wait_idle`; it uses terminal revision notifications,
 not a polling sleep. The initial idle boundary requires either observed output
 or a completely exited child, preventing a false idle result before a TUI's
 first paint. For input-driven transitions, capture the revision before sending
@@ -84,12 +80,12 @@ keys and pass it as `after_revision`; the idle wait then cannot be satisfied by
 output that was already quiet before the input:
 
 ```harn,ignore
-let before = hostlib_terminal_session_capture({session_id: started.session_id})
-hostlib_terminal_session_send_keys({
+let before = harness.terminal.capture({session_id: started.session_id})
+harness.terminal.send_keys({
   session_id: started.session_id,
   events: [{type: "key", key: {kind: "named", name: "enter"}}]
 })
-hostlib_terminal_session_wait_idle({
+harness.terminal.wait_idle({
   session_id: started.session_id,
   after_revision: before.revision,
   quiet_ms: 50,
@@ -97,13 +93,13 @@ hostlib_terminal_session_wait_idle({
 })
 ```
 
-Always call `hostlib_terminal_session_end` in cleanup. `end` closes the PTY,
+Always call `harness.terminal.end(...)` in cleanup. `end` closes the PTY,
 terminates the child when needed, waits for the final output drain, and returns
 its typed exit state.
 
 ## Capture contract
 
-`hostlib_terminal_session_capture` returns:
+`harness.terminal.capture` returns:
 
 - fixed `schema_version: 1`;
 - dimensions and one normalized string per visible row;

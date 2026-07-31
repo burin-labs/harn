@@ -81,6 +81,8 @@ const SANDBOX_DENY_SUBSTRINGS: &[&str] = &[
 /// - `allow_tools` (list<string>, optional): if present, restricts which tool
 ///   names the script may call to this allowlist (the declared connector set).
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_code_mode_run(config: dict) -> dict",
     kind = "async",
     category = "agent.host",
@@ -135,6 +137,11 @@ async fn run_code_mode(
 ) -> Result<VmValue, VmError> {
     let mut sandbox = crate::Vm::new();
     crate::register_core_stdlib(&mut sandbox);
+    // The compiler-owned entrypoint ABI always receives a root Harness. Code
+    // mode intentionally installs a deny-by-default root: its sole egress is
+    // the gated `call_tool` binding below, and merely satisfying the ABI must
+    // not grant ambient filesystem, network, process, or secret authority.
+    sandbox.set_harness(crate::Harness::null());
 
     // Defense in depth: deny any pure-stdlib builtin whose name pattern-matches
     // an I/O family, so a future core addition cannot silently widen the
@@ -165,7 +172,7 @@ async fn run_code_mode(
     // Wrap the script body in an entry pipeline so `execute` returns the value
     // the script `return`s. The body runs with the sandbox's restricted
     // builtin set; there is no path to the host except `call_tool`.
-    let source = format!("pipeline __code_mode_entry() {{\n{code}\n}}\n");
+    let source = format!("pipeline __code_mode_entry(harness: Harness) {{\n{code}\n}}\n");
     let chunk = crate::compile_source(&source)
         .map_err(|error| VmError::Runtime(format!("code-mode script did not compile: {error}")))?;
 
@@ -309,7 +316,7 @@ mod tests {
         // `json_parse` and composes over the structured result. The credential
         // is closed over by the host-side handler and never leaves it.
         let source = r#"
-pipeline main() {
+pipeline main(harness: Harness) {
   const handler = fn(args) {
     const _credential = "SECRET-TOKEN-do-not-leak"
     return json_stringify({ records: [{ id: 1, title: args.q + "-alpha" }, { id: 2, title: args.q + "-beta" }] })

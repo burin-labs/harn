@@ -38,7 +38,11 @@ pub(crate) fn register_tui_builtins(vm: &mut Vm) {
 }
 
 /// Render a text or markdown page through a pager when appropriate.
-#[harn_builtin(sig = "__tui_page(options: dict) -> dict", category = "tui")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__tui_page(options: dict) -> PageResult", category = "tui"
+)]
 fn __tui_page(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_page_options(args)?;
     let content = render_page_content(&options);
@@ -59,7 +63,11 @@ fn __tui_page(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
 }
 
 /// Write the ANSI clear-screen sequence to stdout.
-#[harn_builtin(sig = "__tui_clear() -> nil", category = "tui")]
+#[harn_builtin(
+    exposure = "harness.term.clear",
+    effects = ["stdio.write@const=terminal"],
+    sig = "__tui_clear() -> nil", category = "tui"
+)]
 fn __tui_clear(_args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     super::io::write_stdout(out, CLEAR_SEQUENCE);
     Ok(VmValue::Nil)
@@ -67,6 +75,8 @@ fn __tui_clear(_args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> 
 
 /// Return the current terminal width or the supplied default.
 #[harn_builtin(
+    exposure = "harness.term.terminal_width",
+    effects = ["stdio.observe@const=terminal"],
     sig = "__tui_terminal_width(default_width?: int) -> int",
     category = "tui"
 )]

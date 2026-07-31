@@ -1,7 +1,8 @@
 import { persona_blueprint_compile, persona_blueprint_validate } from "std/personas/compiler"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const digest = persona_blueprint_compile(
+    harness.llm,
     {
       schema_version: "1",
       name: "reply_digest",
@@ -11,16 +12,16 @@ pipeline main() {
       cron: {cron: "0 */4 * * *", timezone: "America/Los_Angeles"},
     },
   )
-  __io_println(is_ok(digest))
+  harness.stdio.println(is_ok(digest))
   const digest_lowering = unwrap(digest)
-  __io_println(digest_lowering.profile)
-  __io_println(digest_lowering.template)
-  __io_println(digest_lowering.policy.autonomy_tier)
-  __io_println(digest_lowering.policy.receipt_policy)
-  __io_println(digest_lowering.triggers[0].kind)
-  __io_println(digest_lowering.triggers[0].events[0])
-  __io_println(digest_lowering.triggers[0].handler)
-  __io_println(digest_lowering.triggers[0].schedule)
+  harness.stdio.println(digest_lowering.profile)
+  harness.stdio.println(digest_lowering.template)
+  harness.stdio.println(digest_lowering.policy.autonomy_tier)
+  harness.stdio.println(digest_lowering.policy.receipt_policy)
+  harness.stdio.println(digest_lowering.triggers[0].kind)
+  harness.stdio.println(digest_lowering.triggers[0].events[0])
+  harness.stdio.println(digest_lowering.triggers[0].handler)
+  harness.stdio.println(digest_lowering.triggers[0].schedule)
   const slack_catalog = [
     {
       provider: "slack",
@@ -33,6 +34,7 @@ pipeline main() {
     },
   ]
   const triage = persona_blueprint_compile(
+    harness.llm,
     {
       schema_version: "1",
       name: "alerts_triage",
@@ -43,14 +45,15 @@ pipeline main() {
     },
     slack_catalog,
   )
-  __io_println(is_ok(triage))
+  harness.stdio.println(is_ok(triage))
   const triage_lowering = unwrap(triage)
-  __io_println(triage_lowering.triggers[0].kind)
-  __io_println(triage_lowering.triggers[0].provider)
-  __io_println(triage_lowering.triggers[0].events[0])
-  __io_println(triage_lowering.triggers[0].handler)
-  __io_println(triage_lowering.triggers[0].secrets.signing_secret)
+  harness.stdio.println(triage_lowering.triggers[0].kind)
+  harness.stdio.println(triage_lowering.triggers[0].provider)
+  harness.stdio.println(triage_lowering.triggers[0].events[0])
+  harness.stdio.println(triage_lowering.triggers[0].handler)
+  harness.stdio.println(triage_lowering.triggers[0].secrets.signing_secret)
   const mixed_sources = persona_blueprint_validate(
+    harness.llm,
     {
       schema_version: "1",
       name: "too_many_sources",
@@ -62,9 +65,10 @@ pipeline main() {
     },
     slack_catalog,
   )
-  __io_println(mixed_sources.valid)
-  __io_println(mixed_sources.errors.any({ error -> error.code == "source_count" }))
+  harness.stdio.println(mixed_sources.valid)
+  harness.stdio.println(mixed_sources.errors.any({ error -> error.code == "source_count" }))
   const missing_source = persona_blueprint_validate(
+    harness.llm,
     {
       schema_version: "1",
       name: "missing_source",
@@ -74,9 +78,10 @@ pipeline main() {
     },
     slack_catalog,
   )
-  __io_println(missing_source.valid)
-  __io_println(missing_source.errors.any({ error -> error.code == "source_count" }))
+  harness.stdio.println(missing_source.valid)
+  harness.stdio.println(missing_source.errors.any({ error -> error.code == "source_count" }))
   const malformed_without_source = persona_blueprint_validate(
+    harness.llm,
     {
       schema_version: "1",
       name: "bad-name",
@@ -86,5 +91,5 @@ pipeline main() {
     },
     slack_catalog,
   )
-  __io_println(json_stringify(malformed_without_source))
+  harness.stdio.println(json_stringify(malformed_without_source))
 }

@@ -126,18 +126,18 @@ fn _resolve_input() {
   }
 }
 
-fn _adapter_for(input) {
+fn _adapter_for(fs: HarnessFs, input) {
   if input.mode == "live" {
     return live_adapter()
   }
-  const raw = read_file(input.fixture_path)
+  const raw = fs.read_text(input.fixture_path)
   const parsed = json_parse(raw)
   return fixture_adapter(parsed)
 }
 
-pub pipeline run(task) -> dict {
+pub pipeline run(harness: Harness, task) -> dict {
   const input = _resolve_input()
-  const policies_load = load_policies(input.policy_paths)
+  const policies_load = load_policies(harness.fs, input.policy_paths)
   if len(policies_load.errors) > 0 {
     const summary = {
       persona: "merge_captain",
@@ -145,12 +145,19 @@ pub pipeline run(task) -> dict {
       status: "policy_load_failed",
       errors: policies_load.errors,
     }
-    __io_println(json_stringify(summary))
+    harness.stdio.println(json_stringify(summary))
     return summary
   }
-  const adapter = _adapter_for(input)
-  const checkpoint_handle = open_checkpoints(input.state_root, input.session_id, input.writer_id)
+  const adapter = _adapter_for(harness.fs, input)
+  const checkpoint_handle = open_checkpoints(
+    harness.agent,
+    input.state_root,
+    input.session_id,
+    input.writer_id,
+  )
   const summary = sweep(
+    harness,
+    harness,
     {
       adapter: adapter,
       policies: policies_load.policies,
@@ -161,7 +168,7 @@ pub pipeline run(task) -> dict {
   )
   const visible =
     "merge_captain swept ${to_string(summary.pr_count)} PRs across ${to_string(len(policies_load.policies))} repos (dry_run=${to_string(input.dry_run)})"
-  __io_println(visible)
-  __io_println(json_stringify(summary))
+  harness.stdio.println(visible)
+  harness.stdio.println(json_stringify(summary))
   return summary
 }

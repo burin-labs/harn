@@ -1,45 +1,45 @@
-import "std/waitpoints"
+import "std/waitpoint"
 
-pipeline test(task) {
-  const id = "fan-in-" + uuid()
-  waitpoint_create(id)
-  const completed = atomic(0)
+pipeline test(harness: Harness, task) {
+  const id = "fan-in-" + harness.random.uuid()
+  harness.runtime.waitpoint_create(id)
+  const completed = harness.runtime.atomic(0)
   const w1 = spawn {
-    let result = waitpoint_wait(id, {wait_id: id + "-1"})
+    let result = harness.runtime.waitpoint_wait(id, {wait_id: id + "-1"})
     if result.status == "completed" {
-      atomic_add(completed, 1)
+      harness.runtime.atomic_add(completed, 1)
     }
   }
   const w2 = spawn {
-    let result = waitpoint_wait(id, {wait_id: id + "-2"})
+    let result = harness.runtime.waitpoint_wait(id, {wait_id: id + "-2"})
     if result.status == "completed" {
-      atomic_add(completed, 1)
+      harness.runtime.atomic_add(completed, 1)
     }
   }
   const w3 = spawn {
-    let result = waitpoint_wait(id, {wait_id: id + "-3"})
+    let result = harness.runtime.waitpoint_wait(id, {wait_id: id + "-3"})
     if result.status == "completed" {
-      atomic_add(completed, 1)
+      harness.runtime.atomic_add(completed, 1)
     }
   }
   const w4 = spawn {
-    let result = waitpoint_wait(id, {wait_id: id + "-4"})
+    let result = harness.runtime.waitpoint_wait(id, {wait_id: id + "-4"})
     if result.status == "completed" {
-      atomic_add(completed, 1)
+      harness.runtime.atomic_add(completed, 1)
     }
   }
   const w5 = spawn {
-    let result = waitpoint_wait(id, {wait_id: id + "-5"})
+    let result = harness.runtime.waitpoint_wait(id, {wait_id: id + "-5"})
     if result.status == "completed" {
-      atomic_add(completed, 1)
+      harness.runtime.atomic_add(completed, 1)
     }
   }
-  const signal = waitpoint_complete(id)
+  const signal = harness.runtime.waitpoint_complete(id)
   await(w1)
   await(w2)
   await(w3)
   await(w4)
   await(w5)
-  __io_println(signal.status == "completed")
-  __io_println(atomic_get(completed) == 5)
+  harness.stdio.println(signal.status == "completed")
+  harness.stdio.println(harness.runtime.atomic_get(completed) == 5)
 }

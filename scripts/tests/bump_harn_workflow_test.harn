@@ -43,8 +43,8 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
 }
 
 @test
-pipeline test_reusable_bump_workflow_preserves_refresh_boundary(task) {
-  const path = path_join(source_dir(), "../../.github/workflows/bump-harn.yml")
+pipeline test_reusable_bump_workflow_preserves_refresh_boundary(harness: Harness, task) {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
   const text = harness.fs.read_text(path)
-  assert_eq(bump_workflow_errors(read_yaml(path), text), [])
+  assert_eq(bump_workflow_errors(read_yaml(harness.fs, path), text), [])
 }

@@ -1,6 +1,6 @@
 # Daemon stdlib
 
-Harn's daemon builtins wrap the existing `agent_loop(..., {daemon: true})`
+Harn's daemon builtins wrap the existing `agent_loop(harness, ..., {daemon: true})`
 runtime so scripts can manage long-lived assistants without hand-assembling
 snapshot paths and resume options.
 

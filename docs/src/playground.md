@@ -16,7 +16,7 @@ harn playground \
 ```
 
 `--task` is exposed to the script through the `HARN_TASK` environment variable,
-so the example reads it with `env_or("HARN_TASK", "")`.
+so the example reads it with `harness.env.get_or("HARN_TASK", "")`.
 
 On a fresh install, playground runs that call provider-backed LLM builtins such
 as `llm_call`, `llm_stream_call`, or `agent_loop` detect local Ollama at
@@ -55,7 +55,7 @@ pipeline expects:
 
 ```harn
 pub fn build_prompt(task_text) {
-  return "Task: " + task_text + "\nWorkspace: " + cwd()
+  return "Task: " + task_text + "\nWorkspace: " + harness.fs.cwd()
 }
 
 pub fn request_permission(tool_name, request_args) -> bool {

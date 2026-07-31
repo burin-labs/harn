@@ -168,7 +168,7 @@ pub fn decision(payload: string) -> dict {
 }
 
 fn main(harness: Harness) {
-  const verdict = decision(read_stdin() ?? "")
+  const verdict = decision(harness.stdio.read_stdin() ?? "")
   if verdict.allow {
     return nil
   }

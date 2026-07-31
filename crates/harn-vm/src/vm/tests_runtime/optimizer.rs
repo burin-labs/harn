@@ -12,20 +12,20 @@ use super::harness::*;
 #[test]
 fn optimizer_differential_success_programs_match() {
     let programs = [
-        r#"pipeline test(task) {
-  __io_println(2 + 3 * 4)
-  __io_println("ha" * 2)
-  __io_println(([1] + [2, 3])[2])
-  __io_println(({a: 1} + {b: 2}).b)
-  __io_println((true && false) || !false)
+        r#"pipeline test(harness: Harness, task) {
+  harness.stdio.println(2 + 3 * 4)
+  harness.stdio.println("ha" * 2)
+  harness.stdio.println(([1] + [2, 3])[2])
+  harness.stdio.println(({a: 1} + {b: 2}).b)
+  harness.stdio.println((true && false) || !false)
 }"#,
-        r"pipeline test(task) {
+        r"pipeline test(harness: Harness, task) {
   fn add(a: int, b: int = 4) {
     return a + b
   }
   const base = 3
-  __io_println(add(base))
-  __io_println(add(1 + 1, 2 + 2))
+  harness.stdio.println(add(base))
+  harness.stdio.println(add(1 + 1, 2 + 2))
 }",
     ];
 
@@ -41,7 +41,7 @@ fn optimizer_differential_success_programs_match() {
 
 #[test]
 fn optimizer_differential_errors_match() {
-    let source = "pipeline test(task) { __io_println(1 / 0) }";
+    let source = "pipeline test(harness: Harness, task) { harness.stdio.println(1 / 0) }";
     let optimized =
         run_harn_result_display_with_options(source, CompilerOptions::optimized()).unwrap_err();
     let unoptimized =
@@ -54,10 +54,10 @@ fn optimizer_differential_errors_match() {
 #[test]
 fn inline_arithmetic_lambda_map_filter_optimization_path() {
     let out = run_vm(
-        r"pipeline default(task) {
+        r"pipeline default(harness: Harness, task) {
             const evens = [1, 2, 3, 4, 5, 6].filter({ x -> x % 2 == 0 })
             const doubled = evens.map({ x -> x * 2 })
-            log(doubled)
+            harness.stdio.log(doubled)
         }",
     );
     assert_eq!(out, "[harn] [4, 8, 12]\n");
@@ -66,12 +66,12 @@ fn inline_arithmetic_lambda_map_filter_optimization_path() {
 #[test]
 fn self_recursive_named_fn_still_resolves_after_optimization() {
     let out = run_vm(
-        r"pipeline default(task) {
+        r"pipeline default(harness: Harness, task) {
             fn fact(n) {
                 if n <= 1 { return 1 }
                 return n * fact(n - 1)
             }
-            log(fact(6))
+            harness.stdio.log(fact(6))
         }",
     );
     assert_eq!(out, "[harn] 720\n");
@@ -84,7 +84,7 @@ fn mutually_recursive_named_fns_still_resolve_after_optimization() {
     // in the flag set so the late-bind walk runs and the cross-fn
     // resolution succeeds.
     let out = run_vm(
-        r"pipeline default(task) {
+        r"pipeline default(harness: Harness, task) {
             fn is_even(n) {
                 if n == 0 { return true }
                 return is_odd(n - 1)
@@ -93,8 +93,8 @@ fn mutually_recursive_named_fns_still_resolve_after_optimization() {
                 if n == 0 { return false }
                 return is_even(n - 1)
             }
-            log(is_even(4))
-            log(is_even(5))
+            harness.stdio.log(is_even(4))
+            harness.stdio.log(is_even(5))
         }",
     );
     assert_eq!(out, "[harn] true\n[harn] false\n");
@@ -103,10 +103,10 @@ fn mutually_recursive_named_fns_still_resolve_after_optimization() {
 #[test]
 fn anonymous_lambda_calling_sibling_fn_via_call_builtin_flags() {
     let out = run_vm(
-        r"pipeline default(task) {
+        r"pipeline default(harness: Harness, task) {
             fn helper(x) { return x + 100 }
             const r = [1, 2, 3].map({ v -> helper(v) })
-            log(r)
+            harness.stdio.log(r)
         }",
     );
     assert_eq!(out, "[harn] [101, 102, 103]\n");
@@ -115,10 +115,10 @@ fn anonymous_lambda_calling_sibling_fn_via_call_builtin_flags() {
 #[test]
 fn anonymous_lambda_with_get_var_capture_flags() {
     let out = run_vm(
-        r"pipeline default(task) {
+        r"pipeline default(harness: Harness, task) {
             const bonus = 10
             const r = [1, 2, 3].map({ v -> v + bonus })
-            log(r)
+            harness.stdio.log(r)
         }",
     );
     assert_eq!(out, "[harn] [11, 12, 13]\n");
@@ -127,13 +127,13 @@ fn anonymous_lambda_with_get_var_capture_flags() {
 #[test]
 fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
     let out = run_vm(
-        r"pipeline default(task) {
+        r"pipeline default(harness: Harness, task) {
             fn helper_a(x) { return x + 1 }
             fn helper_b(x) { return x + 2 }
             const r = [10, 20, 30].map({ v -> v * 2 })
-            log(r)
-            log(helper_a(0))
-            log(helper_b(0))
+            harness.stdio.log(r)
+            harness.stdio.log(helper_a(0))
+            harness.stdio.log(helper_b(0))
         }",
     );
     assert_eq!(out, "[harn] [20, 40, 60]\n[harn] 1\n[harn] 2\n");
@@ -142,10 +142,10 @@ fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
 #[test]
 fn nested_map_lambdas_skip_walk_independently() {
     let out = run_vm(
-        r"pipeline default(task) {
+        r"pipeline default(harness: Harness, task) {
             const grid = [[1, 2], [3, 4]]
             const r = grid.map({ row -> row.map({ x -> x * 10 }) })
-            log(r)
+            harness.stdio.log(r)
         }",
     );
     assert_eq!(out, "[harn] [[10, 20], [30, 40]]\n");
@@ -154,9 +154,9 @@ fn nested_map_lambdas_skip_walk_independently() {
 #[test]
 fn typed_param_lambda_uses_check_type_and_walks() {
     let out = run_vm(
-        r"pipeline default(task) {
+        r"pipeline default(harness: Harness, task) {
             const r = [1, 2, 3].map({ v: int -> v + 1 })
-            log(r)
+            harness.stdio.log(r)
         }",
     );
     assert_eq!(out, "[harn] [2, 3, 4]\n");
@@ -170,17 +170,17 @@ fn typed_param_lambda_uses_check_type_and_walks() {
 /// "Typed int add expected int operands, got int and float".)
 #[test]
 fn var_reassigned_via_any_matches_unoptimized() {
-    let source = r#"pipeline default(task) {
+    let source = r#"pipeline default(harness: Harness, task) {
   let x = 0
   let sum = 0
   let i = 0
-  const cell = shared_cell("k", 2.5)
+  const cell = harness.runtime.shared_cell("k", 2.5)
   while i < 3 {
     sum = sum + x
-    if i == 0 { x = shared_get(cell) }
+    if i == 0 { x = harness.runtime.shared_get(cell) }
     i = i + 1
   }
-  log("${sum}")
+  harness.stdio.log("${sum}")
 }"#;
     let optimized = run_harn_result_display_with_options(source, CompilerOptions::optimized())
         .expect("optimized run should not spuriously type-error");
@@ -199,15 +199,15 @@ fn var_reassigned_via_any_matches_unoptimized() {
 /// optimizer; it must now match the unoptimized result.
 #[test]
 fn for_item_reassigned_via_any_matches_unoptimized() {
-    let source = r#"pipeline default(task) {
+    let source = r#"pipeline default(harness: Harness, task) {
   let sum = 0
-  const cell = shared_cell("k", 2.5)
+  const cell = harness.runtime.shared_cell("k", 2.5)
   for n in [1, 2, 3] {
     sum = sum + n
-    n = shared_get(cell)
+    n = harness.runtime.shared_get(cell)
     sum = sum + n
   }
-  log("${sum}")
+  harness.stdio.log("${sum}")
 }"#;
     let optimized = run_harn_result_display_with_options(source, CompilerOptions::optimized())
         .expect("optimized run should not spuriously type-error");
@@ -225,14 +225,14 @@ fn for_item_reassigned_via_any_matches_unoptimized() {
 /// over-demoting and silently changing arithmetic results).
 #[test]
 fn monomorphic_counter_loop_result_is_correct() {
-    let source = r#"pipeline default(task) {
+    let source = r#"pipeline default(harness: Harness, task) {
   let i = 0
   let total = 0
   while i < 10 {
     total = total + (i + 3) * 2 - 1
     i = i + 1
   }
-  log("${total}")
+  harness.stdio.log("${total}")
 }"#;
     let (out, _) = run_harn(source);
     assert_eq!(out.trim_end(), "[harn] 140");
@@ -245,7 +245,7 @@ fn inplace_concat_untyped_accumulator_builds_correctly() {
     // take on the runtime value. The accumulated list must be correct.
     let source = r#"
 fn seed() -> any { return [] }
-pipeline t(task) {
+pipeline t(harness: Harness, task) {
   let x = seed()
   for i in [1, 2, 3] {
     x = x + [i]
@@ -254,7 +254,7 @@ pipeline t(task) {
   for i in [4, 5] {
     y += [i]
   }
-  log("${x} ${y}")
+  harness.stdio.log("${x} ${y}")
 }"#;
     assert_eq!(run_output(source), "[harn] [1, 2, 3] [4, 5]");
 }
@@ -265,12 +265,12 @@ fn list_appending_assign_preserves_alias_immutability() {
     // as `x = x + [v]`. Rebinding `x` must still leave an existing alias `y`
     // pointing at the original immutable list.
     let source = r#"
-pipeline t(task) {
+pipeline t(harness: Harness, task) {
   let x = []
   x = x.appending(1)
   const y = x
   x = x.appending(2)
-  log("${x} ${y}")
+  harness.stdio.log("${x} ${y}")
 }"#;
     assert_eq!(run_output(source), "[harn] [1, 2] [1]");
 }
@@ -282,14 +282,14 @@ fn inplace_concat_preserves_binding_when_add_throws() {
     // must retain its previous value (it was cloned, not taken) rather than be
     // left as the placeholder.
     let source = r#"
-pipeline t(task) {
+pipeline t(harness: Harness, task) {
   let x = 5
   try {
     x += [1]
   } catch (e) {
-    log("caught")
+    harness.stdio.log("caught")
   }
-  log("${x}")
+  harness.stdio.log("${x}")
 }"#;
     assert_eq!(run_output(source), "[harn] caught\n[harn] 5");
 }

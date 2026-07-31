@@ -349,6 +349,30 @@ pub fn payload_schema() { return "GenericWebhookPayload" }
 }
 
 #[tokio::test]
+async fn runtime_exports_require_a_typed_leading_harness_at_load_time() {
+    let (_dir, module_path) = write_connector(
+        r#"
+pub fn provider_id() { return "webhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "GenericWebhookPayload" }
+pub fn normalize_inbound(raw) {
+  return {type: "reject", status: 400, body: raw}
+}
+"#,
+    );
+    let error = load_contract(&module_path)
+        .await
+        .expect_err("ambient connector entrypoint must fail closed");
+    let message = error.to_string();
+    assert!(
+        message.contains(
+            "runtime export 'normalize_inbound' must declare `harness: Harness` as its first parameter"
+        ),
+        "{message}"
+    );
+}
+
+#[tokio::test]
 async fn normalize_inbound_default_policy_allows_local_hot_path_work() {
     let (_dir, module_path) = write_connector(
         r#"
@@ -356,12 +380,12 @@ pub fn provider_id() { return "webhook" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "GenericWebhookPayload" }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const decoded = base64_decode(raw.body_base64)
   const body = json_parse(decoded)
-  const secret = secret_get("test/signing-secret")
+  const secret = harness.secrets.read("test/signing-secret")
   const signature = hmac_sha256(secret, decoded)
-  metrics_inc("normalize_ok")
+  harness.obs.metrics_inc("normalize_ok")
   return {
 type: "event",
 event: {
@@ -405,7 +429,7 @@ pub fn provider_id() { return "github" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "GitHubEventPayload" }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json
   return {
 type: "event",
@@ -447,7 +471,7 @@ pub fn provider_id() { return "slack" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "SlackEventPayload" }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json
   return {
 type: "event",
@@ -501,7 +525,7 @@ pub fn provider_id() { return "linear" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "LinearEventPayload" }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json
   return {
 type: "event",
@@ -548,7 +572,7 @@ pub fn provider_id() { return "notion" }
 pub fn kinds() { return ["webhook", "poll"] }
 pub fn payload_schema() { return "NotionEventPayload" }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json
   return {
 type: "event",
@@ -610,12 +634,12 @@ async fn normalize_inbound_default_policy_denies_network_llm_and_file_effects() 
 pub fn provider_id() { return "webhook" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "GenericWebhookPayload" }
-pub fn normalize_inbound(_raw) {
-  http_get("https://example.invalid")
+pub fn normalize_inbound(harness: Harness, _raw) {
+  harness.net.get("https://example.invalid")
   return {type: "reject", status: 400}
 }
 "#,
-            "network.http ceiling",
+            "net:read",
         ),
         (
             "llm",
@@ -623,12 +647,12 @@ pub fn normalize_inbound(_raw) {
 pub fn provider_id() { return "webhook" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "GenericWebhookPayload" }
-pub fn normalize_inbound(_raw) {
-  llm_call("hello", nil, {provider: "mock"})
+pub fn normalize_inbound(harness: Harness, _raw) {
+  harness.llm.call("hello", nil, {provider: "mock"})
   return {type: "reject", status: 400}
 }
 "#,
-            "llm.call ceiling",
+            "llm:mock:write",
         ),
         (
             "file",
@@ -636,12 +660,12 @@ pub fn normalize_inbound(_raw) {
 pub fn provider_id() { return "webhook" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "GenericWebhookPayload" }
-pub fn normalize_inbound(_raw) {
-  read_file("ambient.txt")
+pub fn normalize_inbound(harness: Harness, _raw) {
+  harness.fs.read_text("ambient.txt")
   return {type: "reject", status: 400}
 }
 "#,
-            "workspace.read_text ceiling",
+            "fs:read",
         ),
     ] {
         let (_dir, module_path) = write_connector(source);
@@ -680,7 +704,7 @@ pub fn payload_schema() {
   return "GenericWebhookPayload"
 }
 
-pub fn poll_tick(ctx) {
+pub fn poll_tick(_harness: Harness, ctx) {
   let previous = 0
   if ctx.cursor != nil && ctx.cursor.count != nil {
 previous = ctx.cursor.count

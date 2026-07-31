@@ -132,7 +132,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("supervisor_start", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "harness.runtime.supervisor_start",
+    effects = ["worker.mutate@dynamic", "state.mutate@dynamic"],
+    sig_expr = BuiltinSignature::variadic("supervisor_start", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "supervisor"
 )]
@@ -150,7 +153,10 @@ async fn supervisor_start_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("supervisor_state", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "harness.runtime.supervisor_state",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("supervisor_state", &[Param::new("args", TY_ANY
+)], TY_DICT),
     category = "supervisor"
 )]
 fn supervisor_state_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -160,7 +166,10 @@ fn supervisor_state_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("supervisor_events", &[Param::new("args", TY_ANY)], TY_LIST),
+    exposure = "harness.runtime.supervisor_events",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("supervisor_events", &[Param::new("args", TY_ANY
+)], TY_LIST),
     category = "supervisor"
 )]
 fn supervisor_events_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -170,7 +179,10 @@ fn supervisor_events_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("supervisor_metrics", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "harness.runtime.supervisor_metrics",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("supervisor_metrics", &[Param::new("args", TY_ANY
+)], TY_DICT),
     category = "supervisor"
 )]
 fn supervisor_metrics_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -180,7 +192,10 @@ fn supervisor_metrics_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("supervisor_wait", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "harness.runtime.supervisor_wait",
+    effects = ["worker.observe@arg0", "state.observe@arg0"],
+    sig_expr = BuiltinSignature::variadic("supervisor_wait", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "supervisor"
 )]
@@ -205,7 +220,10 @@ async fn supervisor_wait_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("supervisor_stop", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "harness.runtime.supervisor_stop",
+    effects = ["worker.mutate@arg0", "state.mutate@arg0"],
+    sig_expr = BuiltinSignature::variadic("supervisor_stop", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "supervisor"
 )]

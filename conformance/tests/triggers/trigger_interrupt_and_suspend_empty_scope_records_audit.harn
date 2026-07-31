@@ -9,13 +9,13 @@ import "std/triggers"
  * a successful `broadcast` dispatch rather than failing. This is the
  * "panic arrived after every worker already drained" graceful-no-op path.
  */
-pipeline test(task) {
-  const _ = lifecycle_audit_log_take()
+pipeline test(harness: Harness, task) {
+  const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "trigger-interrupt-empty-" + unique,
       kind: "issue.opened",
@@ -34,18 +34,18 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const dispatch = trigger_fire(
+  const dispatch = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  __io_println(dispatch.status == "dispatched")
-  __io_println(dispatch.result?.status == "broadcast")
-  __io_println(dispatch.result?.scope_kind == "concrete")
-  __io_println(dispatch.result?.target_count)
-  __io_println(dispatch.result?.suspended_count)
-  __io_println(dispatch.result?.skipped_count)
-  __io_println(dispatch.result?.reason == "phantom_panic")
-  const audits = lifecycle_audit_log_take()
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.status == "broadcast")
+  harness.stdio.println(dispatch.result?.scope_kind == "concrete")
+  harness.stdio.println(dispatch.result?.target_count)
+  harness.stdio.println(dispatch.result?.suspended_count)
+  harness.stdio.println(dispatch.result?.skipped_count)
+  harness.stdio.println(dispatch.result?.reason == "phantom_panic")
+  const audits = lifecycle_audit_log_take(harness.obs)
   let broadcast_audits = 0
   let per_worker_audits = 0
   let summary_outcome = ""
@@ -61,8 +61,8 @@ pipeline test(task) {
       }
     }
   }
-  __io_println(broadcast_audits)
-  __io_println(per_worker_audits)
-  __io_println(summary_outcome)
-  __io_println(summary_reason)
+  harness.stdio.println(broadcast_audits)
+  harness.stdio.println(per_worker_audits)
+  harness.stdio.println(summary_outcome)
+  harness.stdio.println(summary_reason)
 }

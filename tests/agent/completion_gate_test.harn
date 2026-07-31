@@ -22,7 +22,7 @@ fn classify_by_ext(path, _diff) {
   return "source"
 }
 
-pipeline test_no_write_on_coding_task_vetoes(task) {
+pipeline test_no_write_on_coding_task_vetoes(harness: Harness, task) {
   // burin no_write_on_coding_task: a task needing a source change with zero writes.
   const v = __completion_gate_ladder(
     {source_known: true, source_write_count: 0, cosmetic_write_count: 0, requires_write: true},
@@ -32,7 +32,7 @@ pipeline test_no_write_on_coding_task_vetoes(task) {
   assert_eq(v.strict, false)
 }
 
-pipeline test_cosmetic_only_write_still_vetoes(task) {
+pipeline test_cosmetic_only_write_still_vetoes(harness: Harness, task) {
   // ledger ⛔#5: a cosmetic (.md) final write is NOT source progress; done stays blocked.
   const v = __completion_gate_ladder(
     {source_known: true, source_write_count: 0, cosmetic_write_count: 2, requires_write: true},
@@ -42,7 +42,7 @@ pipeline test_cosmetic_only_write_still_vetoes(task) {
   assert(v.feedback.contains("cosmetic"), "cosmetic-only feedback names the cosmetic case")
 }
 
-pipeline test_source_write_red_verifier_is_strict_veto(task) {
+pipeline test_source_write_red_verifier_is_strict_veto(harness: Harness, task) {
   // burin failed_verification / repeated_verification_failures: source write + red verifier.
   const v = __completion_gate_ladder(
     {
@@ -59,7 +59,7 @@ pipeline test_source_write_red_verifier_is_strict_veto(task) {
   assert(v.feedback.contains("E0308"), "red feedback carries the findings")
 }
 
-pipeline test_red_verifier_with_streak_uses_failed_reason_before_threshold(task) {
+pipeline test_red_verifier_with_streak_uses_failed_reason_before_threshold(harness: Harness, task) {
   const v = __completion_gate_ladder(
     {
       consecutive_failed_after_write: 2,
@@ -77,7 +77,7 @@ pipeline test_red_verifier_with_streak_uses_failed_reason_before_threshold(task)
   assert_eq(v.escalation_target, nil)
 }
 
-pipeline test_red_verifier_escalates_at_streak_threshold(task) {
+pipeline test_red_verifier_escalates_at_streak_threshold(harness: Harness, task) {
   const v = __completion_gate_ladder(
     {
       consecutive_failed_after_write: 3,
@@ -96,7 +96,7 @@ pipeline test_red_verifier_escalates_at_streak_threshold(task) {
   assert(v.feedback.contains("3 consecutive times"), "escalated feedback renders the streak")
 }
 
-pipeline test_converging_failure_churn_does_not_escalate(task) {
+pipeline test_converging_failure_churn_does_not_escalate(harness: Harness, task) {
   const v = __completion_gate_ladder(
     {
       consecutive_failed_after_write: 8,
@@ -114,7 +114,7 @@ pipeline test_converging_failure_churn_does_not_escalate(task) {
   assert_eq(v.escalation_target, nil)
 }
 
-pipeline test_source_write_green_verifier_allows(task) {
+pipeline test_source_write_green_verifier_allows(harness: Harness, task) {
   // burin verified_after_write.
   const v = __completion_gate_ladder(
     {
@@ -129,7 +129,7 @@ pipeline test_source_write_green_verifier_allows(task) {
   assert_eq(v.reason, "verified_after_write")
 }
 
-pipeline test_source_write_no_verify_run_vetoes(task) {
+pipeline test_source_write_no_verify_run_vetoes(harness: Harness, task) {
   // burin missing_verification: wrote source, verifier configured, never ran.
   // Strict — burin's budget never releases a post-write state without a fresh
   // green verifier (`saw_write && !verification_after_last_write`).
@@ -147,7 +147,7 @@ pipeline test_source_write_no_verify_run_vetoes(task) {
   assert_eq(v.strict, true)
 }
 
-pipeline test_non_coding_task_allows_without_write(task) {
+pipeline test_non_coding_task_allows_without_write(harness: Harness, task) {
   // burin no_workspace_write: a task that does not require a source change.
   const v = __completion_gate_ladder(
     {source_known: true, source_write_count: 0, requires_write: false, verify: nil},
@@ -156,7 +156,7 @@ pipeline test_non_coding_task_allows_without_write(task) {
   assert_eq(v.reason, "no_workspace_write")
 }
 
-pipeline test_source_write_no_oracle_allows(task) {
+pipeline test_source_write_no_oracle_allows(harness: Harness, task) {
   const v = __completion_gate_ladder(
     {
       source_known: true,
@@ -170,14 +170,14 @@ pipeline test_source_write_no_oracle_allows(task) {
   assert_eq(v.reason, "wrote_source_no_oracle")
 }
 
-pipeline test_thin_facts_abstain(task) {
+pipeline test_thin_facts_abstain(harness: Harness, task) {
   // No write facts, no verifier signal: the deterministic gate abstains (judge-only).
   const v = __completion_gate_ladder({source_known: false, verify: nil})
   assert_eq(v.ok, true)
   assert_eq(v.reason, "gate_abstain")
 }
 
-pipeline test_unknown_source_but_red_verifier_still_strict(task) {
+pipeline test_unknown_source_but_red_verifier_still_strict(harness: Harness, task) {
   // Even with source counts unknown, a red verifier blocks (strict).
   const v = __completion_gate_ladder(
     {source_known: false, verify: {ok: false, findings: "lint"}, oracle_expected: true},
@@ -187,7 +187,7 @@ pipeline test_unknown_source_but_red_verifier_still_strict(task) {
   assert_eq(v.strict, true)
 }
 
-pipeline test_classify_writes_with_callback(task) {
+pipeline test_classify_writes_with_callback(harness: Harness, task) {
   const counts = __completion_gate_classify_writes(
     [{path: "src/a.rs"}, {path: "README.md"}, {path: "src/b.rs"}],
     classify_by_ext,
@@ -197,24 +197,24 @@ pipeline test_classify_writes_with_callback(task) {
   assert_eq(counts.other_write_count, 0)
 }
 
-pipeline test_classify_writes_uses_kind_field_then_conservative_default(task) {
+pipeline test_classify_writes_uses_kind_field_then_conservative_default(harness: Harness, task) {
   // No callback: honor an explicit kind, default the unclassified write to source.
   const counts = __completion_gate_classify_writes([{kind: "cosmetic"}, {kind: "source"}, {}], nil)
   assert_eq(counts.source_write_count, 2)
   assert_eq(counts.cosmetic_write_count, 1)
 }
 
-pipeline test_classify_writes_other_kind_not_source(task) {
+pipeline test_classify_writes_other_kind_not_source(harness: Harness, task) {
   const counts = __completion_gate_classify_writes([{kind: "test"}, {kind: "doc"}], nil)
   assert_eq(counts.source_write_count, 0)
   assert_eq(counts.other_write_count, 2)
 }
 
-pipeline test_combine_verify_nil_is_nil(task) {
+pipeline test_combine_verify_nil_is_nil(harness: Harness, task) {
   assert_eq(__completion_gate_combine_verify(nil, nil), nil)
 }
 
-pipeline test_combine_verify_any_red_blocks(task) {
+pipeline test_combine_verify_any_red_blocks(harness: Harness, task) {
   const combined = __completion_gate_combine_verify(
     [{ok: true}, {ok: false, findings: "lint"}],
     nil,
@@ -223,7 +223,7 @@ pipeline test_combine_verify_any_red_blocks(task) {
   assert_eq(combined.findings, "lint")
 }
 
-pipeline test_combine_verify_concatenates_findings(task) {
+pipeline test_combine_verify_concatenates_findings(harness: Harness, task) {
   const combined = __completion_gate_combine_verify(
     [{ok: false, findings: "a"}, {ok: false, findings: "b"}],
     nil,
@@ -232,20 +232,20 @@ pipeline test_combine_verify_concatenates_findings(task) {
   assert_eq(combined.findings, "a; b")
 }
 
-pipeline test_combine_verify_custom_combiner_wins(task) {
+pipeline test_combine_verify_custom_combiner_wins(harness: Harness, task) {
   const combiner = fn(_verdicts) { return {ok: true, findings: "overridden"} }
   const combined = __completion_gate_combine_verify([{ok: false, findings: "x"}], combiner)
   assert_eq(combined.ok, true)
   assert_eq(combined.findings, "overridden")
 }
 
-pipeline test_budget_allow_never_charges(task) {
+pipeline test_budget_allow_never_charges(harness: Harness, task) {
   const out = __completion_gate_apply_budget({ok: true, reason: "verified_after_write"}, 5, 3)
   assert_eq(out.verdict.ok, true)
   assert_eq(out.charge, false)
 }
 
-pipeline test_budget_soft_veto_under_budget_charges(task) {
+pipeline test_budget_soft_veto_under_budget_charges(harness: Harness, task) {
   const out = __completion_gate_apply_budget(
     {ok: false, reason: "no_source_write", strict: false},
     1,
@@ -256,7 +256,7 @@ pipeline test_budget_soft_veto_under_budget_charges(task) {
   assert_eq(out.charge, true)
 }
 
-pipeline test_budget_soft_veto_exhausted_converts_to_allow(task) {
+pipeline test_budget_soft_veto_exhausted_converts_to_allow(harness: Harness, task) {
   // At the budget, a non-strict veto converts to an attributable allow.
   const out = __completion_gate_apply_budget(
     {ok: false, reason: "no_source_write", strict: false},
@@ -269,7 +269,7 @@ pipeline test_budget_soft_veto_exhausted_converts_to_allow(task) {
   assert_eq(out.charge, false)
 }
 
-pipeline test_budget_strict_veto_never_converts(task) {
+pipeline test_budget_strict_veto_never_converts(harness: Harness, task) {
   // burin carve-out: a source write with a red verifier is NEVER let through by
   // budget exhaustion — only a fresh green verifier ends it.
   const out = __completion_gate_apply_budget(
@@ -282,7 +282,7 @@ pipeline test_budget_strict_veto_never_converts(task) {
   assert_eq(out.charge, true)
 }
 
-pipeline test_budget_missing_verification_never_converts(task) {
+pipeline test_budget_missing_verification_never_converts(harness: Harness, task) {
   // The divergence crux: a post-write state with a configured-but-unrun verifier
   // is strict in burin (`saw_write && !verification_after_last_write` is never
   // budget-released), so the budget must never convert it to done either.
@@ -296,7 +296,7 @@ pipeline test_budget_missing_verification_never_converts(task) {
   assert_eq(out.charge, true)
 }
 
-pipeline test_budget_disabled_never_converts(task) {
+pipeline test_budget_disabled_never_converts(harness: Harness, task) {
   // max_vetoes = 0 disables the budget: soft vetoes stay vetoes forever.
   const out = __completion_gate_apply_budget(
     {ok: false, reason: "no_source_write", strict: false},
@@ -308,7 +308,7 @@ pipeline test_budget_disabled_never_converts(task) {
   assert_eq(out.charge, true)
 }
 
-pipeline test_ladder_feedback_defaults_byte_identical(task) {
+pipeline test_ladder_feedback_defaults_byte_identical(harness: Harness, task) {
   // feedback_templates (#4296 fix 8): with no templates the rendered feedback must
   // be byte-identical to the strings the eval fleet pins today.
   const cosmetic = __completion_gate_ladder(
@@ -347,7 +347,7 @@ pipeline test_ladder_feedback_defaults_byte_identical(task) {
   )
 }
 
-pipeline test_ladder_feedback_override_replaces(task) {
+pipeline test_ladder_feedback_override_replaces(harness: Harness, task) {
   const v = __completion_gate_ladder(
     {cosmetic_write_count: 1, requires_write: true, source_known: true, source_write_count: 0},
     {no_source_write_cosmetic: "Custom cosmetic guidance."},
@@ -356,7 +356,7 @@ pipeline test_ladder_feedback_override_replaces(task) {
   assert_eq(v.feedback, "Custom cosmetic guidance.")
 }
 
-pipeline test_ladder_feedback_override_keeps_findings_token(task) {
+pipeline test_ladder_feedback_override_keeps_findings_token(harness: Harness, task) {
   // An override may keep the dynamic findings via the {findings} token.
   const v = __completion_gate_ladder(
     {
@@ -371,7 +371,7 @@ pipeline test_ladder_feedback_override_keeps_findings_token(task) {
   assert_eq(v.feedback, "Red. Findings: E0308. Retry.")
 }
 
-pipeline test_escalated_feedback_override_renders_attempts_and_findings(task) {
+pipeline test_escalated_feedback_override_renders_attempts_and_findings(harness: Harness, task) {
   const v = __completion_gate_ladder(
     {
       consecutive_failed_after_write: 4,

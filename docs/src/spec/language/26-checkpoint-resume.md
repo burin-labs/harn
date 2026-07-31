@@ -43,9 +43,9 @@ import { checkpoint_stage } from "std/checkpoint"
 fn fetch_dataset(url) { url }
 fn clean(data) { data }
 fn run_model(cleaned) { cleaned }
-fn upload(result) { log(result) }
+fn upload(result) { harness.obs.log(result) }
 
-pipeline process(task) {
+pipeline process(harness: Harness, task) {
   const url = "https://example.com/data.csv"
   const data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
   const cleaned = checkpoint_stage("clean",   fn() { clean(data) })
@@ -95,7 +95,7 @@ fn fetch_with_timeout(url) { url }
 
 const url = "https://example.com/data.csv"
 const data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
-log(data)
+harness.obs.log(data)
 ```
 
 ### File location
@@ -175,7 +175,8 @@ shape: `{vector: list<float>, model?: string, dim?: int}`. Harn never bundles
 an embedding model; hosts choose it, and embeddings are cached on disk under
 `.harn/memory/<namespace>/vectors/<sanitized_model_hint>/<sha256(text)>.json`
 keyed by `(model_hint, content_hash)`. Tests can satisfy the capability with
-`host_mock("memory", "embed", {result})`.
+`harness.testing.respond("memory.embed", {result})`; the response is scoped to
+that exact root Harness instance.
 
 Determinism contract: a recall over the same `(namespace, query, mode,
 embed_model_hint, top_k)` against the same event log and embedding cache
@@ -213,7 +214,7 @@ Provides typed `harn.fact.v1` assertions on top of `std/memory`. A fact contains
 | `fact_tags(fact, tags?)` | Return `fact`, `fact:<kind>`, `schema:harn.fact.v1`, generic and kind-scoped evidence tags, and caller tags |
 | `store_fact(input, options?)` | Store the fact as `MemoryRecord.value`, using the fact id as the memory record id |
 | `recall_facts(query, kind?, min_confidence?, scope?)` | Recall normalized facts and filter by kind/confidence; `scope` may be a scope string or an options dict with normal memory options |
-| `invalidate_facts(predicate, scope?)` | Append memory tombstones; predicates accept exact `fact_...` ids or dicts with `id`, `key`, `kind`, `claim`, `query`, `tag`, `tags`, `evidence_ref`, or `evidence` |
+| `invalidate_facts(harness.memory, predicate, scope?)` | Append memory tombstones; predicates accept exact `fact_...` ids or dicts with `id`, `key`, `kind`, `claim`, `query`, `tag`, `tags`, `evidence_ref`, or `evidence` |
 
 ### std/agent/probe module
 
@@ -260,8 +261,8 @@ receipts, claims, and audit records.
 
 | Function | Notes |
 |---|---|
-| `pg_pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
-| `pg_connect(source, options?)` | Open a single-connection Postgres pool |
+| `harness.postgres.pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
+| `harness.postgres.connect(source, options?)` | Open a single-connection Postgres pool |
 | `pg_query(handle, sql, params?)` | Run a parameterized query and return rows as dictionaries |
 | `pg_query_one(handle, sql, params?)` | Return the first row, or `nil` when no rows match |
 | `pg_execute(handle, sql, params?)` | Execute a statement and return `{rows_affected}` |

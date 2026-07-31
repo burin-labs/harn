@@ -1,9 +1,9 @@
 /** Test tool registry builtins */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Create registry
   let tools = tool_registry()
-  __io_println(type_of(tools))
-  __io_println(tool_count(tools))
+  harness.stdio.println(type_of(tools))
+  harness.stdio.println(tool_count(tools))
   // tool_define
   tools = tool_define(
     tools,
@@ -28,42 +28,42 @@ pipeline default(task) {
       returns: {type: "integer"},
     },
   )
-  __io_println(tool_count(tools))
+  harness.stdio.println(tool_count(tools))
   // tool_list
   const list = tool_list(tools)
-  __io_println(len(list))
+  harness.stdio.println(len(list))
   // tool_find
   const found = tool_find(tools, "greet")
-  __io_println(found != nil)
+  harness.stdio.println(found != nil)
   const missing = tool_find(tools, "nonexistent")
-  __io_println(missing == nil)
+  harness.stdio.println(missing == nil)
   const selected = tool_select(tools, ["add"])
-  __io_println(tool_count(selected))
-  __io_println(tool_find(selected, "add") != nil)
-  __io_println(tool_find(selected, "greet") == nil)
+  harness.stdio.println(tool_count(selected))
+  harness.stdio.println(tool_find(selected, "add") != nil)
+  harness.stdio.println(tool_find(selected, "greet") == nil)
   // tool_remove
-  const smaller = tool_remove(tools, "add")
-  __io_println(tool_count(smaller))
+  const smaller = harness.tools.remove(tools, "add")
+  harness.stdio.println(tool_count(smaller))
   // tool_describe
   const desc = tool_describe(tools)
-  __io_println(contains(desc, "greet"))
-  __io_println(contains(desc, "add"))
+  harness.stdio.println(contains(desc, "greet"))
+  harness.stdio.println(contains(desc, "add"))
   // tool_schema
   const schema = tool_schema(tools)
-  __io_println(schema.schema_version)
-  __io_println(len(schema.tools))
+  harness.stdio.println(schema.schema_version)
+  harness.stdio.println(len(schema.tools))
   // tool_parse_call
   const calls = tool_parse_call(
     "<tool_call>{\"name\": \"greet\", \"arguments\": {\"name\": \"world\"}}</tool_call>",
   )
-  __io_println(len(calls))
-  __io_println(calls[0].name)
+  harness.stdio.println(len(calls))
+  harness.stdio.println(calls[0].name)
   // tool_format_result
   const result = tool_format_result("greet", "hello")
-  __io_println(contains(result, "tool_result"))
-  __io_println(contains(result, "greet"))
+  harness.stdio.println(contains(result, "tool_result"))
+  harness.stdio.println(contains(result, "greet"))
   // tool_prompt
   const prompt = tool_prompt(tools)
-  __io_println(contains(prompt, "Available Tools"))
-  __io_println(contains(prompt, "greet"))
+  harness.stdio.println(contains(prompt, "Available Tools"))
+  harness.stdio.println(contains(prompt, "greet"))
 }

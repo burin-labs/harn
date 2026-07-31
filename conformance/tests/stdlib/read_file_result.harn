@@ -2,19 +2,19 @@
  * read_file_result returns Result.Ok(content) on success and
  * Result.Err({error, kind, message}) on failure (instead of throwing).
  */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Write a known file, then read it back via read_file_result.
-  const fixture = path_join(harness.fs.temp_dir(), "rfr_fixture.txt")
+  const fixture = path_join(harness.fs.workspace_temp_dir(), "rfr_fixture.txt")
   harness.fs.write_text(fixture, "hello result")
   const ok = harness.fs.read_text_result(fixture)
-  __io_println(is_ok(ok))
-  __io_println(unwrap(ok))
+  harness.stdio.println(is_ok(ok))
+  harness.stdio.println(unwrap(ok))
   harness.fs.delete(fixture)
   // Missing path returns a structured, stable Result.Err.
   const bad = harness.fs.read_text_result("does_not_exist_7f3a.txt")
-  __io_println(is_err(bad))
+  harness.stdio.println(is_err(bad))
   const failure = unwrap_err(bad)
-  __io_println(failure.error)
-  __io_println(failure.kind)
-  __io_println(failure.message.contains("Failed to read"))
+  harness.stdio.println(failure.error)
+  harness.stdio.println(failure.kind)
+  harness.stdio.println(failure.message.contains("Failed to read"))
 }

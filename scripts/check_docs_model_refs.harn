@@ -67,7 +67,7 @@ pub fn rel_path(path: string) -> string {
   return path
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const parsed = try {
     toml_parse(harness.fs.read_text(PROVIDERS_TOML))
   } catch (err) {
@@ -75,7 +75,7 @@ pipeline main(task) {
   }
   const sonnet_model = parsed?.aliases?.sonnet?.id ?? ""
   if sonnet_model == "" {
-    __io_eprintln("error: could not resolve aliases.sonnet from ${PROVIDERS_TOML}")
+    harness.stdio.eprintln("error: could not resolve aliases.sonnet from ${PROVIDERS_TOML}")
     return 1
   }
   let files: list<string> = []
@@ -92,10 +92,10 @@ pipeline main(task) {
       continue
     }
     for ref in stale_refs(text, sonnet_model) {
-      __io_eprintln(
+      harness.stdio.eprintln(
         "error: ${file}:${ref.line_no} references ${ref.model}, but aliases.sonnet is ${sonnet_model}",
       )
-      __io_eprintln(
+      harness.stdio.eprintln(
         "       update the docs example or add harn-doc-model-ref: allow-stale if this is intentionally historical.",
       )
       failures = failures + 1
@@ -104,6 +104,6 @@ pipeline main(task) {
   if failures > 0 {
     return 1
   }
-  __io_println("docs model refs OK: aliases.sonnet = ${sonnet_model}")
+  harness.stdio.println("docs model refs OK: aliases.sonnet = ${sonnet_model}")
   return 0
 }

@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const evt = transcript_suspension_event(
     {
       handle: "worker://triage/42",
@@ -10,16 +10,16 @@ pipeline main() {
       span_id: "span-1",
     },
   )
-  __io_println(evt?.kind == "suspension")
-  __io_println(evt?.role == "system")
-  __io_println(evt?.visibility == "public")
-  __io_println(evt?.text == "waiting for human approval")
-  __io_println(evt?.suspension?.handle == "worker://triage/42")
-  __io_println(evt?.suspension?.initiator == "operator")
-  __io_println(evt?.suspension?.reason == "waiting for human approval")
-  __io_println(evt?.suspension?.conditions?.kind == "approval")
-  __io_println(evt?.suspension?.resume_by_mechanism == "ResumeBy.operator")
-  __io_println(evt?.suspension?.suspended_at_turn == 5)
-  __io_println(evt?.suspension?.span_id == "span-1")
-  __io_println(evt?.metadata?.handle == "worker://triage/42")
+  harness.stdio.println(evt?.kind == "suspension")
+  harness.stdio.println(evt?.role == "system")
+  harness.stdio.println(evt?.visibility == "public")
+  harness.stdio.println(evt?.text == "waiting for human approval")
+  harness.stdio.println(evt?.suspension?.handle == "worker://triage/42")
+  harness.stdio.println(evt?.suspension?.initiator == "operator")
+  harness.stdio.println(evt?.suspension?.reason == "waiting for human approval")
+  harness.stdio.println(evt?.suspension?.conditions?.kind == "approval")
+  harness.stdio.println(evt?.suspension?.resume_by_mechanism == "ResumeBy.operator")
+  harness.stdio.println(evt?.suspension?.suspended_at_turn == 5)
+  harness.stdio.println(evt?.suspension?.span_id == "span-1")
+  harness.stdio.println(evt?.metadata?.handle == "worker://triage/42")
 }

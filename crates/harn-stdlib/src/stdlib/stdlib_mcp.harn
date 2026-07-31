@@ -9,8 +9,8 @@
  * @api_stability: experimental
  * @example: configure({experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}})
  */
-pub fn configure(config: dict = {}) -> dict {
-  return mcp_configure(config)
+pub fn configure(tools: HarnessTools, config: dict = {}) -> dict {
+  return tools.mcp_configure(config)
 }
 
 /**
@@ -21,8 +21,8 @@ pub fn configure(config: dict = {}) -> dict {
  * @api_stability: experimental
  * @example: file_input({accept: ["image/png"], max_size: 5242880})
  */
-pub fn file_input(options: dict = {}) -> dict {
-  return mcp_file_input(options ?? {})
+pub fn file_input(tools: HarnessTools, options: dict = {}) -> dict {
+  return tools.mcp_file_input(options ?? {})
 }
 
 /**
@@ -33,6 +33,6 @@ pub fn file_input(options: dict = {}) -> dict {
  * @api_stability: experimental
  * @example: upload_file(client, "photo.png", {accept: ["image/png"]})
  */
-pub fn upload_file(server, file_path: string, options: dict = {}) -> string {
-  return mcp_upload_file(server, file_path, options ?? {})
+pub fn upload_file(tools: HarnessTools, server, file_path: string, options: dict = {}) -> string {
+  return tools.mcp_upload_file(server, file_path, options ?? {})
 }

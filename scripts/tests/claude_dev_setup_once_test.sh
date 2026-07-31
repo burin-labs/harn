@@ -47,7 +47,7 @@ if ! grep -Fxq "target=$fake_repo" "$record"; then
   exit 1
 fi
 
-parsed_message="$("$real_harn_bin" run -e 'const parsed = json_parse(read_stdin() ?? ""); __io_println(parsed?.hookSpecificOutput?.additionalContext ?? "")' < "$output")"
+parsed_message="$("$real_harn_bin" run -e 'pipeline main(harness: Harness, task) { const parsed = json_parse(harness.stdio.read_stdin() ?? ""); harness.stdio.println(parsed?.hookSpecificOutput?.additionalContext ?? "") }' < "$output")"
 if [[ "$parsed_message" != "Project dev setup completed in "* ]]; then
   echo "claude-dev-setup hook did not emit a SessionStart context JSON object" >&2
   cat "$output" >&2

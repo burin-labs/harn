@@ -1,7 +1,7 @@
 import "../claude_dev_setup_hook.harn"
 
 @test
-pipeline test_claude_dev_setup_cwd_accepts_only_string_cwd(task) {
+pipeline test_claude_dev_setup_cwd_accepts_only_string_cwd(harness: Harness, task) {
   assert_eq(claude_dev_setup_cwd(r#"{"cwd":"/tmp/project"}"#), "/tmp/project")
   assert_eq(claude_dev_setup_cwd(r#"{"cwd":42}"#), "")
   assert_eq(claude_dev_setup_cwd(r#"["/tmp/project"]"#), "")
@@ -9,7 +9,7 @@ pipeline test_claude_dev_setup_cwd_accepts_only_string_cwd(task) {
 }
 
 @test
-pipeline test_claude_dev_setup_context_round_trips_json_escaping(task) {
+pipeline test_claude_dev_setup_context_round_trips_json_escaping(harness: Harness, task) {
   const message = "Project \"setup\" completed.\nLog: /tmp/a b/setup.log"
   const parsed = json_parse(claude_dev_setup_context(message))
   assert_eq(parsed?.hookSpecificOutput?.hookEventName, "SessionStart")

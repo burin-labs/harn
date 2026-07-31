@@ -114,7 +114,11 @@ fn source_edit_invalidates_cache() {
     let workdir = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
     let script = workdir.path().join("entry.harn");
-    fs::write(&script, "__io_println(\"alpha\")\n").unwrap();
+    fs::write(
+        &script,
+        "fn main(harness: Harness) { harness.stdio.println(\"alpha\") }\n",
+    )
+    .unwrap();
 
     let first = run_harn(cache.path(), &script);
     assert_eq!(first.exit_code, 0, "first run failed: {}", first.stderr);
@@ -124,7 +128,11 @@ fn source_edit_invalidates_cache() {
         "expected this script's cache entry to be written"
     );
 
-    fs::write(&script, "__io_println(\"bravo\")\n").unwrap();
+    fs::write(
+        &script,
+        "fn main(harness: Harness) { harness.stdio.println(\"bravo\") }\n",
+    )
+    .unwrap();
     let second = run_harn(cache.path(), &script);
     assert_eq!(second.exit_code, 0, "second run failed: {}", second.stderr);
     assert!(
@@ -149,7 +157,7 @@ fn imported_module_is_cached_to_disk() {
     let script = workdir.path().join("entry.harn");
     fs::write(
         &script,
-        "import { answer } from \"./lib\"\n__io_println(answer())\n",
+        "import { answer } from \"./lib\"\nfn main(harness: Harness) { harness.stdio.println(answer()) }\n",
     )
     .unwrap();
 
@@ -188,7 +196,7 @@ fn imported_file_edit_invalidates_cache() {
     let script = workdir.path().join("entry.harn");
     fs::write(
         &script,
-        "import { greet } from \"./lib\"\n__io_println(greet())\n",
+        "import { greet } from \"./lib\"\nfn main(harness: Harness) { harness.stdio.println(greet()) }\n",
     )
     .unwrap();
 
@@ -216,7 +224,11 @@ fn precompile_then_run_skips_compile() {
     let workdir = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
     let script = workdir.path().join("entry.harn");
-    fs::write(&script, "__io_println(\"precompiled\")\n").unwrap();
+    fs::write(
+        &script,
+        "fn main(harness: Harness) { harness.stdio.println(\"precompiled\") }\n",
+    )
+    .unwrap();
 
     run_in_harn_runtime({
         let target = script.clone();
@@ -352,7 +364,11 @@ fn disabled_cache_does_not_write_files() {
     let workdir = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
     let script = workdir.path().join("entry.harn");
-    fs::write(&script, "__io_println(\"no cache\")\n").unwrap();
+    fs::write(
+        &script,
+        "fn main(harness: Harness) { harness.stdio.println(\"no cache\") }\n",
+    )
+    .unwrap();
 
     let cache_dir = cache.path().to_path_buf();
     let script_for_run = script.clone();

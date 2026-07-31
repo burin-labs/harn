@@ -6,19 +6,20 @@
 // Run with: cargo run --quiet --bin harn -- run examples/llm_best_of_n.harn
 import { best_of_n } from "std/llm/ensemble"
 
-pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "candidate-A"})
-  llm_mock({text: "candidate-B"})
-  llm_mock({text: "candidate-C"})
+pipeline default(harness: Harness) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({text: "candidate-A"})
+  harness.llm.mock_enqueue({text: "candidate-B"})
+  harness.llm.mock_enqueue({text: "candidate-C"})
   // Structured judge response — JSON, picks index 1.
-  llm_mock(
+  harness.llm.mock_enqueue(
     {text: "{\"best_index\": 1, \"scores\": [0.2, 0.9, 0.3], \"reasoning\": \"B is clearest\"}"},
   )
   const result = best_of_n(
+    harness.llm,
     "Pick the best.",
     "",
     {n: 3, parallel: false, call_opts: {provider: "mock"}, judge_opts: {provider: "mock"}},
   )
-  __io_println("winner: " + result.best.text)
+  harness.stdio.println("winner: " + result.best.text)
 }

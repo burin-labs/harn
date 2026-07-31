@@ -783,18 +783,14 @@ impl TypeChecker {
         let TypeExpr::Named(type_name) = self.resolve_alias(&raw_type, scope) else {
             return false;
         };
-        let Some(sub_handle) = crate::harness_methods::harness_type_sub_handle(type_name.as_str())
+        let Some(capability) = harn_builtin_meta::CapabilityId::from_type_name(type_name.as_str())
         else {
             return false;
         };
-        let Some(ambient) = crate::harness_methods::harness_sub_handle_ambient(sub_handle, method)
-        else {
+        let Some(sig) = builtin_signatures::lookup_capability_method(capability, method) else {
             return false;
         };
-        let Some(sig) = builtin_signatures::lookup(ambient) else {
-            return false;
-        };
-        let display_name = format!("harness.{sub_handle}.{method}");
+        let display_name = format!("harness.{}.{method}", capability.field_name());
         let has_spread = args.iter().any(|arg| matches!(&arg.node, Node::Spread(_)));
         self.check_builtin_signature_call(&display_name, sig, &[], args, has_spread, scope, span);
         true

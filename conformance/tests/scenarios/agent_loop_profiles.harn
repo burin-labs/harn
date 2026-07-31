@@ -1,11 +1,14 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
+    harness.llm,
     [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"pass\"}")],
     { ->
       const structured = agent_loop(
+        harness,
         "grade this",
         nil,
         {
@@ -14,9 +17,9 @@ pipeline default() {
           output: {schema: schema, strict: true, validation: "error"},
         },
       )
-      __io_println(structured.visible_text)
-      const calls = llm_mock_calls()
-      __io_println(len(calls))
+      harness.stdio.println(structured.visible_text)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls))
       assert(len(calls) == 2, "verifier profile should retry schema-invalid output")
       assert(
         calls[0].output_format.kind == "text",
@@ -31,15 +34,17 @@ pipeline default() {
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("Needs another pass.")],
     { ->
       const verifier = agent_loop(
+        harness,
         "verify this",
         nil,
         {provider: "mock", profile: "verifier", loop_until_done: true},
       )
-      __io_println(verifier.status)
-      __io_println(verifier.llm.iterations)
+      harness.stdio.println(verifier.status)
+      harness.stdio.println(verifier.llm.iterations)
       assert(verifier.status == "stuck", "verifier max_nudges default should stop immediately")
       assert(
         verifier.llm.iterations == 1,
@@ -48,9 +53,11 @@ pipeline default() {
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("Still working."), llm_text("Finished. ##DONE##")],
     { ->
       const overridden = agent_loop(
+        harness,
         "finish in two",
         nil,
         {
@@ -61,8 +68,8 @@ pipeline default() {
           max_nudges: 2,
         },
       )
-      __io_println(overridden.status)
-      __io_println(overridden.llm.iterations)
+      harness.stdio.println(overridden.status)
+      harness.stdio.println(overridden.llm.iterations)
       assert(
         overridden.status == "done",
         "explicit max_iterations/max_nudges should override profile",

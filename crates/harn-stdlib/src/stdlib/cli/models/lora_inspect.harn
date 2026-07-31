@@ -35,7 +35,7 @@ fn __base_match_label(value: string) -> string {
   return "unknown"
 }
 
-fn __render_human(harness: Harness, report: dict) {
+fn __render_human(stdio: HarnessStdio, report: dict) {
   const base = safe_dict(report["base"])
   const adapter = safe_dict(report["adapter"])
   const compatibility = safe_dict(report["compatibility"])
@@ -46,20 +46,20 @@ fn __render_human(harness: Harness, report: dict) {
   const adapter_name = safe_string(adapter["name"], "lora-adapter")
   const base_id = safe_string(base["id"], "")
   const provider = safe_string(base["provider"], "")
-  harness.stdio.println(adapter_name + " -> " + base_id + " via " + provider)
-  harness.stdio.println("  adapter: " + safe_string(adapter["input"], ""))
-  harness.stdio.println(
+  stdio.println(adapter_name + " -> " + base_id + " via " + provider)
+  stdio.println("  adapter: " + safe_string(adapter["input"], ""))
+  stdio.println(
     "  base match: "
       + __base_match_label(safe_string(compatibility["base_model_match"], "unknown")),
   )
-  harness.stdio.println("  tool format: " + safe_string(base["tool_format"], ""))
-  harness.stdio.println("  request model: " + safe_string(launch["request_model"], adapter_name))
+  stdio.println("  tool format: " + safe_string(base["tool_format"], ""))
+  stdio.println("  request model: " + safe_string(launch["request_model"], adapter_name))
   const native_tools = if safe_bool(tool_calling["native_tools"], false) {
     "yes"
   } else {
     "no"
   }
-  harness.stdio.println(
+  stdio.println(
     "  native tools: "
       + native_tools
       + ", preferred: "
@@ -70,36 +70,36 @@ fn __render_human(harness: Harness, report: dict) {
   } else {
     "no"
   }
-  harness.stdio.println("  catalog LoRA launch flags: " + launch_supported)
+  stdio.println("  catalog LoRA launch flags: " + launch_supported)
   const module_format = safe_string(compatibility["provider_lora_module_value_format"], "")
   if module_format != "" {
-    harness.stdio.println("  LoRA module format: " + module_format)
+    stdio.println("  LoRA module format: " + module_format)
   }
   const modules_to_save = safe_list(adapter["modules_to_save"])
   if len(modules_to_save) > 0 {
-    harness.stdio.println(
+    stdio.println(
       "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
     )
   } else {
-    harness.stdio.println("  modules to save: none")
+    stdio.println("  modules to save: none")
   }
   const rank_supported = if safe_bool(compatibility["provider_supports_lora_max_rank"], false) {
     "yes"
   } else {
     "no"
   }
-  harness.stdio.println("  catalog LoRA rank flag: " + rank_supported)
+  stdio.println("  catalog LoRA rank flag: " + rank_supported)
   const max_rank = safe_int_string(launch["max_lora_rank"], "")
   if max_rank != "" {
-    harness.stdio.println("  max LoRA rank: " + max_rank)
+    stdio.println("  max LoRA rank: " + max_rank)
   }
   const contract_id = safe_string(contract["contract_id"], "")
   const contract_manifest = safe_string(contract["manifest_path"], "")
   if contract_id != "" || contract_manifest != "" {
-    harness.stdio.println("  contract: " + nonempty_string(contract["contract_id"], "<missing>"))
-    harness.stdio.println("  contract manifest: " + contract_manifest)
-    harness.stdio.println("  contract status: " + safe_string(contract["status"], "unknown"))
-    harness.stdio.println(
+    stdio.println("  contract: " + nonempty_string(contract["contract_id"], "<missing>"))
+    stdio.println("  contract manifest: " + contract_manifest)
+    stdio.println("  contract status: " + safe_string(contract["status"], "unknown"))
+    stdio.println(
       "  adapter contract id: "
         + nonempty_string(contract["adapter_contract_id"], "<missing>"),
     )
@@ -129,7 +129,7 @@ fn __render_human(harness: Harness, report: dict) {
     } else {
       "mismatch"
     }
-    harness.stdio.println(
+    stdio.println(
       "  contract route: base="
         + __base_match_label(
         safe_string(contract["base_model_match"], "unknown"),
@@ -147,13 +147,13 @@ fn __render_human(harness: Harness, report: dict) {
   for warning in warnings {
     const text = safe_string(warning, "")
     if text != "" {
-      harness.stdio.println("  warning: " + text)
+      stdio.println("  warning: " + text)
     }
   }
   const launch_argv = safe_list(launch["harn_local_launch"])
   if launch_argv.count != 0 {
-    harness.stdio.println("  launch:")
-    harness.stdio.println("    " + join_shell_argv(launch_argv, " "))
+    stdio.println("  launch:")
+    stdio.println("    " + join_shell_argv(launch_argv, " "))
   }
 }
 
@@ -196,7 +196,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness, report)
+    __render_human(harness.stdio, report)
   }
   if ok {
     return 0

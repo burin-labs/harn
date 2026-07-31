@@ -19,8 +19,11 @@ fn event_contract() -> SchemaContract<Event> {
   return schema_contract(schema_of(Event), [valid_id])
 }
 
-pipeline default(task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-jsonl-pages-" + uuid_v7())
+pipeline default(harness: Harness, task) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-jsonl-pages-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   const path = path_join(root, "events.jsonl")
   harness.fs.write_text(
@@ -32,8 +35,10 @@ pipeline default(task) {
       + "{\"id\":2,\"version\":\"π\"}",
   )
   const contract = event_contract()
-  const first = unwrap(read_jsonl_contract_page_result(path, contract, {max_records: 3}))
-  __io_println(
+  const first = unwrap(
+    read_jsonl_contract_page_result(harness.fs, path, contract, {max_records: 3}),
+  )
+  harness.stdio.println(
     to_string(len(first.records))
       + ":"
       + first.issues[0].kind
@@ -43,9 +48,14 @@ pipeline default(task) {
       + to_string(first.next_cursor.line),
   )
   const second = unwrap(
-    read_jsonl_contract_page_result(path, contract, {cursor: first.next_cursor, max_records: 3}),
+    read_jsonl_contract_page_result(
+      harness.fs,
+      path,
+      contract,
+      {cursor: first.next_cursor, max_records: 3},
+    ),
   )
-  __io_println(
+  harness.stdio.println(
     second.issues[0].kind
       + ":"
       + second.issues[1].kind
@@ -55,9 +65,9 @@ pipeline default(task) {
       + to_string(second.next_cursor.line),
   )
   const third = unwrap(
-    read_jsonl_contract_page_result(path, contract, {cursor: second.next_cursor}),
+    read_jsonl_contract_page_result(harness.fs, path, contract, {cursor: second.next_cursor}),
   )
-  __io_println(
+  harness.stdio.println(
     to_string(third.records[0].value.id)
       + ":"
       + third.records[0].value.version
@@ -66,20 +76,25 @@ pipeline default(task) {
       + ":"
       + to_string(third.done),
   )
-  const materialized = read_jsonl(path)
-  const folded = fold_jsonl_file(path, 0, fn(count, _value, _index) { return count + 1 })
-  __io_println(to_string(len(materialized)) + ":" + to_string(folded))
+  const materialized = read_jsonl(harness.fs, path)
+  const folded = fold_jsonl_file(
+    harness.fs,
+    path,
+    0,
+    fn(count, _value, _index) { return count + 1 },
+  )
+  harness.stdio.println(to_string(len(materialized)) + ":" + to_string(folded))
   const strict = try {
-    read_jsonl(path, {strict: true})
+    read_jsonl(harness.fs, path, {strict: true})
   }
-  __io_println(to_string(!is_ok(strict)))
-  const missing = read_jsonl_page_result(path_join(root, "missing.jsonl"))
-  __io_println(unwrap_err(missing).kind)
+  harness.stdio.println(to_string(!is_ok(strict)))
+  const missing = read_jsonl_page_result(harness.fs, path_join(root, "missing.jsonl"))
+  harness.stdio.println(unwrap_err(missing).kind)
   const oversized_path = path_join(root, "oversized.jsonl")
   harness.fs.write_text(oversized_path, "abcdef\n")
-  const oversized = read_jsonl_page_result(oversized_path, {max_bytes: 4})
-  __io_println(unwrap_err(oversized).kind)
-  const invalid = read_jsonl_page_result(path, {max_records: 0})
-  __io_println(unwrap_err(invalid).kind)
+  const oversized = read_jsonl_page_result(harness.fs, oversized_path, {max_bytes: 4})
+  harness.stdio.println(unwrap_err(oversized).kind)
+  const invalid = read_jsonl_page_result(harness.fs, path, {max_records: 0})
+  harness.stdio.println(unwrap_err(invalid).kind)
   harness.fs.delete(root)
 }

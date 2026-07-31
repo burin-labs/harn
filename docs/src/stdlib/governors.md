@@ -40,7 +40,7 @@ const decision = convergence_guard_decision(
     post_green_proof_artifact_writes: 1,
   },
 )
-log(decision.recovery.verb) // stop_on_green
+harness.stdio.log(decision.recovery.verb) // stop_on_green
 ```
 
 The decision output is structured: `{shape, confidence, evidence, recovery,
@@ -79,7 +79,7 @@ into a live `post_turn_callback` that reads the per-turn payload and steers.
 ```harn,ignore
 import { governor_post_turn } from "std/agent/governors"
 
-agent_loop(task, ctx, {
+agent_loop(harness, task, ctx, {
   post_turn_callback: governor_post_turn({budget: 40.0, signal: "iterations"}),
 })
 ```
@@ -119,7 +119,7 @@ const decision = governor_pace_decision(
     env_blame_without_infra: false,
   },
 )
-log(decision.action)
+harness.stdio.log(decision.action)
 ```
 
 **Policy.** Two bounded caps on the same `GovernorPolicy`: `extend_max`

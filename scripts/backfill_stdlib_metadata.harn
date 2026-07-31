@@ -39,10 +39,19 @@ fn _effect_rules() -> list {
     ["\\b__fs_[a-z_]*list", "fs.read"],
     ["\\b__fs_[a-z_]*walk", "fs.read"],
     ["\\bfs::", "fs.read"],
+    [
+      "\\bharness\\.fs\\.(read|read_text|read_bytes|read_lines|list|glob|walk|exists|metadata|source_dir)\\b",
+      "fs.read",
+    ],
+    [
+      "\\bharness\\.fs\\.(write|write_text|write_bytes|append|delete|remove|rename|copy|mkdir|mkdtemp)\\b",
+      "fs.write",
+    ],
     ["\\bllm_call\\(", "llm.call"],
     ["\\bllm_complete\\(", "llm.call"],
     ["\\bllm_judge\\(", "llm.call"],
     ["\\b__llm_", "llm.call"],
+    ["\\bharness\\.llm\\.", "llm.call"],
     ["\\bhttp_get\\(", "net"],
     ["\\bhttp_post\\(", "net"],
     ["\\bhttp_put\\(", "net"],
@@ -51,35 +60,46 @@ fn _effect_rules() -> list {
     ["\\bweb_fetch\\(", "net"],
     ["\\bweb_get\\(", "net"],
     ["\\b__net_", "net"],
+    ["\\bharness\\.net\\.", "net"],
     ["\\bcommand_run\\(", "process"],
     ["\\bshell\\(", "process"],
     ["\\b__shell_", "process"],
     ["\\b__process_", "process"],
     ["\\bgit_run\\b", "process"],
+    ["\\bharness\\.(process|tools)\\.", "process"],
     ["\\bcrypto_", "crypto"],
     ["\\b__crypto_", "crypto"],
     ["\\bhash_", "crypto"],
+    ["\\bharness\\.crypto\\.", "crypto"],
     ["\\btimestamp\\(", "time"],
     ["\\bnow\\(", "time"],
     ["\\b__time_", "time"],
+    ["\\bharness\\.clock\\.", "time"],
     ["\\bgetenv\\(", "env"],
     ["\\b__env_", "env"],
+    ["\\bharness\\.env\\.", "env"],
     ["\\bstore_get\\(", "store.read"],
     ["\\bstore_set\\(", "store.write"],
     ["\\b__store_", "store.read"],
+    ["\\bharness\\.store\\.(get|read|list|exists)\\b", "store.read"],
+    ["\\bharness\\.store\\.(set|write|delete|remove)\\b", "store.write"],
     ["\\bemit\\(", "transcript.write"],
     ["\\b__transcript_", "transcript.write"],
     ["\\bhost_call\\(", "host"],
     ["\\b__host_", "host"],
+    ["\\bharness\\.host\\.", "host"],
     ["\\bagent_call\\(", "agent"],
     ["\\bagent_spawn\\(", "agent"],
     ["\\b__agent_", "agent"],
+    ["\\bharness\\.agent\\.", "agent"],
     ["\\bnotion_", "net"],
     ["\\bslack_", "net"],
     ["\\blinear_", "net"],
     ["\\bgithub_", "net"],
     ["\\bmcp_", "mcp"],
     ["\\b__mcp_", "mcp"],
+    ["\\bharness\\.mcp\\.", "mcp"],
+    ["\\bharness\\.stdio\\.", "stdio.write"],
   ]
 }
 
@@ -457,7 +477,7 @@ pub fn pct(num, den) -> string {
   return "${whole}.${tenth}%"
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const stdlib = "crates/harn-stdlib/src/stdlib"
   let total = 0
   let backfilled = 0
@@ -480,7 +500,7 @@ pipeline main(task) {
     }
   }
   const coverage = pct(already_complete + backfilled, total)
-  __io_println(
+  harness.stdio.println(
     "public fns: ${total}; already complete: ${already_complete}; backfilled: ${backfilled}; skipped (no /** */ block): ${skipped_no_block}; final coverage: ${coverage}",
   )
   return 0

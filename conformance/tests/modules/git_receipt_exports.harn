@@ -18,19 +18,19 @@ type GitAdapters = {
   prior_mutation?: GitReceipt,
 }
 
-fn lookup(remote: string) -> GitLsRemoteReceipt {
-  return git_ls_remote(remote)
+fn lookup(process: HarnessProcess, remote: string) -> GitLsRemoteReceipt {
+  return git_ls_remote(process, remote)
 }
 
-fn adapters() -> GitAdapters {
+fn adapters(process: HarnessProcess) -> GitAdapters {
   return {
-    lookup: lookup,
-    fetch: { repo -> return git_fetch("origin", repo) },
-    push: { remote, refspec -> return git_push(remote, refspec) },
+    lookup: { remote -> return lookup(process, remote) },
+    fetch: { repo -> return git_fetch(process, "origin", repo) },
+    push: { remote, refspec -> return git_push(process, remote, refspec) },
   }
 }
 
-pipeline default() {
-  const configured: GitAdapters = adapters()
-  __io_println(configured.prior_lookup == nil && configured.prior_sync == nil)
+pipeline default(harness: Harness) {
+  const configured: GitAdapters = adapters(harness.process)
+  harness.stdio.println(configured.prior_lookup == nil && configured.prior_sync == nil)
 }

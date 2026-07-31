@@ -1,9 +1,9 @@
 import { triage_issue_payload } from "lib"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const envelope = json_parse(task)
   const raw = envelope.event.provider_payload?.raw ?? {}
-  __io_println(
+  harness.stdio.println(
     json_stringify(
       triage_issue_payload(raw, envelope.event.trace_id, envelope.event.replay_of_event_id),
     ),

@@ -4,6 +4,7 @@
 //! entry in [`crate::rule`]; the linter dispatches by iterating the
 //! registry rather than calling each rule by name.
 
+pub(crate) mod api_design;
 pub(crate) mod ast_walk;
 pub(crate) mod blank_lines;
 pub(crate) mod deprecated_llm_options;

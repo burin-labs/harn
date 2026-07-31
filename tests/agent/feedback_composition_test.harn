@@ -1,6 +1,6 @@
 import { agent_feedback_compose, agent_feedback_tool_example } from "std/agent/feedback"
 
-pipeline test_composition_is_deterministic_and_reason_coded(task) {
+pipeline test_composition_is_deterministic_and_reason_coded(harness: Harness, task) {
   const composed = agent_feedback_compose(
     [
       {
@@ -39,7 +39,7 @@ pipeline test_composition_is_deterministic_and_reason_coded(task) {
   )
 }
 
-pipeline test_next_step_requires_new_knowledge(task) {
+pipeline test_next_step_requires_new_knowledge(harness: Harness, task) {
   const first = agent_feedback_compose(
     [
       {
@@ -81,11 +81,16 @@ pipeline test_next_step_requires_new_knowledge(task) {
   assert_eq(len(advanced.messages), 1)
 }
 
-pipeline test_tool_examples_follow_the_locked_format(task) {
+pipeline test_tool_examples_follow_the_locked_format(harness: Harness, task) {
   const args = [{key: "path", value: "notes.txt"}]
-  const text = agent_feedback_tool_example("write_note", args, {tool_format: "text"})
-  const json = agent_feedback_tool_example("write_note", args, {tool_format: "json"})
-  const native = agent_feedback_tool_example("write_note", args, {tool_format: "native"})
+  const text = agent_feedback_tool_example(harness.llm, "write_note", args, {tool_format: "text"})
+  const json = agent_feedback_tool_example(harness.llm, "write_note", args, {tool_format: "json"})
+  const native = agent_feedback_tool_example(
+    harness.llm,
+    "write_note",
+    args,
+    {tool_format: "native"},
+  )
   assert(contains(text, "<tool_call>"))
   assert(contains(text, "write_note({ path: \"notes.txt\" })"))
   assert(contains(json, "```tool"))

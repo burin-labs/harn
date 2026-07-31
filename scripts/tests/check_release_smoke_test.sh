@@ -84,18 +84,18 @@ if "$script" 2>"$tmp_root/usage.err"; then
 fi
 grep -q "usage:" "$tmp_root/usage.err" || fail "usage stderr missing"
 
-if ! out="$("$script" v0.10.23)"; then
+if ! out="$("$script" v0.10.23 --gh-bin "$tmp_root/bin/gh")"; then
   fail "expected success for tagged run-name match"
 fi
 grep -q "covered by run 222" <<<"$out" || fail "success output missing run id: $out"
 grep -q "https://example.test/222" <<<"$out" || fail "success output missing url: $out"
 
-if ! out="$("$script" v0.10.29)"; then
+if ! out="$("$script" v0.10.29 --gh-bin "$tmp_root/bin/gh")"; then
   fail "expected success via log-marker fallback for legacy run titles"
 fi
 grep -q "covered by run 333" <<<"$out" || fail "log fallback missed run 333: $out"
 
-if "$script" v0.10.99 2>"$tmp_root/missing.err"; then
+if "$script" v0.10.99 --gh-bin "$tmp_root/bin/gh" 2>"$tmp_root/missing.err"; then
   fail "expected failure when no covering run exists"
 fi
 grep -q "no successful Release smoke run found for v0.10.99" "$tmp_root/missing.err" \

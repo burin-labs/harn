@@ -7,27 +7,27 @@
  *
  * Run with: cargo run --bin harn -- run examples/session-fork.harn
  */
-pipeline main(task) {
-  const base = agent_session_open()
-  agent_session_inject(base, {role: "user", content: "Plan a weekend in Kyoto."})
-  agent_session_inject(
+pipeline main(harness: Harness, task) {
+  const base = harness.agent.open()
+  harness.agent.inject(base, {role: "user", content: "Plan a weekend in Kyoto."})
+  harness.agent.inject(
     base,
     {role: "assistant", content: "Day 1: Fushimi Inari. Day 2: Arashiyama."},
   )
   // Fork two counterfactual branches from the same starting point.
-  const rainy = agent_session_fork(base)
-  const sunny = agent_session_fork(base)
-  agent_session_inject(rainy, {role: "user", content: "What if it rains the whole weekend?"})
-  agent_session_inject(sunny, {role: "user", content: "What if the weather is perfect?"})
-  log("base len=${agent_session_length(base)}")
-  log("rainy len=${agent_session_length(rainy)} id=${rainy}")
-  log("sunny len=${agent_session_length(sunny)} id=${sunny}")
+  const rainy = harness.agent.fork(base)
+  const sunny = harness.agent.fork(base)
+  harness.agent.inject(rainy, {role: "user", content: "What if it rains the whole weekend?"})
+  harness.agent.inject(sunny, {role: "user", content: "What if the weather is perfect?"})
+  harness.stdio.println("base len=${harness.agent.length(base)}")
+  harness.stdio.println("rainy len=${harness.agent.length(rainy)} id=${rainy}")
+  harness.stdio.println("sunny len=${harness.agent.length(sunny)} id=${sunny}")
   // Keep the original clean; release the branches.
-  agent_session_close(rainy)
-  agent_session_close(sunny)
-  if agent_session_length(base) == 2 {
-    log("fork branches did not leak into base")
+  harness.agent.close(rainy)
+  harness.agent.close(sunny)
+  if harness.agent.length(base) == 2 {
+    harness.stdio.log("fork branches did not leak into base")
   } else {
-    log("warning: base was mutated by a branch — session_fork should not share state")
+    harness.stdio.log("warning: base was mutated by a branch — session_fork should not share state")
   }
 }

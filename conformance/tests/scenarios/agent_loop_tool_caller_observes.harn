@@ -1,5 +1,6 @@
+import { agent_loop } from "std/agent/loop"
 /**
- * agent_loop({tool_caller}) routes every dispatch through the supplied
+ * agent_loop(harness, {tool_caller}) routes every dispatch through the supplied
  * caller. The caller increments a counter, observes the envelope, and
  * delegates. Asserts the counter matches the number of tool calls and
  * that the audit data attached by the caller surfaces on the dispatch
@@ -7,8 +8,6 @@
  */
 import { with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
-
-const observed = atomic(0)
 
 fn tools() {
   const r = tool_registry()
@@ -23,9 +22,11 @@ fn tools() {
   )
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
+  const observed = harness.runtime.atomic(0)
   // Two tool calls in turn 1, then a finishing turn.
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -38,10 +39,11 @@ pipeline default() {
     { ->
       const mw = with_required_reason()
       const counting_caller = { call, next ->
-        let _ = atomic_add(observed, 1)
+        let _ = harness.runtime.atomic_add(observed, 1)
         return mw.caller(call, next)
       }
       const result = agent_loop(
+        harness,
         "do it",
         nil,
         {
@@ -54,8 +56,8 @@ pipeline default() {
           tool_caller: counting_caller,
         },
       )
-      __io_println(result.status)
-      __io_println(atomic_get(observed))
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(observed))
     },
   )
 }

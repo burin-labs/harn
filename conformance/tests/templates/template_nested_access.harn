@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const u = {name: "Alice", email: "a@example.com", tags: ["admin", "dev", "ops"]}
-  __io_println(render("fixtures/template/nested.prompt", {user: u}))
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/nested.prompt", {user: u}))
 }

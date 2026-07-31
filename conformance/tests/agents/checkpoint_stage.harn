@@ -5,53 +5,54 @@ import {
   checkpoint_stage_retry,
 } from "std/checkpoint"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Start clean
-  checkpoint_clear()
+  harness.runtime.checkpoint_clear()
   // --- checkpoint_stage ---
   // First call: f() should run and return its value
-  const result1 = checkpoint_stage("step1", fn() { 42 })
+  const result1 = checkpoint_stage(harness.runtime, "step1", fn() { 42 })
   assert(result1 == 42, "first call should return fn result")
-  assert(checkpoint_exists("step1"), "checkpoint should be saved")
+  assert(harness.runtime.checkpoint_exists("step1"), "checkpoint should be saved")
   // Second call with same name: must return cached value (42), not re-run
-  const result2 = checkpoint_stage("step1", fn() { 99 })
+  const result2 = checkpoint_stage(harness.runtime, "step1", fn() { 99 })
   assert(result2 == 42, "second call should return cached value, not 99")
   // Different name: f() runs fresh
-  const result3 = checkpoint_stage("step2", fn() { "hello" })
+  const result3 = checkpoint_stage(harness.runtime, "step2", fn() { "hello" })
   assert(result3 == "hello", "different stage should run its fn")
   // Verify both keys are now checkpointed
-  assert(checkpoint_exists("step2"), "step2 should be checkpointed")
+  assert(harness.runtime.checkpoint_exists("step2"), "step2 should be checkpointed")
   // Works with dict results
-  const result4 = checkpoint_stage("step3", fn() { {x: 1, y: 2} })
+  const result4 = checkpoint_stage(harness.runtime, "step3", fn() { {x: 1, y: 2} })
   assert(result4.x == 1, "dict result preserved")
   assert(result4.y == 2, "dict result preserved")
   // Second call with dict: returns cached dict
-  const result4b = checkpoint_stage("step3", fn() { {x: 99, y: 99} })
+  const result4b = checkpoint_stage(harness.runtime, "step3", fn() { {x: 99, y: 99} })
   assert(result4b.x == 1, "cached dict result returned, not re-run")
   // List results are preserved
-  const result5 = checkpoint_stage("step4", fn() { [1, 2, 3] })
+  const result5 = checkpoint_stage(harness.runtime, "step4", fn() { [1, 2, 3] })
   assert(len(result5) == 3, "list result preserved")
   assert(result5[0] == 1, "list element preserved")
   // Second call returns cached list
-  const result5b = checkpoint_stage("step4", fn() { [9, 9, 9] })
+  const result5b = checkpoint_stage(harness.runtime, "step4", fn() { [9, 9, 9] })
   assert(result5b[0] == 1, "cached list returned")
   // --- checkpoint_stage_retry ---
   // Succeeds on first attempt
-  const r = checkpoint_stage_retry("retry_step", 3, fn() { "success" })
+  const r = checkpoint_stage_retry(harness.runtime, "retry_step", 3, fn() { "success" })
   assert(r == "success", "retry stage should return value")
-  assert(checkpoint_exists("retry_step"), "successful retry stage cached")
+  assert(harness.runtime.checkpoint_exists("retry_step"), "successful retry stage cached")
   // Cached: returns stored value, doesn't re-run
-  const r2 = checkpoint_stage_retry("retry_step", 3, fn() { "different" })
+  const r2 = checkpoint_stage_retry(harness.runtime, "retry_step", 3, fn() { "different" })
   assert(r2 == "success", "cached retry result returned")
   // Keyed stages reuse equivalent structured identities even when dict key
   // insertion order differs, then invalidate when any identity input changes.
   const keyed1 = checkpoint_stage_keyed(
+    harness.runtime,
     "keyed_step",
     {pin: "abc", inputs: {toolchain: "1.2", lock: "def"}},
     fn() { 10 },
   )
   assert(keyed1 == 10, "first keyed stage should run")
-  const keyed_record = checkpoint_get("keyed_step")
+  const keyed_record = harness.runtime.checkpoint_get("keyed_step")
   assert(
     keyed_record.schema == "harn.checkpoint_stage.keyed.v1",
     "keyed stage should store envelope",
@@ -59,37 +60,56 @@ pipeline test(task) {
   assert(keyed_record.fingerprint.starts_with("sha256:"), "keyed stage should store digest")
   assert(!json_stringify(keyed_record).contains("abc"), "raw keyed identity must not be persisted")
   const keyed2 = checkpoint_stage_keyed(
+    harness.runtime,
     "keyed_step",
     {inputs: {lock: "def", toolchain: "1.2"}, pin: "abc"},
     fn() { 20 },
   )
   assert(keyed2 == 10, "equivalent keyed identity should reuse cached success")
   const keyed3 = checkpoint_stage_keyed(
+    harness.runtime,
     "keyed_step",
     {pin: "advanced", inputs: {toolchain: "1.2", lock: "def"}},
     fn() { 30 },
   )
   assert(keyed3 == 30, "changed keyed identity should execute and replace stale success")
-  checkpoint("legacy_keyed_step", 7)
-  const replaced_legacy = checkpoint_stage_keyed("legacy_keyed_step", {pin: "abc"}, fn() { 8 })
+  harness.runtime.checkpoint("legacy_keyed_step", 7)
+  const replaced_legacy = checkpoint_stage_keyed(
+    harness.runtime,
+    "legacy_keyed_step",
+    {pin: "abc"},
+    fn() { 8 },
+  )
   assert(replaced_legacy == 8, "legacy raw checkpoints must not satisfy keyed stages")
   const malformed_fingerprint = "sha256:" + sha256(json_stringify({pin: "abc"}))
-  checkpoint(
+  harness.runtime.checkpoint(
     "malformed_keyed_step",
     {schema: "harn.checkpoint_stage.keyed.v1", fingerprint: malformed_fingerprint},
   )
   const replaced_malformed = checkpoint_stage_keyed(
+    harness.runtime,
     "malformed_keyed_step",
     {pin: "abc"},
     fn() { 9 },
   )
   assert(replaced_malformed == 9, "keyed envelope without a value must be invalidated")
-  const cached_nil = checkpoint_stage_keyed("nil_keyed_step", {pin: "abc"}, fn() { nil })
+  const cached_nil = checkpoint_stage_keyed(
+    harness.runtime,
+    "nil_keyed_step",
+    {pin: "abc"},
+    fn() { nil },
+  )
   assert(cached_nil == nil, "keyed stage should cache nil results")
-  const reused_nil = checkpoint_stage_keyed("nil_keyed_step", {pin: "abc"}, fn() { "unexpected" })
+  const reused_nil = checkpoint_stage_keyed(
+    harness.runtime,
+    "nil_keyed_step",
+    {pin: "abc"},
+    fn() { "unexpected" },
+  )
   assert(reused_nil == nil, "cached nil must be distinguishable from a cache miss")
   const failed_keyed_retry = try {
     checkpoint_stage_keyed_retry(
+      harness.runtime,
       "keyed_retry",
       {pin: "abc"},
       1,
@@ -99,14 +119,18 @@ pipeline test(task) {
     )
   }
   assert(is_err(failed_keyed_retry), "exhausted keyed retry should fail")
-  assert(!checkpoint_exists("keyed_retry"), "failed keyed retry must not cache completion")
+  assert(
+    !harness.runtime.checkpoint_exists("keyed_retry"),
+    "failed keyed retry must not cache completion",
+  )
   const recovered_keyed_retry = checkpoint_stage_keyed_retry(
+    harness.runtime,
     "keyed_retry",
     {pin: "abc"},
     1,
     fn() { "recovered" },
   )
   assert(recovered_keyed_retry == "recovered", "later keyed retry should execute after failure")
-  checkpoint_clear()
-  log("checkpoint_stage tests passed")
+  harness.runtime.checkpoint_clear()
+  harness.stdio.log("checkpoint_stage tests passed")
 }

@@ -11,8 +11,8 @@
  */
 import { lifecycle_audit_log_take } from "std/lifecycle"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("nightly-drain", {note: "one"})
       harness.handoff_to("nightly-drain", {note: "two"})
@@ -23,7 +23,7 @@ pipeline default() {
         return_value,
         {drain_budget_iterations: 1},
       )
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("status=" + result.status)
       harness.stdio.println("iterations=" + to_string(result.iterations))
       harness.stdio.println("budget=" + to_string(result.budget))

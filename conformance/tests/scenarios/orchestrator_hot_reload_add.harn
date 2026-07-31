@@ -1,9 +1,12 @@
 import "../_common"
 
-pipeline default() {
-  const unique = uuid()
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const base = path_join(harness.fs.temp_dir(), "harn-orchestrator-hot-reload-add-" + unique)
+pipeline default(harness: Harness) {
+  const unique = harness.random.uuid()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const base = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-orchestrator-hot-reload-add-" + unique,
+  )
   const workspace = path_join(base, "workspace")
   const state_dir = path_join(base, "state")
   const binary = harness.env.get_or(
@@ -141,10 +144,10 @@ pipeline default() {
     sys.stdout.write(json.dumps({"status": result["status"], "version": snapshot["triggers"][0]["version"]}))
     PY
     """
-  const result = shell(script)
+  const result = harness.process.shell(script)
   assert(result?.success, result?.stderr)
   const summary = json_parse(result?.stdout)
   assert(summary.status == 200, "new route accepts after add reload")
   assert(summary.version == 1, "added binding starts at version 1")
-  log("orchestrator hot reload add status: " + to_string(summary.status))
+  harness.stdio.log("orchestrator hot reload add status: " + to_string(summary.status))
 }

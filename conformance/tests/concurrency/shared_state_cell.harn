@@ -1,18 +1,18 @@
-pipeline default() {
-  const counter = shared_cell({scope: "task_group", key: "budget", initial: 0})
+pipeline default(harness: Harness) {
+  const counter = harness.runtime.shared_cell({scope: "task_group", key: "budget", initial: 0})
   parallel 10 { i ->
     let done = false
     while !done {
-      const snap = shared_snapshot(counter)
-      done = shared_cas(counter, snap, snap.value + 1)
+      const snap = harness.runtime.shared_snapshot(counter)
+      done = harness.runtime.shared_cas(counter, snap, snap.value + 1)
     }
   }
-  __io_println(shared_get(counter))
-  const stale = shared_snapshot(counter)
-  shared_set(counter, 99)
-  __io_println(shared_cas(counter, stale, 100))
-  const metrics = shared_metrics(counter)
-  __io_println(metrics.cas_success_count >= 10)
-  __io_println(metrics.cas_failure_count >= 1)
-  __io_println(metrics.stale_read_count >= 1)
+  harness.stdio.println(harness.runtime.shared_get(counter))
+  const stale = harness.runtime.shared_snapshot(counter)
+  harness.runtime.shared_set(counter, 99)
+  harness.stdio.println(harness.runtime.shared_cas(counter, stale, 100))
+  const metrics = harness.runtime.shared_metrics(counter)
+  harness.stdio.println(metrics.cas_success_count >= 10)
+  harness.stdio.println(metrics.cas_failure_count >= 1)
+  harness.stdio.println(metrics.stale_read_count >= 1)
 }

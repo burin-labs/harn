@@ -1,23 +1,23 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Reassign var inside if block (was stack underflow bug)
   let x = "hello"
   if true {
     x = "fixed"
   }
-  __io_println(x)
+  harness.stdio.println(x)
   // Reassign with condition on var
   let y = "initial"
   if y != "final" {
     y = "final"
   }
-  __io_println(y)
+  harness.stdio.println(y)
   // Reassign with optional chaining init
   const d = nil
   let z = d?.type
   if z != "tests" {
     z = "tests"
   }
-  __io_println(z)
+  harness.stdio.println(z)
   // Nested if reassignment
   let w = 0
   if true {
@@ -25,5 +25,5 @@ pipeline default() {
       w = 42
     }
   }
-  __io_println(w)
+  harness.stdio.println(w)
 }

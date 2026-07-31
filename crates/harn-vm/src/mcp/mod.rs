@@ -110,6 +110,7 @@ pub(crate) struct StdioMcpClientInner {
     /// keeps the deadline injectable so tests can prove the cumulative bound
     /// without waiting the full production budget (harn#4390).
     response_deadline: std::time::Duration,
+    fixtures: Option<Arc<crate::harness::CapabilityFixtureState>>,
 }
 
 pub(crate) struct HttpMcpClientInner {
@@ -125,6 +126,7 @@ pub(crate) struct HttpMcpClientInner {
     proxy_server_name: Option<String>,
     get_stream_task: Option<tokio::task::JoinHandle<()>>,
     tool_headers: BTreeMap<String, Vec<McpToolHeader>>,
+    fixtures: Option<Arc<crate::harness::CapabilityFixtureState>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,6 +209,22 @@ impl std::fmt::Debug for VmMcpClientHandle {
 }
 
 impl VmMcpClientHandle {
+    pub(crate) async fn set_capability_fixtures(
+        &self,
+        fixtures: Arc<crate::harness::CapabilityFixtureState>,
+    ) {
+        let mut guard = self.inner.lock().await;
+        match guard.as_mut() {
+            Some(McpClientInner::Stdio(inner)) => inner.fixtures = Some(fixtures),
+            Some(McpClientInner::Http(inner)) => {
+                inner.abort_get_stream();
+                inner.fixtures = Some(fixtures);
+                ensure_http_get_stream(inner, &self.name);
+            }
+            None => {}
+        }
+    }
+
     async fn protocol_mode(&self) -> Result<McpProtocolMode, VmError> {
         let guard = self.inner.lock().await;
         let inner = guard
@@ -408,6 +426,7 @@ pub(crate) struct HttpStreamConfig {
     session_id: Option<String>,
     proxy_server_name: Option<String>,
     server_name: String,
+    fixtures: Option<Arc<crate::harness::CapabilityFixtureState>>,
 }
 
 pub(crate) struct McpConnectOptions {

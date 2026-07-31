@@ -1,15 +1,21 @@
 import "std/project"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
-  const namespace = "coding-enrichment-${uuid()}"
-  const root = path_join(harness.fs.temp_dir(), "project-deep-scan-invalidation-" + uuid())
+pipeline test(harness: Harness, task) {
+  const namespace = "coding-enrichment-${harness.random.uuid()}"
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "project-deep-scan-invalidation-" + harness.random.uuid(),
+  )
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
   with_llm_script(
+    harness.llm,
     [llm_text("{\"purpose\":\"root\"}"), llm_text("{\"purpose\":\"root changed\"}")],
     { ->
       const first = project_deep_scan(
+        harness.project,
+        harness.clock,
         root,
         {
           namespace: namespace,
@@ -26,6 +32,8 @@ pipeline test(task) {
       )
       harness.fs.write_text(path_join(root, "README.md"), "# repo changed\n")
       const second = project_deep_scan(
+        harness.project,
+        harness.clock,
         root,
         {
           namespace: namespace,
@@ -40,11 +48,11 @@ pipeline test(task) {
           },
         },
       )
-      const second_status = project_deep_scan_status(namespace, root)
-      __io_println(first["."].enriched.purpose == "root")
-      __io_println(second["."].enriched.purpose == "root changed")
-      __io_println(second_status.cache_hits == 0)
-      __io_println(len(llm_mock_calls()) == 2)
+      const second_status = project_deep_scan_status(harness.project, namespace, root)
+      harness.stdio.println(first["."].enriched.purpose == "root")
+      harness.stdio.println(second["."].enriched.purpose == "root changed")
+      harness.stdio.println(second_status.cache_hits == 0)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 2)
       harness.fs.delete(root)
     },
   )

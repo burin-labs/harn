@@ -1,3 +1,5 @@
+import "std/agent/workers"
+
 /**
  * E5.4 (HARN-CAP-301): edge case — when a spawned child has no inline
  * effect-bearing surface (the spawn config carries no harness method
@@ -7,13 +9,14 @@
  * effects at execution time, but this fixture exercises the silent
  * pass-through path.
  */
-pipeline main() {
+pipeline main(harness: Harness) {
   const _worker = spawn_agent(
+    harness.agent,
     {
       name: "opaque-child",
       task: "compute",
       node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}},
     },
   )
-  __io_println("opaque ok")
+  harness.stdio.println("opaque ok")
 }

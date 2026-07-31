@@ -144,48 +144,72 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
     let state = Arc::new(parking_lot::Mutex::new(state));
 
     let s = Arc::clone(&state);
-    vm.register_builtin("store_get", move |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(s.lock().get(&key))
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "store_get",
+        move |args, _out| {
+            let key = args.first().map(|a| a.display()).unwrap_or_default();
+            Ok(s.lock().get(&key))
+        },
+    );
 
     let s = Arc::clone(&state);
-    vm.register_builtin("store_set", move |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        let value = args.get(1).unwrap_or(&VmValue::Nil);
-        let json_val = vm_to_json(value);
-        s.lock().set(key, json_val).map_err(VmError::Runtime)?;
-        Ok(VmValue::Nil)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "store_set",
+        move |args, _out| {
+            let key = args.first().map(|a| a.display()).unwrap_or_default();
+            let value = args.get(1).unwrap_or(&VmValue::Nil);
+            let json_val = vm_to_json(value)?;
+            s.lock().set(key, json_val).map_err(VmError::Runtime)?;
+            Ok(VmValue::Nil)
+        },
+    );
 
     let s = Arc::clone(&state);
-    vm.register_builtin("store_delete", move |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        s.lock().delete(&key).map_err(VmError::Runtime)?;
-        Ok(VmValue::Nil)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "store_delete",
+        move |args, _out| {
+            let key = args.first().map(|a| a.display()).unwrap_or_default();
+            s.lock().delete(&key).map_err(VmError::Runtime)?;
+            Ok(VmValue::Nil)
+        },
+    );
 
     let s = Arc::clone(&state);
-    vm.register_builtin("store_list", move |_args, _out| {
-        let keys = s.lock().list();
-        Ok(VmValue::List(std::sync::Arc::new(
-            keys.into_iter()
-                .map(|k| VmValue::String(arcstr::ArcStr::from(k)))
-                .collect(),
-        )))
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "store_list",
+        move |_args, _out| {
+            let keys = s.lock().list();
+            Ok(VmValue::List(std::sync::Arc::new(
+                keys.into_iter()
+                    .map(|k| VmValue::String(arcstr::ArcStr::from(k)))
+                    .collect(),
+            )))
+        },
+    );
 
     let s = Arc::clone(&state);
-    vm.register_builtin("store_save", move |_args, _out| {
-        s.lock().save().map_err(VmError::Runtime)?;
-        Ok(VmValue::Nil)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "store_save",
+        move |_args, _out| {
+            s.lock().save().map_err(VmError::Runtime)?;
+            Ok(VmValue::Nil)
+        },
+    );
 
     let s = Arc::clone(&state);
-    vm.register_builtin("store_clear", move |_args, _out| {
-        s.lock().clear().map_err(VmError::Runtime)?;
-        Ok(VmValue::Nil)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "store_clear",
+        move |_args, _out| {
+            s.lock().clear().map_err(VmError::Runtime)?;
+            Ok(VmValue::Nil)
+        },
+    );
 }
 
 #[cfg(test)]

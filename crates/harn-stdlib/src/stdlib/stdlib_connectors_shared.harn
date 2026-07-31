@@ -91,7 +91,7 @@ pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", opti
  * @effects: [net]
  * @errors: []
  */
-pub fn verify_jwt(token, jwks_url, options = nil) {
+pub fn verify_jwt(net: HarnessNet, token, jwks_url, options = nil) {
   const opts = options ?? {}
   let jwks = opts.inline_jwks
   if jwks == nil {
@@ -102,7 +102,7 @@ pub fn verify_jwt(token, jwks_url, options = nil) {
         error: "jwks_url is required unless options.inline_jwks is provided",
       }
     }
-    const response = harness.net.get(jwks_url, {headers: {Accept: "application/json"}})
+    const response = net.get(jwks_url, {headers: {Accept: "application/json"}})
     if !(response.ok ?? false) {
       return {ok: false, claims: nil, error: response.body, status: response.status}
     }
@@ -164,7 +164,7 @@ fn __connector_http_month_number(name) {
   return months[lowercase(name)]
 }
 
-fn __connector_http_parse_http_date_ms(raw) {
+fn __connector_http_parse_http_date_ms(clock: HarnessClock, raw) {
   const matches = regex_captures(
     "^[A-Za-z]{3},\\s+(\\d{1,2})\\s+([A-Za-z]{3})\\s+(\\d{4})\\s+(\\d{2}):(\\d{2}):(\\d{2})\\s+GMT$",
     raw,
@@ -191,14 +191,14 @@ fn __connector_http_parse_http_date_ms(raw) {
   if is_err(parsed) {
     return nil
   }
-  const delta_seconds = to_float(unwrap(parsed)) - harness.clock.timestamp()
+  const delta_seconds = to_float(unwrap(parsed)) - clock.timestamp()
   if delta_seconds <= 0.0 {
     return 0
   }
   return to_int(delta_seconds * 1000.0)
 }
 
-fn __connector_http_parse_retry_after_ms(value) {
+fn __connector_http_parse_retry_after_ms(clock: HarnessClock, value) {
   const raw = trim(to_string(value ?? ""))
   if raw == "" {
     return nil
@@ -214,13 +214,13 @@ fn __connector_http_parse_retry_after_ms(value) {
     date_parse(raw)
   }
   if is_ok(parsed) {
-    const delta_seconds = to_float(unwrap(parsed)) - harness.clock.timestamp()
+    const delta_seconds = to_float(unwrap(parsed)) - clock.timestamp()
     if delta_seconds <= 0.0 {
       return 0
     }
     return to_int(delta_seconds * 1000.0)
   }
-  return __connector_http_parse_http_date_ms(raw)
+  return __connector_http_parse_http_date_ms(clock, raw)
 }
 
 fn __connector_http_retry_options(options) {
@@ -384,9 +384,9 @@ fn __connector_http_has_fields(value) {
   return type_of(value) == "dict" && len((value ?? {}).keys()) > 0
 }
 
-fn __connector_http_error_from_response(response, options, retryable) {
+fn __connector_http_error_from_response(clock: HarnessClock, response, options, retryable) {
   const status = to_int(response?.status) ?? 0
-  const rate_limit = connector_http_rate_limit(response)
+  const rate_limit = connector_http_rate_limit(clock, response)
   let error = {category: __connector_http_category(status), status: status, retryable: retryable}
   if rate_limit?.retry_after_ms != nil {
     error["retry_after_ms"] = rate_limit.retry_after_ms
@@ -472,8 +472,8 @@ fn __connector_http_error_envelope(response, error) {
   return envelope
 }
 
-fn __connector_http_success_envelope(response) {
-  const rate_limit = connector_http_rate_limit(response)
+fn __connector_http_success_envelope(clock: HarnessClock, response) {
+  const rate_limit = connector_http_rate_limit(clock, response)
   let envelope = {
     ok: true,
     status: response.status,
@@ -503,7 +503,7 @@ fn __connector_http_should_retry_response(response, retry_policy, retry_allowed)
   return __connector_http_retryable_status(status, retry_policy.retry_on)
 }
 
-fn __connector_http_sleep_before_retry(retry_policy, attempt, retry_after_ms) {
+fn __connector_http_sleep_before_retry(clock: HarnessClock, retry_policy, attempt, retry_after_ms) {
   let delay = __connector_http_retry_delay_ms(retry_policy, attempt)
   if retry_policy.respect_retry_after && retry_after_ms != nil {
     if retry_after_ms > retry_policy.cap_ms {
@@ -514,7 +514,7 @@ fn __connector_http_sleep_before_retry(retry_policy, attempt, retry_after_ms) {
     }
   }
   if delay > 0 {
-    harness.clock.sleep_ms(delay)
+    clock.sleep_ms(delay)
   }
   return true
 }
@@ -537,7 +537,7 @@ pub fn connector_http_header(headers_or_response, name) {
  * @effects: []
  * @errors: []
  */
-pub fn connector_http_rate_limit(headers_or_response) {
+pub fn connector_http_rate_limit(clock: HarnessClock, headers_or_response) {
   const retry_after = connector_http_header(headers_or_response, "Retry-After")
   const limit = connector_http_header(headers_or_response, "RateLimit-Limit")
   const remaining = connector_http_header(headers_or_response, "RateLimit-Remaining")
@@ -548,7 +548,7 @@ pub fn connector_http_rate_limit(headers_or_response) {
   return filter_nil(
     {
       retry_after: retry_after,
-      retry_after_ms: __connector_http_parse_retry_after_ms(retry_after),
+      retry_after_ms: __connector_http_parse_retry_after_ms(clock, retry_after),
       limit: limit ?? x_limit,
       remaining: remaining ?? x_remaining,
       reset: reset ?? x_reset,
@@ -567,9 +567,9 @@ pub fn connector_http_rate_limit(headers_or_response) {
  *
  * @effects: [net, time]
  * @errors: []
- * @example: connector_http_request("GET", url, {retry: {max_attempts: 3}})
+ * @example: connector_http_request(harness.clock, harness.net, "GET", url, {retry: {max_attempts: 3}})
  */
-pub fn connector_http_request(method, url, options = nil) {
+pub fn connector_http_request(clock: HarnessClock, net: HarnessNet, method, url, options = nil) {
   const opts = options ?? {}
   const resolved_method = uppercase(trim(to_string(method ?? "GET")))
   const headers = __connector_http_headers(opts)
@@ -579,7 +579,7 @@ pub fn connector_http_request(method, url, options = nil) {
   let attempt = 0
   while attempt < retry_policy.max_attempts {
     const result = try {
-      harness.net.request(resolved_method, url, request_options)
+      net.request(resolved_method, url, request_options)
     }
     if is_err(result) {
       const error = __connector_http_error_from_exception(unwrap_err(result), opts)
@@ -588,7 +588,7 @@ pub fn connector_http_request(method, url, options = nil) {
       if !can_retry {
         return __connector_http_error_envelope(nil, error)
       }
-      if !__connector_http_sleep_before_retry(retry_policy, attempt, nil) {
+      if !__connector_http_sleep_before_retry(clock, retry_policy, attempt, nil) {
         return __connector_http_error_envelope(nil, error)
       }
       attempt = attempt + 1
@@ -596,19 +596,19 @@ pub fn connector_http_request(method, url, options = nil) {
     }
     const response = unwrap(result)
     if response.ok ?? false {
-      return __connector_http_success_envelope(response)
+      return __connector_http_success_envelope(clock, response)
     }
     const should_retry = __connector_http_should_retry_response(
       response,
       retry_policy,
       retry_allowed,
     )
-    const retry_after_ms = connector_http_rate_limit(response)?.retry_after_ms
-    const error = __connector_http_error_from_response(response, opts, should_retry)
+    const retry_after_ms = connector_http_rate_limit(clock, response)?.retry_after_ms
+    const error = __connector_http_error_from_response(clock, response, opts, should_retry)
     if !should_retry || attempt + 1 >= retry_policy.max_attempts {
       return __connector_http_error_envelope(response, error)
     }
-    if !__connector_http_sleep_before_retry(retry_policy, attempt, retry_after_ms) {
+    if !__connector_http_sleep_before_retry(clock, retry_policy, attempt, retry_after_ms) {
       return __connector_http_error_envelope(response, error)
     }
     attempt = attempt + 1
@@ -630,10 +630,10 @@ pub fn connector_http_request(method, url, options = nil) {
  *
  * @effects: [net, time]
  * @errors: []
- * @example: connector_http_json("GET", url, {retry: {max_attempts: 3}})
+ * @example: connector_http_json(harness, "GET", url, {retry: {max_attempts: 3}})
  */
-pub fn connector_http_json(method, url, options = nil) {
-  const response = connector_http_request(method, url, options)
+pub fn connector_http_json(clock: HarnessClock, net: HarnessNet, method, url, options = nil) {
+  const response = connector_http_request(clock, net, method, url, options)
   if !(response.ok ?? false) {
     return response
   }
@@ -670,7 +670,14 @@ pub fn connector_http_json(method, url, options = nil) {
  * @effects: [net]
  * @errors: []
  */
-pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options = nil) {
+pub fn oauth2_token_refresh(
+  net: HarnessNet,
+  client_id,
+  client_secret,
+  refresh_token,
+  token_url,
+  options = nil,
+) {
   const opts = options ?? {}
   const params = filter_nil(
     merge(
@@ -687,7 +694,7 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
     {Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded"},
     opts.headers ?? {},
   )
-  const response = harness.net.post(token_url, __form_body(params), {headers: headers})
+  const response = net.post(token_url, __form_body(params), {headers: headers})
   const parsed: Result<unknown, JsonParseFailure> = try {
     json_parse(response.body)
   }
@@ -719,7 +726,7 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
  * @effects: [time]
  * @errors: []
  */
-pub fn rate_limit_token_bucket(state = nil, config = nil, now_ms = nil) {
+pub fn rate_limit_token_bucket(clock: HarnessClock, state = nil, config = nil, now_ms = nil) {
   const cfg = config ?? {}
   let capacity = cfg.capacity ?? 60
   if capacity < 1 {
@@ -733,7 +740,7 @@ pub fn rate_limit_token_bucket(state = nil, config = nil, now_ms = nil) {
   if refill_interval_ms < 1 {
     refill_interval_ms = 1
   }
-  const now = now_ms ?? to_int(harness.clock.timestamp() * 1000)
+  const now = now_ms ?? to_int(clock.timestamp() * 1000)
   const last_refill_ms = state?.last_refill_ms ?? now
   const elapsed_ms = now - last_refill_ms
   let tokens = state?.tokens ?? capacity
@@ -1144,7 +1151,12 @@ pub fn git_forge_writeback_request(
  * @effects: [net]
  * @errors: []
  */
-pub fn git_forge_writeback_comment(event: GitForgePullRequestEvent, body: string, options = nil) {
+pub fn git_forge_writeback_comment(
+  net: HarnessNet,
+  event: GitForgePullRequestEvent,
+  body: string,
+  options = nil,
+) {
   const request = git_forge_writeback_request(event, body, options)
-  return connector_call(request.provider, request.method, request.params)
+  return net.connector_call(request.provider, request.method, request.params)
 }

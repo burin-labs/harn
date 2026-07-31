@@ -7,12 +7,12 @@ import "std/agent/loop_support"
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_clock_now_ms() {
-  return harness.clock.now_ms()
+pub fn __agent_loop_clock_now_ms(clock: HarnessClock) {
+  return clock.now_ms()
 }
 
-pub fn __agent_loop_clock_sleep_ms(delay_ms) {
-  harness.clock.sleep_ms(delay_ms)
+pub fn __agent_loop_clock_sleep_ms(clock: HarnessClock, delay_ms) {
+  clock.sleep_ms(delay_ms)
 }
 
 pub const __AGENT_LOOP_CHECKPOINT_ITERATION_START = "iteration_start"
@@ -126,7 +126,7 @@ pub fn __autocontinue_hidden_reasoning_truncated(llm_result, tool_call_count) {
  * @effects: [host]
  * @errors: []
  */
-pub fn __autocontinue_should_continue(call, turn_opts) {
+pub fn __autocontinue_should_continue(agent: HarnessAgent, call, turn_opts) {
   if !(call?.ok ?? false) {
     return false
   }
@@ -135,7 +135,7 @@ pub fn __autocontinue_should_continue(call, turn_opts) {
     return false
   }
   const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
-  const parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
+  const parsed = agent_parse_tool_calls(agent, raw_text, turn_opts?.tools, turn_opts?.tool_format)
   let tool_calls = __resolve_tool_calls(llm_result, parsed)
   const has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
   if __host_agent_truncated_tool_call(
@@ -159,6 +159,7 @@ pub fn __autocontinue_should_continue(call, turn_opts) {
  * @errors: []
  */
 pub fn __invoke_llm_with_autocontinue(
+  harness: Harness,
   message,
   turn_system,
   llm_opts,
@@ -167,12 +168,13 @@ pub fn __invoke_llm_with_autocontinue(
   iteration_index,
 ) {
   const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
-  agent_session_flush(session_id)
-  let call = agent_invoke_llm(message, turn_system, llm_opts)
+  agent_session_flush(harness.agent, session_id)
+  let call = agent_invoke_llm(harness, message, turn_system, llm_opts)
   const max_continuations = __autocontinue_max_continuations(llm_opts)
   let attempts = 0
   let cap = llm_opts?.max_tokens ?? 0
-  while attempts < max_continuations && __autocontinue_should_continue(call, turn_opts) {
+  while attempts < max_continuations
+    && __autocontinue_should_continue(harness.agent, call, turn_opts) {
     const raised = __autocontinue_raised_cap(cap, llm_opts)
     // No headroom left to raise — re-issuing would just truncate again at the
     // same cap, so stop and let parse-guidance take the turn.
@@ -181,6 +183,7 @@ pub fn __invoke_llm_with_autocontinue(
     }
     attempts = attempts + 1
     agent_emit_event(
+      harness.agent,
       session_id,
       "llm_auto_continue",
       {
@@ -198,12 +201,10 @@ pub fn __invoke_llm_with_autocontinue(
       max_tokens: raised,
       _truncation_auto_continue_attempt: attempts,
     }
-    call = agent_invoke_llm(message, turn_system, retry_opts)
+    call = agent_invoke_llm(harness, message, turn_system, retry_opts)
   }
   return call
 }
-
-// -------------------------------------------------------------------------------------------------
 
 /**
  * Context-overflow recovery.
@@ -258,6 +259,7 @@ pub fn __agent_loop_context_overflow_max_recoveries(llm_opts) {
  * @errors: []
  */
 pub fn __agent_loop_recover_context_overflow(
+  harness: Harness,
   call,
   message,
   turn_system,
@@ -272,8 +274,9 @@ pub fn __agent_loop_recover_context_overflow(
   while attempt < max_recoveries && !current.ok
     && __agent_loop_is_context_overflow(current?.error) {
     attempt = attempt + 1
-    const archived = agent_emergency_compact(session, llm_opts, attempt)
+    const archived = agent_emergency_compact(harness.agent, session, llm_opts, attempt)
     agent_emit_event(
+      harness.agent,
       session.session_id,
       "context_overflow_recovery",
       {
@@ -291,7 +294,7 @@ pub fn __agent_loop_recover_context_overflow(
       break
     }
     // Rebuild the turn prompt against the now-compacted transcript and re-issue.
-    const turn_prompt = __agent_loop_build_turn_prompt(session, llm_opts, iteration_index)
+    const turn_prompt = __agent_loop_build_turn_prompt(harness, session, llm_opts, iteration_index)
     const retry_opts = llm_clear_one_shot_prefill(llm_opts)
       + {
       messages: turn_prompt.messages,
@@ -299,6 +302,7 @@ pub fn __agent_loop_recover_context_overflow(
       _context_overflow_recovery_attempt: attempt,
     }
     current = __invoke_llm_with_autocontinue(
+      harness,
       message,
       turn_prompt.system,
       retry_opts,
@@ -309,6 +313,3 @@ pub fn __agent_loop_recover_context_overflow(
   }
   return current
 }
-
-// -------------------------------------------------------------------------------------------------
-

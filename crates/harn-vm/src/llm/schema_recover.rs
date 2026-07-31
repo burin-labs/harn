@@ -38,7 +38,7 @@
 //!
 //! Unlike `llm_call_structured_result`, this helper takes already-
 //! produced text rather than running a fresh structured call. The
-//! intended use is downstream of an `llm_call(...)` that returned
+//! intended use is downstream of an `harness.llm.call(...)` that returned
 //! prose or that used `output: "text"`, when the caller
 //! wants to recover the schema-shaped payload after the fact.
 

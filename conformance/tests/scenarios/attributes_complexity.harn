@@ -37,9 +37,9 @@ pub fn classify(x: int) -> string {
   return "other"
 }
 
-pipeline test_complexity(task) {
+pipeline test_complexity(harness: Harness, task) {
   assert(classify(1) == "one", "branch 1")
   assert(classify(10) == "ten", "branch 10")
   assert(classify(99) == "other", "default branch")
-  log("attributes_complexity ok")
+  harness.stdio.log("attributes_complexity ok")
 }

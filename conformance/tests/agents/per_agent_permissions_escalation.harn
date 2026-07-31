@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
 fn write_tools() {
@@ -15,8 +16,9 @@ fn write_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -27,6 +29,7 @@ pipeline main() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Write twice.",
         "Use tools.",
         {
@@ -45,10 +48,16 @@ pipeline main() {
           },
         },
       )
-      __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionEscalation")) == 1)
-      __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 2)
-      __io_println(len(result?.tools?.rejected ?? []) == 0)
-      __io_println(transcript_render_full(result?.transcript).contains("workspace write approved"))
+      harness.stdio.println(
+        len(transcript_events_by_kind(result?.transcript, "PermissionEscalation")) == 1,
+      )
+      harness.stdio.println(
+        len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 2,
+      )
+      harness.stdio.println(len(result?.tools?.rejected ?? []) == 0)
+      harness.stdio.println(
+        transcript_render_full(result?.transcript).contains("workspace write approved"),
+      )
     },
   )
 }

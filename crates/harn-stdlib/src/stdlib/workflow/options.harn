@@ -123,7 +123,7 @@ pub type StageSpec = {
 }
 
 /**
- * Run-level options accepted by `workflow_execute(task, graph, artifacts?,
+ * Run-level options accepted by `workflow_execute(harness, task, graph, artifacts?,
  * options?)`. See `docs/src/workflow-runtime.md` for semantics.
  *
  * Rust twin: none — these are consumed by the workflow driver in

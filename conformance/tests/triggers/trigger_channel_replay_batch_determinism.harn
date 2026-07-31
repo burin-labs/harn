@@ -12,24 +12,24 @@ import "std/triggers"
  * identical hash sequences, even when intermediate aggregation logic
  * sits between the emits and the handler.
  */
-fn handle_batch(event) {
+fn handle_batch(harness: Harness, event) {
   const batch_len = if event.batch == nil {
     0
   } else {
     len(event.batch)
   }
-  emit_channel("ch.replay.batch.fired", {batch_size: batch_len})
+  harness.channels.append("ch.replay.batch.fired", {batch_size: batch_len})
 }
 
-pipeline default() {
-  const audit = event_log.subscribe(
+pipeline default(harness: Harness) {
+  const audit = harness.obs.event_log_subscribe(
     {topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"},
   )
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-replay-batch-" + unique,
       kind: "channel.emit",
@@ -49,9 +49,9 @@ pipeline default() {
     },
   )
   // First "wall" of batched emits — fires the handler once.
-  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 1})
-  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 2})
-  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 3})
+  const _ = harness.channels.append("ch.replay.batch.input", {repo: "harn", seq: 1})
+  const _ = harness.channels.append("ch.replay.batch.input", {repo: "harn", seq: 2})
+  const _ = harness.channels.append("ch.replay.batch.input", {repo: "harn", seq: 3})
   const first_a = audit.next().value
   const first_b = audit.next().value
   const first_c = audit.next().value
@@ -60,22 +60,22 @@ pipeline default() {
   // Replay-equivalent producer wall: identical payloads in identical
   // order. payload_hash must match the first wall byte-for-byte; only
   // event_ids differ because emit_channel mints a fresh id per call.
-  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 1})
-  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 2})
-  const _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 3})
+  const _ = harness.channels.append("ch.replay.batch.input", {repo: "harn", seq: 1})
+  const _ = harness.channels.append("ch.replay.batch.input", {repo: "harn", seq: 2})
+  const _ = harness.channels.append("ch.replay.batch.input", {repo: "harn", seq: 3})
   const second_a = audit.next().value
   const second_b = audit.next().value
   const second_c = audit.next().value
   // Per-constituent payload_hash equality across runs.
-  __io_println(first_a.payload.payload_hash == second_a.payload.payload_hash)
-  __io_println(first_b.payload.payload_hash == second_b.payload.payload_hash)
-  __io_println(first_c.payload.payload_hash == second_c.payload.payload_hash)
+  harness.stdio.println(first_a.payload.payload_hash == second_a.payload.payload_hash)
+  harness.stdio.println(first_b.payload.payload_hash == second_b.payload.payload_hash)
+  harness.stdio.println(first_c.payload.payload_hash == second_c.payload.payload_hash)
   // Cross-constituent inequality — distinct payloads inside a single
   // batch keep distinct hashes, so the oracle can pinpoint which
   // constituent drifted on a future replay.
-  __io_println(first_a.payload.payload_hash == first_b.payload.payload_hash)
-  __io_println(first_b.payload.payload_hash == first_c.payload.payload_hash)
+  harness.stdio.println(first_a.payload.payload_hash == first_b.payload.payload_hash)
+  harness.stdio.println(first_b.payload.payload_hash == first_c.payload.payload_hash)
   // event_ids are always fresh per emit, even on a "replay" wall, so
   // the oracle anchors via event_id but compares via payload_hash.
-  __io_println(first_a.payload.event_id == second_a.payload.event_id)
+  harness.stdio.println(first_a.payload.event_id == second_a.payload.event_id)
 }

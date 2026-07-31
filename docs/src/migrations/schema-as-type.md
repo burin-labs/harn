@@ -34,7 +34,7 @@ const grader_schema = {
   },
 }
 
-const r = llm_call(prompt, nil, {
+const r = harness.llm.call(prompt, nil, {
   model: routing.model,
   output: grader_schema,
   schema_retries: 2,
@@ -42,7 +42,7 @@ const r = llm_call(prompt, nil, {
 
 // No compile-time guarantee that r.data carries these fields, so the
 // nilable access still needs `?.` to satisfy the checker.
-log("verdict=${r.data?.verdict}")
+harness.stdio.log("verdict=${r.data?.verdict}")
 ```
 
 After — one alias, two uses:
@@ -53,7 +53,7 @@ type GraderOut = {
   summary: string,
 }
 
-const r = llm_call(prompt, nil, {
+const r = harness.llm.call(prompt, nil, {
   model: routing.model,
   output: GraderOut,          // compiled to the JSON-Schema dict
   schema_retries: 2,
@@ -61,7 +61,7 @@ const r = llm_call(prompt, nil, {
 
 if schema_is(r.data, GraderOut) {
   // r.data is narrowed to GraderOut here.
-  log("verdict=${r.data.verdict}")
+  harness.stdio.log("verdict=${r.data.verdict}")
 }
 ```
 
@@ -90,7 +90,7 @@ numeric `min`/`max`, `const`, nested `$ref`, etc.). You can mix:
 ```harn
 type Name = {first: string, last: string}
 
-const r = llm_call(prompt, nil, {
+const r = harness.llm.call(prompt, nil, {
   output: {
     type: "dict",
     properties: {
@@ -112,7 +112,7 @@ const r = llm_call(prompt, nil, {
   `dict<string, V>`, literal-string/int unions, functions, nested aliases,
   applied generic aliases, and open-record tails. Imported aliases may be used
   directly or embedded in a consumer-owned alias.
-- `response.data` of `llm_call(..., {output: T})` is not yet
+- `response.data` of `harness.llm.call(..., {output: T})` is not yet
   automatically narrowed to `T` by the type checker. Use
   `if schema_is(r.data, T) { ... }` in the interim — the narrowing
   there is exact.

@@ -15,7 +15,7 @@ Execute a `.harn` file.
 harn run <file.harn>
 harn run --trace <file.harn>
 harn run --profile --profile-json profile.json <file.harn>
-harn run -e 'log("hello")'
+harn run -e 'harness.stdio.log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
 harn run --approve-risky git.push release.harn
@@ -332,7 +332,7 @@ targets produce a static error and the VM is never started — the same
 `call target ... is not defined or imported` message you see from
 `harn check`.
 
-The inline `-e <code>` form is wrapped in `pipeline main(task) { ... }`
+The inline `-e <code>` form is wrapped in `pipeline main(harness: Harness, task) { ... }`
 and run as a temp file in the current directory, so:
 
 - Leading `import "..."` (and `pub import { ... } from "..."`) lines
@@ -346,8 +346,8 @@ and run as a temp file in the current directory, so:
   pure-expression `-e` still works there but relative imports won't
   resolve.
 
-`--explain-cost` stops after the static pass. It scans direct `llm_call(...)`
-and `agent_loop(...)` callsites, estimates statically known prompt/system input
+`--explain-cost` stops after the static pass. It scans direct `harness.llm.call(...)`
+and `agent_loop(harness, ...)` callsites, estimates statically known prompt/system input
 tokens, applies literal `agent_loop` iteration caps, and reports unresolved
 dynamic model or prompt expressions without executing pipeline code.
 
@@ -696,7 +696,7 @@ harn time run main.harn --json --no-cache
 harn time run main.harn --no-sandbox
 harn time run main.harn --write-root /path/to/output
 harn time run main.harn --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY
-harn time run -e 'log("hi")' --json
+harn time run -e 'harness.stdio.log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```
 
@@ -1027,18 +1027,17 @@ harn fix --plan --json main.harn
 harn fix --plan --json --safety behavior-preserving src/
 harn fix --apply --safety behavior-preserving main.harn
 harn fix --apply --dry-run --json --safety scope-local src/
-harn fix --apply --safety surface-changing --harness-threading thread-params src/
+harn fix --apply --safety surface-changing src/
 ```
 
-`--harness-threading` controls how ambient-capability migrations satisfy call
-sites that do not already have a local `Harness` parameter. The default,
-`local-global`, rewrites ambient builtins to the VM-level `harness` binding and
-preserves helper signatures. `thread-params` adds `harness: Harness` parameters
-and updates same-file callers; use it when you explicitly want public signature
-threading.
+Ambient-capability migrations add an explicit `harness: Harness` parameter and
+update callers. This is a surface-changing repair because Harn has no ambient
+root harness. Follow the repair with `harn lint`; the capability-attenuation
+lint recommends replacing broad root parameters with the narrowest coherent
+nominal handle a helper actually needs.
 
-`--json` returns a `RepairPlan` with `schemaVersion: 2`, `harnessThreading`,
-`diagnostics[]`, `repairs[]`, `skippedFiles[]`, and `safetyLevels[]`. Each
+`--json` returns a `RepairPlan` with `schemaVersion: 2`, `diagnostics[]`,
+`repairs[]`, `skippedFiles[]`, and `safetyLevels[]`. Each
 repair includes the diagnostic code, repair `{id, summary, safety}`, impact
 metadata, candidate edits, `applies_cleanly`, and `conflicts_with` indexes for
 overlapping edit ranges. Ambient Harness repairs classify local rewrites
@@ -1057,9 +1056,10 @@ without writing files.
 
 Type-check one or more `.harn` files or directories and run preflight
 validation without executing them. The preflight pass resolves imports, checks
-literal `render(...)` / `render_prompt(...)` targets, detects import symbol collisions across
-modules, validates `host_call("capability.operation", ...)` capability
-contracts, and flags missing template resources, execution directories, and worker repos that would
+literal `harness.fs.render_prompt(...)` targets, detects import symbol collisions across
+modules, validates privileged provenance-stamped
+`host_call("capability.operation", ...)` bridge contracts, and flags missing
+template resources, execution directories, and worker repos that would
 otherwise fail only at runtime. Source-aware lint rules run as part of
 `check`. (The `missing-harndoc` warning for undocumented `pub fn` APIs is
 opt-in via `[lint] require_docstrings = true` in `harn.toml`.)
@@ -1094,7 +1094,7 @@ harn check --preflight warning src/
 | Flag | Description |
 |---|---|
 | `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries. Overrides `[check].host_capabilities_path` in `harn.toml`. |
-| `--bundle-root <dir>` | Validate `render(...)`, `render_prompt(...)`, and template paths against an alternate bundled layout root |
+| `--bundle-root <dir>` | Validate `harness.fs.render_prompt(...)`, and template paths against an alternate bundled layout root |
 | `--invariants` | Evaluate `@invariant(...)` annotations on functions, tools, and pipelines. Violations fail the check and are reported as `invariant[<name>]` diagnostics with concrete source spans. |
 | `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |
 | `--preflight <severity>` | Override preflight diagnostic severity: `error` (default, fails the check), `warning` (reports but does not fail), or `off` (suppresses all preflight diagnostics). Overrides `[check].preflight_severity`. |
@@ -1134,13 +1134,19 @@ cache; `HARN_BYTECODE_CACHE=0` disables it together with the bytecode cache.
   require_egress_policy: "mcp.connector",
   require_budget: "llm.model",
 )
-fn release_worker(client) {
-  const _approval = request_approval("edit", {capabilities_requested: ["fs.write"]})
-  write_file("src/release.md", "ready")
-  with_command_policy({deny: ["rm"]}, { -> exec("git status") })
-  egress_policy({default: "deny", allow: ["api.github.com"]})
-  mcp_call(client, "github.search", {query: "harn"})
-  llm_call("summarize", nil, {budget: {max_output_tokens: 128}})
+fn release_worker(harness: Harness, client) {
+  const _approval = harness.interaction.request_approval(
+    "edit",
+    {capabilities_requested: ["fs.write"]},
+  )
+  harness.fs.write_text("src/release.md", "ready")
+  harness.runtime.with_command_policy(
+    {deny: ["rm"]},
+    { -> harness.process.exec("git status") },
+  )
+  harness.net.egress_policy({default: "deny", allow: ["api.github.com"]})
+  harness.tools.mcp_call(client, "github.search", {query: "harn"})
+  harness.llm.call("summarize", nil, {budget: {max_output_tokens: 128}})
 }
 ```
 
@@ -1321,8 +1327,9 @@ Print a bundle manifest for one or more `.harn` targets. The manifest includes:
 
 - explicit `entry_modules`, `import_modules`, and `module_dependencies` edges
 - explicit `prompt_assets` and `template_assets` slices, plus a full `assets`
-  table resolved through the same source-relative rules as `render(...)`
-- required host capabilities discovered from literal `host_call(...)` sites
+  table resolved through the same source-relative rules as `harness.fs.render_prompt(...)`
+- required host capabilities discovered from nominal Harness usage and
+  privileged, provenance-stamped `host_call(...)` bridge sites
 - literal execution directories and worker worktree repos
 - a `summary` block with stable counts for packagers and release tooling
 
@@ -2563,7 +2570,7 @@ packages in the leased current generation.
 
 Clarifying-question evals use an explicit fixture with
 `"eval_kind": "clarifying_question"`. The fixture checks persisted
-`ask_user(...)` prompts captured in the run record and can enforce a
+`harness.interaction.ask_user(...)` prompts captured in the run record and can enforce a
 single minimal question via `required_terms`, `forbidden_terms`, and
 question-count bounds.
 
@@ -2787,7 +2794,7 @@ report includes trigger kind/provider, HTTP route path when the binding exposes
 one, local module and handler, match events, declared budgets, statically
 required host capabilities, vendor-lock disclosure from provider-specific
 imports, and template framework overhead tokens for non-trivial
-`render(...)` / `render_prompt(...)` / `render_string(...)` use. Webhook and
+`harness.fs.render_prompt(...)` / `harness.fs.render_template(...)` use. Webhook and
 A2A-push triggers default to `/triggers/<id>` when no path is declared.
 
 ## harn trigger replay
@@ -3098,7 +3105,7 @@ Stdout observability remains available with MCP HTTP and ACP WebSocket, where
 stdout is not the protocol transport.
 
 For scripts that author the MCP surface through the registration
-builtins (`mcp_tools(registry)`, `mcp_resource(...)`, `mcp_prompt(...)`)
+builtins (`harness.tools.mcp_tools(registry)`, `harness.tools.mcp_resource(...)`, `harness.tools.mcp_prompt(...)`)
 instead of `pub fn` exports, `harn serve mcp` auto-detects that mode,
 runs the script once, and exposes the registered tools / resources /
 prompts over either stdio or Streamable HTTP. Pass `--card <PATH_OR_JSON>`

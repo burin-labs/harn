@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn get_name() -> int {
     return "not an int"
   }

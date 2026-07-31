@@ -608,6 +608,16 @@ impl Vm {
                 }
             }
         }
+        if artifact.provenance == crate::module_artifact::ModuleProvenance::PrivilegedWire {
+            for (name, value) in &public_values {
+                if !matches!(value, VmValue::Harness(_)) {
+                    return Err(VmError::Runtime(format!(
+                        "Privileged wire module export `{name}` produced {}; only a nominal Harness capability handle may cross the wire boundary",
+                        value.type_name()
+                    )));
+                }
+            }
+        }
         let public_type_names = artifact.public_type_names.clone();
         let mut public_type_schemas: BTreeMap<String, VmValue> = {
             let state = module_state.lock();

@@ -105,14 +105,14 @@ population. An empty population serializes every statistic as `null` with
 
 ### Writing a conformance test
 
-Create a `.harn` file with a `pipeline default(task)` entry point and use
-`log()` to produce output:
+Create a `.harn` file with a `pipeline default(harness: Harness, task)` entry point and use
+`harness.stdio.log()` to produce output:
 
 ```harn,ignore
 // conformance/tests/<group>/my_feature.harn  (e.g. stdlib/, types/)
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const result = my_feature(42)
-  log(result)
+  harness.stdio.log(result)
 }
 ```
 
@@ -127,39 +127,41 @@ Then create a `.expected` file with the exact output:
 Import `std/testing` in your Harn tests for higher-level test helpers:
 
 ```harn
-import { mock_host_result, assert_host_called, clear_host_mocks } from "std/testing"
+import { with_capability_fixtures, with_llm_mocks } from "std/testing"
 ```
 
-### Host mock helpers
+### Harness-owned capability fixtures
 
-| Function | Description |
+Test effects use the same nominal handles as production code. `HarnessTesting`
+owns fixture registration and the call log for one exact `Harness`; no
+process-global registry or thread-local setup is involved.
+
+| Method or helper | Description |
 |----------|-------------|
-| `clear_host_mocks()` | Remove all registered host mocks |
-| `mock_host_result(cap, op, result, params?, unregistered_ok?)` | Mock a host capability to return a value |
-| `mock_host_error(cap, op, message, params?, unregistered_ok?)` | Mock a host capability to return an error |
-| `mock_host_response(cap, op, config)` | Mock with full response configuration |
+| `harness.testing.clear()` | Clear deterministic responses and recorded calls for this harness |
+| `harness.testing.respond(capability, method, result, when?, repeat?)` | Register a deterministic result for a known capability method |
+| `harness.testing.respond_error(capability, method, message, when?, repeat?)` | Register a deterministic error |
+| `harness.testing.calls()` | Return calls made through this harness |
+| `with_capability_fixtures(harness.testing, fixtures, body)` | Run a body in an isolated response-and-call scope, restoring the prior scope even when the body throws |
+| `with_llm_mocks(harness.llm, mocks, body)` | Run a body in an isolated LLM response-and-call scope |
 
-### Host call assertions
-
-| Function | Description |
-|----------|-------------|
-| `host_calls()` | Return all recorded host calls |
-| `host_calls_for(cap, op)` | Return calls for a specific capability/operation |
-| `host_call_count()` / `host_call_count_for(cap, op)` | Return recorded host call counts |
-| `assert_host_called(cap, op, params?)` | Assert a host call was made |
-| `assert_host_call_count(cap, op, expected_count)` | Assert exact call count |
-| `assert_no_host_calls()` | Assert no host calls were made |
+A fixture target must name a generated capability-contract method or a
+registered host-protocol operation. Unknown targets fail before the behavior
+under test runs, so a typo cannot silently create a second mock-only interface.
+Filter and assert the records returned by `harness.testing.calls()` when a test
+needs exact call evidence.
 
 ### Persona step assertions
 
-Persona steel-thread tests can assert Harn orchestration boundaries without
-depending on Rust internals. `step_assertions_begin(pattern?)` installs
+Persona steel-thread tests can assert Harn orchestration seams without
+depending on Rust internals. `step_assertions_begin(harness.agent, pattern?)` installs
 `PreStep` / `PostStep` hooks for matching personas and records the hook
-payloads until `step_assertions_end()`.
+payloads until `step_assertions_end(harness.agent)`.
 
 | Helper | Description |
 |----------|-------------|
-| `step_assertions_begin(persona_pattern?)` | Clear persona hooks and start recording matching step payloads |
+| `step_assertions_begin(agent, persona_pattern?)` | Clear persona hooks and start recording matching step payloads |
+| `step_assertions_end(agent)` | Clear the test-owned persona hooks |
 | `step_events()` / `step_events_clear()` | Inspect or reset captured step payloads |
 | `assert_steps_ran(names)` | Assert the exact ordered list of `@step` names |
 | `assert_step_received(step, predicate?)` | Assert a `PreStep` payload matched a closure, dict subset, or value |
@@ -171,78 +173,50 @@ payloads until `step_assertions_end()`.
 ### Example
 
 ```harn
-import { mock_host_result, assert_host_called, clear_host_mocks } from "std/testing"
+pipeline test_project_metadata(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond("project", "metadata_get", {value: "file contents"})
 
-pipeline default(task) {
-  clear_host_mocks()
+  const content = harness.project.metadata_get({dir: ".", namespace: "test"})
+  assert_eq(content.value, "file contents")
 
-  // Mock the workspace.read_text capability
-  mock_host_result("workspace", "read_text", "file contents")
-
-  // Code under test calls host_call("workspace.read_text", ...)
-  const content = host_call("workspace.read_text", {path: "test.txt"})
-  log(content)
-
-  // Verify the call was made
-  assert_host_called("workspace", "read_text")
+  const calls = harness.testing.calls()
+  assert_eq(len(calls), 1)
+  assert_eq(calls[0].capability, "project")
+  assert_eq(calls[0].method, "metadata_get")
 }
 ```
 
-### Scoped fixtures (`with_host_mocks` / `with_llm_mocks` / `with_mocks`)
+### Scoped fixtures
 
-Pipeline tests with many capabilities accumulate manual `host_mock_clear()`
-pairs around each test. A failing assertion can skip the clear step and leak
-mocks into the next test. Scoped fixtures handle that lifecycle for you and
-clean up reliably even when the body throws.
-
-| Helper | Description |
-|----------|-------------|
-| `with_host_mocks(mocks, body)` | Push a fresh host-mock scope, register `mocks`, run `body()`, restore on exit |
-| `with_llm_mocks(mocks, body)` | Same shape for LLM mocks (FIFO + `match` patterns) |
-| `with_mocks({host_mocks, llm_mocks}, body)` | Combined scope for tests that exercise both surfaces |
-| `llm_calls()` / `llm_call_count()` | Inspect the LLM call log captured inside the current scope |
-
-Each entry in the host-mock list is a dict shaped like the existing
-`host_mock(...)` config:
+Each capability fixture is a closed record:
 
 ```harn
-{capability: "runtime", operation: "pipeline_input", result: {}, params: {}}
-{capability: "project", operation: "metadata_set", error: "denied"}
+{capability: "runtime", method: "pipeline_input", result: {}, when: {}}
+{capability: "project", method: "metadata_set", error: "denied"}
 {
   capability: "tools",
-  operation: "run_command",
+  method: "run_command",
   result: {status: "completed", exit_code: 0, stdout: "ok", stderr: ""},
-  params: {argv: ["echo", "ok"]},
+  when: {argv: ["echo", "ok"]},
 }
 ```
 
-`error` (if non-nil) takes precedence over `result`, mirroring
-`mock_host_error` / `mock_host_result`.
+`error` takes precedence over `result`; `when` is an argument-subset matcher;
+and `repeat: true` keeps the fixture after one matching call.
 
-Host mocks are strict by default: the capability/operation must be registered
-by Harn or the active hostlib embedder. Use `unregistered_ok: true` only for a
-pure test-local operation that does not correspond to a real host boundary.
+```harn
+import { with_capability_fixtures } from "std/testing"
 
-Hostlib builtins that take a request dict use the same registry under their
-module/method pair, so `hostlib_tools_run_command(...)` can be mocked with
-`{capability: "tools", operation: "run_command"}`. For the `process.exec` to
-hostlib migration, `hostlib_tools_run_command(...)` also honors existing
-`{capability: "process", operation: "exec"}` mocks when the declared `params`
-subset matches the command request.
-
-```harn,ignore
-import { with_host_mocks, assert_host_called } from "std/testing"
-
-pipeline test_skill_registry() {
-  with_host_mocks(
+pipeline test_runtime_input(harness: Harness, task) {
+  with_capability_fixtures(
+    harness.testing,
     [
-      {capability: "runtime", operation: "pipeline_input", result: {}},
-      {capability: "project", operation: "skills", result: [], unregistered_ok: true},
+      {capability: "runtime", method: "pipeline_input", result: {task: "ship"}},
     ],
     { ->
-      const registry = skill_registry_from_host()
-      assert_eq(len(registry.skills), 0, "no skills registered")
-      assert_host_called("project", "skills", nil, nil)
+      assert_eq(harness.runtime.pipeline_input().task, "ship")
+      assert_eq(harness.testing.calls()[0].method, "pipeline_input")
     },
   )
 }
@@ -250,29 +224,15 @@ pipeline test_skill_registry() {
 
 Key properties:
 
-- The body runs inside a fresh host-mock and host-call log; nothing inside
+- The body runs inside a fresh response-and-call scope; nothing inside
   leaks out, and nothing outside is visible inside.
 - The prior state is restored before the helper returns, including when the
-  body throws — the thrown error is re-raised after cleanup.
-- Scopes nest: an inner `with_host_mocks` sees only its own mocks while
+  body throws—the error is re-raised after cleanup.
+- Scopes nest: an inner `with_capability_fixtures` sees only its own fixtures while
   active, then pops back to the outer scope on exit.
 - `with_llm_mocks` follows the same shape; entries are passed straight to
-  `llm_mock(...)`, so any field accepted by that builtin (including
+  the supplied `HarnessLlm`, so any field accepted by the mock queue (including
   `match` / `consume_match` / `error`) is supported.
-
-`with_mocks(config, body)` is the unified form for tests that need both:
-
-```harn,ignore
-with_mocks(
-  {
-    host_mocks: [{capability: "ws", operation: "read", result: "ok", unregistered_ok: true}],
-    llm_mocks: [{text: "agreed"}],
-  },
-  { ->
-    run_pipeline_under_test()
-  },
-)
-```
 
 ### Scripted argv adapters
 
@@ -341,7 +301,7 @@ or writes its own `<name>.harn.snap` file and never deletes anything.
 ```harn,ignore
 import { assert_snapshot } from "std/testing"
 
-pipeline test_render() {
+pipeline test_render(harness: Harness) {
   // Run once locally with HARN_UPDATE_SNAPSHOTS=1 to write
   // __snapshots__/home_page.harn.snap, then commit it; later runs assert.
   assert_snapshot("home_page", render_home_page())
@@ -350,15 +310,15 @@ pipeline test_render() {
 
 ## LLM mocking
 
-For testing agent loops without real LLM calls, use `llm_mock()`:
+For testing agent loops without real LLM calls, use `harness.llm.mock_enqueue()`:
 
 ```harn
-llm_mock({text: "The answer is 42"})
+harness.llm.mock_enqueue({text: "The answer is 42"})
 
-const result = llm_call([
+const result = harness.llm.call([
   {role: "user", content: "What is the answer?"},
 ].join("\n"))
-log(result)
+harness.stdio.log(result)
 ```
 
 This queues a canned response that the next LLM call consumes.
@@ -640,7 +600,7 @@ stage outcomes against an embedded or explicit replay fixture.
 
 ### Clarifying-question evals
 
-Clarifying-question evals assert that the agent called `ask_user(...)`
+Clarifying-question evals assert that the agent called `harness.interaction.ask_user(...)`
 and asked the minimal question required to proceed. The run record
 persists `ask_user` prompts, and the fixture can require a single
 question plus term-level constraints:

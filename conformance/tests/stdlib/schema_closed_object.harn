@@ -1,6 +1,6 @@
 import "std/schema"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const user_schema = schema_closed_object(
     {
       name: schema_field(schema_string() + {min_length: 2}),
@@ -9,24 +9,24 @@ pipeline test(task) {
     {title: "ClosedUser"},
   )
   const validator = schema_validator(user_schema, {apply_defaults: true})
-  __io_println(validator.is({name: "Ada"}))
-  __io_println(!validator.is({name: "Ada", extra: true}))
+  harness.stdio.println(validator.is({name: "Ada"}))
+  harness.stdio.println(!validator.is({name: "Ada", extra: true}))
   const bad_report = validator.report({name: "Ada", extra: true})
-  __io_println(!bad_report.ok)
-  __io_println(
+  harness.stdio.println(!bad_report.ok)
+  harness.stdio.println(
     contains(
       join(bad_report.errors, "\n"),
       "Additional properties are not allowed ('extra' was unexpected)",
     ),
   )
-  __io_println(validator.expect({name: "Ada"}).role)
-  __io_println(validator.json_schema().additionalProperties)
+  harness.stdio.println(validator.expect({name: "Ada"}).role)
+  harness.stdio.println(validator.json_schema().additionalProperties)
   const alias_schema = schema_strict_object(
     {mode: schema_enum(["fast", "safe"])},
     {additional_properties: schema_string()},
   )
   const alias_validator = schema_validator(alias_schema)
-  __io_println(alias_validator.is({mode: "fast"}))
-  __io_println(!alias_validator.is({mode: "fast", extra: "disallowed"}))
-  __io_println(alias_validator.json_schema().additionalProperties)
+  harness.stdio.println(alias_validator.is({mode: "fast"}))
+  harness.stdio.println(!alias_validator.is({mode: "fast", extra: "disallowed"}))
+  harness.stdio.println(alias_validator.json_schema().additionalProperties)
 }

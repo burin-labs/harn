@@ -9,7 +9,7 @@
 
 use std::io::Write;
 
-use harn_hostlib::{ast::AstCapability, tools::permissions, BuiltinRegistry, HostlibCapability};
+use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::NamedTempFile;
 
@@ -161,7 +161,6 @@ const CASES: &[EditCase] = &[
 
 #[test]
 fn apply_node_round_trips_every_tier1_language() {
-    permissions::enable_for_test();
     let registry = registry();
     for case in CASES {
         let file = write_temp(case.ext, case.source);
@@ -244,7 +243,6 @@ fn capabilities_matrix_covers_every_language_and_gates_rename() {
 
 #[test]
 fn unsupported_language_degrades_with_fallback_suggestion() {
-    permissions::enable_for_test();
     let registry = registry();
     let file = write_temp("unknownext", "noop\n");
     let path = file.path().to_string_lossy().to_string();
@@ -266,7 +264,6 @@ fn unsupported_language_degrades_with_fallback_suggestion() {
 
 #[test]
 fn insert_at_anchor_works_on_a_data_format() {
-    permissions::enable_for_test();
     let registry = registry();
     let file = write_temp("css", ".button {\n  color: red;\n}\n");
     let path = file.path().to_string_lossy().to_string();

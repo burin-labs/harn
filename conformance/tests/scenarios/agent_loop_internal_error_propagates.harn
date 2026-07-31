@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * An internal engine/wiring bug surfaced during tool dispatch must ABORT the
  * agent loop, not be swallowed as a recoverable tool observation.
@@ -35,12 +36,14 @@ fn throwing_caller(category) {
   return { call, next -> throw_error("boom from tool caller", category) }
 }
 
-fn run_with_caller(category, cap, calls) {
+fn run_with_caller(harness: Harness, category, cap, calls) {
   return with_llm_script(
+    harness.llm,
     [{tool_calls: calls}, llm_text("##DONE##")],
     { ->
       const outcome = try {
         agent_loop(
+          harness,
           "internal-error probe",
           nil,
           {
@@ -63,22 +66,22 @@ fn run_with_caller(category, cap, calls) {
   )
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const one_call = [{id: "c1", name: "echo", arguments: {msg: "hi"}}]
   const two_calls = [
     {id: "c1", name: "echo", arguments: {msg: "hi"}},
     {id: "c2", name: "echo", arguments: {msg: "yo"}},
   ]
   // Sequential dispatch (cap=1): an internal bug aborts the loop.
-  const seq = run_with_caller("internal", 1, one_call)
-  __io_println("seq.aborted=" + to_string(seq.aborted))
-  __io_println("seq.category=" + to_string(seq?.category ?? ""))
+  const seq = run_with_caller(harness, "internal", 1, one_call)
+  harness.stdio.println("seq.aborted=" + to_string(seq.aborted))
+  harness.stdio.println("seq.category=" + to_string(seq?.category ?? ""))
   // Parallel dispatch (cap=2, two calls): the internal bug still aborts.
-  const par = run_with_caller("internal", 2, two_calls)
-  __io_println("par.aborted=" + to_string(par.aborted))
-  __io_println("par.category=" + to_string(par?.category ?? ""))
+  const par = run_with_caller(harness, "internal", 2, two_calls)
+  harness.stdio.println("par.aborted=" + to_string(par.aborted))
+  harness.stdio.println("par.category=" + to_string(par?.category ?? ""))
   // A recoverable (generic) tool failure is absorbed into a tool observation;
   // the loop completes rather than aborting.
-  const recoverable = run_with_caller("generic", 1, one_call)
-  __io_println("recoverable.aborted=" + to_string(recoverable.aborted))
+  const recoverable = run_with_caller(harness, "generic", 1, one_call)
+  harness.stdio.println("recoverable.aborted=" + to_string(recoverable.aborted))
 }

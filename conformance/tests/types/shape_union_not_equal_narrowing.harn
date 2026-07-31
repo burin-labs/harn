@@ -8,7 +8,7 @@ type Msg = {kind: "ping", ttl: int} \
   | {kind: "pong", latency_ms: int} \
   | {kind: "close", reason: string}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   fn describe(m: Msg) -> string {
     if m.kind != "close" {
       // Narrowed to ping|pong: shared `kind` field is reachable,
@@ -18,7 +18,7 @@ pipeline default() {
     // Else-branch narrows to the single `close` variant.
     return "closed:" + m.reason
   }
-  __io_println(describe({kind: "ping", ttl: 30}))
-  __io_println(describe({kind: "pong", latency_ms: 42}))
-  __io_println(describe({kind: "close", reason: "done"}))
+  harness.stdio.println(describe({kind: "ping", ttl: 30}))
+  harness.stdio.println(describe({kind: "pong", latency_ms: 42}))
+  harness.stdio.println(describe({kind: "close", reason: "done"}))
 }

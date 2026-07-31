@@ -113,10 +113,6 @@ The following identifiers are reserved:
 | `continue` | `.continue` |
 | `select` | `.select` |
 | `impl` | `.impl` |
-| `request_approval` | `.requestApproval` |
-| `dual_control` | `.dualControl` |
-| `ask_user` | `.askUser` |
-| `escalate_to` | `.escalateTo` |
 
 ### Identifiers
 
@@ -158,7 +154,7 @@ Duration literals evaluate to an integer number of milliseconds. They can be use
 anywhere an expression is expected:
 
 ```harn
-sleep(500ms)
+harness.clock.sleep_ms(500ms)
 deadline 30s { /* ... */ }
 const one_day = 1d       // 86400000
 const two_weeks = 2w     // 1209600000
@@ -213,7 +209,7 @@ escape-free:
 ```harn
 // A regex matching a double-quoted string body, with no backslash soup:
 const caps = regex_captures(r#""([^"\\]*)""#, "name=\"value\"")
-log("first body: ${caps[0].groups[0]}")
+harness.obs.log("first body: ${caps[0].groups[0]}")
 ```
 
 #### Multi-line strings
@@ -235,7 +231,7 @@ Use `\${` for a literal `${` sequence inside a multi-line string.
 const name = "world"
 const doc = """
   Hello, ${name}!
-  Today is ${timestamp()}.
+  Today is ${harness.clock.timestamp()}.
 """
 ```
 
@@ -597,10 +593,10 @@ fn sum(...nums) {
 }
 sum(1, 2, 3)  // 6
 
-fn log(level, ...parts) {
-  log("[${level}] ${join(parts, " ")}")
+fn format_log(level, ...parts) {
+  return "[${level}] ${join(parts, " ")}"
 }
-log("INFO", "server", "started")  // [INFO] server started
+format_log("INFO", "server", "started")  // "[INFO] server started"
 ```
 
 ```text
@@ -1012,12 +1008,12 @@ Destructuring patterns work in `for`-`in` loops to unpack each element:
 ```harn
 const entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
 for {name, val} in entries {
-  log("${name}=${val}")
+  harness.obs.log("${name}=${val}")
 }
 
 const pairs = [[1, 2], [3, 4]]
 for [a, b] in pairs {
-  log("${a}+${b}")
+  harness.obs.log("${a}+${b}")
 }
 ```
 
@@ -1085,7 +1081,7 @@ Pipelines may declare a return type with the same `-> TypeExpr` syntax
 as functions:
 
 ```harn
-pipeline ghost_text(task) -> {text: string, code: int} {
+pipeline ghost_text(harness: Harness, task) -> {text: string, code: int} {
   return {text: "hello", code: 0}
 }
 ```
@@ -1608,7 +1604,7 @@ const results = parallel each list with { max_concurrent: 4 } { item ->
 } as stream
 
 for result in results {
-  log(result)
+  harness.obs.log(result)
 }
 ```
 
@@ -1689,7 +1685,7 @@ const outcome = settle_with_abort(lanes, { lane, token ->
     if abort_requested(token) {
       return Err({code: "stopped_waiting", message: "a sibling lane failed"})
     }
-    sleep(poll_interval_ms)
+    harness.clock.sleep_ms(poll_interval_ms)
   }
   if lane_failed(lane) {
     let _ = request_abort(token, {code: "doomed", message: "lane ${lane} failed"})
@@ -1751,7 +1747,7 @@ inside an `if` block fires when control leaves that `if`. A `defer` inside a
 
 ```harn
 fn open(path) { path }
-fn close(f) { log("closing ${f}") }
+fn close(f) { harness.obs.log("closing ${f}") }
 const f = open("data.txt")
 defer { close(f) }
 // ... use f ...
@@ -1820,7 +1816,7 @@ When a VM exits, any un-awaited spawned tasks it owns are cancelled and aborted.
 import "std/signal"
 
 const registration = on_interrupt({ ->
-  agent_session_close(session, {status: "interrupted"})
+  harness.agent.close(session, {status: "interrupted"})
 }, {signals: ["SIGINT", "SIGTERM"], once: true})
 
 defer { off_interrupt(registration) }
@@ -1871,12 +1867,12 @@ is released when the block's scope exits, including `throw`, `return`, `break`,
 Named primitives return a permit value or `nil` on timeout:
 
 ```harn
-const lock = sync_mutex_acquire("state:customer-42", 250ms)
+const lock = harness.runtime.sync_mutex_acquire("state:customer-42", 250ms)
 const slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
 const gate = sync_gate_acquire("workflow-runner", 8, 5s)
 ```
 
-- `sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
+- `harness.runtime.sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
   mutex. Omitting `key` uses `"__default__"`.
 - `sync_semaphore_acquire(key, capacity, permits?, timeout?)` acquires a
   weighted permit from a named FIFO semaphore.
@@ -1916,9 +1912,9 @@ exchange outside the transcript.
 
 Named sessions may also carry a small `scratchpad` dict plus a monotonic
 `scratchpad_version`. The scratchpad is live session-local working memory, not a
-replayable transcript message. `agent_session_scratchpad(id)`,
-`agent_session_set_scratchpad(id, scratchpad, opts?)`, and
-`agent_session_clear_scratchpad(id, opts?)` are the direct state boundary.
+replayable transcript message. `harness.agent.scratchpad(id)`,
+`harness.agent.set_scratchpad(id, scratchpad, opts?)`, and
+`harness.agent.clear_scratchpad(id, opts?)` are the direct state boundary.
 Updates append compact `agent_scratchpad` transcript events that include
 action, version, source, reason, counts, and caller metadata without copying the
 full scratchpad into the event. Snapshots expose `scratchpad` and
@@ -1926,7 +1922,7 @@ full scratchpad into the event. Snapshots expose `scratchpad` and
 `metadata.agent_scratchpad` and `metadata.agent_scratchpad_version`.
 
 Named sessions may carry an RFC 8693 actor chain describing who the session is
-acting as and on whose behalf. `agent_session_actor_chain(id?)` returns the
+acting as and on whose behalf. `harness.agent.actor_chain(id?)` returns the
 canonical `{sub, act}` dict for an explicit session id, or for the current
 active session when `id` is omitted. Hosts bind the originating principal when a
 session enters execution, and child agent sessions push their deterministic
@@ -1950,7 +1946,7 @@ OpenTrustGraph record with `metadata.actor_chain` and
 `metadata.actor_chain_alert` so supervision tools can inspect the violation
 without treating nested actors as authorization grants.
 
-`agent_session_seed_from_jsonl(path, opts?)` creates a new session from a
+`harness.agent.seed_from_jsonl(path, opts?)` creates a new session from a
 replayable LLM transcript sidecar. Exact replay uses prompt-visible `message`
 events or full request snapshots; provider-response-only sidecars are
 assistant-response best effort and require `validate: false`. Options include
@@ -2068,7 +2064,7 @@ Use named synchronization around multi-step updates:
 
 ```harn
 const memo = shared_map({scope: "workflow_run", key: "memo"})
-const lock = sync_mutex_acquire("memo:customer-42", 250ms)
+const lock = harness.runtime.sync_mutex_acquire("memo:customer-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
 try {
   shared_map_set(memo, "customer-42", "summary")
@@ -2187,7 +2183,7 @@ spawn {
   close_channel(ch)
 }
 for item in ch {
-  log(item)    // prints "a", then "b"
+  harness.obs.log(item)    // prints "a", then "b"
 }
 // loop exits after channel is closed and all items are consumed
 ```
@@ -2214,10 +2210,10 @@ channel receives a value first:
 ```harn
 select {
   msg from ch1 {
-    log("ch1: ${msg}")
+    harness.obs.log("ch1: ${msg}")
   }
   msg from ch2 {
-    log("ch2: ${msg}")
+    harness.obs.log("ch2: ${msg}")
   }
 }
 ```
@@ -2228,12 +2224,12 @@ corresponding body. Only one case fires per select.
 #### timeout case
 
 ```harn
-fn handle(msg) { log(msg) }
+fn handle(msg) { harness.obs.log(msg) }
 const ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   timeout 5s {
-    log("timed out")
+    harness.obs.log("timed out")
   }
 }
 ```
@@ -2243,12 +2239,12 @@ If no channel produces a value within the duration, the timeout body runs.
 #### default case (non-blocking)
 
 ```harn
-fn handle(msg) { log(msg) }
+fn handle(msg) { harness.obs.log(msg) }
 const ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   default {
-    log("nothing ready")
+    harness.obs.log("nothing ready")
   }
 }
 ```
@@ -2296,7 +2292,7 @@ gen fn numbers(start: int, end: int) -> Stream<int> {
 }
 
 for n in numbers(1, 4) {
-  log(n)
+  harness.obs.log(n)
 }
 ```
 
@@ -2320,9 +2316,9 @@ action graph alongside webhook and cron events.
 
 #### Emit
 
-The runtime exposes two builtins. `emit_channel(name, payload,
+The runtime exposes two builtins. `harness.channels.append(name, payload,
 options?)` appends one event to the channel's EventLog topic and
-returns a `ChannelEmitReceipt`. `channel_events(name, options?)` reads
+returns a `ChannelEmitReceipt`. `harness.channels.events(name, options?)` reads
 the topic oldest-first for tests and diagnostics. Reference shapes are
 in `docs/src/builtins.md`; full prose is in `docs/src/agent-channels.md`.
 
@@ -2411,9 +2407,9 @@ Semantics:
   partition. Overflow drops the oldest entries with a structured
   `triggers.aggregation.buffer_overflow` warning.
 - Window expiration is driven by an implicit sweep at every emit and
-  by the explicit `flush_trigger_aggregations()` builtin; the latter
-  is the test affordance and pairs with `mock_time(...)` /
-  `advance_time(...)`.
+  by the explicit `harness.channels.flush_aggregations()` method; the latter
+  is the test affordance and pairs with
+  `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)`.
 
 Malformed configs (missing fields, non-positive `count`, unknown
 `expire_action`, wrong-typed `key`) raise `HARN-CHN-005`.
@@ -2507,8 +2503,9 @@ PoolHandle ::= {
 PoolScope ::= "session" | "pipeline" | "tenant" | "org"
 ```
 
-`pool_create(options?)` allocates a handle; `pool_get(name_or_id)`
-returns an existing one or `nil`; `pool_list()` enumerates the
+`pool_create(agent: HarnessAgent, options?)` allocates a handle;
+`pool_get(agent: HarnessAgent, name_or_id)` returns an existing one or `nil`;
+`pool_list(agent: HarnessAgent)` enumerates the
 runtime registry. Names are unique within a live VM registry, so
 callers use `pool_get` to reuse an existing pool. Pipeline-scope pools
 use a deterministic `(scope, scope_id, name)` id so re-creating the pool
@@ -2534,14 +2531,15 @@ PoolTaskHandle ::= {
 }
 ```
 
-`pool_wait(handle_or_handles)` blocks until terminal and returns the
-final snapshot (or list of snapshots). `wait_agent(handle)` from
+`pool_wait(agent: HarnessAgent, handle_or_handles)` blocks until terminal and
+returns the final snapshot (or list of snapshots).
+`wait_agent(agent: HarnessAgent, handle)` from
 `std/agent/workers` accepts pool task handles transparently by
 matching on `_type == "pool_task"`.
 
 #### Queue strategies
 
-`pool_create({queue: <descriptor>})` selects how the pool dequeues
+`pool_create(harness.agent, {queue: <descriptor>})` selects how the pool dequeues
 work when a worker slot frees:
 
 ```text
@@ -2566,7 +2564,7 @@ as a dict for dotted access.
 
 #### Backpressure
 
-`pool_create({backpressure: <descriptor>})` bounds the queue and
+`pool_create(harness.agent, {backpressure: <descriptor>})` bounds the queue and
 selects the overflow policy:
 
 ```text
@@ -2599,7 +2597,7 @@ sees a task handle whose terminal snapshot is
 | Scope | Storage | Survives | Notes |
 |---|---|---|---|
 | `session` | VM-scoped in-memory registry. | VM/session lifetime. | Default. Zero I/O. |
-| `pipeline` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Terminal and stale task metadata reload on next `pool_create({scope: "pipeline", ...})`. |
+| `pipeline` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Terminal and stale task metadata reload on next `pool_create(harness.agent, {scope: "pipeline", ...})`. |
 | `tenant`, `org` | Host-managed registry. | Tenant / org lifetime. | Currently rejected by the in-process runtime unless an embedding host implements tenant/org pool routing. |
 
 On pipeline-scope reload, persisted `Queued` or `Running` task records
@@ -2611,7 +2609,7 @@ the audit trail and allows the fresh submit to execute as a new task.
 `opts.stale_after_ms`) is retained as the freshness knob for future host
 backends. The store compacts opportunistically when
 `max_concurrent + |queue| + |terminal-since-compaction|` exceeds an
-internal threshold. `pool_simulate_restart()` drops the in-process
+internal threshold. `pool_simulate_restart(harness.agent)` drops the in-process
 registry without touching disk and is the conformance affordance for
 reload tests.
 
@@ -2711,6 +2709,47 @@ registration into the next run.
 
 ### `Harness` type
 
+Effects flow from the harness capability object; imports are pure.
+
+`Harness` is the only root authority injected by the runtime. A program
+receives it as an explicit entrypoint parameter—normally
+`fn main(harness: Harness)`—and may pass either the root or one of its nominal
+sub-handles to helpers. Importing a module never grants authority: imports only
+bind code, types, constants, and pure values. An imported helper that performs
+an effect must require the relevant `Harness*` value in its ordinary parameter
+list.
+
+Pure computation remains available as global functions. Runtime operations are
+not globals: their public contracts are methods on a closed `Harness`
+capability type. Each contract declares its conservative effect family,
+access mode, and resource selector; the compiler, policy engine, runtime
+receipts, language tooling, and generated reference all consume that same
+manifest. A host may implement a contract directly or through a privileged
+wire primitive, but privileged wire names are not source-visible or
+re-exportable.
+
+Possessing one sub-handle grants no other sub-handle. For example, a helper
+that accepts `HarnessFs` cannot read environment variables, invoke a process,
+or make a network request. Hosts may narrow a grant or supply deterministic
+fixtures without installing a process registry or an ambient thread-local
+mock. Runtime dispatch rejects a method absent from the typed contract even if
+an embedder accidentally registered a same-named callable.
+
+Authority narrows as control moves inward. Entrypoints and orchestration
+functions may accept root `Harness`; ordinary helpers should accept the
+smallest coherent nominal capability interface that describes their work.
+One handle is not automatically better than two, and a coordinator that
+genuinely combines several capabilities may retain the root. The
+`capability-attenuation` lint reports helpers whose root parameter is used only
+through one or two direct sub-handles and suggests the corresponding
+`Harness*` signature.
+
+`Harness` and every `Harness*` sub-handle are runtime authority, not domain
+data. They cannot be JSON-serialized, placed in the persistent store,
+checkpointed, or embedded inside a persisted record. Programs persist stable
+identifiers and ordinary data, then receive fresh authority from the runtime
+when execution resumes.
+
 The single argument to every lifecycle callback is the harness. The
 read-side surface is `unsettled_state(): UnsettledStateSnapshot`,
 which returns a stable JSON-shaped dict with five lists:
@@ -2723,18 +2762,20 @@ registries (suspended subagents, partial handoffs, in-flight LLM
 calls, pool pending tasks) and from event-log records (queued
 trigger inbox + worker queue items).
 
-Capability sub-handles are exposed by field access on the harness:
+Capability sub-handles are exposed by field access on the harness. The
+contract manifest is the exhaustive method reference; these groups describe
+the stable ownership boundaries:
 
-| Field | Type | Primary methods |
+| Fields | Ownership |
 |---|---|---|
-| `harness.stdio` | `HarnessStdio` | `print`, `println`, `eprint`, `eprintln`, `read_line`, `prompt` |
-| `harness.term` | `HarnessTerm` | `width`, `height`, `read_password` |
-| `harness.clock` | `HarnessClock` | `now_ms`, `timestamp`, `monotonic_ms`, `elapsed`, `sleep_ms` |
-| `harness.fs` | `HarnessFs` | `read_text`, `write_text`, `replace_text`, `append`, `exists`, `list_dir` |
-| `harness.env` | `HarnessEnv` | `get`, `set`, `unset`, `list` |
-| `harness.random` | `HarnessRandom` | `gen_u64`, `uuid`, `bytes` |
-| `harness.net` | `HarnessNet` | `get`, `post` |
-| `harness.system` | `HarnessSystem` | `platform`, `arch`, `cpu`, `memory`, `cwd`, `pid` |
+| `stdio`, `term`, `clock`, `env`, `random`, `system` | Process observation, user I/O, time, and entropy |
+| `fs`, `process`, `net`, `channels`, `secrets` | External I/O and durable communication |
+| `llm`, `agent`, `tools`, `interaction`, `verdict` | Model, worker, tool, human-interaction, and decision authority |
+| `tenant`, `auth`, `obs`, `runtime`, `project` | Identity, authentication, telemetry, runtime, and project state |
+| `ast`, `code_index`, `scanner`, `rules`, `lint` | Language and code-analysis services |
+| `computer`, `embed`, `memory`, `sqlite`, `postgres` | Native interaction and data services |
+| `fs_watch`, `host_lease`, `secret_store`, `terminal` | Long-lived resource factories |
+| `testing` | Per-harness deterministic fixtures, captured calls, and virtual-clock control |
 
 Write-side actions:
 
@@ -2785,10 +2826,18 @@ conformance fixtures and IDE hosts can observe the loop boundary.
 
 ### Lifecycle event taxonomy
 
-The runtime exposes 40 hook events. Registration surfaces:
-`register_tool_hook` (tool events), `register_persona_hook` (persona
-events), `register_worker_hook` (worker events), and
-`register_session_hook` (session events).
+The runtime exposes 40 hook events. Registration surfaces live on typed
+capabilities: `harness.tools.register_hook` (tool events),
+`harness.agent.register_persona_hook` (persona events),
+`harness.agent.register_worker_hook` (worker events), and
+`harness.agent.register_session_hook` (session events).
+
+Every VM-backed hook handler has the entrypoint shape
+`fn(harness: Harness, event)`. The runtime supplies the exact root Harness for
+the firing execution. This is an orchestration boundary, so root authority is
+appropriate here; ordinary helpers called by a hook SHOULD accept the
+narrowest coherent nominal handle they require. A package-manifest `[[hooks]]`
+export uses the same ABI as a programmatically registered closure.
 
 | Event | Category | Reminder effects |
 |---|---|---|
@@ -2836,9 +2885,10 @@ Every lifecycle decision is reproducible on a replay:
    wall-clock or external state) cannot drift the second run.
 3. **Signed timestamps.** `harness.emit_audit` stamps entries with a
    per-run monotonic `LIFECYCLE_SEQ` counter rather than wall-clock
-   time. Wall-clock fields (`queued_at_ms`, `age_ms`) come from
-   `clock_mock`-aware sources and respect `mock_time(...)` /
-   `advance_time(...)` in tests.
+   time. Wall-clock fields (`queued_at_ms`, `age_ms`) come from the
+   harness clock. Tests control only their own harness through
+   `harness.testing.clock_set(...)`, `clock_advance(...)`, and
+   `clock_reset()`.
 4. **One-shot registration.** `pipeline_on_finish(callback)` is
    last-write-wins; the slot is consumed exactly once per run via
    `take_pipeline_on_finish`. The error exit path clears the slot
@@ -2955,8 +3005,8 @@ site and the innermost catch handler exactly once, matching the
 
 ```harn,ignore
 fn fetch(prompt) {
-  // Without try*: try { llm_call(prompt) } / guard is_ok / unwrap
-  const response = try* llm_call(prompt)
+  // Without try*: try { harness.llm.call(prompt) } / guard is_ok / unwrap
+  const response = try* harness.llm.call(prompt)
   return parse(response)
 }
 
@@ -3007,6 +3057,27 @@ fn name(param1, param2) {
 Declares a named function. Equivalent to `let name = { param1, param2 -> ... }`.
 The function captures the lexical scope at definition time.
 
+Public functions should keep call sites explicit when several parameters have
+the same type and their order is easy to confuse. Prefer one named closed
+record once a public API would otherwise expose four or more homogeneous
+positional parameters:
+
+```harn
+type Bounds = {left: int, top: int, right: int, bottom: int}
+
+pub fn area(bounds: Bounds) -> int {
+  const {left, top, right, bottom} = bounds
+  return (right - left) * (bottom - top)
+}
+
+const pixels = area({left: 10, top: 20, right: 110, bottom: 70})
+```
+
+This is API guidance, not a blanket arity limit: heterogeneous positional
+parameters that read naturally and private implementation helpers remain
+valid. The `homogeneous-positional-api` lint provides an informational
+recommendation for ambiguous public signatures.
+
 ### Default parameters
 
 Parameters may have default values using `= expr`. Required parameters must
@@ -3016,7 +3087,7 @@ a default — not just literals.
 
 ```harn
 fn greet(name, greeting = "hello") {
-  log("${greeting}, ${name}!")
+  harness.obs.log("${greeting}, ${name}!")
 }
 greet("world")           // "hello, world!"
 greet("world", "hi")     // "hi, world!"
@@ -3037,7 +3108,7 @@ be omitted.
 ```harn
 tool read_text(path: string, encoding: string = "utf-8") -> string {
   description "Read a file from the filesystem"
-  read_file(path)
+  harness.fs.read_text(path)
 }
 
 tool search_files(query: string, file_glob: string = "*.py") -> string {
@@ -3258,9 +3329,9 @@ historical examples.
 Command execution policy is a first-class Harn value created with
 `command_policy(config)`. A policy can be installed directly with
 `command_policy_push(policy)` / `command_policy_pop()` or scoped to
-`agent_loop` with `command_policy: policy` or
+`agent_loop(harness, ...)` with `command_policy: policy` or
 `policy: { command_policy: policy }`. While installed,
-`host_call("process.exec", ...)` builds a normalized command context,
+`harness.process.exec(...)` builds a normalized command context,
 runs deterministic risk classification, executes the policy pre-hook
 before spawning, and records decisions in the returned command envelope
 under `command_policy`.
@@ -3302,7 +3373,7 @@ in its config dict. Deferred tools keep their schema out of the model's
 context on each LLM call until a tool-search call surfaces them.
 
 ```harn
-fn admin(token) { log(token) }
+fn admin(token) { harness.obs.log(token) }
 
 const registry = tool_registry()
 registry = tool_define(registry, "rare_admin_action", "...", {
@@ -3394,10 +3465,10 @@ pub skill deploy {
   prompt "Follow the deployment runbook."
 
   on_activate fn() {
-    log("deploy skill activated")
+    harness.obs.log("deploy skill activated")
   }
   on_deactivate fn() {
-    log("deploy skill deactivated")
+    harness.obs.log("deploy skill deactivated")
   }
 }
 ```
@@ -3560,8 +3631,8 @@ Enum variants are matched using `EnumName.Variant(binding)` patterns in
 
 ```harn
 match s {
-  Shape.Circle(radius) -> { log("circle r=${radius}") }
-  Shape.Rectangle(w, h) -> { log("rect ${w}x${h}") }
+  Shape.Circle(radius) -> { harness.obs.log("circle r=${radius}") }
+  Shape.Rectangle(w, h) -> { harness.obs.log("rect ${w}x${h}") }
 }
 ```
 
@@ -3579,8 +3650,8 @@ always available this way:
 
 ```harn
 match s {
-  Circle(radius) -> { log("circle r=${radius}") }
-  Rectangle(w, h) -> { log("rect ${w}x${h}") }
+  Circle(radius) -> { harness.obs.log("circle r=${radius}") }
+  Rectangle(w, h) -> { harness.obs.log("rect ${w}x${h}") }
 }
 ```
 
@@ -3666,8 +3737,8 @@ optional subscript spelling is `expr?.[...]`. For example,
 
 ```harn
 match result {
-  Result.Ok(val) -> { log("success: ${val}") }
-  Result.Err(err) -> { log("error: ${err}") }
+  Result.Ok(val) -> { harness.obs.log("success: ${val}") }
+  Result.Err(err) -> { harness.obs.log("error: ${err}") }
 }
 ```
 
@@ -3717,8 +3788,8 @@ in `Result`.
 The `?` operator works naturally in pipelines:
 
 ```harn
-fn fetch_and_parse(url) {
-  const response = http_get(url)?
+fn fetch_and_parse(net: HarnessNet, url) {
+  const response = net.get(url)?
   const data = json_parse(response)?
   return Ok(data)
 }
@@ -3770,8 +3841,8 @@ Struct fields are accessed with dot syntax, the same as dict property
 access:
 
 ```harn
-log(p.x)    // 3
-log(u.name) // "Alice"
+harness.obs.log(p.x)    // 3
+harness.obs.log(u.name) // "Alice"
 ```
 
 ## Impl blocks
@@ -3811,9 +3882,9 @@ impl Point {
 }
 
 const p = Point { x: 3, y: 4 }
-log(p.distance())           // 5.0
+harness.obs.log(p.distance())           // 5.0
 const p2 = p.translate(10, 20)
-log(p2.x)                   // 13
+harness.obs.log(p2.x)                   // 13
 ```
 
 When `instance.method(args)` is called, the VM looks up methods registered
@@ -3879,7 +3950,7 @@ the interface:
 
 ```harn,ignore
 fn show(item: Displayable) {
-  log(item.display())
+  harness.obs.log(item.display())
 }
 
 const d = Dog({name: "Rex"})
@@ -3892,7 +3963,7 @@ Interfaces can be used as generic constraints via `where` clauses:
 
 ```harn
 fn process<T>(item: T) where T: Displayable {
-  log(item.display())
+  harness.obs.log(item.display())
 }
 ```
 
@@ -4058,7 +4129,7 @@ into the warning message.
 
 ```harn,ignore
 @test
-pipeline test_smoke(task) { ... }
+pipeline test_smoke(harness: Harness, task) { ... }
 ```
 
 Marks a pipeline as a test entry point. The conformance / `harn test`
@@ -4074,13 +4145,15 @@ import "std/triggers"
 @retry(max: 3, backoff: "exponential")
 @schedule("0 * * * *", "UTC")
 @queue("scan-jobs")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   return {status: "ok", request: event.provider_payload.raw}
 }
 ```
 
 `@job` marks an exported function as a trigger-dispatched background
-entrypoint. `harn run --as-job file.harn --job scan --request req.json`
+entrypoint. Its first two parameters are the root `Harness` and the normalized
+`TriggerEvent`; ordinary helpers called from the job should accept narrower
+capability handles. `harn run --as-job file.harn --job scan --request req.json`
 runs that job once, delivering the request JSON as
 `event.provider_payload.raw` and printing the returned value as JSON.
 `harn serve worker file.harn` activates every `@schedule`d job in the
@@ -4147,7 +4220,7 @@ legacy helpers with `[lint].persona_step_allowlist`.
 
 ```harn,ignore
 @command(name: "review", description: "Review the diff", hint: "(optional focus area)")
-pipeline review_branch(task) { ... }
+pipeline review_branch(harness: Harness, task) { ... }
 ```
 
 Marks a top-level pipeline as an ACP slash-command. The Harn ACP adapter
@@ -4230,7 +4303,7 @@ change.
 ```harn,ignore
 @invariant("fs.writes", "src/**")
 tool write_patch() {
-  write_file("src/out.txt", "ok")
+  harness.fs.write_text("src/out.txt", "ok")
 }
 ```
 
@@ -4245,7 +4318,7 @@ then the selected invariant checks run against that IR.
 |---|---|---|
 | `@invariant("fs.writes", "src/**")` | One or more allowed globs, passed positionally or as `path_glob:` / `glob:` / `allow:` | Every reachable file-system write must target a literal path proven to stay within one of the declared globs. |
 | `@invariant("budget.remaining", target: "remaining")` | Optional `target:` variable name, default `budget.remaining` | Assignments to the tracked budget value may only preserve it, decrement it, or refresh it from `llm_budget_remaining()`. |
-| `@invariant("approval.reachability")` | No extra args | Every reachable side-effecting call must be gated by a prior `request_approval(...)` or enclosed inside a `dual_control(...)` approval scope. |
+| `@invariant("approval.reachability")` | No extra args | Every reachable side-effecting call must be gated by a prior `harness.interaction.request_approval(...)` or enclosed inside a `harness.interaction.dual_control(...)` approval scope. |
 | `@invariant("capability.policy", allow: "fs.write,llm.model", ...)` | `allow:` capability list; optional `workspace:` globs; optional `require_approval:`, `require_budget:`, `require_autonomy:`, `require_execution_policy:`, `require_command_policy:`, `require_egress_policy:`, and `require_approval_policy:` capability lists | Every reachable capability effect must be declared, and selected capabilities must be guarded by the requested policy/gate on every path. |
 
 The capability-policy lattice recognizes these canonical capabilities:
@@ -4253,13 +4326,16 @@ The capability-policy lattice recognizes these canonical capabilities:
 `llm.model`, `worker.dispatch`, `human.approval`, and
 `autonomy.policy`. Common aliases such as `workspace.write`, `command`,
 `connector`, `llm`, and `worker` normalize to those names. The checker
-classifies direct builtins plus bridge calls such as `mcp_call(...)`,
-`host_tool_call(...)`, and `host_call("capability.operation", ...)`.
+classifies nominal capability methods such as `harness.mcp.call(...)`,
+`harness.tools.invoke(...)`, and `harness.process.exec(...)`. The privileged
+`host_call("capability.operation", ...)` wire is additionally classified when
+it appears in a trusted provenance-stamped host module; ordinary modules cannot
+invoke or re-export that wire.
 Calls like `with_execution_policy(...)`, `with_command_policy(...)`,
 `with_approval_policy(...)`, `with_autonomy_policy(...)`,
-`with_dynamic_permissions(...)`, `egress_policy(...)`,
-`request_approval(...)`, `dual_control(...)`, and budget-bearing
-`llm_call(..., {budget: ...})` satisfy the corresponding gates.
+`with_dynamic_permissions(...)`, `harness.net.egress_policy(...)`,
+`harness.interaction.request_approval(...)`, `harness.interaction.dual_control(...)`, and budget-bearing
+`harness.llm.call(..., {budget: ...})` satisfy the corresponding gates.
 
 Invariant violations surface through `harn check --invariants`,
 `harn explain --invariant <name> <handler> <file>`, and the LSP. Each
@@ -4745,7 +4821,7 @@ type GraderOut = {
 const s = schema_of(GraderOut)
 const ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
 
-const r = llm_call(prompt, nil, {
+const r = harness.llm.call(prompt, nil, {
   provider: "openai",
   output: GraderOut,            // alias in value position — compiled to schema_of(T)
   schema_retries: 2,
@@ -4768,7 +4844,7 @@ recorded in LLM transcript events with the selected route plus all considered
 alternatives so costs can be re-scored later:
 
 ```harn
-const r = llm_call(prompt, nil, {
+const r = harness.llm.call(prompt, nil, {
   route_policy: "cheapest_over_quality(mid)",
   fallback_chain: ["local", "ollama", "openai"],
 })
@@ -4811,7 +4887,7 @@ const r = cost_route {
     strategy: "cheapest_first",
   }
 
-  llm_call(prompt, nil, {max_tokens: 800})
+  harness.llm.call(prompt, nil, {max_tokens: 800})
 }
 ```
 
@@ -4929,13 +5005,13 @@ A user-defined wrapper such as
 
 ```harn,ignore
 fn grade<T>(prompt: string, schema: Schema<T>) -> T {
-  const r = llm_call(prompt, nil,
+  const r = harness.llm.call(prompt, nil,
     {provider: "mock", output: {schema: schema, validation: "error"}})
   return r.data
 }
 
 const out: GraderOut = grade("Grade this", schema_of(GraderOut))
-log(out.verdict)
+harness.obs.log(out.verdict)
 ```
 
 narrows `out` to `GraderOut` at the call site without any
@@ -4957,19 +5033,19 @@ primitive accepts either named arguments or the legacy positional form;
 both lower to the same runtime.
 
 ```harn,ignore
-const answer = ask_user(prompt: "deploy now?", schema: schema_of(Choice))
-const record = request_approval(action: "merge_pr", quorum: 2,
+const answer = harness.interaction.ask_user(prompt: "deploy now?", schema: schema_of(Choice))
+const record = harness.interaction.request_approval(action: "merge_pr", quorum: 2,
                               reviewers: ["alice", "bob", "carol"])
-const merged = dual_control(n: 2, m: 3, action: destructive_step,
+const merged = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
                           approvers: ["alice", "bob", "carol"])
-const handle = escalate_to(role: "oncall", reason: "deploy failed")
+const handle = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
 ```
 
 The runtime owns blocking semantics, timeout behavior, event-log
 records, and replay.
 
 - `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
-- `request_approval(action: string, options?: ApprovalRequestOptions)`
+- `harness.interaction.request_approval(action: string, options?: ApprovalRequestOptions)`
   returns `{approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil,
   signatures: list<{reviewer: string, signed_at: string, signature: string}>}`.
   `ApprovalRequestOptions` is `{detail?: any, args?: any, quorum?: int,
@@ -4977,7 +5053,7 @@ records, and replay.
   evidence_refs?: list<dict>, undo_metadata?: dict,
   capabilities_requested?: list<string>}`.
 - `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
-- `escalate_to(role: string, reason: string)`
+- `harness.interaction.escalate_to(role: string, reason: string)`
   returns `{request_id: string, role: string, reason: string, trace_id: string,
   status: string, accepted_at: string | nil, reviewer: string | nil}`.
 - `hitl_pending(filters?: {since?: string, until?: string, kinds?: list<string>,
@@ -5105,9 +5181,9 @@ removes it from the union in the else-branch.
 ```harn
 fn describe(x: string | int) {
   if type_of(x) == "string" {
-    log(x)  // x is `string`
+    harness.obs.log(x)  // x is `string`
   } else {
-    log(x)  // x is `int`
+    harness.obs.log(x)  // x is `int`
   }
 }
 ```
@@ -5181,7 +5257,7 @@ A bare identifier in condition position narrows by removing `nil`:
 ```harn
 fn check(x: string | nil) {
   if x {
-    log(x)  // x is `string`
+    harness.obs.log(x)  // x is `string`
   }
 }
 ```
@@ -5195,7 +5271,7 @@ fn check(x: string | nil) {
 ```harn
 fn check(x: string | int | nil) {
   if x != nil && type_of(x) == "string" {
-    log(x)  // x is `string`
+    harness.obs.log(x)  // x is `string`
   }
 }
 ```
@@ -5208,7 +5284,7 @@ scope (since the else-body must exit):
 ```harn
 fn process(x: string | nil) {
   guard x != nil else { return }
-  log(x)  // x is `string` here
+  harness.obs.log(x)  // x is `string` here
 }
 ```
 
@@ -5221,7 +5297,7 @@ the `if`:
 ```harn
 fn process(x: string | nil) {
   if x == nil { return }
-  log(x)  // x is `string` — the nil path returned
+  harness.obs.log(x)  // x is `string` — the nil path returned
 }
 ```
 
@@ -5250,8 +5326,8 @@ variable's type is narrowed in each arm:
 ```harn
 fn check(x: string | int) {
   match x {
-    "hello" -> { log(x) }  // x is `string`
-    42 -> { log(x) }       // x is `int`
+    "hello" -> { harness.obs.log(x) }  // x is `string`
+    42 -> { harness.obs.log(x) }       // x is `int`
     _ -> {}
   }
 }
@@ -5327,7 +5403,7 @@ extension and currently rejected.
 ```harn
 fn check(x: {name?: string, age: int}) {
   if x.has("name") {
-    log(x)  // x.name is now required (non-optional)
+    harness.obs.log(x)  // x.name is now required (non-optional)
   }
 }
 ```
@@ -5399,7 +5475,7 @@ exits where both branches of an `if`/`else` exit:
 ```harn
 fn foo(x: bool) {
   if x { return 1 } else { throw "err" }
-  log("never reached")  // warning: unreachable code
+  harness.obs.log("never reached")  // warning: unreachable code
 }
 ```
 
@@ -5439,7 +5515,7 @@ required fields and that each field has the expected type.
 
 ```harn,ignore
 fn process(user: {name: string, age: int}) {
-  log("${user.name} is ${user.age}")
+  harness.obs.log("${user.name} is ${user.age}")
 }
 
 process({name: "Alice", age: 30})     // OK
@@ -5612,8 +5688,8 @@ const form = multipart_parse(fixture.body, fixture.content_type, {
 
 const title = multipart_field_text(form.fields[0])
 const uploaded = multipart_field_bytes(form.fields[1])
-log(title)
-log(bytes_to_hex(uploaded))
+harness.obs.log(title)
+harness.obs.log(bytes_to_hex(uploaded))
 ```
 
 `signed_url` is the canonical helper for short-lived Harn-hosted receipt and
@@ -5719,16 +5795,18 @@ provider integrations.
 
 | Function | Description |
 |---|---|
-| `connector_call(provider, method, params?)` | Invoke the active outbound connector client for `provider` and return JSON-like result data |
-| `egress_policy(config)` | Install an egress policy for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. The policy is process-scoped under `harn run` and isolated per pipeline under `harn test`. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. `block_private: "private"` blocks DNS-resolved loopback, private, link-local, metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `block_private: "off"` opts out, and `allow_loopback: true` opens only loopback. The same axes can be seeded with `HARN_EGRESS_BLOCK_PRIVATE` and `HARN_EGRESS_ALLOW_LOOPBACK`. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}` |
-| `secret_get(secret_id)` | Read a secret from the active connector context. Only available while executing a Harn-backed connector export such as `normalize_inbound` or `call` |
-| `event_log_emit(topic, kind, payload, headers?)` | Append an event to the active event log from a Harn-backed connector export |
-| `metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter from a Harn-backed connector export |
+| `harness.net.connector_call(provider, method, params?)` | Invoke the active outbound connector client for `provider` and return JSON-like result data |
+| `harness.net.egress_policy(config)` | Install a destination policy on this Harness for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. Hosts seed each root Harness from the run environment; `harn test` gives each pipeline an isolated root. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. `block_private: "private"` blocks DNS-resolved loopback, private, link-local, metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `block_private: "off"` opts out, and `allow_loopback: true` opens only loopback. The same axes can be seeded with `HARN_EGRESS_BLOCK_PRIVATE` and `HARN_EGRESS_ALLOW_LOOPBACK`. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}`. `harness.with_net_policy(policy)` derives an attenuated Harness without replacing the root destination policy. |
+| `harness.secrets.read(secret_id)` | Read a secret from the active connector context |
+| `harness.obs.event_log_emit(topic, kind, payload, headers?)` | Append an event to the active connector event log |
+| `harness.obs.metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter |
 
 Harn-backed connector modules are loaded through manifest `[[providers]]`
 entries and must export `provider_id()`, `kinds()`, and `payload_schema()`.
-Inbound providers also export `normalize_inbound(raw)`, which returns a
-`NormalizeResult` v1 dict. The top-level `type` field is one of:
+Those metadata exports are pure. Runtime exports declare a leading
+`harness: Harness`; inbound providers export
+`normalize_inbound(harness: Harness, raw)`, which returns a `NormalizeResult`
+v1 dict. The top-level `type` field is one of:
 
 - `"event"` with `event: {kind, dedupe_key, payload, ...}` for one normalized
   event.
@@ -5780,8 +5858,9 @@ fields may be omitted for compliant protected resources that advertise OAuth
 metadata. `client_id`, `client_secret`, and `token_endpoint_auth_method` are
 defaults only; CLI flags override them for a single connect run.
 
-Poll-capable providers export `poll_tick(ctx)`. The orchestrator invokes this
-hook for `kind = "poll"` bindings using the binding's `poll` configuration:
+Poll-capable providers export `poll_tick(harness: Harness, ctx)`. The
+orchestrator invokes this hook for `kind = "poll"` bindings using the binding's
+`poll` configuration:
 `interval`/`interval_ms`/`interval_secs`, optional
 `jitter`/`jitter_ms`/`jitter_secs`, `state_key` or `cursor_state_key`,
 `tenant_id`, `lease_id`, and `max_batch_size`. `ctx` contains the activated
@@ -5850,7 +5929,7 @@ raised.
   `.iter()` does not affect iteration.
 - **String iteration**: yields chars (Unicode scalar values), not
   graphemes.
-- **Printing**: `log(it)` / `to_string(it)` renders `<iter>` or
+- **Printing**: `harness.obs.log(it)` / `to_string(it)` renders `<iter>` or
   `<iter (exhausted)>` without draining the iter.
 
 ### Combinators
@@ -6085,9 +6164,9 @@ import { checkpoint_stage } from "std/checkpoint"
 fn fetch_dataset(url) { url }
 fn clean(data) { data }
 fn run_model(cleaned) { cleaned }
-fn upload(result) { log(result) }
+fn upload(result) { harness.obs.log(result) }
 
-pipeline process(task) {
+pipeline process(harness: Harness, task) {
   const url = "https://example.com/data.csv"
   const data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
   const cleaned = checkpoint_stage("clean",   fn() { clean(data) })
@@ -6137,7 +6216,7 @@ fn fetch_with_timeout(url) { url }
 
 const url = "https://example.com/data.csv"
 const data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
-log(data)
+harness.obs.log(data)
 ```
 
 ### File location
@@ -6217,7 +6296,8 @@ shape: `{vector: list<float>, model?: string, dim?: int}`. Harn never bundles
 an embedding model; hosts choose it, and embeddings are cached on disk under
 `.harn/memory/<namespace>/vectors/<sanitized_model_hint>/<sha256(text)>.json`
 keyed by `(model_hint, content_hash)`. Tests can satisfy the capability with
-`host_mock("memory", "embed", {result})`.
+`harness.testing.respond("memory.embed", {result})`; the response is scoped to
+that exact root Harness instance.
 
 Determinism contract: a recall over the same `(namespace, query, mode,
 embed_model_hint, top_k)` against the same event log and embedding cache
@@ -6255,7 +6335,7 @@ Provides typed `harn.fact.v1` assertions on top of `std/memory`. A fact contains
 | `fact_tags(fact, tags?)` | Return `fact`, `fact:<kind>`, `schema:harn.fact.v1`, generic and kind-scoped evidence tags, and caller tags |
 | `store_fact(input, options?)` | Store the fact as `MemoryRecord.value`, using the fact id as the memory record id |
 | `recall_facts(query, kind?, min_confidence?, scope?)` | Recall normalized facts and filter by kind/confidence; `scope` may be a scope string or an options dict with normal memory options |
-| `invalidate_facts(predicate, scope?)` | Append memory tombstones; predicates accept exact `fact_...` ids or dicts with `id`, `key`, `kind`, `claim`, `query`, `tag`, `tags`, `evidence_ref`, or `evidence` |
+| `invalidate_facts(harness.memory, predicate, scope?)` | Append memory tombstones; predicates accept exact `fact_...` ids or dicts with `id`, `key`, `kind`, `claim`, `query`, `tag`, `tags`, `evidence_ref`, or `evidence` |
 
 ### std/agent/probe module
 
@@ -6302,8 +6382,8 @@ receipts, claims, and audit records.
 
 | Function | Notes |
 |---|---|
-| `pg_pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
-| `pg_connect(source, options?)` | Open a single-connection Postgres pool |
+| `harness.postgres.pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
+| `harness.postgres.connect(source, options?)` | Open a single-connection Postgres pool |
 | `pg_query(handle, sql, params?)` | Run a parameterized query and return rows as dictionaries |
 | `pg_query_one(handle, sql, params?)` | Return the first row, or `nil` when no rows match |
 | `pg_execute(handle, sql, params?)` | Execute a statement and return `{rows_affected}` |
@@ -7334,7 +7414,7 @@ fn admin_merge(ctx) {
   return ctx
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   register_persona_hook("merge_*", "PreStep", { ctx -> nil })
   register_step_hook("merge_captain", "admin_merge", "PostStep", { ctx ->
     {output: ctx.output}
@@ -7679,11 +7759,11 @@ The test runner scans `.harn` files for pipelines whose names start with
 it completes without error; it fails if it throws or an assertion fails.
 
 ```harn
-pipeline test_addition() {
+pipeline test_addition(harness: Harness) {
   assert_eq(1 + 1, 2)
 }
 
-pipeline test_string_concat() {
+pipeline test_string_concat(harness: Harness) {
   const result = "hello" + " " + "world"
   assert_eq(result, "hello world")
 }
@@ -7700,7 +7780,7 @@ display name `pipeline[row]`.
   {name: "positive", args: [2, 3, 5]},
   {name: "negative", args: [-2, 1, -1]},
 ])
-pipeline add_case(left, right, expected) {
+pipeline add_case(harness: Harness, left, right, expected) {
   assert_eq(left + right, expected)
 }
 ```
@@ -7726,7 +7806,7 @@ fn fixture() -> dict {
   ],
   fixture: fixture,
 )
-pipeline test_query(fx: dict, input: string, expected: string) {
+pipeline test_query(harness: Harness, fx: dict, input: string, expected: string) {
   fx.rows.push(input)
   assert_eq("${fx.prefix}:${input}", expected)
 }
@@ -7829,7 +7909,8 @@ The following environment variables configure runtime behavior:
 ### Sandbox and egress
 
 These variables affect the confinement `harn run` installs by default. See
-[Sandbox mode](30-sandbox-mode.md) for the run-level sandbox and `egress_policy(config)`
+[Sandbox mode](30-sandbox-mode.md) for the run-level sandbox and
+`harness.net.egress_policy(config)`
 in the built-in method table for the full rule syntax.
 
 | Variable | Description |
@@ -7843,10 +7924,11 @@ in the built-in method table for the full rule syntax.
 
 Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}`.
 Any of these variables being set seeds the egress policy before
-`egress_policy(config)` runs, so a script that also declares a policy fails with
-`policy already configured from environment`. `harn run` keeps that policy
-process-wide. `harn test` seeds an isolated copy for each test pipeline, including
-under `--parallel`, so one pipeline cannot alter another's policy.
+`harness.net.egress_policy(config)` runs, so a script that also declares a
+policy fails with `policy already configured from environment`. The host seeds
+the root Harness for `harn run`; `harn test` seeds an isolated root for each
+test pipeline, including under `--parallel`, so one pipeline cannot alter
+another's policy.
 
 ## Known limitations and future work
 

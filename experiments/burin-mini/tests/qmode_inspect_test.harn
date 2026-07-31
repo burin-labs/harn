@@ -11,14 +11,12 @@ fn first_group(pattern: string, text: string) {
   return matches[0].groups[0]
 }
 
-fn repo_root() -> string {
-  let dir = cwd()
+fn repo_root(fs: HarnessFs) -> string {
+  let dir = fs.cwd()
   let depth = 0
   while depth < 8 {
-    if harness.fs.exists(path_join(dir, "Cargo.toml"))
-      && harness.fs.exists(
-      path_join(dir, "experiments"),
-    ) {
+    if fs.exists(path_join(dir, "Cargo.toml"))
+      && fs.exists(path_join(dir, "experiments")) {
       return dir
     }
     const parent = dirname(dir) ?? dir
@@ -28,44 +26,44 @@ fn repo_root() -> string {
     dir = parent
     depth = depth + 1
   }
-  throw "could not find repo root from " + cwd()
+  throw "could not find repo root from " + fs.cwd()
 }
 
-fn resolve_harn_bin(root: string) -> string {
-  const explicit = harness.env.get("HARN_BIN")
+fn resolve_harn_bin(env: HarnessEnv, fs: HarnessFs, root: string) -> string {
+  const explicit = env.get("HARN_BIN")
   if explicit {
     return explicit
   }
-  const env_target_dir = harness.env.get("CARGO_TARGET_DIR")
+  const env_target_dir = env.get("CARGO_TARGET_DIR")
   if env_target_dir {
     return path_join(env_target_dir, "debug/harn")
   }
   const cargo_config = path_join(root, ".cargo/config.toml")
-  if harness.fs.exists(cargo_config) {
-    const config = harness.fs.read_text(cargo_config) ?? ""
+  if fs.exists(cargo_config) {
+    const config = fs.read_text(cargo_config) ?? ""
     const configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
     if configured {
       const configured_bin = path_join(configured, "debug/harn")
-      if harness.fs.exists(configured_bin) {
+      if fs.exists(configured_bin) {
         return configured_bin
       }
     }
   }
   const default_bin = path_join(root, "target/debug/harn")
-  if harness.fs.exists(default_bin) {
+  if fs.exists(default_bin) {
     return default_bin
   }
   return "harn"
 }
 
-fn write_json(path: string, value) -> nil {
-  harness.fs.write_text(path, json_stringify(value) + "\n")
+fn write_json(fs: HarnessFs, path: string, value) -> nil {
+  fs.write_text(path, json_stringify(value) + "\n")
   return nil
 }
 
-fn write_valid_fixture(task_dir: string) -> nil {
-  write_json(path_join(task_dir, "task.json"), {task: "add per-IP rate limiting"})
-  harness.fs.write_text(
+fn write_valid_fixture(fs: HarnessFs, task_dir: string) -> nil {
+  write_json(fs, path_join(task_dir, "task.json"), {task: "add per-IP rate limiting"})
+  fs.write_text(
     path_join(task_dir, "qa.jsonl"),
     json_stringify(
       {
@@ -77,6 +75,7 @@ fn write_valid_fixture(task_dir: string) -> nil {
       + "\n",
   )
   write_json(
+    fs,
     path_join(task_dir, "plan.json"),
     {
       mode: "fast_execute",
@@ -85,7 +84,7 @@ fn write_valid_fixture(task_dir: string) -> nil {
       ready: true,
     },
   )
-  harness.fs.write_text(
+  fs.write_text(
     path_join(task_dir, "llm-mock.jsonl"),
     json_stringify(
       {
@@ -112,8 +111,8 @@ fn write_valid_fixture(task_dir: string) -> nil {
     )
       + "\n",
   )
-  write_json(path_join(task_dir, "step.json"), {tool_calls: [{name: "exit_plan_mode"}]})
-  harness.fs.write_text(
+  write_json(fs, path_join(task_dir, "step.json"), {tool_calls: [{name: "exit_plan_mode"}]})
+  fs.write_text(
     path_join(task_dir, "last-prompt.txt"),
     "- Q: Which backing store should rate limits use?\n  A: Use Redis.\n",
   )
@@ -128,11 +127,12 @@ fn finding_messages(result: dict) -> string {
   return join(lines, "\n")
 }
 
-pipeline test_qmode_inspect_valid_fixture_passes(_task) {
+pipeline test_qmode_inspect_valid_fixture_passes(harness: Harness, _task) {
   with_temp_dir(
+    harness.fs,
     { task_dir ->
-      write_valid_fixture(task_dir)
-      const result = qmode_inspect_task_dir(task_dir)
+      write_valid_fixture(harness.fs, task_dir)
+      const result = qmode_inspect_task_dir(harness.fs, harness.stdio, task_dir)
       const output = finding_messages(result)
       assert(result.exit_code == 0, "valid fixture should pass: " + output)
       assert(output.contains("OK: task.json has task text"), "task text finding should be emitted")
@@ -141,10 +141,11 @@ pipeline test_qmode_inspect_valid_fixture_passes(_task) {
   )
 }
 
-pipeline test_qmode_inspect_terminal_double_call_fails(_task) {
+pipeline test_qmode_inspect_terminal_double_call_fails(harness: Harness, _task) {
   with_temp_dir(
+    harness.fs,
     { task_dir ->
-      write_json(path_join(task_dir, "task.json"), {task: "improve performance"})
+      write_json(harness.fs, path_join(task_dir, "task.json"), {task: "improve performance"})
       harness.fs.write_text(
         path_join(task_dir, "llm-mock.jsonl"),
         json_stringify(
@@ -157,7 +158,7 @@ pipeline test_qmode_inspect_terminal_double_call_fails(_task) {
         )
           + "\n",
       )
-      const result = qmode_inspect_task_dir(task_dir)
+      const result = qmode_inspect_task_dir(harness.fs, harness.stdio, task_dir)
       const output = finding_messages(result)
       assert(result.exit_code == 1, "double terminal tool call must fail")
       assert(
@@ -168,13 +169,15 @@ pipeline test_qmode_inspect_terminal_double_call_fails(_task) {
   )
 }
 
-pipeline test_qmode_inspect_cli_exit_code_and_output(_task) {
+pipeline test_qmode_inspect_cli_exit_code_and_output(harness: Harness, _task) {
   with_temp_dir(
+    harness.fs,
     { task_dir ->
-      write_valid_fixture(task_dir)
-      const root = repo_root()
-      const harn_bin = resolve_harn_bin(root)
+      write_valid_fixture(harness.fs, task_dir)
+      const root = repo_root(harness.fs)
+      const harn_bin = resolve_harn_bin(harness.env, harness.fs, root)
       const child = command_run(
+        harness.tools,
         [
           harn_bin,
           "run",

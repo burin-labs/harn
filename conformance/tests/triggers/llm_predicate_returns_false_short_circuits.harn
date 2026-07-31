@@ -1,12 +1,12 @@
 import { with_llm_script } from "std/testing"
 import "std/triggers"
 
-fn handler(event: TriggerEvent) -> dict {
+fn handler(harness: Harness, event: TriggerEvent) -> dict {
   return {handled: true, kind: event.kind}
 }
 
-fn classify(event: TriggerEvent) -> bool {
-  const result = llm_call(
+fn classify(harness: Harness, event: TriggerEvent) -> bool {
+  const result = harness.llm.call(
     "predicate false " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -14,15 +14,16 @@ fn classify(event: TriggerEvent) -> bool {
   return contains(result.text, "yes")
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [{text: "no", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"}],
     { ->
       const unique = to_string(to_int(harness.clock.timestamp())) + "-"
         + to_string(
-        harness.random.gen_range(100000, 999999),
+        harness.random.range(100000, 999999),
       )
-      const handle: TriggerHandle = trigger_register(
+      const handle: TriggerHandle = harness.runtime.trigger_register(
         {
           id: "llm-predicate-false-" + unique,
           kind: "issue.opened",
@@ -40,17 +41,17 @@ pipeline test(task) {
           package_name: nil,
         },
       )
-      const fire: DispatchHandle = trigger_fire(
+      const fire: DispatchHandle = harness.runtime.trigger_fire(
         handle,
         {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-false-" + unique}},
       )
-      const dispatches = trigger_inspect_lifecycle("DispatchStarted").filter(
+      const dispatches = harness.runtime.trigger_inspect_lifecycle("DispatchStarted").filter(
         { entry -> entry?.headers?.trigger_id == handle.id },
       )
-      __io_println(fire.status == "dispatched")
-      __io_println(contains(json_stringify(fire.result ?? {}), "\"skipped\":true"))
-      __io_println(contains(json_stringify(fire.result ?? {}), "\"reason\":null"))
-      __io_println(len(dispatches) == 0)
+      harness.stdio.println(fire.status == "dispatched")
+      harness.stdio.println(contains(json_stringify(fire.result ?? {}), "\"skipped\":true"))
+      harness.stdio.println(contains(json_stringify(fire.result ?? {}), "\"reason\":null"))
+      harness.stdio.println(len(dispatches) == 0)
     },
   )
 }

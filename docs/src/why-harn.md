@@ -38,7 +38,7 @@ client initialization, no response parsing. Set an environment variable
 and call a model:
 
 ```harn
-const answer = llm_call("Summarize this code", "You are a code reviewer.")
+const answer = harness.llm.call("Summarize this code", "You are a code reviewer.")
 ```
 
 Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter,
@@ -52,16 +52,16 @@ steps, and be imported across files, which keeps multi-stage agent workflows
 readable:
 
 ```harn
-pipeline analyze(task) {
-  const context = read_file("README.md")
-  const plan = llm_call("${task}\n\nContext:\n${context}", "Break this into steps.")
+pipeline analyze(harness: Harness, task) {
+  const context = harness.fs.read_text("README.md")
+  const plan = harness.llm.call("${task}\n\nContext:\n${context}", "Break this into steps.")
   const steps = json_parse(plan.text)
 
   const results = parallel each steps { step ->
-    agent_loop(step, "You are a coding assistant.", {loop_until_done: true})
+    agent_loop(harness, step, "You are a coding assistant.", {loop_until_done: true})
   }
 
-  write_file("results.json", json_stringify(results))
+  harness.fs.write_text("results.json", json_stringify(results))
 }
 ```
 
@@ -79,10 +79,10 @@ The CLI handles standalone OAuth for remote HTTP MCP servers, so cloud MCP
 integrations can be ordinary runtime dependencies instead of host-specific glue.
 
 ```harn
-const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
-const tools = mcp_list_tools(client)
-const content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})
-mcp_disconnect(client)
+const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const tools = harness.tools.mcp_list_tools(client)
+const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/data.txt"})
+harness.tools.mcp_disconnect(client)
 ```
 
 ### Concurrency without async/await
@@ -93,7 +93,7 @@ without asking you to write an event loop.
 
 ```harn
 const results = parallel each files { file ->
-  llm_call(read_file(file), "Review this file for security issues")
+  harness.llm.call(harness.fs.read_text(file), "Review this file for security issues")
 }
 ```
 
@@ -119,7 +119,7 @@ unreliable LLM call in retries is a one-liner:
 
 ```harn
 retry 3 {
-  const result = llm_call(prompt, system)
+  const result = harness.llm.call(prompt, system)
   json_parse(result.text)
 }
 ```
@@ -190,7 +190,7 @@ async def main():
     urls = ["https://a.com", "https://b.com", "https://c.com"]
     results = await asyncio.gather(*[summarize(u) for u in urls])
     for r in results:
-        log(r)
+        harness.stdio.log(r)
 
 asyncio.run(main())
 ```
@@ -198,18 +198,18 @@ asyncio.run(main())
 **Harn**:
 
 ```harn
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const urls = ["https://a.com", "https://b.com", "https://c.com"]
 
   const results = parallel each urls { url ->
     retry 3 {
-      const page = http_get(url)
-      llm_call("Summarize:\n${page}", "Be concise.")
+      const page = harness.net.get(url)
+      harness.llm.call("Summarize:\n${page}", "Be concise.")
     }
   }
 
   for r in results {
-    log(r)
+    harness.stdio.log(r)
   }
 }
 ```

@@ -15,7 +15,11 @@ pub(crate) fn register_cron_builtins(vm: &mut Vm) {
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&CRON_IS_VALID_BUILTIN_DEF];
 
-#[harn_builtin(sig = "__cron_is_valid(expression: string) -> bool", category = "cron")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__cron_is_valid(expression: string) -> bool", category = "cron"
+)]
 fn cron_is_valid_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let expression = expect_string_arg(args, 0, "__cron_is_valid", ErrorKind::Runtime)?;
     Ok(VmValue::Bool(expression.parse::<Cron>().is_ok()))

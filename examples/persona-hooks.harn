@@ -10,13 +10,14 @@ fn admin_merge(ctx) -> string {
   return "merged " + ctx.pr
 }
 
-pipeline default() {
-  register_step_hook(
+pipeline default(harness: Harness) {
+  harness.agent.register_step_hook(
     "merge_captain",
     "admin_merge",
     "PostStep",
     { ctx ->
       post_message(
+        harness,
         "#release-ops",
         "merge_captain.admin_merge completed: " + to_string(ctx.output),
         nil,
@@ -25,5 +26,5 @@ pipeline default() {
       return nil
     },
   )
-  __io_println(merge_captain({pr: "burin-labs/harn#1075"}))
+  harness.stdio.println(merge_captain({pr: "burin-labs/harn#1075"}))
 }

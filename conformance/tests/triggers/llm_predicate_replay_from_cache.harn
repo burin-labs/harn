@@ -1,12 +1,12 @@
 import { with_llm_script } from "std/testing"
 import "std/triggers"
 
-fn handler(event: TriggerEvent) -> dict {
+fn handler(harness: Harness, event: TriggerEvent) -> dict {
   return {handled: true, kind: event.kind}
 }
 
-fn classify(event: TriggerEvent) -> bool {
-  const result = llm_call(
+fn classify(harness: Harness, event: TriggerEvent) -> bool {
+  const result = harness.llm.call(
     "predicate replay " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -14,15 +14,16 @@ fn classify(event: TriggerEvent) -> bool {
   return contains(result.text, "yes")
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [{text: "yes", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"}],
     { ->
       const unique = to_string(to_int(harness.clock.timestamp())) + "-"
         + to_string(
-        harness.random.gen_range(100000, 999999),
+        harness.random.range(100000, 999999),
       )
-      const handle: TriggerHandle = trigger_register(
+      const handle: TriggerHandle = harness.runtime.trigger_register(
         {
           id: "llm-predicate-replay-" + unique,
           kind: "issue.opened",
@@ -40,19 +41,19 @@ pipeline test(task) {
           package_name: nil,
         },
       )
-      const fire: DispatchHandle = trigger_fire(
+      const fire: DispatchHandle = harness.runtime.trigger_fire(
         handle,
         {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-replay-" + unique}},
       )
-      const replay: DispatchHandle = trigger_replay(fire.event_id)
-      const evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(
+      const replay: DispatchHandle = harness.runtime.trigger_replay(fire.event_id)
+      const evaluated = harness.runtime.trigger_inspect_lifecycle("predicate.evaluated").filter(
         { entry -> entry?.headers?.trigger_id == handle.id },
       )
-      __io_println(fire.status == "dispatched" && replay.status == "dispatched")
-      __io_println(len(llm_mock_calls()) == 1)
-      __io_println(len(evaluated) == 2)
-      __io_println(!evaluated[0]?.payload?.cached && evaluated[1]?.payload?.cached)
-      __io_println(evaluated[1]?.payload?.replay_of_event_id == fire.event_id)
+      harness.stdio.println(fire.status == "dispatched" && replay.status == "dispatched")
+      harness.stdio.println(len(harness.llm.mock_calls()) == 1)
+      harness.stdio.println(len(evaluated) == 2)
+      harness.stdio.println(!evaluated[0]?.payload?.cached && evaluated[1]?.payload?.cached)
+      harness.stdio.println(evaluated[1]?.payload?.replay_of_event_id == fire.event_id)
     },
   )
 }

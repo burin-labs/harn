@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const selected = select_artifacts_adaptive(
     [
       artifact({id: "a1", kind: "summary", text: "same content", relevance: 0.9}),
@@ -7,7 +7,7 @@ pipeline test(task) {
     ],
     {include_kinds: ["summary"], max_tokens: 100},
   )
-  __io_println(len(selected))
-  __io_println(selected[0].id)
-  __io_println(json_stringify(selected).contains("different content"))
+  harness.stdio.println(len(selected))
+  harness.stdio.println(selected[0].id)
+  harness.stdio.println(json_stringify(selected).contains("different content"))
 }

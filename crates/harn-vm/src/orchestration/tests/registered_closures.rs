@@ -91,10 +91,10 @@ fn run_registered_closure_probe(source: &str) -> (Result<String, String>, usize)
 // `tool_rejected: ... exceeds execution policy`, taking down every turn.
 #[test]
 fn registered_provider_and_session_hook_evaluate_under_execution_policy() {
-    let script = r#"pipeline main() {
-  const session = agent_session_open("trusted-bridge-probe")
-  agent_session_reset(session)
-  register_reminder_provider({
+    let script = r#"pipeline main(harness: Harness) {
+  const session = harness.agent.open("trusted-bridge-probe")
+  harness.agent.reset(session)
+  harness.agent.register_reminder_provider({
     id: "probe-provider",
     subscribes_to: ["session_start"],
     evaluate: { ctx ->
@@ -102,7 +102,7 @@ fn registered_provider_and_session_hook_evaluate_under_execution_policy() {
       return []
     },
   })
-  register_session_hook("session_start", { _payload ->
+  harness.agent.register_session_hook("session_start", { _harness, _payload ->
     __probe_bridge_gate()
     return {control: "allow"}
   })
@@ -129,7 +129,7 @@ fn registered_provider_and_session_hook_evaluate_under_execution_policy() {
 // own registered-closure seams rather than weakening the policy globally.
 #[test]
 fn bridged_builtin_outside_registered_closure_is_still_rejected_under_policy() {
-    let script = r"pipeline main() {
+    let script = r"pipeline main(harness: Harness) {
   __probe_bridge_gate()
 }";
 
@@ -154,7 +154,7 @@ fn bridged_builtin_outside_registered_closure_is_still_rejected_under_policy() {
 // registry (`USER_PROVIDERS`, the session-hook table) that OUTLIVES the VM that
 // registered it. Its body may call a sibling `pub fn` defined in the SAME
 // pipeline module — exactly how Burin wires
-// `register_reminder_provider({ evaluate: { ctx -> evaluate_burin_user_reminder_rules(ctx) } })`
+// `harness.agent.register_reminder_provider({ evaluate: { ctx -> evaluate_burin_user_reminder_rules(ctx) } })`
 // inside `build_loop_options_base`.
 //
 // Sibling-fn resolution for a module closure goes through the module's function
@@ -182,8 +182,8 @@ pub fn session_hook_decision(payload) {
   return {control: "allow"}
 }
 
-pub fn register_provider_closure() {
-  register_reminder_provider({
+pub fn register_provider_closure(agent: HarnessAgent) {
+  agent.register_reminder_provider({
     id: "fn-provider",
     subscribes_to: ["session_start"],
     evaluate: { ctx -> return compute_provider_reminders(ctx) },
@@ -191,8 +191,8 @@ pub fn register_provider_closure() {
   return nil
 }
 
-pub fn register_hook_closure() {
-  register_session_hook("session_start", { payload ->
+pub fn register_hook_closure(agent: HarnessAgent) {
+  agent.register_session_hook("session_start", { _harness, payload ->
     return session_hook_decision(payload)
   })
   return nil
@@ -218,7 +218,17 @@ async fn register_from_disposable_vm(register_fn: &str) {
         .get(register_fn)
         .unwrap_or_else(|| panic!("module must export {register_fn}"))
         .clone();
-    vm.call_closure_pub(&register, &[])
+    let agent = match vm
+        .root_harness_value()
+        .expect("stdlib registration must install a root Harness")
+    {
+        crate::value::VmValue::Harness(root) => crate::value::VmValue::harness(
+            root.sub_handle("agent")
+                .expect("root Harness must expose HarnessAgent"),
+        ),
+        _ => unreachable!("root Harness value must be a harness handle"),
+    };
+    vm.call_closure_pub(&register, &[agent])
         .await
         .expect("registration closure must run");
     // Drop the VM (and `exports`) so the module's function registry is released,
@@ -265,9 +275,9 @@ fn registered_provider_closure_resolves_sibling_fn_after_registering_vm_dropped(
                     Ok(crate::json_to_vm_value(&report))
                 });
                 let chunk = crate::compile_source(
-                    r#"pipeline main() {
-  const session = agent_session_open("provider-fn-probe")
-  agent_session_reset(session)
+                    r#"pipeline main(harness: Harness) {
+  const session = harness.agent.open("provider-fn-probe")
+  harness.agent.reset(session)
   __test_fire_reminders()
 }"#,
                 )?;
@@ -313,7 +323,7 @@ fn registered_session_hook_closure_resolves_sibling_fn_after_registering_vm_drop
                 let mut vm = crate::Vm::new();
                 crate::stdlib::register_vm_stdlib(&mut vm);
                 let chunk = crate::compile_source(
-                    r#"pipeline main() {
+                    r#"pipeline main(harness: Harness) {
   __host_fire_session_hook("session_start", {session: {id: "hook-fn-probe"}, event: "session_start"})
 }"#,
                 )?;
@@ -347,8 +357,8 @@ fn registered_session_hook_closure_resolves_sibling_fn_after_registering_vm_drop
 // rather than blanket-swallowing unknown names.
 #[test]
 fn registered_provider_closure_unknown_name_still_falls_through_to_bridge() {
-    const MODULE: &str = r#"pub fn register_unknown_call_provider() {
-  register_reminder_provider({
+    const MODULE: &str = r#"pub fn register_unknown_call_provider(agent: HarnessAgent) {
+  agent.register_reminder_provider({
     id: "unknown-call-provider",
     subscribes_to: ["session_start"],
     evaluate: { ctx -> return definitely_not_a_defined_name(ctx) },
@@ -382,7 +392,17 @@ fn registered_provider_closure_unknown_name_still_falls_through_to_bridge() {
                     .get("register_unknown_call_provider")
                     .expect("module must export register fn")
                     .clone();
-                vm.call_closure_pub(&register, &[])
+                let agent = match vm
+                    .root_harness_value()
+                    .expect("stdlib registration must install a root Harness")
+                {
+                    crate::value::VmValue::Harness(root) => crate::value::VmValue::harness(
+                        root.sub_handle("agent")
+                            .expect("root Harness must expose HarnessAgent"),
+                    ),
+                    _ => unreachable!("root Harness value must be a harness handle"),
+                };
+                vm.call_closure_pub(&register, &[agent])
                     .await
                     .expect("registration closure must run");
                 drop(exports);
@@ -402,9 +422,9 @@ fn registered_provider_closure_unknown_name_still_falls_through_to_bridge() {
                     Ok(crate::json_to_vm_value(&report))
                 });
                 let chunk = crate::compile_source(
-                    r#"pipeline main() {
-  const session = agent_session_open("unknown-call-probe")
-  agent_session_reset(session)
+                    r#"pipeline main(harness: Harness) {
+  const session = harness.agent.open("unknown-call-probe")
+  harness.agent.reset(session)
   __test_fire_reminders()
 }"#,
                 )?;

@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const result = deadline 5s {
-    log("within deadline")
+    harness.stdio.log("within deadline")
     42
   }
-  log(result)
+  harness.stdio.log(result)
 }

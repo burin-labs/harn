@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
 fn tools() {
@@ -27,9 +28,10 @@ fn tools() {
   return registry
 }
 
-pipeline default() {
-  register_tool_hook({pattern: "blocked", deny: "blocked by policy"})
+pipeline default(harness: Harness) {
+  harness.tools.register_hook({pattern: "blocked", deny: "blocked by policy"})
   with_llm_script(
+    harness.llm,
     [
       {
         text: "",
@@ -41,6 +43,7 @@ pipeline default() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Try both tools.",
         nil,
         {
@@ -71,16 +74,16 @@ pipeline default() {
           tools: tools(),
         },
       )
-      __io_println(result.stop_reason)
+      harness.stdio.println(result.stop_reason)
       const transcript = json_stringify(transcript_messages(result.transcript))
-      __io_println(transcript.contains("tool_names=lookup,blocked"))
-      __io_println(transcript.contains("successful=lookup"))
-      __io_println(transcript.contains("rejected=blocked"))
-      __io_println(transcript.contains("available=lookup,blocked"))
-      __io_println(transcript.contains("provider=mock"))
-      __io_println(transcript.contains("format=native"))
-      __io_println(transcript.contains("count=2"))
+      harness.stdio.println(transcript.contains("tool_names=lookup,blocked"))
+      harness.stdio.println(transcript.contains("successful=lookup"))
+      harness.stdio.println(transcript.contains("rejected=blocked"))
+      harness.stdio.println(transcript.contains("available=lookup,blocked"))
+      harness.stdio.println(transcript.contains("provider=mock"))
+      harness.stdio.println(transcript.contains("format=native"))
+      harness.stdio.println(transcript.contains("count=2"))
     },
   )
-  clear_tool_hooks()
+  harness.tools.clear_hooks()
 }

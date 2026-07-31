@@ -12,12 +12,13 @@ import { preset_run_command } from "std/tool_hooks"
  * `tool_hook_classifier_verdict` audit so the gating decision is
  * observable.
  */
-pipeline default() {
-  pipeline_lifecycle_audit_log_take()
-  __tool_hooks_classifier_cache_clear()
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.tools.classifier_cache_clear()
   /* Above threshold: classifier asks for a rewrite with confidence 0.95;
    * threshold is 0.7 so the rewrite mode fires. */
   with_llm_script(
+    harness.llm,
     [
       llm_text(
         "{\"kind\": \"rewrite\", \"confidence\": 0.95,"
@@ -33,24 +34,25 @@ pipeline default() {
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
       const wrapper = preset_run_command(
+        harness,
         {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
       )
       const above = wrapper({command: "echo above"})
-      __io_println(above.action)
-      __io_println(above.command)
-      __io_println(above.result.ran)
+      harness.stdio.println(above.action)
+      harness.stdio.println(above.command)
+      harness.stdio.println(above.result.ran)
       const below = wrapper({command: "echo below"})
-      __io_println(below.ok)
-      __io_println(below.ran)
-      const log = pipeline_lifecycle_audit_log_take()
-      __io_println(log[0].kind)
-      __io_println(log[0].payload.kind)
-      __io_println(log[0].payload.action)
-      __io_println(len(log))
+      harness.stdio.println(below.ok)
+      harness.stdio.println(below.ran)
+      const log = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(log[0].kind)
+      harness.stdio.println(log[0].payload.kind)
+      harness.stdio.println(log[0].payload.action)
+      harness.stdio.println(len(log))
       const last = log[len(log) - 1]
-      __io_println(last.kind)
-      __io_println(last.payload.action)
-      __io_println(last.payload.kind)
+      harness.stdio.println(last.kind)
+      harness.stdio.println(last.payload.action)
+      harness.stdio.println(last.payload.kind)
     },
   )
 }

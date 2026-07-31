@@ -1,7 +1,9 @@
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -18,6 +20,7 @@ pipeline main() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Finish without parking.",
         nil,
         {
@@ -28,12 +31,12 @@ pipeline main() {
           max_iterations: 3,
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const followup = json_stringify(calls[1]?.messages ?? [])
-      __io_println(result.status)
-      __io_println(len(calls))
-      __io_println(contains(followup, "HARN-SUS-002"))
-      __io_println(contains(followup, "conditions.trigger"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(contains(followup, "HARN-SUS-002"))
+      harness.stdio.println(contains(followup, "conditions.trigger"))
     },
   )
 }

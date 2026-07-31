@@ -5,52 +5,69 @@ import "std/session-store"
  * projection (upsert/delete), value projection, and chain verification. All
  * fields printed are deterministic apart from the opaque canonical hashes.
  */
-pipeline default() {
-  const root = path_join(harness.fs.temp_dir(), "harn-session-store-" + uuid())
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-session-store-" + harness.random.uuid(),
+  )
   const sid = "burin.agent_context.memories.project"
   const opts = {root: root, kind_type: "AgentMemory"}
   const first = session_store_append(
+    harness.agent,
     sid,
     {operation: "upsert", record: {id: "m1", title: "one"}},
     opts,
   )
   const second = session_store_append(
+    harness.agent,
     sid,
     {operation: "upsert", record: {id: "m2", title: "two"}},
     opts,
   )
-  session_store_append(sid, {operation: "upsert", record: {id: "m1", title: "one-v2"}}, opts)
-  session_store_append(sid, {operation: "delete", id: "m2"}, opts)
+  session_store_append(
+    harness.agent,
+    sid,
+    {operation: "upsert", record: {id: "m1", title: "one-v2"}},
+    opts,
+  )
+  session_store_append(harness.agent, sid, {operation: "delete", id: "m2"}, opts)
   // Hash chain: 1-based event_id, genesis prev_hash is nil, then links.
-  __io_println(first.event_id)
-  __io_println(first.prev_hash == nil)
-  __io_println(second.prev_hash == first.record_hash)
-  __io_println(second.parent_event_id == first.event_id)
-  __io_println(starts_with(first.record_hash, "sha256:"))
-  __io_println(first.kind.type)
+  harness.stdio.println(first.event_id)
+  harness.stdio.println(first.prev_hash == nil)
+  harness.stdio.println(second.prev_hash == first.record_hash)
+  harness.stdio.println(second.parent_event_id == first.event_id)
+  harness.stdio.println(starts_with(first.record_hash, "sha256:"))
+  harness.stdio.println(first.kind.type)
   // Projection: m1 updated to v2, m2 deleted → only m1 survives.
-  const records = session_store_project(sid, {root: root})
-  __io_println(len(records))
-  __io_println(records[0].id)
-  __io_println(records[0].title)
+  const records = session_store_project(harness.agent, sid, {root: root})
+  harness.stdio.println(len(records))
+  harness.stdio.println(records[0].id)
+  harness.stdio.println(records[0].title)
   // Verification of the canonical SQLite chain.
-  const report = session_store_verify(sid, {root: root})
-  __io_println(report.ok)
-  __io_println(report.count)
+  const report = session_store_verify(harness.agent, sid, {root: root})
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.count)
   // Search crosses the public Harn facade and reports the actual fallback.
-  const search = session_store_search("one v2", {root: root, session_id: sid, mode: "hybrid"})
-  __io_println(len(search.hits))
-  __io_println(unwrap(search.hits[0]).session_id)
-  __io_println(search.effective_mode)
-  __io_println(search.semantic_floor)
+  const search = session_store_search(
+    harness.agent,
+    "one v2",
+    {root: root, session_id: sid, mode: "hybrid"},
+  )
+  harness.stdio.println(len(search.hits))
+  harness.stdio.println(unwrap(search.hits[0]).session_id)
+  harness.stdio.println(search.effective_mode)
+  harness.stdio.println(search.semantic_floor)
   // Value stream projection (replace / clear fold).
   const vsid = "example.value.stream"
-  session_store_append(vsid, {operation: "replace", value: "hello"}, {root: root})
-  __io_println(session_store_project_value(vsid, "fallback", {root: root}))
-  __io_println(
-    ends_with(session_store_path(sid, {root: root}), "/.harn/session-store/" + sid + ".jsonl")
+  session_store_append(harness.agent, vsid, {operation: "replace", value: "hello"}, {root: root})
+  harness.stdio.println(session_store_project_value(harness.agent, vsid, "fallback", {root: root}))
+  harness.stdio.println(
+    ends_with(
+      session_store_path(harness.agent, sid, {root: root}),
+      "/.harn/session-store/" + sid + ".jsonl",
+    )
       && ends_with(
-      session_store_database_path({root: root}),
+      session_store_database_path(harness.agent, {root: root}),
       "/.harn/session-store.sqlite",
     ),
   )

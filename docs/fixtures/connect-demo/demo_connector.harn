@@ -4,6 +4,6 @@
  * satisfies the manifest's `connector = { harn = "./demo_connector.harn" }`
  * pointer so `harn connect status` can resolve the provider declaration.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   return "demo connector placeholder"
 }

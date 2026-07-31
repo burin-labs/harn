@@ -1,3 +1,5 @@
+import { agent_loop } from "std/agent/loop"
+
 fn write_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -14,8 +16,9 @@ fn write_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const denied = agent_loop(
+    harness,
     "Try to write outside allowlist",
     "You are helpful",
     {
@@ -26,5 +29,7 @@ pipeline main() {
       approval_policy: {write_path_allowlist: ["/tmp/*"]},
     },
   )
-  __io_println(len(denied?.tools?.rejected) == 0 || denied?.tools?.rejected[0] == "write_file")
+  harness.stdio.println(
+    len(denied?.tools?.rejected) == 0 || denied?.tools?.rejected[0] == "write_file",
+  )
 }

@@ -4,11 +4,13 @@
 import { refine_prompt } from "std/llm/refine"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [llm_text("A short rewrite without a diff.")],
     { ->
       const result = refine_prompt(
+        harness.llm,
         {
           user_prompt: "ramble ramble ramble",
           style: "concise",
@@ -16,9 +18,9 @@ pipeline default() {
           provider: "mock",
         },
       )
-      __io_println(result.ok)
-      __io_println(result.refined)
-      __io_println("[" + result.diff_summary + "]")
+      harness.stdio.println(result.ok)
+      harness.stdio.println(result.refined)
+      harness.stdio.println("[" + result.diff_summary + "]")
     },
   )
 }

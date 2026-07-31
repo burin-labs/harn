@@ -1,9 +1,9 @@
-pipeline test(task) {
-  const ch = channel("later", 1)
+pipeline test(harness: Harness, task) {
+  const ch = harness.runtime.channel("later", 1)
   const h = spawn {
-    receive(ch)
+    harness.runtime.receive(ch)
   }
-  yield_now()
-  send(ch, "ok")
-  log(await(h))
+  harness.runtime.yield_now()
+  harness.runtime.send(ch, "ok")
+  harness.stdio.log(await(h))
 }

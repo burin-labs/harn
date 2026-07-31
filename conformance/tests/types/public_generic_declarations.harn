@@ -13,9 +13,9 @@ interface Repository<T> {
   fn map<U>(self, value: T, f: fn(T) -> U) -> U
 }
 
-pub pipeline default() {
+pub pipeline default(harness: Harness) {
   const status = Status.Ready("ready")
   const cfg = Config({host: "localhost"})
-  __io_println(status.variant)
-  __io_println(cfg.host)
+  harness.stdio.println(status.variant)
+  harness.stdio.println(cfg.host)
 }

@@ -52,7 +52,7 @@ const decision = bulletin_accept(bulletin, {decided_by: "user"})
 | `evidence` | List of `{kind, ref, label?, excerpt?}` provenance pointers |
 | `source` | `{agent?, workflow?, persona?, run_id?, task?}` proposing context |
 | `privacy` | `{sync, redacted, contains_sensitive, redaction_hints, flags}` |
-| `proposed_at` | ISO timestamp (defaults to `date_now_iso()`) |
+| `proposed_at` | ISO timestamp (defaults to `harness.clock.date_iso()`) |
 | `expires_at`, `review_after` | Optional ISO timestamps for host TTL/review prompts |
 | `supersedes` | Optional list of prior bulletin ids this proposal would replace |
 

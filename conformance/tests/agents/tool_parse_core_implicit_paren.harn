@@ -8,9 +8,17 @@
 // bytes is still a hard error (pinned in tool_parse_core_diagnostics).
 import { probe, sample_registry } from "_tool_parse_probe"
 
-pipeline main() {
-  probe("plain object arg, omitted paren", "run({ command: \"go build ./...\" }", sample_registry())
+pipeline main(harness: Harness) {
   probe(
+    harness.agent,
+    harness.stdio,
+    "plain object arg, omitted paren",
+    "run({ command: \"go build ./...\" }",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
     "heredoc edit, omitted paren",
     """edit({
   "action": "create",
@@ -27,6 +35,8 @@ EOF
   // `)`, followed by a `run`. Before the implicit-close recovery only `run`
   // parsed and the three authored edits were dropped as "missing closing `)`".
   probe(
+    harness.agent,
+    harness.stdio,
     "multiblock turn lands every call when the paren is omitted",
     """<tool_call>
 edit({

@@ -412,7 +412,7 @@ pub fn sort_by_start(links: list) -> list {
   return out
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const globbed = harness.fs.glob("${DOCS_DIR}/**/*.md")
   let repo_root = ""
   for g in globbed {
@@ -462,12 +462,12 @@ pipeline main(task) {
     }
   }
   if failures.count > 0 {
-    __io_eprintln("error: dead docs internal link(s):")
+    harness.stdio.eprintln("error: dead docs internal link(s):")
     for f in failures {
-      __io_eprintln("  ${f.source}:${f.line}: ${f.target} -> missing ${f.expected}")
+      harness.stdio.eprintln("  ${f.source}:${f.line}: ${f.target} -> missing ${f.expected}")
     }
     return 1
   }
-  __io_println("docs links OK: ${checked} local link target(s) checked")
+  harness.stdio.println("docs links OK: ${checked} local link target(s) checked")
   return 0
 }

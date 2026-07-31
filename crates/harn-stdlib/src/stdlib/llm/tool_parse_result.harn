@@ -24,8 +24,8 @@ pub type ProtocolViolationKind = "ambiguous_recovery" \
 pub type ProtocolViolation = {
   kind: ProtocolViolationKind,
   message: string,
-  excerpt?: string,
-  dropped_reason?: string,
+  excerpt: string?,
+  dropped_reason: string?,
 }
 
 /**

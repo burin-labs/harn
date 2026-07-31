@@ -1,4 +1,6 @@
-pipeline default() {
+import { workflow_execute } from "std/workflow/execute"
+
+pipeline default(harness: Harness) {
   const failing = workflow_graph(
     {
       entry: "verify",
@@ -13,15 +15,15 @@ pipeline default() {
       edges: [],
     },
   )
-  const failed = workflow_execute("verify once", failing, [], {max_steps: 1})
-  __io_println(failed.run.stages[0].status)
-  __io_println(failed.run.stages[0].outcome)
-  __io_println(failed.run.stages[0].branch)
-  __io_println(len(failed.run.stages[0].attempts))
-  __io_println(len(failed.run.stages[0].artifacts))
-  __io_println(contains(failed.run.stages[0].visible_text, "nope"))
+  const failed = workflow_execute(harness, "verify once", failing, [], {max_steps: 1})
+  harness.stdio.println(failed.run.stages[0].status)
+  harness.stdio.println(failed.run.stages[0].outcome)
+  harness.stdio.println(failed.run.stages[0].branch)
+  harness.stdio.println(len(failed.run.stages[0].attempts))
+  harness.stdio.println(len(failed.run.stages[0].artifacts))
+  harness.stdio.println(contains(failed.run.stages[0].visible_text, "nope"))
   const verify_ok = failed.run.stages[0].verification?.ok ?? false
-  __io_println(!verify_ok)
+  harness.stdio.println(!verify_ok)
   const passing = workflow_graph(
     {
       entry: "verify",
@@ -36,7 +38,7 @@ pipeline default() {
       edges: [],
     },
   )
-  const passed = workflow_execute("verify once", passing, [], {max_steps: 1})
-  __io_println(passed.run.stages[0].status)
-  __io_println(len(passed.run.stages[0].attempts))
+  const passed = workflow_execute(harness, "verify once", passing, [], {max_steps: 1})
+  harness.stdio.println(passed.run.stages[0].status)
+  harness.stdio.println(len(passed.run.stages[0].attempts))
 }

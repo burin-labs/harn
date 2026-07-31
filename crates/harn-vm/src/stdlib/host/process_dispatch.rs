@@ -82,6 +82,7 @@ async fn dispatch_process_exec_with_policy_origin(
     let bridge = HOST_CALL_BRIDGE.with(|bridge| bridge.borrow().clone());
     if let Some(bridge) = bridge {
         if let Some(value) = bridge.dispatch("process", "exec", &params).await? {
+            let value = restore_wrapped_spawn_error(value)?;
             return crate::orchestration::run_command_policy_postflight_with_ctx(
                 ctx,
                 &params,
@@ -100,6 +101,29 @@ async fn dispatch_process_exec_with_policy_origin(
         command_policy_decisions,
     )
     .await
+}
+
+fn restore_wrapped_spawn_error(value: VmValue) -> Result<VmValue, VmError> {
+    let Some(result) = value.as_dict() else {
+        return Ok(value);
+    };
+    let exit_code = result.get("exit_code").and_then(|value| match value {
+        VmValue::Int(value) => i32::try_from(*value).ok(),
+        _ => None,
+    });
+    let stderr = result.get("stderr").and_then(|value| match value {
+        VmValue::String(value) => Some(value.as_bytes()),
+        _ => None,
+    });
+    if let (Some(exit_code), Some(stderr)) = (exit_code, stderr) {
+        if let Some(error) = crate::process_sandbox::wrapped_spawn_io_error(exit_code, stderr) {
+            return Err(crate::value::environment_io_error_thrown(
+                &error,
+                error.to_string(),
+            ));
+        }
+    }
+    Ok(value)
 }
 
 fn validate_reviewed_git_push_with_lease(params: &crate::value::DictMap) -> Result<(), VmError> {

@@ -6,11 +6,11 @@
 // the conformance runner verifies the ordinary entry-compilation path.
 import "cross_module_enum_defect_lib"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const direct = CrossModuleEnum.Other(7)
   const result = make_cross_module_enum(3)
   match result {
-    CrossModuleEnum.Made(_inner) -> { __io_println(result.variant + ":" + direct.variant) }
-    _ -> { __io_println("unexpected-variant") }
+    CrossModuleEnum.Made(_inner) -> { harness.stdio.println(result.variant + ":" + direct.variant) }
+    _ -> { harness.stdio.println("unexpected-variant") }
   }
 }

@@ -26,7 +26,7 @@ covering run.
 | `harn package check` | Yes | Yes | Yes | Manifest parsing, exports resolution, path normalization. Smoke step 5. |
 | Generated artifacts (`harn provider catalog matrix`) | Yes | Yes | Yes | Deterministic-text emitter; line endings, sort order, and rounding are normalized in the writer. Smoke step 6. |
 | `harn run` | Yes | Yes | Yes | VM bootstrapping + stdlib startup. Smoke step 7. |
-| Process spawning (`std/command::command_run`) | Yes (sandbox-exec / Seatbelt) | Yes (Landlock + default-deny seccomp allowlist; `worktree` can fall back to warn under `HARN_HANDLER_SANDBOX=warn`) | Yes (AppContainer + Job Objects; `worktree` warn fallback applies the same way) | Sandbox backend differences are encapsulated in `crates/harn-vm/src/stdlib/sandbox/` (one file per OS) behind a shared `SandboxBackend` trait. Scripts pick argv via `platform()`. Smoke step 9. |
+| Process spawning (`std/command::command_run`) | Yes (sandbox-exec / Seatbelt) | Yes (Landlock + default-deny seccomp allowlist; `worktree` can fall back to warn under `HARN_HANDLER_SANDBOX=warn`) | Yes (AppContainer + Job Objects; `worktree` warn fallback applies the same way) | Sandbox backend differences are encapsulated in `crates/harn-vm/src/stdlib/sandbox/` (one file per OS) behind a shared `SandboxBackend` trait. Scripts pick argv via `harness.system.platform()`. Smoke step 9. |
 | No-credentials workflow (`provider: "mock"`) | Yes | Yes | Yes | Drives `llm_call` end-to-end through the in-memory mock provider with no API keys, network, or platform secret store. Smoke step 10. |
 | File watching (`harn watch`) | Yes (FSEvents) | Yes (inotify) | Yes (ReadDirectoryChangesW) | All three backends provided by the `notify` crate. Smoke step 12 boots the watcher, inspects its readiness banner, and cancels its process group through `std/command`. |
 | Graceful orchestrator shutdown (`SIGTERM` drain) | Yes | Yes | **Deferred** | Tests that depend on the orchestrator drain are gated `#![cfg(unix)]`. See [Windows test coverage](./windows-test-coverage.md) for the inventory. Release smoke uses the hostlib's native cross-platform process-group cancellation instead of asserting graceful signal handling. |
@@ -76,7 +76,7 @@ covering run.
 
   ```harn
   fn echo_argv(text) {
-    if platform() == "windows" {
+    if harness.system.platform() == "windows" {
       return ["cmd", "/C", "echo " + text]
     }
     return ["printf", "%s", text]
@@ -113,7 +113,7 @@ builtin, or sandbox-touching surface):
 1. Add a row to the matrix above, even if every cell is "Yes". The row
    is the smoke driver's contract.
 2. If the capability needs to be exercised at release time, add a step
-   to `scripts/release_smoke.harn`, keyed off `platform()` when necessary.
+   to `scripts/release_smoke.harn`, keyed off `harness.system.platform()` when necessary.
 3. If the Windows path is genuinely deferred (e.g. POSIX-signal
    drain), document why in this page **and** add a row to
    [Windows test coverage](./windows-test-coverage.md). The two pages

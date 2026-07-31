@@ -1,3 +1,5 @@
+import { agent_loop } from "std/agent/loop"
+
 fn read_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -13,8 +15,9 @@ fn read_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const result = agent_loop(
+    harness,
     "Call read",
     "You are helpful",
     {
@@ -25,5 +28,5 @@ pipeline main() {
       approval_policy: {auto_approve: ["read*"], auto_deny: ["shell*"]},
     },
   )
-  __io_println(len(result?.tools?.rejected) == 0)
+  harness.stdio.println(len(result?.tools?.rejected) == 0)
 }

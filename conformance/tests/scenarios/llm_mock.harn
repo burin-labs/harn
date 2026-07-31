@@ -1,57 +1,63 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Text mock
   with_llm_script(
+    harness.llm,
     [llm_text("Paris is the capital.")],
     { ->
-      const r1 = llm_call("What is the capital?", nil, {provider: "mock"})
-      __io_println(r1.text)
+      const r1 = harness.llm.call("What is the capital?", nil, {provider: "mock"})
+      harness.stdio.println(r1.text)
     },
   )
   with_llm_script(
+    harness.llm,
     [{tool_calls: [{name: "read_file", arguments: {path: "main.rs"}}]}],
     { ->
-      const r2 = llm_call("Read the file", nil, {provider: "mock"})
-      __io_println(len(r2.tool_calls))
-      __io_println(r2.tool_calls[0].name)
+      const r2 = harness.llm.call("Read the file", nil, {provider: "mock"})
+      harness.stdio.println(len(r2.tool_calls))
+      harness.stdio.println(r2.tool_calls[0].name)
     },
   )
   with_llm_script(
+    harness.llm,
     [{text: "Checking file.", tool_calls: [{name: "search", arguments: {query: "test"}}]}],
     { ->
-      const r3 = llm_call("Search", nil, {provider: "mock"})
-      __io_println(r3.text)
-      __io_println(r3.tool_calls[0].name)
+      const r3 = harness.llm.call("Search", nil, {provider: "mock"})
+      harness.stdio.println(r3.text)
+      harness.stdio.println(r3.tool_calls[0].name)
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("first"), llm_text("second")],
     { ->
-      __io_println(llm_call("a", nil, {provider: "mock"}).text)
-      __io_println(llm_call("b", nil, {provider: "mock"}).text)
-      const fb = llm_call("hello world", nil, {provider: "mock"})
-      __io_println(contains(fb.text, "Mock response"))
+      harness.stdio.println(harness.llm.call("a", nil, {provider: "mock"}).text)
+      harness.stdio.println(harness.llm.call("b", nil, {provider: "mock"}).text)
+      const fb = harness.llm.call("hello world", nil, {provider: "mock"})
+      harness.stdio.println(contains(fb.text, "Mock response"))
     },
   )
   with_llm_script(
+    harness.llm,
     [{text: "matched!", match: "*hello*"}],
     { ->
-      __io_println(llm_call("say hello please", nil, {provider: "mock"}).text)
-      __io_println(llm_call("say hello again", nil, {provider: "mock"}).text)
+      harness.stdio.println(harness.llm.call("say hello please", nil, {provider: "mock"}).text)
+      harness.stdio.println(harness.llm.call("say hello again", nil, {provider: "mock"}).text)
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {text: "first matched", match: "*step*", consume_match: true},
       {text: "second matched", match: "*step*", consume_match: true},
     ],
     { ->
-      __io_println(llm_call("step once", nil, {provider: "mock"}).text)
-      __io_println(llm_call("step twice", nil, {provider: "mock"}).text)
-      const calls = llm_mock_calls()
-      __io_println(len(calls) > 0)
+      harness.stdio.println(harness.llm.call("step once", nil, {provider: "mock"}).text)
+      harness.stdio.println(harness.llm.call("step twice", nil, {provider: "mock"}).text)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls) > 0)
     },
   )
-  __io_println(len(llm_mock_calls()))
+  harness.stdio.println(len(harness.llm.mock_calls()))
 }

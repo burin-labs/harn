@@ -3,5 +3,5 @@
 // fails the typechecker so the runtime never gets to threading a
 // `Harness` it can't bind.
 fn main() {
-  print("oops")
+  return nil
 }

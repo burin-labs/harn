@@ -1,17 +1,20 @@
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 
-pipeline default() {
-  const seen = shared_cell({scope: "task_group", key: "route-tool-format-seen", initial: ""})
-  const post_turn_count = shared_cell(
+pipeline default(harness: Harness) {
+  const seen = harness.runtime.shared_cell(
+    {scope: "task_group", key: "route-tool-format-seen", initial: ""},
+  )
+  const post_turn_count = harness.runtime.shared_cell(
     {scope: "task_group", key: "route-tool-format-post-turn", initial: 0},
   )
   const caller = { call ->
-    const prior = shared_snapshot(seen)
+    const prior = harness.runtime.shared_snapshot(seen)
     const provider = to_string(call?.opts?.provider ?? "")
     const model = to_string(call?.opts?.model ?? "")
     const tool_format = to_string(call?.opts?.tool_format ?? "")
-    shared_set(seen, prior.value + provider + ":" + model + ":" + tool_format + ",")
+    harness.runtime.shared_set(seen, prior.value + provider + ":" + model + ":" + tool_format + ",")
     if contains(prior.value, "openrouter:") {
       return {ok: true, value: {text: "DONE", tool_calls: [], provider: provider, model: model}}
     }
@@ -21,14 +24,14 @@ pipeline default() {
     }
   }
   const post_turn = { _payload ->
-    const count = shared_snapshot(post_turn_count)
-    shared_set(post_turn_count, count.value + 1)
+    const count = harness.runtime.shared_snapshot(post_turn_count)
+    harness.runtime.shared_set(post_turn_count, count.value + 1)
     if count.value == 0 {
       return {llm_options: {provider: "cerebras", model: "gpt-oss-120b"}}
     }
     return nil
   }
-  const session = "route-tool-format-refresh-" + uuid()
+  const session = "route-tool-format-refresh-" + harness.random.uuid()
   const opts: AgentLoopOptions = {
     session_id: session,
     provider: "openrouter",
@@ -41,9 +44,10 @@ pipeline default() {
     max_iterations: 3,
   }
   const captured = agent_capture_events(
+    harness.agent,
     session,
-    fn() { return agent_loop("exercise a route-only model switch", nil, opts) },
+    fn() { return agent_loop(harness, "exercise a route-only model switch", nil, opts) },
   )
-  __io_println("status=" + captured.result.status)
-  __io_println("routes=" + shared_get(seen))
+  harness.stdio.println("status=" + captured.result.status)
+  harness.stdio.println("routes=" + harness.runtime.shared_get(seen))
 }

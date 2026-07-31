@@ -12,8 +12,10 @@
 // truncation of the batch.
 import { probe_json } from "_tool_parse_probe"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   probe_json(
+    harness.agent,
+    harness.stdio,
     "three objects in one fence",
     """```tool
 {"name": "look", "args": {"file": "src/writer.zig"}}
@@ -22,6 +24,8 @@ pipeline main() {
 ```""",
   )
   probe_json(
+    harness.agent,
+    harness.stdio,
     "double tool fence used as a separator",
     """```tool
 {"name": "look", "args": {"file": "a.zig"}}
@@ -29,6 +33,8 @@ pipeline main() {
 {"name": "look", "args": {"file": "b.zig"}}""",
   )
   probe_json(
+    harness.agent,
+    harness.stdio,
     "complete objects before a truncated tail",
     """```tool
 {"name": "look", "args": {"file": "a.zig"}}
@@ -36,6 +42,8 @@ pipeline main() {
 {"name": "look", "args": {"file": "trunc""",
   )
   probe_json(
+    harness.agent,
+    harness.stdio,
     "three nested xml call tags",
     """<tool_calls>
 <look>
@@ -56,6 +64,8 @@ src/document.zig
 </tool_calls>""",
   )
   probe_json(
+    harness.agent,
+    harness.stdio,
     "a single object is one call",
     """```tool
 {"name": "look", "args": {"file": "a.zig"}}

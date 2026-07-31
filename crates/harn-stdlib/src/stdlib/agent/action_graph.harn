@@ -1,6 +1,7 @@
 import { workflow_result_text } from "std/agent/result_text"
 import "std/collections"
 import { JsonParseFailure } from "std/json"
+import { workflow_execute } from "std/workflow/execute"
 
 fn __action_graph_parse_input(raw) {
   if type_of(raw) != "string" {
@@ -926,7 +927,7 @@ pub fn action_graph_flow(graph, config = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
+pub fn action_graph_run(harness: Harness, task, graph, config = nil, overrides = nil) {
   const plan = if graph?._type == "action_graph" {
     graph
   } else {
@@ -945,7 +946,7 @@ pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
     },
   )
   const artifacts = (overrides?.artifacts ?? []) + [plan_artifact]
-  const runtime = workflow_execute(task, flow, artifacts, overrides)
+  const runtime = workflow_execute(harness, task, flow, artifacts, overrides)
   return {
     _type: "action_graph_run",
     task: task,

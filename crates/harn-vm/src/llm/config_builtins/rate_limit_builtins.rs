@@ -50,6 +50,8 @@ fn rate_limit_u32_option(
 
 /// Set, query, or clear per-provider request/token rate limits.
 #[harn_builtin(
+    exposure = "harness.llm.rate_limit",
+    effects = ["state.read@arg0", "clock.read@const=monotonic"],
     sig = "llm_rate_limit(provider: string, options?: dict|nil) -> bool|int|nil|dict",
     category = "llm.rate_limit"
 )]

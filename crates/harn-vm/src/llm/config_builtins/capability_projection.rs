@@ -349,7 +349,7 @@ pub(crate) fn capabilities_to_vm_value(
         ),
     );
     // Accelerated-serving (`fast`) tier, read from the generalized
-    // `serving_tiers` catalog so callers can branch on `llm_call(...,
+    // `serving_tiers` catalog so callers can branch on `harness.llm.call(...,
     // { fast: true })` support without re-parsing the model row.
     let fast_tier = crate::llm::serving_tiers::fast_tier(model);
     let fast_tier_supported = matches!(

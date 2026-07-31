@@ -37,18 +37,16 @@ fn __message_summary(item: unknown) -> string {
   return line + " (" + safe_int_string(len(safe_string(message["content"], "")), "0") + " chars)"
 }
 
-fn __render_human(harness: Harness, report: dict) {
+fn __render_human(stdio: HarnessStdio, report: dict) {
   const ok = safe_bool(report["ok"], false)
-  harness.stdio.println(
-    "Training example export from " + safe_string(report["run_record_path"], ""),
-  )
+  stdio.println("Training example export from " + safe_string(report["run_record_path"], ""))
   if !ok {
     const error = safe_dict(report["error"])
-    harness.stdio.eprintln("  refused: " + safe_string(error["kind"], "unknown"))
-    harness.stdio.eprintln("  " + safe_string(error["message"], ""))
+    stdio.eprintln("  refused: " + safe_string(error["kind"], "unknown"))
+    stdio.eprintln("  " + safe_string(error["message"], ""))
     const event_index = error["event_index"]
     if event_index != nil {
-      harness.stdio.eprintln("  source event: " + safe_int_string(event_index, "0"))
+      stdio.eprintln("  source event: " + safe_int_string(event_index, "0"))
     }
     return
   }
@@ -58,10 +56,10 @@ fn __render_human(harness: Harness, report: dict) {
   const usage = safe_dict(provenance["usage"])
   const messages = safe_list(example["messages"])
   const tools = safe_list(example["tools"])
-  harness.stdio.println("  schema: " + safe_string(example["schema_version"], ""))
-  harness.stdio.println("  run: " + safe_string(provenance["run_id"], ""))
-  harness.stdio.println("  session: " + safe_string(provenance["session_id"], ""))
-  harness.stdio.println(
+  stdio.println("  schema: " + safe_string(example["schema_version"], ""))
+  stdio.println("  run: " + safe_string(provenance["run_id"], ""))
+  stdio.println("  session: " + safe_string(provenance["session_id"], ""))
+  stdio.println(
     "  route: "
       + safe_string(provenance["provider"], "")
       + "/"
@@ -69,14 +67,14 @@ fn __render_human(harness: Harness, report: dict) {
       + " tool_format="
       + safe_string(provenance["effective_tool_format"], ""),
   )
-  harness.stdio.println("  terminal status: " + safe_string(provenance["terminal_status"], ""))
-  harness.stdio.println(
+  stdio.println("  terminal status: " + safe_string(provenance["terminal_status"], ""))
+  stdio.println(
     "  tool catalog: "
       + safe_int_string(len(tools), "0")
       + " schemas, hash "
       + safe_string(provenance["tool_catalog_hash"], ""),
   )
-  harness.stdio.println(
+  stdio.println(
     "  usage: "
       + safe_int_string(usage["provider_calls"], "0")
       + " provider calls, "
@@ -85,9 +83,9 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_int_string(usage["output_tokens"], "0")
       + " out",
   )
-  harness.stdio.println("  source transcript: " + safe_string(source["transcript_path"], ""))
-  harness.stdio.println("  source digest: " + safe_string(source["transcript_sha256"], ""))
-  harness.stdio.println(
+  stdio.println("  source transcript: " + safe_string(source["transcript_path"], ""))
+  stdio.println("  source digest: " + safe_string(source["transcript_sha256"], ""))
+  stdio.println(
     "  source events: "
       + safe_int_string(source["first_event_index"], "0")
       + "-"
@@ -95,13 +93,13 @@ fn __render_human(harness: Harness, report: dict) {
       + " of "
       + safe_int_string(source["event_count"], "0"),
   )
-  harness.stdio.println("  messages (" + safe_int_string(len(messages), "0") + "):")
+  stdio.println("  messages (" + safe_int_string(len(messages), "0") + "):")
   for item in messages {
-    harness.stdio.println(__message_summary(item))
+    stdio.println(__message_summary(item))
   }
   const output_path = safe_string(report["output_path"], "")
   if output_path != "" {
-    harness.stdio.println("  wrote: " + output_path)
+    stdio.println("  wrote: " + output_path)
   }
 }
 
@@ -144,7 +142,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness, report)
+    __render_human(harness.stdio, report)
   }
   if safe_bool(report["ok"], false) {
     return 0

@@ -1,6 +1,6 @@
 import { cheap_classify_then_escalate } from "std/personas/prelude"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const opts = {
     persona: "triage_captain",
     step: "classify",
@@ -10,25 +10,29 @@ pipeline test(task) {
     min_confidence: 0.7,
   }
   const escalated = cheap_classify_then_escalate(
+    harness.clock,
+    harness.llm,
     "PR-42",
     fn(input) { return {label: "maybe", confidence: 0.4, input: input} },
     fn(input) { return {label: "merge", confidence: 0.99, input: input} },
     fn(result) { return result.label == "maybe" },
     opts,
   )
-  __io_println(escalated.status)
-  __io_println(escalated.escalated)
-  __io_println(escalated.result.label)
-  __io_println(len(escalated.receipt.tool_calls))
+  harness.stdio.println(escalated.status)
+  harness.stdio.println(escalated.escalated)
+  harness.stdio.println(escalated.result.label)
+  harness.stdio.println(len(escalated.receipt.tool_calls))
   const cheap = cheap_classify_then_escalate(
+    harness.clock,
+    harness.llm,
     "PR-43",
     fn(input) { return {label: "ignore", confidence: 0.95, input: input} },
     fn(input) { return {label: "unused", confidence: 1.0, input: input} },
     fn(result) { return result.label == "maybe" },
     opts,
   )
-  __io_println(cheap.status)
-  __io_println(cheap.escalated)
-  __io_println(cheap.result.label)
-  __io_println(len(cheap.receipt.tool_calls))
+  harness.stdio.println(cheap.status)
+  harness.stdio.println(cheap.escalated)
+  harness.stdio.println(cheap.result.label)
+  harness.stdio.println(len(cheap.receipt.tool_calls))
 }

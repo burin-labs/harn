@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface Measurable {
     fn size(self) -> int
   }
@@ -15,5 +15,5 @@ pipeline test(task) {
     return item.size()
   }
   const b = Box({width: 3, height: 4})
-  log(measure(b))
+  harness.stdio.log(measure(b))
 }

@@ -1,12 +1,12 @@
-pipeline test(task) {
-  const ch1 = channel("ch1")
+pipeline test(harness: Harness, task) {
+  const ch1 = harness.runtime.channel("ch1")
   // Don't send anything — default should fire
   select {
     msg from ch1 {
-      log("got: ${msg}")
+      harness.stdio.log("got: ${msg}")
     }
     default {
-      log("nothing ready")
+      harness.stdio.log("nothing ready")
     }
   }
 }

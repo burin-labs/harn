@@ -17,7 +17,7 @@ pub fn describe(c: ImportedColor) -> string {
   }
 }
 
-pipeline default() {
-  __io_println(describe(ImportedColor.Red(1)))
-  __io_println(describe(ImportedColor.Blue(2)))
+pipeline default(harness: Harness) {
+  harness.stdio.println(describe(ImportedColor.Red(1)))
+  harness.stdio.println(describe(ImportedColor.Blue(2)))
 }

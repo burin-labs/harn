@@ -290,7 +290,7 @@ impl LocalSession {
         env.extend(request.env.clone());
 
         let mut options = vec![
-            format!("cmd: {}", harn_string(&request.command)),
+            format!("program: {}", harn_string(&request.command)),
             format!("args: {}", harn_string_list(&request.args)),
             format!("cwd: {}", harn_string(&cwd.display().to_string())),
             format!("env: {}", harn_string_dict(&env)),
@@ -302,7 +302,7 @@ impl LocalSession {
             options.push(format!("timeout_ms: {}", duration_millis(timeout)));
         }
         Ok(format!(
-            "pipeline local_sandbox_exec(task) {{ return spawn_captured({{{}}}) }}",
+            "pipeline local_sandbox_exec(harness: Harness, task) {{ return harness.process.run({{{}}}) }}",
             options.join(", "),
         ))
     }
@@ -322,7 +322,7 @@ impl LocalSession {
             }
         }
         let mut capabilities = BTreeMap::new();
-        capabilities.insert("process".to_string(), vec!["exec".to_string()]);
+        capabilities.insert("process".to_string(), vec!["run".to_string()]);
         capabilities.insert(
             "workspace".to_string(),
             vec![
@@ -506,7 +506,10 @@ fn exec_result_from_value(value: VmValue) -> SandboxResult<ExecResult> {
     };
     let stdout = dict_string(&map, "stdout")?;
     let stderr = dict_string(&map, "stderr")?;
-    let exit_code = dict_int_any(&map, &["status", "exit_code"])?;
+    // The typed Harness contract names the numeric field `exit_code`; legacy
+    // process results used numeric `status`, while lifecycle-aware results now
+    // use `status: "completed"`. Prefer the unambiguous typed field.
+    let exit_code = dict_int_any(&map, &["exit_code", "status"])?;
     let timed_out = dict_bool_optional(&map, "timed_out")?.unwrap_or(false);
     Ok(ExecResult {
         stdout,

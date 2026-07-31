@@ -7,8 +7,9 @@ import { with_llm_mocks } from "std/testing"
  * and the unsupported claim is surfaced. Mocks are matched on prompt content
  * so the parallel per-claim judges resolve deterministically.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_mocks(
+    harness.llm,
     [
       {
         match: "*atomic factual claims*",
@@ -26,16 +27,17 @@ pipeline default() {
     ],
     { ->
       const result = faithfulness_guard(
+        harness.llm,
         "Paris is the capital of France and has 10 million residents.",
         ["France's capital is Paris."],
         {provider: "mock", max_concurrent: 1},
       )
-      __io_println(result.score)
-      __io_println(len(result.claims))
-      __io_println(len(result.supported))
-      __io_println(result.supported[0])
-      __io_println(len(result.unsupported))
-      __io_println(result.unsupported[0])
+      harness.stdio.println(result.score)
+      harness.stdio.println(len(result.claims))
+      harness.stdio.println(len(result.supported))
+      harness.stdio.println(result.supported[0])
+      harness.stdio.println(len(result.unsupported))
+      harness.stdio.println(result.unsupported[0])
     },
   )
 }

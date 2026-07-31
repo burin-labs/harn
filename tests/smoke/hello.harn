@@ -4,6 +4,6 @@
  * endings and ASCII-only output so the smoke driver can byte-compare
  * stdout on every platform.
  */
-pipeline default() {
-  __io_println("harn-release-smoke ok")
+pipeline default(harness: Harness) {
+  harness.stdio.println("harn-release-smoke ok")
 }

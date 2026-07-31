@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const older = transcript_reminder_event(
     {body: "older copy", dedupe_key: "slot", ttl_turns: 3, preserve_on_compact: true},
   )
@@ -15,15 +15,15 @@ pipeline main() {
     ],
     events: [older, newer],
   }
-  const compacted = transcript_compact(
+  const compacted = harness.agent.compact_transcript(
     crafted,
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
   // Two reminders sharing the same dedupe_key collapse to one during
   // compaction, preserving the newest body and TTL.
-  __io_println(len(reminders))
-  __io_println(reminders[0].reminder.body)
-  __io_println(reminders[0].reminder.dedupe_key)
-  __io_println(reminders[0].reminder.ttl_turns)
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
+  harness.stdio.println(reminders[0].reminder.dedupe_key)
+  harness.stdio.println(reminders[0].reminder.ttl_turns)
 }

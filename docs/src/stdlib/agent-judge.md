@@ -32,8 +32,8 @@ const gate = agent_completion_gate({
   facts: { ctx -> {source_write_count: 1, verify: {ok: true}} },
   max_vetoes: 3,
 })
-log(gate._completion_gate.facts_available)
-log(gate._completion_gate.max_vetoes)
+harness.stdio.log(gate._completion_gate.facts_available)
+harness.stdio.log(gate._completion_gate.max_vetoes)
 ```
 
 To use it, spread the fragment into your base options:
@@ -41,7 +41,7 @@ To use it, spread the fragment into your base options:
 ```harn,ignore
 import { agent_completion_gate } from "std/agent/judge"
 
-agent_loop(task, system, base_opts + agent_completion_gate({
+agent_loop(harness, task, system, base_opts + agent_completion_gate({
   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
   verify_command: fn() { return host_run_verify() },
   judge: true,          // optional bounded LLM judge, capped at 5 by default

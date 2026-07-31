@@ -6,8 +6,8 @@
  * the state machine never reaches for `process.exec` or shells out to
  * `gh`.
  */
-fn _gh(method, params) {
-  return connector_call("github", method, params)
+fn _gh(harness: Harness, method, params) {
+  return harness.net.connector_call("github", method, params)
 }
 
 /** Construct a live adapter that dispatches to the github connector. */
@@ -21,7 +21,7 @@ pub fn fixture_adapter(snapshot) {
 }
 
 /** List open PRs in a repository. */
-pub fn list_open_prs(adapter, repo) {
+pub fn list_open_prs(harness: Harness, adapter, repo) {
   if adapter.mode == "fixture" {
     const bucket = adapter.snapshot[repo]
     if bucket == nil {
@@ -31,12 +31,12 @@ pub fn list_open_prs(adapter, repo) {
   }
   const parts = repo.split("/")
   const path = "/repos/${parts[0]}/${parts[1]}/pulls?state=open&per_page=100"
-  const result = _gh("api_call", {path: path, method: "GET"})
+  const result = _gh(harness, "api_call", {path: path, method: "GET"})
   return result ?? []
 }
 
 /** Fetch detailed PR + checks data. */
-pub fn get_pr_details(adapter, repo, number) {
+pub fn get_pr_details(harness: Harness, adapter, repo, number) {
   if adapter.mode == "fixture" {
     const bucket = adapter.snapshot[repo]
     if bucket == nil {
@@ -56,10 +56,12 @@ pub fn get_pr_details(adapter, repo, number) {
   }
   const parts = repo.split("/")
   const pr = _gh(
+    harness,
     "api_call",
     {path: "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}", method: "GET"},
   )
   const checks_envelope = _gh(
+    harness,
     "api_call",
     {path: "/repos/${parts[0]}/${parts[1]}/commits/${pr.head.sha}/check-runs", method: "GET"},
   )
@@ -92,52 +94,56 @@ pub fn normalize_pr(api_pr) {
 }
 
 /** Update a PR branch (rebase/merge from base). */
-pub fn update_branch(adapter, repo, number, dry_run) {
+pub fn update_branch(harness: Harness, adapter, repo, number, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
   const parts = repo.split("/")
   const path = "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}/update-branch"
-  const response = _gh("api_call", {path: path, method: "PUT", body: {}})
+  const response = _gh(harness, "api_call", {path: path, method: "PUT", body: {}})
   return {ok: true, response: response}
 }
 
 /** Enqueue a PR onto the merge queue. */
-pub fn enqueue_merge_queue(adapter, repo, number, merge_method, dry_run) {
+pub fn enqueue_merge_queue(harness: Harness, adapter, repo, number, merge_method, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
   const pr_url = "https://github.com/${repo}/pull/${to_string(number)}"
-  const response = _gh("merge_pr", {pr_url: pr_url, merge_method: merge_method, queue: true})
+  const response = _gh(
+    harness,
+    "merge_pr",
+    {pr_url: pr_url, merge_method: merge_method, queue: true},
+  )
   return {ok: true, response: response}
 }
 
 /** Add a label to a PR. */
-pub fn add_label(adapter, repo, number, label, dry_run) {
+pub fn add_label(harness: Harness, adapter, repo, number, label, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
   const issue_url = "https://github.com/${repo}/issues/${to_string(number)}"
-  const response = _gh("add_labels", {issue_url: issue_url, labels: [label]})
+  const response = _gh(harness, "add_labels", {issue_url: issue_url, labels: [label]})
   return {ok: true, response: response}
 }
 
 /** Comment on a PR. */
-pub fn comment(adapter, repo, number, body, dry_run) {
+pub fn comment(harness: Harness, adapter, repo, number, body, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
   const issue_url = "https://github.com/${repo}/issues/${to_string(number)}"
-  const response = _gh("comment", {issue_url: issue_url, body: body})
+  const response = _gh(harness, "comment", {issue_url: issue_url, body: body})
   return {ok: true, response: response}
 }
 
 /** Request reviews on a PR. */
-pub fn request_review(adapter, repo, number, reviewers, dry_run) {
+pub fn request_review(harness: Harness, adapter, repo, number, reviewers, dry_run) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
   const pr_url = "https://github.com/${repo}/pull/${to_string(number)}"
-  const response = _gh("request_review", {pr_url: pr_url, reviewers: reviewers})
+  const response = _gh(harness, "request_review", {pr_url: pr_url, reviewers: reviewers})
   return {ok: true, response: response}
 }

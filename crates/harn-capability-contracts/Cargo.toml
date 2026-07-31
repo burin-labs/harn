@@ -1,0 +1,18 @@
+[package]
+name = "harn-capability-contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Canonical typed Harness capability method contracts"
+
+[dependencies]
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.46" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.46" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.46" }
+linkme = "0.3"
+
+[lints]
+workspace = true

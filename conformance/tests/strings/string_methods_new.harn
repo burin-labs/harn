@@ -1,26 +1,26 @@
 /** Test new string methods */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // trim_start / trim_end — verify by measuring length
   const s = "  hello world  "
-  __io_println(len(s.trim_start()))
-  __io_println(len(s.trim_end()))
-  __io_println(len(s.trim()))
+  harness.stdio.println(len(s.trim_start()))
+  harness.stdio.println(len(s.trim_end()))
+  harness.stdio.println(len(s.trim()))
   // lines
   const multi = "line1\nline2\nline3"
   const lines = multi.lines()
-  __io_println(len(lines))
-  __io_println(lines.first())
-  __io_println(lines.last())
+  harness.stdio.println(len(lines))
+  harness.stdio.println(lines.first())
+  harness.stdio.println(lines.last())
   // char_at
   const word = "hello"
-  __io_println(word.char_at(0))
-  __io_println(word.char_at(4))
-  __io_println(word.char_at(99))
+  harness.stdio.println(word.char_at(0))
+  harness.stdio.println(word.char_at(4))
+  harness.stdio.println(word.char_at(99))
   // last_index_of
   const path = "src/lib/utils/lib.rs"
-  __io_println(path.index_of("lib"))
-  __io_println(path.last_index_of("lib"))
-  __io_println(path.rfind("lib"))
+  harness.stdio.println(path.index_of("lib"))
+  harness.stdio.println(path.last_index_of("lib"))
+  harness.stdio.println(path.rfind("lib"))
   // len method (on string)
-  __io_println("cafe".len())
+  harness.stdio.println("cafe".len())
 }

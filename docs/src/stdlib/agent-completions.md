@@ -56,7 +56,7 @@ import {
   completion_shown_event,
 } from "std/agent/completions"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const context = completion_context({
     surface: "editor",
     file_path: "src/main.rs",

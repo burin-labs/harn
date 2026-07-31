@@ -1,7 +1,7 @@
 import { parse, parser } from "std/cli/argparse"
 import { assert_eq } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const spec = parser({name: "demo", args: [{name: "input", kind: "positional"}]})
   const result = parse(spec, [])
   assert_eq(

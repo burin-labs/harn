@@ -170,6 +170,8 @@ pub(crate) fn register_durable_rate_limit_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.durable_rate_limit_acquire",
+    effects = ["state.mutate@arg0", "clock.observe@const=monotonic"],
     sig = "durable_rate_limit_acquire(options: dict) -> dict",
     kind = "async",
     category = "concurrency",

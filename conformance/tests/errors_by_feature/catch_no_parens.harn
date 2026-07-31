@@ -1,21 +1,21 @@
 /** Test catch without parentheses around error variable */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // catch e { ... } should work (no parens required)
   try {
     throw "test error"
   } catch (e) {
-    __io_println("caught: " + e)
+    harness.stdio.println("caught: " + e)
   }
   // catch (e) { ... } should also still work
   try {
     throw "another error"
   } catch (e2) {
-    __io_println("also caught: " + e2)
+    harness.stdio.println("also caught: " + e2)
   }
   // catch without variable should work too
   try {
     throw "ignored"
   } catch {
-    __io_println("caught without var")
+    harness.stdio.println("caught without var")
   }
 }

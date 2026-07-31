@@ -72,7 +72,7 @@ fn fake_adapter(plan: RemoteFanoutPlan) -> list<unknown> {
   return [second, first]
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const plan = remote_eval_fanout_plan(options(), neutral_catalog())
   const first_shard = shard_at(plan, 0)
   const second_shard = shard_at(plan, 1)
@@ -135,5 +135,5 @@ pipeline test(task) {
   assert_eq(wrong_seed.readiness.ingest_ready, false)
   assert_eq(wrong_seed.quarantine.malformed_receipts[0]?.shard_id, first_shard.id)
   assert_eq(wrong_seed.quarantine.malformed_receipts[0]?.reason, "receipt contract mismatch")
-  log("stdlib remote fanout plan -> fake adapter -> rejoin readiness ok")
+  harness.stdio.log("stdlib remote fanout plan -> fake adapter -> rejoin readiness ok")
 }

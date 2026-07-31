@@ -3,6 +3,6 @@
 // flowing into the picker as an ignored runtime field.
 import { select_from } from "std/tui"
 
-pipeline default() {
-  select_from(["alpha"], {prompts: "Pick one"})
+pipeline default(harness: Harness) {
+  select_from(harness, ["alpha"], {prompts: "Pick one"})
 }

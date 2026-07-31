@@ -1,5 +1,5 @@
-pipeline test(task) {
-  const intake = webhook_intake_register(
+pipeline test(harness: Harness, task) {
+  const intake = harness.runtime.webhook_intake_register(
     {
       id: "round-trip",
       path: "/hooks/foo",
@@ -9,12 +9,12 @@ pipeline test(task) {
       topic: "tests.intake.round_trip",
     },
   )
-  __io_println(intake.id == "round-trip")
-  __io_println(intake.topic == "tests.intake.round_trip")
+  harness.stdio.println(intake.id == "round-trip")
+  harness.stdio.println(intake.topic == "tests.intake.round_trip")
   const body = "{\"hello\":\"world\"}"
   const signature = "sha256=" + hmac_sha256("super-secret", body)
   // Acceptance: a valid signature is accepted and republished onto the topic.
-  const accepted = webhook_intake_feed(
+  const accepted = harness.runtime.webhook_intake_feed(
     "round-trip",
     {
       headers: {"x-hub-signature-256": signature, "x-github-delivery": "delivery-1"},
@@ -22,10 +22,10 @@ pipeline test(task) {
       path: "/hooks/foo",
     },
   )
-  __io_println(accepted.status == "accepted")
-  __io_println(accepted.delivery_id == "delivery-1")
+  harness.stdio.println(accepted.status == "accepted")
+  harness.stdio.println(accepted.delivery_id == "delivery-1")
   // Acceptance: replay with the same delivery id is deduped.
-  const dup = webhook_intake_feed(
+  const dup = harness.runtime.webhook_intake_feed(
     "round-trip",
     {
       headers: {"x-hub-signature-256": signature, "x-github-delivery": "delivery-1"},
@@ -33,9 +33,9 @@ pipeline test(task) {
       path: "/hooks/foo",
     },
   )
-  __io_println(dup.status == "duplicate")
+  harness.stdio.println(dup.status == "duplicate")
   // Acceptance: a tampered signature is rejected.
-  const bad = webhook_intake_feed(
+  const bad = harness.runtime.webhook_intake_feed(
     "round-trip",
     {
       headers: {"x-hub-signature-256": "sha256=deadbeef", "x-github-delivery": "delivery-2"},
@@ -43,9 +43,9 @@ pipeline test(task) {
       path: "/hooks/foo",
     },
   )
-  __io_println(bad.status == "rejected")
+  harness.stdio.println(bad.status == "rejected")
   // Bounded replay buffer: the topic holds the accepted delivery.
-  const recent = webhook_intake_recent("round-trip", 8)
-  __io_println(len(recent) == 1)
-  __io_println(recent[0].delivery_id == "delivery-1")
+  const recent = harness.runtime.webhook_intake_recent("round-trip", 8)
+  harness.stdio.println(len(recent) == 1)
+  harness.stdio.println(recent[0].delivery_id == "delivery-1")
 }

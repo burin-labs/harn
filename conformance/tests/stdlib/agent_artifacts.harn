@@ -38,33 +38,38 @@ const EVENT_BAD_SCHEMA =
 const EVENT_BAD_VERSION =
   "{\"content\":\"x\",\"content_hash\":\"c\",\"hash\":\"h\",\"schema_version\":99,\"timestamp\":\"7.0\",\"type\":\"system_prompt\"}"
 
-pipeline test(task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-agent-artifacts-" + uuid_v7())
+pipeline test(harness: Harness, task) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-agent-artifacts-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   // ---- Agent result JSON reader: the six distinct outcomes + byte round trip.
   const legacy_path = path_join(root, "agent-result.json")
   harness.fs.write_text(legacy_path, LEGACY_RESULT)
-  const legacy = read_agent_result_result(legacy_path)
-  __io_println(is_ok(legacy))
-  __io_println(to_string(unwrap(legacy).version))
-  __io_println(unwrap(legacy).value.status)
-  __io_println(unwrap(legacy).value.session_id)
-  __io_println(unwrap(legacy).raw == LEGACY_RESULT)
+  const legacy = read_agent_result_result(harness.fs, legacy_path)
+  harness.stdio.println(is_ok(legacy))
+  harness.stdio.println(to_string(unwrap(legacy).version))
+  harness.stdio.println(unwrap(legacy).value.status)
+  harness.stdio.println(unwrap(legacy).value.session_id)
+  harness.stdio.println(unwrap(legacy).raw == LEGACY_RESULT)
   const v2_path = path_join(root, "v2.json")
   harness.fs.write_text(v2_path, V2_RESULT)
-  __io_println(to_string(unwrap(read_agent_result_result(v2_path)).version))
+  harness.stdio.println(to_string(unwrap(read_agent_result_result(harness.fs, v2_path)).version))
   const wrong_path = path_join(root, "wrong.json")
   harness.fs.write_text(wrong_path, WRONG_VERSION_RESULT)
-  const wrong = read_agent_result_result(wrong_path)
-  __io_println(unwrap_err(wrong).kind)
-  __io_println(to_string(unwrap_err(wrong).found_version))
+  const wrong = read_agent_result_result(harness.fs, wrong_path)
+  harness.stdio.println(unwrap_err(wrong).kind)
+  harness.stdio.println(to_string(unwrap_err(wrong).found_version))
   const invalid_path = path_join(root, "invalid.json")
   harness.fs.write_text(invalid_path, INVALID_RESULT)
-  __io_println(unwrap_err(read_agent_result_result(invalid_path)).kind)
+  harness.stdio.println(unwrap_err(read_agent_result_result(harness.fs, invalid_path)).kind)
   const malformed_path = path_join(root, "malformed.json")
   harness.fs.write_text(malformed_path, EVENT_MALFORMED)
-  __io_println(unwrap_err(read_agent_result_result(malformed_path)).kind)
-  __io_println(unwrap_err(read_agent_result_result(path_join(root, "missing.json"))).kind)
+  harness.stdio.println(unwrap_err(read_agent_result_result(harness.fs, malformed_path)).kind)
+  harness.stdio.println(
+    unwrap_err(read_agent_result_result(harness.fs, path_join(root, "missing.json"))).kind,
+  )
   // ---- Transcript JSONL: recognized families, unknown envelope, per-record issues.
   const transcript_path = path_join(root, "llm_transcript.jsonl")
   harness.fs.write_text(
@@ -86,34 +91,34 @@ pipeline test(task) {
       + EVENT_BAD_VERSION
       + "\n",
   )
-  const page = unwrap(read_transcript_events_page_result(transcript_path))
-  __io_println(to_string(len(page.events)))
-  __io_println(to_string(len(page.issues)))
-  __io_println(to_string(page.events[0].recognized) + ":" + page.events[0].tag)
-  __io_println(to_string(page.events[0].version))
-  __io_println(page.events[0].raw == EVENT_SYSTEM)
-  __io_println(to_string(page.events[1].recognized) + ":" + page.events[1].tag)
-  __io_println(page.events[1].value.manifest.call_role)
-  __io_println(to_string(page.events[4].recognized) + ":" + page.events[4].tag)
-  __io_println(page.events[4].raw == EVENT_FUTURE)
-  __io_println(page.issues[0].kind + ":" + to_string(page.issues[0].line))
-  __io_println(page.issues[1].kind + ":" + to_string(page.issues[1].line))
-  __io_println(
+  const page = unwrap(read_transcript_events_page_result(harness.fs, transcript_path))
+  harness.stdio.println(to_string(len(page.events)))
+  harness.stdio.println(to_string(len(page.issues)))
+  harness.stdio.println(to_string(page.events[0].recognized) + ":" + page.events[0].tag)
+  harness.stdio.println(to_string(page.events[0].version))
+  harness.stdio.println(page.events[0].raw == EVENT_SYSTEM)
+  harness.stdio.println(to_string(page.events[1].recognized) + ":" + page.events[1].tag)
+  harness.stdio.println(page.events[1].value.manifest.call_role)
+  harness.stdio.println(to_string(page.events[4].recognized) + ":" + page.events[4].tag)
+  harness.stdio.println(page.events[4].raw == EVENT_FUTURE)
+  harness.stdio.println(page.issues[0].kind + ":" + to_string(page.issues[0].line))
+  harness.stdio.println(page.issues[1].kind + ":" + to_string(page.issues[1].line))
+  harness.stdio.println(
     page.issues[2].kind
       + ":"
       + to_string(page.issues[2].line)
       + ":"
       + to_string(page.issues[2].found_version),
   )
-  __io_println(to_string(page.done))
+  harness.stdio.println(to_string(page.done))
   // ---- Derived transcript context, folded from the same stream.
-  const context = unwrap(read_transcript_context_result(transcript_path))
-  __io_println(to_string(context.version))
-  __io_println(to_string(context.value.event_count))
-  __io_println(context.value.system_prompt)
-  __io_println(to_string(context.value.provider) + ":" + to_string(context.value.model))
-  __io_println(context.value.tool_format)
-  __io_println(
+  const context = unwrap(read_transcript_context_result(harness.fs, transcript_path))
+  harness.stdio.println(to_string(context.version))
+  harness.stdio.println(to_string(context.value.event_count))
+  harness.stdio.println(context.value.system_prompt)
+  harness.stdio.println(to_string(context.value.provider) + ":" + to_string(context.value.model))
+  harness.stdio.println(context.value.tool_format)
+  harness.stdio.println(
     to_string(context.value.request_count)
       + ":"
       + to_string(context.value.response_count)
@@ -122,8 +127,8 @@ pipeline test(task) {
   )
   // ---- Pure contract check surfaces the same distinct kinds without a file.
   const parsed_ok = check_versioned(json_parse(LEGACY_RESULT), agent_result_contract())
-  __io_println(is_ok(parsed_ok))
+  harness.stdio.println(is_ok(parsed_ok))
   const parsed_bad = check_versioned(json_parse(WRONG_VERSION_RESULT), agent_result_contract())
-  __io_println(unwrap_err(parsed_bad).kind)
+  harness.stdio.println(unwrap_err(parsed_bad).kind)
   harness.fs.delete(root)
 }

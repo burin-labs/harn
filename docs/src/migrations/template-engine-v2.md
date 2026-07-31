@@ -1,6 +1,6 @@
 # Prompt templates: v2 migration
 
-The prompt-template engine used by `render(...)` / `render_prompt(...)` now
+The prompt-template engine used by `harness.fs.render_prompt(...)` now
 supports `else`/`elif`, loops, includes, filters, comments, raw blocks, and
 whitespace trim markers. Existing templates keep rendering unchanged — this
 is a strict superset. But many pre-v2 workarounds can now be simplified.
@@ -36,7 +36,7 @@ const block = ""
 for sample in samples {
   block = "${block}### ${sample.path}\n\`\`\`\n${sample.content}\n\`\`\`\n\n"
 }
-const prompt = render("enrichment.prompt", {block: block, ...})
+const prompt = harness.fs.render_prompt("enrichment.prompt", {block: block, ...})
 ```
 
 ```harn-prompt
@@ -48,7 +48,7 @@ const prompt = render("enrichment.prompt", {block: block, ...})
 **After** — iterate in the template:
 
 ```harn,ignore
-const prompt = render("enrichment.prompt", {samples: samples, ...})
+const prompt = harness.fs.render_prompt("enrichment.prompt", {samples: samples, ...})
 ```
 
 ````harn-prompt
@@ -92,7 +92,7 @@ Pass stage-specific overrides with `with`:
 
 ```harn,ignore
 const tags_str = join(map(tags, fn(t) { return uppercase(t) }), ", ")
-render("x.prompt", {tags: tags_str})
+harness.fs.render_prompt("x.prompt", {tags: tags_str})
 ```
 
 **After**:

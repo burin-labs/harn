@@ -20,21 +20,23 @@ use crate::vm::*;
 #[test]
 fn test_parallel_basic() {
     let out = run_output(
-        "pipeline t(task) { const results = parallel(3) { i -> i * 10 }\nlog(results) }",
+        "pipeline t(harness: Harness, task) { const results = parallel(3) { i -> i * 10 }\nharness.stdio.log(results) }",
     );
     assert_eq!(out, "[harn] [0, 10, 20]");
 }
 
 #[test]
 fn test_parallel_no_variable() {
-    let out = run_output("pipeline t(task) { const results = parallel(3) { 42 }\nlog(results) }");
+    let out = run_output(
+        "pipeline t(harness: Harness, task) { const results = parallel(3) { 42 }\nharness.stdio.log(results) }",
+    );
     assert_eq!(out, "[harn] [42, 42, 42]");
 }
 
 #[test]
 fn test_parallel_each_basic() {
     let out = run_output(
-        "pipeline t(task) { const results = parallel each [1, 2, 3] { x -> x * x }\nlog(results) }",
+        "pipeline t(harness: Harness, task) { const results = parallel each [1, 2, 3] { x -> x * x }\nharness.stdio.log(results) }",
     );
     assert_eq!(out, "[harn] [1, 4, 9]");
 }
@@ -49,22 +51,22 @@ async fn test_parallel_fail_fast_cancels_slow_sibling() {
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
-                    r#"pipeline t(task) {
-const survived = atomic(0)
+                    r#"pipeline t(harness: Harness, task) {
+const survived = harness.runtime.atomic(0)
 try {
   parallel 2 { i ->
     if i == 0 {
       throw "boom"
     }
-    sleep(5s)
-    atomic_set(survived, 1)
+    harness.clock.sleep_ms(5000)
+    harness.runtime.atomic_set(survived, 1)
     i
   }
 } catch (e) {
-  log("caught: " + e)
+  harness.stdio.log("caught: " + e)
 }
-sleep(20s)
-log(atomic_get(survived))
+harness.clock.sleep_ms(20000)
+harness.stdio.log(harness.runtime.atomic_get(survived))
 }"#,
                 )
                 .await
@@ -84,22 +86,22 @@ async fn test_parallel_each_fail_fast_cancels_slow_sibling() {
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
-                    r#"pipeline t(task) {
-const survived = atomic(0)
+                    r#"pipeline t(harness: Harness, task) {
+const survived = harness.runtime.atomic(0)
 try {
   parallel each ["fail", "slow"] { item ->
     if item == "fail" {
       throw "each boom"
     }
-    sleep(5s)
-    atomic_set(survived, 1)
+    harness.clock.sleep_ms(5000)
+    harness.runtime.atomic_set(survived, 1)
     item
   }
 } catch (e) {
-  log("caught: " + e)
+  harness.stdio.log("caught: " + e)
 }
-sleep(20s)
-log(atomic_get(survived))
+harness.clock.sleep_ms(20000)
+harness.stdio.log(harness.runtime.atomic_get(survived))
 }"#,
                 )
                 .await
@@ -117,20 +119,20 @@ fn test_parallel_fail_fast_skips_unstarted_branches() {
     // With max_concurrent: 1, the first branch's error means the queued
     // branches are never started at all — fully deterministic, no timing.
     let out = run_output(
-        r#"pipeline t(task) {
-const started = atomic(0)
+        r#"pipeline t(harness: Harness, task) {
+const started = harness.runtime.atomic(0)
 try {
   parallel each [1, 2, 3] with { max_concurrent: 1 } { n ->
     if n == 1 {
       throw "stop"
     }
-    atomic_add(started, 1)
+    harness.runtime.atomic_add(started, 1)
     n
   }
 } catch (e) {
-  log(e)
+  harness.stdio.log(e)
 }
-log(atomic_get(started))
+harness.stdio.log(harness.runtime.atomic_get(started))
 }"#,
     );
     assert_eq!(out, "[harn] stop\n[harn] 0");
@@ -143,13 +145,13 @@ fn test_parallel_fail_fast_reports_lowest_index_error() {
     // be the lowest-source-index one (the `scope { }` convention), not
     // whichever happened to join first.
     let out = run_output(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 try {
   parallel each ["first", "second"] { word ->
     throw word
   }
 } catch (e) {
-  log(e)
+  harness.stdio.log(e)
 }
 }"#,
     );
@@ -165,19 +167,19 @@ async fn test_parallel_settle_still_runs_all_branches() {
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
-                    r#"pipeline t(task) {
-const completed = atomic(0)
+                    r#"pipeline t(harness: Harness, task) {
+const completed = harness.runtime.atomic(0)
 const outcome = parallel settle [1, 2, 3] { item ->
   if item == 1 {
     throw "early failure"
   }
-  sleep(5s)
-  atomic_add(completed, 1)
+  harness.clock.sleep_ms(5000)
+  harness.runtime.atomic_add(completed, 1)
   item * 10
 }
-log(outcome.succeeded)
-log(outcome.failed)
-log(atomic_get(completed))
+harness.stdio.log(outcome.succeeded)
+harness.stdio.log(outcome.failed)
+harness.stdio.log(harness.runtime.atomic_get(completed))
 }"#,
                 )
                 .await
@@ -197,18 +199,18 @@ async fn test_parallel_each_stream_break_cancels_remaining_work() {
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
-                    r"pipeline t(task) {
-const completed = atomic(0)
+                    r"pipeline t(harness: Harness, task) {
+const completed = harness.runtime.atomic(0)
 const results = parallel each [1, 2, 3] with { max_concurrent: 1 } { item ->
-  sleep(1s)
-  atomic_add(completed, 1)
+  harness.clock.sleep_ms(1000)
+  harness.runtime.atomic_add(completed, 1)
   return item
 } as stream
 for item in results {
   break
 }
-sleep(3s)
-log(atomic_get(completed))
+harness.clock.sleep_ms(3000)
+harness.stdio.log(harness.runtime.atomic_get(completed))
 }",
                 )
                 .await
@@ -224,10 +226,10 @@ log(atomic_get(completed))
 #[test]
 fn test_spawn_await() {
     let out = run_output(
-        r#"pipeline t(task) {
-const handle = spawn { log("spawned") }
+        r#"pipeline t(harness: Harness, task) {
+const handle = spawn { harness.stdio.log("spawned") }
 const result = await(handle)
-log("done")
+harness.stdio.log("done")
 }"#,
     );
     assert_eq!(out, "[harn] spawned\n[harn] done");
@@ -236,10 +238,10 @@ log("done")
 #[test]
 fn test_spawn_cancel() {
     let out = run_output(
-        r#"pipeline t(task) {
-const handle = spawn { log("should be cancelled") }
+        r#"pipeline t(harness: Harness, task) {
+const handle = spawn { harness.stdio.log("should be cancelled") }
 cancel(handle)
-log("cancelled")
+harness.stdio.log("cancelled")
 }"#,
     );
     assert_eq!(out, "[harn] cancelled");
@@ -248,7 +250,7 @@ log("cancelled")
 #[test]
 fn test_cancel_graceful_propagates_to_cpu_bound_spawn() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 const handle = spawn {
   let i = 0
   while true {
@@ -256,8 +258,8 @@ const handle = spawn {
   }
 }
 const result = cancel_graceful(handle, 100ms)
-log(is_err(result))
-log(contains(unwrap_err(result), "cancelled"))
+harness.stdio.log(is_err(result))
+harness.stdio.log(contains(unwrap_err(result), "cancelled"))
 }"#,
     );
     assert_eq!(out, "[harn] true\n[harn] true");
@@ -269,13 +271,13 @@ fn test_std_signal_handlers_are_lifo_and_removable() {
         r#"
 import "std/signal"
 
-pipeline t() {
-  const first = on_interrupt({ -> log("a") }, {once: false})
-  const second = on_interrupt({ -> log("b") }, {once: false})
+pipeline t(harness: Harness) {
+  const first = on_interrupt({ -> harness.stdio.log("a") }, {once: false})
+  const second = on_interrupt({ -> harness.stdio.log("b") }, {once: false})
   __signal_raise("SIGINT")
   off_interrupt(second)
   __signal_raise("SIGINT")
-  log(interrupted())
+  harness.stdio.log(interrupted())
   off_interrupt(first.handle)
 }
 "#,
@@ -289,9 +291,9 @@ fn test_with_interrupt_unregisters_after_throw() {
         r#"
 import "std/signal"
 
-pipeline t() {
+pipeline t(harness: Harness) {
   try {
-    with_interrupt({ -> log("leaked") }, { -> throw "boom" }, {once: false})
+    with_interrupt({ -> harness.stdio.log("leaked") }, { -> throw "boom" }, {once: false})
   } catch (e) {
   }
   const raised = try {
@@ -300,7 +302,7 @@ pipeline t() {
   } catch (e) {
     "interrupted"
   }
-  log(raised)
+  harness.stdio.log(raised)
 }
 "#,
     );
@@ -313,7 +315,7 @@ fn test_interrupt_handler_graceful_timeout_is_enforced() {
         r#"
 import "std/signal"
 
-pipeline t() {
+pipeline t(harness: Harness) {
   on_interrupt({ ->
     let spin = 0
     while true { spin = spin + 1 }
@@ -324,7 +326,7 @@ pipeline t() {
   } catch (e) {
     e
   }
-  log(result)
+  harness.stdio.log(result)
 }
 "#,
     );
@@ -382,7 +384,9 @@ fn test_host_signal_token_dispatches_matching_signal() {
 
 #[test]
 fn test_spawn_returns_value() {
-    let out = run_output("pipeline t(task) { const h = spawn { 42 }\nconst r = await(h)\nlog(r) }");
+    let out = run_output(
+        "pipeline t(harness: Harness, task) { const h = spawn { 42 }\nconst r = await(h)\nharness.stdio.log(r) }",
+    );
     assert_eq!(out, "[harn] 42");
 }
 
@@ -391,10 +395,10 @@ fn test_spawn_returns_value() {
 #[test]
 fn test_deadline_success() {
     let out = run_output(
-        r#"pipeline t(task) {
-const result = deadline 5s { log("within deadline")
+        r#"pipeline t(harness: Harness, task) {
+const result = deadline 5s { harness.stdio.log("within deadline")
 42 }
-log(result)
+harness.stdio.log(result)
 }"#,
     );
     assert_eq!(out, "[harn] within deadline\n[harn] 42");
@@ -403,7 +407,7 @@ log(result)
 #[test]
 fn test_deadline_exceeded() {
     let result = run_harn_result(
-        r"pipeline t(task) {
+        r"pipeline t(harness: Harness, task) {
 deadline 1ms {
   let i = 0
   while i < 1000000 { i = i + 1 }
@@ -416,14 +420,14 @@ deadline 1ms {
 #[test]
 fn test_deadline_caught_by_try() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 try {
   deadline 1ms {
     let i = 0
     while i < 1000000 { i = i + 1 }
   }
 } catch(e) {
-  log("caught")
+  harness.stdio.log("caught")
 }
 }"#,
     );
@@ -440,9 +444,9 @@ fn test_deadline_kills_blocking_exec_subprocess() {
     // run to completion and orphaning it.
     let started = std::time::Instant::now();
     let result = run_harn_result(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 deadline 500ms {
-  exec("sh", "-c", "sleep 30")
+  harness.process.exec("sh", "-c", "sleep 30")
 }
 }"#,
     );
@@ -461,14 +465,14 @@ async fn test_deadline_interrupts_async_sleep_without_wall_clock() {
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
-                    r#"pipeline t(task) {
+                    r#"pipeline t(harness: Harness, task) {
 try {
   deadline 50ms {
-    sleep(1s)
-    log("missed deadline")
+    harness.clock.sleep_ms(1000)
+    harness.stdio.log("missed deadline")
   }
 } catch(e) {
-  log("caught")
+  harness.stdio.log("caught")
 }
 }"#,
                 )
@@ -487,9 +491,9 @@ async fn test_cancel_during_await_aborts_spawned_task() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let source = r"pipeline t(task) {
+            let source = r"pipeline t(harness: Harness, task) {
 const handle = spawn {
-  sleep(1s)
+  harness.clock.sleep_ms(1000)
   mark()
 }
 await(handle)

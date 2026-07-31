@@ -1,47 +1,50 @@
 import { with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {text: "Visible <think>hidden", stop_reason: "stop"},
       {text: "Visible <think>hidden", stop_reason: "stop"},
     ],
     { ->
       const chunks = stream.collect(
-        llm_stream_call("stream this", nil, {provider: "mock"}),
+        harness.llm.stream_call("stream this", nil, {provider: "mock"}),
         {max: 4},
       )
-      const direct = llm_call("non-stream this", nil, {provider: "mock"})
+      const direct = harness.llm.call("non-stream this", nil, {provider: "mock"})
       let raw = ""
       for chunk in chunks {
         raw = raw + chunk.delta
       }
       const final = chunks[len(chunks) - 1]
-      __io_println(raw == direct.text)
-      __io_println(chunks[0].visible_delta == "Visible")
-      __io_println(chunks[0].partial == "Visible")
-      __io_println(final.stop_reason)
-      __io_println(final.delta == "")
+      harness.stdio.println(raw == direct.text)
+      harness.stdio.println(chunks[0].visible_delta == "Visible")
+      harness.stdio.println(chunks[0].partial == "Visible")
+      harness.stdio.println(final.stop_reason)
+      harness.stdio.println(final.delta == "")
     },
   )
   with_llm_script(
+    harness.llm,
     [{text: "early cancel text", stop_reason: "stop"}],
     { ->
-      const first = stream.first(llm_stream_call("cancel early", nil, {provider: "mock"}))
-      __io_println(first.delta == "early cancel text")
-      __io_println(first.stop_reason == nil)
+      const first = stream.first(harness.llm.stream_call("cancel early", nil, {provider: "mock"}))
+      harness.stdio.println(first.delta == "early cancel text")
+      harness.stdio.println(first.stop_reason == nil)
     },
   )
   with_llm_script(
+    harness.llm,
     [{text: "break cancel text", stop_reason: "stop"}],
     { ->
       let broke_before_terminal = false
-      const cancel_stream = llm_stream_call("break early", nil, {provider: "mock"})
+      const cancel_stream = harness.llm.stream_call("break early", nil, {provider: "mock"})
       for chunk in cancel_stream {
         broke_before_terminal = chunk.stop_reason == nil
         break
       }
-      __io_println(broke_before_terminal)
+      harness.stdio.println(broke_before_terminal)
     },
   )
 }

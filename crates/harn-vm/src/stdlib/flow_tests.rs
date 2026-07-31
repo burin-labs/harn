@@ -4,6 +4,7 @@ use crate::vm::Vm;
 fn vm_with_flow_builtins() -> Vm {
     let mut vm = Vm::new();
     register_flow_builtins(&mut vm);
+    vm.set_harness(crate::Harness::real());
     vm
 }
 
@@ -494,14 +495,20 @@ async fn eval_source_with_options(
     options: serde_json::Value,
 ) -> serde_json::Value {
     let mut vm = vm_with_flow_builtins();
+    let runtime = vm
+        .harness()
+        .and_then(|harness| harness.sub_handle("runtime"))
+        .expect("flow tests install HarnessRuntime");
     let value = vm
-        .call_named_builtin(
+        .call_harness_method(
+            &runtime,
             "flow_evaluate_invariants",
             vec![
                 VmValue::String(arcstr::ArcStr::from(source)),
                 json_to_vm_value(&slice),
                 json_to_vm_value(&options),
-            ],
+            ]
+            .as_slice(),
         )
         .await
         .unwrap();
@@ -802,8 +809,13 @@ pub fn judge(_request) {
         ),
         ("budget_ms", VmValue::Int(1_000)),
     ]);
+    let runtime = vm
+        .harness()
+        .and_then(|harness| harness.sub_handle("runtime"))
+        .expect("flow tests install HarnessRuntime");
     let value = vm
-        .call_named_builtin(
+        .call_harness_method(
+            &runtime,
             "flow_evaluate_invariants",
             vec![
                 VmValue::String(arcstr::ArcStr::from(
@@ -825,7 +837,8 @@ pub fn semantic_check(_slice, ctx, _repo_at_base) {
                 )),
                 json_to_vm_value(&serde_json::json!({"files": []})),
                 options,
-            ],
+            ]
+            .as_slice(),
         )
         .await
         .expect("evaluate invariants");

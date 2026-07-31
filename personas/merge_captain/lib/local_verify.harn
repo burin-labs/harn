@@ -6,7 +6,7 @@
 import { process_shell } from "std/runtime"
 
 /** Run all local verification commands for a repo. */
-pub fn run_local_verify(commands, dry_run) {
+pub fn run_local_verify(clock: HarnessClock, process: HarnessProcess, commands, dry_run) {
   const timeout_ms = 600000
   return commands.map(
     { cmd ->
@@ -20,11 +20,11 @@ pub fn run_local_verify(commands, dry_run) {
           stderr: "",
         }
       } else {
-        const started = now_ms()
+        const started = clock.now_ms()
         const result = try {
-          process_shell(to_string(cmd.command), {timeout_ms: cmd.timeout_ms ?? timeout_ms})
+          process_shell(process, to_string(cmd.command), {timeout_ms: cmd.timeout_ms ?? timeout_ms})
         }
-        const finished = now_ms()
+        const finished = clock.now_ms()
         if !is_ok(result) {
           {
             name: cmd.name ?? cmd.command,

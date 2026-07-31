@@ -614,7 +614,7 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
     harness.stdio.eprintln("")
     harness.stdio.eprintln(usage())
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const input = if to_string(parsed?.input ?? "") == "" {
@@ -625,7 +625,7 @@ fn main(harness: Harness) {
   const limit = to_int(parsed?.limit) ?? 10
   if !harness.fs.exists(input) {
     harness.stdio.eprintln("hook timing log not found: " + input)
-    exit(1)
+    harness.runtime.exit(1)
   }
   const parsed_log = parse_hook_timing_text(harness.fs.read_text(input))
   const filters: HookTimingFilters = {
@@ -649,7 +649,7 @@ fn main(harness: Harness) {
   }
   if (parsed?.json ?? false) && (parsed?.budgets ?? false) {
     harness.stdio.eprintln("--json and --budgets are mutually exclusive")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if parsed?.budgets ?? false {
     harness.stdio.println(json_stringify_pretty(derive_hook_timing_budgets(events)))

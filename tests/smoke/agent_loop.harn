@@ -35,11 +35,13 @@ fn smoke_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [llm_tool_call("add", {lhs: 2, rhs: 3}), llm_text("The sum is 5.")],
     { ->
       const result = agent_loop(
+        harness,
         "Add 2 and 3 using the tool, then report the sum.",
         nil,
         {
@@ -60,7 +62,7 @@ pipeline default() {
       if !contains(result.tools.successful, "add") {
         throw "agent loop smoke failed: expected the add tool to run, got ${result.tools.successful}"
       }
-      __io_println("agent loop ok")
+      harness.stdio.println("agent loop ok")
     },
   )
 }

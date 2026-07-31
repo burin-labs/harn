@@ -16,14 +16,14 @@ Start with a tiny set of representative inputs. Keep the examples small enough
 that you can inspect failures by eye:
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   const cases = [
     {id: "case-1", input: "What is 2 + 2?", expected: "4"},
     {id: "case-2", input: "Capital of France?", expected: "Paris"},
     {id: "case-3", input: "Color of grass?", expected: "green"},
   ]
 
-  log("Loaded ${cases.count} eval cases")
+  harness.stdio.log("Loaded ${cases.count} eval cases")
 }
 ```
 
@@ -32,7 +32,7 @@ pipeline main(task) {
 If each case is independent, use `parallel each` so the slow parts overlap.
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   const cases = [
     {id: "case-1", input: "What is 2 + 2?", expected: "4"},
     {id: "case-2", input: "Capital of France?", expected: "Paris"},
@@ -40,7 +40,7 @@ pipeline main(task) {
   ]
 
   const results = parallel each cases { tc ->
-    const answer = llm_call(tc.input, "Answer in one word or short phrase.", {
+    const answer = harness.llm.call(tc.input, "Answer in one word or short phrase.", {
       temperature: 0.0,
       max_tokens: 64,
     })
@@ -53,12 +53,12 @@ pipeline main(task) {
     }
   }
 
-  log(json_stringify(results))
+  harness.stdio.log(json_stringify(results))
 }
 ```
 
 For a real eval suite, replace the inline `cases` list with a manifest or a
-dataset file that your pipeline reads with `read_file()`.
+dataset file that your pipeline reads with `harness.fs.read_text()`.
 
 ## 3. Record metrics
 
@@ -66,7 +66,7 @@ The important part of an eval pipeline is the metric trail. Use
 `eval_metric()` to record per-case and aggregate results.
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   const cases = [
     {id: "case-1", input: "What is 2 + 2?", expected: "4"},
     {id: "case-2", input: "Capital of France?", expected: "Paris"},
@@ -74,7 +74,7 @@ pipeline main(task) {
 
   let passed = 0
   for tc in cases {
-    const answer = llm_call(tc.input, "Answer in one word.", {temperature: 0.0})
+    const answer = harness.llm.call(tc.input, "Answer in one word.", {temperature: 0.0})
     const correct = answer.text.contains(tc.expected)
     if correct {
       passed = passed + 1
@@ -84,8 +84,8 @@ pipeline main(task) {
 
   const accuracy = passed / cases.count
   eval_metric("accuracy", accuracy, {passed: passed, total: cases.count})
-  eval_metric("run_id", uuid())
-  eval_metric("generated_at", timestamp())
+  eval_metric("run_id", harness.random.uuid())
+  eval_metric("generated_at", harness.clock.timestamp())
 }
 ```
 
@@ -95,16 +95,16 @@ Once the metrics are recorded, write a compact report so a later run can diff
 the results.
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   const summary = {
-    run_id: uuid(),
-    generated_at: timestamp(),
+    run_id: harness.random.uuid(),
+    generated_at: harness.clock.timestamp(),
     accuracy: 0.83,
     notes: "Replace the fixed accuracy with real case scoring",
   }
 
-  write_file("eval-summary.json", json_stringify(summary))
-  log(json_stringify(summary))
+  harness.fs.write_text("eval-summary.json", json_stringify(summary))
+  harness.stdio.log(json_stringify(summary))
 }
 ```
 

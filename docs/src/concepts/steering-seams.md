@@ -79,7 +79,7 @@ Plugin authors observe seams through one canonical builtin:
 
 ```harn,ignore
 register_checkpoint_hook(["pre_tool_dispatch", "iteration_end"], { event ->
-  log("seam fired:", event.kind, "delivered:", event.delivered)
+  harness.stdio.log("seam fired:", event.kind, "delivered:", event.delivered)
 })
 ```
 
@@ -93,7 +93,7 @@ works too, with explicit pattern syntax (`kind=="pre_tool_dispatch"`,
 
 ## Migration from the old drain sites
 
-Pre-#2211 code called `agent_session_drain_bridge_injections(session_id,
+Pre-#2211 code called `harness.agent.drain_bridge_injections(session_id,
 checkpoint)` directly at several sites. Those calls still work — the
 checkpoint helper is implemented on top of them — but they bypass the
 `LoopCheckpoint` event and the hook fan-out. Prefer

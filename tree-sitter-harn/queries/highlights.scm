@@ -50,12 +50,6 @@
 "to" @keyword.operator
 "exclusive" @keyword.operator
 
-; HITL primitives (reserved keywords parsed as call-like statements)
-"ask_user" @keyword
-"dual_control" @keyword
-"escalate_to" @keyword
-"request_approval" @keyword
-
 ; Literals
 (true) @boolean
 (false) @boolean

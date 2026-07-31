@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // += on int
   let x = 10
   x += 5
@@ -40,5 +40,5 @@ pipeline test(task) {
   assert_eq(10 % 3, 1, "modulo basic")
   assert_eq(15 % 5, 0, "modulo even")
   assert_eq(7 % 2, 1, "modulo odd")
-  log("compound assignment: all tests passed")
+  harness.stdio.log("compound assignment: all tests passed")
 }

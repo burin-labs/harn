@@ -1,15 +1,16 @@
 //! Per-OS process sandboxing.
 //!
-//! macOS surfaces a denial as a typed error, Linux blocks a battery of process
+//! macOS surfaces a denial as a typed result, Linux blocks a battery of process
 //! escapes, and Windows permits in-workspace exec (including argv0) while
 //! rejecting writes outside it.
 
+#[cfg(target_os = "windows")]
 use crate::VmError;
 
 use super::harness::*;
 #[cfg(target_os = "macos")]
 #[test]
-fn test_macos_process_sandbox_surfaces_denial_as_typed_error() {
+fn test_macos_process_sandbox_surfaces_denial_as_typed_result() {
     if !std::path::Path::new("/usr/bin/sandbox-exec").exists() {
         return;
     }
@@ -30,26 +31,35 @@ fn test_macos_process_sandbox_surfaces_denial_as_typed_error() {
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([(
             "process".to_string(),
-            vec!["exec".to_string()],
+            vec!["run".to_string()],
         )]),
         workspace_roots: vec![allowed.path().display().to_string()],
         side_effect_level: Some("process_exec".to_string()),
         ..Default::default()
     };
     let source = format!(
-        r#"pipeline t(task) {{ shell("printf denied > '{}'") }}"#,
+        r#"pipeline t(harness: Harness, task) {{ harness.process.shell("printf denied > '{}'") }}"#,
         outside_file.display()
     );
-    let err = run_harn_with_policy(&source, policy).unwrap_err();
-
-    assert!(matches!(
-        err,
-        VmError::CategorizedError {
-            category: crate::value::ErrorCategory::ToolRejected,
-            ..
-        }
-    ));
-    assert!(err.to_string().contains("sandbox violation"));
+    let (_, result) = run_harn_with_policy(&source, policy)
+        .expect("the process capability returns a typed nonzero-exit receipt");
+    let result = result
+        .as_dict()
+        .expect("HarnessProcess.shell must return a process receipt");
+    assert_eq!(
+        result
+            .get("success")
+            .map(crate::VmValue::display)
+            .as_deref(),
+        Some("false")
+    );
+    assert!(
+        result
+            .get("stderr")
+            .map(crate::VmValue::display)
+            .is_some_and(|stderr| stderr.contains("operation not permitted")),
+        "sandbox denial must be observable in the process receipt"
+    );
     assert!(!outside_file.exists());
 }
 
@@ -71,7 +81,7 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
 
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([
-            ("process".to_string(), vec!["exec".to_string()]),
+            ("process".to_string(), vec!["run".to_string()]),
             (
                 "workspace".to_string(),
                 vec![
@@ -121,23 +131,25 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
 
     for command in escapes {
         let source = format!(
-            r#"pipeline t(task) {{ shell("{}") }}"#,
+            r#"pipeline t(harness: Harness, task) {{ harness.process.shell("{}") }}"#,
             harn_string_escape(&command)
         );
-        let err = run_harn_with_policy(&source, policy.clone()).unwrap_err();
+        let (_, result) = run_harn_with_policy(&source, policy.clone())
+            .expect("a sandboxed process denial returns a typed process receipt");
+        let receipt = result
+            .as_dict()
+            .expect("HarnessProcess.shell must return a process receipt");
         assert!(
-            matches!(
-                err,
-                VmError::CategorizedError {
-                    category: crate::value::ErrorCategory::ToolRejected,
-                    ..
-                }
-            ),
-            "expected tool_rejected for command {command}, got {err:?}"
+            receipt
+                .get("success")
+                .is_some_and(|value| matches!(value, crate::VmValue::Bool(false))),
+            "expected an unsuccessful process receipt for command {command}, got {receipt:?}"
         );
         assert!(
-            err.to_string().contains("sandbox violation"),
-            "expected sandbox violation for command {command}, got {err}"
+            receipt
+                .get("exit_code")
+                .is_some_and(|value| matches!(value, crate::VmValue::Int(code) if *code != 0)),
+            "expected a nonzero exit code for command {command}, got {receipt:?}"
         );
     }
 
@@ -157,7 +169,7 @@ fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
 
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([
-            ("process".to_string(), vec!["exec".to_string()]),
+            ("process".to_string(), vec!["run".to_string()]),
             ("workspace".to_string(), vec!["write_text".to_string()]),
         ]),
         workspace_roots: vec![allowed.path().display().to_string()],
@@ -166,7 +178,7 @@ fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
     };
     let command = format!("echo allowed>{}", allowed_file.display());
     let source = format!(
-        r#"pipeline t(task) {{ shell("{}") }}"#,
+        r#"pipeline t(harness: Harness, task) {{ harness.process.shell("{}") }}"#,
         harn_string_escape(&command)
     );
     let result = run_harn_with_policy(&source, policy);
@@ -185,14 +197,14 @@ fn test_windows_process_sandbox_allows_exec_argv0() {
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([(
             "process".to_string(),
-            vec!["exec".to_string()],
+            vec!["run".to_string()],
         )]),
         workspace_roots: vec![allowed.path().display().to_string()],
         side_effect_level: Some("process_exec".to_string()),
         ..Default::default()
     };
     let result = run_harn_with_policy(
-        r#"pipeline t(task) { exec("cmd", "/C", "exit 0") }"#,
+        r#"pipeline t(harness: Harness, task) { harness.process.exec("cmd", "/C", "exit 0") }"#,
         policy,
     );
 
@@ -210,7 +222,7 @@ fn test_windows_process_sandbox_denies_write_outside_workspace() {
 
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([
-            ("process".to_string(), vec!["exec".to_string()]),
+            ("process".to_string(), vec!["run".to_string()]),
             ("workspace".to_string(), vec!["write_text".to_string()]),
         ]),
         workspace_roots: vec![allowed.path().display().to_string()],
@@ -219,7 +231,7 @@ fn test_windows_process_sandbox_denies_write_outside_workspace() {
     };
     let command = format!("echo denied>{}", outside_file.display());
     let source = format!(
-        r#"pipeline t(task) {{ shell("{}") }}"#,
+        r#"pipeline t(harness: Harness, task) {{ harness.process.shell("{}") }}"#,
         harn_string_escape(&command)
     );
     let err = run_harn_with_policy(&source, policy).unwrap_err();

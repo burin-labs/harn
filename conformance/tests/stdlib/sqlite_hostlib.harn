@@ -1,13 +1,13 @@
 import "std/sqlite"
 
-pipeline default() {
-  const mem = sqlite_open(":memory:")
+pipeline default(harness: Harness) {
+  const mem = harness.sqlite.open(":memory:")
   sqlite_execute(mem, "create table notes(id integer primary key, body text not null)")
   const inserted = sqlite_execute(mem, "insert into notes(id, body) values (?, ?)", [1, "alpha"])
-  __io_println("mem.inserted=" + to_string(inserted.rows_affected))
+  harness.stdio.println("mem.inserted=" + to_string(inserted.rows_affected))
   const rows = sqlite_query(mem, "select id, body from notes where id = ?", [1])
-  __io_println("mem.row=" + to_string(rows[0].id) + ":" + rows[0].body)
-  __io_println(
+  harness.stdio.println("mem.row=" + to_string(rows[0].id) + ":" + rows[0].body)
+  harness.stdio.println(
     "mem.miss="
       + to_string(sqlite_query_one(mem, "select id from notes where id = ?", [99]) == nil),
   )
@@ -22,15 +22,15 @@ pipeline default() {
   } catch (e) {
     "caught"
   }
-  __io_println("tx.rollback=" + rollback)
+  harness.stdio.println("tx.rollback=" + rollback)
   const after_rollback = sqlite_query_one(mem, "select count(*) as n from notes where id = ?", [2])
-  __io_println("tx.rollback.count=" + to_string(after_rollback.n))
+  harness.stdio.println("tx.rollback.count=" + to_string(after_rollback.n))
   const close_during_tx = try {
     sqlite_transaction(mem, { tx -> sqlite_close(mem) })
   } catch (e) {
     "rejected"
   }
-  __io_println("tx.close=" + close_during_tx)
+  harness.stdio.println("tx.close=" + close_during_tx)
   sqlite_transaction(
     mem,
     { tx ->
@@ -46,16 +46,19 @@ pipeline default() {
     "select count(*) as n from notes where id in (?, ?)",
     [3, 4],
   )
-  __io_println("savepoint.count=" + to_string(savepoint_count.n))
-  const root = path_join(harness.fs.temp_dir(), "harn-sqlite-hostlib-" + uuid())
+  harness.stdio.println("savepoint.count=" + to_string(savepoint_count.n))
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-sqlite-hostlib-" + harness.random.uuid(),
+  )
   const db_path = path_join(root, "state", "app.sqlite")
-  const file_db = sqlite_open(db_path, {create: true, journal_mode: "wal"})
+  const file_db = harness.sqlite.open(db_path, {create: true, journal_mode: "wal"})
   sqlite_execute(file_db, "create table persisted(id integer primary key, body text not null)")
   sqlite_execute(file_db, "insert into persisted(id, body) values (?, ?)", [7, "durable"])
   sqlite_close(file_db)
-  const reopened = sqlite_open(db_path, {read_only: true})
+  const reopened = harness.sqlite.open(db_path, {read_only: true})
   const persisted = sqlite_query_one(reopened, "select body from persisted where id = ?", [7])
-  __io_println("file.reopen=" + persisted.body)
+  harness.stdio.println("file.reopen=" + persisted.body)
   sqlite_close(reopened)
   const migrations = path_join(root, "migrations")
   harness.fs.mkdir(migrations)
@@ -68,7 +71,7 @@ pipeline default() {
     "insert into migrated(id, body) values (1, 'seed');",
   )
   harness.fs.write_text(path_join(migrations, "0002_seed.down.sql"), "drop table migrated;")
-  const migrate_db = sqlite_open(path_join(root, "migrate.sqlite"), {create: true})
+  const migrate_db = harness.sqlite.open(path_join(root, "migrate.sqlite"), {create: true})
   const dry_run = sqlite_migrate(migrate_db, {dir: migrations, dry_run: true})
   const dry_run_ledger = sqlite_query_one(
     migrate_db,
@@ -78,17 +81,17 @@ pipeline default() {
   const first = sqlite_migrate(migrate_db, {dir: migrations})
   const second = sqlite_migrate(migrate_db, {dir: migrations})
   const migrated = sqlite_query_one(migrate_db, "select body from migrated where id = ?", [1])
-  __io_println(
+  harness.stdio.println(
     "migrate.dry_run=" + to_string(len(dry_run.applied)) + "/" + to_string(dry_run_ledger.n),
   )
-  __io_println(
+  harness.stdio.println(
     "migrate.first=" + to_string(len(first.applied)) + "/" + to_string(len(first.available)),
   )
-  __io_println(
+  harness.stdio.println(
     "migrate.second=" + to_string(len(second.applied)) + "/" + to_string(len(second.skipped)),
   )
-  __io_println("migrate.row=" + migrated.body)
-  const mock = sqlite_mock_db(
+  harness.stdio.println("migrate.row=" + migrated.body)
+  const mock = harness.testing.sqlite_mock_db(
     [
       {sql: "select id from events where topic = ?", params: ["agent_events"], rows: [{id: 42}]},
       {sql: "update events set seen = 1 where id = ?", params: [42], rows_affected: 1},
@@ -97,9 +100,9 @@ pipeline default() {
   const mock_rows = sqlite_query(mock, "select id from events where topic = ?", ["agent_events"])
   const mock_exec = sqlite_execute(mock, "update events set seen = 1 where id = ?", [42])
   const calls = sqlite_mock_calls(mock)
-  __io_println("mock.row=" + to_string(mock_rows[0].id))
-  __io_println("mock.exec=" + to_string(mock_exec.rows_affected))
-  __io_println(
+  harness.stdio.println("mock.row=" + to_string(mock_rows[0].id))
+  harness.stdio.println("mock.exec=" + to_string(mock_exec.rows_affected))
+  harness.stdio.println(
     "mock.call=" + calls[0].sql + ":" + calls[0].params[0] + ":" + to_string(calls[0].execute),
   )
 }

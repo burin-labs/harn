@@ -11,12 +11,12 @@ table for that system.
 
 | OpenAI term | Harn equivalent | Notes |
 |---|---|---|
-| `Agent` (class) | `agent_loop(...)` invocation, or a `persona` | OpenAI's `Agent` bundles instructions, tools, and output type; the closest Harn shape is a configured `agent_loop` call site. |
-| `Runner.run(...)` | `agent_turn(...)` or one `agent_loop(...)` | One OpenAI "turn" wraps many model round-trips. Harn's `agent_turn` wraps the same idea. |
+| `Agent` (class) | `agent_loop(harness, ...)` invocation, or a `persona` | OpenAI's `Agent` bundles instructions, tools, and output type; the closest Harn shape is a configured `agent_loop` call site. |
+| `Runner.run(...)` | `agent_turn(...)` or one `agent_loop(harness, ...)` | One OpenAI "turn" wraps many model round-trips. Harn's `agent_turn` wraps the same idea. |
 | **"turn"** | Harn **`prompt_turn`** / `agent_turn` | OpenAI's "turn" is the *outer* cycle (one user request → final answer). Map it to Harn's `agent_turn` wrapper, not to Harn's per-iteration counter. |
 | "model roundtrip" (unnamed) | Harn **`iteration`** | The inner unit. |
 | `max_turns` | `max_iterations` | Both bound a budget, but the nouns are off-by-one — OpenAI counts outer SDK invocations, Harn counts inner LLM calls. |
-| `Session` (`SQLiteSession("id")`) | `session_id` + `agent_session_open(id)` | Direct match. |
+| `Session` (`SQLiteSession("id")`) | `session_id` + `harness.agent.open(id)` | Direct match. |
 | `handoff` | persona handoff or `spawn_agent` | Direct match in shape. |
 | `input_guardrails` / `output_guardrails` | `agent_input_guardrail` + tool middleware + completion gates | Harn exposes input guardrails as a named pre-loop bookend; output checks use completion gates, judges, validators, and tool middleware. |
 
@@ -25,9 +25,9 @@ table for that system.
 | Anthropic term | Harn equivalent | Notes |
 |---|---|---|
 | **"agent loop"** | `agent_loop` | Direct vocabulary match. |
-| `query()` / `ClaudeSDKClient` | `agent_loop(...)` / `agent_chat_loop(...)` | Stateless single-shot vs stateful multi-turn. |
+| `query()` / `ClaudeSDKClient` | `agent_loop(harness, ...)` / `agent_chat_loop(...)` | Stateless single-shot vs stateful multi-turn. |
 | `AssistantMessage`, `TextBlock` (typed stream) | transcript events | Anthropic streams typed messages; Harn streams typed transcript events. |
-| Session resumption | `agent_session_open(id)` + transcript continuity | Direct match. |
+| Session resumption | `harness.agent.open(id)` + transcript continuity | Direct match. |
 | **"hook"** | `register_tool_hook`, `register_session_hook`, `register_reminder_provider` | Harn's hook registry is the richer version. |
 
 Anthropic and Harn align closely on agent-loop vocabulary; this is the easiest

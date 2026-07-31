@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /** Plan a sweep for Linear issues stuck in review. */
-pub fn bump_stuck_issues(event: TriggerEvent) -> dict {
+pub fn bump_stuck_issues(_harness: Harness, event: TriggerEvent) -> dict {
   return {
     provider: "linear",
     action: "bump_stuck_issues",

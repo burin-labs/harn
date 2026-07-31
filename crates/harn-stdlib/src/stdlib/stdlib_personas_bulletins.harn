@@ -354,7 +354,7 @@ pub fn bulletin_validate(bulletin: ProfileBulletin) -> ProfileBulletin {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_propose(input, options = nil) -> ProfileBulletin {
+pub fn bulletin_propose(clock: HarnessClock, input, options = nil) -> ProfileBulletin {
   if input == nil || type_of(input) != "dict" {
     throw "std/personas/bulletins: bulletin_propose requires a dict input"
   }
@@ -379,7 +379,7 @@ pub fn bulletin_propose(input, options = nil) -> ProfileBulletin {
   const evidence = __bulletin_evidence(opts?.evidence ?? input?.evidence)
   const source = __bulletin_source(opts?.source ?? input?.source)
   const privacy = __bulletin_privacy(opts?.privacy ?? input?.privacy)
-  const proposed_at = __bulletin_first([opts?.proposed_at, input?.proposed_at]) ?? date_now_iso()
+  const proposed_at = __bulletin_first([opts?.proposed_at, input?.proposed_at]) ?? clock.date_iso()
   const expires_at = __bulletin_first([opts?.expires_at, input?.expires_at])
   const review_after = __bulletin_first([opts?.review_after, input?.review_after])
   const supersedes = __bulletin_string_list(opts?.supersedes ?? input?.supersedes)
@@ -419,11 +419,11 @@ pub fn bulletin_propose(input, options = nil) -> ProfileBulletin {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_dedupe(bulletins: list) -> list<ProfileBulletin> {
+pub fn bulletin_dedupe(clock: HarnessClock, bulletins: list) -> list<ProfileBulletin> {
   let seen = {}
   let out = []
   for entry in bulletins {
-    const bulletin = entry?.schema == BULLETIN_SCHEMA ? entry : bulletin_propose(entry)
+    const bulletin = entry?.schema == BULLETIN_SCHEMA ? entry : bulletin_propose(clock, entry)
     if seen[bulletin.id] == nil {
       seen[bulletin.id] = true
       out = out.appending(bulletin)
@@ -442,15 +442,21 @@ pub fn bulletin_dedupe(bulletins: list) -> list<ProfileBulletin> {
  * @effects: [transcript.write]
  * @errors: []
  */
-pub fn bulletin_emit(input, options = nil) -> BulletinProposeReceipt {
+pub fn bulletin_emit(
+  clock: HarnessClock,
+  obs: HarnessObs,
+  input,
+  options = nil,
+) -> BulletinProposeReceipt {
   const opts = options ?? {}
   const raw = input?.schema == BULLETIN_SCHEMA ? bulletin_validate(input) : bulletin_propose(
+    clock,
     input,
     opts,
   )
   const bulletin = raw + {status: "proposed"}
   const topic = opts?.topic ?? BULLETIN_PROPOSAL_TOPIC
-  const event_log_id = event_log.emit(
+  const event_log_id = obs.event_log_emit(
     topic,
     BULLETIN_PROPOSED_KIND,
     bulletin,
@@ -477,6 +483,7 @@ pub fn bulletin_emit(input, options = nil) -> BulletinProposeReceipt {
  * @errors: []
  */
 pub fn bulletin_decide(
+  clock: HarnessClock,
   bulletin: ProfileBulletin,
   action,
   options = nil,
@@ -484,7 +491,7 @@ pub fn bulletin_decide(
   const opts = options ?? {}
   const resolved_action = __bulletin_resolve_action(action)
   const status = __bulletin_status_for_action(resolved_action)
-  const decided_at = __bulletin_first([opts?.decided_at]) ?? date_now_iso()
+  const decided_at = __bulletin_first([opts?.decided_at]) ?? clock.date_iso()
   const decided_by = __bulletin_text(opts?.decided_by)
   const resolved_by = decided_by == "" ? "host" : decided_by
   const rationale = __bulletin_first([opts?.rationale])
@@ -519,6 +526,7 @@ pub fn bulletin_decide(
  * @errors: []
  */
 pub fn bulletin_emit_decision(
+  obs: HarnessObs,
   decision: ProfileBulletinDecision,
   options = nil,
 ) -> BulletinDecisionReceipt {
@@ -530,7 +538,7 @@ pub fn bulletin_emit_decision(
     throw "std/personas/bulletins: decision bulletin_id is required"
   }
   const topic = opts?.topic ?? BULLETIN_DECISION_TOPIC
-  const event_log_id = event_log.emit(
+  const event_log_id = obs.event_log_emit(
     topic,
     BULLETIN_DECISION_KIND,
     decision,
@@ -564,7 +572,7 @@ pub fn bulletin_memory_namespace(bulletin: ProfileBulletin) -> string {
   return "personas/bulletins/" + scope + "/" + scope_key
 }
 
-fn __bulletin_remember_accepted(bulletin: ProfileBulletin, options) {
+fn __bulletin_remember_accepted(memory: HarnessMemory, bulletin: ProfileBulletin, options) {
   const opts = options ?? {}
   const override_namespace = __bulletin_text(opts?.memory_namespace)
   const namespace = override_namespace != "" ? override_namespace : bulletin_memory_namespace(
@@ -592,7 +600,14 @@ fn __bulletin_remember_accepted(bulletin: ProfileBulletin, options) {
       },
     },
   )
-  memory_store(namespace, bulletin.id, {text: text, bulletin: bulletin}, tags, store_options)
+  memory_store(
+    memory,
+    namespace,
+    bulletin.id,
+    {text: text, bulletin: bulletin},
+    tags,
+    store_options,
+  )
 }
 
 /**
@@ -605,10 +620,18 @@ fn __bulletin_remember_accepted(bulletin: ProfileBulletin, options) {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_accept(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
-  const receipt = bulletin_emit_decision(bulletin_decide(bulletin, "accept", options), options)
+pub fn bulletin_accept(
+  harness: Harness,
+  bulletin: ProfileBulletin,
+  options = nil,
+) -> BulletinDecisionReceipt {
+  const receipt = bulletin_emit_decision(
+    harness.obs,
+    bulletin_decide(harness.clock, bulletin, "accept", options),
+    options,
+  )
   if options != nil && options?.embed {
-    __bulletin_remember_accepted(bulletin, options)
+    __bulletin_remember_accepted(harness.memory, bulletin, options)
   }
   return receipt
 }
@@ -619,8 +642,13 @@ pub fn bulletin_accept(bulletin: ProfileBulletin, options = nil) -> BulletinDeci
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_reject(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
-  return bulletin_emit_decision(bulletin_decide(bulletin, "reject", options), options)
+pub fn bulletin_reject(
+  clock: HarnessClock,
+  obs: HarnessObs,
+  bulletin: ProfileBulletin,
+  options = nil,
+) -> BulletinDecisionReceipt {
+  return bulletin_emit_decision(obs, bulletin_decide(clock, bulletin, "reject", options), options)
 }
 
 /**
@@ -629,8 +657,13 @@ pub fn bulletin_reject(bulletin: ProfileBulletin, options = nil) -> BulletinDeci
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_expire(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
-  return bulletin_emit_decision(bulletin_decide(bulletin, "expire", options), options)
+pub fn bulletin_expire(
+  clock: HarnessClock,
+  obs: HarnessObs,
+  bulletin: ProfileBulletin,
+  options = nil,
+) -> BulletinDecisionReceipt {
+  return bulletin_emit_decision(obs, bulletin_decide(clock, bulletin, "expire", options), options)
 }
 
 /**
@@ -640,12 +673,14 @@ pub fn bulletin_expire(bulletin: ProfileBulletin, options = nil) -> BulletinDeci
  * @errors: []
  */
 pub fn bulletin_supersede(
+  clock: HarnessClock,
+  obs: HarnessObs,
   bulletin: ProfileBulletin,
   supersedes: list<string>,
   options = nil,
 ) -> BulletinDecisionReceipt {
   const merged = (options ?? {}) + {supersedes: supersedes}
-  return bulletin_emit_decision(bulletin_decide(bulletin, "supersede", merged), merged)
+  return bulletin_emit_decision(obs, bulletin_decide(clock, bulletin, "supersede", merged), merged)
 }
 
 fn __bulletin_decision_index(decisions) {
@@ -740,8 +775,8 @@ fn __bulletin_expired_now(bulletin, now_iso) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_active(bulletins: list, now = nil) -> list<ProfileBulletin> {
-  const now_iso = __bulletin_text(now) == "" ? date_now_iso() : __bulletin_text(now)
+pub fn bulletin_active(clock: HarnessClock, bulletins: list, now = nil) -> list<ProfileBulletin> {
+  const now_iso = __bulletin_text(now) == "" ? clock.date_iso() : __bulletin_text(now)
   let out = []
   for bulletin in __bulletin_list(bulletins) {
     const status = __bulletin_resolve_status(bulletin?.status)
@@ -771,13 +806,13 @@ fn __bulletin_render_line(bulletin) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_render_for_prompt(bulletins: list, options = nil) -> string {
+pub fn bulletin_render_for_prompt(clock: HarnessClock, bulletins: list, options = nil) -> string {
   const opts = options ?? {}
   const now = __bulletin_text(opts?.now)
   const {active_only = true, include_proposed = true} = opts ?? {}
   const parts = bulletin_partition(bulletins)
   const accepted_pool = if active_only {
-    bulletin_active(parts.accepted, now == "" ? nil : now)
+    bulletin_active(clock, parts.accepted, now == "" ? nil : now)
   } else {
     parts.accepted
   }

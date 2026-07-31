@@ -1,13 +1,13 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Tail call optimization with closures passed as arguments
   const double = { x -> x * 2 }
   const apply = { f, x -> f(x) }
-  __io_println(apply(double, 5))
-  __io_println(apply({ x -> x + 10 }, 3))
+  harness.stdio.println(apply(double, 5))
+  harness.stdio.println(apply({ x -> x + 10 }, 3))
   // Pipe into closure
   const result = 7 |> { x -> x * 3 }
-  __io_println(result)
+  harness.stdio.println(result)
   // Chained pipes with closures
   const out = 2 |> { x -> x + 1 } |> { x -> x * 10 }
-  __io_println(out)
+  harness.stdio.println(out)
 }

@@ -1,13 +1,13 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Query with no limit configured -> nil
-  const none = llm_rate_limit("test_provider_xyz")
-  log(none)
+  const none = harness.llm.rate_limit("test_provider_xyz")
+  harness.stdio.log(none)
   // Set a limit
-  llm_rate_limit("test_provider_xyz", {rpm: 100})
-  const limit = llm_rate_limit("test_provider_xyz")
-  log(limit)
+  harness.llm.rate_limit("test_provider_xyz", {rpm: 100})
+  const limit = harness.llm.rate_limit("test_provider_xyz")
+  harness.stdio.log(limit)
   // Clear it
-  llm_rate_limit("test_provider_xyz", {rpm: 0})
-  const cleared = llm_rate_limit("test_provider_xyz")
-  log(cleared)
+  harness.llm.rate_limit("test_provider_xyz", {rpm: 0})
+  const cleared = harness.llm.rate_limit("test_provider_xyz")
+  harness.stdio.log(cleared)
 }

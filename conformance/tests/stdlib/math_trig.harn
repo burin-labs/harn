@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Trig
   const p = pi
   assert(p > 3.14)
@@ -34,5 +34,5 @@ pipeline test(task) {
   // is_nan, is_infinite
   assert(!is_nan(1.0))
   assert(!is_infinite(1.0))
-  log("math ok")
+  harness.stdio.log("math ok")
 }

@@ -66,8 +66,8 @@ pub fn is_absolute(path) {
  * @effects: []
  * @errors: []
  */
-pub fn workspace_info(path, workspace_root = nil) {
-  return path_workspace_info(path, workspace_root)
+pub fn workspace_info(fs: HarnessFs, path, workspace_root = nil) {
+  return fs.workspace_info(path, workspace_root)
 }
 
 /**
@@ -89,8 +89,12 @@ pub fn workspace_normalize(path, workspace_root = nil) {
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn workspace_canonicalize_existing(path: string, workspace_root: string? = nil) -> string? {
-  return path_workspace_canonicalize_existing(path, workspace_root)
+pub fn workspace_canonicalize_existing(
+  fs: HarnessFs,
+  path: string,
+  workspace_root: string? = nil,
+) -> string? {
+  return fs.workspace_canonicalize_existing(path, workspace_root)
 }
 
 /**
@@ -100,12 +104,12 @@ pub fn workspace_canonicalize_existing(path: string, workspace_root: string? = n
  * @effects: []
  * @errors: []
  */
-pub fn list_files(dir) {
-  const entries = harness.fs.list_dir(dir)
+pub fn list_files(fs: HarnessFs, dir) {
+  const entries = fs.list_dir(dir)
   return entries.filter(
     { name ->
       const full = path_join(dir, name)
-      const info = harness.fs.stat(full)
+      const info = fs.stat(full)
       return info.is_file
     },
   )
@@ -118,12 +122,12 @@ pub fn list_files(dir) {
  * @effects: []
  * @errors: []
  */
-pub fn list_dirs(dir) {
-  const entries = harness.fs.list_dir(dir)
+pub fn list_dirs(fs: HarnessFs, dir) {
+  const entries = fs.list_dir(dir)
   return entries.filter(
     { name ->
       const full = path_join(dir, name)
-      const info = harness.fs.stat(full)
+      const info = fs.stat(full)
       return info.is_dir
     },
   )

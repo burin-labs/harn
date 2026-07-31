@@ -58,32 +58,31 @@ Grammar dependency changes update
 `make gen-grammar-fitness`. `make check-grammar-fitness` compares the resolved
 artifact receipt and executes the versioned parse/search/safe-edit corpus.
 
-> **Feature gate.** Every helper that reads or writes a file on disk —
-> `edit_apply_node`, `edit_insert_at_anchor`, `edit_fast_apply`, and
-> `edit_safe_text_patch` —
-> is gated on the deterministic-tools feature, the same gate the
-> `hostlib_tools_*` file I/O builtins use. Call
-> `hostlib_enable("tools:deterministic")` once at the start of the
-> pipeline before invoking them; otherwise the underlying builtin returns
-> a structured error pointing you back here. Pure in-memory helpers
-> (`edit_apply_old_new_patch`, `edit_dry_run`, the validators) are not
-> gated.
+> **Capability contract.** Every helper that reads or writes a file receives
+> the exact nominal handles it needs: `HarnessAst` for structural edits,
+> `HarnessFs` + `HarnessRandom` for collision-safe text writes, and the
+> corresponding LLM/code-index handles for fast apply and rename. There is no
+> thread-local feature grant. The active policy may still reject an operation,
+> and a helper that receives only `HarnessAst` cannot recover filesystem,
+> process, network, or LLM authority. Pure in-memory helpers
+> (`edit_apply_old_new_patch`, `edit_dry_run`, and validators) take no
+> capability.
 
 ## `edit_apply_node` — Tree-Sitter query → format-preserving replace
 
-`edit_apply_node({path, query, replacement, ...})` locates AST node(s)
+`edit_apply_node(harness.ast, {path, query, replacement, ...})` locates AST node(s)
 via a Tree-Sitter S-expression query and replaces each match's bytes
 with `replacement`. Because the splice operates on the matched node's
 start/end bytes, leading indentation, surrounding whitespace, and
 trailing trivia outside the matched span are preserved verbatim.
 
-Backed by the `hostlib_ast_apply_node` builtin (issue
+Backed by the `harness.ast.apply_node` builtin (issue
 [#2506](https://github.com/burin-labs/harn/issues/2506)) under the
 `std/edit` umbrella epic
 [#2497](https://github.com/burin-labs/harn/issues/2497).
 
-Requires `hostlib_enable("tools:deterministic")` first — it writes the
-edited source to disk (see [Feature gate](#edit-stdlib)).
+The explicit `HarnessAst` argument owns the structural read/write operation
+(see [Capability contract](#edit-stdlib)).
 
 ### Parameters
 
@@ -125,23 +124,23 @@ after text.
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // src/lib.rs contains:
   //
   //   fn greet(name: &str) -> String {
   //       format!("hi {name}")
   //   }
   //
-  const result = edit_apply_node(
+  const result = edit_apply_node(harness.ast,
     {
       path: "src/lib.rs",
       query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
       replacement: "{ format!(\"hi {name}!\") }",
     },
   )
-  __io_println(result.result)               // "applied"
-  __io_println(result.match_count == 1)     // true
-  __io_println(contains(result.preview, "hi {name}!"))
+  harness.stdio.println(result.result)               // "applied"
+  harness.stdio.println(result.match_count == 1)     // true
+  harness.stdio.println(contains(result.preview, "hi {name}!"))
 }
 ```
 
@@ -155,9 +154,9 @@ untouched.
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Rewrite every function body in the file.
-  const all = edit_apply_node(
+  const all = edit_apply_node(harness.ast,
     {
       path: "src/lib.rs",
       query: "(function_item body: (block) @target)",
@@ -167,7 +166,7 @@ pipeline default() {
   )
 
   // Rewrite the second function only.
-  const second = edit_apply_node(
+  const second = edit_apply_node(harness.ast,
     {
       path: "src/lib.rs",
       query: "(function_item body: (block) @target)",
@@ -177,8 +176,8 @@ pipeline default() {
     },
   )
 
-  __io_println(all.match_count)
-  __io_println(second.match_count == 1)
+  harness.stdio.println(all.match_count)
+  harness.stdio.println(second.match_count == 1)
 }
 ```
 
@@ -187,18 +186,18 @@ pipeline default() {
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Intentional syntax error.
-  const result = edit_apply_node(
+  const result = edit_apply_node(harness.ast,
     {
       path: "src/lib.rs",
       query: "(function_item body: (block) @target)",
       replacement: "{ (",
     },
   )
-  __io_println(result.applied)              // false
-  __io_println(result.result)               // "syntax_error"
-  __io_println(result.details)              // human-readable diagnostic
+  harness.stdio.println(result.applied)              // false
+  harness.stdio.println(result.result)               // "syntax_error"
+  harness.stdio.println(result.details)              // human-readable diagnostic
   // src/lib.rs is unchanged on disk.
 }
 ```
@@ -206,19 +205,19 @@ pipeline default() {
 ### Staged-filesystem atomicity
 
 When the hostlib session is in staged mode (see
-[`hostlib_fs_set_mode`](https://github.com/burin-labs/harn/blob/main/crates/harn-hostlib/src/fs.rs)),
+[`harness.fs.set_mode`](https://github.com/burin-labs/harn/blob/main/crates/harn-hostlib/src/fs.rs)),
 passing the session id routes both the read and the write through the
 overlay. The edit becomes part of the same transaction as any sibling
 staged writes, and the working tree is only touched on
-`hostlib_fs_commit_staged`.
+`harness.fs.commit_staged`.
 
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
-  const session = harness.session_id()
-  const _ = hostlib_fs_set_mode({session_id: session, mode: "staged"})
-  const result = edit_apply_node(
+pipeline default(harness: Harness) {
+  const session = harness.agent.current_id()
+  const _ = harness.fs.set_mode({session_id: session, mode: "staged"})
+  const result = edit_apply_node(harness.ast,
     {
       path: "src/lib.rs",
       query: "(function_item body: (block) @target)",
@@ -227,9 +226,9 @@ pipeline default() {
       session_id: session,
     },
   )
-  __io_println(result.applied)
+  harness.stdio.println(result.applied)
   // The working tree only changes on commit.
-  const _ = hostlib_fs_commit_staged({session_id: session})
+  const _ = harness.fs.commit_staged({session_id: session})
 }
 ```
 
@@ -248,19 +247,19 @@ pipeline default() {
 
 ## `edit_insert_at_anchor` — splice a sibling or child relative to an AST anchor
 
-`edit_insert_at_anchor({path, query, position, content, ...})` is the
+`edit_insert_at_anchor(harness.ast, {path, query, position, content, ...})` is the
 companion to `edit_apply_node` for the *other* canonical mutation: not
 "replace this node" but "add a sibling next to it" or "append a child
 inside it". The query locates a single anchor; `position` picks the
 slot; `content` is re-indented to the right depth and spliced in.
 
-Backed by the `hostlib_ast_insert_at_anchor` builtin (issue
+Backed by the `harness.ast.insert_at_anchor` builtin (issue
 [#2507](https://github.com/burin-labs/harn/issues/2507)) under the same
 [#2497](https://github.com/burin-labs/harn/issues/2497) umbrella epic
 as `edit_apply_node`.
 
-Requires `hostlib_enable("tools:deterministic")` first — it writes the
-edited source to disk (see [Feature gate](#edit-stdlib)).
+The explicit `HarnessAst` argument owns the structural read/write operation
+(see [Capability contract](#edit-stdlib)).
 
 ### Parameters
 
@@ -311,7 +310,7 @@ and SHA-256 hashes of the before / after text.
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // src/lib.rs contains:
   //
   //   #[cfg(test)]
@@ -320,15 +319,15 @@ pipeline default() {
   //       fn one() {}
   //   }
   //
-  const result = edit_insert_at_anchor({
+  const result = edit_insert_at_anchor(harness.ast, {
     path: "src/lib.rs",
     query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
     position: "last_child",
     content: "#[test]\nfn two() {}",
   })
-  __io_println(result.result)            // "applied"
-  __io_println(result.position)          // "last_child"
-  __io_println(contains(result.preview, "fn two()"))
+  harness.stdio.println(result.result)            // "applied"
+  harness.stdio.println(result.position)          // "last_child"
+  harness.stdio.println(contains(result.preview, "fn two()"))
 }
 ```
 
@@ -340,8 +339,8 @@ The new `#[test] fn two() {}` lands at the right depth inside the
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
-  const result = edit_insert_at_anchor({
+pipeline default(harness: Harness) {
+  const result = edit_insert_at_anchor(harness.ast, {
     path: "src/index.ts",
     // Anchor on the last existing import. `select` is not exposed —
     // tighten the query if you need a specific one.
@@ -349,7 +348,7 @@ pipeline default() {
     position: "after",
     content: "import { extra } from \"./extra\";",
   })
-  __io_println(result.applied)
+  harness.stdio.println(result.applied)
 }
 ```
 
@@ -358,8 +357,8 @@ pipeline default() {
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
-  const result = edit_insert_at_anchor({
+pipeline default(harness: Harness) {
+  const result = edit_insert_at_anchor(harness.ast, {
     path: "src/lib.rs",
     query: "(function_item) @anchor",       // matches every top-level fn
     position: "after",
@@ -387,7 +386,7 @@ plus the predicate) to pin a single anchor.
 
 ## `edit_safe_text_patch` — multi-hunk text edits with staged-fs collision rejection
 
-`edit_safe_text_patch({path, expected_hash, hunks, ...})` reads the
+`edit_safe_text_patch(harness.fs, harness.random, {path, expected_hash, hunks, ...})` reads the
 file through the staged-fs overlay, runs each `{old_text, new_text}`
 hunk through the same matcher as `edit_apply_old_new_patch`, and
 writes the composed post-image back atomically. When the observed
@@ -395,11 +394,11 @@ pre-image hash diverges from `expected_hash` the call returns
 `result == "stale_base"` without writing — callers should re-read and
 retry, never blindly clobber.
 
-Backed by the `hostlib_fs_safe_text_patch` builtin (issue
+Backed by the `harness.fs.safe_text_patch` builtin (issue
 [#2509](https://github.com/burin-labs/harn/issues/2509)).
 
-Requires `hostlib_enable("tools:deterministic")` first — it reads
-(`hostlib_fs_read_text`) and writes the target file on disk (see
+Requires `` first — it reads
+(`harness.fs.staged_read_text`) and writes the target file on disk (see
 [Feature gate](#edit-stdlib)).
 
 ### Parameters
@@ -442,12 +441,12 @@ via the `dry_run` field on the result, mirroring `edit_apply_node`.
 ```harn,ignore
 import { edit_safe_text_patch } from "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const path = "src/lib.rs"
   // 1) Snapshot the pre-image hash through the same overlay.
-  const snapshot = hostlib_fs_read_text({path: path})
+  const snapshot = harness.fs.staged_read_text({path: path})
   // 2) Compose a patch off the snapshot.
-  const result = edit_safe_text_patch(
+  const result = edit_safe_text_patch(harness.fs, harness.random,
     {
       path: path,
       expected_hash: snapshot.sha256,
@@ -457,12 +456,12 @@ pipeline default() {
       ],
     },
   )
-  __io_println(result.result)                  // "applied"
-  __io_println(result.telemetry.applied)       // 1
-  __io_println(result.hunks_count)             // 2
+  harness.stdio.println(result.result)                  // "applied"
+  harness.stdio.println(result.telemetry.applied)       // 1
+  harness.stdio.println(result.hunks_count)             // 2
   // On a stale_base result, re-read snapshot.sha256 and retry.
   if result.result == "stale_base" {
-    __io_println(result.current_hash)          // overlay's actual hash
+    harness.stdio.println(result.current_hash)          // overlay's actual hash
   }
 }
 ```
@@ -475,18 +474,17 @@ turns the race into a deterministic `stale_base` outcome:
 ```harn,ignore
 import { edit_safe_text_patch } from "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const session = "demo"
-  hostlib_enable("tools:deterministic")
-  hostlib_fs_set_mode({session_id: session, mode: "staged"})
-  const pre = hostlib_fs_read_text({path: "src/main.rs", session_id: session})
+    harness.fs.set_mode({session_id: session, mode: "staged"})
+  const pre = harness.fs.staged_read_text({path: "src/main.rs", session_id: session})
 
   // Sibling agent stages a competing write — overlay diverges.
-  hostlib_tools_write_file(
+  harness.tools.write_file(
     {session_id: session, path: "src/main.rs", content: "// sibling won\n"},
   )
 
-  const losing = edit_safe_text_patch(
+  const losing = edit_safe_text_patch(harness.fs, harness.random,
     {
       path: "src/main.rs",
       expected_hash: pre.sha256,
@@ -494,11 +492,11 @@ pipeline default() {
       session_id: session,
     },
   )
-  __io_println(losing.result)                 // "stale_base"
+  harness.stdio.println(losing.result)                 // "stale_base"
 
   // Retry against the now-current overlay hash.
-  const refreshed = hostlib_fs_read_text({path: "src/main.rs", session_id: session})
-  const winner = edit_safe_text_patch(
+  const refreshed = harness.fs.staged_read_text({path: "src/main.rs", session_id: session})
+  const winner = edit_safe_text_patch(harness.fs, harness.random,
     {
       path: "src/main.rs",
       expected_hash: refreshed.sha256,
@@ -506,7 +504,7 @@ pipeline default() {
       session_id: session,
     },
   )
-  __io_println(winner.result)                 // "applied"
+  harness.stdio.println(winner.result)                 // "applied"
 }
 ```
 
@@ -523,8 +521,8 @@ fn rewrite(path, hunks, session_id) {
   let attempt = 0
   const max_attempts = 3
   while attempt < max_attempts {
-    const snapshot = hostlib_fs_read_text({path: path, session_id: session_id})
-    const result = edit_safe_text_patch(
+    const snapshot = harness.fs.staged_read_text({path: path, session_id: session_id})
+    const result = edit_safe_text_patch(harness.fs, harness.random,
       {
         path: path,
         expected_hash: snapshot.sha256,
@@ -551,10 +549,10 @@ write" — same convention as `edit_apply_node`.
 ```harn,ignore
 import { edit_safe_text_patch } from "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const path = "src/lib.rs"
-  const snapshot = hostlib_fs_read_text({path: path})
-  const preview = edit_safe_text_patch(
+  const snapshot = harness.fs.staged_read_text({path: path})
+  const preview = edit_safe_text_patch(harness.fs, harness.random,
     {
       path: path,
       expected_hash: snapshot.sha256,
@@ -562,14 +560,14 @@ pipeline default() {
       dry_run: true,
     },
   )
-  __io_println(preview.applied)               // true (matcher succeeded)
-  __io_println(preview.dry_run)               // true (no write happened)
-  __io_println(preview.bytes_written)         // 0
+  harness.stdio.println(preview.applied)               // true (matcher succeeded)
+  harness.stdio.println(preview.dry_run)               // true (no write happened)
+  harness.stdio.println(preview.bytes_written)         // 0
   // The file on disk is unchanged. `preview.preview` carries the
   // post-image the real apply would produce — show it in a diff UI,
   // gate on user approval, then re-run with `dry_run: false`.
   if user_approves(preview.preview) {
-    edit_safe_text_patch(
+    edit_safe_text_patch(harness.fs, harness.random,
       {
         path: path,
         expected_hash: snapshot.sha256,
@@ -588,8 +586,8 @@ new entry point incrementally:
 
 | Before | After |
 |---|---|
-| Read file, call `edit_apply_old_new_patch(text, old, new)`, write result. | `edit_safe_text_patch({path, hunks: [{old_text: old, new_text: new}]})` — handles the read + write + staged-fs routing for you. |
-| Race-aware bespoke retry loop. | Pass `expected_hash` from a `hostlib_fs_read_text` snapshot; the helper returns `result == "stale_base"` and `current_hash` on collision so the caller can retry. |
+| Read file, call `edit_apply_old_new_patch(text, old, new)`, write result. | `edit_safe_text_patch(harness.fs, harness.random, {path, hunks: [{old_text: old, new_text: new}]})` — handles the read + write + staged-fs routing for you. |
+| Race-aware bespoke retry loop. | Pass `expected_hash` from a `harness.fs.staged_read_text` snapshot; the helper returns `result == "stale_base"` and `current_hash` on collision so the caller can retry. |
 | Apply multiple hunks via N sequential `edit_apply_old_new_patch` calls + N writes. | Pass them as one `hunks: [...]` list — all-or-nothing commit, no half-applied intermediate state. |
 | Manual logging of hunk-conflict / stale-base counters. | `result.telemetry` carries per-call counters so hosts aggregate without log scraping. |
 
@@ -601,11 +599,11 @@ back to disk.
 
 ## `edit_fast_apply` — merge-model-assisted full-file apply
 
-`edit_fast_apply({path, intent, ...})` is the safe fallback when an
+`edit_fast_apply(harness.fs, harness.random, harness.ast, harness.llm, {path, intent, ...})` is the safe fallback when an
 agent has broad edit intent but not a precise AST query yet. It
 separates "what should change" from "how to rewrite the bytes":
 
-1. Read the current file through `hostlib_fs_read_text`.
+1. Read the current file through `harness.fs.staged_read_text`.
 2. Call `llm_call` with `model_role: "merge"` (or `params.model_role`)
    and ask for complete updated file content.
 3. Reject lazy truncation and syntax errors for supported Tree-Sitter
@@ -634,7 +632,7 @@ max_tokens = 12000
 Per-call `llm_options` still win:
 
 ```harn,ignore
-const result = edit_fast_apply({
+const result = edit_fast_apply(harness.fs, harness.random, harness.ast, harness.llm, {
   path: "src/lib.rs",
   intent: "Rename the local variable to make the intent clearer.",
   llm_options: {provider: "mock", model: "mock"},
@@ -691,36 +689,35 @@ the lower-level stale-base / hunk-conflict counters.
 ```harn,ignore
 import { edit_fast_apply } from "std/edit"
 
-pipeline default() {
-  hostlib_enable("tools:deterministic")
-  const preview = edit_fast_apply({
+pipeline default(harness: Harness) {
+    const preview = edit_fast_apply(harness.fs, harness.random, harness.ast, harness.llm, {
     path: "src/lib.rs",
     intent: "Change answer() to return 42 and keep the rest of the file untouched.",
     dry_run: true,
   })
-  __io_println(preview.result)
-  __io_println(preview.per_file_unified_diff[0].diff)
+  harness.stdio.println(preview.result)
+  harness.stdio.println(preview.per_file_unified_diff[0].diff)
 
   if user_approves(preview.per_file_unified_diff[0].diff) {
-    const applied = edit_fast_apply({
+    const applied = edit_fast_apply(harness.fs, harness.random, harness.ast, harness.llm, {
       path: "src/lib.rs",
       intent: "Change answer() to return 42 and keep the rest of the file untouched.",
     })
-    __io_println(applied.telemetry.applied)
+    harness.stdio.println(applied.telemetry.applied)
   }
 }
 ```
 
 ## `edit_rename_symbol` — safe cross-file rename
 
-`edit_rename_symbol({symbol_ref, new_name, scope, ...})` is the cross-file
+`edit_rename_symbol(harness.code_index, {symbol_ref, new_name, scope, ...})` is the cross-file
 counterpart of `edit_apply_node`. It resolves `symbol_ref` against the
 typed symbol graph (#2434), walks every file in scope with tree-sitter
 to collect identifier-context byte spans for `symbol_ref.name`, and
 refuses to write if `new_name` already exists as an identifier in any
 rewritten file (shadow check).
 
-Backed by the `hostlib_code_index_rename_symbol` builtin (issue
+Backed by the `harness.code_index.rename_symbol` builtin (issue
 [#2508](https://github.com/burin-labs/harn/issues/2508)) under the
 `std/edit` umbrella epic
 [#2497](https://github.com/burin-labs/harn/issues/2497).
@@ -755,7 +752,7 @@ Python, Swift, Go. Other languages return `result ==
 ### Atomicity
 
 When `session_id` is supplied AND the session is in `staged` mode,
-every touched file lands in the overlay; one `hostlib_fs_commit_staged`
+every touched file lands in the overlay; one `harness.fs.commit_staged`
 call flips them atomically. Without a session, the host still buffers
 the full plan in memory and only writes after pre-flight validation
 passes, so a clean run is all-or-nothing modulo mid-call disk failures.
@@ -763,14 +760,14 @@ passes, so a clean run is all-or-nothing modulo mid-call disk failures.
 ```harn,ignore
 import { edit_rename_symbol } from "std/edit"
 
-const result = edit_rename_symbol({
+const result = edit_rename_symbol(harness.code_index, {
   symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
   new_name: "Gadget",
   scope: "workspace",
 })
 if !result.ok && result.result == "conflict" {
   for site in result.conflicts {
-    println("would shadow " + site.shadow + " at " + site.path)
+    harness.stdio.println("would shadow " + site.shadow + " at " + site.path)
   }
 }
 ```
@@ -788,7 +785,7 @@ before and after the call. Plan ops share that transient session, so
 the second op sees the first op's pending write and the response
 collapses to one diff per file even when several ops touch it.
 
-Backed by the `hostlib_ast_dry_run` builtin (issue
+Backed by the `harness.ast.dry_run` builtin (issue
 [#2510](https://github.com/burin-labs/harn/issues/2510)).
 
 ### Plan shape
@@ -800,7 +797,7 @@ Each op carries an `op` tag:
 | `apply_node` | `path`, `query`, `replacement` | Same shape as `edit_apply_node`. Optional: `select`, `nth`, `target_capture`, `language`, `validate`. |
 | `insert_at_anchor` | `path`, `query`, `position`, `content` | `position` ∈ `before \| after \| first_child \| last_child`. Anchor must match exactly once. |
 | `safe_text_patch` | `path`, `old_text`, `new_text` | Exact unique-match text replacement. |
-| `rename_symbol` | `symbol_ref`, `new_name` | Workspace-level cross-file rename through the shared code-index graph. Optional: `scope` (`workspace` by default), `validate`. Hosts that register AST without code-index reject with `reason: "code_index_unavailable"`; call [`edit_rename_symbol({..., dry_run: true})`](#edit_rename_symbol--safe-cross-file-rename) for the standalone metadata-rich preview. |
+| `rename_symbol` | `symbol_ref`, `new_name` | Workspace-level cross-file rename through the shared code-index graph. Optional: `scope` (`workspace` by default), `validate`. Hosts that register AST without code-index reject with `reason: "code_index_unavailable"`; call [`edit_rename_symbol(harness.code_index, {..., dry_run: true})`](#edit_rename_symbol--safe-cross-file-rename) for the standalone metadata-rich preview. |
 
 ### Result
 
@@ -837,7 +834,7 @@ files use `+++ /dev/null`.
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const bundle = edit_dry_run(
     {
       plan: [
@@ -852,9 +849,9 @@ pipeline default() {
       ],
     },
   )
-  __io_println(bundle.result)                     // "ok"
-  __io_println(bundle.summary.ops_applied == 2)   // true
-  __io_println(bundle.summary.files_touched == 1) // true
+  harness.stdio.println(bundle.result)                     // "ok"
+  harness.stdio.println(bundle.summary.ops_applied == 2)   // true
+  harness.stdio.println(bundle.summary.files_touched == 1) // true
   // `bundle.per_file_unified_diff[0].diff` is the patch you'd show
   // a reviewer or feed to `git apply` to commit the plan.
 }
@@ -870,7 +867,7 @@ fully-rejected case.
 ```harn,ignore
 import "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const bundle = edit_dry_run(
     {
       plan: [
@@ -887,10 +884,10 @@ pipeline default() {
       ],
     },
   )
-  __io_println(bundle.result)                       // "partial"
-  __io_println(bundle.ops[0].applied)               // true
-  __io_println(bundle.ops[1].applied)               // false
-  __io_println(bundle.ops[1].reason)                // "no_match"
+  harness.stdio.println(bundle.result)                       // "partial"
+  harness.stdio.println(bundle.ops[0].applied)               // true
+  harness.stdio.println(bundle.ops[1].applied)               // false
+  harness.stdio.println(bundle.ops[1].reason)                // "no_match"
 }
 ```
 
@@ -930,11 +927,11 @@ Query the matrix at runtime with `edit_capabilities`:
 ```harn
 import "std/edit"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Whole matrix, or pass {language: "yaml"} to filter to one row.
   const caps = edit_capabilities()
   for row in caps.languages {
-    __io_println("${row.language}: rename=${row.rename_symbol}")
+    harness.stdio.println("${row.language}: rename=${row.rename_symbol}")
   }
 }
 ```
@@ -1008,7 +1005,7 @@ All require the `tools:deterministic` capability.
 | `edit_reorder_parameters` | `path`, `symbol`, `order` (permutation of param indices) | rust, python, ts/tsx, js/jsx, go |
 | `edit_change_return_type` | `path`, `symbol`, `new_type` | rust, python, ts/tsx, go |
 | `edit_inline` | `path`, `symbol` (zero-param, single-`return` body) | rust, python, ts/tsx, js/jsx, go |
-| `edit_move_decl` | `path`, `symbol`, `target_file`, `target_position?` (`end \| start`) | follows `hostlib_ast_symbol_extract` |
+| `edit_move_decl` | `path`, `symbol`, `target_file`, `target_position?` (`end \| start`) | follows `harness.ast.symbol_extract` |
 
 `symbol` accepts `{name}` or a bare name string. A language outside a
 refactoring's matrix returns `result: "unsupported"` with a reason rather than

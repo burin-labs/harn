@@ -6,9 +6,9 @@
 arrive. Iterate over it with a `for` loop:
 
 ```harn
-const stream = llm_stream("Tell me a story", "You are a storyteller")
+const stream = harness.llm.stream("Tell me a story", "You are a storyteller")
 for chunk in stream {
-  log(chunk)
+  harness.stdio.log(chunk)
 }
 ```
 
@@ -24,9 +24,9 @@ It returns a first-class `Stream` of chunk dicts instead of a channel of
 raw strings:
 
 ```harn
-const chunks = llm_stream_call("Tell me a story", nil, {provider: "openai"})
+const chunks = harness.llm.stream_call("Tell me a story", nil, {provider: "openai"})
 for chunk in chunks {
-  log(chunk.visible_delta)
+  harness.stdio.log(chunk.visible_delta)
   if chunk.partial.contains("REFUSAL") {
     break
   }
@@ -53,7 +53,7 @@ const result = agent_stream_call(prompt, system, {
   provider: "openai",
   model: "gpt-5-mini",
   private: {open_tag: "<secret>", close_tag: "</secret>"},
-  on_delta: { delta, _event, _state -> print(delta) },
+  on_delta: { delta, _event, _state -> harness.stdio.print(delta) },
 })
 ```
 
@@ -75,10 +75,10 @@ tool dispatch is unaffected; providers that do not stream fall back to a single
 full-text delta:
 
 ```harn,ignore
-agent_loop("summarize the diff", nil, {
+agent_loop(harness, "summarize the diff", nil, {
   provider: "anthropic",
   model: "claude-sonnet-5",
-  on_delta: { delta -> print(delta) },
+  on_delta: { delta -> harness.stdio.print(delta) },
 })
 ```
 
@@ -92,7 +92,7 @@ event subscribers and persists them for deterministic replay, including in
 headless sessions.
 
 Final token usage is recorded after the provider response completes. Read it
-from the `llm_call` / `agent_loop` result, from `llm_usage()`, or from the
+from the `llm_call` / `agent_loop` result, from `harness.obs.llm_usage()`, or from the
 workflow session usage summary shown below.
 
 ## Transcript management
@@ -101,9 +101,9 @@ Harn includes transcript primitives for carrying context across calls,
 forks, repairs, and resumptions:
 
 ```harn
-const first = llm_call("Plan the work", nil, {provider: "mock"})
+const first = harness.llm.call("Plan the work", nil, {provider: "mock"})
 
-const second = llm_call("Continue", nil, {
+const second = harness.llm.call("Continue", nil, {
   provider: "mock",
   transcript: first.transcript
 })
@@ -150,10 +150,10 @@ Each workflow session also carries a normalized `usage` summary copied from the
 underlying run record when available:
 
 ```harn
-log(session?.usage?.input_tokens)
-log(session?.usage?.output_tokens)
-log(session?.usage?.total_duration_ms)
-log(session?.usage?.call_count)
+harness.stdio.log(session?.usage?.input_tokens)
+harness.stdio.log(session?.usage?.output_tokens)
+harness.stdio.log(session?.usage?.total_duration_ms)
+harness.stdio.log(session?.usage?.call_count)
 ```
 
 `std/agents` also exposes worker helpers for delegated/background orchestration:

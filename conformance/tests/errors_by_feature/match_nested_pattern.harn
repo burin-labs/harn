@@ -4,11 +4,11 @@
  * (which bound nothing and threw "undefined variable" at runtime, or matched
  * by structural equality and bound the wrong values).
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const xs = [[1, 2], [3, 4]]
   const out = match xs {
     [[a, b], [c, d]] -> { a + b + c + d }
     _ -> { -1 }
   }
-  log(out)
+  harness.stdio.log(out)
 }

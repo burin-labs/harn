@@ -37,7 +37,7 @@ impl HarnLsp {
         let ast = state.cached_ast.clone();
         drop(docs);
 
-        // Inside a `render(...)` / `render_prompt(...)` string literal,
+        // Inside a `harness.fs.render_prompt(...)` string literal,
         // jump straight to the referenced `.harn.prompt` file. Honors
         // package-root forms (`@/...`, `@<alias>/...`) via the same
         // resolver the runtime and preflight checks use (#742).
@@ -364,7 +364,7 @@ impl HarnLsp {
 }
 
 /// When the cursor sits inside a string literal that's the first
-/// argument to a literal `render(...)` or `render_prompt(...)` call,
+/// argument to a literal `harness.fs.render_prompt(...)` call,
 /// resolve the path (source-relative or `@/...` / `@<alias>/...`) and
 /// return a `Location` pointing at the prompt file's first byte. Returns
 /// `None` for any other context, so callers can fall through to symbol
@@ -412,8 +412,12 @@ fn find_render_string_at_offset(program: &[SNode], offset: usize) -> Option<(Str
 }
 
 fn find_render_string_in_node(node: &SNode, offset: usize) -> Option<(String, Span)> {
-    if let Node::FunctionCall { name, args, .. } = &node.node {
-        if (name == "render" || name == "render_prompt") && !args.is_empty() {
+    if let Node::MethodCall { method, args, .. } = &node.node {
+        if matches!(
+            method.as_str(),
+            "render_prompt" | "render_prompt_with_provenance"
+        ) && !args.is_empty()
+        {
             if let Node::StringLiteral(value) = &args[0].node {
                 let span = args[0].span;
                 if span_contains_offset(&span, offset) {
@@ -514,9 +518,9 @@ mod tests {
     #[test]
     fn finds_render_prompt_string_under_cursor() {
         let source = r#"
-pipeline test() {
-  const x = render_prompt("@/prompts/foo.harn.prompt", {})
-  __io_println(x)
+pipeline test(harness: Harness) {
+  const x = harness.fs.render_prompt("@/prompts/foo.harn.prompt", {})
+  harness.stdio.println(x)
 }
 "#;
         let program = parse_source(source).expect("parse");
@@ -542,8 +546,8 @@ pipeline test() {
     #[test]
     fn finds_render_string_outside_string_returns_none() {
         let source = r#"
-pipeline test() {
-  const x = render_prompt("@/prompts/foo.harn.prompt", {})
+pipeline test(harness: Harness) {
+  const x = harness.fs.render_prompt("@/prompts/foo.harn.prompt", {})
 }
 "#;
         let program = parse_source(source).expect("parse");

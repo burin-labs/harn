@@ -61,22 +61,22 @@ fn out_with_setup(source: &str, setup: impl FnOnce()) -> Vec<String> {
 #[test]
 fn post_event_then_drain_round_trips_through_inbox() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
-  agent_session_post_event(s, "tool_result", "first", "test")
-  agent_session_post_event(s, "mcp_progress", "halfway", "mcp")
-  agent_session_post_event(s, "tool_result", "second", "test")
-  const drained = agent_session_drain_inbox(s)
-  log(len(drained))
-  log(drained[0].kind)
-  log(drained[0].content)
-  log(drained[0].source)
-  log(drained[1].kind)
-  log(drained[1].content)
-  log(drained[2].kind)
-  log(drained[2].content)
-  log(drained[0].sequence < drained[1].sequence)
-  log(drained[1].sequence < drained[2].sequence)
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.post_event(s, "tool_result", "first", "test")
+  harness.agent.post_event(s, "mcp_progress", "halfway", "mcp")
+  harness.agent.post_event(s, "tool_result", "second", "test")
+  const drained = harness.agent.drain_inbox(s)
+  harness.stdio.log(len(drained))
+  harness.stdio.log(drained[0].kind)
+  harness.stdio.log(drained[0].content)
+  harness.stdio.log(drained[0].source)
+  harness.stdio.log(drained[1].kind)
+  harness.stdio.log(drained[1].content)
+  harness.stdio.log(drained[2].kind)
+  harness.stdio.log(drained[2].content)
+  harness.stdio.log(drained[0].sequence < drained[1].sequence)
+  harness.stdio.log(drained[1].sequence < drained[2].sequence)
 }
 "#);
     assert_eq!(
@@ -179,11 +179,11 @@ fn feedback_drain_ignores_queued_typed_host_injections() {
             r#"
 import {{ agent_session_drain_feedback }} from "std/agent/state"
 
-pipeline main(task) {{
-  const drained = agent_session_drain_feedback("{session_id}")
-  log(len(drained))
-  log(drained[0].kind)
-  log(drained[0].content)
+pipeline main(harness: Harness, task) {{
+  const drained = harness.agent.session_drain_feedback("{session_id}")
+  harness.stdio.log(len(drained))
+  harness.stdio.log(drained[0].kind)
+  harness.stdio.log(drained[0].content)
 }}
 "#
         ),

@@ -1,33 +1,33 @@
 /**
  * Verify the per-call sandbox_profile parameter on
- * host_call("process.exec", ...) parses the documented profile names
+ * harness.process.run( ...) parses the documented profile names
  * and rejects unknown values with a typed error rather than silently
  * running the command unsandboxed.
  */
-pipeline default() {
-  const argv = if platform() == "windows" {
+pipeline default(harness: Harness) {
+  const argv = if harness.system.platform().os == "windows" {
     ["cmd", "/C", "echo|set /p=ok"]
   } else {
     ["printf", "ok"]
   }
-  const result = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "worktree"})
-  __io_println(result?.success)
-  __io_println(result?.stdout)
-  const unrestricted = host_call(
-    "process.exec",
-    {mode: "argv", argv: argv, sandbox_profile: "unrestricted"},
+  const result = harness.process.run(
+    {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "worktree"},
   )
-  __io_println(unrestricted?.success)
-  const workspace_paths = host_call(
-    "process.exec",
-    {mode: "argv", argv: argv, sandbox_profile: "workspace_paths"},
+  harness.stdio.println(result?.success)
+  harness.stdio.println(result?.stdout)
+  const unrestricted = harness.process.run(
+    {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "unrestricted"},
   )
-  __io_println(workspace_paths?.success)
+  harness.stdio.println(unrestricted?.success)
+  const workspace_paths = harness.process.run(
+    {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "workspace_paths"},
+  )
+  harness.stdio.println(workspace_paths?.success)
   const bad = try {
-    host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "wide_open"})
+    harness.process.run({program: argv[0], args: argv[1:len(argv)], sandbox_profile: "wide_open"})
     nil
   } catch (e) {
     e
   }
-  __io_println(bad != nil)
+  harness.stdio.println(bad != nil)
 }

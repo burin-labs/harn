@@ -1,18 +1,18 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Create a real channel
-  const ch = channel("test", 10)
-  __io_println(type_of(ch))
+  const ch = harness.runtime.channel("test", 10)
+  harness.stdio.println(type_of(ch))
   // Send and receive
   const t = spawn {
-    send(ch, "hello")
-    send(ch, "world")
-    send(ch, 42)
+    harness.runtime.send(ch, "hello")
+    harness.runtime.send(ch, "world")
+    harness.runtime.send(ch, 42)
   }
   await(t)
-  const v1 = receive(ch)
-  const v2 = receive(ch)
-  const v3 = receive(ch)
-  __io_println(v1)
-  __io_println(v2)
-  __io_println(v3)
+  const v1 = harness.runtime.receive(ch)
+  const v2 = harness.runtime.receive(ch)
+  const v3 = harness.runtime.receive(ch)
+  harness.stdio.println(v1)
+  harness.stdio.println(v2)
+  harness.stdio.println(v3)
 }

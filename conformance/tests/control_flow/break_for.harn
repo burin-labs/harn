@@ -1,4 +1,4 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   let result = ""
   for item in ["a", "b", "c", "d", "e"] {
     if item == "d" {
@@ -6,5 +6,5 @@ pipeline default(task) {
     }
     result = result + item
   }
-  log(result)
+  harness.stdio.log(result)
 }

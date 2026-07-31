@@ -519,7 +519,7 @@ impl CapabilityPolicyInvariant {
                 context,
                 "egress",
                 "egress policy",
-                "install `egress_policy(...)` before the reachable network or connector call",
+                "install `harness.net.egress_policy(...)` before the reachable network or connector call",
             );
         }
         if self.require_approval_policy.contains(&capability) && !state.has_approval_policy() {

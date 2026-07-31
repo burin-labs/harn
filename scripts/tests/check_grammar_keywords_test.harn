@@ -2,7 +2,7 @@
 import "../check_grammar_keywords.harn"
 
 @test
-pipeline test_grammar_section_extracts_body(task) {
+pipeline test_grammar_section_extracts_body(harness: Harness, task) {
   const spec = "intro\n\n## Grammar\nrule ::= 'fn'\n\n## Next\nother\n"
   const section = grammar_section(spec)
   assert(section != nil)
@@ -11,12 +11,12 @@ pipeline test_grammar_section_extracts_body(task) {
 }
 
 @test
-pipeline test_grammar_section_missing_returns_nil(task) {
+pipeline test_grammar_section_missing_returns_nil(harness: Harness, task) {
   assert_eq(grammar_section("no grammar header here"), nil)
 }
 
 @test
-pipeline test_single_quoted_words_extracts_alpha_literals(task) {
+pipeline test_single_quoted_words_extracts_alpha_literals(harness: Harness, task) {
   const words = single_quoted_words("a ::= 'fn' | 'where' ':' '->' 'fn'")
   assert(words.contains("fn"))
   assert(words.contains("where"))

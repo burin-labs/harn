@@ -21,10 +21,10 @@
 //!   shape `rules.diagnostics` emits. The visitor has full programmatic
 //!   control (compute a message/fix from the captured metavars), which the
 //!   declarative form cannot.
-//! - `rules.apply` (write-gated) — apply a codemod rule's `fix`; writes only
+//! - `rules.apply` — apply a codemod rule's `fix`; writes only
 //!   when `dry_run: false` *and* the rule is safe to auto-apply (or
-//!   `allow_unsafe: true`). Shares the deterministic-tools gate with the
-//!   other mutating builtins.
+//!   `allow_unsafe: true`). Possessing `HarnessRules` is the authority to call
+//!   it; no process- or thread-local grant state exists.
 //!
 //! A rule is passed as its TOML source (`rule`), so an agent can author and
 //! run a rule — declarative *or* imperative — entirely from `.harn` without
@@ -48,7 +48,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use harn_hostlib::ast::Language;
-use harn_hostlib::tools::permissions::gated_handler;
 use harn_hostlib::{
     BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry, RegisteredBuiltin,
 };
@@ -95,19 +94,17 @@ impl HostlibCapability for RulesCapability {
             method: "diagnostics",
             handler: Arc::new(diagnostics_run),
         });
-        // `apply` writes files, so it shares the deterministic-tools gate.
         registry.register(RegisteredBuiltin {
             name: APPLY,
             module: "rules",
             method: "apply",
-            handler: gated_handler(APPLY, apply_run),
+            handler: Arc::new(apply_run),
         });
-        // `fold` also writes; same gate.
         registry.register(RegisteredBuiltin {
             name: FOLD,
             module: "rules",
             method: "fold",
-            handler: gated_handler(FOLD, fold_run),
+            handler: Arc::new(fold_run),
         });
     }
 }
@@ -143,7 +140,7 @@ pub fn install(vm: &mut Vm) {
     // `rules.visit` invokes a `.harn` closure per match, which only an async
     // builtin can do (`call_closure_pub` is async). It is therefore registered
     // directly on the VM rather than through the sync `HostlibRegistry`.
-    vm.register_async_builtin(VISIT, visit_run);
+    vm.register_async_capability_method(harn_builtin_meta::CapabilityId::Rules, "visit", visit_run);
 }
 
 // ---------------------------------------------------------------------------

@@ -340,11 +340,11 @@ pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") 
  * @effects: [net]
  * @errors: []
  */
-pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
+pub fn graphql_request(net: HarnessNet, endpoint, query, variables = nil, options = nil) {
   const auth = options?.auth ?? options?.authorization
   const headers = graphql_auth_headers(auth, options?.headers)
   const body = graphql_request_body(query, variables, options)
-  const response = harness.net.request(
+  const response = net.request(
     "POST",
     endpoint,
     filter_nil(
@@ -394,7 +394,13 @@ pub fn graphql_operation(name, document, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_execute_operation(client, operation, variables = nil, options = nil) {
+pub fn graphql_execute_operation(
+  net: HarnessNet,
+  client,
+  operation,
+  variables = nil,
+  options = nil,
+) {
   const endpoint = if type_of(client) == "string" {
     client
   } else {
@@ -416,6 +422,7 @@ pub fn graphql_execute_operation(client, operation, variables = nil, options = n
     variables
   }
   const envelope = graphql_request(
+    net,
     endpoint,
     operation.document,
     checked_variables,
@@ -545,7 +552,7 @@ pub fn graphql_codegen_wrapper(operation, client_param = "client") {
     + "  let operation = json_parse("
     + operation_literal
     + ")\n"
-    + "  return graphql_execute_operation("
+    + "  return graphql_execute_operation(harness.net, "
     + client_param
     + ", operation, variables, options)\n"
     + "}\n"

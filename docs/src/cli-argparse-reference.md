@@ -65,15 +65,15 @@ const spec = parser({
   args: [{name: "input", kind: "positional"}],
 })
 if help_requested(argv) {
-  __io_println(render_help(spec))
-  exit(0)
+  harness.stdio.println(render_help(spec))
+  harness.runtime.exit(0)
 }
 const result = parse(spec, argv)
 if is_err(result) {
   const failure = unwrap_err(result)
-  __io_eprintln(render_help(spec))
-  __io_eprintln("error: " + failure.message)
-  exit(2)
+  harness.stdio.eprintln(render_help(spec))
+  harness.stdio.eprintln("error: " + failure.message)
+  harness.runtime.exit(2)
 }
 const invocation = unwrap(result)
 const input = invocation.options.input
@@ -189,8 +189,8 @@ const spec = parser({
 
 const result = parse_typed(spec, argv, schema_of(RunOptions))
 if is_err(result) {
-  __io_eprintln(unwrap_err(result).message)
-  exit(2)
+  harness.stdio.eprintln(unwrap_err(result).message)
+  harness.runtime.exit(2)
 }
 const invocation = unwrap(result)
 const jobs: int = invocation.options.jobs

@@ -1,4 +1,4 @@
-# Per-tool-call filesystem snapshots (hostlib)
+# Per-tool-call filesystem snapshots
 
 `harn-hostlib` ships a Gemini-style `/restore` primitive paralleling the
 [staged filesystem mode](staged-fs.md): a snapshot captures the
@@ -6,23 +6,23 @@ pre-image of paths a single mutating tool call is about to touch, so a
 client can surgically roll the change back without affecting untracked
 work.
 
-The capability is registered by `harn_hostlib::install_default` as part
-of the `fs` module:
+The host adapter registers the implementation as part of the `fs` capability
+family. Scripts use the `HarnessFs` interface:
 
 | Method | Result |
 |--------|--------|
-| `hostlib_fs_snapshot` | Register (and optionally pre-capture paths for) a snapshot keyed by `scope_id` — canonically the ACP `toolCallId`. |
-| `hostlib_fs_restore` | Write the captured pre-image back onto disk; delete paths the snapshot saw as absent. |
-| `hostlib_fs_list_snapshots` | List the snapshots registered for a session, sorted by capture time. |
-| `hostlib_fs_drop_snapshot` | Remove a snapshot's in-memory and on-disk state. |
+| `harness.fs.snapshot(request)` | Register (and optionally pre-capture paths for) a snapshot keyed by `scope_id`—canonically the ACP `toolCallId`. |
+| `harness.fs.restore(request)` | Write the captured pre-image back onto disk; delete paths the snapshot saw as absent. |
+| `harness.fs.list_snapshots(request)` | List the snapshots registered for a session, sorted by capture time. |
+| `harness.fs.drop_snapshot(request)` | Remove a snapshot's in-memory and on-disk state. |
 
 ## Capture modes
 
-**Explicit.** Pass a `paths` list to `hostlib_fs_snapshot`; the bytes
+**Explicit.** Pass a `paths` list to `harness.fs.snapshot(...)`; the bytes
 are copied into the snapshot immediately:
 
 ```text
-hostlib_fs_snapshot({
+harness.fs.snapshot({
   session_id: "sess_abc",
   scope_id: "tc_42",
   paths: ["/work/src/lib.rs"],
@@ -30,13 +30,13 @@ hostlib_fs_snapshot({
 ```
 
 **Auto-on-write.** Omit `paths` and the snapshot is "open" — the
-mutating tool builtins (`hostlib_tools_write_file`,
-`hostlib_tools_delete_file`) lazy-capture each path's pre-image into
-the active open snapshot bound to the current
-`harn_vm::agent_sessions::current_tool_call_id`. The agent loop sets
-that thread-local automatically when it dispatches a tool call, so a
-single `hostlib_fs_snapshot({session_id, scope_id})` registration is
-enough to roll the next mutation back.
+mutating tool builtins (`harness.tools.write_file`,
+`harness.tools.delete_file`) lazy-capture each path's pre-image into
+the active open snapshot bound to the current tool-call dispatch context. The
+agent loop binds that context while it dispatches a tool, so a single
+`harness.fs.snapshot({session_id, scope_id})` registration is enough to roll
+the next mutation back. This internal context is not a script-facing authority
+grant.
 
 ## Storage layout
 

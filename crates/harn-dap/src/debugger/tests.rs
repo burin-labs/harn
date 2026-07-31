@@ -221,7 +221,10 @@ fn test_set_breakpoints() {
 fn test_launch_and_run() {
     let mut dbg = Debugger::new();
 
-    let (_dir, file) = write_temp_program("test.harn", "pipeline test(task) { log(42) }");
+    let (_dir, file) = write_temp_program(
+        "test.harn",
+        "pipeline test(harness: Harness, task) { harness.stdio.log(42) }",
+    );
 
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -265,9 +268,9 @@ fn test_parallel_runs_under_debugger_runtime() {
     let responses = run_debug_program(
         "parallel_debugger_runtime.harn",
         r"
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const results = parallel 3 { i -> i * 10 }
-  log(results)
+  harness.stdio.log(results)
 }
 ",
     );
@@ -291,21 +294,21 @@ fn test_pool_workers_run_under_debugger_runtime() {
         r#"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline test(task) {
-  const pool = pool_create({name: "dap-pool-runtime", max_concurrent: 4})
+pipeline test(harness: Harness, task) {
+  const pool = pool_create(harness.agent, {name: "dap-pool-runtime", max_concurrent: 4})
   let handles = []
   for i in 0 to 8 exclusive {
     const seed = i
     handles = handles.appending(pool.submit({ -> seed + 10 }))
   }
-  const results = pool_wait(handles)
+  const results = pool_wait(harness.agent, handles)
   let completed = 0
   for result in results {
     if result.status == "completed" && result.result >= 10 {
       completed = completed + 1
     }
   }
-  log(completed)
+  harness.stdio.log(completed)
 }
 "#,
     );
@@ -655,7 +658,7 @@ fn test_breakpoint_stop() {
 
     let (_dir, file) = write_temp_program(
         "test_bp.harn",
-        "pipeline test(task) {\n  const x = 1\n  const y = 2\n  log(x + y)\n}",
+        "pipeline test(harness: Harness, task) {\n  const x = 1\n  const y = 2\n  harness.stdio.log(x + y)\n}",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));
@@ -704,7 +707,7 @@ fn test_clearing_breakpoints_updates_live_vm() {
 
     let (_dir, file) = write_temp_program(
         "clear_breakpoints.harn",
-        "pipeline test(task) {\n  const x = 1\n  const y = 2\n  log(x + y)\n}\n",
+        "pipeline test(harness: Harness, task) {\n  const x = 1\n  const y = 2\n  harness.stdio.log(x + y)\n}\n",
     );
     let path = file.to_string_lossy().to_string();
 
@@ -802,7 +805,7 @@ fn test_completions_returns_frame_scope_and_builtins() {
 
     let (_dir, file) = write_temp_program(
         "completions.harn",
-        "pipeline t(task) { const local_name = 1\nlog(local_name) }",
+        "pipeline t(harness: Harness, task) { const local_name = 1\nharness.stdio.log(local_name) }",
     );
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -936,77 +939,7 @@ fn test_terminate_emits_terminated_event() {
     assert!(!dbg.is_running());
 }
 
-#[test]
-fn test_loaded_sources_reports_entry_program() {
-    let mut dbg = Debugger::new();
-    let (_dir, file) = write_temp_program("loaded.harn", "pipeline t(task) { log(\"hi\") }");
-    dbg.handle_message(make_request(1, "initialize", None));
-    dbg.handle_message(make_request(
-        2,
-        "launch",
-        Some(json!({"program": file.to_string_lossy()})),
-    ));
-    let responses = dbg.handle_message(make_request(3, "loadedSources", None));
-    let body = responses[0].body.as_ref().unwrap();
-    let sources = body["sources"].as_array().unwrap();
-    assert!(
-        sources
-            .iter()
-            .any(|s| s.get("path").and_then(|p| p.as_str()).is_some()),
-        "loadedSources must include at least the entry script's path"
-    );
-}
-
-#[test]
-fn test_modules_reports_entry_module() {
-    let mut dbg = Debugger::new();
-    let (_dir, file) = write_temp_program("mods.harn", "pipeline t(task) { log(\"hi\") }");
-    dbg.handle_message(make_request(1, "initialize", None));
-    dbg.handle_message(make_request(
-        2,
-        "launch",
-        Some(json!({"program": file.to_string_lossy()})),
-    ));
-    let responses = dbg.handle_message(make_request(3, "modules", None));
-    let body = responses[0].body.as_ref().unwrap();
-    let modules = body["modules"].as_array().unwrap();
-    assert!(!modules.is_empty(), "modules list must not be empty");
-    let total = body["totalModules"].as_u64().unwrap_or(0);
-    assert!(total >= 1);
-    // Module entries must carry id + name + path.
-    let first = &modules[0];
-    assert!(first.get("id").is_some());
-    assert!(first.get("name").is_some());
-    assert!(first.get("path").is_some());
-}
-
-#[test]
-fn test_modules_with_explicit_zero_module_count_returns_all() {
-    // Per DAP, `moduleCount: 0` is paging-disabled and means "all
-    // remaining". The previous `.max(1)` silently returned a single
-    // entry — this regression test pins the new behavior.
-    let mut dbg = Debugger::new();
-    let (_dir, file) = write_temp_program("zerocount.harn", "pipeline t(task) { log(\"hi\") }");
-    dbg.handle_message(make_request(1, "initialize", None));
-    dbg.handle_message(make_request(
-        2,
-        "launch",
-        Some(json!({"program": file.to_string_lossy()})),
-    ));
-    let responses = dbg.handle_message(make_request(
-        3,
-        "modules",
-        Some(json!({"startModule": 0, "moduleCount": 0})),
-    ));
-    let body = responses[0].body.as_ref().unwrap();
-    let modules = body["modules"].as_array().unwrap();
-    let total = body["totalModules"].as_u64().unwrap_or(0);
-    assert_eq!(
-        modules.len() as u64,
-        total,
-        "moduleCount: 0 must return every module (paging disabled)"
-    );
-}
+mod source_requests;
 
 #[test]
 fn test_triggered_breakpoint_skipped_until_trigger_fires() {
@@ -1128,7 +1061,7 @@ fn test_function_breakpoint_fires_on_matching_call() {
 
     let (_dir, file) = write_temp_program(
         "fn_bp.harn",
-        "fn helper() -> int { return 42 }\npipeline t(task) { const x = helper()\n log(x) }",
+        "fn helper() -> int { return 42 }\npipeline t(harness: Harness, task) { const x = helper()\n harness.stdio.log(x) }",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));
@@ -1170,23 +1103,23 @@ fn test_step_over_step_stops_on_next_step_boundary() {
         "step_boundary.harn",
         r#"
 @persona(name: "merge_captain")
-fn merge_captain(ctx) {
-  first_step(ctx)
-  second_step(ctx)
+fn merge_captain(stdio: HarnessStdio, ctx) {
+  first_step(stdio, ctx)
+  second_step(stdio, ctx)
 }
 
 @step(name: "first")
-fn first_step(ctx) {
-  log(ctx)
+fn first_step(stdio: HarnessStdio, ctx) {
+  stdio.log(ctx)
 }
 
 @step(name: "second")
-fn second_step(ctx) {
-  log(ctx)
+fn second_step(stdio: HarnessStdio, ctx) {
+  stdio.log(ctx)
 }
 
-pipeline test(task) {
-  merge_captain("issue")
+pipeline test(harness: Harness, task) {
+  merge_captain(harness.stdio, "issue")
 }
 "#,
     );

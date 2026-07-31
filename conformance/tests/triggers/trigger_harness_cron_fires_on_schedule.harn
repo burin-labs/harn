@@ -1,7 +1,7 @@
-pipeline test(task) {
-  const result = trigger_test_harness("cron_fires_on_schedule")
-  __io_println(result.ok)
-  __io_println(len(result.emitted) == 1)
-  __io_println(result.emitted[0].provider == "cron")
-  __io_println(result.emitted[0].occurred_at == "2026-04-19T00:01:00Z")
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("cron_fires_on_schedule")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(len(result.emitted) == 1)
+  harness.stdio.println(result.emitted[0].provider == "cron")
+  harness.stdio.println(result.emitted[0].occurred_at == "2026-04-19T00:01:00Z")
 }

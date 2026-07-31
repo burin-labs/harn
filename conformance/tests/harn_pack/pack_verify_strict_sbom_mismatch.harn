@@ -1,15 +1,21 @@
 import "../_common"
 
-pipeline default() {
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+pipeline default(harness: Harness) {
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn_pack_strict_sbom_" + uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_pack_strict_sbom_" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
-  harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
-  const pack = exec_at(
+  harness.fs.write_text(
+    path_join(root, "hello.harn"),
+    "fn main(harness: Harness) { harness.stdio.println(\"hi\") }\n",
+  )
+  const pack = harness.process.exec_at(
     root,
     harn_bin,
     "pack",
@@ -18,11 +24,19 @@ pipeline default() {
     "--out",
     path_join(root, "hello.harnpack"),
   )
-  __io_println(pack.success)
+  harness.stdio.println(pack.success)
   const unpack_dir = path_join(root, "unpack")
-  const unpack = exec_at(root, harn_bin, "pack", "unpack", "hello.harnpack", "--out", unpack_dir)
-  __io_println(unpack.success)
-  const tamper = exec_at(
+  const unpack = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "unpack",
+    "hello.harnpack",
+    "--out",
+    unpack_dir,
+  )
+  harness.stdio.println(unpack.success)
+  const tamper = harness.process.exec_at(
     root,
     "python3",
     "-c",
@@ -30,10 +44,18 @@ pipeline default() {
     path_join(root, "unpack/harnpack.json"),
     path_join(root, "unpack/sbom.spdx.json"),
   )
-  __io_println(tamper.success)
-  const repack = exec_at(root, harn_bin, "pack", "repack", unpack_dir, "--out", "tampered.harnpack")
-  __io_println(repack.success)
-  const lenient = exec_at(
+  harness.stdio.println(tamper.success)
+  const repack = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "repack",
+    unpack_dir,
+    "--out",
+    "tampered.harnpack",
+  )
+  harness.stdio.println(repack.success)
+  const lenient = harness.process.exec_at(
     root,
     harn_bin,
     "pack",
@@ -42,10 +64,10 @@ pipeline default() {
     "--allow-unsigned",
     "--json",
   )
-  __io_println(lenient.success)
+  harness.stdio.println(lenient.success)
   const lenient_data = json_parse(lenient.stdout)
-  __io_println(lenient_data.ok)
-  const strict = exec_at(
+  harness.stdio.println(lenient_data.ok)
+  const strict = harness.process.exec_at(
     root,
     harn_bin,
     "pack",
@@ -55,8 +77,8 @@ pipeline default() {
     "--strict",
     "--json",
   )
-  __io_println(strict.success)
+  harness.stdio.println(strict.success)
   const strict_data = json_parse(strict.stdout)
-  __io_println(strict_data.ok)
-  __io_println(strict_data.error.code)
+  harness.stdio.println(strict_data.ok)
+  harness.stdio.println(strict_data.error.code)
 }

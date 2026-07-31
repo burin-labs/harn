@@ -1,21 +1,21 @@
 /**
- * Verify `mcp_registry_status()` and `mcp_ensure_active`/`mcp_release`
+ * Verify `harness.tools.mcp_registry_status()` and `mcp_ensure_active`/`mcp_release`
  * behave sanely when no MCP servers are registered (conformance tests
  * don't load harn.toml MCP configs).
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   // Empty registry reports no servers.
-  const status = mcp_registry_status()
-  __io_println(status.count)
+  const status = harness.tools.mcp_registry_status()
+  harness.stdio.println(status.count)
   // Ensuring an unknown server throws — catch + print.
   try {
-    mcp_ensure_active("not-registered")
-    __io_println("unreachable")
+    harness.tools.mcp_ensure_active("not-registered")
+    harness.stdio.println("unreachable")
   } catch (e) {
     // Error text should mention the missing name.
-    __io_println(e.contains("not-registered"))
+    harness.stdio.println(e.contains("not-registered"))
   }
   // Release of an unknown server is a silent no-op.
-  mcp_release("also-not-registered")
-  __io_println("ok")
+  harness.tools.mcp_release("also-not-registered")
+  harness.stdio.println("ok")
 }

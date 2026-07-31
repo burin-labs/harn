@@ -94,9 +94,12 @@ fn __fleet_typed_data(value, schema, label) {
   return get_typed_value(value, schema)
 }
 
-fn __fleet_post(scope, room, kind, subject, data, options) {
+fn __fleet_post(harness: Harness, scope, room, kind, subject, data, options) {
   const opts = __fleet_options(options)
   return coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     scope,
     room,
     {
@@ -375,7 +378,7 @@ pub fn fleet_snapshot_report(value) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_claim(scope, room, work_key, options = nil) {
+pub fn fleet_claim(harness: Harness, scope, room, work_key, options = nil) {
   const opts = __fleet_options(options)
   const key = __fleet_required_text(work_key, "work_key")
   const data = __fleet_typed_data(
@@ -394,7 +397,7 @@ pub fn fleet_claim(scope, room, work_key, options = nil) {
     fleet_claim_schema(),
     "claim",
   )
-  return __fleet_post(scope, room, "claim", opts?.subject ?? ("Claim " + key), data, opts)
+  return __fleet_post(harness, scope, room, "claim", opts?.subject ?? ("Claim " + key), data, opts)
 }
 
 /**
@@ -404,7 +407,7 @@ pub fn fleet_claim(scope, room, work_key, options = nil) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_ack(scope, room, target_id, decision = "accepted", options = nil) {
+pub fn fleet_ack(harness: Harness, scope, room, target_id, decision = "accepted", options = nil) {
   const opts = __fleet_options(options)
   const target = __fleet_required_text(target_id, "target_id")
   const data = __fleet_typed_data(
@@ -413,6 +416,7 @@ pub fn fleet_ack(scope, room, target_id, decision = "accepted", options = nil) {
     "ack",
   )
   return __fleet_post(
+    harness,
     scope,
     room,
     "ack",
@@ -429,7 +433,15 @@ pub fn fleet_ack(scope, room, target_id, decision = "accepted", options = nil) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_done(scope, room, claim_id, work_key, outcome = "completed", options = nil) {
+pub fn fleet_done(
+  harness: Harness,
+  scope,
+  room,
+  claim_id,
+  work_key,
+  outcome = "completed",
+  options = nil,
+) {
   const opts = __fleet_options(options)
   const claim = __fleet_required_text(claim_id, "claim_id")
   const key = __fleet_required_text(work_key, "work_key")
@@ -447,6 +459,7 @@ pub fn fleet_done(scope, room, claim_id, work_key, outcome = "completed", option
     "done receipt",
   )
   return __fleet_post(
+    harness,
     scope,
     room,
     "done",
@@ -463,7 +476,7 @@ pub fn fleet_done(scope, room, claim_id, work_key, outcome = "completed", option
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_finding(scope, room, premise, options = nil) {
+pub fn fleet_finding(harness: Harness, scope, room, premise, options = nil) {
   const opts = __fleet_options(options)
   const normalized = lowercase(trim(__fleet_required_text(premise, "premise")))
   const data = __fleet_typed_data(
@@ -486,6 +499,7 @@ pub fn fleet_finding(scope, room, premise, options = nil) {
     "finding",
   )
   return __fleet_post(
+    harness,
     scope,
     room,
     "finding",
@@ -502,7 +516,7 @@ pub fn fleet_finding(scope, room, premise, options = nil) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_heartbeat(scope, room, state = "busy", options = nil) {
+pub fn fleet_heartbeat(harness: Harness, scope, room, state = "busy", options = nil) {
   const opts = __fleet_options(options)
   const data = __fleet_typed_data(
     {
@@ -521,6 +535,7 @@ pub fn fleet_heartbeat(scope, room, state = "busy", options = nil) {
     "heartbeat",
   )
   return __fleet_post(
+    harness,
     scope,
     room,
     "heartbeat",
@@ -537,7 +552,7 @@ pub fn fleet_heartbeat(scope, room, state = "busy", options = nil) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_checkin(scope, room, sections, options = nil) {
+pub fn fleet_checkin(harness: Harness, scope, room, sections, options = nil) {
   const opts = __fleet_options(options)
   const input = __fleet_dict(sections)
   const data = __fleet_typed_data(
@@ -554,7 +569,15 @@ pub fn fleet_checkin(scope, room, sections, options = nil) {
     fleet_checkin_schema(),
     "checkin",
   )
-  return __fleet_post(scope, room, "checkin", opts?.subject ?? "Fleet check-in", data, opts)
+  return __fleet_post(
+    harness,
+    scope,
+    room,
+    "checkin",
+    opts?.subject ?? "Fleet check-in",
+    data,
+    opts,
+  )
 }
 
 fn __fleet_row(item) {
@@ -670,7 +693,7 @@ fn __fleet_liveness(heartbeat, now_ms, grace_ms) {
 /**
  * Project oldest-first coordination rows into a deterministic fleet snapshot.
  *
- * Pass rows from `coord_read(..., {include_events:true})` so liveness uses the
+ * Pass rows from `coord_read(harness.runtime, ..., {include_events:true})` so liveness uses the
  * signed channel timestamp. Raw messages without an event receipt remain
  * visible but receive `unknown` liveness. `now_ms` and `grace_ms` are injected
  * options; `now_ms` is required. This function never mutates, acknowledges,

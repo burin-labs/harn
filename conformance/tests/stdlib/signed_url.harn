@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const link = signed_url(
     "https://example.test/receipts/r_123?b=two+words",
     {artifact: "transcript/json", receipt: "r_123"},
@@ -34,5 +34,5 @@ pipeline test(task) {
   assert(contains(path_link, "/artifacts/run%201?"), "signed paths are encoded")
   assert(contains(path_link, "download=true"), "signed paths are supported")
   assert(contains(path_link, "sig="), "signed path includes signature")
-  __io_println("signed_url_ok")
+  harness.stdio.println("signed_url_ok")
 }

@@ -1,9 +1,9 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const _name = "world"
-  log("hello ${_name}!")
+  harness.stdio.log("hello ${_name}!")
   const _x = 5
-  log("result: ${_x + 1}")
+  harness.stdio.log("result: ${_x + 1}")
   const _a = "foo"
   const _b = "bar"
-  log("${_a}-${_b}")
+  harness.stdio.log("${_a}-${_b}")
 }

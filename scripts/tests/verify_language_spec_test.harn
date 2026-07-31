@@ -4,35 +4,35 @@
 import "../verify_language_spec.harn"
 
 @test
-pipeline test_slugify_basic(task) {
+pipeline test_slugify_basic(harness: Harness, task) {
   assert_eq(slugify("Hello World"), "hello-world")
 }
 
 @test
-pipeline test_slugify_strips_punctuation(task) {
+pipeline test_slugify_strips_punctuation(harness: Harness, task) {
   assert_eq(slugify("  Foo! Bar?? Baz  "), "foo-bar-baz")
 }
 
 @test
-pipeline test_slugify_strips_leading_trailing_dashes(task) {
+pipeline test_slugify_strips_leading_trailing_dashes(harness: Harness, task) {
   assert_eq(slugify("--Foo--"), "foo")
 }
 
 @test
-pipeline test_slugify_empty_becomes_section(task) {
+pipeline test_slugify_empty_becomes_section(harness: Harness, task) {
   assert_eq(slugify("!!!"), "section")
   assert_eq(slugify(""), "section")
 }
 
 @test
-pipeline test_heading_text_strips_hashes(task) {
+pipeline test_heading_text_strips_hashes(harness: Harness, task) {
   assert_eq(heading_text("## My Heading"), "My Heading")
   assert_eq(heading_text("#### Deep"), "Deep")
   assert_eq(heading_text("#NoSpace"), "NoSpace")
 }
 
 @test
-pipeline test_is_word_char(task) {
+pipeline test_is_word_char(harness: Harness, task) {
   assert(is_word_char("a"))
   assert(is_word_char("Z"))
   assert(is_word_char("5"))
@@ -43,7 +43,7 @@ pipeline test_is_word_char(task) {
 }
 
 @test
-pipeline test_normalize_standalone_ellipsis(task) {
+pipeline test_normalize_standalone_ellipsis(harness: Harness, task) {
   assert_eq(normalize_snippet("let x = ..."), "let x = nil")
   assert_eq(normalize_snippet("a ... b"), "a nil b")
   assert_eq(normalize_snippet("(...)"), "(nil)")
@@ -51,7 +51,7 @@ pipeline test_normalize_standalone_ellipsis(task) {
 }
 
 @test
-pipeline test_normalize_preserves_spread(task) {
+pipeline test_normalize_preserves_spread(harness: Harness, task) {
   assert_eq(normalize_snippet("...rest"), "...rest")
   assert_eq(normalize_snippet("foo.bar...baz"), "foo.bar...baz")
   assert_eq(normalize_snippet("_..."), "_...")
@@ -60,20 +60,20 @@ pipeline test_normalize_preserves_spread(task) {
 }
 
 @test
-pipeline test_normalize_preserves_dot_runs(task) {
+pipeline test_normalize_preserves_dot_runs(harness: Harness, task) {
   assert_eq(normalize_snippet("...."), "....")
   assert_eq(normalize_snippet("....."), ".....")
 }
 
 @test
-pipeline test_should_skip_snippet(task) {
+pipeline test_should_skip_snippet(harness: Harness, task) {
   assert(should_skip_snippet("let x = 1 // error: nope"))
   assert(should_skip_snippet("# ERROR: documented failure"))
   assert(!should_skip_snippet("let x = 1"))
 }
 
 @test
-pipeline test_fence_info_recognizes_boundaries(task) {
+pipeline test_fence_info_recognizes_boundaries(harness: Harness, task) {
   assert_eq(fence_info("```harn"), "harn")
   assert_eq(fence_info("```harn,ignore"), "harn,ignore")
   assert_eq(fence_info("```rust"), "rust")
@@ -82,14 +82,14 @@ pipeline test_fence_info_recognizes_boundaries(task) {
 }
 
 @test
-pipeline test_fence_info_rejects_non_boundaries(task) {
+pipeline test_fence_info_rejects_non_boundaries(harness: Harness, task) {
   assert(fence_info("not a fence") == nil)
   assert(fence_info("``inline``") == nil)
   assert(fence_info("```with`backtick") == nil)
 }
 
 @test
-pipeline test_pad3(task) {
+pipeline test_pad3(harness: Harness, task) {
   assert_eq(pad3(1), "001")
   assert_eq(pad3(42), "042")
   assert_eq(pad3(100), "100")
@@ -97,13 +97,13 @@ pipeline test_pad3(task) {
 }
 
 @test
-pipeline test_snippet_filename(task) {
+pipeline test_snippet_filename(harness: Harness, task) {
   assert_eq(snippet_filename(1, "Hello World", 39), "001_hello-world_L39.harn")
   assert_eq(snippet_filename(12, "Foo!", 7), "012_foo_L7.harn")
 }
 
 @test
-pipeline test_extract_single_harn_fence(task) {
+pipeline test_extract_single_harn_fence(harness: Harness, task) {
   const md = "# Intro\n\n```harn\nlet x = 1\n```\n"
   const fences = extract_harn_fences(md)
   assert_eq(fences.count, 1)
@@ -114,21 +114,21 @@ pipeline test_extract_single_harn_fence(task) {
 }
 
 @test
-pipeline test_extract_skips_other_languages(task) {
+pipeline test_extract_skips_other_languages(harness: Harness, task) {
   const md = "## A\n\n```rust\nfn main(){}\n```\n\n```ebnf\nrule = x\n```\n"
   const fences = extract_harn_fences(md)
   assert_eq(fences.count, 0)
 }
 
 @test
-pipeline test_extract_skips_harn_ignore(task) {
+pipeline test_extract_skips_harn_ignore(harness: Harness, task) {
   const md = "```harn,ignore\nbroken on purpose\n```\n"
   const fences = extract_harn_fences(md)
   assert_eq(fences.count, 0)
 }
 
 @test
-pipeline test_extract_harn_check_fence(task) {
+pipeline test_extract_harn_check_fence(harness: Harness, task) {
   const md = "```harn,check\npipeline default() { return 1 }\n```\n"
   const fences = extract_harn_fences(md)
   assert_eq(fences.count, 1)
@@ -137,7 +137,7 @@ pipeline test_extract_harn_check_fence(task) {
 }
 
 @test
-pipeline test_extract_multiple_with_headings(task) {
+pipeline test_extract_multiple_with_headings(harness: Harness, task) {
   const md = "# First\n\n```harn\na\n```\n\n## Second\n\n```harn\nb\nc\n```\n"
   const fences = extract_harn_fences(md)
   assert_eq(fences.count, 2)
@@ -148,14 +148,14 @@ pipeline test_extract_multiple_with_headings(task) {
 }
 
 @test
-pipeline test_extract_empty_fence_dropped(task) {
+pipeline test_extract_empty_fence_dropped(harness: Harness, task) {
   const md = "```harn\n\n\n```\n"
   const fences = extract_harn_fences(md)
   assert_eq(fences.count, 0)
 }
 
 @test
-pipeline test_extract_default_heading_is_spec(task) {
+pipeline test_extract_default_heading_is_spec(harness: Harness, task) {
   const md = "```harn\nlet x = 1\n```\n"
   const fences = extract_harn_fences(md)
   assert_eq(fences.count, 1)

@@ -123,9 +123,9 @@ fn __env_with_auth_header(env: dict, config: dict, secret: dict) -> dict {
  *   id, provider, source_url, table_index?, column_map (dict),
  *   header_match?, confidence (default "high"), terms_notes?.
  */
-pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
+pub fn html_pricing_table_adapter(harness: Harness, env: dict, config: dict) -> dict {
   const url = config.source_url
-  const response = web_fetch(url, env?.http_options ?? {})
+  const response = web_fetch(harness, url, env?.http_options ?? {})
   if !response.ok {
     return {
       run: __fetch_failure_run(config.id, "html", "provider", url, response),
@@ -246,9 +246,9 @@ pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
  *   id, provider, source_url, mapper, source_owner ("aggregator" or
  *   "provider"), confidence (default "high"), terms_notes?.
  */
-pub fn json_api_adapter(env: dict, config: dict) -> dict {
+pub fn json_api_adapter(harness: Harness, env: dict, config: dict) -> dict {
   const url = config.source_url
-  const response = web_fetch(url, env?.http_options ?? {})
+  const response = web_fetch(harness, url, env?.http_options ?? {})
   if !response.ok {
     return {
       run: __fetch_failure_run(
@@ -312,7 +312,7 @@ pub fn json_api_adapter(env: dict, config: dict) -> dict {
  * surfaces the gap instead of silently treating the source as a
  * removal.
  */
-pub fn key_required_adapter(env: dict, config: dict) -> dict {
+pub fn key_required_adapter(harness: Harness, env: dict, config: dict) -> dict {
   const key_envs = config.key_envs ?? []
   const secret = __first_available_secret(env, key_envs)
   if secret == nil {
@@ -333,7 +333,7 @@ pub fn key_required_adapter(env: dict, config: dict) -> dict {
     }
   }
   const adapter_env = __env_with_auth_header(env, config, secret)
-  const result = config.adapter(adapter_env)
+  const result = config.adapter(harness, adapter_env)
   const augmented = result.run + {requires_key: true, key_envs: key_envs}
   return {run: augmented, observations: result.observations}
 }
@@ -360,9 +360,9 @@ pub fn key_required_adapter(env: dict, config: dict) -> dict {
  * authoritative), so this adapter restricts itself to the benchmark
  * surface to avoid spurious drift.
  */
-pub fn artificialanalysis_adapter(env: dict, config: dict) -> dict {
+pub fn artificialanalysis_adapter(harness: Harness, env: dict, config: dict) -> dict {
   const url = config.source_url
-  const response = web_fetch(url, env?.http_options ?? {})
+  const response = web_fetch(harness, url, env?.http_options ?? {})
   if !response.ok {
     return {
       run: __fetch_failure_run(config.id, "html", "aggregator", url, response),

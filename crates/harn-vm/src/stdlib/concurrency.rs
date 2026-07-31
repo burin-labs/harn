@@ -144,7 +144,7 @@ fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>,
     (None, all_closed)
 }
 
-fn cancelled_vm_error() -> VmError {
+pub(crate) fn cancelled_vm_error() -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
         "kind:cancelled:VM cancelled by host",
     )))
@@ -409,6 +409,8 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sync_mutex_acquire(key?: string, timeout_ms?: int) -> any",
     kind = "async",
     category = "concurrency",
@@ -434,6 +436,8 @@ async fn sync_mutex_acquire_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.sync_semaphore_acquire",
+    effects = ["state.mutate@arg0"],
     sig = "sync_semaphore_acquire(key?: string, capacity?: int, permits?: int, timeout_ms?: int) -> any",
     kind = "async",
     category = "concurrency",
@@ -468,6 +472,8 @@ async fn sync_semaphore_acquire_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.sync_gate_acquire",
+    effects = ["state.mutate@arg0"],
     sig = "sync_gate_acquire(key?: string, limit?: int, timeout_ms?: int) -> any",
     kind = "async",
     category = "concurrency",
@@ -494,6 +500,8 @@ async fn sync_gate_acquire_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.sync_rwlock_acquire",
+    effects = ["state.mutate@arg0"],
     sig = "sync_rwlock_acquire(key?: string, mode?: string, timeout_ms?: int) -> any",
     kind = "async",
     category = "concurrency",
@@ -540,6 +548,8 @@ async fn sync_rwlock_acquire_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.sync_release",
+    effects = ["state.mutate@arg0"],
     sig = "sync_release(permit: any) -> bool",
     category = "concurrency",
     doc = "Release a synchronization permit."
@@ -554,6 +564,8 @@ fn sync_release_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.sync_metrics",
+    effects = ["state.read@arg0"],
     sig = "sync_metrics(kind?: string, key?: string) -> dict",
     kind = "async",
     category = "concurrency",
@@ -570,6 +582,8 @@ async fn sync_metrics_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_scope_id",
+    effects = ["state.read@const=execution-scope"],
     sig = "shared_scope_id(scope?: any, options?: dict) -> string",
     kind = "async",
     category = "concurrency",
@@ -591,6 +605,8 @@ async fn shared_scope_id_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_cell",
+    effects = ["state.mutate@const=shared-state"],
     sig = "shared_cell(options_or_key?: any, initial?: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -612,6 +628,8 @@ async fn shared_cell_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_get",
+    effects = ["state.read@arg0"],
     sig = "shared_get(handle: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -631,6 +649,8 @@ async fn shared_get_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_snapshot",
+    effects = ["state.read@arg0"],
     sig = "shared_snapshot(handle: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -650,6 +670,8 @@ async fn shared_snapshot_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_set",
+    effects = ["state.write@arg0"],
     sig = "shared_set(handle: any, value: any) -> nil",
     kind = "async",
     category = "concurrency",
@@ -670,6 +692,8 @@ async fn shared_set_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_cas",
+    effects = ["state.mutate@arg0"],
     sig = "shared_cas(handle: any, expected: any, value: any) -> bool",
     kind = "async",
     category = "concurrency",
@@ -695,6 +719,8 @@ async fn shared_cas_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_map",
+    effects = ["state.mutate@const=shared-state"],
     sig = "shared_map(options_or_key?: any, initial?: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -717,6 +743,8 @@ async fn shared_map_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_map_get",
+    effects = ["state.read@arg0"],
     sig = "shared_map_get(handle: any, key: any, default?: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -739,6 +767,8 @@ async fn shared_map_get_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_map_snapshot",
+    effects = ["state.read@arg0"],
     sig = "shared_map_snapshot(handle: any, key: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -760,6 +790,8 @@ async fn shared_map_snapshot_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_map_entries",
+    effects = ["state.read@arg0"],
     sig = "shared_map_entries(handle: any) -> list",
     kind = "async",
     category = "concurrency",
@@ -779,6 +811,8 @@ async fn shared_map_entries_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_map_set",
+    effects = ["state.write@arg0"],
     sig = "shared_map_set(handle: any, key: any, value: any) -> nil",
     kind = "async",
     category = "concurrency",
@@ -800,6 +834,8 @@ async fn shared_map_set_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_map_delete",
+    effects = ["state.mutate@arg0"],
     sig = "shared_map_delete(handle: any, key: any) -> nil",
     kind = "async",
     category = "concurrency",
@@ -821,6 +857,8 @@ async fn shared_map_delete_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_map_cas",
+    effects = ["state.mutate@arg0"],
     sig = "shared_map_cas(handle: any, key: any, expected: any, value: any) -> bool",
     kind = "async",
     category = "concurrency",
@@ -847,6 +885,8 @@ async fn shared_map_cas_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.shared_metrics",
+    effects = ["state.read@const=shared-state"],
     sig = "shared_metrics(handle?: any) -> dict",
     kind = "async",
     category = "concurrency",
@@ -871,6 +911,8 @@ async fn shared_metrics_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.mailbox_open",
+    effects = ["state.mutate@arg0"],
     sig = "mailbox_open(options_or_name?: any, capacity?: int) -> any",
     kind = "async",
     category = "concurrency",
@@ -892,6 +934,8 @@ async fn mailbox_open_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.mailbox_lookup",
+    effects = ["state.read@arg0"],
     sig = "mailbox_lookup(target: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -911,6 +955,8 @@ async fn mailbox_lookup_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.mailbox_send",
+    effects = ["state.write@arg0"],
     sig = "mailbox_send(target: any, value: any) -> bool",
     kind = "async",
     category = "concurrency",
@@ -941,6 +987,8 @@ async fn mailbox_send_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.mailbox_try_receive",
+    effects = ["state.mutate@arg0"],
     sig = "mailbox_try_receive(target: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -972,6 +1020,8 @@ async fn mailbox_try_receive_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.mailbox_receive",
+    effects = ["state.observe@arg0", "state.mutate@arg0"],
     sig = "mailbox_receive(target: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -1027,6 +1077,8 @@ async fn mailbox_receive_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.mailbox_close",
+    effects = ["state.mutate@arg0"],
     sig = "mailbox_close(target: any) -> nil",
     kind = "async",
     category = "concurrency",
@@ -1046,6 +1098,8 @@ async fn mailbox_close_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.mailbox_metrics",
+    effects = ["state.read@arg0"],
     sig = "mailbox_metrics(target: any) -> dict",
     kind = "async",
     category = "concurrency",
@@ -1065,6 +1119,8 @@ async fn mailbox_metrics_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.channel",
+    effects = ["state.mutate@const=channels"],
     sig = "channel(name?: string, capacity?: int) -> any",
     category = "concurrency",
     doc = "Create an in-memory channel."
@@ -1085,6 +1141,8 @@ fn channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.close_channel",
+    effects = ["state.mutate@arg0"],
     sig = "close_channel(channel: any) -> nil",
     category = "concurrency",
     doc = "Mark a channel closed."
@@ -1109,6 +1167,8 @@ fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.channel_is_closed",
+    effects = ["state.read@arg0"],
     sig = "channel_is_closed(channel: any) -> bool",
     category = "concurrency",
     doc = "Return true if the channel has been marked closed."
@@ -1123,6 +1183,8 @@ fn channel_is_closed_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.try_receive",
+    effects = ["state.mutate@arg0"],
     sig = "try_receive(channel: any) -> any",
     category = "concurrency",
     doc = "Try to receive one channel value without blocking."
@@ -1149,6 +1211,8 @@ fn try_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.atomic",
+    effects = ["state.mutate@const=atomics"],
     sig = "atomic(initial?: any) -> any",
     category = "concurrency",
     doc = "Create an atomic integer handle."
@@ -1166,6 +1230,8 @@ fn atomic_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.atomic_get",
+    effects = ["state.read@arg0"],
     sig = "atomic_get(handle: any) -> int",
     category = "concurrency",
     doc = "Read an atomic integer value."
@@ -1179,6 +1245,8 @@ fn atomic_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.atomic_set",
+    effects = ["state.write@arg0"],
     sig = "atomic_set(handle: any, value: int) -> int",
     category = "concurrency",
     doc = "Set an atomic integer and return the previous value."
@@ -1194,6 +1262,8 @@ fn atomic_set_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.atomic_add",
+    effects = ["state.mutate@arg0"],
     sig = "atomic_add(handle: any, delta: int) -> int",
     category = "concurrency",
     doc = "Add to an atomic integer and return the previous value."
@@ -1209,6 +1279,8 @@ fn atomic_add_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.atomic_cas",
+    effects = ["state.mutate@arg0"],
     sig = "atomic_cas(handle: any, expected: int, value: int) -> bool",
     category = "concurrency",
     doc = "Compare and swap an atomic integer."
@@ -1228,6 +1300,8 @@ fn atomic_cas_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sleep(ms?: any) -> nil",
     kind = "async",
     category = "concurrency",
@@ -1269,6 +1343,8 @@ async fn sleep_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.yield_now",
+    effects = ["clock.observe@const=scheduler"],
     sig = "yield_now() -> nil",
     kind = "async",
     category = "concurrency",
@@ -1283,6 +1359,8 @@ async fn yield_now_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.send",
+    effects = ["state.write@arg0"],
     sig = "send(channel: any, value: any) -> bool",
     kind = "async",
     category = "concurrency",
@@ -1337,6 +1415,8 @@ async fn send_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.receive",
+    effects = ["state.observe@arg0", "state.mutate@arg0"],
     sig = "receive(channel: any) -> any",
     kind = "async",
     category = "concurrency",
@@ -1426,6 +1506,8 @@ async fn receive_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.select",
+    effects = ["state.observe@dynamic", "state.mutate@dynamic"],
     sig = "select(...channels: any) -> dict",
     kind = "async",
     category = "concurrency",
@@ -1465,6 +1547,8 @@ async fn select_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.select_timeout",
+    effects = ["clock.observe@const=monotonic", "state.observe@dynamic"],
     sig = "__select_timeout(channels: list, timeout: any) -> dict",
     kind = "async",
     category = "concurrency",
@@ -1502,6 +1586,8 @@ async fn select_timeout_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.select_try",
+    effects = ["state.mutate@dynamic"],
     sig = "__select_try(channels: list) -> dict",
     kind = "async",
     category = "concurrency",
@@ -1533,6 +1619,8 @@ async fn select_try_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.select_list",
+    effects = ["state.mutate@dynamic"],
     sig = "__select_list(channels: list) -> dict",
     kind = "async",
     category = "concurrency",
@@ -1573,6 +1661,8 @@ async fn select_list_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.channel_select",
+    effects = ["state.observe@dynamic", "state.mutate@dynamic"],
     sig = "channel_select(channels: list, timeout_ms?: int) -> dict",
     kind = "async",
     category = "concurrency",
@@ -1607,6 +1697,8 @@ async fn channel_select_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.timer_start",
+    effects = ["clock.read@const=monotonic"],
     sig = "timer_start(name?: string) -> dict",
     category = "concurrency",
     doc = "Start a named timer and return its handle."
@@ -1627,6 +1719,8 @@ fn timer_start_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.circuit_breaker",
+    effects = ["state.mutate@const=circuits"],
     sig = "circuit_breaker(name: string, threshold?: int, reset_ms?: int) -> nil",
     category = "concurrency",
     doc = "Create or reset a named circuit breaker."
@@ -1688,6 +1782,8 @@ fn optional_non_negative_u64_arg(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.circuit_check",
+    effects = ["state.read@arg0", "clock.read@const=monotonic"],
     sig = "circuit_check(name: string) -> string",
     category = "concurrency",
     doc = "Return the state of a named circuit breaker."
@@ -1718,6 +1814,8 @@ fn circuit_check_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.circuit_record_success",
+    effects = ["state.mutate@arg0"],
     sig = "circuit_record_success(name: string) -> nil",
     category = "concurrency",
     doc = "Record a successful call for a named circuit breaker."
@@ -1738,6 +1836,8 @@ fn circuit_record_success_builtin(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.circuit_record_failure",
+    effects = ["state.mutate@arg0", "clock.read@const=monotonic"],
     sig = "circuit_record_failure(name: string) -> bool",
     category = "concurrency",
     doc = "Record a failed call and return whether the circuit opened."
@@ -1762,6 +1862,8 @@ fn circuit_record_failure_builtin(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.circuit_reset",
+    effects = ["state.mutate@arg0"],
     sig = "circuit_reset(name: string) -> nil",
     category = "concurrency",
     doc = "Reset a named circuit breaker to closed."
@@ -1782,6 +1884,8 @@ fn circuit_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.timer_end",
+    effects = ["clock.read@const=monotonic", "state.mutate@arg0"],
     sig = "timer_end(timer: any) -> int",
     category = "concurrency",
     doc = "End a timer, print elapsed milliseconds, and return the elapsed time."

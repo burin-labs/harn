@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Default behavior: repeated children of the same tag collapse into
   // a bare list because the convention is render-side symmetric
   // (`<list><item>...</item></list>`). The inner tag is dropped.
@@ -24,5 +24,5 @@ pipeline test(task) {
   }
   const saw_depth = is_err(result) && contains(to_string(unwrap_err(result)), "max nesting depth")
   assert_eq(saw_depth, true, "depth guard rejects pathologically nested XML")
-  log("xml_lossless_parse: all tests passed")
+  harness.stdio.log("xml_lossless_parse: all tests passed")
 }

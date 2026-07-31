@@ -1,11 +1,13 @@
 import "std/agents"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [llm_text("background summary")],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Investigate worker provenance",
         {
           provider: "mock",
@@ -17,18 +19,20 @@ pipeline main() {
           verification_steps: ["cargo test -p harn-vm agents_workers"],
         },
       )
-      __io_println(worker_request(handle)?.payload?.topic == "provenance")
-      __io_println(len(worker_research_questions(handle)) == 1)
-      __io_println(worker_action_items(handle)[0]?.id == "action_1")
-      __io_println(worker_workflow_stages(handle)[1] == "implement")
-      __io_println(worker_verification_steps(handle)[0] == "cargo test -p harn-vm agents_workers")
-      const done = wait_agent(handle)
-      __io_println(worker_request(done)?.task == "Investigate worker provenance")
-      __io_println(worker_provenance(done)?.worker_id == done?.id)
-      __io_println(contains(worker_result(done)?.summary ?? "", "background summary"))
-      const continued = send_input(done, "Follow up with implementation details")
-      __io_println(continued?.task == "Follow up with implementation details")
-      __io_println(worker_request(continued)?.task == "Investigate worker provenance")
+      harness.stdio.println(worker_request(handle)?.payload?.topic == "provenance")
+      harness.stdio.println(len(worker_research_questions(handle)) == 1)
+      harness.stdio.println(worker_action_items(handle)[0]?.id == "action_1")
+      harness.stdio.println(worker_workflow_stages(handle)[1] == "implement")
+      harness.stdio.println(
+        worker_verification_steps(handle)[0] == "cargo test -p harn-vm agents_workers",
+      )
+      const done = wait_agent(harness.agent, handle)
+      harness.stdio.println(worker_request(done)?.task == "Investigate worker provenance")
+      harness.stdio.println(worker_provenance(done)?.worker_id == done?.id)
+      harness.stdio.println(contains(worker_result(done)?.summary ?? "", "background summary"))
+      const continued = send_input(harness.agent, done, "Follow up with implementation details")
+      harness.stdio.println(continued?.task == "Follow up with implementation details")
+      harness.stdio.println(worker_request(continued)?.task == "Investigate worker provenance")
     },
   )
 }

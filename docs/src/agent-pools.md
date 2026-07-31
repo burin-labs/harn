@@ -43,19 +43,19 @@ Three anti-patterns worth calling out:
 
 ## Create a pool
 
-`pool_create(options?)` allocates a new pool, registers it under
+`pool_create(agent: HarnessAgent, options?)` allocates a new pool, registers it under
 `options.name`, and returns a handle:
 
 ```harn,ignore
 import { pool_create } from "std/lifecycle/pool"
 
-const pool = pool_create({
+const pool = pool_create(harness.agent, {
   name: "pr-review",
   max_concurrent: 5,
 })
 ```
 
-Names must be unique within the live VM registry. Use `pool_get(name)`
+Names must be unique within the live VM registry. Use `pool_get(agent, name)`
 to reuse an existing pool in the same process. Pipeline-scope pools use
 a deterministic `(scope, scope_id, name)` id, so after a process restart
 creating the same pool binds to the persisted state.
@@ -81,7 +81,7 @@ The returned handle is a dict with:
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `name` | string | auto-generated | Visible in `pool_list()` and snapshots. Used for `pool_get(name)`. |
+| `name` | string | auto-generated | Visible in `pool_list(harness.agent)` and snapshots. Used for `pool_get(harness.agent, name)`. |
 | `max_concurrent` | int | `1` | Hard cap on simultaneously running tasks. Must be `>= 1`. |
 | `queue` | dict / string | `priority()` | Queue strategy descriptor (see [Queue strategies](#queue-strategies)). |
 | `backpressure` | dict / string | unbounded | Backpressure descriptor (see [Backpressure](#backpressure)). `nil` keeps the queue unbounded. |
@@ -89,8 +89,8 @@ The returned handle is a dict with:
 | `pipeline_id` | string | active pipeline id | Required for `scope: "pipeline"` when not running inside a pipeline. |
 | `stale_after_ms` | int / duration | `30000` | Pipeline scope: freshness knob for persisted running-task markers on reload. |
 
-`pool_get(name_or_id)` looks up an existing pool and returns `nil` when
-not found. `pool_list()` returns every pool registered in the current
+`pool_get(agent: HarnessAgent, name_or_id)` looks up an existing pool and returns
+`nil` when not found. `pool_list(agent: HarnessAgent)` returns every pool registered in the current
 runtime.
 
 ## Submit work
@@ -104,7 +104,7 @@ pool registry handle.
 
 ```harn,ignore
 const handle = pool.submit({ ->
-  return agent_loop("review this PR", "You are a careful reviewer.")
+  return agent_loop(harness, "review this PR", "You are a careful reviewer.")
 }, {
   priority: 10,
   tenant_id: "acme",
@@ -149,7 +149,7 @@ catching an error.
 
 ## Wait on a task
 
-`pool_wait(handle)` blocks until the task reaches a terminal state and
+`pool_wait(agent: HarnessAgent, handle)` blocks until the task reaches a terminal state and
 returns the final task snapshot. Passing a list of handles waits for
 all of them:
 
@@ -157,7 +157,7 @@ all of them:
 import { pool_wait } from "std/lifecycle/pool"
 
 const handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
-const outcomes = pool_wait(handles)
+const outcomes = pool_wait(harness.agent, handles)
 ```
 
 `wait_agent(handle)` from `std/agent/workers` recognises pool task
@@ -167,7 +167,7 @@ handles does not need to learn a second waiter API.
 ## Queue strategies
 
 `std/lifecycle/pool` exports four strategy factories. Pass the result
-as `pool_create({queue: <strategy>})`:
+as `pool_create(harness.agent, {queue: <strategy>})`:
 
 | Function | Behavior |
 |---|---|
@@ -180,7 +180,7 @@ as `pool_create({queue: <strategy>})`:
 import { QueueStrategy, pool_create } from "std/lifecycle/pool"
 
 const queue = QueueStrategy()
-const pool = pool_create({
+const pool = pool_create(harness.agent, {
   name: "tenant-work",
   max_concurrent: 4,
   queue: queue.fair_round_robin("tenant_id"),
@@ -218,7 +218,7 @@ turn.
 import { Backpressure, pool_create } from "std/lifecycle/pool"
 
 const bp = Backpressure()
-const pool = pool_create({
+const pool = pool_create(harness.agent, {
   name: "webhook-intake",
   max_concurrent: 10,
   backpressure: bp.ring_buffer(100),
@@ -248,7 +248,7 @@ A pool's `scope` decides where its state lives.
 | Scope | State | Survives | Notes |
 |---|---|---|---|
 | `"session"` | VM-scoped in-memory registry. | VM/session lifetime. | Default. Zero I/O. |
-| `"pipeline"` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Terminal and stale task metadata reload on next `pool_create({scope: "pipeline", ...})`. |
+| `"pipeline"` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Terminal and stale task metadata reload on next `pool_create(harness.agent, {scope: "pipeline", ...})`. |
 | `"tenant"` | Host-managed registry. | Tenant lifetime, cross-pipeline. | Requires an embedding host with tenant pool routing. The in-process runtime rejects it. |
 | `"org"` | Host-managed registry. | Org lifetime, cross-tenant. | Requires an embedding host with org pool routing. The in-process runtime rejects it. |
 
@@ -270,9 +270,9 @@ The log is compacted opportunistically: when reload sees
 internal threshold, the next `pool_create` rewrites the log with only
 live state.
 
-`pool_simulate_restart()` drops the in-process registry without
+`pool_simulate_restart(harness.agent)` drops the in-process registry without
 touching disk, so pipeline-scope pools can be exercised under
-conformance tests by re-calling `pool_create(...)` and asserting the
+conformance tests by re-calling `pool_create(harness.agent, ...)` and asserting the
 stale records rehydrate.
 
 ## Idempotency
@@ -284,7 +284,7 @@ return the *same* task handle:
 ```harn,ignore
 const first = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
 const second = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
-log(first.id == second.id)   // true
+harness.stdio.log(first.id == second.id)   // true
 ```
 
 This is load-bearing for pipeline-scope pools: a worker that crashed
@@ -301,7 +301,7 @@ Use the `SpawnToPool` handler variant from `std/triggers`:
 import { trigger_register, SpawnToPool } from "std/triggers"
 import { pool_create, fair_round_robin } from "std/lifecycle/pool"
 
-const pool = pool_create({
+const pool = pool_create(harness.agent, {
   name: "webhook-work",
   max_concurrent: 10,
   queue: fair_round_robin("source"),
@@ -341,8 +341,8 @@ runs.
 |---|---|
 | `pool.size()` | Live count of active + queued tasks. Excludes terminal-state tasks. |
 | `pool.snapshot()` | Full dict: `active`, `queued`, `completed`, `failed`, `rejected`, `blocked_submitters`, `total`, selected `queue`, selected `backpressure`, `scope`, `scope_id`, `stale_after_ms`, the per-task list, and the original `config` so dashboards can show "what was configured". |
-| `pool_get(name_or_id)` | Lookup by name. Returns `nil` when missing. |
-| `pool_list()` | Every pool registered on the current runtime. |
+| `pool_get(harness.agent, name_or_id)` | Lookup by name. Returns `nil` when missing. |
+| `pool_list(harness.agent)` | Every pool registered on the current runtime. |
 | `harness.unsettled_state().pool_pending_tasks` | Pipeline-lifecycle integration: lists tasks blocking pipeline finalization. See [pipeline lifecycle](./stdlib/lifecycle.md). |
 
 ## Observability
@@ -397,7 +397,7 @@ const results = agent_fanout(
 )
 
 for r in results {
-  log("${r.label}: ${r.ok ? "ok" : "failed"}")
+  harness.stdio.log("${r.label}: ${r.ok ? "ok" : "failed"}")
 }
 ```
 

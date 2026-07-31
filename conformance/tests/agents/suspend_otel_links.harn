@@ -25,9 +25,10 @@ import { llm_text, with_llm_script } from "std/testing"
  * `agent_await_resumption` tool call, matching the auto-resume
  * conformance fixture.
  */
-pipeline main() {
-  enable_tracing(true)
+pipeline main(harness: Harness) {
+  harness.obs.enable_tracing(true)
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -44,32 +45,33 @@ pipeline main() {
     ],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Park until review.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
-      __io_println(suspended?.status)
-      const resumed_handle = resume_agent(handle)
-      __io_println(resumed_handle?.status)
-      const resumed = wait_agent(handle)
-      __io_println(resumed?.status)
-      const spans = trace_spans()
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println(suspended?.status)
+      const resumed_handle = resume_agent(harness.agent, handle)
+      harness.stdio.println(resumed_handle?.status)
+      const resumed = wait_agent(harness.agent, handle)
+      harness.stdio.println(resumed?.status)
+      const spans = harness.obs.trace_spans()
       const suspension_spans = spans.filter({ s -> s.kind == "suspension" })
       const resume_spans = spans.filter({ s -> s.kind == "resume" })
-      __io_println(len(suspension_spans) >= 1)
-      __io_println(len(resume_spans) >= 1)
+      harness.stdio.println(len(suspension_spans) >= 1)
+      harness.stdio.println(len(resume_spans) >= 1)
       const suspension = suspension_spans[0]
       const resume = resume_spans[0]
-      __io_println(suspension.metadata?.handle != nil)
-      __io_println(suspension.metadata?.reason != nil)
-      __io_println(suspension.metadata?.initiator != nil)
-      __io_println(resume.metadata?.handle != nil)
-      __io_println(resume.metadata?.continue_transcript != nil)
-      __io_println(resume.metadata?.had_resume_input != nil)
-      __io_println(resume.parent_id == nil)
-      __io_println(resume.links != nil)
-      __io_println(len(resume.links) >= 1)
-      enable_tracing(false)
+      harness.stdio.println(suspension.metadata?.handle != nil)
+      harness.stdio.println(suspension.metadata?.reason != nil)
+      harness.stdio.println(suspension.metadata?.initiator != nil)
+      harness.stdio.println(resume.metadata?.handle != nil)
+      harness.stdio.println(resume.metadata?.continue_transcript != nil)
+      harness.stdio.println(resume.metadata?.had_resume_input != nil)
+      harness.stdio.println(resume.parent_id == nil)
+      harness.stdio.println(resume.links != nil)
+      harness.stdio.println(len(resume.links) >= 1)
+      harness.obs.enable_tracing(false)
     },
   )
 }

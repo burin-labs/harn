@@ -1,4 +1,4 @@
-pipeline test(task) -> int {
+pipeline test(harness: Harness, task) -> int {
   const local = "not an int"
   return local
 }

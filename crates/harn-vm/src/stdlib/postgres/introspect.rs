@@ -54,14 +54,17 @@ use crate::stdlib::macros::{
 use crate::value::{VmError, VmValue};
 
 use super::{
-    bind_params, handle_id, pool_arg, pool_record_by_id, required_arg, row_to_value, runtime_error,
-    validate_pg_identifier, HANDLE_POOL,
+    bind_params, pool_arg, pool_record_from_handle, required_arg, row_to_value, runtime_error,
+    validate_pg_identifier,
 };
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.read@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_introspect_tables",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_LIST,
     ),
     kind = "async",
@@ -107,9 +110,12 @@ async fn pg_introspect_tables_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.read@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_introspect_columns",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_LIST,
     ),
     kind = "async",
@@ -147,9 +153,12 @@ async fn pg_introspect_columns_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.read@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_introspect_indexes",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_LIST,
     ),
     kind = "async",
@@ -192,7 +201,10 @@ async fn pg_introspect_indexes_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg_pool_stats", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "capability_arg:0",
+    effects = ["network.read@const=postgres"],
+    sig_expr = BuiltinSignature::variadic("pg_pool_stats", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "postgres"
 )]
@@ -201,8 +213,7 @@ async fn pg_pool_stats_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let pool_handle = required_arg(&args, 0, "pg_pool_stats", "pool handle")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_pool_stats")?;
-    let record = pool_record_by_id(&pool_id)?;
+    let record = pool_record_from_handle(pool_handle, "pg_pool_stats")?;
     let pool = record.pool.as_ref();
     let size = pool.size();
     let idle = pool.num_idle();
@@ -271,9 +282,12 @@ async fn pg_pool_stats_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_partition_attach",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_BOOL,
     ),
     kind = "async",
@@ -313,9 +327,12 @@ async fn pg_partition_attach_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_partition_detach",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_BOOL,
     ),
     kind = "async",
@@ -354,9 +371,12 @@ async fn pg_partition_detach_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_partition_prune",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_LIST,
     ),
     kind = "async",
@@ -392,9 +412,12 @@ async fn pg_partition_prune_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_partition_retain",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_LIST,
     ),
     kind = "async",
@@ -429,9 +452,12 @@ async fn pg_partition_retain_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic(
         "pg_partition_create_for_window",
-        &[Param::new("args", TY_ANY)],
+        &[Param::new("args", TY_ANY
+)],
         TY_LIST,
     ),
     kind = "async",

@@ -469,7 +469,7 @@ fn __governor_pace_expected_total_ms(obs: dict, armed: int) -> int {
  *     when we blow past it by >= 1 checkpoint while progressing. Defaults to
  *     armed_budget_ms.
  *   - made_progress     bool — a workspace write succeeded since the last
- *     checkpoint (the single progress signal).
+ *     harness.runtime.checkpoint(the single progress signal).
  *   - verifier_signature_unchanged bool — a write landed but the verifier failure
  *     signature did not improve; a landed write whose verifier signature is
  *     unchanged is NOT progress (the edit_applied_but_wrong thrash). The stateful
@@ -607,7 +607,7 @@ const GOVERNOR_RECOGNIZED_SIGNALS = ["iterations", "tokens", "cost"]
  * `agent_compute_post_turn` field), so it is pure. For "tokens"/"cost" it reads
  * the host-tracked cumulative via `agent_session_totals`.
  */
-fn __governor_observe(policy: GovernorPolicy, payload: dict) -> dict {
+fn __governor_observe(agent: HarnessAgent, policy: GovernorPolicy, payload: dict) -> dict {
   const signal = to_string(policy.signal ?? "iterations")
   if !contains(GOVERNOR_RECOGNIZED_SIGNALS, signal) {
     throw "agent_loop: governor `policy.signal` must be one of "
@@ -620,9 +620,9 @@ fn __governor_observe(policy: GovernorPolicy, payload: dict) -> dict {
   }
   const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
   const consumed = if signal == "tokens" {
-    to_float(agent_session_totals(session_id)?.tokens_used ?? 0)
+    to_float(agent_session_totals(agent, session_id)?.tokens_used ?? 0)
   } else if signal == "cost" {
-    to_float(agent_session_totals(session_id)?.cost_usd ?? 0.0)
+    to_float(agent_session_totals(agent, session_id)?.cost_usd ?? 0.0)
   } else {
     to_float((to_int(payload?.iteration ?? 0) ?? 0) + 1)
   }
@@ -682,7 +682,7 @@ fn __governor_verdict(decision: dict) {
 }
 
 /**
- * governor_post_turn(policy) returns a `post_turn_callback` closure that reads
+ * governor_post_turn(harness.agent, policy) returns a `post_turn_callback` closure that reads
  * the live per-turn payload, evaluates the pace/budget policy, and returns a
  * steering verdict (warn message / stop) through the existing seam.
  *
@@ -698,7 +698,7 @@ fn __governor_verdict(decision: dict) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn governor_post_turn(policy: GovernorPolicy) {
+pub fn governor_post_turn(agent: HarnessAgent, policy: GovernorPolicy) {
   return { payload ->
     if !__governor_shape_ok(payload) {
       {
@@ -712,7 +712,7 @@ pub fn governor_post_turn(policy: GovernorPolicy) {
         stop_reason: "budget_governor:payload_shape_drift",
       }
     } else {
-      __governor_verdict(governor_decision(policy, __governor_observe(policy, payload)))
+      __governor_verdict(governor_decision(policy, __governor_observe(agent, policy, payload)))
     }
   }
 }
@@ -785,7 +785,7 @@ pub fn compose_post_turn(callbacks: list) {
 }
 
 /**
- * with_governance(opts, config) folds a governor and/or a unified detector spec
+ * with_governance(harness.agent, opts, config) folds a governor and/or a unified detector spec
  * into an agent_loop options dict through EXISTING seams only:
  *   - config.governor  (GovernorPolicy) -> composed into `post_turn_callback`.
  *   - config.detectors (DetectorSpec)   -> lowered onto `stall_diagnostics`
@@ -798,14 +798,14 @@ pub fn compose_post_turn(callbacks: list) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn with_governance(opts: dict, config: dict) -> dict {
+pub fn with_governance(agent: HarnessAgent, opts: dict, config: dict) -> dict {
   let callbacks = []
   const existing = opts?.post_turn_callback
   if existing != nil {
     callbacks = callbacks.appending(existing)
   }
   if config?.governor != nil {
-    callbacks = callbacks.appending(governor_post_turn(config.governor))
+    callbacks = callbacks.appending(governor_post_turn(agent, config.governor))
   }
   let result = opts
   const detectors = config?.detectors
@@ -816,7 +816,7 @@ pub fn with_governance(opts: dict, config: dict) -> dict {
       {}
     }
     result = result + {stall_diagnostics: existing_stall + detector_spec_to_stall(detectors)}
-    const overlay = unified_detectors_post_turn(detectors)
+    const overlay = unified_detectors_post_turn(agent, detectors)
     if overlay != nil {
       callbacks = callbacks.appending(overlay)
     }
@@ -828,17 +828,17 @@ pub fn with_governance(opts: dict, config: dict) -> dict {
 }
 
 /**
- * agent_governed_preset(kind, options, governance) is `agent_preset` with a
+ * agent_governed_preset(harness, kind, options, governance) is `agent_preset` with a
  * governor / detector spec folded in, so a durable persona can carry its pace
  * governor and detector rows by name. Equivalent to
- * `with_governance(agent_preset(kind, options), governance)`.
+ * `with_governance(harness.agent, agent_preset(harness, kind, options), governance)`.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_governed_preset(kind, options = nil, governance = {}) -> dict {
-  return with_governance(agent_preset(kind, options), governance)
+pub fn agent_governed_preset(harness: Harness, kind, options = nil, governance = {}) -> dict {
+  return with_governance(harness.agent, agent_preset(harness, kind, options), governance)
 }
 
 /**
@@ -854,7 +854,7 @@ pub fn agent_governed_preset(kind, options = nil, governance = {}) -> dict {
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn governors_selftest() -> dict {
+pub fn governors_selftest(agent: HarnessAgent) -> dict {
   const live_payload = {
     dispatch: {results: []},
     has_tool_calls: true,
@@ -886,7 +886,7 @@ pub fn governors_selftest() -> dict {
   // at hard=1.0 -> abort. If `iteration` ever drifts, consumed collapses to 1
   // and `ok` flips false.
   const policy = {budget: 5.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"}
-  const obs = __governor_observe(policy, live_payload)
+  const obs = __governor_observe(agent, policy, live_payload)
   const decision = governor_decision(policy, obs)
   return {
     decision: decision,

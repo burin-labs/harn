@@ -54,18 +54,18 @@ fn run_instr(i: Instr) -> int {
   }
 }
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Pure-literal-union round trip
-  __io_println(classify_verdict("pass"))
-  __io_println(classify_verdict("fail"))
-  __io_println(classify_verdict("unclear"))
+  harness.stdio.println(classify_verdict("pass"))
+  harness.stdio.println(classify_verdict("fail"))
+  harness.stdio.println(classify_verdict("unclear"))
   // kind-tagged
-  __io_println(describe_msg({kind: "ping", ttl: 30}))
-  __io_println(describe_msg({kind: "pong", latency_ms: 12}))
+  harness.stdio.println(describe_msg({kind: "ping", ttl: 30}))
+  harness.stdio.println(describe_msg({kind: "pong", latency_ms: 12}))
   // type-tagged
-  __io_println(describe_event({type: "click", x: 7, y: 9}))
-  __io_println(describe_event({type: "scroll", dy: -2}))
+  harness.stdio.println(describe_event({type: "click", x: 7, y: 9}))
+  harness.stdio.println(describe_event({type: "scroll", dy: -2}))
   // op-tagged
-  __io_println(to_string(run_instr({op: "add", lhs: 2, rhs: 3})))
-  __io_println(to_string(run_instr({op: "neg", arg: 11})))
+  harness.stdio.println(to_string(run_instr({op: "add", lhs: 2, rhs: 3})))
+  harness.stdio.println(to_string(run_instr({op: "neg", arg: 11})))
 }

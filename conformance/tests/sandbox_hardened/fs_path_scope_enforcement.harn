@@ -10,11 +10,10 @@
  * the VM-native `harness.fs.*` surface enforces, so both filesystem
  * surfaces reject the same out-of-root path identically.
  */
-pipeline default() {
-  hostlib_enable("tools:deterministic")
+pipeline default(harness: Harness) {
   const base = path_join(
     harness.fs.temp_dir(),
-    "harn_fs_path_scope_" + to_string(harness.random.gen_range(100000, 999999)),
+    "harn_fs_path_scope_" + to_string(harness.random.range(100000, 999999)),
   )
   const root = path_join(base, "workspace")
   harness.fs.mkdir(root)
@@ -25,34 +24,34 @@ pipeline default() {
   // whatever read scope happens to be ambient and its read-rejection
   // assertion quietly stops testing anything. Naming the root pins the read
   // scope to the same directory as the write scope.
-  with_execution_policy(
+  harness.runtime.with_execution_policy(
     {sandbox_profile: "worktree", workspace_roots: [root], read_only_roots: [root]},
     { ->
-      const ok = hostlib_tools_write_file({path: in_path, content: "ok\n"})
-      __io_println(ok.bytes_written)
+      const ok = harness.tools.write_file({path: in_path, content: "ok\n"})
+      harness.stdio.println(ok.bytes_written)
       const write_err = try {
-        hostlib_tools_write_file({path: out_path, content: "nope\n"})
+        harness.tools.write_file({path: out_path, content: "nope\n"})
         nil
       } catch (e) {
         e
       }
-      __io_println(write_err.kind)
-      __io_println(write_err.builtin)
-      __io_println(contains(write_err.message, "outside workspace_roots"))
-      __io_println(contains(write_err.path, "outside.txt"))
+      harness.stdio.println(write_err.kind)
+      harness.stdio.println(write_err.builtin)
+      harness.stdio.println(contains(write_err.message, "outside workspace_roots"))
+      harness.stdio.println(contains(write_err.path, "outside.txt"))
       const read_err = try {
-        hostlib_fs_read_text({path: out_path})
+        harness.fs.staged_read_text({path: out_path})
         nil
       } catch (e) {
         e
       }
-      __io_println(read_err.kind)
-      __io_println(read_err.builtin)
+      harness.stdio.println(read_err.kind)
+      harness.stdio.println(read_err.builtin)
     },
   )
   // The in-root write landed; the rejected out-of-root write never did.
-  __io_println(harness.fs.read_text(in_path) == "ok\n")
-  __io_println(harness.fs.exists(out_path))
+  harness.stdio.println(harness.fs.read_text(in_path) == "ok\n")
+  harness.stdio.println(harness.fs.exists(out_path))
 }
 // In-root write is allowed.
 // Out-of-root write is refused with the typed violation, before any

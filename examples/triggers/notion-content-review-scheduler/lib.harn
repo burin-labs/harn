@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /** Plan a weekly Notion content-review pass. */
-pub fn schedule_content_reviews(event: TriggerEvent) -> dict {
+pub fn schedule_content_reviews(_harness: Harness, event: TriggerEvent) -> dict {
   return {
     provider: "notion",
     action: "schedule_content_reviews",

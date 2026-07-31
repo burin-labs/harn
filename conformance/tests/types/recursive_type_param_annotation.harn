@@ -15,9 +15,9 @@ fn head_value(n: Node) -> int {
   return n.head
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const tree: Tree = {value: 7, children: [{value: 2, children: []}]}
-  __io_println(to_string(root_value(tree)))
+  harness.stdio.println(to_string(root_value(tree)))
   const list: Node = {head: 10, tail: {head: 20, tail: nil}}
-  __io_println(to_string(head_value(list)))
+  harness.stdio.println(to_string(head_value(list)))
 }

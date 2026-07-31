@@ -4,8 +4,8 @@
  * @effects: []
  * @errors: []
  */
-pub fn host_tools() {
-  return host_tool_list()
+pub fn host_tools(tools: HarnessTools) {
+  return tools.list_registered()
 }
 
 /**
@@ -14,8 +14,8 @@ pub fn host_tools() {
  * @effects: []
  * @errors: []
  */
-pub fn host_tool_lookup(name: string) {
-  for entry in host_tool_list() {
+pub fn host_tool_lookup(tools: HarnessTools, name: string) {
+  for entry in tools.list_registered() {
     if entry?.name == name {
       return entry
     }
@@ -29,6 +29,6 @@ pub fn host_tool_lookup(name: string) {
  * @effects: []
  * @errors: []
  */
-pub fn host_tool_available(name: string) -> bool {
-  return host_tool_lookup(name) != nil
+pub fn host_tool_available(tools: HarnessTools, name: string) -> bool {
+  return host_tool_lookup(tools, name) != nil
 }

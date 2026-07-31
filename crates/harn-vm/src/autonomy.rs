@@ -12,6 +12,7 @@ use crate::stdlib::hitl::append_approval_request_on;
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
+use harn_builtin_meta::CapabilityId;
 
 /// Stable diagnostic prefix for a deny driven by the `needs-human` autonomy
 /// class. Approval surfaces (Slack, IDE, portal) match on this code to render
@@ -329,6 +330,53 @@ pub async fn enforce_builtin_side_effect(
     let Some(action) = side_effect_action_for_builtin(name) else {
         return Ok(None);
     };
+    enforce_side_effect(action, args, None).await
+}
+
+/// Enforce autonomy at the typed Harness boundary.
+///
+/// Harness methods do not dispatch through their removed ambient-builtin
+/// counterparts, so their capability/method identity must enter the same
+/// autonomy decision engine explicitly. Keep this mapping nominal: the
+/// capability registry supplies the first discriminator and methods are
+/// matched only within that capability.
+pub(crate) async fn enforce_capability_side_effect(
+    harness: &crate::harness::VmHarness,
+    capability: CapabilityId,
+    method: &str,
+    args: &[VmValue],
+) -> Result<Option<AutonomyDecision>, VmError> {
+    let action = match (capability, method) {
+        (CapabilityId::Fs, "write_text") => Some(workspace_write_action("write_text", "fs.write")),
+        (CapabilityId::Fs, "write_bytes") => {
+            Some(workspace_write_action("write_bytes", "fs.write"))
+        }
+        (CapabilityId::Fs, "append_text") => {
+            Some(workspace_write_action("append_text", "fs.write"))
+        }
+        (CapabilityId::Fs, "mkdir") => Some(workspace_write_action("mkdir", "fs.mkdir")),
+        (CapabilityId::Fs, "mkdtemp") => Some(workspace_write_action("mkdtemp", "fs.mkdtemp")),
+        (CapabilityId::Fs, "copy") => Some(workspace_write_action("copy", "fs.copy")),
+        (CapabilityId::Fs, "move") => Some(workspace_write_action("move", "fs.move")),
+        (CapabilityId::Fs, "delete") => Some(action("delete", "fs.delete", "workspace.delete")),
+        (CapabilityId::Process, "exec")
+        | (CapabilityId::Process, "exec_at")
+        | (CapabilityId::Process, "shell")
+        | (CapabilityId::Process, "shell_at")
+        | (CapabilityId::Process, "run") => Some(action("process", "process.exec", "process.exec")),
+        _ => None,
+    };
+    match action {
+        Some(action) => enforce_side_effect(action, args, Some(harness)).await,
+        None => Ok(None),
+    }
+}
+
+async fn enforce_side_effect(
+    action: SideEffectAction,
+    args: &[VmValue],
+    harness: Option<&crate::harness::VmHarness>,
+) -> Result<Option<AutonomyDecision>, VmError> {
     let Some(identity) = current_identity(&action) else {
         return Ok(None);
     };
@@ -369,7 +417,7 @@ pub async fn enforce_builtin_side_effect(
             Ok(Some(AutonomyDecision::Skip(VmValue::Nil)))
         }
         AutonomyTier::ActWithApproval => {
-            let approval = request_approval_before_effect(&identity, action, args).await?;
+            let approval = request_approval_before_effect(&identity, action, args, harness).await?;
             append_enforcement_record(
                 &identity,
                 action,
@@ -562,6 +610,7 @@ async fn request_approval_before_effect(
     identity: &AutonomyIdentity,
     action: SideEffectAction,
     args: &[VmValue],
+    harness: Option<&crate::harness::VmHarness>,
 ) -> Result<ApprovalOutcome, VmError> {
     active_event_log().ok_or_else(|| {
         categorized_error(
@@ -571,6 +620,7 @@ async fn request_approval_before_effect(
     })?;
     let detail = detail_for(action, args);
     let approval = crate::stdlib::hitl::request_approval_for_side_effect(
+        harness,
         action.class,
         detail,
         identity.agent_id.clone(),

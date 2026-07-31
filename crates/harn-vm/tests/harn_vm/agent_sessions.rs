@@ -5,7 +5,8 @@ use tempfile::tempdir;
 
 fn run(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
+    let chunk = harn_vm::compile_source(&source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -40,11 +41,11 @@ fn harn_string(value: &str) -> String {
 #[test]
 fn open_mints_and_is_idempotent() {
     let lines = out(r"
-pipeline main(task) {
-  const a = agent_session_open()
-  const b = agent_session_open(a)
-  log(a == b)
-  log(agent_session_exists(a))
+pipeline main(harness: Harness, task) {
+  const a = harness.agent.open()
+  const b = harness.agent.open(a)
+  harness.stdio.log(a == b)
+  harness.stdio.log(harness.agent.exists(a))
 }
 ");
     assert_eq!(lines, vec!["true", "true"]);
@@ -53,16 +54,16 @@ pipeline main(task) {
 #[test]
 fn inject_then_length_and_snapshot() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
-  agent_session_inject(s, {role: "user", content: "hello"})
-  agent_session_inject(s, {role: "assistant", content: "hi"})
-  log(agent_session_length(s))
-  const snap = agent_session_snapshot(s)
-  log(len(snap["messages"]))
-  log(snap["parent_id"] == nil)
-  log(len(snap["child_ids"]))
-  log(snap["branched_at_event_index"] == nil)
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.inject(s, {role: "user", content: "hello"})
+  harness.agent.inject(s, {role: "assistant", content: "hi"})
+  harness.stdio.log(harness.agent.length(s))
+  const snap = harness.agent.snapshot(s)
+  harness.stdio.log(len(snap["messages"]))
+  harness.stdio.log(snap["parent_id"] == nil)
+  harness.stdio.log(len(snap["child_ids"]))
+  harness.stdio.log(snap["branched_at_event_index"] == nil)
 }
 "#);
     assert_eq!(lines, vec!["2", "2", "true", "0", "true"]);
@@ -71,13 +72,13 @@ pipeline main(task) {
 #[test]
 fn reset_clears_history_preserves_id() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
-  agent_session_inject(s, {role: "user", content: "a"})
-  agent_session_inject(s, {role: "user", content: "b"})
-  agent_session_reset(s)
-  log(agent_session_length(s))
-  log(agent_session_exists(s))
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.inject(s, {role: "user", content: "a"})
+  harness.agent.inject(s, {role: "user", content: "b"})
+  harness.agent.reset(s)
+  harness.stdio.log(harness.agent.length(s))
+  harness.stdio.log(harness.agent.exists(s))
 }
 "#);
     assert_eq!(lines, vec!["0", "true"]);
@@ -86,19 +87,19 @@ pipeline main(task) {
 #[test]
 fn tool_format_contract_is_first_class_and_resettable() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open("tool-contract")
-  log(agent_session_tool_format(s) == nil)
-  agent_session_claim_tool_format(s, "native")
-  log(agent_session_tool_format(s))
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open("tool-contract")
+  harness.stdio.log(harness.agent.tool_format(s) == nil)
+  harness.agent.claim_tool_format(s, "native")
+  harness.stdio.log(harness.agent.tool_format(s))
   const conflict = try {
-    agent_session_claim_tool_format(s, "text")
+    harness.agent.claim_tool_format(s, "text")
   }
-  log(is_err(conflict))
-  agent_session_reset(s)
-  log(agent_session_tool_format(s) == nil)
-  agent_session_claim_tool_format(s, "text")
-  log(agent_session_tool_format(s))
+  harness.stdio.log(is_err(conflict))
+  harness.agent.reset(s)
+  harness.stdio.log(harness.agent.tool_format(s) == nil)
+  harness.agent.claim_tool_format(s, "text")
+  harness.stdio.log(harness.agent.tool_format(s))
 }
 "#);
     assert_eq!(lines, vec!["true", "native", "true", "true", "text"]);
@@ -107,26 +108,26 @@ pipeline main(task) {
 #[test]
 fn agent_loop_rejects_tool_format_switch_on_same_session() {
     let lines = out(r#"
-pipeline main(task) {
-  llm_mock_clear()
-  llm_mock({text: "first ##DONE##"})
-  const s = agent_session_open("agent-loop-tool-contract")
-  const first = agent_loop(
+pipeline main(harness: Harness, task) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({text: "first ##DONE##"})
+  const s = harness.agent.open("agent-loop-tool-contract")
+  const first = agent_loop(harness,
     "first turn",
     nil,
     {provider: "mock", model: "mock", session_id: s, max_iterations: 1, tool_format: "text"},
   )
-  log(first?.tools?.mode)
-  log(agent_session_tool_format(s))
+  harness.stdio.log(first?.tools?.mode)
+  harness.stdio.log(harness.agent.tool_format(s))
   const switched = try {
-    agent_loop(
+    agent_loop(harness,
       "second turn",
       nil,
       {provider: "mock", model: "mock", session_id: s, max_iterations: 1, tool_format: "native"},
     )
   }
-  log(is_err(switched))
-  log(contains(json_stringify(unwrap_err(switched)), "tool_format"))
+  harness.stdio.log(is_err(switched))
+  harness.stdio.log(contains(json_stringify(unwrap_err(switched)), "tool_format"))
 }
 "#);
     assert_eq!(lines, vec!["text", "text", "true", "true"]);
@@ -135,25 +136,25 @@ pipeline main(task) {
 #[test]
 fn fork_is_independent_in_both_directions() {
     let lines = out(r#"
-pipeline main(task) {
-  const src = agent_session_open()
-  agent_session_inject(src, {role: "user", content: "shared"})
-  const dst = agent_session_fork(src)
-  const src_snap = agent_session_snapshot(src)
-  const dst_snap = agent_session_snapshot(dst)
-  const dst_ancestry = agent_session_ancestry(dst)
-  log(agent_session_length(dst))
-  log(dst_snap["parent_id"] == src)
-  log(len(src_snap["child_ids"]))
-  log(dst_ancestry["root_id"] == src)
+pipeline main(harness: Harness, task) {
+  const src = harness.agent.open()
+  harness.agent.inject(src, {role: "user", content: "shared"})
+  const dst = harness.agent.fork(src)
+  const src_snap = harness.agent.snapshot(src)
+  const dst_snap = harness.agent.snapshot(dst)
+  const dst_ancestry = harness.agent.ancestry(dst)
+  harness.stdio.log(harness.agent.length(dst))
+  harness.stdio.log(dst_snap["parent_id"] == src)
+  harness.stdio.log(len(src_snap["child_ids"]))
+  harness.stdio.log(dst_ancestry["root_id"] == src)
 
-  agent_session_inject(src, {role: "user", content: "src-only"})
-  agent_session_inject(dst, {role: "user", content: "dst-only-1"})
-  agent_session_inject(dst, {role: "user", content: "dst-only-2"})
+  harness.agent.inject(src, {role: "user", content: "src-only"})
+  harness.agent.inject(dst, {role: "user", content: "dst-only-1"})
+  harness.agent.inject(dst, {role: "user", content: "dst-only-2"})
 
-  log(agent_session_length(src))
-  log(agent_session_length(dst))
-  log(src == dst)
+  harness.stdio.log(harness.agent.length(src))
+  harness.stdio.log(harness.agent.length(dst))
+  harness.stdio.log(src == dst)
 }
 "#);
     assert_eq!(lines, vec!["1", "true", "1", "true", "2", "3", "false"]);
@@ -162,15 +163,15 @@ pipeline main(task) {
 #[test]
 fn fork_carries_tool_format_contract() {
     let lines = out(r#"
-pipeline main(task) {
-  const src = agent_session_open("tool-fork-src")
-  agent_session_claim_tool_format(src, "native")
-  const dst = agent_session_fork(src, "tool-fork-dst")
-  log(agent_session_tool_format(dst))
+pipeline main(harness: Harness, task) {
+  const src = harness.agent.open("tool-fork-src")
+  harness.agent.claim_tool_format(src, "native")
+  const dst = harness.agent.fork(src, "tool-fork-dst")
+  harness.stdio.log(harness.agent.tool_format(dst))
   const conflict = try {
-    agent_session_claim_tool_format(dst, "text")
+    harness.agent.claim_tool_format(dst, "text")
   }
-  log(is_err(conflict))
+  harness.stdio.log(is_err(conflict))
 }
 "#);
     assert_eq!(lines, vec!["native", "true"]);
@@ -179,18 +180,18 @@ pipeline main(task) {
 #[test]
 fn fork_at_records_branch_index_and_root_lineage() {
     let lines = out(r#"
-pipeline main(task) {
-  const root = agent_session_open("root")
-  agent_session_inject(root, {role: "user", content: "a"})
-  agent_session_inject(root, {role: "assistant", content: "b"})
-  agent_session_inject(root, {role: "user", content: "c"})
-  const branch = agent_session_fork_at(root, 2, "branch")
-  const snap = agent_session_snapshot(branch)
-  const ancestry = agent_session_ancestry(branch)
-  log(agent_session_length(branch))
-  log(snap["branched_at_event_index"])
-  log(ancestry["parent_id"] == root)
-  log(ancestry["root_id"] == root)
+pipeline main(harness: Harness, task) {
+  const root = harness.agent.open("root")
+  harness.agent.inject(root, {role: "user", content: "a"})
+  harness.agent.inject(root, {role: "assistant", content: "b"})
+  harness.agent.inject(root, {role: "user", content: "c"})
+  const branch = harness.agent.fork_at(root, 2, "branch")
+  const snap = harness.agent.snapshot(branch)
+  const ancestry = harness.agent.ancestry(branch)
+  harness.stdio.log(harness.agent.length(branch))
+  harness.stdio.log(snap["branched_at_event_index"])
+  harness.stdio.log(ancestry["parent_id"] == root)
+  harness.stdio.log(ancestry["root_id"] == root)
 }
 "#);
     assert_eq!(lines, vec!["2", "2", "true", "true"]);
@@ -199,18 +200,18 @@ pipeline main(task) {
 #[test]
 fn trim_retains_last_n() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
-  agent_session_inject(s, {role: "user", content: "a"})
-  agent_session_inject(s, {role: "user", content: "b"})
-  agent_session_inject(s, {role: "user", content: "c"})
-  agent_session_inject(s, {role: "user", content: "d"})
-  const kept = agent_session_trim(s, 2)
-  log(kept)
-  log(agent_session_length(s))
-  const snap = agent_session_snapshot(s)
-  log(snap["messages"][0]["content"])
-  log(snap["messages"][1]["content"])
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.inject(s, {role: "user", content: "a"})
+  harness.agent.inject(s, {role: "user", content: "b"})
+  harness.agent.inject(s, {role: "user", content: "c"})
+  harness.agent.inject(s, {role: "user", content: "d"})
+  const kept = harness.agent.trim(s, 2)
+  harness.stdio.log(kept)
+  harness.stdio.log(harness.agent.length(s))
+  const snap = harness.agent.snapshot(s)
+  harness.stdio.log(snap["messages"][0]["content"])
+  harness.stdio.log(snap["messages"][1]["content"])
 }
 "#);
     assert_eq!(lines, vec!["2", "2", "c", "d"]);
@@ -219,10 +220,10 @@ pipeline main(task) {
 #[test]
 fn trim_clamps_to_available() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open()
-  agent_session_inject(s, {role: "user", content: "only"})
-  log(agent_session_trim(s, 100))
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.inject(s, {role: "user", content: "only"})
+  harness.stdio.log(harness.agent.trim(s, 100))
 }
 "#);
     assert_eq!(lines, vec!["1"]);
@@ -231,10 +232,10 @@ pipeline main(task) {
 #[test]
 fn close_removes_session() {
     let lines = out(r"
-pipeline main(task) {
-  const s = agent_session_open()
-  agent_session_close(s)
-  log(agent_session_exists(s))
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.close(s)
+  harness.stdio.log(harness.agent.exists(s))
 }
 ");
     assert_eq!(lines, vec!["false"]);
@@ -243,9 +244,9 @@ pipeline main(task) {
 #[test]
 fn inject_without_role_errors() {
     let err = run(r#"
-pipeline main(task) {
-  const s = agent_session_open()
-  agent_session_inject(s, {content: "oops"})
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.inject(s, {content: "oops"})
 }
 "#)
     .unwrap_err();
@@ -255,14 +256,14 @@ pipeline main(task) {
 #[test]
 fn operations_on_unknown_session_error() {
     for op in [
-        r#"agent_session_reset("does-not-exist")"#,
-        r#"agent_session_fork("does-not-exist")"#,
-        r#"agent_session_close("does-not-exist")"#,
-        r#"agent_session_trim("does-not-exist", 1)"#,
-        r#"agent_session_inject("does-not-exist", {role: "user"})"#,
-        r#"agent_session_length("does-not-exist")"#,
+        r#"harness.agent.reset("does-not-exist")"#,
+        r#"harness.agent.fork("does-not-exist")"#,
+        r#"harness.agent.close("does-not-exist")"#,
+        r#"harness.agent.trim("does-not-exist", 1)"#,
+        r#"harness.agent.inject("does-not-exist", {role: "user"})"#,
+        r#"harness.agent.length("does-not-exist")"#,
     ] {
-        let src = format!("pipeline main(task) {{ {op} }}");
+        let src = format!("pipeline main(harness: Harness, task) {{ {op} }}");
         let err = run(&src).unwrap_err();
         assert!(
             err.contains("does-not-exist") || err.to_lowercase().contains("unknown"),
@@ -274,12 +275,12 @@ fn operations_on_unknown_session_error() {
 #[test]
 fn exists_and_snapshot_on_unknown_are_safe() {
     let lines = out(r#"
-pipeline main(task) {
-  log(agent_session_exists("nope"))
-  const snap = agent_session_snapshot("nope")
-  log(snap == nil)
-  const ancestry = agent_session_ancestry("nope")
-  log(ancestry == nil)
+pipeline main(harness: Harness, task) {
+  harness.stdio.log(harness.agent.exists("nope"))
+  const snap = harness.agent.snapshot("nope")
+  harness.stdio.log(snap == nil)
+  const ancestry = harness.agent.ancestry("nope")
+  harness.stdio.log(ancestry == nil)
 }
 "#);
     assert_eq!(lines, vec!["false", "true", "true"]);
@@ -288,13 +289,13 @@ pipeline main(task) {
 #[test]
 fn fork_at_on_unknown_or_negative_keep_first_errors() {
     for op in [
-        r#"agent_session_fork_at("does-not-exist", 1)"#,
+        r#"harness.agent.fork_at("does-not-exist", 1)"#,
         r"
-const s = agent_session_open()
-agent_session_fork_at(s, -1)
+const s = harness.agent.open()
+harness.agent.fork_at(s, -1)
 ",
     ] {
-        let src = format!("pipeline main(task) {{ {op} }}");
+        let src = format!("pipeline main(harness: Harness, task) {{ {op} }}");
         let err = run(&src).unwrap_err();
         assert!(
             err.contains("does-not-exist")
@@ -325,9 +326,9 @@ fn lru_eviction_kicks_in_at_cap() {
 #[test]
 fn compact_unknown_key_errors() {
     let err = run(r"
-pipeline main(task) {
-  const s = agent_session_open()
-  agent_session_compact(s, {bogus: 1})
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.compact(s, {bogus: 1})
 }
 ")
     .unwrap_err();
@@ -337,8 +338,8 @@ pipeline main(task) {
 #[test]
 fn open_pins_workspace_anchor_and_surfaces_in_snapshot() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open(
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open(
     "anchor-open",
     {
       workspace_anchor: {
@@ -347,11 +348,11 @@ pipeline main(task) {
       },
     },
   )
-  log(agent_session_workspace_anchor(s)["primary"])
-  const snap = agent_session_snapshot(s)
-  log(snap["workspace_anchor"]["primary"])
-  log(snap["workspace_anchor"]["anchored_at"])
-  log(len(snap["workspace_anchor"]["additional_roots"]))
+  harness.stdio.log(harness.agent.workspace_anchor(s)["primary"])
+  const snap = harness.agent.snapshot(s)
+  harness.stdio.log(snap["workspace_anchor"]["primary"])
+  harness.stdio.log(snap["workspace_anchor"]["anchored_at"])
+  harness.stdio.log(len(snap["workspace_anchor"]["additional_roots"]))
 }
 "#);
     assert_eq!(
@@ -368,23 +369,23 @@ pipeline main(task) {
 #[test]
 fn set_workspace_anchor_replaces_and_clears() {
     let lines = out(r#"
-pipeline main(task) {
-  const s = agent_session_open("anchor-set")
-  log(agent_session_workspace_anchor(s) == nil)
-  const changed = agent_session_set_workspace_anchor(s, {
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open("anchor-set")
+  harness.stdio.log(harness.agent.workspace_anchor(s) == nil)
+  const changed = harness.agent.set_workspace_anchor(s, {
     primary: "/workspace/initial",
     anchored_at: "2026-05-23T00:00:00Z",
   })
-  log(changed)
-  log(agent_session_workspace_anchor(s)["primary"])
-  const same = agent_session_set_workspace_anchor(s, {
+  harness.stdio.log(changed)
+  harness.stdio.log(harness.agent.workspace_anchor(s)["primary"])
+  const same = harness.agent.set_workspace_anchor(s, {
     primary: "/workspace/initial",
     anchored_at: "2026-05-23T00:00:00Z",
   })
-  log(same)
-  const cleared = agent_session_set_workspace_anchor(s, nil)
-  log(cleared)
-  log(agent_session_workspace_anchor(s) == nil)
+  harness.stdio.log(same)
+  const cleared = harness.agent.set_workspace_anchor(s, nil)
+  harness.stdio.log(cleared)
+  harness.stdio.log(harness.agent.workspace_anchor(s) == nil)
 }
 "#);
     assert_eq!(
@@ -403,8 +404,8 @@ pipeline main(task) {
 #[test]
 fn workspace_anchor_round_trips_through_fork() {
     let lines = out(r#"
-pipeline main(task) {
-  const src = agent_session_open("anchor-fork-src", {
+pipeline main(harness: Harness, task) {
+  const src = harness.agent.open("anchor-fork-src", {
     workspace_anchor: {
       primary: "/workspace/main",
       additional_roots: [
@@ -413,11 +414,11 @@ pipeline main(task) {
       anchored_at: "2026-05-23T00:00:00Z",
     },
   })
-  const dst = agent_session_fork(src, "anchor-fork-dst")
-  const anchor = agent_session_workspace_anchor(dst)
-  log(anchor["primary"])
-  log(len(anchor["additional_roots"]))
-  log(anchor["additional_roots"][0]["mount_mode"])
+  const dst = harness.agent.fork(src, "anchor-fork-dst")
+  const anchor = harness.agent.workspace_anchor(dst)
+  harness.stdio.log(anchor["primary"])
+  harness.stdio.log(len(anchor["additional_roots"]))
+  harness.stdio.log(anchor["additional_roots"][0]["mount_mode"])
 }
 "#);
     assert_eq!(lines, vec!["/workspace/main", "1", "read_only"]);
@@ -426,8 +427,8 @@ pipeline main(task) {
 #[test]
 fn open_rejects_unknown_option_keys() {
     let err = run(r"
-pipeline main(task) {
-  agent_session_open(nil, {bogus: 1})
+pipeline main(harness: Harness, task) {
+  harness.agent.open(nil, {bogus: 1})
 }
 ")
     .unwrap_err();
@@ -437,8 +438,8 @@ pipeline main(task) {
 #[test]
 fn workspace_anchor_requires_primary() {
     let err = run(r#"
-pipeline main(task) {
-  agent_session_open(nil, {workspace_anchor: {anchored_at: "2026-05-23T00:00:00Z"}})
+pipeline main(harness: Harness, task) {
+  harness.agent.open(nil, {workspace_anchor: {anchored_at: "2026-05-23T00:00:00Z"}})
 }
 "#)
     .unwrap_err();
@@ -448,8 +449,8 @@ pipeline main(task) {
 #[test]
 fn workspace_anchor_rejects_unknown_mount_mode() {
     let err = run(r#"
-pipeline main(task) {
-  agent_session_open(nil, {
+pipeline main(harness: Harness, task) {
+  harness.agent.open(nil, {
     workspace_anchor: {
       primary: "/workspace/main",
       additional_roots: [{path: "/workspace/lib", mount_mode: "bogus"}],
@@ -474,37 +475,37 @@ fn add_root_uses_default_mount_mode_emits_event_and_removes_cleanly() {
     let mounted_literal = harn_string(&mounted_path);
     let lines = out(&format!(
         r#"
-pipeline main(task) {{
-  const s = agent_session_open("anchor-roots", {{
+pipeline main(harness: Harness, task) {{
+  const s = harness.agent.open("anchor-roots", {{
     workspace_policy: {{default_mount_mode: "extend"}},
     workspace_anchor: {{
       primary: {primary_literal},
       anchored_at: "2026-05-24T00:00:00Z",
     }},
   }})
-  const added = agent_session_add_root(s, {mounted_literal}, {{reason: "shared"}})
-  log(added.ok)
-  log(added.mounted_at != nil)
-  const roots = agent_session_list_roots(s)
-  log(roots["primary"])
-  log(len(roots["additional"]))
-  log(roots["additional"][0]["mount_mode"])
-  const mounted_events = transcript_events_by_kind(agent_session_snapshot(s), "RootMounted")
-  log(len(mounted_events))
-  log(mounted_events[0]["metadata"]["path"])
-  log(mounted_events[0]["metadata"]["mount_mode"])
-  log(mounted_events[0]["metadata"]["reason"])
+  const added = harness.agent.add_root(s, {mounted_literal}, {{reason: "shared"}})
+  harness.stdio.log(added.ok)
+  harness.stdio.log(added.mounted_at != nil)
+  const roots = harness.agent.list_roots(s)
+  harness.stdio.log(roots["primary"])
+  harness.stdio.log(len(roots["additional"]))
+  harness.stdio.log(roots["additional"][0]["mount_mode"])
+  const mounted_events = transcript_events_by_kind(harness.agent.snapshot(s), "RootMounted")
+  harness.stdio.log(len(mounted_events))
+  harness.stdio.log(mounted_events[0]["metadata"]["path"])
+  harness.stdio.log(mounted_events[0]["metadata"]["mount_mode"])
+  harness.stdio.log(mounted_events[0]["metadata"]["reason"])
 
-  const updated = agent_session_add_root(s, {mounted_literal}, {{mount_mode: "sandboxed"}})
-  log(updated.ok)
-  log(agent_session_list_roots(s)["additional"][0]["mount_mode"])
-  log(len(agent_session_list_roots(s)["additional"]))
+  const updated = harness.agent.add_root(s, {mounted_literal}, {{mount_mode: "sandboxed"}})
+  harness.stdio.log(updated.ok)
+  harness.stdio.log(harness.agent.list_roots(s)["additional"][0]["mount_mode"])
+  harness.stdio.log(len(harness.agent.list_roots(s)["additional"]))
 
-  const removed = agent_session_remove_root(s, {mounted_literal})
-  log(removed.ok)
-  log(len(agent_session_list_roots(s)["additional"]))
-  const missing = agent_session_remove_root(s, {mounted_literal})
-  log(missing.ok)
+  const removed = harness.agent.remove_root(s, {mounted_literal})
+  harness.stdio.log(removed.ok)
+  harness.stdio.log(len(harness.agent.list_roots(s)["additional"]))
+  const missing = harness.agent.remove_root(s, {mounted_literal})
+  harness.stdio.log(missing.ok)
 }}
 "#
     ));
@@ -540,16 +541,16 @@ fn add_root_reports_missing_directory_in_result_envelope() {
     let missing_literal = harn_string(&missing_path);
     let lines = out(&format!(
         r#"
-pipeline main(task) {{
-  const s = agent_session_open("anchor-roots-missing", {{
+pipeline main(harness: Harness, task) {{
+  const s = harness.agent.open("anchor-roots-missing", {{
     workspace_anchor: {{
       primary: {primary_literal},
       anchored_at: "2026-05-24T00:00:00Z",
     }},
   }})
-  const added = agent_session_add_root(s, {missing_literal})
-  log(added.ok)
-  log(contains(added.error ?? "", "must exist"))
+  const added = harness.agent.add_root(s, {missing_literal})
+  harness.stdio.log(added.ok)
+  harness.stdio.log(contains(added.error ?? "", "must exist"))
 }}
 "#
     ));

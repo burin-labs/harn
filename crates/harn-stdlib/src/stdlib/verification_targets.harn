@@ -15,7 +15,7 @@ import "std/verification_core"
 import "std/verification_types"
 
 pub fn __verification_clean_path(value) -> string {
-  let path = regex_replace_all("\\\\", "/", trim(to_string(value ?? "")))
+  let path = regex_replace("\\\\", "/", trim(to_string(value ?? "")))
   while starts_with(path, "./") {
     path = substring(path, 2)
   }
@@ -42,28 +42,28 @@ pub fn __verification_shell_join(values) -> string {
   return join(quoted, " ")
 }
 
-pub fn __verification_render_adapter_value(value, ctx) {
+pub fn __verification_render_adapter_value(fs: HarnessFs, value, ctx) {
   if type_of(value) == "string" {
-    return render_string(value, ctx)
+    return fs.render_template(value, ctx)
   }
   if type_of(value) == "list" {
     let out = []
     for item in value {
-      out = out + [__verification_render_adapter_value(item, ctx)]
+      out = out + [__verification_render_adapter_value(fs, item, ctx)]
     }
     return out
   }
   if type_of(value) == "dict" {
     let out = {}
     for key in value.keys() {
-      out = out + {[key]: __verification_render_adapter_value(value[key], ctx)}
+      out = out + {[key]: __verification_render_adapter_value(fs, value[key], ctx)}
     }
     return out
   }
   return value
 }
 
-pub fn __verification_adapter_spec(row, changed_paths, opts) {
+pub fn __verification_adapter_spec(fs: HarnessFs, row, changed_paths, opts) {
   const spec = row?.spec ?? row?.command
   if spec == nil {
     return nil
@@ -76,7 +76,7 @@ pub fn __verification_adapter_spec(row, changed_paths, opts) {
     changed_paths_space: __verification_shell_join(changed_paths),
     root: opts?.root ?? opts?.workspace_root ?? "",
   }
-  return __verification_render_adapter_value(spec, ctx)
+  return __verification_render_adapter_value(fs, spec, ctx)
 }
 
 pub fn __verification_adapter_command_options(row, opts) {
@@ -308,7 +308,7 @@ pub fn __verification_parse_adapter_targets(
   throw "verification_affected_targets: unsupported parser_id `" + parser_id + "`"
 }
 
-pub fn __verification_code_index_fallback(changed_paths, opts) {
+pub fn __verification_code_index_fallback(code_index: HarnessCodeIndex, changed_paths, opts) {
   if opts?.fallback == false {
     return {enabled: false, available: false, targets: []}
   }
@@ -327,7 +327,7 @@ pub fn __verification_code_index_fallback(changed_paths, opts) {
       },
     )
     const file_id = try {
-      hostlib_code_index_path_to_id({path: path})
+      code_index.path_to_id({path: path})
     } catch (e) {
       errors = errors + [to_string(e)]
       nil
@@ -336,14 +336,14 @@ pub fn __verification_code_index_fallback(changed_paths, opts) {
       continue
     }
     const importers = try {
-      hostlib_code_index_deps_get({file_id: file_id, direction: "importers"})
+      code_index.deps_get({file_id: file_id, direction: "importers"})
     } catch (e) {
       errors = errors + [to_string(e)]
       []
     }
     for importer_id in importers {
       const importer_path = try {
-        hostlib_code_index_id_to_path({file_id: importer_id})
+        code_index.id_to_path({file_id: importer_id})
       } catch (_e) {
         nil
       }

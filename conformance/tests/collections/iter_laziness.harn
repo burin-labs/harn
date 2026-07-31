@@ -3,12 +3,12 @@
  * but taking only 2 materializes 2 elements. Single-pass semantics are
  * preserved — a second drain of the same iter yields only what remains.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  log(iter(xs).map({ x -> x * 10 }).take(2).to_list())
-  log(iter(xs).map({ x -> x * 10 }).filter({ x -> x > 30 }).take(3).to_list())
+  harness.stdio.log(iter(xs).map({ x -> x * 10 }).take(2).to_list())
+  harness.stdio.log(iter(xs).map({ x -> x * 10 }).filter({ x -> x > 30 }).take(3).to_list())
   // Single-pass: consuming the same iter twice yields only remaining items.
   const it = iter([1, 2, 3, 4]).map({ x -> x * 10 })
-  log(it.take(2).to_list())
-  log(it.take(10).to_list())
+  harness.stdio.log(it.take(2).to_list())
+  harness.stdio.log(it.take(10).to_list())
 }

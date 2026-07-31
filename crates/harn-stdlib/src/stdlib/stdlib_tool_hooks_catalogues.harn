@@ -5,17 +5,17 @@
  * Each `tool_hooks_catalogue_<stack>()` returns a `catalogue(...)` value
  * carrying the well-known "command faux-pas" rules for that ecosystem.
  * `tool_hooks_seed_registry(stacks)` composes the requested stacks into a
- * `tool_hooks_registry()` and always includes the universal catalogue, so
+ * `harness.tools.hooks_registry()` and always includes the universal catalogue, so
  * deny-rules (e.g. `git push --force` against `main`, `rm -rf /`) apply
  * regardless of language opt-in.
  *
- * The catalogues are stack-tagged so `tool_hooks_filter(registry, [...])`
+ * The catalogues are stack-tagged so `harness.tools.hooks_filter(registry, [...])`
  * scoping continues to work when callers compose their own registries by
  * hand. The universal catalogue intentionally has no `stack` field — the
  * filter's "match-any when stackless" branch keeps it active for every
  * opt-in.
  *
- * Wiring: `preset_run_command(config)` auto-seeds via this module when no
+ * Wiring: `preset_run_command(harness, config)` auto-seeds via this module when no
  * explicit `registry` is supplied. Callers can still pass a custom
  * registry to override the defaults (e.g. for tests or vendor patches).
  *
@@ -43,7 +43,7 @@
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: preset_run_command({stacks: ["rust", "python"]})
+ * @example: preset_run_command(harness, {stacks: ["rust", "python"]})
  */
 
 // -------------------------------------------------------------------------------------------------
@@ -161,11 +161,11 @@ fn __cat_pred_find_for_ext(extensions) {
  *   4. The escape-hatch env var HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH is not
  *      "1" / "true". Read via `env_or` so test contexts can opt out.
  */
-fn __cat_pred_force_push_main(command, _context) -> bool {
+fn __cat_pred_force_push_main(env: HarnessEnv, command, _context) -> bool {
   if !__cat_re("^git push\\b", command) {
     return false
   }
-  const allow = harness.env.get_or("HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH", "")
+  const allow = env.get_or("HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH", "")
   if allow == "1" || allow == "true" {
     return false
   }
@@ -266,7 +266,7 @@ fn __cat_pred_rm_rf_root(command, _context) -> bool {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_rust())
+ * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_rust())
  */
 pub fn tool_hooks_catalogue_rust() {
   const target_dir_rule = tool_rule(
@@ -356,7 +356,7 @@ pub fn tool_hooks_catalogue_rust() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_python())
+ * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_python())
  */
 pub fn tool_hooks_catalogue_python() {
   const find_rule = tool_rule(
@@ -426,7 +426,7 @@ pub fn tool_hooks_catalogue_python() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_typescript())
+ * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_typescript())
  */
 pub fn tool_hooks_catalogue_typescript() {
   const find_rule = tool_rule(
@@ -479,7 +479,7 @@ pub fn tool_hooks_catalogue_typescript() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_swift())
+ * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_swift())
  */
 pub fn tool_hooks_catalogue_swift() {
   const clean_rule = tool_rule(
@@ -515,7 +515,7 @@ pub fn tool_hooks_catalogue_swift() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_sql())
+ * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_sql())
  */
 pub fn tool_hooks_catalogue_sql() {
   const select_star_rule = tool_rule(
@@ -560,7 +560,7 @@ pub fn tool_hooks_catalogue_sql() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_harn())
+ * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_harn())
  */
 pub fn tool_hooks_catalogue_harn() {
   const cargo_quiet_rule = tool_rule(
@@ -616,13 +616,13 @@ pub fn tool_hooks_catalogue_harn() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal())
+ * @example: harness.tools.hooks_register(harness.tools.hooks_registry(), tool_hooks_catalogue_universal(harness.env))
  */
-pub fn tool_hooks_catalogue_universal() {
+pub fn tool_hooks_catalogue_universal(env: HarnessEnv) {
   const force_push_rule = tool_rule(
     {
       id: "universal.git_push_force_main",
-      pattern: __cat_pred_force_push_main,
+      pattern: { command, context -> __cat_pred_force_push_main(env, command, context) },
       severity: "error",
       explanation:
         "Force-pushing to main/master rewrites history for every downstream clone. Set HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH=1 only after coordinating with the team, or use `--force-with-lease` (which fails safely on remote drift).",
@@ -683,7 +683,7 @@ fn __cat_for_stack(stack) {
 }
 
 /**
- * Build a `tool_hooks_registry()` pre-populated with the universal
+ * Build a `harness.tools.hooks_registry()` pre-populated with the universal
  * catalogue plus one catalogue per requested stack. Unknown stacks are
  * silently skipped so older scripts opting into a future stack name
  * don't break.
@@ -691,15 +691,15 @@ fn __cat_for_stack(stack) {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: tool_hooks_seed_registry(["rust", "python"])
+ * @example: tool_hooks_seed_registry(harness, ["rust", "python"])
  */
-pub fn tool_hooks_seed_registry(stacks = nil) {
+pub fn tool_hooks_seed_registry(env: HarnessEnv, tools: HarnessTools, stacks = nil) {
   const opt_in = if type_of(stacks) == "list" {
     stacks
   } else {
     []
   }
-  const registry = tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal())
+  const registry = tools.hooks_register(tools.hooks_registry(), tool_hooks_catalogue_universal(env))
   let seen = {}
   let acc = registry
   for stack in opt_in {
@@ -714,7 +714,7 @@ pub fn tool_hooks_seed_registry(stacks = nil) {
     if cat == nil {
       continue
     }
-    acc = tool_hooks_register(acc, cat)
+    acc = tools.hooks_register(acc, cat)
   }
   return acc
 }

@@ -44,7 +44,11 @@ pub(crate) fn register_http_response_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "http_ok(body: any?) -> dict", category = "http_response")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "http_ok(body: any?) -> dict", category = "http_response"
+)]
 fn http_ok_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let body = args.first().cloned().unwrap_or(VmValue::Nil);
     Ok(envelope(
@@ -56,6 +60,8 @@ fn http_ok_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "http_created(body: any?, location?: string?) -> dict",
     category = "http_response"
 )]
@@ -68,7 +74,11 @@ fn http_created_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(envelope(201, body, BODY_KIND_JSON, headers))
 }
 
-#[harn_builtin(sig = "http_no_content() -> dict", category = "http_response")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "http_no_content() -> dict", category = "http_response"
+)]
 fn http_no_content_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(envelope(
         204,
@@ -79,6 +89,8 @@ fn http_no_content_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "http_error(status: int, code: string, message: string, details?: any) -> dict",
     category = "http_response"
 )]
@@ -110,6 +122,8 @@ fn http_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "http_reply(status: int, body?: any, headers?: dict) -> dict",
     category = "http_response"
 )]
@@ -135,6 +149,8 @@ fn http_reply_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 /// Convert a host/adapter response record with `status`, `body`, `headers`,
 /// and optional `body_kind` into a tagged HTTP response envelope.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "http_reply_from(result: dict) -> dict",
     category = "http_response"
 )]
@@ -221,6 +237,8 @@ fn stream_body_chunks(body: VmValue) -> VmValue {
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
     sig = "http_stream(source: any, content_type?: string?) -> dict",
     kind = "async",
     category = "http_response"
@@ -250,6 +268,8 @@ async fn http_stream_impl(
 }
 
 #[harn_builtin(
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
     sig = "http_sse(source: any, retry_ms?: int?) -> dict",
     kind = "async",
     category = "http_response"
@@ -565,7 +585,11 @@ impl HttpHeaderValue {
     }
 }
 
-#[harn_builtin(sig = "http_etag(body: any) -> string", category = "http_response")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "http_etag(body: any) -> string", category = "http_response"
+)]
 fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let body = args
         .first()
@@ -581,6 +605,8 @@ fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "http_choose(accept: string?, offers: list, default?: string?) -> string",
     category = "http_response"
 )]
@@ -645,6 +671,8 @@ fn expect_string_list(
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "http_not_modified(etag?: string?, headers?: dict) -> dict",
     category = "http_response"
 )]
@@ -657,6 +685,8 @@ fn http_not_modified_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "http_push_hints(envelope: dict, paths: list) -> dict",
     category = "http_response"
 )]
@@ -778,6 +808,8 @@ fn infer_preload_as(path: &str) -> Option<&'static str> {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "http_upgrade_ws(req: dict, options?: dict) -> dict",
     category = "http_response"
 )]

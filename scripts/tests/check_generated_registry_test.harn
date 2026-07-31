@@ -4,12 +4,12 @@ import "../check_generated_registry.harn"
 
 // --- whole_target_search --------------------------------------------------
 @test
-pipeline test_whole_target_plain_hit(task) {
+pipeline test_whole_target_plain_hit(harness: Harness, task) {
   assert_eq(whole_target_search("check-highlight", "  make check-highlight\n"), true)
 }
 
 @test
-pipeline test_whole_target_not_a_prefix(task) {
+pipeline test_whole_target_not_a_prefix(harness: Harness, task) {
   // `check-provider-catalog` must NOT match inside `-drift` suffix.
   assert_eq(
     whole_target_search("check-provider-catalog", "make check-provider-catalog-drift\n"),
@@ -18,7 +18,7 @@ pipeline test_whole_target_not_a_prefix(task) {
 }
 
 @test
-pipeline test_whole_target_full_name_hit(task) {
+pipeline test_whole_target_full_name_hit(harness: Harness, task) {
   assert_eq(
     whole_target_search("check-provider-catalog-drift", "make check-provider-catalog-drift\n"),
     true,
@@ -26,79 +26,79 @@ pipeline test_whole_target_full_name_hit(task) {
 }
 
 @test
-pipeline test_whole_target_at_end_of_text(task) {
+pipeline test_whole_target_at_end_of_text(harness: Harness, task) {
   // Target at the very end (no trailing char) still matches.
   assert_eq(whole_target_search("check-x", "run check-x"), true)
 }
 
 @test
-pipeline test_whole_target_word_char_suffix(task) {
+pipeline test_whole_target_word_char_suffix(harness: Harness, task) {
   // Followed by a word char (no hyphen) is also a non-match.
   assert_eq(whole_target_search("check-x", "check-xy"), false)
 }
 
 @test
-pipeline test_whole_target_underscore_suffix(task) {
+pipeline test_whole_target_underscore_suffix(harness: Harness, task) {
   assert_eq(whole_target_search("check-x", "check-x_y"), false)
 }
 
 @test
-pipeline test_whole_target_empty_target(task) {
+pipeline test_whole_target_empty_target(harness: Harness, task) {
   assert_eq(whole_target_search("", "anything"), false)
 }
 
 @test
-pipeline test_whole_target_absent(task) {
+pipeline test_whole_target_absent(harness: Harness, task) {
   assert_eq(whole_target_search("check-missing", "make check-other\n"), false)
 }
 
 // --- makefile_targets -----------------------------------------------------
 @test
-pipeline test_makefile_targets_basic(task) {
+pipeline test_makefile_targets_basic(harness: Harness, task) {
   const mk = "all: fmt\n\tmake check-x\ngen-foo:\n\techo hi\ncheck-foo:\n\techo\n"
   assert_eq(makefile_targets(mk), ["all", "check-foo", "gen-foo"])
 }
 
 @test
-pipeline test_makefile_targets_skips_indented(task) {
+pipeline test_makefile_targets_skips_indented(harness: Harness, task) {
   // Indented (tab or space) lines are recipe bodies, not rule defs.
   const mk = "real:\n\tnope: indented\n  alsonope: spaced\n"
   assert_eq(makefile_targets(mk), ["real"])
 }
 
 @test
-pipeline test_makefile_targets_dedup_and_sort(task) {
+pipeline test_makefile_targets_dedup_and_sort(harness: Harness, task) {
   const mk = "zeta:\n\tx\nalpha:\n\ty\nzeta:\n\tz\n"
   assert_eq(makefile_targets(mk), ["alpha", "zeta"])
 }
 
 @test
-pipeline test_makefile_targets_empty(task) {
+pipeline test_makefile_targets_empty(harness: Harness, task) {
   assert_eq(makefile_targets(""), [])
 }
 
 // --- make_all_recipe ------------------------------------------------------
 @test
-pipeline test_make_all_recipe_basic(task) {
+pipeline test_make_all_recipe_basic(harness: Harness, task) {
   const mk = "all: fmt\n\tmake check-x check-y\n\tmake check-z\nother:\n\techo no\n"
   assert_eq(make_all_recipe(mk), "\tmake check-x check-y\n\tmake check-z")
 }
 
 @test
-pipeline test_make_all_recipe_blank_line_skipped(task) {
+pipeline test_make_all_recipe_blank_line_skipped(harness: Harness, task) {
   // A blank line inside the body is skipped, not a terminator.
   const mk = "all:\n\tone\n\n\ttwo\nnext:\n\tx\n"
   assert_eq(make_all_recipe(mk), "\tone\n\ttwo")
 }
 
 @test
-pipeline test_make_all_recipe_missing(task) {
+pipeline test_make_all_recipe_missing(harness: Harness, task) {
   assert_eq(make_all_recipe("build:\n\tx\n"), "")
 }
 
 // --- artifact_flag_errors -------------------------------------------------
 @test
-pipeline test_flag_errors_ci_true_not_in_workflow(task) {
+pipeline test_flag_errors_ci_true_not_in_workflow(harness: Harness, task) {
   const art = {id: "a", ci: true}
   const errs = artifact_flag_errors(art, "check-a", "", "", [])
   assert_eq(errs.count, 1)
@@ -106,14 +106,14 @@ pipeline test_flag_errors_ci_true_not_in_workflow(task) {
 }
 
 @test
-pipeline test_flag_errors_ci_true_in_workflow_ok(task) {
+pipeline test_flag_errors_ci_true_in_workflow_ok(harness: Harness, task) {
   const art = {id: "a", ci: true}
   const errs = artifact_flag_errors(art, "check-a", "", "make check-a\n", [])
   assert_eq(errs.count, 0)
 }
 
 @test
-pipeline test_flag_errors_ci_false_in_workflow(task) {
+pipeline test_flag_errors_ci_false_in_workflow(harness: Harness, task) {
   const art = {id: "a", ci: false}
   const errs = artifact_flag_errors(art, "check-a", "", "make check-a\n", [])
   assert_eq(errs.count, 1)
@@ -121,14 +121,14 @@ pipeline test_flag_errors_ci_false_in_workflow(task) {
 }
 
 @test
-pipeline test_flag_errors_ci_missing_key_skips_both(task) {
+pipeline test_flag_errors_ci_missing_key_skips_both(harness: Harness, task) {
   // No `ci` key at all: neither the truthy nor the defensive branch fires.
   const art = {id: "a"}
   assert_eq(artifact_flag_errors(art, "check-a", "", "make check-a\n", []).count, 0)
 }
 
 @test
-pipeline test_flag_errors_make_all_missing_from_recipe(task) {
+pipeline test_flag_errors_make_all_missing_from_recipe(harness: Harness, task) {
   const art = {id: "a", make_all: true}
   const errs = artifact_flag_errors(art, "check-a", "\tmake check-other\n", "", [])
   assert_eq(errs.count, 1)
@@ -136,13 +136,13 @@ pipeline test_flag_errors_make_all_missing_from_recipe(task) {
 }
 
 @test
-pipeline test_flag_errors_make_all_present_ok(task) {
+pipeline test_flag_errors_make_all_present_ok(harness: Harness, task) {
   const art = {id: "a", make_all: true}
   assert_eq(artifact_flag_errors(art, "check-a", "\tmake check-a\n", "", []).count, 0)
 }
 
 @test
-pipeline test_flag_errors_missing_output(task) {
+pipeline test_flag_errors_missing_output(harness: Harness, task) {
   const art = {id: "a", outputs: ["docs/gone.md"]}
   const errs = artifact_flag_errors(art, "check-a", "", "", ["docs/gone.md"])
   assert_eq(errs.count, 1)
@@ -150,25 +150,25 @@ pipeline test_flag_errors_missing_output(task) {
 }
 
 @test
-pipeline test_flag_errors_release_package_output_can_be_absent(task) {
+pipeline test_flag_errors_release_package_output_can_be_absent(harness: Harness, task) {
   const art = {id: "a", lifecycle: "release-package", outputs: ["generated/payload.bin"]}
   assert_eq(artifact_flag_errors(art, "check-a", "", "", ["generated/payload.bin"]), [])
 }
 
 // --- artifact_lifecycle_errors -------------------------------------------
 @test
-pipeline test_lifecycle_defaults_to_source(task) {
+pipeline test_lifecycle_defaults_to_source(harness: Harness, task) {
   assert_eq(artifact_lifecycle_errors({id: "a"}), [])
 }
 
 @test
-pipeline test_lifecycle_accepts_release_package(task) {
+pipeline test_lifecycle_accepts_release_package(harness: Harness, task) {
   const art = {id: "a", lifecycle: "release-package", ci: true, make_all: false}
   assert_eq(artifact_lifecycle_errors(art), [])
 }
 
 @test
-pipeline test_lifecycle_requires_explicit_release_package_policy(task) {
+pipeline test_lifecycle_requires_explicit_release_package_policy(harness: Harness, task) {
   const errs = artifact_lifecycle_errors({id: "a", lifecycle: "release-package"})
   assert_eq(errs.count, 2)
   assert_eq(errs[0].contains("ci = true"), true)
@@ -176,14 +176,14 @@ pipeline test_lifecycle_requires_explicit_release_package_policy(task) {
 }
 
 @test
-pipeline test_lifecycle_rejects_unknown_value(task) {
+pipeline test_lifecycle_rejects_unknown_value(harness: Harness, task) {
   const errs = artifact_lifecycle_errors({id: "a", lifecycle: "ephemeral"})
   assert_eq(errs.count, 1)
   assert_eq(errs[0].contains("unsupported lifecycle `ephemeral`"), true)
 }
 
 @test
-pipeline test_flag_errors_empty_check_suppresses_flag_errors(task) {
+pipeline test_flag_errors_empty_check_suppresses_flag_errors(harness: Harness, task) {
   // With an empty check, ci/make_all flag checks short-circuit (check != "").
   const art = {id: "a", ci: true, make_all: true}
   assert_eq(artifact_flag_errors(art, "", "", "", []).count, 0)
@@ -191,63 +191,89 @@ pipeline test_flag_errors_empty_check_suppresses_flag_errors(task) {
 
 // --- completeness_errors --------------------------------------------------
 @test
-pipeline test_completeness_unregistered_gen(task) {
-  const errs = completeness_errors(["gen-foo"], [], [], [])
+pipeline test_completeness_unregistered_gen(harness: Harness, task) {
+  const errs = completeness_errors(
+    {targets: ["gen-foo"], registered_gens: [], registered_checks: [], exempt: []},
+  )
   assert_eq(errs.count, 1)
   assert_eq(errs[0].contains("Makefile target `gen-foo` generates an artifact"), true)
 }
 
 @test
-pipeline test_completeness_sync_prefix(task) {
-  const errs = completeness_errors(["sync-bar"], [], [], [])
+pipeline test_completeness_sync_prefix(harness: Harness, task) {
+  const errs = completeness_errors(
+    {targets: ["sync-bar"], registered_gens: [], registered_checks: [], exempt: []},
+  )
   assert_eq(errs.count, 1)
   assert_eq(errs[0].contains("`sync-bar` generates an artifact"), true)
 }
 
 @test
-pipeline test_completeness_registered_gen_ok(task) {
-  assert_eq(completeness_errors(["gen-foo"], ["gen-foo"], [], []).count, 0)
+pipeline test_completeness_registered_gen_ok(harness: Harness, task) {
+  assert_eq(
+    completeness_errors(
+      {targets: ["gen-foo"], registered_gens: ["gen-foo"], registered_checks: [], exempt: []},
+    ).count,
+    0,
+  )
 }
 
 @test
-pipeline test_completeness_unregistered_check(task) {
-  const errs = completeness_errors(["check-foo"], [], [], [])
+pipeline test_completeness_unregistered_check(harness: Harness, task) {
+  const errs = completeness_errors(
+    {targets: ["check-foo"], registered_gens: [], registered_checks: [], exempt: []},
+  )
   assert_eq(errs.count, 1)
   assert_eq(errs[0].contains("`check-foo` is a check but is neither registered"), true)
 }
 
 @test
-pipeline test_completeness_check_exempt_ok(task) {
-  assert_eq(completeness_errors(["check-foo"], [], [], ["check-foo"]).count, 0)
+pipeline test_completeness_check_exempt_ok(harness: Harness, task) {
+  assert_eq(
+    completeness_errors(
+      {targets: ["check-foo"], registered_gens: [], registered_checks: [], exempt: ["check-foo"]},
+    ).count,
+    0,
+  )
 }
 
 @test
-pipeline test_completeness_check_registered_ok(task) {
-  assert_eq(completeness_errors(["check-foo"], [], ["check-foo"], []).count, 0)
+pipeline test_completeness_check_registered_ok(harness: Harness, task) {
+  assert_eq(
+    completeness_errors(
+      {targets: ["check-foo"], registered_gens: [], registered_checks: ["check-foo"], exempt: []},
+    ).count,
+    0,
+  )
 }
 
 @test
-pipeline test_completeness_ignores_plain_targets(task) {
+pipeline test_completeness_ignores_plain_targets(harness: Harness, task) {
   // Targets that are neither gen-/sync- nor check- are ignored entirely.
-  assert_eq(completeness_errors(["all", "build", "test"], [], [], []).count, 0)
+  assert_eq(
+    completeness_errors(
+      {targets: ["all", "build", "test"], registered_gens: [], registered_checks: [], exempt: []},
+    ).count,
+    0,
+  )
 }
 
 // --- exempt_hygiene_errors ------------------------------------------------
 @test
-pipeline test_hygiene_overlap_flagged(task) {
+pipeline test_hygiene_overlap_flagged(harness: Harness, task) {
   const errs = exempt_hygiene_errors(["check-a", "check-b"], ["check-b"])
   assert_eq(errs.count, 1)
   assert_eq(errs[0].contains("`check-b` is both registered"), true)
 }
 
 @test
-pipeline test_hygiene_no_overlap(task) {
+pipeline test_hygiene_no_overlap(harness: Harness, task) {
   assert_eq(exempt_hygiene_errors(["check-a"], ["check-b"]).count, 0)
 }
 
 // --- preflight_dispatch_errors --------------------------------------------
 @test
-pipeline test_preflight_unclassified_check(task) {
+pipeline test_preflight_unclassified_check(harness: Harness, task) {
   // A check-* target absent from the dispatch table is flagged.
   assert_eq(
     preflight_dispatch_errors(["check-foo"], {}),
@@ -258,20 +284,20 @@ pipeline test_preflight_unclassified_check(task) {
 }
 
 @test
-pipeline test_preflight_umbrella_check_not_required(task) {
+pipeline test_preflight_umbrella_check_not_required(harness: Harness, task) {
   // The umbrella `check` has no hyphen, so it is not required to be classified.
   assert_eq(preflight_dispatch_errors(["check", "all", "test"], {}).count, 0)
 }
 
 @test
-pipeline test_preflight_classified_ok(task) {
+pipeline test_preflight_classified_ok(harness: Harness, task) {
   const dispatch = {"check-a": "source", "check-b": "binary"}
   const errs = preflight_dispatch_errors(["check-a", "check-b"], dispatch)
   assert_eq(errs, [])
 }
 
 @test
-pipeline test_preflight_dead_target_flagged(task) {
+pipeline test_preflight_dead_target_flagged(harness: Harness, task) {
   // A dispatch entry naming a target that does not exist is flagged.
   assert_eq(
     preflight_dispatch_errors([], {"check-gone": "source"}),
@@ -282,7 +308,7 @@ pipeline test_preflight_dead_target_flagged(task) {
 }
 
 @test
-pipeline test_preflight_invalid_tier_flagged(task) {
+pipeline test_preflight_invalid_tier_flagged(harness: Harness, task) {
   assert_eq(
     preflight_dispatch_errors(["check-a"], {"check-a": "sourced"}),
     [
@@ -292,7 +318,7 @@ pipeline test_preflight_invalid_tier_flagged(task) {
 }
 
 @test
-pipeline test_preflight_lint_target_allowed(task) {
+pipeline test_preflight_lint_target_allowed(harness: Harness, task) {
   // A lint-* target may be classified (it is a real target with a valid tier)
   // without being required — only check-* targets are mandatory.
   const dispatch = {"lint-x": "source", "check-a": "source"}
@@ -301,58 +327,98 @@ pipeline test_preflight_lint_target_allowed(task) {
 
 // --- validate (integration of the pure pieces) ----------------------------
 @test
-pipeline test_validate_clean(task) {
+pipeline test_validate_clean(harness: Harness, task) {
   const artifacts = [
     {id: "h", check: "check-h", gen: "gen-h", ci: true, make_all: true, outputs: ["out.js"]},
   ]
   const errs = validate(
-    artifacts,
-    [],
-    ["check-h", "gen-h"],
-    "\tmake check-h\n",
-    "make check-h\n",
-    [],
+    {
+      artifacts: artifacts,
+      exempt: [],
+      targets: ["check-h", "gen-h"],
+      all_recipe: "\tmake check-h\n",
+      workflow_text: "make check-h\n",
+      missing_outputs: [],
+    },
   )
   assert_eq(errs, [])
 }
 
 @test
-pipeline test_validate_missing_check(task) {
-  const errs = validate([{id: "x"}], [], [], "", "", [])
+pipeline test_validate_missing_check(harness: Harness, task) {
+  const errs = validate(
+    {
+      artifacts: [{id: "x"}],
+      exempt: [],
+      targets: [],
+      all_recipe: "",
+      workflow_text: "",
+      missing_outputs: [],
+    },
+  )
   assert_eq(errs.count, 1)
   assert_eq(errs[0], "[x] missing required `check` target")
 }
 
 @test
-pipeline test_validate_rejects_unknown_lifecycle(task) {
+pipeline test_validate_rejects_unknown_lifecycle(harness: Harness, task) {
   const errs = validate(
-    [{id: "x", check: "check-x", lifecycle: "ephemeral"}],
-    [],
-    ["check-x"],
-    "",
-    "",
-    [],
+    {
+      artifacts: [{id: "x", check: "check-x", lifecycle: "ephemeral"}],
+      exempt: [],
+      targets: ["check-x"],
+      all_recipe: "",
+      workflow_text: "",
+      missing_outputs: [],
+    },
   )
   assert_eq(errs.count, 1)
   assert_eq(errs[0].contains("unsupported lifecycle"), true)
 }
 
 @test
-pipeline test_validate_missing_id_placeholder(task) {
+pipeline test_validate_missing_id_placeholder(harness: Harness, task) {
   // An artifact with no id uses the "<missing id>" placeholder.
-  const errs = validate([{check: "check-z"}], [], [], "", "", [])
+  const errs = validate(
+    {
+      artifacts: [{check: "check-z"}],
+      exempt: [],
+      targets: [],
+      all_recipe: "",
+      workflow_text: "",
+      missing_outputs: [],
+    },
+  )
   assert_eq(errs[0], "[<missing id>] check target `check-z` is not defined in the Makefile")
 }
 
 @test
-pipeline test_validate_duplicate_id(task) {
+pipeline test_validate_duplicate_id(harness: Harness, task) {
   const arts = [{id: "dup", check: "check-dup"}, {id: "dup", check: "check-dup"}]
-  const errs = validate(arts, [], ["check-dup"], "", "", [])
+  const errs = validate(
+    {
+      artifacts: arts,
+      exempt: [],
+      targets: ["check-dup"],
+      all_recipe: "",
+      workflow_text: "",
+      missing_outputs: [],
+    },
+  )
   assert_eq(errs.contains("duplicate artifact id: dup"), true)
 }
 
 @test
-pipeline test_validate_gen_not_defined(task) {
-  const errs = validate([{id: "a", check: "check-a", gen: "gen-a"}], [], ["check-a"], "", "", [])
+pipeline test_validate_gen_not_defined(harness: Harness, task) {
+  const errs = validate(
+    {
+      artifacts: [{id: "a", check: "check-a", gen: "gen-a"}],
+      exempt: [],
+      targets: ["check-a"],
+      all_recipe: "",
+      workflow_text: "",
+      missing_outputs: [],
+    },
+  )
   assert_eq(errs.contains("[a] gen target `gen-a` is not defined in the Makefile"), true)
 }

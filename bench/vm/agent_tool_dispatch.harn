@@ -25,7 +25,7 @@ fn bench_tools() {
   return tools
 }
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const tools = bench_tools()
   const calls = [
     {id: "read-001", name: "read", arguments: {path: "src/a.harn", line: 1}},
@@ -39,6 +39,7 @@ pipeline default(task) {
   let total = 0
   while iteration < 500 {
     const results = agent_dispatch_tool_batch(
+      harness.tools,
       calls,
       tools,
       {session_id: "bench-agent-tool-dispatch", tool_retries: 0, tool_backoff_ms: 1},
@@ -51,6 +52,6 @@ pipeline default(task) {
     iteration = iteration + 1
   }
   if total < 0 {
-    log("unreachable")
+    harness.stdio.log("unreachable")
   }
 }

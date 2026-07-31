@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const f: fn(int) -> int = { x -> x + "oops" }
-  __io_println(0)
+  harness.stdio.println(0)
 }

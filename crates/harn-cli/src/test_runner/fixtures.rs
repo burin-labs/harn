@@ -51,10 +51,19 @@ pub(super) fn discover(program: &[SNode]) -> Result<FixtureRegistry, String> {
                 "`@test_fixture` only applies to function declarations",
             ));
         };
-        if !params.is_empty() {
+        let accepts_only_harness = matches!(
+            params.as_slice(),
+            [harn_parser::TypedParam {
+                type_expr: Some(harn_parser::TypeExpr::Named(type_name)),
+                ..
+            }] if type_name == "Harness"
+        );
+        if !params.is_empty() && !accepts_only_harness {
             return Err(at(
                 inner.span,
-                &format!("test fixture `{name}` must not declare parameters"),
+                &format!(
+                    "test fixture `{name}` may only declare a leading `harness: Harness` parameter"
+                ),
             ));
         }
         if return_type.is_none() {

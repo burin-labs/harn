@@ -22,7 +22,6 @@ use crate::json::vm_dict_to_json;
 use crate::process::handle::is_sensitive_env_name;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 use crate::tools::args::{dict_arg, resolve_host_path};
-use crate::tools::permissions::{gated_handler_for, FEATURE_TERMINAL_SESSION};
 
 const MODULE: &str = "terminal_session";
 const START: &str = "hostlib_terminal_session_start";
@@ -183,7 +182,7 @@ fn register(
         name,
         module: MODULE,
         method,
-        handler: gated_handler_for(FEATURE_TERMINAL_SESSION, name, handler),
+        handler,
     });
 }
 

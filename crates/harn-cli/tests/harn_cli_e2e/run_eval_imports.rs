@@ -1,6 +1,6 @@
 //! End-to-end coverage for `harn run -e` with module imports.
 //!
-//! `-e` wraps the snippet in `pipeline main(task) { ... }`, but `import`
+//! `-e` wraps the snippet in `pipeline main(harness: Harness, task) { ... }`, but `import`
 //! is a top-level Harn declaration so leading `import` lines are
 //! hoisted out of the wrapper. The temp file backing `-e` is also
 //! placed in the current working directory so relative imports resolve

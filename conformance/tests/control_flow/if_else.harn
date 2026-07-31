@@ -1,10 +1,10 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   if true {
-    log("yes")
+    harness.stdio.log("yes")
   }
   if false {
-    log("wrong")
+    harness.stdio.log("wrong")
   } else {
-    log("no")
+    harness.stdio.log("no")
   }
 }

@@ -1,6 +1,6 @@
 import "std/agents"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const patch = artifact_workspace_file("crates/harn-vm/src/lib.rs", "pub fn handoff() {}")
   const verification = artifact_verification_result("cargo test -p harn-vm", "passed")
   const review = handoff(
@@ -28,6 +28,7 @@ pipeline main() {
   )
   const emitted = handoff_artifact(review)
   const run = workflow_result_run(
+    harness.obs,
     "Prepare review handoff",
     "merge_captain",
     {visible_text: "handoff ready"},
@@ -36,9 +37,9 @@ pipeline main() {
   )
   const consumed = handoff(run?.artifacts[2])
   const context = handoff_context(run?.artifacts[2])
-  __io_println(run?.handoffs[0]?.source_persona == "merge_captain")
-  __io_println(run?.handoffs[0]?.target_persona_or_human?.label == "review_captain")
-  __io_println(run?.handoffs[0]?.receipt_links[0]?.kind == "run_receipt")
-  __io_println(consumed?.evidence_refs[0]?.artifact_id == patch?.id)
-  __io_println(contains(context, "comment_on_pr"))
+  harness.stdio.println(run?.handoffs[0]?.source_persona == "merge_captain")
+  harness.stdio.println(run?.handoffs[0]?.target_persona_or_human?.label == "review_captain")
+  harness.stdio.println(run?.handoffs[0]?.receipt_links[0]?.kind == "run_receipt")
+  harness.stdio.println(consumed?.evidence_refs[0]?.artifact_id == patch?.id)
+  harness.stdio.println(contains(context, "comment_on_pr"))
 }

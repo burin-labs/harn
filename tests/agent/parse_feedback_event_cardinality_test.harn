@@ -7,6 +7,7 @@ import {
   agent_event_value,
   agent_feedback_injected_event_schema,
 } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -29,11 +30,12 @@ fn parse_feedback_tools() {
   return tools
 }
 
-pipeline test_parse_feedback_is_counted_once(task) {
+pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [llm_text("<tool_call>\nadd({ left: })\n</tool_call>"), llm_text("<done>##DONE##</done>")],
     { ->
-      const session = "parse-feedback-cardinality-" + uuid()
+      const session = "parse-feedback-cardinality-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
         provider: "mock",
         session_id: session,
@@ -45,8 +47,9 @@ pipeline test_parse_feedback_is_counted_once(task) {
         max_iterations: 3,
       }
       const captured = agent_capture_events(
+        harness.agent,
         session,
-        fn() { return agent_loop("Add the two numbers, then finish.", nil, opts) },
+        fn() { return agent_loop(harness, "Add the two numbers, then finish.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
       let parse_guidance_events = 0
@@ -74,9 +77,10 @@ pipeline test_parse_feedback_is_counted_once(task) {
   )
 }
 
-pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(task) {
+pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(harness: Harness, task) {
   const malformed = llm_text("<tool_call>\nadd({ left: })\n</tool_call>")
   with_llm_script(
+    harness.llm,
     [
       malformed,
       malformed,
@@ -84,7 +88,7 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(task) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const session = "parse-feedback-recovery-" + uuid()
+      const session = "parse-feedback-recovery-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
         provider: "mock",
         session_id: session,
@@ -103,8 +107,9 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(task) {
         },
       }
       const captured = agent_capture_events(
+        harness.agent,
         session,
-        fn() { return agent_loop("Add one and two, then finish.", nil, opts) },
+        fn() { return agent_loop(harness, "Add one and two, then finish.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
       assert_eq(captured.result.tools.successful, ["add"])
@@ -116,7 +121,7 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(task) {
         },
       )
       assert_eq(len(warnings), 1)
-      const retry_messages = json_stringify(llm_mock_calls()[2].messages)
+      const retry_messages = json_stringify(harness.llm.mock_calls()[2].messages)
       assert(contains(retry_messages, "Content repair"))
       assert(contains(retry_messages, "active tool format"))
     },

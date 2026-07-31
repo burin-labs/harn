@@ -21,13 +21,13 @@ fn __load_plan(harness: Harness) -> dict {
   const raw = harness.env.get_or("HARN_CANON_CHECK_PLAN_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("canon: internal error - HARN_CANON_CHECK_PLAN_JSON not set")
-    exit(70)
+    harness.runtime.exit(70)
   }
   return try {
     json_parse(raw)
   } catch (e) {
     harness.stdio.eprintln("canon: internal error - failed to parse check plan: " + e.message)
-    exit(70)
+    harness.runtime.exit(70)
   }
 }
 
@@ -108,15 +108,15 @@ fn __report(plan: dict, result: dict, feedback: string) -> dict {
   }
 }
 
-fn __render_json(harness: Harness, report: dict) {
+fn __render_json(stdio: HarnessStdio, report: dict) {
   const ok = safe_bool(report["ok"], false) || safe_bool(report["advisory"], false)
   if ok {
-    harness.stdio.println(
+    stdio.println(
       json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report})),
     )
     return
   }
-  harness.stdio.println(
+  stdio.println(
     json_stringify_pretty(
       cli_json_envelope(
         {
@@ -133,33 +133,34 @@ fn __render_json(harness: Harness, report: dict) {
   )
 }
 
-fn __render_human(harness: Harness, report: dict) {
-  harness.stdio.println("harn-canon check: " + safe_string(report["status"], "unknown"))
-  harness.stdio.println("  paths: " + safe_int_string(report["path_count"], "0"))
+fn __render_human(stdio: HarnessStdio, report: dict) {
+  stdio.println("harn-canon check: " + safe_string(report["status"], "unknown"))
+  stdio.println("  paths: " + safe_int_string(report["path_count"], "0"))
   const selected = __join_text(safe_list(report["selected_pack_ids"]), ", ")
   if selected == "" {
-    harness.stdio.println("  packs: none")
+    stdio.println("  packs: none")
   } else {
-    harness.stdio.println("  packs: " + selected)
+    stdio.println("  packs: " + selected)
   }
   const feedback = safe_string(report["feedback_text"], "")
   if feedback != "" {
-    harness.stdio.println("")
-    harness.stdio.println(feedback)
+    stdio.println("")
+    stdio.println(feedback)
   } else if safe_string(report["status"], "") == "no_packs" {
-    harness.stdio.println("")
-    harness.stdio.println(
+    stdio.println("")
+    stdio.println(
       "No harn-canon packs selected. Pass --pack or configure canon-packs.json routing.",
     )
   } else {
-    harness.stdio.println("")
-    harness.stdio.println("No harn-canon findings.")
+    stdio.println("")
+    stdio.println("No harn-canon findings.")
   }
 }
 
 fn main(harness: Harness) -> int {
   const plan = __load_plan(harness)
   const slice = canon_slice_from_paths(
+    harness.fs,
     safe_list(plan["paths"]),
     {
       root: safe_string(plan["workspace_root"], ""),
@@ -167,7 +168,7 @@ fn main(harness: Harness) -> int {
       include_missing: safe_bool(plan["include_missing"], false),
     },
   )
-  const result = canon_evaluate_slice(slice, __options(plan, slice))
+  const result = canon_evaluate_slice(harness, slice, __options(plan, slice))
   const feedback = canon_feedback_text(
     result,
     {header: safe_string(plan["feedback_header"], "harn-canon feedback")},
@@ -175,9 +176,9 @@ fn main(harness: Harness) -> int {
   const report = __report(plan, result, feedback)
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
-    __render_json(harness, report)
+    __render_json(harness.stdio, report)
   } else {
-    __render_human(harness, report)
+    __render_human(harness.stdio, report)
   }
   if safe_bool(report["ok"], false) || safe_bool(report["advisory"], false) {
     return 0

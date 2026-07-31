@@ -1,16 +1,13 @@
-pipeline default() {
-  const argv = host_call("process.exec", {mode: "argv", argv: ["printf", "runner-v2"]})
-  __io_println(argv?.status)
-  __io_println(argv?.exit_code)
-  __io_println(argv?.success)
-  __io_println(argv?.stdout)
-  __io_println(argv?.command_id != nil)
-  __io_println(argv?.pid != nil)
-  const shell = host_call(
-    "process.exec",
-    {mode: "shell", command: "printf shell-v2", shell: {id: "sh"}},
-  )
-  __io_println(shell?.status)
-  __io_println(shell?.exit_code)
-  __io_println(shell?.stdout)
+pipeline default(harness: Harness) {
+  const argv = harness.process.run({program: "printf", args: ["runner-v2"]})
+  harness.stdio.println(argv?.status)
+  harness.stdio.println(argv?.exit_code)
+  harness.stdio.println(argv?.success)
+  harness.stdio.println(argv?.stdout)
+  harness.stdio.println(argv?.command_id != nil)
+  harness.stdio.println(argv?.pid != nil)
+  const shell = harness.process.shell("printf shell-v2")
+  harness.stdio.println(shell?.status)
+  harness.stdio.println(shell?.exit_code)
+  harness.stdio.println(shell?.stdout)
 }

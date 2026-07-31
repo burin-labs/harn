@@ -18,7 +18,7 @@ What belongs in Harn `std/*` modules or the VM:
 - Transcript schemas, assets, compaction, and replay semantics
 - Context/artifact assembly rules that are product-agnostic
 - Structured contract enforcement and eval/replay helpers
-- Test-time typed host mocks such as `host_mock(...)` when the behavior is a
+- Test-time capability fixtures owned by `HarnessTesting` when behavior is a
   runtime fixture for host-backed flows rather than a product-specific bridge
 - Mutation-session identity and audit provenance for write-capable workflows
   and delegated workers
@@ -28,7 +28,7 @@ What should stay in host-side `.harn` scripts:
 - Product-specific prompts and instruction tone
 - IDE-specific flows such as edit application, approval UX, repo enrichment,
   or bespoke tool choreography
-- Host-owned filesystem and edit wrappers built on capability-aware `host_call(...)`
+- Host-owned filesystem and edit adapters exposed as typed harness capabilities
 - Host-owned editor, diagnostics, git, learning, and project-context wrappers
 - Concrete undo/redo stacks and editor-native mutation application
 - Proprietary ranking, routing, or heuristics tied to one host product
@@ -64,9 +64,11 @@ Hosts should own the concrete UX:
 
 ## Typed host capabilities
 
-Typed capabilities surfaced through `host_call(capability.operation, params)`
-let Harn delegate platform effects without coupling to one host. Notable
-capabilities Harn defines today:
+Typed capabilities surfaced through nominal handles such as `HarnessFs`,
+`HarnessProcess`, and `HarnessInteraction` let Harn delegate platform effects
+without coupling scripts to one host. Ordinary scripts never call
+`host_call(...)`; the capability registry projects each operation onto the
+appropriate `harness.*` handle. Notable capability families include:
 
 - `process.exec` and the `process.*` shell helpers — process execution.
 - `template.render` — host-resolved template rendering.
@@ -78,16 +80,16 @@ capabilities Harn defines today:
   per `(model_hint, content_hash)` so replays are deterministic. See
   [Memory](memory.md) for the recall and storage contract.
 
-Tests satisfy registered capabilities with `host_mock(capability, op,
-{result})`. Deliberately synthetic test-only operations must pass
-`unregistered_ok: true` so typos in real host boundaries fail at registration
-instead of surfacing later as unsupported host calls. Embedders ship richer
-behavior via the async `HostCallBridge` trait described in
+Tests satisfy registered capabilities through the `HarnessTesting` handle:
+`harness.testing.respond(...)`, `respond_error(...)`, and `calls()`. Unknown
+capability methods fail closed, so typos cannot create a mock-only interface.
+Embedders ship richer behavior via the async `HostCallBridge` trait described in
 `crates/harn-vm/src/stdlib/host/bridge.rs`. ACP installs that bridge and keeps the
-stdlib `host_call` builtin, so mocks, command-policy preflight, the
-process-handle registry, and the per-turn memo stay on one dispatch path;
-editor-owned terminal builtins (`exec`, `shell`, `run_command`) remain
-separate ACP overrides.
+privileged wire dispatch, fixture routing, command-policy preflight, the
+process-handle registry, and the per-turn memo on one internal path. Only
+stamped privileged modules may name `host_call`; provenance is transitive and
+cannot be re-exported as a closure to ordinary code. Script-facing process
+execution remains `harness.process.*` in every embedder.
 
 ## Process sandbox
 

@@ -2,6 +2,6 @@ fn tuple(value: int) -> string {
   return "user:${value}"
 }
 
-pipeline default() {
-  __io_println(tuple(9))
+pipeline default(harness: Harness) {
+  harness.stdio.println(tuple(9))
 }

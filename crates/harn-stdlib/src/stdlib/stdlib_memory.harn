@@ -21,8 +21,8 @@
  * @effects: []
  * @errors: []
  */
-pub fn memory_open(namespace, options = nil) {
-  return __memory_open(namespace, options)
+pub fn memory_open(memory: HarnessMemory, namespace, options = nil) {
+  return memory.open(namespace, options)
 }
 
 /**
@@ -35,8 +35,8 @@ pub fn memory_open(namespace, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn memory_store(namespace, key, value, tags = nil, options = nil) {
-  return __memory_store(namespace, key, value, tags, options)
+pub fn memory_store(memory: HarnessMemory, namespace, key, value, tags = nil, options = nil) {
+  return memory.store(namespace, key, value, tags, options)
 }
 
 /**
@@ -49,8 +49,8 @@ pub fn memory_store(namespace, key, value, tags = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn memory_recall(namespace, query, k = nil, options = nil) {
-  return __memory_recall(namespace, query, k, options)
+pub fn memory_recall(memory: HarnessMemory, namespace, query, k = nil, options = nil) {
+  return memory.recall(namespace, query, k, options)
 }
 
 /**
@@ -59,8 +59,8 @@ pub fn memory_recall(namespace, query, k = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn memory_summarize(namespace, window = nil, options = nil) {
-  return __memory_summarize(namespace, window, options)
+pub fn memory_summarize(memory: HarnessMemory, namespace, window = nil, options = nil) {
+  return memory.summarize(namespace, window, options)
 }
 
 /**
@@ -69,8 +69,8 @@ pub fn memory_summarize(namespace, window = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn memory_forget(namespace, predicate, options = nil) {
-  return __memory_forget(namespace, predicate, options)
+pub fn memory_forget(memory: HarnessMemory, namespace, predicate, options = nil) {
+  return memory.forget(namespace, predicate, options)
 }
 
 /**
@@ -85,8 +85,8 @@ pub fn memory_forget(namespace, predicate, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn memory_update(namespace, id, patch, options = nil) {
-  return __memory_update(namespace, id, patch, options)
+pub fn memory_update(memory: HarnessMemory, namespace, id, patch, options = nil) {
+  return memory.update(namespace, id, patch, options)
 }
 
 /**
@@ -99,8 +99,8 @@ pub fn memory_update(namespace, id, patch, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn memory_list(namespace, options = nil) {
-  return __memory_list(namespace, options)
+pub fn memory_list(memory: HarnessMemory, namespace, options = nil) {
+  return memory.list(namespace, options)
 }
 
 /**
@@ -114,9 +114,9 @@ pub fn memory_list(namespace, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn memory_reminders(namespace, options = nil) {
+pub fn memory_reminders(memory: HarnessMemory, namespace, options = nil) {
   const flag = (options ?? {})?.flag ?? "auto_surface"
-  return memory_list(namespace, (options ?? {}) + {flag: flag})
+  return memory_list(memory, namespace, (options ?? {}) + {flag: flag})
 }
 
 /**
@@ -135,6 +135,6 @@ pub fn memory_reminders(namespace, options = nil) {
  * @effects: [host]
  * @errors: []
  */
-pub fn embed(text, options = nil) -> dict {
-  return __embed(text, options)
+pub fn embed(embedder: HarnessEmbed, text, options = nil) -> dict {
+  return embedder.text(text, options)
 }

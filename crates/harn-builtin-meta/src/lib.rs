@@ -13,15 +13,22 @@
 //! parser's static typechecking tables and the `#[harn_builtin]` macro's
 //! `@NAME` signature injection.
 
+pub mod contracts;
+pub mod host_capabilities;
 pub mod llm_options;
 pub mod runtime_type_tags;
 pub mod shapes;
 pub mod signatures;
 
+pub use contracts::{
+    BuiltinContract, BuiltinExposure, CapabilityId, EffectAccess, EffectKind, EffectSpec,
+    ResourceSelector,
+};
+
 /// A complete, static description of one builtin: identifier, arity range,
 /// per-parameter types, generic type parameters, return type, and any
 /// where-clause bounds the type checker should enforce on call.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltinSignature {
     /// Builtin name as registered in the VM and referenced from Harn source.
     pub name: &'static str,
@@ -44,8 +51,15 @@ pub struct BuiltinSignature {
     pub where_clauses: &'static [(&'static str, &'static str)],
 }
 
+impl BuiltinSignature {
+    /// Reuse a canonical signature shape under a projected source name.
+    pub const fn with_name(self, name: &'static str) -> Self {
+        Self { name, ..self }
+    }
+}
+
 /// One parameter slot inside a [`BuiltinSignature`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Param {
     pub name: &'static str,
     pub ty: Ty,
@@ -76,7 +90,7 @@ impl Param {
 /// `TypeExpr` from `harn-parser` but is constructable in `const` position with
 /// no allocation. Convert to `TypeExpr` at the boundary via the parser-side
 /// `Ty::to_type_expr` helper.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ty {
     /// A primitive or user-defined named type: `int`, `string`, `bool`,
     /// `float`, `nil`, `bytes`, `dict`, `list`, `closure`, `duration`,
@@ -114,7 +128,7 @@ pub enum Ty {
     LitString(&'static str),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShapeFieldDescriptor {
     pub name: &'static str,
     pub ty: Ty,
@@ -373,6 +387,7 @@ pub const TY_INT: Ty = Ty::Named("int");
 pub const TY_LIST: Ty = Ty::Named("list");
 pub const TY_NEVER: Ty = Ty::Never;
 pub const TY_NIL: Ty = Ty::Named("nil");
+pub const TY_RESOURCE: Ty = Ty::Named("resource");
 pub const TY_STRING: Ty = Ty::Named("string");
 
 /// `string | nil`.

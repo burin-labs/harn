@@ -10,9 +10,9 @@ const COUNT: int = len([10, 20, 30, 40])
 
 const GREETING: string = "hello" + "-" + "world"
 
-pipeline main() {
-  log(X)
-  log(Y)
-  log(COUNT)
-  log(GREETING)
+pipeline main(harness: Harness) {
+  harness.stdio.log(X)
+  harness.stdio.log(Y)
+  harness.stdio.log(COUNT)
+  harness.stdio.log(GREETING)
 }

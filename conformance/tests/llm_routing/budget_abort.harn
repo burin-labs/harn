@@ -5,11 +5,12 @@ import { with_llm_script } from "std/testing"
  * 100k output tokens at catalog pricing well above the $0.0001 cap,
  * so the chain aborts before any provider call.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [{text: "should never reach the provider", model: "gpt-4o-mini", provider: "openai"}],
     { ->
-      const policy = routing_policy(
+      const policy = harness.llm.routing_policy(
         {
           chain: [{provider: "openai", model: "gpt-4o-mini"}],
           budget: {per_call_usd: 0.000001, on_exceed: "abort"},
@@ -17,13 +18,13 @@ pipeline test(task) {
         },
       )
       const result = try {
-        llm_call("hi", nil, {routing: policy, max_tokens: 100000})
+        harness.llm.call("hi", nil, {routing: policy, max_tokens: 100000})
       } catch (e) {
         {caught: true, category: e.category, limit: e.limit}
       }
-      __io_println(result.caught)
-      __io_println(result.category)
-      __io_println(result.limit)
+      harness.stdio.println(result.caught)
+      harness.stdio.println(result.category)
+      harness.stdio.println(result.limit)
     },
   )
 }

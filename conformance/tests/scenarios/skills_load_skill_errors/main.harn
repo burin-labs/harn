@@ -1,8 +1,10 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   with_llm_script(
+    harness.llm,
     [
       {
         text: "Try the gated skill.",
@@ -16,6 +18,7 @@ pipeline test(task) {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Use the skills catalog",
         catalog,
         {
@@ -29,7 +32,7 @@ pipeline test(task) {
         },
       )
       assert(result?.status == "done", "agent loop completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const second_messages = json_stringify(calls[1].messages)
       assert(
         contains(second_messages, "skill_model_invocation_disabled"),
@@ -38,7 +41,7 @@ pipeline test(task) {
       assert(!contains(second_messages, "top secret"), "gated skill body does not leak")
       const third_messages = json_stringify(calls[2].messages)
       assert(contains(third_messages, "skill_not_found"), "missing skill returns a typed error")
-      log("skills_load_skill_errors passed")
+      harness.stdio.log("skills_load_skill_errors passed")
     },
   )
 }

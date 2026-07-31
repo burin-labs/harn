@@ -1,7 +1,7 @@
 /**
  * std/oauth/device_flow — RFC 8628 device authorization grant.
  *
- * `device_flow(provider, opts)` performs the full RFC 8628 dance for
+ * `device_flow(harness, provider, opts)` performs the full RFC 8628 dance for
  * headless contexts (CI runners, daemons, IDE side panes) where a
  * browser redirect is impractical. The function:
  *
@@ -27,8 +27,7 @@
  *     import { device_flow } from "std/oauth/device_flow"
  *     import { write_stderr } from "std/io"
  *
- *     let token = device_flow(
- *       providers().github,
+ *     let token = device_flow(harness, *       providers().github,
  *       {
  *         client_id: env("GITHUB_CLIENT_ID"),
  *         scopes: ["read:user"],
@@ -50,8 +49,8 @@
  * outstanding poll.
  *
  * Concurrency / time mocking: the polling sleep routes through the
- * standard `sleep(ms)` builtin and so honors `mock_time(...)` /
- * `advance_time(...)` in tests.
+ * standard `sleep(ms)` builtin and so honors `harness.testing.clock_set(...)` /
+ * `harness.testing.clock_advance(...)` in tests.
  */
 import { JsonParseFailure } from "std/json"
 
@@ -152,12 +151,12 @@ fn __form_body(params) {
   return join(parts, "&")
 }
 
-fn __now_seconds(harness: Harness) {
-  return to_int(harness.clock.timestamp())
+fn __now_seconds(clock: HarnessClock) {
+  return to_int(clock.timestamp())
 }
 
-fn __default_on_user_code(user_code, verification_uri) {
-  const _ = __io_write_stderr(
+fn __default_on_user_code(stdio: HarnessStdio, user_code, verification_uri) {
+  const _ = stdio.eprint(
     "To authorize this device, open " + to_string(verification_uri) + " and enter code: "
       + to_string(
       user_code,
@@ -167,9 +166,9 @@ fn __default_on_user_code(user_code, verification_uri) {
   return nil
 }
 
-fn __invoke_user_code_handler(handler, user_code, verification_uri) {
+fn __invoke_user_code_handler(stdio: HarnessStdio, handler, user_code, verification_uri) {
   if handler == nil {
-    return __default_on_user_code(user_code, verification_uri)
+    return __default_on_user_code(stdio, user_code, verification_uri)
   }
   if type_of(handler) != "closure" && type_of(handler) != "builtin" {
     throw "std/oauth/device_flow: opts.on_user_code must be a function"
@@ -217,13 +216,13 @@ fn __build_token_set(parsed, scopes, issued_at) {
   return token_set
 }
 
-fn __audit_obtained(provider_id, storage_key, token_set) {
+fn __audit_obtained(obs: HarnessObs, provider_id, storage_key, token_set) {
   const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
     next: __redact_token(token_set),
   }
-  const _ = event_log.emit(
+  const _ = obs.event_log_emit(
     __AUDIT_TOPIC,
     __AUDIT_KIND_OBTAINED,
     payload,
@@ -231,7 +230,7 @@ fn __audit_obtained(provider_id, storage_key, token_set) {
   )
 }
 
-fn __request_device_code(harness: Harness, cfg) {
+fn __request_device_code(net: HarnessNet, cfg) {
   let form = [{key: "client_id", value: cfg.client_id}]
   const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
   if scopes_str != nil {
@@ -241,7 +240,7 @@ fn __request_device_code(harness: Harness, cfg) {
     form = form + [{key: "audience", value: cfg.audience}]
   }
   const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  const response = harness.net.post(cfg.device_code_url, __form_body(form), {headers: headers})
+  const response = net.post(cfg.device_code_url, __form_body(form), {headers: headers})
   if !(response?.ok ?? false) {
     const parsed: Result<unknown, JsonParseFailure> = try {
       json_parse(response?.body ?? "")
@@ -292,7 +291,7 @@ fn __request_device_code(harness: Harness, cfg) {
   }
 }
 
-fn __poll_once(harness: Harness, cfg, device_code) {
+fn __poll_once(net: HarnessNet, cfg, device_code) {
   let form = [
     {key: "grant_type", value: "urn:ietf:params:oauth:grant-type:device_code"},
     {key: "device_code", value: device_code},
@@ -302,7 +301,7 @@ fn __poll_once(harness: Harness, cfg, device_code) {
     form = form + [{key: "client_secret", value: cfg.client_secret}]
   }
   const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  const response = harness.net.post(cfg.token_url, __form_body(form), {headers: headers})
+  const response = net.post(cfg.token_url, __form_body(form), {headers: headers})
   const status = to_int(response?.status ?? 0)
   const parsed: Result<unknown, JsonParseFailure> = try {
     json_parse(response?.body ?? "")
@@ -338,7 +337,8 @@ fn __poll_once(harness: Harness, cfg, device_code) {
 }
 
 fn __poll_until_done(
-  harness: Harness,
+  clock: HarnessClock,
+  net: HarnessNet,
   cfg,
   device_code,
   initial_interval_seconds,
@@ -347,7 +347,7 @@ fn __poll_until_done(
   let interval_seconds = initial_interval_seconds
   let elapsed_seconds = 0
   while true {
-    const outcome = __poll_once(harness, cfg, device_code)
+    const outcome = __poll_once(net, cfg, device_code)
     if outcome.kind == "ok" {
       return outcome.parsed
     }
@@ -358,7 +358,7 @@ fn __poll_until_done(
     if expires_in_seconds > 0 && elapsed_seconds + interval_seconds > expires_in_seconds {
       throw "std/oauth/device_flow: device code expired before authorization completed"
     }
-    sleep(interval_seconds * 1000)
+    clock.sleep_ms(interval_seconds * 1000)
     elapsed_seconds = elapsed_seconds + interval_seconds
   }
 }
@@ -385,9 +385,9 @@ fn __poll_until_done(
  * @effects: [time, net, stderr]
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: device_flow(providers().github, {client_id: id, storage: memory()})
+ * @example: device_flow(harness, providers().github, {client_id: id, storage: memory()})
  */
-pub fn device_flow(provider, opts) {
+pub fn device_flow(harness: Harness, provider, opts) {
   if type_of(opts) != "dict" {
     throw "std/oauth/device_flow: opts must be a dict"
   }
@@ -408,22 +408,24 @@ pub fn device_flow(provider, opts) {
     scope_separator: scope_separator,
     audience: opts?.audience,
   }
-  const device = __request_device_code(harness, cfg)
+  const device = __request_device_code(harness.net, cfg)
   const _ = __invoke_user_code_handler(
+    harness.stdio,
     opts?.on_user_code,
     device.user_code,
     device.verification_uri,
   )
   const parsed = __poll_until_done(
-    harness,
+    harness.clock,
+    harness.net,
     cfg,
     device.device_code,
     device.interval_seconds,
     device.expires_in_seconds,
   )
-  const issued_at = __now_seconds(harness)
+  const issued_at = __now_seconds(harness.clock)
   const token_set = __build_token_set(parsed, scopes, issued_at)
   storage.set(storage_key, token_set)
-  __audit_obtained(cfg.provider_id, storage_key, token_set)
+  __audit_obtained(harness.obs, cfg.provider_id, storage_key, token_set)
   return token_set
 }

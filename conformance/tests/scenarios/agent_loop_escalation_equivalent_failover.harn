@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Escalated agent-loop turns opt into Harn's provider-equivalent failover.
  *
@@ -8,8 +9,6 @@
  * without live providers or timing-sensitive behavior.
  */
 import { AgentLoopOptions } from "std/agent/options"
-
-const calls = atomic(0)
 
 fn tools() {
   const r = tool_registry()
@@ -24,10 +23,11 @@ fn tools() {
   )
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
+  const calls = harness.runtime.atomic(0)
   const caller = { call ->
-    let _ = atomic_add(calls, 1)
-    let n = atomic_get(calls)
+    let _ = harness.runtime.atomic_add(calls, 1)
+    let n = harness.runtime.atomic_get(calls)
     if n == 1 {
       return {
         ok: true,
@@ -44,10 +44,10 @@ pipeline default() {
       }
     }
     let failover = call.opts?.equivalent_failover ?? {}
-    __io_println("provider=" + to_string(call.opts?.provider ?? ""))
-    __io_println("model=" + to_string(call.opts?.model ?? ""))
-    __io_println("failover.max_routes=" + to_string(failover?.max_routes ?? "nil"))
-    __io_println("failover.on_no_dispatch=" + to_string(failover?.on_no_dispatch ?? false))
+    harness.stdio.println("provider=" + to_string(call.opts?.provider ?? ""))
+    harness.stdio.println("model=" + to_string(call.opts?.model ?? ""))
+    harness.stdio.println("failover.max_routes=" + to_string(failover?.max_routes ?? "nil"))
+    harness.stdio.println("failover.on_no_dispatch=" + to_string(failover?.on_no_dispatch ?? false))
     return {
       ok: true,
       value: {
@@ -79,7 +79,7 @@ pipeline default() {
       return ""
     },
   }
-  const result = agent_loop("do it", nil, opts)
-  __io_println(result.status)
-  __io_println("visible=" + to_string(result.visible_text ?? ""))
+  const result = agent_loop(harness, "do it", nil, opts)
+  harness.stdio.println(result.status)
+  harness.stdio.println("visible=" + to_string(result.visible_text ?? ""))
 }

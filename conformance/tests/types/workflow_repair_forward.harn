@@ -8,11 +8,12 @@
 import { WorkflowRepairResult, workflow_run_repair } from "std/workflow/repair"
 import { summarize_repair } from "workflow_repair_forward_lib"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const token = "GOTOKEN"
   // Success after a repair: the inline executor emits the pass token only once
   // it has seen it threaded through the prior attempt's findings (attempt 2).
   const passing: WorkflowRepairResult = workflow_run_repair(
+    harness,
     {
       task: "Z",
       executor: { ctx ->
@@ -34,6 +35,7 @@ pipeline test(task) {
   assert(contains(summary, "1:failed"), "first attempt failed before the repair")
   // Exhausted: a never-satisfiable verifier stops at the attempt cap.
   const exhausted: WorkflowRepairResult = workflow_run_repair(
+    harness,
     {
       task: "u",
       executor: { _ctx -> return {text: "x"} },
@@ -44,6 +46,7 @@ pipeline test(task) {
   assert(!exhausted.ok, "exhausted variant representable")
   // Execution error: a throwing executor is a contained failed attempt.
   const boom: WorkflowRepairResult = workflow_run_repair(
+    harness,
     {
       task: "b",
       executor: { ctx ->
@@ -54,7 +57,7 @@ pipeline test(task) {
     },
   )
   assert(!boom.ok, "execution-error variant representable")
-  log(
+  harness.stdio.log(
     "workflow_repair_forward " + summary + " | " + to_string(len(exhausted.attempts)) + " | "
       + to_string(
       len(boom.attempts),

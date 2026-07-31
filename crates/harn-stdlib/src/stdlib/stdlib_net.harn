@@ -19,12 +19,13 @@ type UnixSocketJsonResult = {
  *
  * @effects: [network]
  * @errors: []
- * @example: unix_socket_json_request(path, {id: "ping", method: "ping"})
+ * @example: unix_socket_json_request(harness.net, path, {id: "ping", method: "ping"})
  */
 pub fn unix_socket_json_request(
+  net: HarnessNet,
   path: string,
   request,
   options: UnixSocketJsonOptions = {},
 ) -> UnixSocketJsonResult {
-  return __net_unix_socket_json_request(path, request, options ?? {})
+  return net.unix_socket_json_request(path, request, options ?? {})
 }

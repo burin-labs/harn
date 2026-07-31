@@ -58,7 +58,7 @@ raised.
   `.iter()` does not affect iteration.
 - **String iteration**: yields chars (Unicode scalar values), not
   graphemes.
-- **Printing**: `log(it)` / `to_string(it)` renders `<iter>` or
+- **Printing**: `harness.obs.log(it)` / `to_string(it)` renders `<iter>` or
   `<iter (exhausted)>` without draining the iter.
 
 ### Combinators

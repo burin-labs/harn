@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn tools() {
@@ -16,14 +17,16 @@ fn tools() {
   return registry
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]},
       llm_text("Finished."),
     ],
     { ->
       const failed = agent_loop(
+        harness,
         "Use one tool.",
         nil,
         {
@@ -35,18 +38,20 @@ pipeline main() {
           require_successful_tools: ["missing_tool"],
         },
       )
-      __io_println(failed.status)
-      __io_println(failed.stop_reason)
-      __io_println(failed.missing_required_tools[0])
+      harness.stdio.println(failed.status)
+      harness.stdio.println(failed.stop_reason)
+      harness.stdio.println(failed.missing_required_tools[0])
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "x"}}]},
       llm_text("Finished."),
     ],
     { ->
       const satisfied = agent_loop(
+        harness,
         "Use one tool.",
         nil,
         {
@@ -58,11 +63,12 @@ pipeline main() {
           require_successful_tools: [["lookup", "alternate_reader"]],
         },
       )
-      __io_println(satisfied.status)
-      __io_println(len(satisfied.missing_required_tools ?? []))
+      harness.stdio.println(satisfied.status)
+      harness.stdio.println(len(satisfied.missing_required_tools ?? []))
     },
   )
   with_llm_script(
+    harness.llm,
     [
       llm_text("Finished before using the required tool."),
       {tool_calls: [{id: "lookup_3", name: "lookup", arguments: {query: "x"}}]},
@@ -70,6 +76,7 @@ pipeline main() {
     ],
     { ->
       const gated = agent_loop(
+        harness,
         "Use one tool.",
         nil,
         {
@@ -82,9 +89,9 @@ pipeline main() {
           require_successful_tools: ["lookup"],
         },
       )
-      __io_println(gated.status)
-      __io_println(gated.llm.iterations)
-      __io_println(len(gated.missing_required_tools ?? []))
+      harness.stdio.println(gated.status)
+      harness.stdio.println(gated.llm.iterations)
+      harness.stdio.println(len(gated.missing_required_tools ?? []))
     },
   )
 }

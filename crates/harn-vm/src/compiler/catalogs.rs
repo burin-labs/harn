@@ -5,6 +5,31 @@ use harn_parser::{Node, SNode};
 use super::{Compiler, EnumCatalogSnapshot};
 
 impl Compiler {
+    /// Catalog names whose call target is supplied by source/module
+    /// resolution. Builtin exposure is a property of the resolved builtin,
+    /// not of every source value that happens to use the same identifier.
+    pub(super) fn collect_source_callable_names(&mut self, program: &[SNode]) {
+        for nodes in harn_parser::lexical::module_scope_node_slices(program) {
+            for node in nodes {
+                let declaration = match &node.node {
+                    Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                    _ => node,
+                };
+                match &declaration.node {
+                    Node::FnDecl { name, .. }
+                    | Node::ToolDecl { name, .. }
+                    | Node::Pipeline { name, .. } => {
+                        self.source_callable_names.insert(name.clone());
+                    }
+                    Node::SelectiveImport { names, .. } => {
+                        self.source_callable_names.extend(names.iter().cloned());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     pub(super) fn collect_imported_enum_candidates(&mut self, program: &[SNode]) {
         if self.imported_enum_candidates_authoritative {
             return;

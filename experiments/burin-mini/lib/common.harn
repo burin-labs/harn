@@ -2,21 +2,18 @@ import { JsonParseFailure } from "std/json"
 import "std/schema"
 
 /** Resolve the LLM provider for Burin Mini runs. */
-pub fn provider_name() {
-  return harness.env.get_or("BURIN_MINI_PROVIDER", harness.env.get_or("HARN_LLM_PROVIDER", "mock"))
+pub fn provider_name(env: HarnessEnv) {
+  return env.get_or("BURIN_MINI_PROVIDER", env.get_or("HARN_LLM_PROVIDER", "mock"))
 }
 
 /** Resolve the generator model for Burin Mini runs. */
-pub fn generator_model() {
-  return harness.env.get_or(
-    "BURIN_MINI_GENERATOR_MODEL",
-    harness.env.get_or("HARN_LLM_MODEL", "mock"),
-  )
+pub fn generator_model(env: HarnessEnv) {
+  return env.get_or("BURIN_MINI_GENERATOR_MODEL", env.get_or("HARN_LLM_MODEL", "mock"))
 }
 
 /** Resolve the evaluator model for Burin Mini runs. */
-pub fn evaluator_model() {
-  return harness.env.get_or("BURIN_MINI_EVALUATOR_MODEL", generator_model())
+pub fn evaluator_model(env: HarnessEnv) {
+  return env.get_or("BURIN_MINI_EVALUATOR_MODEL", generator_model(env))
 }
 
 fn bool_env(value) {
@@ -30,33 +27,33 @@ fn bool_env(value) {
   return nil
 }
 
-fn reasoning_policy_for_model(harness: Harness, _provider, _model) {
-  const legacy = bool_env(harness.env.get_or("BURIN_MINI_THINKING", ""))
+fn reasoning_policy_for_model(env: HarnessEnv, _provider, _model) {
+  const legacy = bool_env(env.get_or("BURIN_MINI_THINKING", ""))
   if legacy != nil && !legacy {
     return "off"
   }
   if legacy {
     return "manual_on"
   }
-  return harness.env.get_or("BURIN_MINI_REASONING_POLICY", "auto")
+  return env.get_or("BURIN_MINI_REASONING_POLICY", "auto")
 }
 
-fn reasoning_scale_for_model(harness: Harness, _provider, _model) {
-  return harness.env.get_or("BURIN_MINI_REASONING_SCALE", "medium")
+fn reasoning_scale_for_model(env: HarnessEnv, _provider, _model) {
+  return env.get_or("BURIN_MINI_REASONING_SCALE", "medium")
 }
 
 /** Apply the Burin Mini reasoning policy defaults to agent options. */
-pub fn apply_reasoning_policy(opts, task) {
-  const provider = opts?.provider ?? provider_name()
-  const model = opts?.model ?? generator_model()
-  const policy = reasoning_policy_for_model(harness, provider, model)
+pub fn apply_reasoning_policy(env: HarnessEnv, opts, task) {
+  const provider = opts?.provider ?? provider_name(env)
+  const model = opts?.model ?? generator_model(env)
+  const policy = reasoning_policy_for_model(env, provider, model)
   if policy == "manual_on" {
     return opts + {thinking: true}
   }
   return opts
     + {
     reasoning_policy: policy,
-    reasoning_scale: reasoning_scale_for_model(harness, provider, model),
+    reasoning_scale: reasoning_scale_for_model(env, provider, model),
     reasoning_task: task,
   }
 }
@@ -708,7 +705,7 @@ pub fn render_action_results(results) {
   return join(lines, "\n")
 }
 
-/** Structured planner output schema for `sub_agent_run(... returns.schema)`. */
+/** Structured planner output schema for `sub_agent_run(harness, ... returns.schema)`. */
 pub fn planner_schema() {
   return {
     type: "object",
@@ -750,7 +747,7 @@ pub fn planner_schema() {
   }
 }
 
-/** Structured research output schema for `sub_agent_run(... returns.schema)`. */
+/** Structured research output schema for `sub_agent_run(harness, ... returns.schema)`. */
 pub fn research_schema() {
   return {
     type: "object",
@@ -764,10 +761,10 @@ pub fn research_schema() {
 }
 
 /** Build common generator sub-agent options. */
-pub fn generator_options(system, tools, allowed_tools) {
+pub fn generator_options(env: HarnessEnv, system, tools, allowed_tools) {
   const opts = {
-    provider: provider_name(),
-    model: generator_model(),
+    provider: provider_name(env),
+    model: generator_model(env),
     system: system,
     tools: tools,
     allowed_tools: allowed_tools,
@@ -780,14 +777,14 @@ pub fn generator_options(system, tools, allowed_tools) {
   } else {
     "code"
   }
-  return apply_reasoning_policy(opts, task)
+  return apply_reasoning_policy(env, opts, task)
 }
 
 /** Build common evaluator sub-agent options. */
-pub fn evaluator_options(system, tools) {
+pub fn evaluator_options(env: HarnessEnv, system, tools) {
   const opts = {
-    provider: provider_name(),
-    model: evaluator_model(),
+    provider: provider_name(env),
+    model: evaluator_model(env),
     system: system,
     tools: tools,
     allowed_tools: ["read", "search", "run"],
@@ -795,7 +792,7 @@ pub fn evaluator_options(system, tools) {
     temperature: 0,
     max_iterations: 4,
   }
-  return apply_reasoning_policy(opts, "verify")
+  return apply_reasoning_policy(env, opts, "verify")
 }
 
 /** Safely parse a JSON object from model output. */

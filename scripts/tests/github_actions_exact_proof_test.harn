@@ -70,7 +70,7 @@ fn request(overrides = {}) {
     + overrides
 }
 
-pipeline test_exact_actions_proof_fixtures(task) {
+pipeline test_exact_actions_proof_fixtures(harness: Harness, task) {
   const accepted = github_actions_exact_proof(request(), [run()], jobs())
   assert_eq(accepted.ok, true)
   assert_eq(accepted.reason, "proof_accepted")

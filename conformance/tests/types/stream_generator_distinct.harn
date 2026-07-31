@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   gen fn values() -> Stream<int> {
     emit 1
   }
   const wrong: Generator<int> = values()
-  __io_println(wrong)
+  harness.stdio.println(wrong)
 }

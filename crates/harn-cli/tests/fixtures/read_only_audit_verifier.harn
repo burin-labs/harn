@@ -10,7 +10,7 @@ fn result(calls, text: string) {
   return {visible_text: text, tools: {calls: calls}}
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const repeated_reads = result(
     [
       {name: "read_file", arguments: {path: "README.md"}},
@@ -25,23 +25,23 @@ pipeline main() {
     "AUDIT_OK: no edits are needed.",
   )
   const parent_path = result([{name: "read_file", arguments: {path: "../README.md"}}], "AUDIT_OK: no edits are needed.")
-  __io_println(
+  harness.stdio.println(
     "repeated_reads="
       + to_string(coding_agent_read_only_audit_verification_success(README, SETTINGS, repeated_reads)),
   )
-  __io_println(
+  harness.stdio.println(
     "no_read="
       + to_string(coding_agent_read_only_audit_verification_success(README, SETTINGS, no_read)),
   )
-  __io_println(
+  harness.stdio.println(
     "edit_attempt="
       + to_string(coding_agent_read_only_audit_verification_success(README, SETTINGS, edit_attempt)),
   )
-  __io_println(
+  harness.stdio.println(
     "parent_path="
       + to_string(coding_agent_read_only_audit_verification_success(README, SETTINGS, parent_path)),
   )
-  __io_println(
+  harness.stdio.println(
     "changed_readme="
       + to_string(
       coding_agent_read_only_audit_verification_success(

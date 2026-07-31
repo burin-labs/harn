@@ -1,10 +1,10 @@
 import "std/postgres"
 
-pipeline default() {
-  const db = pg_mock_pool([])
+pipeline default(harness: Harness) {
+  const db = harness.testing.pg_mock_pool([])
   const result = pg_stmt_cache_clear(db)
-  __io_println(result.pools)
-  __io_println(result.connections_cleared)
-  __io_println(result.connections_skipped)
-  __io_println(len(pg_mock_calls(db)))
+  harness.stdio.println(result.pools)
+  harness.stdio.println(result.connections_cleared)
+  harness.stdio.println(result.connections_skipped)
+  harness.stdio.println(len(pg_mock_calls(db)))
 }

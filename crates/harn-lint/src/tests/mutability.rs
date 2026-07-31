@@ -65,7 +65,7 @@ pipeline default(task) {
     pins = pins + [pin]
   }
   const labels = pins.map({ pin -> pin.name })
-  log(labels.join(","))
+  assert_eq(labels.join(","), "alpha,beta")
 }
 "#;
     let diagnostics = lint_source(source);

@@ -1,11 +1,11 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const input = "b"
   const label = match input {
     "a" -> { "alpha" }
     "b" -> { "bravo" }
     _ -> { "other" }
   }
-  __io_println(label)
+  harness.stdio.println(label)
   const n = 7
   const size = match n {
     0 -> { "zero" }
@@ -15,11 +15,11 @@ pipeline default() {
     }
     _ -> { "small" }
   }
-  __io_println(size)
+  harness.stdio.println(size)
   const pair = [10, 20]
   const second = match pair {
     [_, value] -> { value }
     _ -> { 0 }
   }
-  __io_println(second)
+  harness.stdio.println(second)
 }

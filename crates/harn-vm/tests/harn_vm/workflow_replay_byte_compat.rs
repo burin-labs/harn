@@ -93,9 +93,12 @@ fn pre_inversion_record_replays_byte_identical() {
     let out_path = temp_path("replayed");
 
     let source = format!(
-        r#"pipeline default() {{
+        r#"import {{ workflow_execute }} from "std/workflow/execute"
+
+pipeline default(harness: Harness) {{
   const graph = {GRAPH}
   const replayed = workflow_execute(
+    harness,
     "byte compat probe",
     graph,
     [],
@@ -106,7 +109,7 @@ fn pre_inversion_record_replays_byte_identical() {
       persist_path: "{out}",
     }},
   )
-  __io_println(replayed.run.metadata.replay_mode)
+  harness.stdio.println(replayed.run.metadata.replay_mode)
 }}"#,
         fixture = fixture_path.display(),
         out = out_path.display(),
@@ -149,10 +152,12 @@ fn live_default_policy_attempts_match_pre_inversion_bytes() {
     let out_path = temp_path("live");
 
     let source = format!(
-        r#"pipeline default() {{
+        r#"import {{ workflow_execute }} from "std/workflow/execute"
+
+pipeline default(harness: Harness) {{
   const graph = {GRAPH}
-  const live = workflow_execute("byte compat probe", graph, [], {{max_steps: 1, persist_path: "{out}"}})
-  __io_println(live.run.stages[0].status)
+  const live = workflow_execute(harness, "byte compat probe", graph, [], {{max_steps: 1, persist_path: "{out}"}})
+  harness.stdio.println(live.run.stages[0].status)
 }}"#,
         out = out_path.display(),
     );

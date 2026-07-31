@@ -8,6 +8,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -1059,174 +1060,226 @@ fn record_sse_event_received(stream_id: &str) -> Result<(), VmError> {
 }
 
 pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
-    vm.register_builtin("sse_mock", |args, _out| {
-        let url_pattern = args.first().map(|arg| arg.display()).unwrap_or_default();
-        if url_pattern.is_empty() {
-            return Err(vm_error("sse_mock: URL pattern is required"));
-        }
-        let events = parse_mock_stream_events(args.get(1));
-        SSE_MOCKS.with(|mocks| {
-            mocks.borrow_mut().push(SseMock {
-                url_pattern,
-                events,
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "sse_mock",
+        |args, _out| {
+            let url_pattern = args.first().map(|arg| arg.display()).unwrap_or_default();
+            if url_pattern.is_empty() {
+                return Err(vm_error("sse_mock: URL pattern is required"));
+            }
+            let events = parse_mock_stream_events(args.get(1));
+            SSE_MOCKS.with(|mocks| {
+                mocks.borrow_mut().push(SseMock {
+                    url_pattern,
+                    events,
+                });
             });
-        });
-        Ok(VmValue::Nil)
-    });
+            Ok(VmValue::Nil)
+        },
+    );
 
-    vm.register_async_builtin("sse_connect", |_ctx, args| async move {
-        let method = args
-            .first()
-            .map(|arg| arg.display())
-            .filter(|method| !method.is_empty())
-            .unwrap_or_else(|| "GET".to_string())
-            .to_uppercase();
-        let url = args.get(1).map(|arg| arg.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(vm_error("sse_connect: URL is required"));
-        }
-        let options = get_options_arg(&args, 2);
-        vm_sse_connect(&method, &url, &options).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_connect",
+        |_ctx, args| async move {
+            let method = args
+                .first()
+                .map(|arg| arg.display())
+                .filter(|method| !method.is_empty())
+                .unwrap_or_else(|| "GET".to_string())
+                .to_uppercase();
+            let url = args.get(1).map(|arg| arg.display()).unwrap_or_default();
+            if url.is_empty() {
+                return Err(vm_error("sse_connect: URL is required"));
+            }
+            let options = get_options_arg(&args, 2);
+            vm_sse_connect(&method, &url, &options).await
+        },
+    );
 
-    vm.register_async_builtin("sse_receive", |_ctx, args| async move {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("sse_receive: requires a stream handle"));
-        };
-        let stream_id = handle_from_value(handle, "sse_receive")?;
-        let timeout_ms = receive_timeout_arg(&args, 1);
-        vm_sse_receive(&stream_id, timeout_ms).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_receive",
+        |_ctx, args| async move {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("sse_receive: requires a stream handle"));
+            };
+            let stream_id = handle_from_value(handle, "sse_receive")?;
+            let timeout_ms = receive_timeout_arg(&args, 1);
+            vm_sse_receive(&stream_id, timeout_ms).await
+        },
+    );
 
-    vm.register_builtin("sse_event", |args, _out| {
-        let Some(event) = args.first() else {
-            return Err(vm_error("sse_event: requires event data or an event dict"));
-        };
-        let options = get_options_arg(args, 1);
-        Ok(VmValue::String(arcstr::ArcStr::from(vm_sse_event_frame(
-            event, &options,
-        )?)))
-    });
+    vm.register_builtin_def(&SSE_EVENT_IMPL_DEF);
 
-    vm.register_builtin("sse_server_response", |args, _out| {
-        let options = get_options_arg(args, 0);
-        vm_sse_server_response(&options)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_response",
+        |args, _out| {
+            let options = get_options_arg(args, 0);
+            vm_sse_server_response(&options)
+        },
+    );
 
-    vm.register_builtin("sse_server_send", |args, _out| {
-        if args.len() < 2 {
-            return Err(vm_error("sse_server_send: requires stream and event"));
-        }
-        let stream_id = handle_from_value(&args[0], "sse_server_send")?;
-        let options = get_options_arg(args, 2);
-        vm_sse_server_send(&stream_id, &args[1], &options)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_send",
+        |args, _out| {
+            if args.len() < 2 {
+                return Err(vm_error("sse_server_send: requires stream and event"));
+            }
+            let stream_id = handle_from_value(&args[0], "sse_server_send")?;
+            let options = get_options_arg(args, 2);
+            vm_sse_server_send(&stream_id, &args[1], &options)
+        },
+    );
 
-    vm.register_builtin("sse_server_heartbeat", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("sse_server_heartbeat: requires a stream handle"));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_heartbeat")?;
-        vm_sse_server_heartbeat(&stream_id, args.get(1))
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_heartbeat",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("sse_server_heartbeat: requires a stream handle"));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_heartbeat")?;
+            vm_sse_server_heartbeat(&stream_id, args.get(1))
+        },
+    );
 
-    vm.register_builtin("sse_server_flush", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("sse_server_flush: requires a stream handle"));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_flush")?;
-        vm_sse_server_flush(&stream_id)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_flush",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("sse_server_flush: requires a stream handle"));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_flush")?;
+            vm_sse_server_flush(&stream_id)
+        },
+    );
 
-    vm.register_builtin("sse_server_close", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("sse_server_close: requires a stream handle"));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_close")?;
-        vm_sse_server_close(&stream_id)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_close",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("sse_server_close: requires a stream handle"));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_close")?;
+            vm_sse_server_close(&stream_id)
+        },
+    );
 
-    vm.register_builtin("sse_server_cancel", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("sse_server_cancel: requires a stream handle"));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_cancel")?;
-        vm_sse_server_cancel(&stream_id, args.get(1))
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_cancel",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("sse_server_cancel: requires a stream handle"));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_cancel")?;
+            vm_sse_server_cancel(&stream_id, args.get(1))
+        },
+    );
 
-    vm.register_builtin("sse_server_status", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("sse_server_status: requires a stream handle"));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_status")?;
-        vm_sse_server_status(&stream_id)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_status",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("sse_server_status: requires a stream handle"));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_status")?;
+            vm_sse_server_status(&stream_id)
+        },
+    );
 
-    vm.register_builtin("sse_server_disconnected", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error(
-                "sse_server_disconnected: requires a stream handle",
-            ));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_disconnected")?;
-        vm_sse_server_observed_bool(&stream_id, "sse_server_disconnected", |handle| {
-            handle.disconnected
-        })
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_disconnected",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error(
+                    "sse_server_disconnected: requires a stream handle",
+                ));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_disconnected")?;
+            vm_sse_server_observed_bool(&stream_id, "sse_server_disconnected", |handle| {
+                handle.disconnected
+            })
+        },
+    );
 
-    vm.register_builtin("sse_server_cancelled", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("sse_server_cancelled: requires a stream handle"));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_cancelled")?;
-        vm_sse_server_observed_bool(&stream_id, "sse_server_cancelled", |handle| {
-            handle.cancelled
-        })
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_server_cancelled",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("sse_server_cancelled: requires a stream handle"));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_cancelled")?;
+            vm_sse_server_observed_bool(&stream_id, "sse_server_cancelled", |handle| {
+                handle.cancelled
+            })
+        },
+    );
 
-    vm.register_builtin("sse_server_mock_receive", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error(
-                "sse_server_mock_receive: requires a stream handle",
-            ));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_mock_receive")?;
-        vm_sse_server_mock_receive(&stream_id)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "sse_server_mock_receive",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error(
+                    "sse_server_mock_receive: requires a stream handle",
+                ));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_mock_receive")?;
+            vm_sse_server_mock_receive(&stream_id)
+        },
+    );
 
-    vm.register_builtin("sse_server_mock_disconnect", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error(
-                "sse_server_mock_disconnect: requires a stream handle",
-            ));
-        };
-        let stream_id = handle_from_value(handle, "sse_server_mock_disconnect")?;
-        vm_sse_server_mock_disconnect(&stream_id)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "sse_server_mock_disconnect",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error(
+                    "sse_server_mock_disconnect: requires a stream handle",
+                ));
+            };
+            let stream_id = handle_from_value(handle, "sse_server_mock_disconnect")?;
+            vm_sse_server_mock_disconnect(&stream_id)
+        },
+    );
 
-    vm.register_builtin("sse_close", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("sse_close: requires a stream handle"));
-        };
-        let stream_id = handle_from_value(handle, "sse_close")?;
-        let removed = SSE_HANDLES.with(|handles| {
-            let mut handles = handles.borrow_mut();
-            let removed = handles.remove(&stream_id);
-            if let Some(handle) = &removed {
-                if let SseHandleKind::Real(stream) = &handle.kind {
-                    if let Ok(mut stream) = stream.try_lock() {
-                        stream.close();
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "sse_close",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("sse_close: requires a stream handle"));
+            };
+            let stream_id = handle_from_value(handle, "sse_close")?;
+            let removed = SSE_HANDLES.with(|handles| {
+                let mut handles = handles.borrow_mut();
+                let removed = handles.remove(&stream_id);
+                if let Some(handle) = &removed {
+                    if let SseHandleKind::Real(stream) = &handle.kind {
+                        if let Ok(mut stream) = stream.try_lock() {
+                            stream.close();
+                        }
                     }
                 }
-            }
-            removed
-        });
-        Ok(VmValue::Bool(removed.is_some()))
-    });
+                removed
+            });
+            Ok(VmValue::Bool(removed.is_some()))
+        },
+    );
 
     websocket::register_websocket_builtins(vm);
 
-    vm.register_builtin("transport_mock_clear", |_args, _out| {
+    vm.register_builtin("__transport_mock_clear", |_args, _out| {
         clear_http_streams();
         SSE_MOCKS.with(|mocks| mocks.borrow_mut().clear());
         SSE_HANDLES.with(|handles| handles.borrow_mut().clear());
@@ -1244,7 +1297,7 @@ pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    vm.register_builtin("transport_mock_calls", |_args, _out| {
+    vm.register_builtin("__transport_mock_calls", |_args, _out| {
         let calls = TRANSPORT_MOCK_CALLS.with(|calls| calls.borrow().clone());
         let values = calls
             .iter()
@@ -1252,6 +1305,22 @@ pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
             .collect::<Vec<_>>();
         Ok(VmValue::List(std::sync::Arc::new(values)))
     });
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "sse_event(event: any, options?: dict) -> string",
+    category = "http"
+)]
+fn sse_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(event) = args.first() else {
+        return Err(vm_error("sse_event: requires event data or an event dict"));
+    };
+    let options = get_options_arg(args, 1);
+    Ok(VmValue::String(arcstr::ArcStr::from(vm_sse_event_frame(
+        event, &options,
+    )?)))
 }
 
 #[cfg(test)]

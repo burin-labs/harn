@@ -1,7 +1,7 @@
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -22,14 +22,14 @@ pipeline main() {
       },
     },
   )
-  const dispatched = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
-  __io_println(
+  const dispatched = agent_dispatch_tool_call(harness.tools, {name: "edit", arguments: {}}, tools)
+  harness.stdio.println(
     dispatched.rendered_result == "Edited src/main.harn\n\nDiagnostics wording may change.",
   )
-  __io_println(dispatched.result.schema)
-  __io_println(dispatched.result.data.edit_status)
-  __io_println(dispatched.result.data.diagnostics_error_count)
-  __io_println(!dispatched.observation.contains("diagnostics_error_count"))
-  __io_println(dispatched.mutation_status)
-  __io_println(dispatched.changed_paths[0])
+  harness.stdio.println(dispatched.result.schema)
+  harness.stdio.println(dispatched.result.data.edit_status)
+  harness.stdio.println(dispatched.result.data.diagnostics_error_count)
+  harness.stdio.println(!dispatched.observation.contains("diagnostics_error_count"))
+  harness.stdio.println(dispatched.mutation_status)
+  harness.stdio.println(dispatched.changed_paths[0])
 }

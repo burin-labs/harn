@@ -2,22 +2,27 @@ import { bounded_loop } from "std/personas/prelude"
 
 @persona(name: "template_persona", description: "Frontier judgment loop template persona.", tools: [github, mcp], capabilities: ["project.scan", "runtime.record_run", "interaction.ask", "workspace.read_text"], autonomy: "suggest", receipts: "required")
 /** Run the frontier judgment loop template DAG. */
-pub fn template_persona(task) {
-  return judge_until_confident(task)
+pub fn template_persona(harness: Harness, task) {
+  return judge_until_confident(harness, task)
 }
 
 @step(name: "judge_until_confident", model: "mock", receipt: audit, error_boundary: escalate, retry: {max_attempts: 2}, budget: {max_tokens: 4000})
-fn judge_until_confident(task) {
+fn judge_until_confident(harness: Harness, task) {
   const fixture = task?.fixture ?? {}
   const schema = {
     type: "object",
     required: ["decision", "confidence", "rationale"],
-    properties: {decision: {type: "string"}, confidence: {type: "number"}, rationale: {type: "string"}},
+    properties: {
+      decision: {type: "string"},
+      confidence: {type: "number"},
+      rationale: {type: "string"},
+    },
   }
   return bounded_loop(
+    harness.clock,
     {decision: nil, confidence: 0.0, attempts: 0},
     fn(state) {
-      const prompt = render_prompt(
+      const prompt = harness.fs.render_prompt(
         "../prompts/system.harn.prompt",
         {
           persona_name: "template_persona",
@@ -25,7 +30,11 @@ fn judge_until_confident(task) {
           request: fixture?.request ?? "review",
         },
       )
-      const result = llm_call_structured_safe(prompt, schema, {provider: "mock", model: "mock", retries: 0})
+      const result = harness.llm.call_structured_safe(
+        prompt,
+        schema,
+        {provider: "mock", model: "mock", retries: 0},
+      )
       return {
         state: result.data + {attempts: state.attempts + 1},
         progress: result.ok,
@@ -41,6 +50,6 @@ fn judge_until_confident(task) {
   )
 }
 
-pub pipeline run(task) -> dict {
-  return template_persona(task)
+pub pipeline run(harness: Harness, task) -> dict {
+  return template_persona(harness, task)
 }

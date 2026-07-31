@@ -366,27 +366,31 @@ pub fn check_unknown_variants_text(
   return out
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   let errors: list<string> = []
   const registry_text = harness.fs.read_text(REGISTRY)
   const reg = check_registry_text(registry_text)
   const code_names: list<string> = reg.variants
   errors = errors + reg.errors
-  errors = errors + scan_struct_literals("LintDiagnostic", "crates/harn-lint/src")
-  errors = errors + scan_struct_literals("TypeDiagnostic", "crates/harn-parser/src")
+  errors = errors + scan_struct_literals(harness.fs, "LintDiagnostic", "crates/harn-lint/src")
+  errors = errors + scan_struct_literals(harness.fs, "TypeDiagnostic", "crates/harn-parser/src")
   errors = errors
-    + scan_struct_literals("PreflightDiagnostic", "crates/harn-cli/src/commands/check")
-  errors = errors + scan_helper_calls("crates/harn-parser/src/typechecker")
-  errors = errors + scan_constructor_calls("crates/harn-fmt/src", "FormatError::new")
-  errors = errors + scan_unknown_variants(code_names)
+    + scan_struct_literals(
+    harness.fs,
+    "PreflightDiagnostic",
+    "crates/harn-cli/src/commands/check",
+  )
+  errors = errors + scan_helper_calls(harness.fs, "crates/harn-parser/src/typechecker")
+  errors = errors + scan_constructor_calls(harness.fs, "crates/harn-fmt/src", "FormatError::new")
+  errors = errors + scan_unknown_variants(harness.fs, code_names)
   if errors.count > 0 {
-    __io_eprintln("diagnostic code check failed:")
+    harness.stdio.eprintln("diagnostic code check failed:")
     for error in errors {
-      __io_eprintln("  - ${error}")
+      harness.stdio.eprintln("  - ${error}")
     }
     return 1
   }
-  __io_println("diagnostic codes: OK")
+  harness.stdio.println("diagnostic codes: OK")
   return 0
 }
 
@@ -396,48 +400,48 @@ pipeline main(task) {
  * Recursively glob every `.rs` file beneath `root` and return them sorted, so
  * the scan order matches Python's `sorted(root.rglob("*.rs"))`.
  */
-fn sorted_rs_files(root: string) -> list<string> {
+fn sorted_rs_files(fs: HarnessFs, root: string) -> list<string> {
   let paths: list<string> = []
-  for path in harness.fs.glob("${root}/**/*.rs") {
+  for path in fs.glob("${root}/**/*.rs") {
     paths = paths + [path]
   }
   return paths.sorted()
 }
 
-fn scan_struct_literals(name: string, root: string) -> list<string> {
+fn scan_struct_literals(fs: HarnessFs, name: string, root: string) -> list<string> {
   let out: list<string> = []
-  for path in sorted_rs_files(root) {
+  for path in sorted_rs_files(fs, root) {
     const rel = rel_path(path)
-    const text = harness.fs.read_text(path)
+    const text = fs.read_text(path)
     out = out + check_struct_literals_text(rel, name, text)
   }
   return out
 }
 
-fn scan_helper_calls(root: string) -> list<string> {
+fn scan_helper_calls(fs: HarnessFs, root: string) -> list<string> {
   let out: list<string> = []
-  for path in sorted_rs_files(root) {
+  for path in sorted_rs_files(fs, root) {
     const rel = rel_path(path)
     if rel.ends_with("/mod.rs") || rel == "mod.rs" {
       continue
     }
-    const text = harness.fs.read_text(path)
+    const text = fs.read_text(path)
     out = out + check_helper_calls_text(rel, text)
   }
   return out
 }
 
-fn scan_constructor_calls(root: string, needle: string) -> list<string> {
+fn scan_constructor_calls(fs: HarnessFs, root: string, needle: string) -> list<string> {
   let out: list<string> = []
-  for path in sorted_rs_files(root) {
+  for path in sorted_rs_files(fs, root) {
     const rel = rel_path(path)
-    const text = harness.fs.read_text(path)
+    const text = fs.read_text(path)
     out = out + check_constructor_calls_text(rel, needle, text)
   }
   return out
 }
 
-fn scan_unknown_variants(code_names: list<string>) -> list<string> {
+fn scan_unknown_variants(fs: HarnessFs, code_names: list<string>) -> list<string> {
   let out: list<string> = []
   const roots = [
     "crates/harn-parser/src",
@@ -447,12 +451,12 @@ fn scan_unknown_variants(code_names: list<string>) -> list<string> {
     "crates/harn-lsp/src",
   ]
   for root in roots {
-    for path in sorted_rs_files(root) {
+    for path in sorted_rs_files(fs, root) {
       const rel = rel_path(path)
       if rel == REGISTRY {
         continue
       }
-      const text = harness.fs.read_text(path)
+      const text = fs.read_text(path)
       out = out + check_unknown_variants_text(rel, text, code_names)
     }
   }

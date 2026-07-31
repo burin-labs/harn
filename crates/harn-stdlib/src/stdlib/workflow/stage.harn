@@ -219,7 +219,7 @@ fn __stage_command_spec(node) {
 fn __stage_command_options(node) {
   const metadata = node?.metadata ?? {}
   const args = metadata?.command_args
-  let options = {capture: {max_inline_bytes: 65536}}
+  let options: dict = {capture: {max_inline_bytes: 65536}}
   if type_of(args) == "dict" {
     options = options
       + pick_keys(
@@ -337,7 +337,7 @@ fn __stage_prepare_escalation(node_id, node, consumed_artifact_ids) {
   }
 }
 
-fn __stage_prepare_manual_gate(node_id, node, artifacts) {
+fn __stage_prepare_manual_gate(interaction: HarnessInteraction, node_id, node, artifacts) {
   const metadata = node?.metadata ?? {}
   const approval_id = __stage_string(metadata?.approval_id, node_id)
   const prompt = __stage_string(
@@ -346,7 +346,7 @@ fn __stage_prepare_manual_gate(node_id, node, artifacts) {
   )
   const skippable = __stage_bool(metadata?.approval_skippable, false)
   const consumed_artifact_ids = __stage_artifact_ids(artifacts)
-  let options = {
+  let options: dict = {
     detail: {
       node_id: node_id,
       approval_id: approval_id,
@@ -358,7 +358,7 @@ fn __stage_prepare_manual_gate(node_id, node, artifacts) {
   }
   options = options + pick_keys(metadata, ["reviewers", "quorum", "deadline"], {drop_nil: true})
   const requested = try {
-    request_approval(prompt, options)
+    interaction.request_approval(prompt, options)
   }
   if is_err(requested) {
     const error = unwrap_err(requested)
@@ -442,7 +442,7 @@ fn __stage_prepare_manual_gate(node_id, node, artifacts) {
   }
 }
 
-fn __stage_prepare_command(node_id, node, consumed_artifact_ids) {
+fn __stage_prepare_command(tools: HarnessTools, node_id, node, consumed_artifact_ids) {
   const spec = __stage_command_spec(node)
   const output_kind = __stage_first_string(node?.output_contract?.output_kinds, "command_result")
   if spec == nil {
@@ -465,7 +465,7 @@ fn __stage_prepare_command(node_id, node, consumed_artifact_ids) {
       branch: "failed",
     }
   }
-  const command_result = command_run(spec, __stage_command_options(node))
+  const command_result = command_run(tools, spec, __stage_command_options(node))
   const ok = __stage_bool(command_result?.ok ?? command_result?.success, false)
   const text = __stage_string(command_result?.combined, __stage_string(command_result?.stdout, ""))
   const status = if ok {
@@ -536,10 +536,10 @@ fn __stage_compaction_options(node) {
   return options
 }
 
-fn __stage_prepare_compact(node_id, node, artifacts, consumed_artifact_ids) {
+fn __stage_prepare_compact(agent: HarnessAgent, node_id, node, artifacts, consumed_artifact_ids) {
   const options = __stage_compaction_options(node)
   const transcript = transcript_from_messages(__stage_compaction_messages(artifacts))
-  const compacted = transcript_compact(transcript, options)
+  const compacted = agent.compact_transcript(transcript, options)
   const fallback = __stage_texts(artifacts).join("\n\n")
   const summary = __stage_string(transcript_summary(compacted), fallback)
   const text = if summary == "" {
@@ -756,11 +756,16 @@ pub fn workflow_stage_attempt_outcome(config = nil) {
 /**
  * workflow_prepare_static_stage.
  *
- * @effects: []
+ * @effects: [host]
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_prepare_static_stage(config = nil) {
+pub fn workflow_prepare_static_stage(
+  agent: HarnessAgent,
+  interaction: HarnessInteraction,
+  tools: HarnessTools,
+  config = nil,
+) {
   const node_id = __stage_string(config?.node_id, "stage")
   const node = config?.node ?? {}
   const kind = __stage_string(node?.kind, "")
@@ -783,13 +788,13 @@ pub fn workflow_prepare_static_stage(config = nil) {
     return __stage_prepare_escalation(node_id, node, consumed_artifact_ids)
   }
   if kind == "stage" && mode == "manual" && __stage_bool(node?.metadata?.human_gate, false) {
-    return __stage_prepare_manual_gate(node_id, node, artifacts)
+    return __stage_prepare_manual_gate(interaction, node_id, node, artifacts)
   }
   if kind == "stage" && mode == "command" {
-    return __stage_prepare_command(node_id, node, consumed_artifact_ids)
+    return __stage_prepare_command(tools, node_id, node, consumed_artifact_ids)
   }
   if kind == "stage" && mode == "compact" {
-    return __stage_prepare_compact(node_id, node, artifacts, consumed_artifact_ids)
+    return __stage_prepare_compact(agent, node_id, node, artifacts, consumed_artifact_ids)
   }
   return {handled: false}
 }
@@ -1022,7 +1027,15 @@ fn __stage_run_executor(node, task, attempt, prior, selected, transcript) {
   return __stage_shape_executor_result(unwrap(attempted), transcript)
 }
 
-fn __stage_attempt_record(attempt, status, outcome, branch, error, verification) {
+fn __stage_attempt_record(
+  random: HarnessRandom,
+  attempt,
+  status,
+  outcome,
+  branch,
+  error,
+  verification,
+) {
   return {
     attempt: attempt,
     status: status,
@@ -1030,8 +1043,8 @@ fn __stage_attempt_record(attempt, status, outcome, branch, error, verification)
     branch: branch,
     error: error,
     verification: verification,
-    started_at: uuid_v7(),
-    finished_at: uuid_v7(),
+    started_at: random.uuid_v7(),
+    finished_at: random.uuid_v7(),
   }
 }
 
@@ -1050,6 +1063,7 @@ fn __stage_attempt_record(attempt, status, outcome, branch, error, verification)
  * @api_stability: experimental
  */
 pub fn workflow_execute_stage_attempts(
+  random: HarnessRandom,
   task,
   node_id,
   node = nil,
@@ -1113,6 +1127,7 @@ pub fn workflow_execute_stage_attempts(
       attempts = __host_stage_record_attempt(
         attempts,
         __stage_attempt_record(
+          random,
           attempt,
           status,
           settled?.outcome,
@@ -1145,7 +1160,7 @@ pub fn workflow_execute_stage_attempts(
       const error_message = __stage_string(settled?.error, "")
       attempts = __host_stage_record_attempt(
         attempts,
-        __stage_attempt_record(attempt, "failed", "error", "error", error_message, nil),
+        __stage_attempt_record(random, attempt, "failed", "error", "error", error_message, nil),
       )
       if attempt == max_attempts {
         return {

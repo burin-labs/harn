@@ -4,14 +4,11 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use harn_hostlib::tools::permissions;
 use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
 fn registry() -> BuiltinRegistry {
-    permissions::reset();
-    permissions::enable_for_test();
     let mut registry = BuiltinRegistry::new();
     ToolsCapability.register_builtins(&mut registry);
     registry
@@ -536,20 +533,6 @@ fn search_glob_filter_does_not_reinclude_gitignored_paths() {
         "gitignored build output should be skipped, got {paths:?}"
     );
     assert_eq!(rows.len(), 1);
-}
-
-#[test]
-fn search_gate_blocks_when_feature_disabled() {
-    permissions::reset();
-    let mut reg = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut reg);
-    let entry = reg.find("hostlib_tools_search").unwrap();
-    let err = (entry.handler)(&dict_arg(&[("pattern", vm_string("x"))])).unwrap_err();
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("hostlib_enable"),
-        "expected gate message pointing at hostlib_enable, got `{msg}`"
-    );
 }
 
 /// A `.gitignore` sitting outside any checkout is not a project rule, so it

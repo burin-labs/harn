@@ -854,7 +854,7 @@ mod tests {
                     r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> int {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> int {
   return len(event.batch ?? [])
 }
 "#,
@@ -1026,7 +1026,7 @@ pub fn local_fn(event: TriggerEvent) -> int {
                     r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> int {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> int {
   return len(event.batch ?? [])
 }
 "#,
@@ -1111,7 +1111,7 @@ pub fn local_fn(event: TriggerEvent) -> int {
                     r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> int {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> int {
   return len(event.batch ?? [])
 }
 "#,

@@ -4,7 +4,7 @@ import {
   token_count_encoder,
 } from "std/llm/budget"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const prose =
     "Harn turns agent orchestration into typed, replayable programs with deterministic host boundaries."
   const official_gpt4_tokens = 17
@@ -38,5 +38,5 @@ pipeline test(task) {
   assert(!unknown.known_model_family, "unknown model falls back to heuristic")
   assert_eq(estimate_text_tokens(nil, "gpt-4"), 0)
   assert_eq(estimate_text_tokens_detail(nil, "unknown-local-model").tokens, 0)
-  log("llm_budget_token_counts tests passed")
+  harness.stdio.log("llm_budget_token_counts tests passed")
 }

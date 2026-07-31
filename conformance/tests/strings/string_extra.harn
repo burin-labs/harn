@@ -1,8 +1,8 @@
-pipeline test(task) {
-  log("hello world".index_of("world"))
-  log("abc".chars())
-  log("ha".repeat(3))
-  log("hello".reversed())
-  log("hi".pad_left(5))
-  log("hi".pad_right(5, "."))
+pipeline test(harness: Harness, task) {
+  harness.stdio.log("hello world".index_of("world"))
+  harness.stdio.log("abc".chars())
+  harness.stdio.log("ha".repeat(3))
+  harness.stdio.log("hello".reversed())
+  harness.stdio.log("hi".pad_left(5))
+  harness.stdio.log("hi".pad_right(5, "."))
 }

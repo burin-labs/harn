@@ -150,7 +150,22 @@ async fn call_worker_harn_export(
     function: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    crate::stdlib::harn_entry::call_harn_export_by_name(ctx, module, function, function, args).await
+    let harness = ctx.child_vm().root_harness_value().ok_or_else(|| {
+        VmError::Runtime(format!(
+            "{function}: delegated worker has no root Harness authority"
+        ))
+    })?;
+    let mut explicit_args = Vec::with_capacity(args.len() + 1);
+    explicit_args.push(harness);
+    explicit_args.extend_from_slice(args);
+    crate::stdlib::harn_entry::call_harn_export_by_name(
+        ctx,
+        module,
+        function,
+        function,
+        &explicit_args,
+    )
+    .await
 }
 
 async fn execute_worker_config(

@@ -5,7 +5,7 @@
 // versions broke due to a `+` / `??` precedence pitfall.
 import { estimate_session_cost, format_usd } from "std/llm/economics"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const summary = estimate_session_cost(
     [
       {
@@ -32,11 +32,11 @@ pipeline default() {
       },
     ],
   )
-  __io_println("calls=" + to_string(summary.total_calls))
-  __io_println("unknown=" + to_string(summary.unknown_calls))
-  __io_println("total=" + format_usd(summary.total_cost_usd))
-  __io_println("known=" + format_usd(summary.known_cost_usd))
-  __io_println("rows=" + to_string(len(summary.per_model)))
-  __io_println("top=" + summary.per_model[0].model)
-  __io_println("top_calls=" + to_string(summary.per_model[0].calls))
+  harness.stdio.println("calls=" + to_string(summary.total_calls))
+  harness.stdio.println("unknown=" + to_string(summary.unknown_calls))
+  harness.stdio.println("total=" + format_usd(summary.total_cost_usd))
+  harness.stdio.println("known=" + format_usd(summary.known_cost_usd))
+  harness.stdio.println("rows=" + to_string(len(summary.per_model)))
+  harness.stdio.println("top=" + summary.per_model[0].model)
+  harness.stdio.println("top_calls=" + to_string(summary.per_model[0].calls))
 }

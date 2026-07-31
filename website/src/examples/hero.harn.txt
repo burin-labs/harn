@@ -1,14 +1,14 @@
-pipeline review(task) {
-  let files = ["src/main.rs", "src/lib.rs"]
+pipeline review(harness: Harness, task) {
+  const files = ["src/main.rs", "src/lib.rs"]
 
-  let reviews = parallel each files { file ->
-    let code = harness.fs.read_text(file)
+  const reviews = parallel each files { file ->
+    const code = harness.fs.read_text(file)
     retry 3 {
-      llm_call(code, "Review this Rust file and list any issues.")
+      harness.llm.call(code, "Review this Rust file and list any issues.")
     }
   }
 
   for review in reviews {
-    log(review)
+    harness.stdio.log(review)
   }
 }

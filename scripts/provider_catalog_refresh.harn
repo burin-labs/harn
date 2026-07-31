@@ -1,7 +1,7 @@
 // Pure-logic helpers for the provider catalog refresh workflow.
 //
 // This file holds the bits that don't reach the network: observation
-// normalization, drift detection against `llm_provider_catalog()`, the
+// normalization, drift detection against `harness.llm.provider_catalog()`, the
 // markdown report writer, and the candidate TOML patch writer. Source
 // adapters (Anthropic/OpenAI HTML, OpenRouter JSON, key-required APIs)
 // live in `scripts/provider_catalog_sources.harn` so they can be
@@ -336,7 +336,7 @@ fn __observed_providers(observations) {
 }
 
 /**
- * Compare `observations` to the live `llm_provider_catalog()` snapshot
+ * Compare `observations` to the live `harness.llm.provider_catalog()` snapshot
  * (or any catalog dict in the same shape). Returns the drift in a
  * shape that's easy to render: added/removed/changed models, with
  * sub-categorized changes (pricing, context window, capabilities)

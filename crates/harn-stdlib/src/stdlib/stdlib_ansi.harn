@@ -188,9 +188,9 @@ pub fn ansi_reset() -> string {
 pub fn ansi_strip(text: string) -> string {
   const value = text ?? ""
   const csi = __ANSI_ESC + "\\[[0-9;?]*[ -/]*[@-~]"
-  const without_csi = regex_replace_all(csi, "", value)
+  const without_csi = regex_replace(csi, "", value)
   const osc = __ANSI_ESC + "\\][^" + __ANSI_BEL + "]*(" + __ANSI_BEL + "|" + __ANSI_ESC + "\\\\)"
-  return regex_replace_all(osc, "", without_csi)
+  return regex_replace(osc, "", without_csi)
 }
 
 /**

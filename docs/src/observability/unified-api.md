@@ -7,7 +7,7 @@ metric, or event.
 ```harn
 import { obs } from "std/observability"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const o = obs()
   o.configure({backend: o.Backend.auto})
 

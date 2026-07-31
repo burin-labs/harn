@@ -19,8 +19,8 @@
  * freezing every other field against upstream catalog updates. Fully
  * offline — no LLM calls, no network.
  */
-pipeline default(_task) {
-  const info = llm_model_info("demo/patch-target")
+pipeline default(harness: Harness, _task) {
+  const info = harness.llm.model_info("demo/patch-target")
   const row = info.catalog
   require row.stream_timeout == 1200.0
   require row.pricing.output_per_mtok == 7.5
@@ -35,7 +35,7 @@ pipeline default(_task) {
     preserved_context_window: row.context_window,
     preserved_input_per_mtok: row.pricing.input_per_mtok,
   }
-  __io_println("=== catalog-patch-models receipt ===")
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== catalog-patch-models receipt ===")
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

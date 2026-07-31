@@ -12,13 +12,13 @@ not json
 """
 
 @test
-pipeline test_default_hook_timing_path(task) {
+pipeline test_default_hook_timing_path(harness: Harness, task) {
   assert_eq(default_hook_timing_path("/Users/example"), "/Users/example/.burin/hook-timings.ndjson")
   assert_eq(default_hook_timing_path(""), ".burin/hook-timings.ndjson")
 }
 
 @test
-pipeline test_parse_hook_timing_text_skips_invalid_rows(task) {
+pipeline test_parse_hook_timing_text_skips_invalid_rows(harness: Harness, task) {
   const report = parse_hook_timing_text(SAMPLE_LOG)
   assert_eq(report.events.count, 3)
   assert_eq(report.invalid_lines, 5)
@@ -32,7 +32,7 @@ pipeline test_parse_hook_timing_text_skips_invalid_rows(task) {
 }
 
 @test
-pipeline test_phase_summary_aggregates_each_top_level_phase(task) {
+pipeline test_phase_summary_aggregates_each_top_level_phase(harness: Harness, task) {
   const parsed = parse_hook_timing_text(
     """
 {"repository":"burin-labs/harn","repo":"one","hook":"pre-push","profile":"fast","duration_ms":100,"phases":{"setup-and-guards":30,"fast-validation":70}}
@@ -52,7 +52,7 @@ pipeline test_phase_summary_aggregates_each_top_level_phase(task) {
 }
 
 @test
-pipeline test_worktree_summary_keeps_checkout_identity(task) {
+pipeline test_worktree_summary_keeps_checkout_identity(harness: Harness, task) {
   const parsed = parse_hook_timing_text(
     """
 {"repository":"burin-labs/harn","repo":"one","hook":"pre-commit","profile":"fast","duration_ms":100,"exit_code":0}
@@ -72,7 +72,7 @@ pipeline test_worktree_summary_keeps_checkout_identity(task) {
 }
 
 @test
-pipeline test_summarize_hook_timings_aggregates_and_sorts_by_total(task) {
+pipeline test_summarize_hook_timings_aggregates_and_sorts_by_total(harness: Harness, task) {
   const parsed = parse_hook_timing_text(
     """
 {"repo":"slow","hook":"pre-push","duration_ms":100}
@@ -96,14 +96,14 @@ pipeline test_summarize_hook_timings_aggregates_and_sorts_by_total(task) {
 }
 
 @test
-pipeline test_slowest_hook_timings_honors_limit(task) {
+pipeline test_slowest_hook_timings_honors_limit(harness: Harness, task) {
   const parsed = parse_hook_timing_text(SAMPLE_LOG)
   const slowest = slowest_hook_timings(parsed.events, 2)
   assert_eq(slowest.map({ event -> event.duration_ms }).to_list(), [405030, 1054])
 }
 
 @test
-pipeline test_filter_hook_timings_combines_repo_hook_and_min_duration(task) {
+pipeline test_filter_hook_timings_combines_repo_hook_and_min_duration(harness: Harness, task) {
   const parsed = parse_hook_timing_text(SAMPLE_LOG)
   const filtered = filter_hook_timings(
     parsed.events,
@@ -114,7 +114,7 @@ pipeline test_filter_hook_timings_combines_repo_hook_and_min_duration(task) {
 }
 
 @test
-pipeline test_render_hook_timing_report_contains_actionable_sections(task) {
+pipeline test_render_hook_timing_report_contains_actionable_sections(harness: Harness, task) {
   const parsed = parse_hook_timing_text(SAMPLE_LOG)
   const rendered = render_hook_timing_report(
     {
@@ -139,7 +139,7 @@ pipeline test_render_hook_timing_report_contains_actionable_sections(task) {
 }
 
 @test
-pipeline test_budget_projection_separates_profiles_and_excludes_failures(task) {
+pipeline test_budget_projection_separates_profiles_and_excludes_failures(harness: Harness, task) {
   const parsed = parse_hook_timing_text(
     """
 {"ts":"2026-07-16T01:00:00Z","repository":"burin-labs/harn","repo":"one","hook":"pre-push","profile":"fast","duration_ms":100,"exit_code":0}
@@ -166,7 +166,7 @@ pipeline test_budget_projection_separates_profiles_and_excludes_failures(task) {
 }
 
 @test
-pipeline test_budget_projection_refuses_thin_samples(task) {
+pipeline test_budget_projection_refuses_thin_samples(harness: Harness, task) {
   const parsed = parse_hook_timing_text(
     """
 {"repository":"burin-labs/harn","repo":"one","hook":"pre-commit","profile":"fast","duration_ms":100}

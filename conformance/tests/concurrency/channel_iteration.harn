@@ -1,11 +1,11 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Use llm_stream with mock provider to test channel iteration
-  const stream = llm_stream("Say hello", nil, {provider: "mock"})
+  const stream = harness.llm.stream("Say hello", nil, {provider: "mock"})
   let chunks = []
   for chunk in stream {
     chunks = chunks + [chunk]
   }
   // Mock stream should produce at least one chunk
-  __io_println(chunks.count > 0)
-  __io_println(type_of(chunks[0]))
+  harness.stdio.println(chunks.count > 0)
+  harness.stdio.println(type_of(chunks[0]))
 }

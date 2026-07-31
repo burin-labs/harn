@@ -47,7 +47,7 @@ fn assert_throws_contains(body, fragment: string) -> nil {
 }
 
 @test
-pipeline test_publishable_workspace_packages_filter_and_sort(task) {
+pipeline test_publishable_workspace_packages_filter_and_sort(harness: Harness, task) {
   assert_eq(
     publishable_workspace_packages_from_metadata(META, "/repo"),
     [
@@ -68,7 +68,7 @@ pipeline test_publishable_workspace_packages_filter_and_sort(task) {
 }
 
 @test
-pipeline test_plan_rows_are_shell_readable(task) {
+pipeline test_plan_rows_are_shell_readable(harness: Harness, task) {
   assert_eq(
     verify_crate_packages_plan_rows(META, "/repo"),
     [
@@ -80,7 +80,7 @@ pipeline test_plan_rows_are_shell_readable(task) {
 }
 
 @test
-pipeline test_plan_fails_closed_for_duplicate_package_names(task) {
+pipeline test_plan_fails_closed_for_duplicate_package_names(harness: Harness, task) {
   const meta = META
     + {
     workspace_members: ["id-cli", "id-duplicate"],
@@ -106,6 +106,6 @@ pipeline test_plan_fails_closed_for_duplicate_package_names(task) {
 }
 
 @test
-pipeline test_plan_fails_closed_for_missing_target_directory(task) {
+pipeline test_plan_fails_closed_for_missing_target_directory(harness: Harness, task) {
   assert_throws_contains({ -> target_directory_from_metadata({}) }, "target_directory")
 }

@@ -1,5 +1,5 @@
 /** Test flow-sensitive nil narrowing in both if branches */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn check_neq(x: string?) -> string {
     if x != nil {
       return x
@@ -24,12 +24,12 @@ pipeline test(task) {
     }
     return x
   }
-  log(check_neq("hello"))
-  log(check_neq(nil))
-  log(check_eq("world"))
-  log(check_eq(nil))
-  log(check_truthiness("yes"))
-  log(check_truthiness(nil))
-  log(check_negation(nil))
-  log(check_negation("no"))
+  harness.stdio.log(check_neq("hello"))
+  harness.stdio.log(check_neq(nil))
+  harness.stdio.log(check_eq("world"))
+  harness.stdio.log(check_eq(nil))
+  harness.stdio.log(check_truthiness("yes"))
+  harness.stdio.log(check_truthiness(nil))
+  harness.stdio.log(check_negation(nil))
+  harness.stdio.log(check_negation("no"))
 }

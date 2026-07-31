@@ -8,9 +8,9 @@ pub fn normalize(text: string) -> string {
   return text.replace("\r\n", "\n").replace("\r", "\n")
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   if argv.count != 2 {
-    __io_eprintln("usage: compare_generated_text.harn <committed> <generated>")
+    harness.stdio.eprintln("usage: compare_generated_text.harn <committed> <generated>")
     return 2
   }
   const committed_path = argv[0] ?? ""

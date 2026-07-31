@@ -362,12 +362,12 @@ fn test_identical_arms_do_not_manufacture_a_winner() {
   require decision.winner == nil, "A/A evidence never manufactures a winner"
 }
 
-pipeline default(_task) {
+pipeline default(harness: Harness, _task) {
   test_manifest_contract()
   test_registration_and_assignment()
   test_decision_and_promotion()
   test_guardrail_veto()
   test_baseline_beats_a_known_bad_candidate()
   test_identical_arms_do_not_manufacture_a_winner()
-  __io_println("experiment-contract-ok")
+  harness.stdio.println("experiment-contract-ok")
 }

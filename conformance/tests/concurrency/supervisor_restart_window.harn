@@ -1,6 +1,6 @@
-pipeline default() {
-  const starts = atomic(0)
-  const sup = supervisor_start(
+pipeline default(harness: Harness) {
+  const starts = harness.runtime.atomic(0)
+  const sup = harness.runtime.supervisor_start(
     {
       name: "windowed",
       strategy: "one_for_one",
@@ -10,7 +10,7 @@ pipeline default() {
           kind: "workflow_runner",
           restart: {mode: "on_failure", max_restarts: 1, window_ms: 1, backoff_ms: 5},
           task: { _ctx ->
-            let attempt = atomic_add(starts, 1) + 1
+            let attempt = harness.runtime.atomic_add(starts, 1) + 1
             if attempt < 3 {
               throw "transient"
             }
@@ -20,17 +20,17 @@ pipeline default() {
       ],
     },
   )
-  let state = supervisor_state(sup)
+  let state = harness.runtime.supervisor_state(sup)
   const deadline_ms = harness.clock.timestamp() * 1000 + 250
   while state.status != "completed" && harness.clock.timestamp() * 1000 < deadline_ms {
-    sleep(5ms)
-    state = supervisor_state(sup)
+    harness.clock.sleep_ms(5ms)
+    state = harness.runtime.supervisor_state(sup)
   }
-  __io_println(atomic_get(starts))
-  __io_println(state.status)
-  __io_println(state.children[0].status)
-  __io_println(state.children[0].restart_count)
-  __io_println(state.metrics.failed)
-  __io_println(state.metrics.restarted)
-  __io_println(state.metrics.suppressed)
+  harness.stdio.println(harness.runtime.atomic_get(starts))
+  harness.stdio.println(state.status)
+  harness.stdio.println(state.children[0].status)
+  harness.stdio.println(state.children[0].restart_count)
+  harness.stdio.println(state.metrics.failed)
+  harness.stdio.println(state.metrics.restarted)
+  harness.stdio.println(state.metrics.suppressed)
 }

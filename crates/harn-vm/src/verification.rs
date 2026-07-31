@@ -73,7 +73,7 @@ fn validate_record_set(value: &VmValue) -> Result<BTreeMap<String, serde_json::V
     };
     let mut fields = BTreeMap::new();
     for (key, entry) in dict.iter() {
-        fields.insert(key.to_string(), vm_to_json(entry));
+        fields.insert(key.to_string(), vm_to_json(entry)?);
     }
     match fields.get("schemaVersion") {
         None => {
@@ -476,6 +476,8 @@ fn optional_dir_arg(args: &[VmValue], index: usize) -> String {
 /// Reads the record set with hierarchical directory resolution, so a
 /// record set stored at the repo root is visible from any subdirectory.
 #[harn_builtin(
+    exposure = "harness.runtime.verification_profiles_get",
+    effects = ["state.read@const=verification-profiles"],
     sig = "verification_profiles_get(dir?: string|nil) -> dict|nil",
     category = "verification"
 )]
@@ -494,6 +496,8 @@ fn verification_profiles_get_impl(args: &[VmValue], _out: &mut String) -> Result
 /// `schemaVersion` (defaulted/validated), `rows` (must be a list of
 /// dicts), and `updatedAt` (stamped by the store) are normalized.
 #[harn_builtin(
+    exposure = "harness.runtime.verification_profiles_set",
+    effects = ["state.mutate@const=verification-profiles"],
     sig = "verification_profiles_set(record_set: dict, dir?: string|nil) -> nil",
     category = "verification"
 )]
@@ -512,6 +516,8 @@ fn verification_profiles_set_impl(args: &[VmValue], _out: &mut String) -> Result
 /// `{repo?, path?, language?, task?}`. Returns the full row (unknown
 /// fields included) or nil when no row applies.
 #[harn_builtin(
+    exposure = "harness.runtime.verification_profile_resolve",
+    effects = ["state.read@const=verification-profiles"],
     sig = "verification_profile_resolve(query: dict, dir?: string|nil) -> dict|nil",
     category = "verification"
 )]
@@ -541,6 +547,8 @@ fn verification_profile_resolve_impl(
 /// scheduler policy can rank candidates without duplicating the selector
 /// engine in stdlib code.
 #[harn_builtin(
+    exposure = "harness.runtime.verification_profile_matches",
+    effects = ["state.read@const=verification-profiles"],
     sig = "verification_profile_matches(query: dict, dir?: string|nil) -> list",
     category = "verification"
 )]
@@ -578,6 +586,8 @@ fn verification_profile_matches_impl(
 /// the record set actually lives at, so updating from a subdirectory
 /// never forks a shadowing copy.
 #[harn_builtin(
+    exposure = "harness.runtime.verification_profile_record_run",
+    effects = ["state.write@const=verification-profiles"],
     sig = "verification_profile_record_run(row_id: string, observation: dict, dir?: string|nil) -> dict|nil",
     category = "verification"
 )]
@@ -595,7 +605,7 @@ fn verification_profile_record_run_impl(
         ));
     }
     let observation = match args.get(1) {
-        Some(VmValue::Dict(_)) => vm_to_json(args.get(1).expect("checked")),
+        Some(VmValue::Dict(_)) => vm_to_json(args.get(1).expect("checked"))?,
         _ => {
             return Err(VmError::Runtime(
                 "verification_profile_record_run: observation must be a dict".to_string(),
@@ -656,6 +666,8 @@ fn verification_profile_record_run_impl(
 /// `{status, staleFiles, feedsGates, advisory, reason, rung?, rowId?}`
 /// with status one of `bound_fresh` / `bound_stale` / `unbound`.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "verification_diagnostic_classify(envelope: dict|nil, current_hashes: dict) -> dict",
     category = "verification"
 )]
@@ -666,10 +678,12 @@ fn verification_diagnostic_classify_impl(
     let envelope = args
         .first()
         .map(vm_to_json)
+        .transpose()?
         .unwrap_or(serde_json::Value::Null);
     let current_hashes = args
         .get(1)
         .map(vm_to_json)
+        .transpose()?
         .unwrap_or_else(|| serde_json::json!({}));
     Ok(json_to_vm(&classify_diagnostic(&envelope, &current_hashes)))
 }

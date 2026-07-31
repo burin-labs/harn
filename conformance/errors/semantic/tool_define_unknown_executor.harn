@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Unknown executor values must error so typos don't silently
   // create handlerless tools.
   const r = tool_registry()

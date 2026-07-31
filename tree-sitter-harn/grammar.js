@@ -719,7 +719,6 @@ module.exports = grammar({
         $.unary_expression,
         $.call_expression,
         $.generic_call_expression,
-        $.hitl_expression,
         $.method_call,
         $.subscript_expression,
         $.property_access,
@@ -835,38 +834,6 @@ module.exports = grammar({
           repeat(lineBreak($)),
           ")"
         )
-      ),
-
-    // First-class HITL primitives: `ask_user(...)`, `dual_control(...)`,
-    // `escalate_to(...)`, `request_approval(...)`. Each is a reserved
-    // keyword in the runtime lexer and accepts both positional and
-    // named arguments — matching the dispatch in
-    // `parse_hitl_expr` in crates/harn-parser/src/parser/expressions.rs.
-    hitl_expression: ($) =>
-      prec.left(
-        13,
-        seq(
-          field("primitive", choice(
-            "ask_user",
-            "dual_control",
-            "escalate_to",
-            "request_approval"
-          )),
-          "(",
-          repeat(lineBreak($)),
-          optional(seq(
-            $.hitl_arg,
-            repeat(seq(",", repeat(lineBreak($)), $.hitl_arg)),
-            optional(seq(",", repeat(lineBreak($))))
-          )),
-          ")"
-        )
-      ),
-
-    hitl_arg: ($) =>
-      choice(
-        seq(field("name", $.identifier), ":", field("value", $._expression)),
-        $._expression
       ),
 
     method_call: ($) =>

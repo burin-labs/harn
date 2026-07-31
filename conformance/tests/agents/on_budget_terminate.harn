@@ -8,8 +8,8 @@
 import { lifecycle_audit_log_take } from "std/lifecycle"
 import { OnBudget, terminate } from "std/lifecycle/on_budget"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const state = {
         kind: "tokens",
@@ -34,7 +34,7 @@ pipeline default() {
       harness.stdio.println("state_kind=" + caught.budget_state.kind)
       harness.stdio.println("state_limit_value=" + to_string(caught.budget_state.limit_value))
       harness.stdio.println("message_passthrough=" + caught.message)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)
       harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)

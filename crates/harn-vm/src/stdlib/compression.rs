@@ -262,6 +262,8 @@ fn entry_value(fields: crate::value::DictMap) -> VmValue {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "gzip_encode(input: bytes | string, level?: int) -> bytes",
     category = "compression"
 )]
@@ -281,6 +283,8 @@ fn gzip_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "gzip_decode(input: bytes, options?: dict) -> bytes",
     category = "compression"
 )]
@@ -293,6 +297,8 @@ fn gzip_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "zstd_encode(input: bytes | string, level?: int) -> bytes",
     category = "compression"
 )]
@@ -313,6 +319,8 @@ fn zstd_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "zstd_decode(input: bytes, options?: dict) -> bytes",
     category = "compression"
 )]
@@ -326,6 +334,8 @@ fn zstd_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "brotli_encode(input: bytes | string, quality?: int) -> bytes",
     category = "compression"
 )]
@@ -348,6 +358,8 @@ fn brotli_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "brotli_decode(input: bytes, options?: dict) -> bytes",
     category = "compression"
 )]
@@ -359,7 +371,11 @@ fn brotli_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     Ok(bytes_value(output))
 }
 
-#[harn_builtin(sig = "tar_create(entries: list) -> bytes", category = "compression")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tar_create(entries: list) -> bytes", category = "compression"
+)]
 fn tar_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let entries = expect_entries(args, "tar_create")?;
     let mut output = Vec::new();
@@ -395,6 +411,8 @@ fn tar_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tar_extract(input: bytes, options?: dict) -> list",
     category = "compression"
 )]
@@ -455,7 +473,11 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::List(std::sync::Arc::new(output)))
 }
 
-#[harn_builtin(sig = "zip_create(entries: list) -> bytes", category = "compression")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "zip_create(entries: list) -> bytes", category = "compression"
+)]
 fn zip_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let entries = expect_entries(args, "zip_create")?;
     let cursor = Cursor::new(Vec::new());
@@ -481,6 +503,8 @@ fn zip_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "zip_extract(input: bytes, options?: dict) -> list",
     category = "compression"
 )]

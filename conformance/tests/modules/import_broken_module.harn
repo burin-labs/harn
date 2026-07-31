@@ -3,6 +3,6 @@
 // undefined here.
 import { slugify_title } from "import_broken_module_lib"
 
-pipeline test(task) {
-  log(slugify_title("Hello World"))
+pipeline test(harness: Harness, task) {
+  harness.stdio.log(slugify_title("Hello World"))
 }

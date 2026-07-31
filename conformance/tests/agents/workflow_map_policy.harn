@@ -13,7 +13,7 @@ fn item_kinds(items) {
   return out
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const artifact_plan = workflow_map_work_items(
     {
       node: {
@@ -28,10 +28,10 @@ pipeline default() {
       ],
     },
   )
-  __io_println(len(artifact_plan.items))
-  __io_println(artifact_plan.items[0].kind)
-  __io_println(artifact_plan.items[0].artifact.id)
-  __io_println(json_stringify(artifact_plan.selected_artifact_ids))
+  harness.stdio.println(len(artifact_plan.items))
+  harness.stdio.println(artifact_plan.items[0].kind)
+  harness.stdio.println(artifact_plan.items[0].artifact.id)
+  harness.stdio.println(json_stringify(artifact_plan.selected_artifact_ids))
   const explicit_plan = workflow_map_work_items(
     {
       node: {
@@ -46,22 +46,22 @@ pipeline default() {
       artifacts: [{id: "summary", kind: "summary", text: "s"}],
     },
   )
-  __io_println(len(explicit_plan.items))
-  __io_println(json_stringify(item_kinds(explicit_plan.items)))
-  __io_println(explicit_plan.items[1].value.name)
-  __io_println(explicit_plan.items[0].artifact_kind)
-  __io_println(json_stringify(explicit_plan.selected_artifact_ids))
-  __io_println(workflow_map_join_target({join_policy: {strategy: "all"}, total: 3}))
-  __io_println(workflow_map_join_target({join_policy: {strategy: "first"}, total: 3}))
-  __io_println(
+  harness.stdio.println(len(explicit_plan.items))
+  harness.stdio.println(json_stringify(item_kinds(explicit_plan.items)))
+  harness.stdio.println(explicit_plan.items[1].value.name)
+  harness.stdio.println(explicit_plan.items[0].artifact_kind)
+  harness.stdio.println(json_stringify(explicit_plan.selected_artifact_ids))
+  harness.stdio.println(workflow_map_join_target({join_policy: {strategy: "all"}, total: 3}))
+  harness.stdio.println(workflow_map_join_target({join_policy: {strategy: "first"}, total: 3}))
+  harness.stdio.println(
     workflow_map_join_target({join_policy: {strategy: "quorum", min_completed: 2}, total: 3}),
   )
   const direct_plan = workflow_map_stage_plan(
     {node: {map_policy: {output_kind: "work"}, output_contract: {output_kinds: ["summary"]}}},
   )
-  __io_println(direct_plan.runs_stage)
-  __io_println(direct_plan.output_kind)
-  __io_println(direct_plan.stage_node == nil)
+  harness.stdio.println(direct_plan.runs_stage)
+  harness.stdio.println(direct_plan.output_kind)
+  harness.stdio.println(direct_plan.stage_node == nil)
   const stage_plan = workflow_map_stage_plan(
     {
       node: {
@@ -74,11 +74,11 @@ pipeline default() {
       },
     },
   )
-  __io_println(stage_plan.runs_stage)
-  __io_println(stage_plan.stage_node.kind)
-  __io_println(json_stringify(stage_plan.stage_node.map_policy))
-  __io_println(json_stringify(stage_plan.stage_node.join_policy))
-  __io_println(stage_plan.stage_node.output_contract.output_kinds[0])
+  harness.stdio.println(stage_plan.runs_stage)
+  harness.stdio.println(stage_plan.stage_node.kind)
+  harness.stdio.println(json_stringify(stage_plan.stage_node.map_policy))
+  harness.stdio.println(json_stringify(stage_plan.stage_node.join_policy))
+  harness.stdio.println(stage_plan.stage_node.output_contract.output_kinds[0])
   const completed = workflow_map_finalize(
     {
       strategy: "quorum",
@@ -88,10 +88,10 @@ pipeline default() {
       failures: [],
     },
   )
-  __io_println(completed.result.status)
-  __io_println(completed.result.text)
-  __io_println(completed.outcome)
-  __io_println(completed.branch)
+  harness.stdio.println(completed.result.status)
+  harness.stdio.println(completed.result.text)
+  harness.stdio.println(completed.outcome)
+  harness.stdio.println(completed.branch)
   const failed = workflow_map_finalize(
     {
       strategy: "all",
@@ -101,7 +101,7 @@ pipeline default() {
       failures: [{status: "failed"}, {status: "failed"}],
     },
   )
-  __io_println(failed.result.status)
-  __io_println(failed.result.text)
-  __io_println(failed.branch)
+  harness.stdio.println(failed.result.status)
+  harness.stdio.println(failed.result.text)
+  harness.stdio.println(failed.branch)
 }

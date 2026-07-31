@@ -1409,7 +1409,7 @@ path = "SKILL.md"
         fs::write(temp.path().join("assets/prompt.txt"), "prompt asset\n").unwrap();
         fs::write(
             temp.path().join("scripts/entry.harn"),
-            "import \"../assets/prompt.txt\"\n__io_println(\"packed\")\n",
+            "import \"../assets/prompt.txt\"\nfn main(harness: Harness) { harness.stdio.println(\"packed\") }\n",
         )
         .unwrap();
 
@@ -1442,7 +1442,7 @@ path = "SKILL.md"
         fs::write(outside.join("prompt.txt"), "outside asset\n").unwrap();
         fs::write(
             root.join("entry.harn"),
-            "import \"../outside/prompt.txt\"\n__io_println(\"packed\")\n",
+            "import \"../outside/prompt.txt\"\nfn main(harness: Harness) { harness.stdio.println(\"packed\") }\n",
         )
         .unwrap();
 

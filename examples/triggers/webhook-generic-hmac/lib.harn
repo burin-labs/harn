@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /** Route a generic HMAC-verified webhook event. */
-pub fn on_webhook(event: TriggerEvent) -> dict {
+pub fn on_webhook(_harness: Harness, event: TriggerEvent) -> dict {
   const raw = event.provider_payload.raw
   return {
     action: "generic_webhook",

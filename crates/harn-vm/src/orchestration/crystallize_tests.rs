@@ -251,7 +251,9 @@ fn crystallizes_repeated_version_bump_with_parameters() {
     assert!(params.contains("version"));
     assert!(params.contains("repo_path"));
     assert!(params.contains("branch_name"));
-    assert!(artifacts.harn_code.contains("pipeline version_bump("));
+    assert!(artifacts
+        .harn_code
+        .contains("pipeline version_bump(harness: Harness, "));
     assert!(artifacts.eval_pack_toml.contains("crystallization-shadow"));
 }
 

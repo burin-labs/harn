@@ -31,8 +31,8 @@ harn scan '$X?.$K ?? $D' crates/harn-stdlib --lang harn
 - Add `--report-only` for per-file counts instead of each match, or `--json`
   for a machine envelope.
 - Narrow a hole to a syntactic class with a **typed placeholder**:
-  `harn scan 'log($A:identifier)' src --lang typescript` matches `log(x)` but
-  not `log(f())`.
+  `harn scan 'harness.stdio.log($A:identifier)' src --lang typescript` matches `harness.stdio.log(x)` but
+  not `harness.stdio.log(f())`.
 
 ## How do I write a reusable rule?
 
@@ -185,12 +185,19 @@ import { rules_search, rules_apply } from "std/rules"
 
 const rule = "id = \"calls\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$FN()\"\n"
 
-const found = rules_search({rule: rule, source: "foo();\nbar();\n", language: "typescript"})
-__io_println(found.match_count)            // 2
+fn inspect_rules(rules: HarnessRules, stdio: HarnessStdio) {
+  const found = rules_search(
+    rules,
+    {rule: rule, source: "foo();\nbar();\n", language: "typescript"},
+  )
+  stdio.println(found.match_count)            // 2
 
-// rules_apply is a gated deterministic tool; dry-run by default.
-hostlib_enable("tools:deterministic")
-const result = rules_apply({rule: codemod_rule, paths: ["src/a.ts"], dry_run: false})
+  // Applying a codemod is explicit authority; dry-run remains the default.
+  const result = rules_apply(
+    rules,
+    {rule: codemod_rule, paths: ["src/a.ts"], dry_run: false},
+  )
+}
 ```
 
 For logic a declarative rule can't express, `rules_visit({rule, ..., on_match:

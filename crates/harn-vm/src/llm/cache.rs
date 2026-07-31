@@ -111,6 +111,8 @@ fn cache_envelope_base(options: &CacheOptions) -> crate::value::DictMap {
 
 /// Return a persistent cache hit envelope for key.
 #[harn_builtin(
+    exposure = "harness.llm.cache_get",
+    effects = ["state.read@arg0"],
     sig = "__cache_get(key: string, options?: dict|nil) -> dict",
     category = "cache"
 )]
@@ -136,6 +138,8 @@ fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 /// Persist a cache value with TTL and LRU eviction.
 #[harn_builtin(
+    exposure = "harness.llm.cache_put",
+    effects = ["state.write@arg0"],
     sig = "__cache_put(key: string, value: any, options?: dict|nil) -> dict",
     category = "cache"
 )]
@@ -159,7 +163,11 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 /// Clear one persistent cache namespace.
-#[harn_builtin(sig = "__cache_clear(options?: dict|nil) -> nil", category = "cache")]
+#[harn_builtin(
+    exposure = "harness.llm.cache_clear",
+    effects = ["state.mutate@const=llm-cache"],
+    sig = "__cache_clear(options?: dict|nil) -> nil", category = "cache"
+)]
 fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
     match options.backend {
@@ -172,7 +180,11 @@ fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 /// Return {hits, misses, lookups, hit_rate} for a cache namespace.
-#[harn_builtin(sig = "__cache_stats(options?: dict|nil) -> dict", category = "cache")]
+#[harn_builtin(
+    exposure = "harness.llm.cache_stats",
+    effects = ["state.read@const=llm-cache"],
+    sig = "__cache_stats(options?: dict|nil) -> dict", category = "cache"
+)]
 fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
     let snapshot = metrics_snapshot(&options);
@@ -208,6 +220,8 @@ fn saturating_u64_to_i64(value: u64) -> i64 {
 
 /// Reset the in-process hit/miss counters for a cache namespace.
 #[harn_builtin(
+    exposure = "harness.llm.cache_stats_reset",
+    effects = ["state.mutate@const=llm-cache-stats"],
     sig = "__cache_stats_reset(options?: dict|nil) -> nil",
     category = "cache"
 )]
@@ -219,6 +233,8 @@ fn cache_stats_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 /// Derive the canonical LLM with_cache key.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__llm_cache_key(prompt: any, system?: any, options?: dict|nil) -> string",
     category = "cache"
 )]

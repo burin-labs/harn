@@ -3,7 +3,7 @@
 import "../backfill_stdlib_metadata.harn"
 
 @test
-pipeline test_strip_helpers(task) {
+pipeline test_strip_helpers(harness: Harness, task) {
   assert_eq(lstrip_ws("  \t hi  "), "hi  ")
   assert_eq(rstrip_ws("  hi \t "), "  hi")
   assert_eq(strip_ws("  hi  "), "hi")
@@ -12,7 +12,7 @@ pipeline test_strip_helpers(task) {
 }
 
 @test
-pipeline test_match_pub_fn(task) {
+pipeline test_match_pub_fn(harness: Harness, task) {
   assert_eq(match_pub_fn("pub fn foo("), "foo")
   assert_eq(match_pub_fn("pub fn foo<T>("), "foo")
   assert_eq(match_pub_fn("pub fn foo ("), "foo")
@@ -26,9 +26,9 @@ pipeline test_match_pub_fn(task) {
 }
 
 @test
-pipeline test_infer_effects(task) {
+pipeline test_infer_effects(harness: Harness, task) {
   assert_eq(infer_effects("return read_to_string(a)"), "[fs.read]")
-  assert_eq(infer_effects("return llm_call(name)"), "[llm.call]")
+  assert_eq(infer_effects("return harness.llm.call(name)"), "[llm.call]")
   // Order follows the rule table: net before process.
   assert_eq(infer_effects("http_get(u)\n command_run(u)"), "[net, process]")
   // No matching builtin → empty list.
@@ -38,7 +38,7 @@ pipeline test_infer_effects(task) {
 }
 
 @test
-pipeline test_parse_existing_metadata(task) {
+pipeline test_parse_existing_metadata(harness: Harness, task) {
   const block = ["/**", " * Prose.", " * @effects: [fs.read]", " */"]
   const m = parse_existing_metadata(block)
   assert_eq(m["effects"], "[fs.read]")
@@ -46,7 +46,7 @@ pipeline test_parse_existing_metadata(task) {
 }
 
 @test
-pipeline test_find_doc_block_start(task) {
+pipeline test_find_doc_block_start(harness: Harness, task) {
   // Multi-line block directly above (no blank separator).
   const out_a = ["/**", " * doc", " */"]
   assert_eq(find_doc_block_start(out_a), 0)
@@ -64,7 +64,7 @@ pipeline test_find_doc_block_start(task) {
 }
 
 @test
-pipeline test_pct(task) {
+pipeline test_pct(harness: Harness, task) {
   assert_eq(pct(1150, 1211), "95.0%")
   assert_eq(pct(1211, 1211), "100.0%")
   assert_eq(pct(0, 1211), "0.0%")
@@ -75,11 +75,11 @@ pipeline test_pct(task) {
 }
 
 @test
-pipeline test_process_file_backfills_required_fields_only(task) {
+pipeline test_process_file_backfills_required_fields_only(harness: Harness, task) {
   const input =
-    "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+    "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return harness.llm.call(name)\n}\n"
   const expected =
-    "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n *\n * @errors: []\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/**\n * Single-line prose.\n *\n * @effects: [llm.call]\n * @errors: []\n */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+    "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n *\n * @errors: []\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/**\n * Single-line prose.\n *\n * @effects: [llm.call]\n * @errors: []\n */\npub fn one(name) -> StructuredText {\n  return harness.llm.call(name)\n}\n"
   const result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
   assert_eq(result["text"], expected)
   const st = result["stats"]
@@ -94,7 +94,7 @@ pipeline test_process_file_backfills_required_fields_only(task) {
 }
 
 @test
-pipeline test_process_file_skip_no_block(task) {
+pipeline test_process_file_skip_no_block(harness: Harness, task) {
   // A pub fn with no doc block is counted but left untouched.
   const input = "pub fn naked(z) {\n  return z\n}\n"
   const result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
@@ -106,7 +106,7 @@ pipeline test_process_file_skip_no_block(task) {
 }
 
 @test
-pipeline test_process_file_already_complete(task) {
+pipeline test_process_file_already_complete(harness: Harness, task) {
   // A fn carrying both required fields is a no-op, even when the
   // optional tags are present too.
   const input =
@@ -119,10 +119,10 @@ pipeline test_process_file_already_complete(task) {
 }
 
 @test
-pipeline test_process_file_idempotent(task) {
+pipeline test_process_file_idempotent(harness: Harness, task) {
   // Running the transform twice yields the same text the second time.
   const input =
-    "/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+    "/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return harness.llm.call(name)\n}\n"
   const once = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")["text"]
   const twice = process_file(once, "/r/crates/harn-stdlib/src/stdlib/x.harn")["text"]
   assert_eq(twice, once)

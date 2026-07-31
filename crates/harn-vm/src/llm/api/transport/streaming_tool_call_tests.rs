@@ -487,20 +487,47 @@ async fn openai_stream_reasoning_does_not_leak_into_text_when_tool_call_present(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn openai_stream_normalizes_harmony_wrapper_tool_call() {
+async fn openai_stream_delays_generic_wrapper_announcement_until_name_resolves() {
     let body = concat!(
-            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"tool\",\"arguments\":\"{\\\"na\"}}]}}]}\n",
-            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"me\\\":\\\"look\\\",\\\"args\\\":{\\\"path\\\":\\\"parser.rs\\\"}}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"tool_call\",\"arguments\":\"{\\\"tool\\\":\\\"look\\\"\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\",\\\"path\\\":\\\"parser.rs\\\"}\"}}]}}]}\n",
             "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6}}\n",
             "data: [DONE]\n",
         );
     let session_id = fresh_session_id("oai-wrapper-toolcall");
-    let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+    let (result, events) = drive(body.as_bytes(), &session_id, false).await;
 
     assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
     assert_eq!(result.tool_calls.len(), 1);
     assert_eq!(result.tool_calls[0]["name"], "look");
     assert_eq!(result.tool_calls[0]["arguments"]["path"], "parser.rs");
+    let starts: Vec<&AgentEvent> = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::ToolCall { .. }))
+        .collect();
+    assert_eq!(
+        starts.len(),
+        1,
+        "one logical wrapper call must emit one concrete start: {events:#?}"
+    );
+    assert!(matches!(
+        starts[0],
+        AgentEvent::ToolCall {
+            tool_name,
+            tool_call_id,
+            ..
+        } if tool_name == "look" && tool_call_id == "call_a"
+    ));
+    assert!(
+        events.iter().all(|event| match event {
+            AgentEvent::ToolCall { tool_name, .. }
+            | AgentEvent::ToolCallUpdate { tool_name, .. } => {
+                !crate::llm::tools::is_generic_wrapper_name(tool_name)
+            }
+            _ => true,
+        }),
+        "generic wrapper names are provider framing, never lifecycle names: {events:#?}"
+    );
 
     clear_session_sinks(&session_id);
 }
@@ -1071,7 +1098,7 @@ async fn streamed_tool_call_uses_one_wire_id_across_announcement_and_dispatch() 
 async fn no_session_id_means_no_streaming_events() {
     // Without an opt-in session id the transport must remain silent
     // — the dispatch-time lifecycle still owns the canonical events
-    // for raw `llm_call(...)` invocations from script context.
+    // for raw `harness.llm.call(...)` invocations from script context.
     let body = concat!(
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_x\",\"name\":\"fake\"}}\n",
             "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"k\\\":1}\"}}\n",

@@ -1,7 +1,13 @@
-import { agent_lifecycle_tools, agent_stop, sub_agent_run, wait_agent } from "std/agent/workers"
+import {
+  agent_lifecycle_tools,
+  agent_stop,
+  list_agents,
+  sub_agent_run,
+  wait_agent,
+} from "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
-fn nested_tools() {
+fn nested_tools(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -10,6 +16,7 @@ fn nested_tools() {
     {
       handler: { _args ->
         const child = sub_agent_run(
+          harness,
           "Leaf checks the migration guard.",
           {
             provider: "mock",
@@ -21,7 +28,7 @@ fn nested_tools() {
             anchor: {primary: "/workspace/agent-stop-middle/leaf"},
           },
         )
-        return wait_agent(child)
+        return wait_agent(harness.agent, child)
       },
       parameters: {},
       returns: {type: "object"},
@@ -30,8 +37,9 @@ fn nested_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [{id: "spawn_nested_1", name: "spawn_nested", arguments: {}}],
@@ -53,6 +61,7 @@ pipeline main() {
     ],
     { ->
       const middle = sub_agent_run(
+        harness,
         "Middle should spawn a leaf then park.",
         {
           provider: "mock",
@@ -60,45 +69,48 @@ pipeline main() {
           tool_format: "native",
           max_iterations: 4,
           token_budget: 50,
-          tools: agent_lifecycle_tools(nested_tools()),
+          tools: agent_lifecycle_tools(nested_tools(harness)),
           allowed_tools: ["spawn_nested", "agent_await_resumption"],
           session_id: "agent-stop-middle",
           anchor: {primary: "/workspace/agent-stop-middle"},
         },
       )
-      const suspended = wait_agent(middle)
-      const stopped = agent_stop(middle, {graceful: true, reason: "parent takeover"})
-      __io_println("suspended=" + suspended.status)
-      __io_println("stopped=" + stopped.status)
-      __io_println("worker_status=" + stopped.worker.status)
-      __io_println("handoff_type=" + stopped.handoff._type)
-      __io_println("handoff_kind=" + stopped.handoff.kind)
-      __io_println(
+      const suspended = wait_agent(harness.agent, middle)
+      const stopped = agent_stop(harness.agent, middle, {graceful: true, reason: "parent takeover"})
+      harness.stdio.println("suspended=" + suspended.status)
+      harness.stdio.println("stopped=" + stopped.status)
+      harness.stdio.println("worker_status=" + stopped.worker.status)
+      harness.stdio.println("handoff_type=" + stopped.handoff._type)
+      harness.stdio.println("handoff_kind=" + stopped.handoff.kind)
+      harness.stdio.println(
         "has_anchor=" + to_string(stopped.handoff.metadata.workspace_anchor.primary != nil),
       )
-      __io_println("has_budget=" + to_string(stopped.handoff.budget_remaining.tokens != nil))
-      __io_println("confidence=" + to_string(stopped.handoff.confidence > 0.0))
-      __io_println("children=" + to_string(len(stopped.children)))
-      __io_println(
+      harness.stdio.println(
+        "has_budget=" + to_string(stopped.handoff.budget_remaining.tokens != nil),
+      )
+      harness.stdio.println("confidence=" + to_string(stopped.handoff.confidence > 0.0))
+      harness.stdio.println("children=" + to_string(len(stopped.children)))
+      harness.stdio.println(
         "summary_reason=" + to_string(contains(stopped.summary, "waiting for parent stop")),
       )
-      __io_println(
+      harness.stdio.println(
         "nested_summary="
           + to_string(contains(stopped.children[0].handoff.reason, "leaf concluded")),
       )
-      __io_println("flat_handoffs=" + to_string(len(stopped.handoffs)))
-      __io_println(
+      harness.stdio.println("flat_handoffs=" + to_string(len(stopped.handoffs)))
+      harness.stdio.println(
         "outcome="
           + to_string(contains(stopped.handoff.metadata.outcome, "waiting for parent stop")),
       )
       let leaf_status = ""
-      for agent in list_agents() {
+      for agent in list_agents(harness.agent) {
         if agent.result?.session_id == "agent-stop-leaf" {
           leaf_status = agent.status
         }
       }
-      __io_println("leaf_status=" + leaf_status)
+      harness.stdio.println("leaf_status=" + leaf_status)
       const hard = sub_agent_run(
+        harness,
         "Hard cancel stays lossy.",
         {
           provider: "mock",
@@ -108,8 +120,8 @@ pipeline main() {
           session_id: "agent-stop-hard",
         },
       )
-      const cancelled = agent_stop(hard, {graceful: false})
-      __io_println("hard=" + cancelled.status)
+      const cancelled = agent_stop(harness.agent, hard, {graceful: false})
+      harness.stdio.println("hard=" + cancelled.status)
     },
   )
 }

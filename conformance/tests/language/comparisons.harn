@@ -1,6 +1,6 @@
-pipeline test(task) {
-  log(1 < 2)
-  log(2 > 3)
-  log(true)
-  log(1 != 2)
+pipeline test(harness: Harness, task) {
+  harness.stdio.log(1 < 2)
+  harness.stdio.log(2 > 3)
+  harness.stdio.log(true)
+  harness.stdio.log(1 != 2)
 }

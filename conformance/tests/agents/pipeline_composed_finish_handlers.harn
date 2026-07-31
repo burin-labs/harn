@@ -17,7 +17,7 @@
 import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
 import { compose } from "std/lifecycle/combinators"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const log_cb = { harness, return_value ->
     harness.emit_audit("composed_log_step", {value: return_value})
     return return_value
@@ -26,11 +26,11 @@ pipeline default() {
     harness.emit_audit("composed_after_drain", {value: return_value})
     return return_value
   }
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const chained = compose([log_cb, on_finish_drain, audit_cb])
       const result = chained(harness, return_value)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println(
         "kind_order=" + audits[0].kind + "," + audits[1].kind + "," + audits[2].kind,

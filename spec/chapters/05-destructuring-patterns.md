@@ -94,12 +94,12 @@ Destructuring patterns work in `for`-`in` loops to unpack each element:
 ```harn
 const entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
 for {name, val} in entries {
-  log("${name}=${val}")
+  harness.obs.log("${name}=${val}")
 }
 
 const pairs = [[1, 2], [3, 4]]
 for [a, b] in pairs {
-  log("${a}+${b}")
+  harness.obs.log("${a}+${b}")
 }
 ```
 

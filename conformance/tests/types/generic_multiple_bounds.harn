@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface Named {
     fn name(self) -> string
   }
@@ -20,5 +20,5 @@ pipeline test(task) {
   fn describe<T>(item: T) -> string where T: Named, T: Aged {
     return "${item.name()} is ${item.age()}"
   }
-  log(describe(Person({name: "Alice", age: 30})))
+  harness.stdio.log(describe(Person({name: "Alice", age: 30})))
 }

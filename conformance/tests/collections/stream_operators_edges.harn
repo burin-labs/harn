@@ -1,7 +1,7 @@
-pipeline test(task) {
-  log(stream.collect(stream.map([], { x -> x })))
-  log(stream.collect(stream.filter([1], { x -> x == 1 })))
-  log(
+pipeline test(harness: Harness, task) {
+  harness.stdio.log(stream.collect(stream.map([], { x -> x })))
+  harness.stdio.log(stream.collect(stream.filter([1], { x -> x == 1 })))
+  harness.stdio.log(
     stream.collect(
       stream.tap(
         [],
@@ -11,27 +11,27 @@ pipeline test(task) {
       ),
     ),
   )
-  log(stream.collect(stream.scan([5], 1, { acc, x -> acc + x })))
-  log(stream.fold([], "seed", { acc, x -> acc + x }))
-  log(stream.collect(stream.take([1], 5)))
-  log(stream.collect(stream.take_until([1], { x -> x == 9 })))
-  log(stream.first([42]))
-  log(stream.collect(stream.merge([], [1])))
-  log(stream.collect(stream.interleave([], [1])))
-  log(stream.collect(stream.zip([], [1])))
-  log(stream.collect(stream.race([], [2])))
+  harness.stdio.log(stream.collect(stream.scan([5], 1, { acc, x -> acc + x })))
+  harness.stdio.log(stream.fold([], "seed", { acc, x -> acc + x }))
+  harness.stdio.log(stream.collect(stream.take([1], 5)))
+  harness.stdio.log(stream.collect(stream.take_until([1], { x -> x == 9 })))
+  harness.stdio.log(stream.first([42]))
+  harness.stdio.log(stream.collect(stream.merge([], [1])))
+  harness.stdio.log(stream.collect(stream.interleave([], [1])))
+  harness.stdio.log(stream.collect(stream.zip([], [1])))
+  harness.stdio.log(stream.collect(stream.race([], [2])))
   const copies = stream.broadcast([], 1)
-  log(stream.collect(copies[0]))
-  log(stream.collect(stream.throttle([], 1000)))
-  log(stream.collect(stream.debounce([], 0)))
-  const empty_channel = channel("empty", 1)
-  const ready_channel = channel("ready", 1)
-  send(ready_channel, "ready")
-  log(stream.first(stream.merge(empty_channel, ready_channel)))
-  const slow_channel = channel("slow", 1)
-  const winner_channel = channel("winner", 1)
-  send(winner_channel, "winner")
-  log(stream.first(stream.race(slow_channel, winner_channel)))
+  harness.stdio.log(stream.collect(copies[0]))
+  harness.stdio.log(stream.collect(stream.throttle([], 1000)))
+  harness.stdio.log(stream.collect(stream.debounce([], 0)))
+  const empty_channel = harness.runtime.channel("empty", 1)
+  const ready_channel = harness.runtime.channel("ready", 1)
+  harness.runtime.send(ready_channel, "ready")
+  harness.stdio.log(stream.first(stream.merge(empty_channel, ready_channel)))
+  const slow_channel = harness.runtime.channel("slow", 1)
+  const winner_channel = harness.runtime.channel("winner", 1)
+  harness.runtime.send(winner_channel, "winner")
+  harness.stdio.log(stream.first(stream.race(slow_channel, winner_channel)))
   const source_error = stream.map(
     [1, 2],
     { x ->
@@ -47,6 +47,6 @@ pipeline test(task) {
   } catch (e) {
     "propagated"
   }
-  log(propagated)
-  log("stream_operators_edges tests passed")
+  harness.stdio.log(propagated)
+  harness.stdio.log("stream_operators_edges tests passed")
 }

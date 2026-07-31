@@ -1,18 +1,18 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // date_now returns a dict with date components
-  const now = date_now()
-  __io_println(now.year > 2024)
-  __io_println(now.month >= 1)
-  __io_println(now.month <= 12)
-  __io_println(now.timestamp > 0.0)
-  __io_println(contains(now.iso8601, "T"))
+  const now = harness.clock.now()
+  harness.stdio.println(now.year > 2024)
+  harness.stdio.println(now.month >= 1)
+  harness.stdio.println(now.month <= 12)
+  harness.stdio.println(now.timestamp > 0.0)
+  harness.stdio.println(contains(now.iso8601, "T"))
   // date_format with a known timestamp
   // 2024-01-15 00:00:00 UTC = 1705276800
   const formatted = date_format(1705276800.0, "%Y-%m-%d")
-  __io_println(formatted)
+  harness.stdio.println(formatted)
   // date_parse roundtrip
   const ts = date_parse("2024-01-15 00:00:00")
-  __io_println(ts)
+  harness.stdio.println(ts)
   const reformatted = date_format(ts, "%Y-%m-%d %H:%M:%S")
-  __io_println(reformatted)
+  harness.stdio.println(reformatted)
 }

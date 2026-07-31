@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // clone gives a fresh dict — mutating the source dict's bindings
   // doesn't bleed into the clone. (Harn dicts are immutable by value,
   // but we still want to confirm the identity guarantees: structural
@@ -36,5 +36,5 @@ pipeline test(task) {
   const lookup = dict_from_pairs([["a", 1], ["b", 2], ["a", 3]])
   assert_eq(lookup.a, 3, "dict_from_pairs: last write wins")
   assert_eq(lookup.b, 2, "dict_from_pairs: distinct keys preserved")
-  log("clone + merge: all tests passed")
+  harness.stdio.log("clone + merge: all tests passed")
 }

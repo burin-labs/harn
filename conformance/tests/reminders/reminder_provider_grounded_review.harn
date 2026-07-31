@@ -1,6 +1,6 @@
 import { agent_reminder_providers_fire } from "std/agent/state"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const opts = {
     reminders: {
       providers: [
@@ -14,9 +14,10 @@ pipeline main() {
       ],
     },
   }
-  const session = agent_session_open("reminder-provider-grounded-review")
-  agent_session_reset(session)
+  const session = harness.agent.open("reminder-provider-grounded-review")
+  harness.agent.reset(session)
   const report = agent_reminder_providers_fire(
+    harness.agent,
     session,
     "post_tool_use",
     {
@@ -30,21 +31,22 @@ pipeline main() {
     },
     opts,
   )
-  const reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   const reminder = reminders[0].reminder
-  __io_println(report.fired_count)
-  __io_println(report.reports[0].provider)
-  __io_println(reminder.tags[0])
-  __io_println(reminder.tags[1])
-  __io_println(reminder.ttl_turns)
-  __io_println(reminder.role_hint)
-  __io_println(reminder.propagate)
-  __io_println(contains(reminder.body, "verified:typecheck"))
-  __io_println(contains(reminder.body, "cannot find value `missing`"))
-  __io_println(contains(reminder.body, "command=cargo check -p demo"))
-  const verifier_session = agent_session_open("reminder-provider-grounded-review-verifier")
-  agent_session_reset(verifier_session)
+  harness.stdio.println(report.fired_count)
+  harness.stdio.println(report.reports[0].provider)
+  harness.stdio.println(reminder.tags[0])
+  harness.stdio.println(reminder.tags[1])
+  harness.stdio.println(reminder.ttl_turns)
+  harness.stdio.println(reminder.role_hint)
+  harness.stdio.println(reminder.propagate)
+  harness.stdio.println(contains(reminder.body, "verified:typecheck"))
+  harness.stdio.println(contains(reminder.body, "cannot find value `missing`"))
+  harness.stdio.println(contains(reminder.body, "command=cargo check -p demo"))
+  const verifier_session = harness.agent.open("reminder-provider-grounded-review-verifier")
+  harness.agent.reset(verifier_session)
   const verifier = agent_reminder_providers_fire(
+    harness.agent,
     verifier_session,
     "post_agent_turn",
     {
@@ -62,16 +64,17 @@ pipeline main() {
     opts,
   )
   const verifier_reminder = transcript_events_by_kind(
-    agent_session_snapshot(verifier_session),
+    harness.agent.snapshot(verifier_session),
     "system_reminder",
   )[0].reminder
-  __io_println(verifier.fired_count)
-  __io_println(contains(verifier_reminder.body, "verified:verifier:lint"))
-  __io_println(contains(verifier_reminder.body, "forbidden pattern matched"))
-  __io_println(contains(verifier_reminder.body, "typecheck verifier returned accept"))
-  const clean_session = agent_session_open("reminder-provider-grounded-review-clean")
-  agent_session_reset(clean_session)
+  harness.stdio.println(verifier.fired_count)
+  harness.stdio.println(contains(verifier_reminder.body, "verified:verifier:lint"))
+  harness.stdio.println(contains(verifier_reminder.body, "forbidden pattern matched"))
+  harness.stdio.println(contains(verifier_reminder.body, "typecheck verifier returned accept"))
+  const clean_session = harness.agent.open("reminder-provider-grounded-review-clean")
+  harness.agent.reset(clean_session)
   const clean = agent_reminder_providers_fire(
+    harness.agent,
     clean_session,
     "post_tool_use",
     {
@@ -82,5 +85,5 @@ pipeline main() {
     },
     opts,
   )
-  __io_println(clean.fired_count)
+  harness.stdio.println(clean.fired_count)
 }

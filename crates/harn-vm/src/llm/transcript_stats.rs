@@ -4,37 +4,59 @@
 
 use std::collections::BTreeMap;
 
-use crate::value::VmValue;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_transcript_builtins(vm: &mut Vm) {
-    vm.register_builtin("transcript_stats", |args, _out| {
-        let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
-        let stats = compute_transcript_stats(&transcript);
-        Ok(stats_to_vm(&stats))
-    });
-
-    vm.register_builtin("transcript_events_by_kind", |args, _out| {
-        let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
-        let kind = args.get(1).map(|v| v.display()).unwrap_or_default();
-        let events = events_list(&transcript);
-        let filtered: Vec<VmValue> = events
-            .into_iter()
-            .filter(|event| match event {
-                VmValue::Dict(dict) => dict
-                    .get("kind")
-                    .and_then(|v| match v {
-                        VmValue::String(s) => Some(s.as_str()),
-                        _ => None,
-                    })
-                    .map(|s| s == kind)
-                    .unwrap_or(false),
-                _ => false,
-            })
-            .collect();
-        Ok(VmValue::List(std::sync::Arc::new(filtered)))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_stats(transcript: list | dict | Transcript | SessionSnapshot | nil) -> dict",
+    category = "agent"
+)]
+fn transcript_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
+    Ok(stats_to_vm(&compute_transcript_stats(&transcript)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_events_by_kind(transcript: list | dict | Transcript | SessionSnapshot | nil, kind: string) -> list",
+    category = "agent"
+)]
+fn transcript_events_by_kind_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
+    let kind = args.get(1).map(VmValue::display).unwrap_or_default();
+    let filtered = events_list(&transcript)
+        .into_iter()
+        .filter(|event| match event {
+            VmValue::Dict(dict) => dict
+                .get("kind")
+                .and_then(|value| match value {
+                    VmValue::String(value) => Some(value.as_str()),
+                    _ => None,
+                })
+                .is_some_and(|value| value == kind),
+            _ => false,
+        })
+        .collect();
+    Ok(VmValue::List(std::sync::Arc::new(filtered)))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &TRANSCRIPT_STATS_BUILTIN_DEF,
+    &TRANSCRIPT_EVENTS_BY_KIND_BUILTIN_DEF,
+];
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptStats {

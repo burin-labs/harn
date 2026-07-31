@@ -2,12 +2,12 @@
 // path (validate, then use) keeps working.
 type User = {name: string}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const d: dict = {name: "Ada"}
   if schema_is(d, User) {
     const u: User = d
-    __io_println(u.name)
+    harness.stdio.println(u.name)
   } else {
-    __io_println("not a user")
+    harness.stdio.println("not a user")
   }
 }

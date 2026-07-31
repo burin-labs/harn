@@ -473,7 +473,7 @@ type GraderOut = {
 const s = schema_of(GraderOut)
 const ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
 
-const r = llm_call(prompt, nil, {
+const r = harness.llm.call(prompt, nil, {
   provider: "openai",
   output: GraderOut,            // alias in value position — compiled to schema_of(T)
   schema_retries: 2,
@@ -496,7 +496,7 @@ recorded in LLM transcript events with the selected route plus all considered
 alternatives so costs can be re-scored later:
 
 ```harn
-const r = llm_call(prompt, nil, {
+const r = harness.llm.call(prompt, nil, {
   route_policy: "cheapest_over_quality(mid)",
   fallback_chain: ["local", "ollama", "openai"],
 })
@@ -539,7 +539,7 @@ const r = cost_route {
     strategy: "cheapest_first",
   }
 
-  llm_call(prompt, nil, {max_tokens: 800})
+  harness.llm.call(prompt, nil, {max_tokens: 800})
 }
 ```
 
@@ -657,13 +657,13 @@ A user-defined wrapper such as
 
 ```harn,ignore
 fn grade<T>(prompt: string, schema: Schema<T>) -> T {
-  const r = llm_call(prompt, nil,
+  const r = harness.llm.call(prompt, nil,
     {provider: "mock", output: {schema: schema, validation: "error"}})
   return r.data
 }
 
 const out: GraderOut = grade("Grade this", schema_of(GraderOut))
-log(out.verdict)
+harness.obs.log(out.verdict)
 ```
 
 narrows `out` to `GraderOut` at the call site without any
@@ -685,19 +685,19 @@ primitive accepts either named arguments or the legacy positional form;
 both lower to the same runtime.
 
 ```harn,ignore
-const answer = ask_user(prompt: "deploy now?", schema: schema_of(Choice))
-const record = request_approval(action: "merge_pr", quorum: 2,
+const answer = harness.interaction.ask_user(prompt: "deploy now?", schema: schema_of(Choice))
+const record = harness.interaction.request_approval(action: "merge_pr", quorum: 2,
                               reviewers: ["alice", "bob", "carol"])
-const merged = dual_control(n: 2, m: 3, action: destructive_step,
+const merged = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
                           approvers: ["alice", "bob", "carol"])
-const handle = escalate_to(role: "oncall", reason: "deploy failed")
+const handle = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
 ```
 
 The runtime owns blocking semantics, timeout behavior, event-log
 records, and replay.
 
 - `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
-- `request_approval(action: string, options?: ApprovalRequestOptions)`
+- `harness.interaction.request_approval(action: string, options?: ApprovalRequestOptions)`
   returns `{approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil,
   signatures: list<{reviewer: string, signed_at: string, signature: string}>}`.
   `ApprovalRequestOptions` is `{detail?: any, args?: any, quorum?: int,
@@ -705,7 +705,7 @@ records, and replay.
   evidence_refs?: list<dict>, undo_metadata?: dict,
   capabilities_requested?: list<string>}`.
 - `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
-- `escalate_to(role: string, reason: string)`
+- `harness.interaction.escalate_to(role: string, reason: string)`
   returns `{request_id: string, role: string, reason: string, trace_id: string,
   status: string, accepted_at: string | nil, reviewer: string | nil}`.
 - `hitl_pending(filters?: {since?: string, until?: string, kinds?: list<string>,
@@ -833,9 +833,9 @@ removes it from the union in the else-branch.
 ```harn
 fn describe(x: string | int) {
   if type_of(x) == "string" {
-    log(x)  // x is `string`
+    harness.obs.log(x)  // x is `string`
   } else {
-    log(x)  // x is `int`
+    harness.obs.log(x)  // x is `int`
   }
 }
 ```
@@ -909,7 +909,7 @@ A bare identifier in condition position narrows by removing `nil`:
 ```harn
 fn check(x: string | nil) {
   if x {
-    log(x)  // x is `string`
+    harness.obs.log(x)  // x is `string`
   }
 }
 ```
@@ -923,7 +923,7 @@ fn check(x: string | nil) {
 ```harn
 fn check(x: string | int | nil) {
   if x != nil && type_of(x) == "string" {
-    log(x)  // x is `string`
+    harness.obs.log(x)  // x is `string`
   }
 }
 ```
@@ -936,7 +936,7 @@ scope (since the else-body must exit):
 ```harn
 fn process(x: string | nil) {
   guard x != nil else { return }
-  log(x)  // x is `string` here
+  harness.obs.log(x)  // x is `string` here
 }
 ```
 
@@ -949,7 +949,7 @@ the `if`:
 ```harn
 fn process(x: string | nil) {
   if x == nil { return }
-  log(x)  // x is `string` — the nil path returned
+  harness.obs.log(x)  // x is `string` — the nil path returned
 }
 ```
 
@@ -978,8 +978,8 @@ variable's type is narrowed in each arm:
 ```harn
 fn check(x: string | int) {
   match x {
-    "hello" -> { log(x) }  // x is `string`
-    42 -> { log(x) }       // x is `int`
+    "hello" -> { harness.obs.log(x) }  // x is `string`
+    42 -> { harness.obs.log(x) }       // x is `int`
     _ -> {}
   }
 }
@@ -1055,7 +1055,7 @@ extension and currently rejected.
 ```harn
 fn check(x: {name?: string, age: int}) {
   if x.has("name") {
-    log(x)  // x.name is now required (non-optional)
+    harness.obs.log(x)  // x.name is now required (non-optional)
   }
 }
 ```
@@ -1127,7 +1127,7 @@ exits where both branches of an `if`/`else` exit:
 ```harn
 fn foo(x: bool) {
   if x { return 1 } else { throw "err" }
-  log("never reached")  // warning: unreachable code
+  harness.obs.log("never reached")  // warning: unreachable code
 }
 ```
 
@@ -1167,7 +1167,7 @@ required fields and that each field has the expected type.
 
 ```harn,ignore
 fn process(user: {name: string, age: int}) {
-  log("${user.name} is ${user.age}")
+  harness.obs.log("${user.name} is ${user.age}")
 }
 
 process({name: "Alice", age: 30})     // OK

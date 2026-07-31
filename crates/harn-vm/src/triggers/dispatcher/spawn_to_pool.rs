@@ -22,7 +22,7 @@ impl Dispatcher {
         // path so policy intersection, cancellation, and dispatch context
         // bookkeeping all work the same way as a Local handler.
         let factory_value = self
-            .invoke_vm_callable(
+            .invoke_vm_event_callable(
                 &crate::value::VmCallable::Eager(Arc::clone(task_factory)),
                 &binding.binding_key(),
                 event,

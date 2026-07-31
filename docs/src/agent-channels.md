@@ -2,7 +2,7 @@
 
 Agent channels are a typed, durable pub/sub primitive for orchestrating
 multiple agents (and the triggers that watch them). One agent calls
-`emit_channel(name, payload)`; any number of subscribers — declared as
+`harness.channels.append(name, payload)`; any number of subscribers — declared as
 `channel.emit` triggers — react. Channel events land on the active
 EventLog, so they survive process restarts, feed the replay oracle, and
 show up in the action graph alongside webhook and cron events.
@@ -23,7 +23,7 @@ narrowest one that fits.
 | React to an external system (GitHub, Slack, cron, Kafka) | Triggers with a provider source | The trigger system already owns signature checks, dedupe, replay, and DLQ for external traffic. |
 | Park one running agent until a specific external event arrives | Suspend/resume with `agent_await_resumption(reason, conditions)` | The waiting agent keeps its transcript; you only need a resume condition, not a long-lived subscriber. |
 | Let agents share claims, blockers, handoffs, and decisions without user-visible chatter | Coordination ledger (`std/coordination`) | Stable coordination envelopes on top of channels, plus opt-in memory recall. |
-| Emit a typed event to N subscribers — including triggers that may not exist yet | **Channels** (`emit_channel(...)` + `channel.emit` trigger) | One producer, many consumers, durable journal, replay-compatible. |
+| Emit a typed event to N subscribers — including triggers that may not exist yet | **Channels** (`harness.channels.append(...)` + `channel.emit` trigger) | One producer, many consumers, durable journal, replay-compatible. |
 | Inject a periodic prompt into a running agent loop | **Channels + `batch` + `ReminderInject`** | Aggregate N emits into one reminder, dropped onto the target session at its next turn boundary. |
 
 Two anti-patterns worth calling out:
@@ -38,18 +38,18 @@ Two anti-patterns worth calling out:
 
 ## Emit a channel
 
-`emit_channel(name, payload, options?)` appends one channel event and
+`harness.channels.append(name, payload, options?)` appends one channel event and
 returns a receipt:
 
 ```harn,ignore
-const receipt = emit_channel("pr.merged", {
+const receipt = harness.channels.append("pr.merged", {
   repo: "burin-labs/harn",
   number: 1984,
   sha: "3e949640",
 })
-log(receipt.event_id)
-log(receipt.name_resolved)  // "tenant:default:pr.merged"
-log(receipt.emitted_at.signature.starts_with("sha256:"))
+harness.stdio.log(receipt.event_id)
+harness.stdio.log(receipt.name_resolved)  // "tenant:default:pr.merged"
+harness.stdio.log(receipt.emitted_at.signature.starts_with("sha256:"))
 ```
 
 The receipt shape is:
@@ -70,7 +70,7 @@ The receipt shape is:
 
 ### Scopes
 
-A bare name resolves to **tenant** scope: `emit_channel("pr.merged",
+A bare name resolves to **tenant** scope: `harness.channels.append("pr.merged",
 payload)` is `tenant:<current-tenant-or-default>:pr.merged`. Add a
 prefix to pick a different scope:
 
@@ -85,7 +85,7 @@ prefix to pick a different scope:
 Scope id can also be passed as an option:
 
 ```harn,ignore
-emit_channel("worker.ready", {worker: "lint"}, {
+harness.channels.append("worker.ready", {worker: "lint"}, {
   scope: "session",
   session_id: "review-bot-123",
   id: "worker-ready-lint",  // idempotency key
@@ -115,24 +115,24 @@ tampering during cross-run comparisons.
 
 ### Reading events back
 
-`channel_events(name, options?)` returns the stored events oldest-first
+`harness.channels.events(name, options?)` returns the stored events oldest-first
 for tests, diagnostics, and local orchestration inspection:
 
 ```harn,ignore
-const events = channel_events("pr.merged", {limit: 10})
+const events = harness.channels.events("pr.merged", {limit: 10})
 for event in events {
-  log(event.payload.repo)
+  harness.stdio.log(event.payload.repo)
 }
 ```
 
 `from_cursor` (or `cursor`) resumes after a specific event id; `limit`
 caps the returned size. This is **not** a subscription — for live
 delivery, register a trigger (next section) or call
-`channel_subscribe(name, options?)`. Use `channel_subscribe` instead of raw
+`harness.channels.subscribe(name, options?)`. Use `channel_subscribe` instead of raw
 `event_log.subscribe` when code needs channel scope resolution; session-scoped
 channels use an in-process session channel log that raw EventLog subscriptions
 do not read.
-Use `channel_consumer_cursor(...)` and `channel_ack(...)` when a durable
+Use `harness.channels.consumer_cursor(...)` and `harness.channels.ack(...)` when a durable
 consumer needs to remember its processed high-water cursor without removing
 events from the shared journal.
 
@@ -213,8 +213,8 @@ trigger_register({
   id: "release-on-pr-merge",
   kind: "channel.emit",
   provider: "channel",
-  handler: { event ->
-    log("PR merged: " + to_string(event.provider_payload.payload.number))
+  handler: { harness, event ->
+    harness.stdio.log("PR merged: " + to_string(event.provider_payload.payload.number))
   },
   match: {events: ["channel:pr.merged"]},
 })
@@ -247,8 +247,8 @@ trigger_register({
   kind: "channel.emit",
   provider: "channel",
   match: {events: ["channel:pr.merged"]},
-  when: { event -> event.provider_payload.payload.target_branch == "main" },
-  handler: { event -> kick_release(event) },
+  when: { _harness, event -> event.provider_payload.payload.target_branch == "main" },
+  handler: { harness, event -> kick_release(event) },
 })
 ```
 
@@ -269,9 +269,9 @@ trigger_register({
   provider: "channel",
   match: {events: ["channel:pr.merged"]},
   batch: {count: 3, window: "1h", key: "repo", expire_action: "fire_partial"},
-  handler: { event ->
+  handler: { harness, event ->
     const merged = event.batch
-    log("Cutting release with " + to_string(len(merged)) + " merged PRs")
+    harness.stdio.log("Cutting release with " + to_string(len(merged)) + " merged PRs")
   },
 })
 ```
@@ -300,9 +300,9 @@ Window expiration is driven by two mechanisms:
 1. **Implicit sweep** — every channel emit first drains expired buffers
    before fanning the new event out, so wall-clock advance is enough
    when emits keep arriving.
-2. **Explicit flush** — `flush_trigger_aggregations()` drains every
-   expired buffer immediately. Tests pair this with `mock_time(ms)` /
-   `advance_time(ms)` for deterministic coverage.
+2. **Explicit flush** — `harness.channels.flush_aggregations()` drains every
+   expired buffer immediately. Tests pair this with `harness.testing.clock_set(ms)` /
+   `harness.testing.clock_advance(ms)` for deterministic coverage.
 
 Diagnostic codes:
 

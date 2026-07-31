@@ -1,9 +1,9 @@
 import { obs } from "observability"
 
-pipeline default() {
-  const o = obs()
+pipeline default(harness: Harness) {
+  const o = obs(harness.obs)
   o.reset()
   o.configure({backend: o.Backend.test()})
   o.log("alias")
-  __io_println(o.events_take()[0].payload.message)
+  harness.stdio.println(o.events_take()[0].payload.name)
 }

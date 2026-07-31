@@ -378,7 +378,7 @@ fn main(harness: Harness) {
   harness.stdio.print("before ")
   harness.stdio.println("exit")
   harness.stdio.eprintln("diagnostic")
-  exit(2)
+  harness.runtime.exit(2)
 }
 "#,
         )

@@ -1,25 +1,25 @@
-pipeline default() {
-  const first_id = event_log.emit("tests.events", "one", {n: 1})
-  const second_id = event_log.emit("tests.events", "two", {n: 2})
-  const replay = event_log.subscribe({topic: "tests.events", from_cursor: first_id})
+pipeline default(harness: Harness) {
+  const first_id = harness.obs.event_log_emit("tests.events", "one", {n: 1})
+  const second_id = harness.obs.event_log_emit("tests.events", "two", {n: 2})
+  const replay = harness.obs.event_log_subscribe({topic: "tests.events", from_cursor: first_id})
   const replayed = replay.next()
-  __io_println(replayed.value.kind)
-  __io_println(replayed.value.payload.n)
-  const live = event_log.subscribe({topic: "tests.events", from_cursor: second_id})
-  event_log.emit("tests.events", "three", {n: 3})
+  harness.stdio.println(replayed.value.kind)
+  harness.stdio.println(replayed.value.payload.n)
+  const live = harness.obs.event_log_subscribe({topic: "tests.events", from_cursor: second_id})
+  harness.obs.event_log_emit("tests.events", "three", {n: 3})
   const live_event = live.next()
-  __io_println(live_event.value.kind)
-  __io_println(live_event.value.cursor)
-  const filtered = event_log.subscribe(
+  harness.stdio.println(live_event.value.kind)
+  harness.stdio.println(live_event.value.cursor)
+  const filtered = harness.obs.event_log_subscribe(
     {
       topic: "tests.events",
       from_cursor: live_event.value.cursor,
       kind_prefix: "transcript.reminder.",
     },
   )
-  event_log.emit("tests.events", "other", {n: 4})
-  event_log.emit("tests.events", "transcript.reminder.injected", {n: 5})
+  harness.obs.event_log_emit("tests.events", "other", {n: 4})
+  harness.obs.event_log_emit("tests.events", "transcript.reminder.injected", {n: 5})
   const filtered_event = filtered.next()
-  __io_println(filtered_event.value.kind)
-  __io_println(filtered_event.value.payload.n)
+  harness.stdio.println(filtered_event.value.kind)
+  harness.stdio.println(filtered_event.value.payload.n)
 }

@@ -1,3 +1,5 @@
+import { agent_loop } from "std/agent/loop"
+
 fn list_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -13,8 +15,9 @@ fn list_tools() {
   return tools
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const result = agent_loop(
+    harness,
     "Inspect the workspace",
     "You are helpful",
     {
@@ -22,11 +25,15 @@ pipeline test(task) {
       tools: list_tools(),
       tool_format: "native",
       max_iterations: 1,
-      policy: {tool_arg_constraints: [{tool: "list_directory", arg_key: "path", arg_patterns: ["src/*"]}]},
+      policy: {
+        tool_arg_constraints: [{tool: "list_directory", arg_key: "path", arg_patterns: ["src/*"]}],
+      },
     },
   )
-  log(result?.tools?.rejected[0])
-  log(
-    json_stringify(transcript_messages(result?.transcript)).contains("is outside your allowed scope"),
+  harness.stdio.log(result?.tools?.rejected[0])
+  harness.stdio.log(
+    json_stringify(transcript_messages(result?.transcript)).contains(
+      "is outside your allowed scope",
+    ),
   )
 }

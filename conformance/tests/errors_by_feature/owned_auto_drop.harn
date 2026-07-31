@@ -1,67 +1,67 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // `owned<channel>` auto-drops at lexical block exit.
   fn block_scope_drop() {
-    const observable = channel("obs", 4)
+    const observable = harness.runtime.channel("obs", 4)
     if true {
       const inner: owned<channel> = observable
-      log("inside: closed?")
-      log(channel_is_closed(inner))
+      harness.stdio.log("inside: closed?")
+      harness.stdio.println(harness.runtime.channel_is_closed(inner))
     }
     // `observable` is the same Arc-shared handle — auto-drop on the inner
     // binding closes the underlying channel.
-    log("after block: closed?")
-    log(channel_is_closed(observable))
+    harness.stdio.log("after block: closed?")
+    harness.stdio.println(harness.runtime.channel_is_closed(observable))
   }
   block_scope_drop()
   // Auto-drop fires on early return.
   fn early_return_drop() {
-    const ch = channel("ret", 4)
+    const ch = harness.runtime.channel("ret", 4)
     if true {
       const owned_ch: owned<channel> = ch
-      log("before return: closed?")
-      log(channel_is_closed(owned_ch))
+      harness.stdio.log("before return: closed?")
+      harness.stdio.println(harness.runtime.channel_is_closed(owned_ch))
       return ch
     }
     return ch
   }
   const after_return = early_return_drop()
-  log("after return: closed?")
-  log(channel_is_closed(after_return))
+  harness.stdio.log("after return: closed?")
+  harness.stdio.println(harness.runtime.channel_is_closed(after_return))
   // User-written defer runs before the synthetic auto-drop (LIFO: auto-drop
   // was pushed at the let-binding, user defer pushed later, runs first).
   fn lifo_with_user_defer() {
-    const visible = channel("lifo", 4)
+    const visible = harness.runtime.channel("lifo", 4)
     if true {
       const h: owned<channel> = visible
       defer {
-        log("user defer: closed before me?")
-        log(channel_is_closed(h))
+        harness.stdio.log("user defer: closed before me?")
+        harness.stdio.println(harness.runtime.channel_is_closed(h))
       }
-      log("block body")
+      harness.stdio.log("block body")
     }
-    log("after block: closed?")
-    log(channel_is_closed(visible))
+    harness.stdio.log("after block: closed?")
+    harness.stdio.println(harness.runtime.channel_is_closed(visible))
   }
   lifo_with_user_defer()
   // Multiple owned bindings drop in LIFO order. Open three channels at
   // module scope so we can observe each one after the inner scope exits.
   fn multi_lifo() {
-    const a = channel("a", 4)
-    const b = channel("b", 4)
-    const c = channel("c", 4)
+    const a = harness.runtime.channel("a", 4)
+    const b = harness.runtime.channel("b", 4)
+    const c = harness.runtime.channel("c", 4)
     if true {
       const oa: owned<channel> = a
       const ob: owned<channel> = b
       const oc: owned<channel> = c
-      log("inside: a, b, c closed?")
-      log(channel_is_closed(oa))
-      log(channel_is_closed(ob))
-      log(channel_is_closed(oc))
+      harness.stdio.log("inside: a, b, c closed?")
+      harness.stdio.println(harness.runtime.channel_is_closed(oa))
+      harness.stdio.println(harness.runtime.channel_is_closed(ob))
+      harness.stdio.println(harness.runtime.channel_is_closed(oc))
     }
-    log("after: a, b, c closed?")
-    log(channel_is_closed(a))
-    log(channel_is_closed(b))
-    log(channel_is_closed(c))
+    harness.stdio.log("after: a, b, c closed?")
+    harness.stdio.println(harness.runtime.channel_is_closed(a))
+    harness.stdio.println(harness.runtime.channel_is_closed(b))
+    harness.stdio.println(harness.runtime.channel_is_closed(c))
   }
   multi_lifo()
 }

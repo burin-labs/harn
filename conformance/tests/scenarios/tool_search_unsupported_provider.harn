@@ -9,7 +9,7 @@
  * (provider, model) pair that exposes no native path still errors,
  * pointing at the client fallback as the fix.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -34,7 +34,7 @@ pipeline test(task) {
   // capability by model generation. `gpt-4o` is below the 5.4 cutoff
   // so the error still fires.
   const native_err = try {
-    llm_call(
+    harness.llm.call(
       "hello",
       nil,
       {
@@ -51,5 +51,5 @@ pipeline test(task) {
   assert(native_err != nil, "native mode must error on unsupported provider")
   assert(native_err.contains("does not expose native"), "error mentions missing native support")
   assert(native_err.contains("mode: \"client\""), "error suggests the client fallback")
-  log("tool_search_unsupported_provider tests passed")
+  harness.stdio.log("tool_search_unsupported_provider tests passed")
 }

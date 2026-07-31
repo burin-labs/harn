@@ -1,5 +1,5 @@
-pipeline test(task) {
-  const root = project_root() ?? cwd()
+pipeline test(harness: Harness, task) {
+  const root = harness.fs.workspace_root()
   const helper_dir = path_join(root, "conformance/helpers")
   const claims = {iss: "12345", iat: 1700000000, exp: 1700000600}
   const es256_key = harness.fs.read_text(path_join(helper_dir, "jwt_es256_test_key.pem"))
@@ -23,5 +23,5 @@ pipeline test(task) {
   assert_eq(rs256_header.typ, "JWT")
   assert_eq(rs256_payload.exp, 1700000600)
   assert(len(rs256_parts[2]) > 0, "RS256 signature present")
-  __io_println("jwt_sign_ok")
+  harness.stdio.println("jwt_sign_ok")
 }

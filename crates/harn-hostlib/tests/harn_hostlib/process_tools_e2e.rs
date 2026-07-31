@@ -50,7 +50,6 @@ fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, Host
         "process_tools_e2e::owner_death_guardian_fixture",
         "--nocapture",
     ]);
-    harn_hostlib::tools::permissions::enable_for_test();
     let registry = registry();
     let entry = registry
         .find(builtin)

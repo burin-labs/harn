@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface Processor {
     fn process(self, x: int) -> string
   }
@@ -11,7 +11,7 @@ pipeline test(task) {
     }
   }
   fn run_proc<T>(p: T) where T: Processor {
-    log(p.process("hello"))
+    harness.stdio.log(p.process("hello"))
   }
   run_proc(MyProc({name: "a"}))
 }

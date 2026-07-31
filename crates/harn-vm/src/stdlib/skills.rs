@@ -232,7 +232,11 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "skill_registry() -> dict", category = "skills")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "skill_registry() -> dict", category = "skills"
+)]
 fn skill_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = BTreeMap::new();
     registry.put_str("_type", "skill_registry");
@@ -244,6 +248,8 @@ fn skill_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "skill_define(registry: dict, name: string, config: dict) -> dict",
     category = "skills"
 )]
@@ -380,7 +386,11 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::dict(new_registry))
 }
 
-#[harn_builtin(sig = "skill_list(registry: dict) -> list", category = "skills")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "skill_list(registry: dict) -> list", category = "skills"
+)]
 fn skill_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
@@ -412,6 +422,8 @@ fn skill_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "skills_catalog_entries(registry: dict) -> list",
     category = "skills"
 )]
@@ -431,6 +443,8 @@ fn skills_catalog_entries_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "skill_who_signed(registry: dict, name: string) -> dict",
     category = "skills"
 )]
@@ -453,6 +467,8 @@ fn skill_who_signed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "render_always_on_catalog(entries_or_registry: list | dict, budget?: int) -> string",
     category = "skills"
 )]
@@ -671,6 +687,8 @@ fn parse_string_list(value: Option<&VmValue>) -> Vec<String> {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "skills_activation_evidence(registry: dict, options?: dict) -> dict",
     category = "skills"
 )]
@@ -729,6 +747,8 @@ fn skills_activation_evidence_impl(
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "skill_find(registry: dict, name: string) -> dict?",
     category = "skills"
 )]
@@ -762,6 +782,8 @@ fn skill_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "skill_select(registry: dict, names: list) -> dict",
     category = "skills"
 )]
@@ -812,7 +834,11 @@ fn skill_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::dict(new_registry))
 }
 
-#[harn_builtin(sig = "skill_describe(registry: dict) -> string", category = "skills")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "skill_describe(registry: dict) -> string", category = "skills"
+)]
 fn skill_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
@@ -864,6 +890,8 @@ fn skill_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "skill_remove(registry: dict, name: string) -> dict",
     category = "skills"
 )]
@@ -912,6 +940,8 @@ fn skill_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 // string body. Args is an optional list of strings; missing values
 // pass through unchanged so authors can spot under-supplied calls.
 #[harn_builtin(
+    exposure = "harness.agent.skill_render",
+    effects = ["state.read@dynamic", "env.read@const=HARN_SESSION_ID"],
     sig = "skill_render(skill: dict | string, arguments?: list) -> string",
     category = "skills"
 )]
@@ -969,6 +999,8 @@ fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.load_skill",
+    effects = ["state.read@dynamic", "fs.read@dynamic", "env.read@const=HARN_SESSION_ID"],
     sig = "load_skill(request: string | dict) -> string",
     category = "skills",
     kind = "async"
@@ -997,7 +1029,11 @@ async fn load_skill_impl(
     )))
 }
 
-#[harn_builtin(sig = "skill_count(registry: dict) -> int", category = "skills")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "skill_count(registry: dict) -> int", category = "skills"
+)]
 fn skill_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,

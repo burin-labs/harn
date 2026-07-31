@@ -1454,7 +1454,7 @@ fn __tool_parse_json_error(detail: string) -> string {
 /**
  * Parse one model text response.
  *
- * @effects: [host]
+ * @effects: []
  * @errors: []
  * @api_stability: experimental
  */

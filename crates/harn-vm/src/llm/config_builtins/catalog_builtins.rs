@@ -7,13 +7,12 @@ use crate::value::{VmError, VmValue};
 
 use super::batch_projection::string_list_to_vm_value;
 use super::capability_projection::capabilities_to_vm_value;
-use super::model_projection::llm_catalog_value;
-use super::provider_projection::{
-    llm_provider_status_value, provider_catalog_to_vm_value, provider_def_to_vm_value,
-};
+use super::provider_projection::{provider_catalog_to_vm_value, provider_def_to_vm_value};
 
 /// Return provider/model capability metadata from the loaded capability matrix.
 #[harn_builtin(
+    exposure = "harness.llm.provider_capabilities",
+    effects = ["state.read@arg0"],
     sig = "provider_capabilities(provider: string, model?: string|nil) -> dict",
     category = "llm.config"
 )]
@@ -34,6 +33,8 @@ pub(super) fn provider_capabilities_builtin(
 
 /// Install raw TOML capability overrides for provider/model capability lookup.
 #[harn_builtin(
+    exposure = "harness.llm.provider_capabilities_install",
+    effects = ["state.mutate@arg0"],
     sig = "provider_capabilities_install(toml_src: string) -> bool",
     category = "llm.config"
 )]
@@ -54,7 +55,11 @@ fn provider_capabilities_install_builtin(
 }
 
 /// Clear installed provider/model capability overrides.
-#[harn_builtin(sig = "provider_capabilities_clear() -> bool", category = "llm.config")]
+#[harn_builtin(
+    exposure = "harness.llm.provider_capabilities_clear",
+    effects = ["state.mutate@const=provider-capabilities"],
+    sig = "provider_capabilities_clear() -> bool", category = "llm.config"
+)]
 fn provider_capabilities_clear_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -64,7 +69,11 @@ fn provider_capabilities_clear_builtin(
 }
 
 /// List providers usable in the current environment.
-#[harn_builtin(sig = "llm_available_providers() -> list", category = "llm.config")]
+#[harn_builtin(
+    exposure = "harness.llm.available_providers",
+    effects = ["state.read@const=provider-catalog"],
+    sig = "llm_available_providers() -> list", category = "llm.config"
+)]
 fn llm_available_providers_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -75,27 +84,19 @@ fn llm_available_providers_builtin(
 }
 
 /// Return the loaded provider, alias, model, pricing, and availability catalog.
-#[harn_builtin(sig = "llm_provider_catalog() -> dict", category = "llm.config")]
+#[harn_builtin(
+    exposure = "harness.llm.provider_catalog",
+    effects = ["state.read@const=provider-catalog"],
+    sig = "llm_provider_catalog() -> dict", category = "llm.config"
+)]
 fn llm_provider_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(provider_catalog_to_vm_value())
 }
 
-/// List all configured and runtime-registered LLM provider names.
-#[harn_builtin(sig = "llm_providers() -> list", category = "llm.config")]
-fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let config_names = llm_config::provider_names();
-    let registry_names = crate::llm::provider::registered_provider_names();
-    let mut all: std::collections::BTreeSet<String> = config_names.into_iter().collect();
-    all.extend(registry_names);
-    let list: Vec<VmValue> = all
-        .into_iter()
-        .map(|n| VmValue::String(arcstr::ArcStr::from(n)))
-        .collect();
-    Ok(VmValue::List(std::sync::Arc::new(list)))
-}
-
 /// Register a custom OpenAI-compatible provider name for runtime dispatch.
 #[harn_builtin(
+    exposure = "harness.llm.provider_register",
+    effects = ["state.mutate@arg0"],
     sig = "provider_register(name: string) -> bool",
     category = "llm.config"
 )]
@@ -108,31 +109,6 @@ fn provider_register_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
     }
     crate::llm::provider::register_provider_name(&name);
     Ok(VmValue::Bool(true))
-}
-
-/// Return the full configured model catalog as a list of dicts:
-/// `[{id, name, provider, context_window, runtime_context_window, capabilities,
-/// quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`.
-/// Alias for the read-only `harness.llm.catalog()` handle method, available for
-/// scripts that do not receive a `Harness` parameter.
-#[harn_builtin(sig_expr = harn_builtin_meta::signatures::LLM_CATALOG, category = "llm.config")]
-fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(llm_catalog_value())
-}
-
-/// Refresh the process-wide provider/model catalog overlay from the configured
-/// hosted catalog, validating the remote document before installing it.
-#[harn_builtin(sig_expr = harn_builtin_meta::signatures::LLM_CATALOG_REFRESH, kind = "async", category = "llm.config")]
-async fn llm_catalog_refresh_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let options = parse_catalog_refresh_options(args.first(), "llm_catalog_refresh")?;
-    let report = crate::provider_catalog::refresh_runtime_catalog(options).await;
-    let json = serde_json::to_value(report).map_err(|error| {
-        VmError::Runtime(format!("llm_catalog_refresh: serialize result: {error}"))
-    })?;
-    Ok(crate::stdlib::json_to_vm_value(&json))
 }
 
 pub(crate) fn parse_catalog_refresh_options(
@@ -159,20 +135,10 @@ pub(crate) fn parse_catalog_refresh_options(
     Ok(crate::provider_catalog::CatalogRefreshOptions { url, force })
 }
 
-/// Return a list of `{name, available, credential_status}` dicts describing every
-/// configured provider plus runtime-registered names. `available` is true when
-/// credentials resolve via the configured env vars (or when the provider uses
-/// multi-step auth like Bedrock/Vertex). `credential_status` is one of
-/// `"ok"`, `"missing"`, `"not_required"`, `"deferred"`. Alias for the
-/// read-only `harness.llm.providers()` handle method, available for scripts that
-/// do not receive a `Harness` parameter.
-#[harn_builtin(sig_expr = harn_builtin_meta::signatures::LLM_PROVIDER_STATUS, category = "llm.config")]
-fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(llm_provider_status_value())
-}
-
 /// Return configured provider settings, or all provider settings when no provider is passed.
 #[harn_builtin(
+    exposure = "harness.llm.config",
+    effects = ["state.mutate@const=llm-config"],
     sig = "llm_config(provider?: string|nil) -> dict|nil",
     category = "llm.config"
 )]

@@ -2,14 +2,14 @@ import { bounded_loop } from "std/personas/prelude"
 
 @persona(name: "template_persona", description: "Deterministic sweeper template persona.", tools: [github], capabilities: ["project.test_commands", "runtime.record_run", "workspace.read_text"], autonomy: "act_with_approval", receipts: "required")
 /** Run the deterministic sweeper template DAG. */
-pub fn template_persona(task) {
-  return drain_queue(task)
+pub fn template_persona(clock: HarnessClock, fs: HarnessFs, task) {
+  return drain_queue(clock, fs, task)
 }
 
 @step(name: "drain_queue", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
-fn drain_queue(task) {
+fn drain_queue(clock: HarnessClock, fs: HarnessFs, task) {
   const fixture = task?.fixture ?? {items: []}
-  const prompt = render_prompt(
+  const prompt = fs.render_prompt(
     "../prompts/system.harn.prompt",
     {
       persona_name: "template_persona",
@@ -18,6 +18,7 @@ fn drain_queue(task) {
     },
   )
   return bounded_loop(
+    clock,
     {remaining: fixture.items, processed: []},
     fn(state) {
       if len(state.remaining) == 0 {
@@ -40,6 +41,6 @@ fn drain_queue(task) {
   )
 }
 
-pub pipeline run(task) -> dict {
-  return template_persona(task)
+pub pipeline run(harness: Harness, task) -> dict {
+  return template_persona(harness.clock, harness.fs, task)
 }

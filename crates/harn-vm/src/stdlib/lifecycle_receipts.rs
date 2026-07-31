@@ -30,6 +30,8 @@ pub(crate) fn register_lifecycle_receipt_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.lifecycle_receipt_record_suspension",
+    effects = ["state.write@arg0"],
     sig = "lifecycle_receipt_record_suspension(receipt: dict) -> dict",
     category = "lifecycle_receipts"
 )]
@@ -43,6 +45,8 @@ fn lifecycle_receipt_record_suspension_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.lifecycle_receipt_record_resumption",
+    effects = ["state.write@arg0"],
     sig = "lifecycle_receipt_record_resumption(receipt: dict) -> dict",
     category = "lifecycle_receipts"
 )]
@@ -56,6 +60,8 @@ fn lifecycle_receipt_record_resumption_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.lifecycle_receipt_record_drain_decision",
+    effects = ["state.write@arg0"],
     sig = "lifecycle_receipt_record_drain_decision(receipt: dict) -> dict",
     category = "lifecycle_receipts"
 )]
@@ -69,6 +75,8 @@ fn lifecycle_receipt_record_drain_decision_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.lifecycle_receipts_snapshot",
+    effects = ["state.read@const=lifecycle-receipts"],
     sig = "lifecycle_receipts_snapshot() -> list",
     category = "lifecycle_receipts"
 )]
@@ -85,6 +93,8 @@ fn lifecycle_receipts_snapshot_impl(
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "verify_lifecycle_receipt_signature(kind: string, payload: dict) -> dict",
     category = "lifecycle_receipts"
 )]
@@ -103,6 +113,8 @@ fn verify_lifecycle_receipt_signature_impl(
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "lifecycle_resume_input_hash(input: any) -> string",
     category = "lifecycle_receipts"
 )]
@@ -121,6 +133,8 @@ fn lifecycle_resume_input_hash_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.lifecycle_drain_decision_prompt_hash",
+    effects = ["state.read@arg0"],
     sig = "lifecycle_drain_decision_prompt_hash(prompt: string) -> string",
     category = "lifecycle_receipts"
 )]
@@ -138,6 +152,8 @@ fn lifecycle_drain_decision_prompt_hash_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.lifecycle_replay_resume_input",
+    effects = ["state.read@arg0"],
     sig = "lifecycle_replay_resume_input(receipt: dict, candidate?: any) -> dict",
     category = "lifecycle_receipts"
 )]
@@ -176,6 +192,8 @@ fn lifecycle_replay_resume_input_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.lifecycle_replay_drain_decision",
+    effects = ["state.read@arg0"],
     sig = "lifecycle_replay_drain_decision(receipt: dict, candidate_prompt?: string) -> dict",
     category = "lifecycle_receipts"
 )]

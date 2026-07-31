@@ -9,7 +9,7 @@ patching the runtime.
 | Seam | Stage | Hook | Use cases |
 |------|-------|------|-----------|
 | **Schema-time** | Before the model sees a registry | `tools_use_middleware(registry, transform)` | Augment input schemas (force a `reason` arg, inject a `dry_run` flag), drop tools, rewrite descriptions. |
-| **Execution-time** | Around every tool dispatch | `agent_loop({tool_caller: caller})` | Audit logs, consent prompts, dry-run preview, redaction, idempotency, rate-limit, telemetry. |
+| **Execution-time** | Around every tool dispatch | `agent_loop(harness, {tool_caller: caller})` | Audit logs, consent prompts, dry-run preview, redaction, idempotency, rate-limit, telemetry. |
 
 Both seams compose. The execution-time seam runs *every* dispatch
 regardless of executor (`harn`, `host_bridge`, `mcp_server`,
@@ -134,7 +134,7 @@ the model omits the synthetic `reason` field, while still recording
 ```harn,ignore
 const mw = with_required_reason({schema_required: false})
 const registry = tools_use_middleware(my_registry, mw.schema_transform)
-agent_loop(task, system, {tools: registry, tool_caller: mw.caller})
+agent_loop(harness, task, system, {tools: registry, tool_caller: mw.caller})
 ```
 
 `schema_required: false` keeps runtime validation aligned with the
@@ -152,12 +152,12 @@ instead of raw payloads.
 `sink_or_options` accepts a callable sink, `"local"`, `"cloud"`,
 `"both"`, or `{sink, redact}`. Local receipts append to
 `<state_root>/receipts/<session_id>.jsonl`, where `<state_root>` is
-`runtime_paths().state_root` — Harn's runtime state directory, which
+`harness.fs.runtime_paths().state_root` — Harn's runtime state directory, which
 follows `HARN_STATE_DIR` and defaults to `.harn` under the project root.
 Cloud receipts mirror through the
 host event bridge; `both` writes local first and mirrors the same
 receipt. `redact` is a list of argument keys removed before `args_hash`
-is computed. In `agent_loop({prefetch_next_turn: true})`, local and
+is computed. In `agent_loop(harness, {prefetch_next_turn: true})`, local and
 callable sinks flush in the background after the tool result has been
 recorded; cloud receipt mirroring still remains attached to the tool
 result event.
@@ -258,7 +258,7 @@ Caches successful tool results keyed by `key_fn(call) -> string`,
 backed by `std/cache` so the cache outlives the caller closure. Repeat
 queries within the TTL reuse cached results.
 
-### `with_rate_limit(opts) -> caller`
+### `with_rate_limit(harness.runtime, opts) -> caller`
 
 Caps the total number of tool calls processed by this caller. Once
 `max_calls` is hit, further calls short-circuit with `rate_limited`.
@@ -301,7 +301,7 @@ Caps wall-clock time per tool call. Calls inside the budget pass
 through with `audit.layers[…].status == "ok"`. Calls that breach the
 budget surface `error_category: "timeout"` and `status: "timeout"` on
 the layer log. The middleware does *not* cancel the in-flight dispatch
-(hard cancellation belongs in `agent_loop({deadline_ms})`); it
+(hard cancellation belongs in `agent_loop(harness, {deadline_ms})`); it
 observes the breach so upstream layers can react.
 
 Options: `max_ms` (required, non-negative int), `per_tool`
@@ -356,13 +356,13 @@ const captain_tool_caller = compose_tool_callers([
   with_redaction(unified_redaction_policy),    // strip secrets
   with_handoff_artifact({sink: handoff_emitter}), // typed handoff records
   with_idempotency(per_tool_idempotency_keyer),
-  with_rate_limit({max_calls: persona.tool_budget}),
+  with_rate_limit(harness.runtime, {max_calls: persona.tool_budget}),
   with_dry_run({only: persona.shadow_tools}),  // crystallization shadow runs
 ])
 
 const registry = tools_use_middleware(my_registry, reason_mw.schema_transform)
 
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   tools: registry,
   tool_caller: captain_tool_caller,
 })
@@ -388,7 +388,7 @@ audit log sees what the runtime actually attempted.
    `rendered_result` or `output` or `content`). Use
    `__tool_mw_short_circuit` patterns or the bundled middleware as a
    template.
-3. **Parallel dispatch ordering.** `agent_loop({max_concurrent_tools:
+3. **Parallel dispatch ordering.** `agent_loop(harness, {max_concurrent_tools:
    N})` can run sibling tool calls from one planner turn concurrently,
    with or without middleware. The transcript still records tool
    results in planner-emitted order, and audited receipts carry

@@ -30,7 +30,11 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &QUERY_STRINGIFY_IMPL_DEF,
 ];
 
-#[harn_builtin(sig = "url_parse(url: string) -> dict", category = "url")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "url_parse(url: string) -> dict", category = "url"
+)]
 fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw = args.first().map(|a| a.display()).unwrap_or_default();
     let parsed = Url::parse(&raw).map_err(|e| {
@@ -88,7 +92,11 @@ fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::dict(dict))
 }
 
-#[harn_builtin(sig = "url_build(parts: dict) -> string", category = "url")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "url_build(parts: dict) -> string", category = "url"
+)]
 fn url_build_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::Dict(parts)) = args.first() else {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -159,7 +167,11 @@ fn url_build_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(parsed.as_str())))
 }
 
-#[harn_builtin(sig = "query_parse(query: string) -> list", category = "url")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "query_parse(query: string) -> list", category = "url"
+)]
 fn query_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw = args.first().map(|a| a.display()).unwrap_or_default();
     let trimmed = raw.strip_prefix('?').unwrap_or(&raw);
@@ -174,7 +186,11 @@ fn query_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::List(std::sync::Arc::new(pairs)))
 }
 
-#[harn_builtin(sig = "query_stringify(pairs: list) -> string", category = "url")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "query_stringify(pairs: list) -> string", category = "url"
+)]
 fn query_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::List(items)) = args.first() else {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(

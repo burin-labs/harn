@@ -65,6 +65,49 @@ pub(super) async fn dispatch_process_exec_after_policy(
     command_policy_context: JsonValue,
     command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
 ) -> Result<VmValue, VmError> {
+    let (tape_program, tape_args) = process_exec_argv(params)?;
+    let tape_cwd = optional_string(params, "cwd").map(|cwd| resolve_process_exec_cwd(&cwd));
+    let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");
+    let started = crate::clock_mock::leak_audit::instant_now("host_call/process.exec.started");
+    if let Some(intercepted) = crate::testbench::process_tape::intercept_spawn(
+        &tape_program,
+        &tape_args,
+        tape_cwd.as_deref(),
+    ) {
+        let output = intercepted
+            .map_err(|message| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message))))?;
+        let exit_code = output.status.code().unwrap_or(-1);
+        let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
+        let stderr_utf8_valid = std::str::from_utf8(&output.stderr).is_ok();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let response = process_exec_response(ProcessExecResponse {
+            pid: None,
+            started_at,
+            started,
+            stdout: &stdout,
+            stderr: &stderr,
+            exit_code,
+            status: "completed",
+            success: output.status.success(),
+            timed_out: false,
+            stdout_utf8_valid,
+            stderr_utf8_valid,
+        });
+        return crate::orchestration::run_command_policy_postflight_with_ctx(
+            ctx,
+            params,
+            response,
+            command_policy_context,
+            command_policy_decisions,
+        )
+        .await;
+    }
+    let tape_recording = crate::testbench::process_tape::start_recording(
+        &tape_program,
+        &tape_args,
+        tape_cwd.as_deref(),
+    );
     let timeout_ms = optional_i64(params, "timeout")
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
@@ -78,6 +121,52 @@ pub(super) async fn dispatch_process_exec_after_policy(
         Some(value) => Some(push_sandbox_profile_override(&value)?),
         None => None,
     };
+    #[cfg(target_os = "windows")]
+    if let Some((policy, profile)) = crate::stdlib::sandbox::active_sandbox_policy() {
+        let launch = ProcessExecLaunch::from_params(params, "process.exec")?;
+        // The resolved policy/profile are owned snapshots. Drop the thread-
+        // local, non-Send override guard before the blocking worker await; the
+        // Windows backend receives the snapshot explicitly.
+        drop(profile_guard);
+        let output = crate::stdlib::sandbox::windows_command_output(
+            tape_program,
+            tape_args,
+            launch.into_process_config(),
+            policy,
+            profile,
+        )
+        .await
+        .map_err(|error| contextualize_process_error("process.exec", "sandbox", error))?;
+        let exit_code = output.status.code().unwrap_or(-1);
+        if let Some(recording) = tape_recording {
+            recording.finish(&output);
+        }
+        let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
+        let stderr_utf8_valid = std::str::from_utf8(&output.stderr).is_ok();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let response = process_exec_response(ProcessExecResponse {
+            pid: None,
+            started_at,
+            started,
+            stdout: &stdout,
+            stderr: &stderr,
+            exit_code,
+            status: "completed",
+            success: output.status.success(),
+            timed_out: false,
+            stdout_utf8_valid,
+            stderr_utf8_valid,
+        });
+        return crate::orchestration::run_command_policy_postflight_with_ctx(
+            ctx,
+            params,
+            response,
+            command_policy_context,
+            command_policy_decisions,
+        )
+        .await;
+    }
     let mut cmd = build_sandboxed_command(params, "process.exec")?;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
@@ -90,11 +179,9 @@ pub(super) async fn dispatch_process_exec_after_policy(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");
-    let started = crate::clock_mock::leak_audit::instant_now("host_call/process.exec.started");
     let mut child = cmd
         .spawn()
-        .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
+        .map_err(|error| crate::value::environment_io_error_thrown(&error, error.to_string()))?;
     drop(profile_guard);
     let pid = child.id();
     crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
@@ -202,6 +289,18 @@ pub(super) async fn dispatch_process_exec_after_policy(
         drain_pipes.await?
     };
     drop(cleanup_registration);
+    if let Some(recording) = tape_recording {
+        recording.finish_parts(exit_code, &stdout, &stderr);
+    }
+
+    if status == "completed" {
+        if let Some(error) = crate::process_sandbox::wrapped_spawn_io_error(exit_code, &stderr) {
+            return Err(crate::value::environment_io_error_thrown(
+                &error,
+                error.to_string(),
+            ));
+        }
+    }
 
     let stdout_utf8_valid = std::str::from_utf8(&stdout).is_ok();
     let stderr_utf8_valid = std::str::from_utf8(&stderr).is_ok();
@@ -283,95 +382,142 @@ async fn terminate_process_exec_child(
 /// [`crate::process_sandbox::tokio_command_for`], cwd enforcement, and
 /// env/env_mode/env_remove handling.
 ///
-/// Shared by `process.exec` (synchronous) and `process.spawn`
-/// (non-blocking) so both go through the identical sandbox-gated build
-/// path. The caller is responsible for any `sandbox_profile` override
-/// guard (it must be live across this call) and for setting stdio/kill
-/// behaviour on the returned command. `label` ("process.exec" or
-/// "process.spawn") is woven into error messages.
+/// The platform-independent normalization lives in [`ProcessExecLaunch`].
+/// This function projects it onto Tokio for `process.spawn` and for
+/// `process.exec` on platforms whose sandbox can decorate a Tokio command.
+/// Windows exec projects the same launch onto `ProcessCommandConfig` because
+/// AppContainer requires the custom output backend.
 pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
     label: &str,
 ) -> Result<tokio::process::Command, VmError> {
-    let (program, args) = process_exec_argv(params)?;
-    let mut cmd = crate::process_sandbox::tokio_command_for(&program, &args)
-        .map_err(|e| VmError::Runtime(format!("host_call {label} sandbox setup: {e}")))?;
-    if let Some(cwd) = optional_string(params, "cwd") {
-        let cwd = resolve_process_exec_cwd(&cwd);
-        crate::process_sandbox::enforce_process_cwd(&cwd)
-            .map_err(|e| VmError::Runtime(format!("host_call {label} cwd: {e}")))?;
+    let launch = ProcessExecLaunch::from_params(params, label)?;
+    let mut cmd = crate::process_sandbox::tokio_command_for(&launch.program, &launch.args)
+        .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
+    if let Some(cwd) = launch.cwd {
         cmd.current_dir(cwd);
     }
-    // Under a session profile the command from `tokio_command_for` already
-    // carries the resolver's closed env (parent env cleared), applied once at
-    // the sandbox funnel; everything below layers onto that closed base.
-    //
-    // Track keys the caller set explicitly so the sandbox-local TMPDIR overlay
-    // below never clobbers an intentional per-call value.
-    let mut caller_env_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    if let Some(env) = optional_string_dict(params, "env")? {
-        // `env_mode` controls how the provided `env` keys combine with the
-        // parent environment:
-        //   - "merge" (default): inherit the parent env and overlay the
-        //     provided keys. This is the least-surprising behavior — a
-        //     caller passing `env: {ONE_VAR: "x"}` keeps PATH/HOME/etc.
-        //   - "replace": clear the parent env entirely, then set only the
-        //     provided keys. This is the footgun shape and must be requested
-        //     explicitly whenever `env` is supplied.
-        let env_mode = optional_string(params, "env_mode");
-        match env_mode.as_deref().unwrap_or("merge") {
-            "replace" => {
-                cmd.env_clear();
-            }
-            "merge" => {}
+    if launch.closed_env {
+        cmd.env_clear();
+    }
+    for (key, value) in launch.env {
+        cmd.env(key, value);
+    }
+    for key in launch.env_remove {
+        cmd.env_remove(key);
+    }
+    Ok(cmd)
+}
+
+/// Normalized process authority at the host boundary.
+///
+/// Parsing, cwd confinement, execution-context overlays, caller overrides,
+/// removals, workspace-local paths, and deterministic locale policy happen
+/// once here. Platform launchers are deliberately boring projections of this
+/// value so Windows AppContainer and Tokio-backed hosts cannot drift.
+struct ProcessExecLaunch {
+    program: String,
+    args: Vec<String>,
+    cwd: Option<std::path::PathBuf>,
+    env: Vec<(String, String)>,
+    env_remove: Vec<String>,
+    closed_env: bool,
+}
+
+impl ProcessExecLaunch {
+    fn from_params(params: &crate::value::DictMap, label: &str) -> Result<Self, VmError> {
+        let (program, args) = process_exec_argv(params)?;
+        let execution_context = crate::stdlib::process::current_execution_context();
+        let cwd = optional_string(params, "cwd")
+            .or_else(|| {
+                execution_context
+                    .as_ref()
+                    .and_then(|context| context.cwd.clone())
+                    .filter(|cwd| !cwd.is_empty())
+            })
+            .map(|cwd| resolve_process_exec_cwd(&cwd));
+        if let Some(cwd) = &cwd {
+            crate::process_sandbox::enforce_process_cwd(cwd)
+                .map_err(|error| contextualize_process_error(label, "cwd", error))?;
+        }
+
+        let closed_env = match optional_string(params, "env_mode")
+            .as_deref()
+            .unwrap_or("merge")
+        {
+            "replace" => true,
+            "merge" => false,
             other => {
                 return Err(VmError::Runtime(format!(
                     "host_call {label}: unknown env_mode {other:?}; expected \"merge\" or \"replace\""
                 )));
             }
+        };
+        let mut env = Vec::new();
+        if !closed_env {
+            if let Some(context) = &execution_context {
+                env.extend(
+                    context
+                        .env
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                );
+            }
         }
-        for (key, value) in env {
-            caller_env_keys.insert(key.clone());
-            cmd.env(key, value);
+        env.extend(crate::stdlib::process::runtime_child_env_overlay());
+
+        let mut caller_env_keys = std::collections::BTreeSet::new();
+        if let Some(overrides) = optional_string_dict(params, "env")? {
+            for (key, value) in overrides {
+                caller_env_keys.insert(key.clone());
+                env.push((key, value));
+            }
+        }
+        let mut env_remove = optional_string_list(params, "env_remove").unwrap_or_default();
+        caller_env_keys.extend(env_remove.iter().cloned());
+        for (key, value) in crate::process_sandbox::active_workspace_process_env() {
+            if !caller_env_keys.contains(&key) {
+                env.push((key, value));
+            }
+        }
+        if !caller_env_keys.contains(crate::process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV) {
+            env_remove.push(crate::process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV.to_string());
+        }
+        for (key, value) in crate::process_sandbox::deterministic_message_locale_env() {
+            if !caller_env_keys.contains(&key) {
+                env.push((key, value));
+            }
+        }
+        Ok(Self {
+            program,
+            args,
+            cwd,
+            env,
+            env_remove,
+            closed_env,
+        })
+    }
+
+    #[cfg(target_os = "windows")]
+    fn into_process_config(self) -> crate::stdlib::sandbox::ProcessCommandConfig {
+        crate::stdlib::sandbox::ProcessCommandConfig {
+            cwd: self.cwd,
+            env: self.env,
+            env_remove: self.env_remove,
+            stdin_null: true,
+            closed_env: self.closed_env,
         }
     }
-    // env_remove: list of environment variable names to strip before
-    // spawning. Applied after `env` so callers can both inherit and
-    // selectively unset (e.g. the git stdlib strips `GIT_*` so its
-    // operations are self-contained even when Harn is invoked from
-    // inside a git hook that sets `GIT_DIR`).
-    if let Some(env_remove) = optional_string_list(params, "env_remove") {
-        for key in env_remove {
-            caller_env_keys.insert(key.clone());
-            cmd.env_remove(key);
-        }
+}
+
+fn contextualize_process_error(label: &str, stage: &str, error: VmError) -> VmError {
+    match error {
+        VmError::CategorizedError { message, category } => VmError::CategorizedError {
+            message: format!("host_call {label} {stage}: {message}"),
+            category,
+        },
+        other => VmError::Runtime(format!("host_call {label} {stage}: {other}")),
     }
-    // Give the child workspace-local temp, home, and toolchain-cache paths. A
-    // key the caller set (via `env`) or explicitly stripped (via `env_remove`)
-    // is left as intended; only untouched keys receive the overlay.
-    for (key, value) in crate::process_sandbox::active_workspace_process_env() {
-        if caller_env_keys.contains(&key) {
-            continue;
-        }
-        cmd.env(key, value);
-    }
-    // Pin tool *message* output to a deterministic English/UTF-8 locale so
-    // downstream English-diagnostic matchers (deterministic syntax repair,
-    // error-signature grounding, completion/pass-fail classification) do not
-    // misfire for a non-Anglosphere user whose shell localizes compiler/test
-    // output. A user-inherited `LC_ALL` overrides `LC_MESSAGES`, so strip it
-    // first — unless the caller pinned it via `env`/`env_remove` — then apply
-    // the overlay with the same caller-wins rule as the TMPDIR overlay above.
-    if !caller_env_keys.contains(crate::process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV) {
-        cmd.env_remove(crate::process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV);
-    }
-    for (key, value) in crate::process_sandbox::deterministic_message_locale_env() {
-        if caller_env_keys.contains(&key) {
-            continue;
-        }
-        cmd.env(key, value);
-    }
-    Ok(cmd)
 }
 
 struct ProcessExecResponse<'a> {

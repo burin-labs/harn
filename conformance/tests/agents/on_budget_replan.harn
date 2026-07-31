@@ -14,22 +14,22 @@ fn reminder_has_no_command_terms(body) {
     && !contains(lowered, "rustc")
 }
 
-pipeline default() {
-  const src = agent_session_open("on-budget-replan-source")
-  agent_session_inject(src, {role: "user", content: "seed"})
-  agent_session_inject(src, {role: "assistant", content: "branch"})
+pipeline default(harness: Harness) {
+  const src = harness.agent.open("on-budget-replan-source")
+  harness.agent.inject(src, {role: "user", content: "seed"})
+  harness.agent.inject(src, {role: "assistant", content: "branch"})
   const result = replan(
     harness,
     {session_id: src, iteration: 2, last_good_iteration: 1, kind: "wall_clock"},
   )
-  const snapshot = agent_session_snapshot(result.session_id)
+  const snapshot = harness.agent.snapshot(result.session_id)
   const reminders = transcript_events_by_kind(snapshot, "system_reminder")
   const body = reminders[0].reminder.body
   const ns = OnBudget()
-  __io_println("strategy=" + result.strategy)
-  __io_println("branched_at=" + to_string(snapshot.branched_at_event_index))
-  __io_println("reminders=" + to_string(len(reminders)))
-  __io_println("body=" + body)
-  __io_println("body_clean=" + to_string(reminder_has_no_command_terms(body)))
-  __io_println("namespace=" + to_string(ns.replan != nil))
+  harness.stdio.println("strategy=" + result.strategy)
+  harness.stdio.println("branched_at=" + to_string(snapshot.branched_at_event_index))
+  harness.stdio.println("reminders=" + to_string(len(reminders)))
+  harness.stdio.println("body=" + body)
+  harness.stdio.println("body_clean=" + to_string(reminder_has_no_command_terms(body)))
+  harness.stdio.println("namespace=" + to_string(ns.replan != nil))
 }

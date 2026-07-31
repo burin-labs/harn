@@ -1,12 +1,12 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const ts = date_parse("2026-04-25T17:32:09Z")
   const la = date_in_zone(ts, "America/Los_Angeles")
-  __io_println(la.year)
-  __io_println(la.month)
-  __io_println(la.day)
-  __io_println(la.hour)
-  __io_println(la.offset_seconds)
-  __io_println(la.zone)
-  __io_println(date_to_zone(ts, "America/Los_Angeles"))
-  __io_println(date_format(ts, "%Y-%m-%d %H:%M %Z %:z", "America/Los_Angeles"))
+  harness.stdio.println(la.year)
+  harness.stdio.println(la.month)
+  harness.stdio.println(la.day)
+  harness.stdio.println(la.hour)
+  harness.stdio.println(la.offset_seconds)
+  harness.stdio.println(la.zone)
+  harness.stdio.println(date_to_zone(ts, "America/Los_Angeles"))
+  harness.stdio.println(date_format(ts, "%Y-%m-%d %H:%M %Z %:z", "America/Los_Angeles"))
 }

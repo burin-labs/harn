@@ -3439,6 +3439,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-capability-contracts"
+version = "0.10.46"
+dependencies = [
+ "harn-builtin-macros",
+ "harn-builtin-meta",
+ "harn-builtin-registry",
+ "linkme",
+]
+
+[[package]]
 name = "harn-cli"
 version = "0.10.46"
 dependencies = [
@@ -3455,6 +3465,7 @@ dependencies = [
  "ed25519-dalek",
  "flate2",
  "futures",
+ "harn-builtin-meta",
  "harn-dap",
  "harn-flock",
  "harn-fmt",
@@ -3624,6 +3635,7 @@ dependencies = [
  "grep-matcher",
  "grep-regex",
  "grep-searcher",
+ "harn-builtin-meta",
  "harn-flock",
  "harn-lexer",
  "harn-parser",
@@ -3689,6 +3701,8 @@ dependencies = [
 name = "harn-ir"
 version = "0.10.46"
 dependencies = [
+ "harn-builtin-meta",
+ "harn-builtin-registry",
  "harn-glob",
  "harn-lexer",
  "harn-parser",
@@ -3806,6 +3820,7 @@ version = "0.10.46"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
+ "harn-capability-contracts",
  "harn-lexer",
  "serde",
  "serde_json",
@@ -3841,6 +3856,7 @@ name = "harn-rules-hostlib"
 version = "0.10.46"
 dependencies = [
  "arcstr",
+ "harn-builtin-meta",
  "harn-fmt",
  "harn-hostlib",
  "harn-lint",
@@ -3984,6 +4000,7 @@ dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
  "harn-builtin-registry",
+ "harn-capability-contracts",
  "harn-clock",
  "harn-flock",
  "harn-glob",

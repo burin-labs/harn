@@ -1,20 +1,20 @@
-pipeline test(task) {
-  const recv_ch = channel("closed-receive", 1)
-  close_channel(recv_ch)
+pipeline test(harness: Harness, task) {
+  const recv_ch = harness.runtime.channel("closed-receive", 1)
+  harness.runtime.close_channel(recv_ch)
   const recv_result = try {
-    receive(recv_ch)
+    harness.runtime.receive(recv_ch)
   }
-  __io_println(is_err(recv_result))
+  harness.stdio.println(is_err(recv_result))
   const recv_err = unwrap_err(recv_result)
-  __io_println(recv_err.type)
-  __io_println(error_category(recv_err))
-  const send_ch = channel("closed-send", 1)
-  close_channel(send_ch)
+  harness.stdio.println(recv_err.type)
+  harness.stdio.println(error_category(recv_err))
+  const send_ch = harness.runtime.channel("closed-send", 1)
+  harness.runtime.close_channel(send_ch)
   const send_result = try {
-    send(send_ch, "late")
+    harness.runtime.send(send_ch, "late")
   }
-  __io_println(is_err(send_result))
+  harness.stdio.println(is_err(send_result))
   const send_err = unwrap_err(send_result)
-  __io_println(send_err.type)
-  __io_println(error_category(send_err))
+  harness.stdio.println(send_err.type)
+  harness.stdio.println(error_category(send_err))
 }

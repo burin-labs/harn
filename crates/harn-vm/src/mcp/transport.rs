@@ -254,7 +254,12 @@ async fn dispatch_stdio_message(
     msg: serde_json::Value,
 ) -> Result<Option<serde_json::Value>, VmError> {
     if msg.get("id").is_none() {
-        let _ = handle_inbound_client_request(server_name, &msg).await;
+        let _ = handle_inbound_client_request_with_fixtures(
+            server_name,
+            &msg,
+            inner.fixtures.as_deref(),
+        )
+        .await;
         return Ok(None);
     }
 
@@ -263,7 +268,10 @@ async fn dispatch_stdio_message(
         return Ok(Some(msg));
     }
 
-    if let Some(response) = handle_inbound_client_request(server_name, &msg).await {
+    if let Some(response) =
+        handle_inbound_client_request_with_fixtures(server_name, &msg, inner.fixtures.as_deref())
+            .await
+    {
         // Bound the write: responses to server-to-client requests are small,
         // but a wedged pipe must surface as an error, not an eternal hang.
         tokio::time::timeout(MCP_TIMEOUT, write_stdio_json(&mut inner.stdin, &response))
@@ -286,6 +294,14 @@ pub(crate) async fn handle_inbound_client_request(
     server_name: &str,
     msg: &serde_json::Value,
 ) -> Option<serde_json::Value> {
+    handle_inbound_client_request_with_fixtures(server_name, msg, None).await
+}
+
+async fn handle_inbound_client_request_with_fixtures(
+    server_name: &str,
+    msg: &serde_json::Value,
+    fixtures: Option<&crate::harness::CapabilityFixtureState>,
+) -> Option<serde_json::Value> {
     let method = msg.get("method").and_then(|value| value.as_str())?;
     if method == "notifications/progress" {
         relay_progress_notification(server_name, msg);
@@ -304,7 +320,9 @@ pub(crate) async fn handle_inbound_client_request(
         return None;
     }
     if method == crate::mcp_elicit::ELICITATION_METHOD {
-        return Some(crate::mcp_elicit::dispatch_inbound_elicitation(server_name, msg).await);
+        return Some(
+            crate::mcp_elicit::dispatch_inbound_elicitation(server_name, msg, fixtures).await,
+        );
     }
     if method == crate::mcp_sampling::SAMPLING_METHOD {
         return Some(crate::mcp_sampling::dispatch_inbound_sampling(server_name, msg).await);
@@ -662,6 +680,7 @@ pub(crate) fn ensure_http_get_stream(inner: &mut HttpMcpClientInner, server_name
         session_id: inner.session_id.clone(),
         proxy_server_name: inner.proxy_server_name.clone(),
         server_name: server_name.to_string(),
+        fixtures: inner.fixtures.clone(),
     };
     inner.get_stream_task = Some(tokio::task::spawn_local(run_http_get_stream(config)));
 }
@@ -695,8 +714,12 @@ pub(crate) async fn run_http_get_stream(config: HttpStreamConfig) {
                     tracing::debug!("MCP HTTP GET stream received non-JSON event");
                     continue;
                 };
-                if let Some(response) =
-                    handle_inbound_client_request(&config.server_name, &msg).await
+                if let Some(response) = handle_inbound_client_request_with_fixtures(
+                    &config.server_name,
+                    &msg,
+                    config.fixtures.as_deref(),
+                )
+                .await
                 {
                     let _ = post_http_jsonrpc_payload(&config, response).await;
                 }
@@ -971,6 +994,7 @@ pub(crate) async fn parse_sse_jsonrpc_body(
         session_id: inner.session_id.clone(),
         proxy_server_name: inner.proxy_server_name.clone(),
         server_name: server_name.to_string(),
+        fixtures: inner.fixtures.clone(),
     };
 
     let mut fallback = None;
@@ -982,7 +1006,13 @@ pub(crate) async fn parse_sse_jsonrpc_body(
             {
                 return Ok(value);
             }
-            if let Some(response) = handle_inbound_client_request(server_name, &value).await {
+            if let Some(response) = handle_inbound_client_request_with_fixtures(
+                server_name,
+                &value,
+                inner.fixtures.as_deref(),
+            )
+            .await
+            {
                 let _ = post_http_jsonrpc_payload(&config, response).await;
                 continue;
             }

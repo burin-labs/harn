@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::stdlib::harn_entry::{call_harn_export_json, call_harn_export_typed};
+use crate::stdlib::harn_entry::call_harn_export_typed;
 use crate::stdlib::xml::escape_xml_text;
 
 use super::{
@@ -431,14 +431,25 @@ pub async fn prepare_workflow_stage_prompt(
         "rendered_context": rendered_context,
         "verification_contracts": verification_contracts,
     });
-    let prepared = call_harn_export_json(
+    let fs = ctx
+        .child_vm()
+        .harness()
+        .and_then(|harness| harness.sub_handle("fs"))
+        .map(crate::value::VmValue::harness)
+        .ok_or_else(|| {
+            crate::value::VmError::Runtime(
+                "workflow_prepare_stage_prompt: execution has no HarnessFs authority".to_string(),
+            )
+        })?;
+    let prepared = crate::stdlib::harn_entry::call_harn_export_by_name(
         ctx,
         "std/workflow/prompts",
         "workflow_prepare_stage_prompt",
         "workflow_prepare_stage_prompt",
-        payload,
+        &[fs, crate::stdlib::json_to_vm_value(&payload)],
     )
     .await?;
+    let prepared = crate::llm::vm_value_to_json(&prepared);
     let prepared = prepared.as_object().ok_or_else(|| {
         crate::value::VmError::Runtime(
             "workflow_prepare_stage_prompt must return a dict".to_string(),

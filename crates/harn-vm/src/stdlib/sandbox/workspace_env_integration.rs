@@ -70,6 +70,34 @@ fn run(program: &Path, args: &[&str], workspace: &Path) -> std::process::Output 
     output
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn absolute_executable_outside_workspace_runs_without_widening_its_parent() {
+    let workspace = tempfile::tempdir().unwrap();
+    let artifact_dir = tempfile::tempdir().unwrap();
+    let artifact = artifact_dir.path().join("verified-harn-artifact");
+    std::fs::copy("/bin/true", &artifact).unwrap();
+
+    let _policy = enter_policy(workspace.path());
+    let output = run(&artifact, &[], workspace.path());
+    assert!(output.status.success());
+
+    let sibling = artifact_dir.path().join("not-granted.txt");
+    std::fs::write(&sibling, "outside capability scope").unwrap();
+    let denied = command_output(
+        "/bin/cat",
+        &[sibling.display().to_string()],
+        &ProcessCommandConfig {
+            cwd: Some(workspace.path().to_path_buf()),
+            ..ProcessCommandConfig::default()
+        },
+    );
+    assert!(
+        denied.is_err(),
+        "granting one executable must not grant reads from its parent directory"
+    );
+}
+
 #[test]
 fn spawned_process_observes_workspace_toolchain_environment() {
     let workspace = tempfile::tempdir().unwrap();

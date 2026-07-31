@@ -1,1 +1,1 @@
-pipeline p(x) {
+pipeline p(harness: Harness, x) {

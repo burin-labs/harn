@@ -11,8 +11,7 @@
 //! - `run_record_*` and `eval_*` for replay fixtures and eval suites.
 
 use super::{
-    BuiltinSignature, Param, Ty, TY_ANY, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_LIST, TY_NIL,
-    TY_STRING,
+    BuiltinSignature, Param, Ty, TY_ANY, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_NIL, TY_STRING,
 };
 
 /// `dict | Schema<any>` — schema aliases type-check as `Schema<T>` but
@@ -26,19 +25,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "assemble_context",
         &[Param::new("options", TY_DICT)],
-        TY_DICT,
-    ),
-    // workflow_execute(task, workflow, artifacts?, options?) — async;
-    // runs the workflow and returns `{status, run, artifacts,
-    // transcript, path}`.
-    BuiltinSignature::simple(
-        "workflow_execute",
-        &[
-            Param::new("task", TY_STRING),
-            Param::new("workflow", TY_DICT),
-            Param::optional("artifacts", Ty::Union(&[TY_LIST, TY_NIL])),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
         TY_DICT,
     ),
     BuiltinSignature::simple(

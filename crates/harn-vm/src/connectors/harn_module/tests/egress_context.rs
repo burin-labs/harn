@@ -14,8 +14,8 @@ async fn connector_worker_inherits_pipeline_egress_policy() {
 pub fn provider_id() { return "webhook" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "GenericWebhookPayload" }
-pub fn call(_method, _args) {
-  http_get("https://example.invalid")
+pub fn call(harness: Harness, _method, _args) {
+  harness.net.get("https://example.invalid")
   return {}
 }
 "#,

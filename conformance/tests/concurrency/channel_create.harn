@@ -1,4 +1,4 @@
-pipeline test(task) {
-  const ch = channel("events")
-  log(type_of(ch))
+pipeline test(harness: Harness, task) {
+  const ch = harness.runtime.channel("events")
+  harness.stdio.log(type_of(ch))
 }

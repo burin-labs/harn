@@ -6,37 +6,46 @@ import { rules_apply, rules_diagnostics, rules_report, rules_search, rules_visit
  * tables, declarative diagnostics, an imperative `on_match` visitor, and a
  * dry-run codemod — no recompile needed.
  */
-pipeline default() {
-  hostlib_enable("tools:deterministic")
+pipeline default(harness: Harness) {
   const finder = "id = \"find-calls\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$FN()\"\n"
   const src = "foo();\nbar();\n"
   // 1) Search returns matches with capture bindings.
-  const r = rules_search({rule: finder, source: src, language: "typescript"})
-  __io_println(r.ok && r.match_count == 2)
-  __io_println(r.matches[0].captures.FN == "foo")
-  __io_println(r.matches[1].captures.FN == "bar")
+  const r = rules_search(harness.rules, {rule: finder, source: src, language: "typescript"})
+  harness.stdio.println(r.ok && r.match_count == 2)
+  harness.stdio.println(r.matches[0].captures.FN == "foo")
+  harness.stdio.println(r.matches[1].captures.FN == "bar")
   // 2) Report-only mode yields a data table with a per-match summary.
-  const rep = rules_report({rule: finder, source: src, language: "typescript", path: "a.ts"})
-  __io_println(rep.summary.total_rows == 2)
-  __io_println(rep.rule_id == "find-calls")
+  const rep = rules_report(
+    harness.rules,
+    {rule: finder, source: src, language: "typescript", path: "a.ts"},
+  )
+  harness.stdio.println(rep.summary.total_rows == 2)
+  harness.stdio.println(rep.rule_id == "find-calls")
   // 3) A codemod in dry-run previews without writing; the
   //    `behavior-preserving` safety makes it machine-applicable.
   const codemod =
     "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n"
-  const ap = rules_apply({rule: codemod, source: "foo();\n", language: "typescript", dry_run: true})
-  __io_println(ap.ok && ap.files[0].changed && !ap.files[0].applied)
-  __io_println(ap.files[0].preview == "bar();\n")
-  __io_println(ap.auto_applicable)
+  const ap = rules_apply(
+    harness.rules,
+    {rule: codemod, source: "foo();\n", language: "typescript", dry_run: true},
+  )
+  harness.stdio.println(ap.ok && ap.files[0].changed && !ap.files[0].applied)
+  harness.stdio.println(ap.files[0].preview == "bar();\n")
+  harness.stdio.println(ap.auto_applicable)
   // 4) A declarative lint rule (a `message`, no `fix`) emits diagnostics.
   const lint =
     "id = \"calls\"\nlanguage = \"typescript\"\nmessage = \"function call\"\n[rule]\npattern = \"$FN()\"\n"
-  const decl = rules_diagnostics({rule: lint, source: src, language: "typescript", path: "a.ts"})
-  __io_println(decl.ok && decl.diagnostic_count == 2)
-  __io_println(decl.diagnostics[0].message == "function call")
+  const decl = rules_diagnostics(
+    harness.rules,
+    {rule: lint, source: src, language: "typescript", path: "a.ts"},
+  )
+  harness.stdio.println(decl.ok && decl.diagnostic_count == 2)
+  harness.stdio.println(decl.diagnostics[0].message == "function call")
   // 5) An imperative visitor over the *same matcher* returning the *same*
   //    static message produces IDENTICAL diagnostics (the #2878 acceptance):
   //    same message, severity, applicability, and spans.
   const imp = rules_visit(
+    harness.rules,
     {
       rule: finder,
       source: src,
@@ -45,15 +54,16 @@ pipeline default() {
       on_match: fn(node, ctx) { return {message: "function call"} },
     },
   )
-  __io_println(imp.ok && imp.diagnostic_count == 2)
-  __io_println(imp.diagnostics[0].message == decl.diagnostics[0].message)
-  __io_println(imp.diagnostics[0].severity == decl.diagnostics[0].severity)
-  __io_println(imp.diagnostics[0].applicability == decl.diagnostics[0].applicability)
-  __io_println(imp.diagnostics[0].start_row == decl.diagnostics[0].start_row)
-  __io_println(imp.diagnostics[1].start_row == decl.diagnostics[1].start_row)
+  harness.stdio.println(imp.ok && imp.diagnostic_count == 2)
+  harness.stdio.println(imp.diagnostics[0].message == decl.diagnostics[0].message)
+  harness.stdio.println(imp.diagnostics[0].severity == decl.diagnostics[0].severity)
+  harness.stdio.println(imp.diagnostics[0].applicability == decl.diagnostics[0].applicability)
+  harness.stdio.println(imp.diagnostics[0].start_row == decl.diagnostics[0].start_row)
+  harness.stdio.println(imp.diagnostics[1].start_row == decl.diagnostics[1].start_row)
   // 6) Imperative-only power: compute a message from the captured metavar —
   //    something a declarative rule (with only a static message) cannot.
   const computed = rules_visit(
+    harness.rules,
     {
       rule: finder,
       source: src,
@@ -61,10 +71,11 @@ pipeline default() {
       on_match: fn(node, ctx) { return {message: "call to " + node.captures.FN} },
     },
   )
-  __io_println(computed.diagnostics[0].message == "call to foo")
-  __io_println(computed.diagnostics[1].message == "call to bar")
+  harness.stdio.println(computed.diagnostics[0].message == "call to foo")
+  harness.stdio.println(computed.diagnostics[1].message == "call to bar")
   // 7) The visitor controls flow: returning nil skips a match.
   const filtered = rules_visit(
+    harness.rules,
     {
       rule: finder,
       source: src,
@@ -77,6 +88,6 @@ pipeline default() {
       },
     },
   )
-  __io_println(filtered.diagnostic_count == 1)
-  __io_println(filtered.diagnostics[0].message == "kept")
+  harness.stdio.println(filtered.diagnostic_count == 1)
+  harness.stdio.println(filtered.diagnostics[0].message == "kept")
 }

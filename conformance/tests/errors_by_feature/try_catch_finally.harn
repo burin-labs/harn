@@ -1,12 +1,12 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let cleanup_ran = false
   try {
-    log("try body")
+    harness.stdio.log("try body")
     throw "oops"
   } catch (e) {
-    log("caught: ${e}")
+    harness.stdio.log("caught: ${e}")
   } finally {
     cleanup_ran = true
   }
-  log("cleanup_ran: ${cleanup_ran}")
+  harness.stdio.log("cleanup_ran: ${cleanup_ran}")
 }

@@ -321,7 +321,7 @@ fn __lane_own_tool_names(row, registry, policy) {
  * @effects: []
  * @errors: [runtime]
  * @api_stability: stable
- * @example: agent_loop(task, nil, lane_policy(default_lane_rows(), task, {provider: "anthropic", tools: my_tools}))
+ * @example: agent_loop(harness, task, nil, lane_policy(default_lane_rows(), task, {provider: "anthropic", tools: my_tools}))
  */
 pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
   const validated = __lane_validate_rows(rows)
@@ -379,7 +379,7 @@ pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
  * @effects: []
  * @errors: []
  * @api_stability: stable
- * @example: agent_loop(task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
+ * @example: agent_loop(harness, task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
  */
 pub fn lane_scope_classifier(rows, options = nil) {
   const validated = __lane_validate_rows(rows)
@@ -672,7 +672,7 @@ fn __stage_gate_latest_user_prompt(messages) {
 }
 
 /**
- * stage_gate_from_session(session_id, options?) — recover the active gate
+ * stage_gate_from_session(harness.agent, session_id, options?) — recover the active gate
  * MID-TRANSCRIPT by inspecting the latest user prompt in a live session's
  * transcript (the marker-recovery half of the PreToolUse enforcement seam). Reads
  * the existing `agent_session_snapshot`/`transcript_messages` seam — no new host
@@ -684,12 +684,12 @@ fn __stage_gate_latest_user_prompt(messages) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn stage_gate_from_session(session_id, options = nil) {
+pub fn stage_gate_from_session(agent: HarnessAgent, session_id, options = nil) {
   const sid = to_string(session_id ?? "").trim()
   if sid == "" {
     return {}
   }
-  const snapshot = agent_session_snapshot(sid)
+  const snapshot = agent.snapshot(sid)
   if snapshot == nil {
     return {}
   }

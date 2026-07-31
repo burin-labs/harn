@@ -16,14 +16,14 @@ fn first_value(item) -> any {
   return to_string(item)
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const items = [{a: "one"}, {b: "two"}, {c: "three"}]
   let picked = []
   for item in items {
     picked = picked + [first_value(item)]
   }
-  __io_println(len(picked))
+  harness.stdio.println(len(picked))
   for value in picked {
-    __io_println(value)
+    harness.stdio.println(value)
   }
 }

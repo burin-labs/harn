@@ -17,7 +17,11 @@ pub(crate) fn register_datetime_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "date_now() -> dict", category = "datetime")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "date_now() -> dict", category = "datetime"
+)]
 fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let now = Utc::now();
     let mut result = utc_datetime_dict(now);
@@ -32,14 +36,35 @@ fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::dict(result))
 }
 
-#[harn_builtin(sig = "date_now_iso() -> string", category = "datetime")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "date_now_iso() -> string", category = "datetime"
+)]
 fn date_now_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(arcstr::ArcStr::from(
         Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     )))
 }
 
+pub(crate) fn date_dict_from_millis(millis: i64) -> Result<VmValue, VmError> {
+    let now = DateTime::<Utc>::from_timestamp_millis(millis)
+        .ok_or_else(|| VmError::Runtime(format!("clock timestamp is out of range: {millis}")))?;
+    let mut result = utc_datetime_dict(now);
+    result.insert(
+        crate::value::intern_key("timestamp"),
+        VmValue::Float(millis as f64 / 1_000.0),
+    );
+    result.put_str(
+        "iso8601",
+        now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    );
+    Ok(VmValue::dict(result))
+}
+
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "date_format(timestamp: int | float | dict, format?: string, timezone?: string) -> string",
     category = "datetime"
 )]
@@ -61,6 +86,8 @@ fn date_format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "date_parse(text: string?) -> int | float",
     category = "datetime"
 )]
@@ -71,6 +98,8 @@ fn date_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "date_in_zone(timestamp: int | float | dict, timezone: string) -> dict",
     category = "datetime"
 )]
@@ -86,6 +115,8 @@ fn date_in_zone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "date_to_zone(timestamp: int | float | dict, timezone: string) -> string",
     category = "datetime"
 )]
@@ -99,6 +130,8 @@ fn date_to_zone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "date_from_components(components: dict, timezone?: string) -> int | float",
     category = "datetime"
 )]
@@ -113,6 +146,8 @@ fn date_from_components_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "duration_ms(count: int | float) -> duration",
     category = "datetime"
 )]
@@ -121,6 +156,8 @@ fn duration_ms_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "duration_seconds(count: int | float) -> duration",
     category = "datetime"
 )]
@@ -129,6 +166,8 @@ fn duration_seconds_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "duration_minutes(count: int | float) -> duration",
     category = "datetime"
 )]
@@ -137,6 +176,8 @@ fn duration_minutes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "duration_hours(count: int | float) -> duration",
     category = "datetime"
 )]
@@ -145,6 +186,8 @@ fn duration_hours_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "duration_days(count: int | float) -> duration",
     category = "datetime"
 )]
@@ -153,6 +196,8 @@ fn duration_days_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "date_add(timestamp: int | float | dict, duration: duration) -> int | float",
     category = "datetime"
 )]
@@ -167,6 +212,8 @@ fn date_add_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "date_diff(a: int | float | dict, b: int | float | dict) -> duration",
     category = "datetime"
 )]
@@ -181,6 +228,8 @@ fn date_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "duration_to_seconds(duration: duration) -> int",
     category = "datetime"
 )]
@@ -190,6 +239,8 @@ fn duration_to_seconds_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "duration_to_human(duration: duration) -> string",
     category = "datetime"
 )]
@@ -201,6 +252,8 @@ fn duration_to_human_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "weekday_name(timestamp: int | float | dict, timezone?: string) -> string",
     category = "datetime"
 )]
@@ -217,6 +270,8 @@ fn weekday_name_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "month_name(timestamp: int | float | dict, timezone?: string) -> string",
     category = "datetime"
 )]

@@ -1,7 +1,7 @@
 import { with_temp_dir } from "std/testing"
 import "../check_python_boundary.harn"
 
-fn mkdirs(path: string) -> nil {
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
   let current = if path.starts_with("/") {
     "/"
@@ -17,29 +17,29 @@ fn mkdirs(path: string) -> nil {
     } else {
       path_join(current, part)
     }
-    if !harness.fs.exists(current) {
-      harness.fs.mkdir(current)
+    if !fs.exists(current) {
+      fs.mkdir(current)
     }
   }
   return nil
 }
 
-fn write_file(root: string, rel: string) -> nil {
+fn write_file(fs: HarnessFs, root: string, rel: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(dirname(path) ?? root)
-  harness.fs.write_text(path, "print('fixture')\n")
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, "print('fixture')\n")
   return nil
 }
 
-fn write_text(root: string, rel: string, text: string) -> nil {
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(dirname(path) ?? root)
-  harness.fs.write_text(path, text)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
   return nil
 }
 
 @test
-pipeline test_allowlist_exact_and_prefix_rules(task) {
+pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task) {
   // `make check-python-boundary` owns the live repository scan. Keep this suite
   // to bounded fixtures so the per-test deadline is independent of checkout size.
   assert_eq(python_boundary_rule_for("scripts/affected-crates.py").allowed, false)
@@ -54,24 +54,25 @@ pipeline test_allowlist_exact_and_prefix_rules(task) {
 }
 
 @test
-pipeline test_temp_tree_reports_only_unclassified_python(task) {
+pipeline test_temp_tree_reports_only_unclassified_python(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
-      write_file(root, "scripts/affected-crates.py")
-      write_file(root, "conformance/helpers/http_proxy_server.py")
-      write_file(root, "conformance/helpers/new_mock_server.py")
-      write_file(root, "scripts/new_orchestration.py")
-      write_file(root, ".harn/tmp/ignored.py")
-      write_file(root, ".harn-tmp/parallel-test/ignored.py")
-      write_file(root, "target/generated.py")
-      const files = python_files(root)
+      write_file(harness.fs, root, "scripts/affected-crates.py")
+      write_file(harness.fs, root, "conformance/helpers/http_proxy_server.py")
+      write_file(harness.fs, root, "conformance/helpers/new_mock_server.py")
+      write_file(harness.fs, root, "scripts/new_orchestration.py")
+      write_file(harness.fs, root, ".harn/tmp/ignored.py")
+      write_file(harness.fs, root, ".harn-tmp/parallel-test/ignored.py")
+      write_file(harness.fs, root, "target/generated.py")
+      const files = python_files(harness.fs, harness.process, root)
       assert_eq(files.contains("scripts/affected-crates.py"), true)
       assert_eq(files.contains("scripts/new_orchestration.py"), true)
       assert_eq(files.contains("conformance/helpers/new_mock_server.py"), true)
       assert_eq(files.contains(".harn/tmp/ignored.py"), false)
       assert_eq(files.contains(".harn-tmp/parallel-test/ignored.py"), false)
       assert_eq(files.contains("target/generated.py"), false)
-      const report = check_python_boundary(root)
+      const report = check_python_boundary(harness.fs, harness.process, root)
       assert_eq(report.violation_count, 4)
       assert_eq(
         report.violations.map({ row -> row.path }).to_list().sort(),
@@ -87,23 +88,34 @@ pipeline test_temp_tree_reports_only_unclassified_python(task) {
 }
 
 @test
-pipeline test_embedded_python_audit_rejects_control_plane_and_classifies_venv(task) {
+pipeline test_embedded_python_audit_rejects_control_plane_and_classifies_venv(
+  harness: Harness,
+  task,
+) {
   with_temp_dir(
+    harness.fs,
     { root ->
-      write_text(root, "scripts/bad.sh", "#!/bin/sh\npython3 - <<'PY'\nPY\n")
-      write_text(root, "Makefile", "bad:\n\tpython -c 'print(1)'\n")
-      write_text(root, ".github/workflows/bad.yml", "steps:\n  - run: python3 -c 'print(1)'\n")
+      write_text(harness.fs, root, "scripts/bad.sh", "#!/bin/sh\npython3 - <<'PY'\nPY\n")
+      write_text(harness.fs, root, "Makefile", "bad:\n\tpython -c 'print(1)'\n")
       write_text(
+        harness.fs,
+        root,
+        ".github/workflows/bad.yml",
+        "steps:\n  - run: python3 -c 'print(1)'\n",
+      )
+      write_text(
+        harness.fs,
         root,
         "scripts/generate_sdk_clients.sh",
         "#!/bin/sh\n    python3 -m venv \"$venv\"\n",
       )
       write_text(
+        harness.fs,
         root,
         "scripts/fake_guard.sh",
         "cat > \"$fake_bin/python3\" <<'SH'\necho \"python3 must not run\" >&2\nSH\n",
       )
-      const embedded = embedded_python_findings(root)
+      const embedded = embedded_python_findings(harness.fs, harness.process, root)
       assert_eq(
         embedded.violations.map({ row -> row.path }).to_list().sort(),
         [".github/workflows/bad.yml", "Makefile", "scripts/bad.sh"],
@@ -116,7 +128,10 @@ pipeline test_embedded_python_audit_rejects_control_plane_and_classifies_venv(ta
 }
 
 @test
-pipeline test_python_invocation_pattern_ignores_mentions_but_catches_shell_commands(task) {
+pipeline test_python_invocation_pattern_ignores_mentions_but_catches_shell_commands(
+  harness: Harness,
+  task,
+) {
   assert_eq(line_invokes_python("echo \"python3 must not run\""), false)
   assert_eq(line_invokes_python("cat > \"$fake_bin/python3\" <<'SH'"), false)
   assert_eq(line_invokes_python("python3 -c 'print(1)'"), true)

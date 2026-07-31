@@ -191,26 +191,32 @@ fn watch_step(config: ReleaseSmokeConfig, adapters) {
 }
 
 /** Execute every release capability and retain an attributable result for each one. */
-pub fn run_release_smoke(config: ReleaseSmokeConfig, adapters = nil) -> ReleaseSmokeReport {
+pub fn run_release_smoke(
+  tools: HarnessTools,
+  clock: HarnessClock,
+  config: ReleaseSmokeConfig,
+  adapters = nil,
+) -> ReleaseSmokeReport {
   const runner = adapters?.run ?? { spec, options -> command_run(spec, options) }
   let steps = []
   for spec in command_specs(config.candidate) {
-    steps = steps + [command_step(spec.name, spec.argv, command_options(config, runner))]
+    steps = steps
+      + [command_step(tools, clock, spec.name, spec.argv, command_options(config, runner))]
   }
   steps = steps + [watch_step(config, adapters ?? {})]
   const failed = steps.filter({ step -> !(step?.success ?? false) })
   return {platform: config.platform, steps: steps, failed: failed, success: failed.count == 0}
 }
 
-fn render_report(report: ReleaseSmokeReport) {
+fn render_report(stdio: HarnessStdio, report: ReleaseSmokeReport) {
   for step in report.steps {
-    harness.stdio.println("::group::[${report.platform}] ${step.name}")
+    stdio.println("::group::[${report.platform}] ${step.name}")
     const output = result_output(step)
     const noisy_success = step.name == "harn --help" || step.name == "harn check --provider-matrix"
     if trim(output) != "" && (!(step?.success ?? false) || !noisy_success) {
-      harness.stdio.println(trim(output))
+      stdio.println(trim(output))
     }
-    harness.stdio.println("::endgroup::")
+    stdio.println("::endgroup::")
     if !(step?.success ?? false) {
       const detail = if step?.timed_out ?? false {
         "timed out"
@@ -218,15 +224,17 @@ fn render_report(report: ReleaseSmokeReport) {
         "failed (exit ${step?.exit_code ?? "unknown"})"
       }
       gha_error(
+        stdio,
         "release-smoke (${report.platform}): ${step.name} ${detail}",
         {title: "release-smoke: ${report.platform}/${step.name}"},
       )
     }
   }
   if report.success {
-    harness.stdio.println("release-smoke (${report.platform}): all capabilities ok")
+    stdio.println("release-smoke (${report.platform}): all capabilities ok")
   } else {
     gha_error(
+      stdio,
       "release-smoke (${report.platform}): ${report.failed.count} capability check(s) regressed",
       {title: "release-smoke: ${report.platform}"},
     )
@@ -251,7 +259,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("release-smoke: timeout values must be positive")
     return 2
   }
-  const root = path_normalize(path_join(source_dir(), ".."))
+  const root = path_normalize(path_join(harness.fs.source_dir(), ".."))
   const temp = harness.fs.mkdtemp_in_workspace("release-smoke-")
   const watch_target = path_join(temp, "watch_target.harn")
   harness.fs.write_text(
@@ -260,9 +268,11 @@ fn main(harness: Harness) -> int {
   )
   const report = try {
     run_release_smoke(
+      harness.tools,
+      harness.clock,
       {
         candidate: to_string(options.candidate),
-        platform: display_platform(platform()),
+        platform: display_platform(harness.system.platform().os),
         root: root,
         step_timeout_ms: step_timeout_ms,
         watch_timeout_ms: watch_timeout_ms,
@@ -272,6 +282,6 @@ fn main(harness: Harness) -> int {
   } finally {
     harness.fs.delete(temp)
   }
-  render_report(report)
+  render_report(harness.stdio, report)
   return report.success ? 0 : 1
 }

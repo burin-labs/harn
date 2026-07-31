@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Locks in that `harn fmt` preserves the `->` arrow on zero-arg closure
   // literals. Pre-fix the formatter silently rewrote `{ -> expr }` to
   // `{ expr }`, turning a callable closure into an immediately-evaluated
@@ -10,7 +10,7 @@ pipeline default() {
   }
   const with_call = { -> heavy() }
   const one = { x -> x + 1 }
-  __io_println(zero())
-  __io_println(with_call())
-  __io_println(one(2))
+  harness.stdio.println(zero())
+  harness.stdio.println(with_call())
+  harness.stdio.println(one(2))
 }

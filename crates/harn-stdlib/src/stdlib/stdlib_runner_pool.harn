@@ -92,15 +92,22 @@ fn __runner_slot_key(slot: int) -> string {
   return "slot-" + to_string(slot)
 }
 
-fn __runner_pool_status(statuses, slot: int, online: bool, busy: bool, lifecycle: string) -> nil {
-  shared_map_set(
+fn __runner_pool_status(
+  runtime: HarnessRuntime,
+  statuses,
+  slot: int,
+  online: bool,
+  busy: bool,
+  lifecycle: string,
+) -> nil {
+  runtime.shared_map_set(
     statuses,
     __runner_slot_key(slot),
     {online: online, busy: busy, lifecycle: lifecycle},
   )
 }
 
-fn __runner_pool_children(handle, size: int) -> list<dict> {
+fn __runner_pool_children(runtime: HarnessRuntime, handle, size: int) -> list<dict> {
   let children = []
   for slot in range(0, size) {
     const slot_index = slot
@@ -112,9 +119,10 @@ fn __runner_pool_children(handle, size: int) -> list<dict> {
         kind: "ephemeral_runner",
         restart: handle.restart,
         task: { ctx ->
-          __runner_pool_status(handle.statuses, slot_index, true, false, "online")
+          __runner_pool_status(runtime, handle.statuses, slot_index, true, false, "online")
           const mark_busy = { busy ->
             __runner_pool_status(
+              runtime,
               handle.statuses,
               slot_index,
               true,
@@ -138,10 +146,10 @@ fn __runner_pool_children(handle, size: int) -> list<dict> {
                 mark_busy: mark_busy,
               },
             )
-            __runner_pool_status(handle.statuses, slot_index, false, false, "exited")
+            __runner_pool_status(runtime, handle.statuses, slot_index, false, false, "exited")
             result
           } catch (error) {
-            __runner_pool_status(handle.statuses, slot_index, false, false, "failed")
+            __runner_pool_status(runtime, handle.statuses, slot_index, false, false, "failed")
             throw error
           }
         },
@@ -151,14 +159,14 @@ fn __runner_pool_children(handle, size: int) -> list<dict> {
   return children
 }
 
-fn __runner_pool_launch(handle, size: int) -> RunnerPoolHandle {
+fn __runner_pool_launch(runtime: HarnessRuntime, handle, size: int) -> RunnerPoolHandle {
   const next = handle + {size: size}
-  const supervisor = supervisor_start(
+  const supervisor = runtime.supervisor_start(
     {
       name: handle.name + "-g" + to_string(handle.generation),
       strategy: "one_for_one",
       shutdown_ms: handle.shutdown_ms,
-      children: __runner_pool_children(next, size),
+      children: __runner_pool_children(runtime, next, size),
     },
   )
   return next + {supervisor: supervisor}
@@ -175,7 +183,11 @@ fn __runner_pool_launch(handle, size: int) -> RunnerPoolHandle {
  * @effects: [process]
  * @errors: [invalid_argument, process_spawn]
  */
-pub fn runner_pool_start(spec: RunnerPoolSpec) -> RunnerPoolHandle {
+pub fn runner_pool_start(
+  random: HarnessRandom,
+  runtime: HarnessRuntime,
+  spec: RunnerPoolSpec,
+) -> RunnerPoolHandle {
   if trim(spec.name) == "" {
     throw "runner_pool_start: name must be non-empty"
   }
@@ -184,9 +196,10 @@ pub fn runner_pool_start(spec: RunnerPoolSpec) -> RunnerPoolHandle {
     spec.min_size,
     spec.max_size,
   )
-  const id = spec.name + "-" + uuid()
-  const statuses = shared_map({scope: "task_group", key: "runner-pool:" + id, initial: {}})
+  const id = spec.name + "-" + random.uuid()
+  const statuses = runtime.shared_map({scope: "task_group", key: "runner-pool:" + id, initial: {}})
   return __runner_pool_launch(
+    runtime,
     {
       id: id,
       name: spec.name,
@@ -220,13 +233,17 @@ pub fn runner_pool_start(spec: RunnerPoolSpec) -> RunnerPoolHandle {
  * @effects: [process]
  * @errors: [invalid_argument, process_spawn]
  */
-pub fn runner_pool_scale(handle: RunnerPoolHandle, desired_size: int) -> RunnerPoolHandle {
+pub fn runner_pool_scale(
+  runtime: HarnessRuntime,
+  handle: RunnerPoolHandle,
+  desired_size: int,
+) -> RunnerPoolHandle {
   const size = __runner_pool_size(desired_size, handle.min_size, handle.max_size)
   if size == handle.size {
     return handle
   }
-  supervisor_stop(handle.supervisor, handle.shutdown_ms)
-  return __runner_pool_launch(handle + {generation: handle.generation + 1}, size)
+  runtime.supervisor_stop(handle.supervisor, handle.shutdown_ms)
+  return __runner_pool_launch(runtime, handle + {generation: handle.generation + 1}, size)
 }
 
 /**
@@ -235,14 +252,14 @@ pub fn runner_pool_scale(handle: RunnerPoolHandle, desired_size: int) -> RunnerP
  * @effects: []
  * @errors: []
  */
-pub fn runner_pool_state(handle: RunnerPoolHandle) -> RunnerPoolState {
-  const state = supervisor_state(handle.supervisor)
+pub fn runner_pool_state(runtime: HarnessRuntime, handle: RunnerPoolHandle) -> RunnerPoolState {
+  const state = runtime.supervisor_state(handle.supervisor)
   let slots = []
   let online = 0
   let busy = 0
   for slot in range(0, handle.size) {
     const child = state.children[slot]
-    const reported = shared_map_get(handle.statuses, __runner_slot_key(slot), {})
+    const reported = runtime.shared_map_get(handle.statuses, __runner_slot_key(slot), {})
     const is_online = reported?.online ?? (child.status == "running")
     const is_busy = reported?.busy ?? false
     if is_online {
@@ -283,7 +300,7 @@ pub fn runner_pool_state(handle: RunnerPoolHandle) -> RunnerPoolState {
  * @effects: [process]
  * @errors: [process_stop]
  */
-pub fn runner_pool_stop(handle: RunnerPoolHandle) -> RunnerPoolState {
-  supervisor_stop(handle.supervisor, handle.shutdown_ms)
-  return runner_pool_state(handle)
+pub fn runner_pool_stop(runtime: HarnessRuntime, handle: RunnerPoolHandle) -> RunnerPoolState {
+  runtime.supervisor_stop(handle.supervisor, handle.shutdown_ms)
+  return runner_pool_state(runtime, handle)
 }

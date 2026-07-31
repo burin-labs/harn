@@ -1,15 +1,15 @@
-pipeline default() {
-  const server = http_server({max_body_bytes: 16, retain_raw_body: true})
-  http_server_before(server, { req -> req + {order: "before-a"} })
-  http_server_before(server, { req -> req + {order: req.order + ",before-b"} })
-  http_server_after(
+pipeline default(harness: Harness) {
+  const server = harness.net.server({max_body_bytes: 16, retain_raw_body: true})
+  harness.net.server_before(server, { req -> req + {order: "before-a"} })
+  harness.net.server_before(server, { req -> req + {order: req.order + ",before-b"} })
+  harness.net.server_after(
     server,
     { response, _req ->
       const prior = response.headers["x-order"] ?? ""
       response + {headers: response.headers + {"x-order": prior + ",after-a"}}
     },
   )
-  http_server_after(
+  harness.net.server_after(
     server,
     { response, _req ->
       const prior = response.headers["x-order"] ?? ""
@@ -17,7 +17,7 @@ pipeline default() {
         + {headers: response.headers + {"x-order": prior + ",after-b", "x-after": "after-b"}}
     },
   )
-  http_server_route(
+  harness.net.server_route(
     server,
     "POST",
     "/hooks/{tenant}/{trigger}",
@@ -35,7 +35,7 @@ pipeline default() {
     },
     {max_body_bytes: 64},
   )
-  const response = http_server_test(
+  const response = harness.net.server_test(
     server,
     {
       method: "post",
@@ -45,36 +45,42 @@ pipeline default() {
       client_ip: "203.0.113.7",
     },
   )
-  __io_println(response.status)
-  __io_println(http_header(response, "X-After"))
-  __io_println(json_parse(response.body).accepted)
-  __io_println(http_header(response, "x-order"))
-  http_server_route(
+  harness.stdio.println(response.status)
+  harness.stdio.println(http_header(response, "X-After"))
+  harness.stdio.println(json_parse(response.body).accepted)
+  harness.stdio.println(http_header(response, "x-order"))
+  harness.net.server_route(
     server,
     "POST",
     "/limited",
     { _req -> http_response_text("unreachable") },
     {max_body_bytes: 4},
   )
-  const rejected = http_server_request(server, {method: "POST", path: "/limited", body: "12345"})
-  __io_println(rejected.status)
-  __io_println(http_header(rejected, "x-harn-body-limit"))
-  http_server_route(
+  const rejected = harness.net.server_request(
+    server,
+    {method: "POST", path: "/limited", body: "12345"},
+  )
+  harness.stdio.println(rejected.status)
+  harness.stdio.println(http_header(rejected, "x-harn-body-limit"))
+  harness.net.server_route(
     server,
     "POST",
     "/discard",
     { req -> http_response_text(to_string(req.raw_body == nil) + ":" + req.body) },
     {retain_raw_body: false},
   )
-  const discarded = http_server_test(server, {method: "POST", path: "/discard", body: "kept-text"})
-  __io_println(discarded.body)
-  http_server_set_ready(server, false)
-  __io_println(http_server_test(server, {method: "POST", path: "/discard"}).status)
-  http_server_set_ready(server, true)
-  http_server_readiness(server, { _server -> false })
-  __io_println(http_server_ready(server))
-  __io_println(http_server_test(server, {method: "POST", path: "/discard"}).status)
-  http_server_on_shutdown(server, { _server -> nil })
-  __io_println(http_server_shutdown(server))
-  __io_println(http_server_test(server, {method: "POST", path: "/discard"}).status)
+  const discarded = harness.net.server_test(
+    server,
+    {method: "POST", path: "/discard", body: "kept-text"},
+  )
+  harness.stdio.println(discarded.body)
+  harness.net.server_set_ready(server, false)
+  harness.stdio.println(harness.net.server_test(server, {method: "POST", path: "/discard"}).status)
+  harness.net.server_set_ready(server, true)
+  harness.net.server_readiness(server, { _server -> false })
+  harness.stdio.println(harness.net.server_ready(server))
+  harness.stdio.println(harness.net.server_test(server, {method: "POST", path: "/discard"}).status)
+  harness.net.server_on_shutdown(server, { _server -> nil })
+  harness.stdio.println(harness.net.server_shutdown(server))
+  harness.stdio.println(harness.net.server_test(server, {method: "POST", path: "/discard"}).status)
 }

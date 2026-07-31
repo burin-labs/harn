@@ -18,7 +18,10 @@ const JSONB_MERGE_SQL: &str = "SELECT ($1::jsonb || $2::jsonb) AS value";
 const JSONB_CONTAINS_SQL: &str = "SELECT ($1::jsonb @> $2::jsonb) AS contains";
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg.jsonb.path", &[Param::new("args", TY_ANY)], TY_LIST),
+    exposure = "pure",
+    effects = [],
+    sig_expr = BuiltinSignature::variadic("pg.jsonb.path", &[Param::new("args", TY_ANY
+)], TY_LIST),
     kind = "async",
     category = "postgres"
 )]
@@ -41,7 +44,10 @@ async fn pg_jsonb_path_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg.jsonb.merge", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "pure",
+    effects = [],
+    sig_expr = BuiltinSignature::variadic("pg.jsonb.merge", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "postgres"
 )]
@@ -63,7 +69,10 @@ async fn pg_jsonb_merge_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("pg.jsonb.contains", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "pure",
+    effects = [],
+    sig_expr = BuiltinSignature::variadic("pg.jsonb.contains", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "postgres"
 )]

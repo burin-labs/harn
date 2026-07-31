@@ -16,11 +16,13 @@ fn write_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [{tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]}],
     { ->
       const worker = spawn_agent(
+        harness.agent,
         {
           name: "permission-worker",
           task: "Try to write.",
@@ -34,9 +36,11 @@ pipeline main() {
           },
         },
       )
-      __io_println(worker.status == "completed")
-      __io_println(worker.result?.result?.tools?.rejected[0] == "write_note")
-      __io_println(len(transcript_events_by_kind(worker.result?.transcript, "PermissionDeny")) == 1)
+      harness.stdio.println(worker.status == "completed")
+      harness.stdio.println(worker.result?.result?.tools?.rejected[0] == "write_note")
+      harness.stdio.println(
+        len(transcript_events_by_kind(worker.result?.transcript, "PermissionDeny")) == 1,
+      )
     },
   )
 }

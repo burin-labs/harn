@@ -6,27 +6,27 @@ fn identity(value) {
   return value
 }
 
-fn return_value() {
+fn return_value(stdio: HarnessStdio) {
   try {
     return "value"
   } finally {
-    __io_println("cleanup:value")
+    stdio.println("cleanup:value")
   }
 }
 
-fn return_failed_call() {
+fn return_failed_call(stdio: HarnessStdio) {
   try {
     return fail("direct")
   } finally {
-    __io_println("cleanup:direct")
+    stdio.println("cleanup:direct")
   }
 }
 
-fn return_nested_failed_call() {
+fn return_nested_failed_call(stdio: HarnessStdio) {
   try {
     return identity(fail("nested"))
   } finally {
-    __io_println("cleanup:nested")
+    stdio.println("cleanup:nested")
   }
 }
 
@@ -38,11 +38,11 @@ fn return_with_failed_cleanup() {
   }
 }
 
-fn throw_failed_call() {
+fn throw_failed_call(stdio: HarnessStdio) {
   try {
     throw fail("throw operand")
   } finally {
-    __io_println("cleanup:throw operand")
+    stdio.println("cleanup:throw operand")
   }
 }
 
@@ -64,31 +64,31 @@ fn continue_and_break() {
   return events
 }
 
-pipeline default() {
-  __io_println(return_value())
+pipeline default(harness: Harness) {
+  harness.stdio.println(return_value(harness.stdio))
   const direct = try {
-    return_failed_call()
+    return_failed_call(harness.stdio)
   } catch (error) {
     "caught:${error}"
   }
-  __io_println(direct)
+  harness.stdio.println(direct)
   const nested = try {
-    return_nested_failed_call()
+    return_nested_failed_call(harness.stdio)
   } catch (error) {
     "caught:${error}"
   }
-  __io_println(nested)
+  harness.stdio.println(nested)
   const precedence = try {
     return_with_failed_cleanup()
   } catch (error) {
     "caught:${error}"
   }
-  __io_println(precedence)
+  harness.stdio.println(precedence)
   const throw_operand = try {
-    throw_failed_call()
+    throw_failed_call(harness.stdio)
   } catch (error) {
     "caught:${error}"
   }
-  __io_println(throw_operand)
-  __io_println(continue_and_break())
+  harness.stdio.println(throw_operand)
+  harness.stdio.println(continue_and_break())
 }

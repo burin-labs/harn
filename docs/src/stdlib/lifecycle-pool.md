@@ -13,30 +13,30 @@ VM so nested pool operations see the same named budgets.
 ```harn,ignore
 import { fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
 
-const pool = pool_create({
+const pool = pool_create(harness.agent, {
   name: "pr-review",
   max_concurrent: 5,
   queue: fair_round_robin("tenant_id"),
 })
 
 const handle = pool.submit({ ->
-  return agent_loop("review this PR", system_prompt: "...")
+  return agent_loop(harness, "review this PR", system_prompt: "...")
 }, {tenant_id: "tenant-acme", priority: 10})
 
-const result = pool_wait(handle)
+const result = pool_wait(harness.agent, handle)
 ```
 
 ## Creating a pool
 
-`pool_create(options?)` allocates a new pool and registers it under
+`pool_create(agent: HarnessAgent, options?)` allocates a new pool and registers it under
 `options.name`. Names must be unique within the live VM registry; use
-`pool_get(name)` to reuse an existing one. Pipeline-scope pools use a
+`pool_get(agent, name)` to reuse an existing one. Pipeline-scope pools use a
 deterministic id so creating the same `(scope, scope_id, name)` after process
 restart binds to the persisted state.
 
 | Option           | Type   | Default          | Notes                                          |
 |------------------|--------|------------------|------------------------------------------------|
-| `name`           | string | auto-generated   | Visible in `pool_list()` and snapshots.        |
+| `name`           | string | auto-generated   | Visible in `pool_list(harness.agent)` and snapshots.        |
 | `max_concurrent` | int    | `1`              | Hard cap on simultaneously running tasks.      |
 | `queue`          | dict/string | `priority()` | Queue strategy descriptor. |
 | `backpressure`   | dict/string | `nil`        | Backpressure descriptor. `nil` keeps the queue unbounded. |
@@ -80,7 +80,7 @@ return handles whose terminal snapshot has `status: "rejected"`,
 import { QueueStrategy, pool_create } from "std/lifecycle/pool"
 
 const queue = QueueStrategy()
-const pool = pool_create({
+const pool = pool_create(harness.agent, {
   name: "tenant-work",
   max_concurrent: 2,
   queue: queue.fair_round_robin("tenant_id"),
@@ -102,7 +102,7 @@ const pool = pool_create({
 import { Backpressure, pool_create } from "std/lifecycle/pool"
 
 const backpressure = Backpressure()
-const pool = pool_create({
+const pool = pool_create(harness.agent, {
   name: "review",
   max_concurrent: 2,
   backpressure: backpressure.queue(100, "fail_submitter"),
@@ -116,7 +116,7 @@ the pool name, task ids, policy, queue depth, and max depth.
 
 ## Waiting
 
-`pool_wait(handle)` blocks until the task reaches a terminal state and
+`pool_wait(agent: HarnessAgent, handle)` blocks until the task reaches a terminal state and
 returns the final task snapshot (`status`, `result` or `error`, timestamps).
 Passing a list of handles waits for all of them. The same dispatch also
 works through `wait_agent(handle)` from `std/agent/workers` — pool task
@@ -125,7 +125,7 @@ callers need to learn.
 
 ```harn,ignore
 const handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
-const outcomes = pool_wait(handles)  // or: wait_agent(handles)
+const outcomes = pool_wait(harness.agent, handles)  // or: wait_agent(handles)
 ```
 
 ## Inspection
@@ -136,8 +136,8 @@ const outcomes = pool_wait(handles)  // or: wait_agent(handles)
   `completed`, `failed`, `rejected`, `blocked_submitters`, `total`,
   the selected `backpressure`, the per-task list, and the original
   `config` so observability stacks can show "what was configured".
-- `pool_get(name_or_id)` — lookup by name; returns `nil` when missing.
-- `pool_list()` — every pool registered on the current VM runtime.
+- `pool_get(harness.agent, name_or_id)` — lookup by name; returns `nil` when missing.
+- `pool_list(harness.agent)` — every pool registered on the current VM runtime.
 
 ## Composability
 

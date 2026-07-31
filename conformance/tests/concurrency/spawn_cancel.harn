@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const handle = spawn {
-    log("should be cancelled")
+    harness.stdio.log("should be cancelled")
   }
   cancel(handle)
-  log("cancelled")
+  harness.stdio.log("cancelled")
 }

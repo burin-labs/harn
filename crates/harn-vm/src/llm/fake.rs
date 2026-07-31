@@ -285,7 +285,7 @@ fn take_next_turn(request: &LlmRequestPayload) -> Result<FakeLlmTurn, VmError> {
         let mut turns = turns.borrow_mut();
         if turns.is_empty() {
             Err(VmError::Runtime(
-                "FakeLlmProvider: no script installed (or script exhausted) — install_fake_llm_script() must precede llm_call(provider: \"fake\")".to_string()
+                "FakeLlmProvider: no script installed (or script exhausted) — install_fake_llm_script() must precede harness.llm.call(provider: \"fake\")".to_string()
             ))
         } else {
             Ok(turns.remove(0))

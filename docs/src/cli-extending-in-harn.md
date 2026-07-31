@@ -106,7 +106,7 @@ Match the subcommand in the top-level dispatch (`lib.rs`):
 Command::Greet(args) => {
     let exit = commands::greet::run(args).await;
     if exit != 0 {
-        process::exit(exit);
+        process::harness.runtime.exit(exit);
     }
 }
 ```
@@ -224,8 +224,8 @@ const spec = parser({
 })
 const result = parse(spec, argv)
 if is_err(result) {
-  __io_eprintln(unwrap_err(result).message)
-  exit(2)
+  harness.stdio.eprintln(unwrap_err(result).message)
+  harness.runtime.exit(2)
 }
 const invocation = unwrap(result)
 const template = invocation.options.template
@@ -290,8 +290,8 @@ const spec = parser({
 
 const result = parse_typed(spec, argv, schema_of(RenderOptions))
 if is_err(result) {
-  __io_eprintln(unwrap_err(result).message)
-  exit(2)
+  harness.stdio.eprintln(unwrap_err(result).message)
+  harness.runtime.exit(2)
 }
 const options: RenderOptions = unwrap(result).options
 ```
@@ -326,9 +326,9 @@ import { parser, parse, render_help } from "std/cli/argparse"
 const result = parse(spec, argv)
 if is_err(result) {
   const failure = unwrap_err(result)
-  __io_eprintln(render_help(spec))
-  __io_eprintln("error: " + failure.message)
-  exit(2)
+  harness.stdio.eprintln(render_help(spec))
+  harness.stdio.eprintln("error: " + failure.message)
+  harness.runtime.exit(2)
 }
 const invocation = unwrap(result)
 ```
@@ -417,8 +417,8 @@ builtin via the G4 pattern ([#2297][g4]). G4 landed a first round of
 free builtins (`term_width`, `term_height`, `mkdtemp`, `glob`,
 `llm_catalog`, `llm_provider_status`) that today live as top-level functions so the
 ports could move. Directory policy that can be expressed from env vars
-belongs in `std/cli/paths` instead of a host capability. `spawn_captured`
-has since moved to `harness.process.spawn_captured`, `sha256_hex` is a
+belongs in `std/cli/paths` instead of a host capability. Process execution
+has since moved to `harness.process.run`, `sha256_hex` is a
 compatibility alias for `harness.crypto.sha256`, and the LLM catalog helpers
 have moved to `harness.llm.catalog()` and `harness.llm.providers()`. Prefer
 the canonical `harness.X.Y` sub-handle when the script receives a `Harness`

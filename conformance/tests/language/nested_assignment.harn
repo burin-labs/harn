@@ -1,9 +1,9 @@
-fn bump_index() {
-  log("index evaluated")
+fn bump_index(stdio: HarnessStdio) {
+  stdio.log("index evaluated")
   return 1
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Nested property path writes the leaf, not `root.<final>`
   let a = {b: {c: 1}, c: 99}
   a.b.c = 2
@@ -37,7 +37,7 @@ pipeline test(task) {
   assert_eq(acc.inner.n, 6, "compound assignment accumulates through the path")
   // A side-effecting index in a compound assignment evaluates exactly once
   let nums = [10, 20]
-  nums[bump_index()] += 5
+  nums[bump_index(harness.stdio)] += 5
   assert_eq(nums[1], 25, "compound subscript writes through the hoisted index")
   // Immutability still holds through a nested path
   const frozen = {b: {c: 1}}
@@ -49,5 +49,5 @@ pipeline test(task) {
   }
   assert_eq(rejected, true, "let roots stay immutable through nested paths")
   assert_eq(frozen.b.c, 1, "rejected nested write leaves the value untouched")
-  log("nested assignment: all tests passed")
+  harness.stdio.log("nested assignment: all tests passed")
 }

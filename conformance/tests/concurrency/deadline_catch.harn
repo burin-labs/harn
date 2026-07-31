@@ -1,9 +1,9 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   try {
     deadline 50ms {
-      sleep(75ms)
+      harness.clock.sleep_ms(75ms)
     }
   } catch (e) {
-    log("caught deadline")
+    harness.stdio.log("caught deadline")
   }
 }

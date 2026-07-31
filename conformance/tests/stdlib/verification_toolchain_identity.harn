@@ -1,7 +1,8 @@
 import { verification_toolchain_facts } from "std/verification"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const facts = verification_toolchain_facts(
+    harness.tools,
     [
       {
         id: "go/unit",
@@ -42,5 +43,5 @@ pipeline test(task) {
   assert_eq(facts[2]?.available, false)
   assert_eq(facts[2]?.version, nil)
   assert_eq(facts[2]?.probe.exit, 7)
-  __io_println("verification toolchain identity ok")
+  harness.stdio.println("verification toolchain identity ok")
 }

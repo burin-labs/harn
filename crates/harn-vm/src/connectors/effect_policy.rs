@@ -77,27 +77,51 @@ pub fn connector_export_denied_builtin_reason(export: &str, builtin: &str) -> Op
     }
 }
 
+/// Return an actionable lint reason when a typed Harness method exceeds an
+/// export's default ceiling. Both the contract effects and the ceiling are the
+/// same values used by runtime enforcement; the linter does not maintain a
+/// second capability-name table.
+pub fn connector_export_denied_harness_method_reason(
+    export: &str,
+    capability_field: &str,
+    method: &str,
+) -> Option<String> {
+    let policy = default_connector_export_policy(export)?;
+    let entry = crate::stdlib::all_builtin_manifest().iter().find(|entry| {
+        matches!(
+            entry.contract.exposure,
+            harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                capability,
+                method: candidate_method,
+            } if capability.field_name() == capability_field && candidate_method == method
+        )
+    })?;
+    let denied = crate::orchestration::runtime_effects_from_contract(entry.contract.effects, &[])
+        .into_iter()
+        .find(|effect| !crate::orchestration::effect_allowed_by_ceiling(effect, &policy))?;
+    Some(format!(
+        "{} is outside the `{export}` default effect ceiling",
+        crate::orchestration::effect_record_summary(&denied)
+    ))
+}
+
 fn policy_for_effect_class(class: ConnectorExportEffectClass) -> CapabilityPolicy {
-    let mut capabilities = BTreeMap::new();
-    capabilities.insert(
-        "connector".to_string(),
-        match class {
-            ConnectorExportEffectClass::HotPathLocal => vec![
-                "secret_get".to_string(),
-                "event_log_emit".to_string(),
-                "metrics_inc".to_string(),
-            ],
-            ConnectorExportEffectClass::ConnectorOutbound
-            | ConnectorExportEffectClass::Activation => {
-                vec![
-                    "call".to_string(),
-                    "secret_get".to_string(),
-                    "event_log_emit".to_string(),
-                    "metrics_inc".to_string(),
-                ]
-            }
-        },
-    );
+    let mut capabilities = BTreeMap::from([
+        ("secrets".to_string(), vec!["read".to_string()]),
+        ("observability".to_string(), vec!["emit".to_string()]),
+        ("clock".to_string(), vec!["now".to_string()]),
+        ("state".to_string(), vec!["read".to_string()]),
+    ]);
+    if matches!(
+        class,
+        ConnectorExportEffectClass::ConnectorOutbound | ConnectorExportEffectClass::Activation
+    ) {
+        capabilities.insert("network".to_string(), vec!["http".to_string()]);
+        capabilities
+            .entry("state".to_string())
+            .or_default()
+            .push("write".to_string());
+    }
 
     CapabilityPolicy {
         capabilities,

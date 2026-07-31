@@ -4,7 +4,7 @@
  * `Named("list")` members — so a `list<int> | int` union narrows to
  * `list<int>` on the truthy branch and `int` on the falsy branch.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn describe_list(v: list<int> | int) -> string {
     if type_of(v) == "list" {
       // v: list<int> here, so len/sum work.
@@ -26,9 +26,9 @@ pipeline test(task) {
     }
     return "list of ${len(v)}"
   }
-  log(describe_list([1, 2, 3]))
-  log(describe_list(42))
-  log(describe_dict({a: 1, b: 2}))
-  log(describe_dict(7))
-  log(describe_single([10, 20]))
+  harness.stdio.log(describe_list([1, 2, 3]))
+  harness.stdio.log(describe_list(42))
+  harness.stdio.log(describe_dict({a: 1, b: 2}))
+  harness.stdio.log(describe_dict(7))
+  harness.stdio.log(describe_single([10, 20]))
 }

@@ -13,13 +13,13 @@ import "std/triggers"
  * Successful current-session injection is exercised at the integration
  * layer (via agent_loop, which pushes onto the current-session stack).
  */
-pipeline test(task) {
-  const _ = lifecycle_audit_log_take()
+pipeline test(harness: Harness, task) {
+  const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "trigger-channel-reminder-current-" + unique,
       kind: "channel.emit",
@@ -43,7 +43,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const dispatch = trigger_fire(
+  const dispatch = harness.runtime.trigger_fire(
     handle,
     {
       provider: "channel",
@@ -54,11 +54,11 @@ pipeline test(task) {
   )
   // Dispatch itself succeeds (no crash); the inject is dropped with a
   // structured `target_missing` outcome and a matching lifecycle audit.
-  __io_println(dispatch.status == "dispatched")
-  __io_println(dispatch.result?.status == "dropped")
-  __io_println(dispatch.result?.reason == "target_missing")
-  __io_println(dispatch.result?.target_kind == "current")
-  const audits = lifecycle_audit_log_take()
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.status == "dropped")
+  harness.stdio.println(dispatch.result?.reason == "target_missing")
+  harness.stdio.println(dispatch.result?.target_kind == "current")
+  const audits = lifecycle_audit_log_take(harness.obs)
   let inject_audit_count = 0
   let outcome = ""
   let reason = ""
@@ -71,8 +71,8 @@ pipeline test(task) {
       target_kind = audit.payload.target_kind
     }
   }
-  __io_println(inject_audit_count)
-  __io_println(outcome)
-  __io_println(reason)
-  __io_println(target_kind)
+  harness.stdio.println(inject_audit_count)
+  harness.stdio.println(outcome)
+  harness.stdio.println(reason)
+  harness.stdio.println(target_kind)
 }

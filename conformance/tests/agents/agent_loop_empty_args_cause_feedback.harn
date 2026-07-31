@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -43,10 +44,11 @@ fn loop_opts() {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // (a) Empty args + finish_reason "length" -> the feedback names the
   // output-cap truncation, never the misdiagnosing missing-parameter slip.
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "t1", name: "write_note", arguments: {}}], stop_reason: "length"},
       {
@@ -56,19 +58,20 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      const result = agent_loop("Write a.txt.", nil, loop_opts())
-      const calls = llm_mock_calls()
+      const result = agent_loop(harness, "Write a.txt.", nil, loop_opts())
+      const calls = harness.llm.mock_calls()
       const feedback = json_stringify(calls[1].messages)
-      __io_println(result.status)
-      __io_println(contains(feedback, "[result of write_note]"))
-      __io_println(contains(feedback, "[end of write_note result]"))
-      __io_println(contains(feedback, "TRUNCATED by the output limit"))
-      __io_println(!contains(feedback, "missing required parameter"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(contains(feedback, "[result of write_note]"))
+      harness.stdio.println(contains(feedback, "[end of write_note result]"))
+      harness.stdio.println(contains(feedback, "TRUNCATED by the output limit"))
+      harness.stdio.println(!contains(feedback, "missing required parameter"))
     },
   )
   // (b) Empty args + clean stop -> the feedback names the provider fault and
   // coaches an identical re-issue.
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "t1", name: "write_note", arguments: {}}], stop_reason: "tool_calls"},
       {
@@ -78,20 +81,21 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      const result = agent_loop("Write a.txt.", nil, loop_opts())
-      const calls = llm_mock_calls()
+      const result = agent_loop(harness, "Write a.txt.", nil, loop_opts())
+      const calls = harness.llm.mock_calls()
       const feedback = json_stringify(calls[1].messages)
-      __io_println(result.status)
-      __io_println(contains(feedback, "[result of write_note]"))
-      __io_println(contains(feedback, "[end of write_note result]"))
-      __io_println(contains(feedback, "EMPTY arguments"))
-      __io_println(contains(feedback, "Re-issue the same call with its full arguments"))
-      __io_println(!contains(feedback, "missing required parameter"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(contains(feedback, "[result of write_note]"))
+      harness.stdio.println(contains(feedback, "[end of write_note result]"))
+      harness.stdio.println(contains(feedback, "EMPTY arguments"))
+      harness.stdio.println(contains(feedback, "Re-issue the same call with its full arguments"))
+      harness.stdio.println(!contains(feedback, "missing required parameter"))
     },
   )
   // (c) Non-empty but incomplete args -> the precise validator message stays;
   // the empty-args cause-naming must not fire.
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [{id: "t1", name: "write_note", arguments: {body: "hello"}}],
@@ -104,14 +108,14 @@ pipeline default() {
       llm_text("##DONE##"),
     ],
     { ->
-      const result = agent_loop("Write a.txt.", nil, loop_opts())
-      const calls = llm_mock_calls()
+      const result = agent_loop(harness, "Write a.txt.", nil, loop_opts())
+      const calls = harness.llm.mock_calls()
       const feedback = json_stringify(calls[1].messages)
-      __io_println(result.status)
-      __io_println(contains(feedback, "[result of write_note]"))
-      __io_println(contains(feedback, "[end of write_note result]"))
-      __io_println(contains(feedback, "missing required parameter(s): path"))
-      __io_println(!contains(feedback, "EMPTY arguments"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(contains(feedback, "[result of write_note]"))
+      harness.stdio.println(contains(feedback, "[end of write_note result]"))
+      harness.stdio.println(contains(feedback, "missing required parameter(s): path"))
+      harness.stdio.println(!contains(feedback, "EMPTY arguments"))
     },
   )
 }

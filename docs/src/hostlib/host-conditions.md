@@ -7,7 +7,7 @@ import { host_conditions_sample } from "std/host_conditions"
 
 const snapshot = host_conditions_sample()
 for answer in snapshot.questions {
-  log(answer.question, answer.status, answer.contention)
+  harness.stdio.log(answer.question, answer.status, answer.contention)
 }
 ```
 

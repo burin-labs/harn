@@ -19,7 +19,6 @@
 4	agents/agent_sessions_fork.harn	HARN-LNT-025
 2	agents/agent_sub_agent_anchor.harn	HARN-LNT-025
 4	agents/artifact_emit.harn	HARN-LNT-018
-1	agents/command_capture_rewrite.harn	HARN-LNT-054
 1	agents/effects_inheritance_empty_child.harn	HARN-LNT-014
 1	agents/effects_inheritance_subset_allowed.harn	HARN-LNT-014
 1	agents/pipeline_drain_settlement_constrained_surface.harn	HARN-LNT-014
@@ -87,15 +86,11 @@
 1	modules/selective_import_private_helper.harn	HARN-LNT-025
 1	modules/selective_import_private_rejected_lib.harn	HARN-LNT-019
 1	personas/prelude_bounded_loop.harn	HARN-LNT-018
-1	pool/backpressure_policies.harn	HARN-LNT-018
 1	pool/max_concurrent_caps_in_flight.harn	HARN-LNT-018
 3	pool/pool_unsettled_state_integration.harn	HARN-LNT-014
 1	pool_durability/stale_inflight_marked_failed.harn	HARN-LNT-014
 1	reminders/reminder_lifecycle_event_log.harn	HARN-LNT-014
-1	reminders/reminder_render_local.harn	HARN-RMD-003
-1	runtime/cli_host_caps_mkdtemp.harn	HARN-LNT-054
 40	runtime/command_policy_hooks.harn	HARN-LNT-025
-1	runtime/harness_fs_glob.harn	HARN-LNT-054
 1	runtime/http_mock.harn	HARN-LNT-029
 2	scenarios/agent_loop_escalation_equivalent_failover.harn	HARN-LNT-018
 1	scenarios/agent_loop_escalation_equivalent_failover_partial_route_patch.harn	HARN-LNT-018
@@ -120,7 +115,6 @@
 1	scenarios/llm_caller_with_retry_recovers_from_transient_error.harn	HARN-LNT-018
 1	scenarios/llm_handlers_with_repair.harn	HARN-LNT-018
 1	scenarios/llm_handlers_with_retry.harn	HARN-LNT-018
-6	scenarios/llm_mock.harn	HARN-LNT-029
 6	scenarios/llm_rewrite_supersedes_system_fragments.harn	HARN-LNT-016
 2	scenarios/llm_structural_experiments.harn	HARN-LNT-018
 1	scenarios/llm_transcripts.harn	HARN-LNT-014
@@ -146,8 +140,6 @@
 25	stdlib/command_step_retry_logic.harn	HARN-LNT-025
 2	stdlib/coordination_addressed_inbox.harn	HARN-LNT-014
 5	stdlib/document_pdf.harn	HARN-LNT-018
-1	stdlib/fs_path_status.harn	HARN-LNT-054
-6	stdlib/fs_write_creates_parent_dirs.harn	HARN-LNT-054
 1	stdlib/graphql_sdk.harn	HARN-LNT-029
 2	stdlib/http_builtins.harn	HARN-LNT-014
 2	stdlib/http_timeout_ms.harn	HARN-LNT-014
@@ -162,8 +154,6 @@
 1	stdlib/schema_validator.harn	HARN-LNT-020
 9	stdlib/stdlib_testing_snapshot.harn	HARN-LNT-018
 3	stdlib/stdlib_testing_toolkit.harn	HARN-LNT-018
-13	stdlib/stdlib_testing_with_mocks.harn	HARN-CAP-005
-1	stdlib/stdlib_testing_with_mocks.harn	__CHECK_FAILED__
 1	stdlib/tui_select_from.harn	HARN-LNT-018
 1	stdlib/waitpoint_fan_out.harn	HARN-LNT-018
 5	stdlib/waitpoints_fan_in.harn	HARN-LNT-018

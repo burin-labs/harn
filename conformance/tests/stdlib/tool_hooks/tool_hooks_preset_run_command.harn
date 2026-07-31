@@ -18,7 +18,7 @@ import {
  *   * No-match fallback running `inner` (or returning a passthrough
  *     envelope when `inner` is omitted).
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const rust_rule = tool_rule(
     {
       id: "rust.cargo.target_dir",
@@ -41,34 +41,40 @@ pipeline default() {
   )
   const rust_cat = catalogue({id: "harn-canon/rust", stack: "rust", rules: [rust_rule]})
   const py_cat = catalogue({id: "harn-canon/python", stack: "python", rules: [python_rule]})
-  const registry = tool_hooks_register(tool_hooks_register(tool_hooks_registry(), rust_cat), py_cat)
+  const registry = harness.tools.hooks_register(
+    harness.tools.hooks_register(harness.tools.hooks_registry(), rust_cat),
+    py_cat,
+  )
   /* Pure inner: echoes the command it saw so the test can confirm
    * whether the wrapper forwarded the original, the rewrite, or
    * nothing at all. */
   const inner = { args -> return {ok: true, ran: args.command} }
   /* Rust-scoped wrapper: only rust rules match. */
-  const rust_wrapper = preset_run_command({stacks: ["rust"], registry: registry, inner: inner})
+  const rust_wrapper = preset_run_command(
+    harness,
+    {stacks: ["rust"], registry: registry, inner: inner},
+  )
   const rust_result = rust_wrapper({command: "cargo build --release"})
-  __io_println(rust_result.action)
-  __io_println(rust_result.rule_id)
-  __io_println(rust_result.catalogue_id)
-  __io_println(rust_result.severity)
-  __io_println(rust_result.original_command)
-  __io_println(rust_result.command)
-  __io_println(rust_result.result.ok)
-  __io_println(rust_result.result.ran)
+  harness.stdio.println(rust_result.action)
+  harness.stdio.println(rust_result.rule_id)
+  harness.stdio.println(rust_result.catalogue_id)
+  harness.stdio.println(rust_result.severity)
+  harness.stdio.println(rust_result.original_command)
+  harness.stdio.println(rust_result.command)
+  harness.stdio.println(rust_result.result.ok)
+  harness.stdio.println(rust_result.result.ran)
   /* Python catalogue is filtered out by `stacks: ["rust"]`, so a find
    * command becomes a no-match passthrough that runs `inner` unchanged. */
   const passthrough_result = rust_wrapper({command: "find . -name foo"})
-  __io_println(passthrough_result.ok)
-  __io_println(passthrough_result.ran)
+  harness.stdio.println(passthrough_result.ok)
+  harness.stdio.println(passthrough_result.ran)
   /* Same wrapper, no inner: returns the decision envelope so the caller
    * can drive the executor itself. */
-  const preview_wrapper = preset_run_command({stacks: ["rust"], registry: registry})
+  const preview_wrapper = preset_run_command(harness, {stacks: ["rust"], registry: registry})
   const preview = preview_wrapper({command: "cargo test"})
-  __io_println(preview.action)
-  __io_println(preview.command)
-  __io_println(preview.rule_id)
+  harness.stdio.println(preview.action)
+  harness.stdio.println(preview.command)
+  harness.stdio.println(preview.rule_id)
   /* Custom rules take priority over the registered catalogues even when
    * stacks would have filtered the registered catalogue out. */
   const custom_rule = tool_rule(
@@ -81,6 +87,7 @@ pipeline default() {
     },
   )
   const deny_wrapper = preset_run_command(
+    harness,
     {
       stacks: ["rust"],
       registry: registry,
@@ -90,18 +97,19 @@ pipeline default() {
     },
   )
   const denied = deny_wrapper({command: "git push origin main --force"})
-  __io_println(denied.action)
-  __io_println(denied.rule_id)
-  __io_println(denied.catalogue_id)
-  __io_println(denied.severity)
-  __io_println(denied.explanation)
+  harness.stdio.println(denied.action)
+  harness.stdio.println(denied.rule_id)
+  harness.stdio.println(denied.catalogue_id)
+  harness.stdio.println(denied.severity)
+  harness.stdio.println(denied.explanation)
   /* When the same denying wrapper sees a registered-catalogue match,
    * deny still fires (the rule from the registry, not the custom one). */
   const registered_denied = deny_wrapper({command: "cargo build"})
-  __io_println(registered_denied.action)
-  __io_println(registered_denied.rule_id)
+  harness.stdio.println(registered_denied.action)
+  harness.stdio.println(registered_denied.rule_id)
   /* Passthrough-with-audit: matched, tagged, still ran. */
   const audit_wrapper = preset_run_command(
+    harness,
     {
       stacks: ["python"],
       registry: registry,
@@ -110,34 +118,38 @@ pipeline default() {
     },
   )
   const audited = audit_wrapper({command: "find . -name 'x'"})
-  __io_println(audited.action)
-  __io_println(audited.rule_id)
-  __io_println(audited.original_command)
-  __io_println(audited.command)
-  __io_println(audited.result.ran)
+  harness.stdio.println(audited.action)
+  harness.stdio.println(audited.rule_id)
+  harness.stdio.println(audited.original_command)
+  harness.stdio.println(audited.command)
+  harness.stdio.println(audited.result.ran)
   /* String-shaped args: the wrapper accepts a bare command string for
    * call-sites that haven't materialized an args dict. */
-  const string_wrapper = preset_run_command({stacks: ["python"], registry: registry, inner: inner})
+  const string_wrapper = preset_run_command(
+    harness,
+    {stacks: ["python"], registry: registry, inner: inner},
+  )
   const stringed = string_wrapper("find . -name baz")
-  __io_println(stringed.action)
-  __io_println(stringed.command)
-  __io_println(stringed.result.ran)
+  harness.stdio.println(stringed.action)
+  harness.stdio.println(stringed.command)
+  harness.stdio.println(stringed.result.ran)
   /* llm_classifier (TH-05): construction validates the config shape so
    * obvious typos surface at wrapper-build time rather than first
    * dispatch. Empty model, out-of-range threshold, etc. all throw. */
   const bad_model = try {
-    preset_run_command({llm_classifier: {model: ""}})
+    preset_run_command(harness, {llm_classifier: {model: ""}})
   }
-  __io_println(is_err(bad_model))
-  __io_println(contains(to_string(unwrap_err(bad_model)), "llm_classifier.model"))
+  harness.stdio.println(is_err(bad_model))
+  harness.stdio.println(contains(to_string(unwrap_err(bad_model)), "llm_classifier.model"))
   const bad_threshold = try {
-    preset_run_command({llm_classifier: {model: "haiku", threshold: 1.5}})
+    preset_run_command(harness, {llm_classifier: {model: "haiku", threshold: 1.5}})
   }
-  __io_println(is_err(bad_threshold))
-  __io_println(contains(to_string(unwrap_err(bad_threshold)), "threshold"))
+  harness.stdio.println(is_err(bad_threshold))
+  harness.stdio.println(contains(to_string(unwrap_err(bad_threshold)), "threshold"))
   /* Valid classifier config: constructor accepts and returns a closure. */
   const cls_wrapper = preset_run_command(
+    harness,
     {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
   )
-  __io_println(type_of(cls_wrapper))
+  harness.stdio.println(type_of(cls_wrapper))
 }

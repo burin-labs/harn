@@ -631,8 +631,8 @@ impl<F: Future> Future for Checkpointed<F> {
 /// align with the rest of the runtime's clock reads; returns 0 only if
 /// the host clock is behind the epoch (e.g. unusual sandbox shims).
 fn wall_clock_ms() -> u64 {
-    if let Some(mock) = crate::clock_mock::active_mock_clock() {
-        return mock.now_wall_ms() as u64;
+    if let Some(clock) = crate::clock_mock::active_clock() {
+        return harn_clock::now_wall_ms(clock.as_ref()).max(0) as u64;
     }
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -647,7 +647,7 @@ fn wall_clock_ms() -> u64 {
 /// wall-clock progress; spans without an active mock at start fall
 /// through to the standard `Instant::elapsed` path on close.
 fn mock_monotonic_ms() -> Option<u64> {
-    crate::clock_mock::active_mock_clock().map(|mock| mock.now_monotonic_ms() as u64)
+    crate::clock_mock::active_clock().map(|clock| clock.monotonic_ms().max(0) as u64)
 }
 
 /// Enable or disable VM tracing for the current thread.

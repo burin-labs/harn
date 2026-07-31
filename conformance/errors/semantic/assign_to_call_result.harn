@@ -2,6 +2,6 @@ fn get_thing() {
   return {x: 1}
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   get_thing().x = 99
 }

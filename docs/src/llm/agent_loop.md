@@ -24,8 +24,8 @@ const turn_opts: AgentLoopOptions = {
   model: "gpt-5-mini",
 }
 const result = agent_turn("Summarize the current project risks.", turn_opts)
-log(result.visible_text)
-log(result.judge_decisions[0].verdict)
+harness.stdio.log(result.visible_text)
+harness.stdio.log(result.judge_decisions[0].verdict)
 ```
 
 ## agent_loop
@@ -46,14 +46,14 @@ documented path: option typos surface at `harn check` time, and the
 import { AgentLoopOptions } from "std/agent/options"
 
 const opts: AgentLoopOptions = {loop_until_done: true}
-const result = agent_loop(
+const result = agent_loop(harness,
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
   opts,
 )
-log(result.text)           // the accumulated output
-log(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
-log(result.llm.iterations) // number of LLM round-trips
+harness.stdio.log(result.text)           // the accumulated output
+harness.stdio.log(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
+harness.stdio.log(result.llm.iterations) // number of LLM round-trips
 ```
 
 ### Choosing tool mode
@@ -191,7 +191,7 @@ const opts: AgentLoopOptions = {
   loop_until_done: true,
   max_iterations: 20,
 }
-const result = agent_loop(task, system, opts)
+const result = agent_loop(harness, task, system, opts)
 ```
 
 For deterministic eval fixtures, use `scripted_user(...)` or its alias
@@ -212,7 +212,7 @@ const opts: AgentLoopOptions = {
   tool_format: "native",
   loop_until_done: true,
 }
-agent_loop(task, system, opts)
+agent_loop(harness, task, system, opts)
 ```
 
 When the target agent does not have an explicit user-question tool, use
@@ -248,7 +248,7 @@ const result = agent_chat_loop({
   tools: coding_tools,
   tool_format: "native",
   on_user_input: { state ->
-    const line = read_line()
+    const line = harness.stdio.read_line()
     if !line.ok {
       return {kind: "exit", reason: line.status ?? "closed"}
     }
@@ -277,7 +277,7 @@ so the loop's first (and every subsequent) provider request presents them
 exactly as `llm_call`'s `messages` array would.
 
 ```harn,ignore
-const result = agent_loop(
+const result = agent_loop(harness,
   "What is the codeword?",
   nil,
   {
@@ -319,7 +319,7 @@ transport; the callback fires once per streamed chunk of the assistant's
 **visible text**:
 
 ```harn,ignore
-agent_loop("summarize the diff", nil, {
+agent_loop(harness, "summarize the diff", nil, {
   provider: "anthropic",
   model: "claude-sonnet-5",
   on_delta: { delta -> render_token(delta) },
@@ -513,7 +513,7 @@ key explicitly to override the profile's value for that call.
 
 ### Agent scratchpad
 
-`agent_loop(..., {scratchpad: true})` creates a small structured scratchpad for
+`agent_loop(harness, ..., {scratchpad: true})` creates a small structured scratchpad for
 the session, renders it as a tail system fragment on every turn, and runs a
 structured reorganization pass every three continuing turns. The reorganizer may
 use a different provider or model:
@@ -528,7 +528,7 @@ const scratchpad_opts: AgentLoopOptions = {
     reorganizer: {provider: "ollama", model: "devstral-small-2"},
   },
 }
-agent_loop(task, system, scratchpad_opts)
+agent_loop(harness, task, system, scratchpad_opts)
 ```
 
 The scratchpad is capped at 16 KiB and is stored as live session state, not as a
@@ -543,8 +543,8 @@ stays visible; stale, unreferenced tool-result bodies can be reclaimed from the
 model-visible prefix while the raw transcript remains intact.
 
 Scripts can read and write the state directly with
-`agent_session_scratchpad(id)`, `agent_session_set_scratchpad(id, pad, opts?)`,
-and `agent_session_clear_scratchpad(id, opts?)`. Reorganization validates that
+`harness.agent.scratchpad(id)`, `harness.agent.set_scratchpad(id, pad, opts?)`,
+and `harness.agent.clear_scratchpad(id, opts?)`. Reorganization validates that
 returned facts cite source refs already present in the scratchpad or recent
 turns, so heavy tool output remains referenced rather than copied.
 
@@ -559,7 +559,7 @@ cargo run --quiet --bin harn -- run examples/evals/agent_scratchpad_retention.ha
 
 The preferred surface for retry / fallback / shadow / budget / cache /
 circuit-breaker behavior on `agent_loop` is `llm_caller:`. Pass a
-closure that wraps the per-turn `llm_call(...)` and the loop will
+closure that wraps the per-turn `harness.llm.call(...)` and the loop will
 route every turn through it:
 
 ```harn,ignore
@@ -575,7 +575,7 @@ const opts: AgentLoopOptions = {
   loop_until_done: true,
   llm_caller: caller,
 }
-const result = agent_loop(task, system, opts)
+const result = agent_loop(harness, task, system, opts)
 ```
 
 Caller contract: `fn(call) -> {ok, value | status, error?}` where
@@ -603,7 +603,7 @@ const compaction_opts: AgentLoopOptions = {
   model: "gpt-4o",
   compaction: {strategy: "hybrid", keep_last_n: 10},
 }
-const result = agent_loop(task, system, compaction_opts)
+const result = agent_loop(harness, task, system, compaction_opts)
 ```
 
 Available strategies:
@@ -647,7 +647,7 @@ const auto_compact_opts: AgentLoopOptions = {
     {summary: "resume with " + policy.mode + " over " + to_string(len(archived)) + " messages"}
   },
 }
-const result = agent_loop(task, system, auto_compact_opts)
+const result = agent_loop(harness, task, system, auto_compact_opts)
 ```
 
 Stdlib helpers cover common host commands:
@@ -674,7 +674,7 @@ import { AgentLoopOptions, IterationBudget } from "std/agent/options"
 
 const budget: IterationBudget = {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
 const budget_opts: AgentLoopOptions = {iteration_budget: budget}
-const result = agent_loop(prompt, system, budget_opts)
+const result = agent_loop(harness, prompt, system, budget_opts)
 ```
 
 Fields:
@@ -766,11 +766,11 @@ All decisions are recorded:
 import { AgentLoopOptions } from "std/agent/options"
 
 const adaptive_opts: AgentLoopOptions = {iteration_budget: {mode: "adaptive", initial: 4, max: 12}}
-const result = agent_loop(prompt, system, adaptive_opts)
-log(result.adaptive_budget.extensions_used)
-log(result.adaptive_budget.final_limit)
+const result = agent_loop(harness, prompt, system, adaptive_opts)
+harness.stdio.log(result.adaptive_budget.extensions_used)
+harness.stdio.log(result.adaptive_budget.final_limit)
 for decision in result.adaptive_budget.decisions {
-  log(decision.action + ": " + decision.reason)
+  harness.stdio.log(decision.action + ": " + decision.reason)
 }
 ```
 
@@ -829,7 +829,7 @@ agent_preset_register("triage", {
   pack: {provider: "openai", timeout_ms: 90000, budget: {total_budget_usd: 5.0}},
 })
 const opts = agent_preset("triage", {tools: triage_tools})
-const run = agent_loop("Triage the queue.", opts?.system, opts)
+const run = agent_loop(harness, "Triage the queue.", opts?.system, opts)
 ```
 
 ```harn
@@ -843,7 +843,7 @@ const audit_opts = agent_preset("audit", {
   tools: release_tools,
   require_successful_tools: ["release_run"],
 })
-const audit = agent_loop("Audit the release", audit_opts?.system, audit_opts)
+const audit = agent_loop(harness, "Audit the release", audit_opts?.system, audit_opts)
 
 // Tool-using repair. Wider budget {initial: 4, max: 16}, max_nudges: 2.
 // Customize before passing to agent_loop:
@@ -851,11 +851,11 @@ const opts = agent_preset("repair", {
   tools: repair_tools,
   iteration_budget: {mode: "adaptive", initial: 6, max: 20},
 })
-const result = agent_loop(prompt, system, opts)
+const result = agent_loop(harness, prompt, system, opts)
 
 // Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
 const summary_opts = agent_preset("summary", {provider: "openai", model: "gpt-4o-mini"})
-const summary = agent_loop("Summarize the audit findings.", nil, summary_opts)
+const summary = agent_loop(harness, "Summarize the audit findings.", nil, summary_opts)
 
 // Local/configured route. The audit preset keeps its audit behavior,
 // budget, timeout, and retry defaults, but it does not mix in the built-in
@@ -864,7 +864,7 @@ const local_opts = agent_preset("audit", {
   llm_options: {provider: "llamacpp", model: "gemma4-local"},
   tools: release_tools,
 })
-const local_audit = agent_loop("Audit with the configured local model.", local_opts?.system, local_opts)
+const local_audit = agent_loop(harness, "Audit with the configured local model.", local_opts?.system, local_opts)
 ```
 
 Preset roles, defaults summarized:
@@ -877,7 +877,7 @@ Preset roles, defaults summarized:
 | `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | unset | `done_judge: true` |
 | `merge_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 60, extend_by: 4}` | enabled, threshold 3 | both `nil`; default consent denies writes |
 | `review_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 30, extend_by: 3}` | enabled, threshold 3 | both `nil` |
-| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `with_rate_limit({max_calls: 50})` |
+| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `with_rate_limit(harness.runtime, {max_calls: 50})` |
 | `release_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 40, extend_by: 4}` | enabled, threshold 3 | both `nil`; opt-in `with_dry_run` shadow runs |
 
 ### Captain presets
@@ -903,9 +903,9 @@ const sweep_opts = agent_preset("merge_captain", {
   consent: { call -> approval_bridge.prompt(call) },     // HITL bridge
   audit_sink: { record -> receipts.append(record) },     // captain ledger
 })
-const sweep = agent_loop("Sweep open PRs.", sweep_opts?.system, sweep_opts)
+const sweep = agent_loop(harness, "Sweep open PRs.", sweep_opts?.system, sweep_opts)
 
-// Oncall Captain: defaults `with_rate_limit({max_calls: 50})` so an
+// Oncall Captain: defaults `with_rate_limit(harness.runtime, {max_calls: 50})` so an
 // alert-storm loop can't fan out unbounded. Override via `rate_limit`.
 const triage_opts = agent_preset("oncall_captain", {
   provider: "openai",
@@ -913,7 +913,7 @@ const triage_opts = agent_preset("oncall_captain", {
   tools: oncall_tools,
   rate_limit: {max_calls: 100, message: "alert-loop cap"},
 })
-const triaged = agent_loop("Triage paging alerts.", triage_opts?.system, triage_opts)
+const triaged = agent_loop(harness, "Triage paging alerts.", triage_opts?.system, triage_opts)
 
 // Release Captain: long checkpointed budget; pass `dry_run: true` (or
 // a `with_dry_run` opts dict) to layer a shadow-run gate.
@@ -927,7 +927,7 @@ const ship_opts = agent_preset("release_captain", {
   escalate_predicate: { call -> call?.opts?.reasoning_task == "judge" },
   logging_sink: { record -> receipts.llm_call(record) },
 })
-const shipping = agent_loop("Cut v0.9.0.", ship_opts?.system, ship_opts)
+const shipping = agent_loop(harness, "Cut v0.9.0.", ship_opts?.system, ship_opts)
 ```
 
 Captain layers are opt-in: the preset only adds an `audit_sink` /
@@ -1021,7 +1021,7 @@ const judged_opts: AgentLoopOptions = {
     cadence: {every: 5, when: "always", max_invocations: 3},
   },
 }
-agent_loop(task, system, judged_opts)
+agent_loop(harness, task, system, judged_opts)
 ```
 
 `when: "stalled"` does not fire on ordinary completion candidates. It is the
@@ -1045,7 +1045,7 @@ const guardrail_opts = agent_input_guardrail(
   { payload -> return cheap_policy_classifier(payload.user_message) },
   {confidence_threshold: 0.8},
 )
-agent_loop(task, system, base_opts + guardrail_opts)
+agent_loop(harness, task, system, base_opts + guardrail_opts)
 ```
 
 For scripts that want an explicit preflight verdict instead of loop composition,
@@ -1101,7 +1101,7 @@ degrades to judge-only mode and surfaces the degraded state on the returned bund
 ```harn,ignore
 import { agent_completion_gate } from "std/agent/judge"
 
-agent_loop(task, system, base_opts + agent_completion_gate({
+agent_loop(harness, task, system, base_opts + agent_completion_gate({
   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
   verify_command: fn() { return host_run_verify() },
   judge: true,          // optional bounded LLM judge, capped at 5 by default
@@ -1158,7 +1158,7 @@ const daemon = daemon_spawn({
 
 daemon_trigger(daemon, {kind: "file_changed", path: "src/lib.rs"})
 const snap = daemon_snapshot(daemon)
-log(snap.pending_event_count)
+harness.stdio.log(snap.pending_event_count)
 daemon_stop(daemon)
 const resumed = daemon_resume(".harn/daemons/reviewer")
 ```
@@ -1225,7 +1225,7 @@ const callback_opts: AgentLoopOptions = {
   loop_until_done: true,
   context_callback: hide_old_assistant_turns,
 }
-const result = agent_loop(task, "You are a coding assistant.", callback_opts)
+const result = agent_loop(harness, task, "You are a coding assistant.", callback_opts)
 ```
 
 ### Post-turn callback
@@ -1301,8 +1301,8 @@ const retry_opts: AgentLoopOptions = {
   model: "claude-sonnet-5",
 }
 retry 3 {
-  const result = agent_loop(task, "You are a coding assistant.", retry_opts)
-  log(result.text)
+  const result = agent_loop(harness, task, "You are a coding assistant.", retry_opts)
+  harness.stdio.log(result.text)
 }
 ```
 
@@ -1352,7 +1352,7 @@ the loop picks which skill(s) to activate:
   The next `agent_loop` call on the same session rehydrates them
   before iteration-0 matching runs, so sticky re-entry stays hot
   without re-matching from a cold prompt.
-- **JSONL seeding**: `agent_session_seed_from_jsonl(path, opts?)`
+- **JSONL seeding**: `harness.agent.seed_from_jsonl(path, opts?)`
   creates a new session from an `llm_transcript.jsonl` sidecar. It
   imports exact prompt-visible `message` events or older full request
   snapshots, optionally checks `provider` / `model`, and supports
@@ -1405,7 +1405,7 @@ const ship_opts: AgentLoopOptions = {
   skills: ship,
   working_files: ["infra/terraform/cluster.tf"],
 }
-const result = agent_loop(
+const result = agent_loop(harness,
   "Ship the new release to production",
   "You are a staff deploy engineer.",
   ship_opts,
@@ -1451,7 +1451,7 @@ const worker = spawn_agent({
 })
 
 const done = wait_agent(worker)
-log(done.status)
+harness.stdio.log(done.status)
 ```
 
 `spawn_agent(...)` accepts either:
@@ -1511,13 +1511,13 @@ Worker lifecycle builtins:
 
 ### Agent Lifecycle Tools
 
-`agent_loop(...)` automatically exposes `agent_await_resumption` as a model tool.
+`agent_loop(harness, ...)` automatically exposes `agent_await_resumption` as a model tool.
 When an agent is running as a worker, that tool is structural: the loop validates
 optional `conditions` with `parse_resume_conditions(...)`, calls the same suspend
 path as `suspend_agent(...)`, returns `status: "suspended"` to the parent, and
 does not dispatch the tool as an ordinary handler result.
 
-Top-level loops use the same result shape. If a root `agent_loop(...)` parks,
+Top-level loops use the same result shape. If a root `agent_loop(harness, ...)` parks,
 Harn persists a resumable worker snapshot and returns
 `{status: "suspended", handle, reason, initiator: "self", ...}` to the direct
 caller. The CLI can cold-restore that snapshot with:
@@ -1561,9 +1561,9 @@ const result = sub_agent_run("Find the config entrypoints.", {
 })
 
 if result.ok {
-  log(result.data.paths)
+  harness.stdio.log(result.data.paths)
 } else {
-  log(result.error.category)
+  harness.stdio.log(result.error.category)
 }
 ```
 
@@ -1591,7 +1591,7 @@ the child transcript with `source: "inherited"` and `originating_agent_id`.
 - `error: {category, message, tool?}` when the child fails or a narrowed tool
   policy rejects a call
 
-`agent_loop(...)`, `sub_agent_run(...)`, and `spawn_agent(...)` accept
+`agent_loop(harness, ...)`, `sub_agent_run(...)`, and `spawn_agent(...)` accept
 `approval_policy` for declarative allow/ask/deny gating before a tool runs.
 Use `approval_policy.rules` for typed matching over tool name/kind,
 side-effect level, declared paths, commands, URLs/domains/methods, MCP identity,
@@ -1603,7 +1603,7 @@ explicit `external_roots` allowance. Ask decisions call
 `session/request_permission`; the host request and the transcript event both
 carry a `policyDecision` receipt with matched rule and rationale.
 
-`agent_loop(...)`, `sub_agent_run(...)`, and `spawn_agent(...)` also accept a
+`agent_loop(harness, ...)`, `sub_agent_run(...)`, and `spawn_agent(...)` also accept a
 `permissions` dict for per-agent dynamic policy. `allow` and `deny` entries can
 be tool-name glob lists, argument pattern lists, or Harn predicates over the tool
 args. For path-bearing tools, `std/tools.path_scope(...)` returns a matcher that

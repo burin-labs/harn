@@ -1,20 +1,20 @@
-# Staged filesystem (hostlib)
+# Staged filesystem
 
 `harn-hostlib` includes a session-scoped filesystem staging layer for
 hosts that want agents to accumulate a diff before applying it to the
 working tree.
 
-The capability is registered by `harn_hostlib::install_default` as the
-`fs` module:
+The host adapter registers the implementation as the `fs` capability family.
+Scripts use the nominal `HarnessFs` and `HarnessTools` interfaces:
 
 | Method | Result |
 |--------|--------|
-| `hostlib_fs_set_mode` | Switches a session between `immediate` and `staged`, returning the previous mode. |
-| `hostlib_fs_staged_status` | Lists pending writes/deletes with byte counts and oldest pending age. |
-| `hostlib_fs_commit_staged` | Applies all pending changes, or only selected paths, to disk. |
-| `hostlib_fs_discard_staged` | Drops all pending changes, or only selected paths. |
-| `hostlib_fs_read_text` | Overlay-aware UTF-8 read returning `{ content, sha256, size, exists }`. Un-gated companion to the `tools/read_file` primitive — Harn scripts call it to snapshot pre-image hashes without enabling the deterministic-tools feature. |
-| `hostlib_fs_safe_text_patch` | Atomic compare-and-swap text write. Reads the overlay pre-image, rejects with `result: "stale_base"` if `expected_hash` diverges, writes through the overlay otherwise. Backs `std/edit`'s `edit_safe_text_patch` multi-hunk wrapper. |
+| `harness.fs.set_mode` | Switches a session between `immediate` and `staged`, returning the previous mode. |
+| `harness.fs.staged_status` | Lists pending writes/deletes with byte counts and oldest pending age. |
+| `harness.fs.commit_staged` | Applies all pending changes, or only selected paths, to disk. |
+| `harness.fs.discard_staged` | Drops all pending changes, or only selected paths. |
+| `harness.fs.staged_read_text` | Overlay-aware UTF-8 read returning `{ content, sha256, size, exists }`. Un-gated companion to the `tools/read_file` primitive — Harn scripts call it to snapshot pre-image hashes without enabling the deterministic-tools feature. |
+| `harness.fs.safe_text_patch` | Atomic compare-and-swap text write. Reads the overlay pre-image, rejects with `result: "stale_base"` if `expected_hash` diverges, writes through the overlay otherwise. Backs `std/edit`'s `edit_safe_text_patch` multi-hunk wrapper. |
 
 Staged data is stored below:
 
@@ -26,18 +26,18 @@ The manifest records the active mode, root, and pending entries. File
 bodies are stored by SHA-256 content hash under `bodies/`, and
 `journal.jsonl` records each staging operation for audit/debugging.
 
-When a session is in `staged` mode, hostlib mutating tools write into
+When a session is in `staged` mode, mutating `HarnessTools` methods write into
 the overlay:
 
-- `hostlib_tools_write_file` records a staged write.
-- `hostlib_tools_delete_file` records a staged delete.
+- `harness.tools.write_file` records a staged write.
+- `harness.tools.delete_file` records a staged delete.
 
 Read helpers use the same overlay before falling back to disk:
 
-- `hostlib_tools_read_file`
-- `hostlib_tools_list_directory`
-- `hostlib_tools_get_file_outline`
-- `hostlib_ast_parse_file`
+- `harness.tools.read_file`
+- `harness.tools.list_directory`
+- `harness.tools.get_file_outline`
+- `harness.ast.parse_file`
 - code-index file read/hash helpers
 
 The ACP adapter exposes host controls for the same state:

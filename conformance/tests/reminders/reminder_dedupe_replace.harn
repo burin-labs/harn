@@ -1,10 +1,10 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const base = transcript()
-  const first = transcript.inject_reminder(
+  const first = harness.agent.transcript_inject_reminder(
     base,
     {body: "old reminder", tags: ["context"], dedupe_key: "context-slot", ttl_turns: 2},
   )
-  const second = transcript.inject_reminder(
+  const second = harness.agent.transcript_inject_reminder(
     first.transcript,
     {
       body: "new reminder",
@@ -15,10 +15,10 @@ pipeline main() {
     },
   )
   const events = transcript_events_by_kind(second.transcript, "system_reminder")
-  __io_println(second.deduped_count)
-  __io_println(len(events))
-  __io_println(events[0].text)
-  __io_println(events[0].reminder.ttl_turns)
-  __io_println(events[0].role)
-  __io_println(len(transcript_messages(second.transcript)))
+  harness.stdio.println(second.deduped_count)
+  harness.stdio.println(len(events))
+  harness.stdio.println(events[0].text)
+  harness.stdio.println(events[0].reminder.ttl_turns)
+  harness.stdio.println(events[0].role)
+  harness.stdio.println(len(transcript_messages(second.transcript)))
 }

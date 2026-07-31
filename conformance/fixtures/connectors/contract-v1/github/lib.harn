@@ -9,31 +9,31 @@ pub fn kinds() {
 }
 
 pub fn payload_schema() {
-  return {harn_schema_name: "GitHubEventPayload", json_schema: {type: "object", additionalProperties: true}}
+  return {
+    harn_schema_name: "GitHubEventPayload",
+    json_schema: {type: "object", additionalProperties: true},
+  }
 }
 
-pub fn init(ctx) {
+pub fn init(_harness: Harness, ctx) {
   if ctx.provider_id != "github" {
     throw "unexpected provider id"
   }
-  if !ctx.capabilities.event_log_emit {
-    throw "event_log_emit capability missing"
-  }
 }
 
-pub fn activate(bindings) {
+pub fn activate(harness: Harness, bindings) {
   active_bindings = bindings
-  metrics_inc("github_contract_activations", len(bindings))
+  harness.obs.metrics_inc("github_contract_activations", len(bindings))
 }
 
-pub fn shutdown() {
-  metrics_inc("github_contract_shutdown")
+pub fn shutdown(harness: Harness) {
+  harness.obs.metrics_inc("github_contract_shutdown")
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
-  const token = secret_get("github/contract-token")
-  event_log_emit(
+  const token = harness.secrets.read("github/contract-token")
+  harness.obs.event_log_emit(
     "connectors.github.contract",
     "normalize",
     {event: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"], token: token},
@@ -49,6 +49,6 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }

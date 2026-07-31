@@ -354,7 +354,7 @@ async fn eval_json<T>(vm: &mut harn_vm::Vm, expr: &str) -> Result<T, Orchestrato
 where
     T: DeserializeOwned,
 {
-    let source = format!("pipeline default() {{\n  return {expr}\n}}\n");
+    let source = format!("pipeline default(harness: Harness) {{\n  return {expr}\n}}\n");
     let chunk = harn_vm::compile_source(&source)?;
     let value = vm
         .execute(&chunk)

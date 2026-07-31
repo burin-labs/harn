@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
 /**
@@ -10,8 +11,9 @@ import { with_llm_script } from "std/testing"
  * `close_agent` is idempotent (already-cancelled workers stay
  * cancelled, no panic).
  */
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -25,25 +27,26 @@ pipeline main() {
     ],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Park, get closed, reject resume.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
-      __io_println("pre_close_status=" + suspended.status)
-      const closed = close_agent(handle)
-      __io_println("post_close_status=" + closed.status)
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println("pre_close_status=" + suspended.status)
+      const closed = close_agent(harness.agent, handle)
+      harness.stdio.println("post_close_status=" + closed.status)
       const resume_attempt = try {
-        resume_agent(handle)
+        resume_agent(harness.agent, handle)
       }
-      __io_println("resume_failed=" + to_string(is_err(resume_attempt)))
-      __io_println(
+      harness.stdio.println("resume_failed=" + to_string(is_err(resume_attempt)))
+      harness.stdio.println(
         "resume_err_has_code="
           + to_string(
           contains(to_string(unwrap_err(resume_attempt)), "HARN-SUS-010"),
         ),
       )
-      const closed_again = close_agent(handle)
-      __io_println("reclose_status=" + closed_again.status)
+      const closed_again = close_agent(harness.agent, handle)
+      harness.stdio.println("reclose_status=" + closed_again.status)
     },
   )
 }

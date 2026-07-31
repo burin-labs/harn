@@ -4,7 +4,7 @@
  * distinct literals onto the same f64). The sign is applied by the parser, so
  * the most negative i64 must be written as `-9223372036854775807 - 1`.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const too_big = 9223372036854775808
-  log(too_big)
+  harness.stdio.log(too_big)
 }

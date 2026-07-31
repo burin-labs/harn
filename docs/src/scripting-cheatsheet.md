@@ -27,8 +27,8 @@ quotes.
 
 ## Prompt templates
 
-Use `render("file.prompt", bindings)` / `render_prompt(...)` for
-source-relative prompt assets, and `render_string(template, bindings)`
+Use `harness.fs.render_prompt("file.prompt", bindings)` / `harness.fs.render_prompt(...)` for
+source-relative prompt assets, and `harness.fs.render_template(template, bindings)`
 when the template should live inline in the module:
 
 ```harn
@@ -38,7 +38,7 @@ pub fn {{ fn_name }}({{ for p in params }}{{ p }}{{ if !loop.last }}, {{ end }}{
 }
 """
 
-const src = render_string(template, {
+const src = harness.fs.render_template(template, {
   fn_name: "hello",
   params: ["name", "title = nil"],
 })
@@ -120,7 +120,7 @@ can be unbounded.
 ## LLM resilience patterns
 
 `agent_loop` accepts an `llm_caller:` closure that owns each turn's
-`llm_call(...)`. Wrap it with middleware from `std/llm/handlers` to
+`harness.llm.call(...)`. Wrap it with middleware from `std/llm/handlers` to
 compose retry / fallback / shadow / logging / budget behavior:
 
 ```harn,ignore
@@ -131,7 +131,7 @@ const caller = compose([
   with_retry({max_attempts: 4, base_ms: 250, backoff: "exponential"}),
 ])(default_llm_caller())
 
-const result = agent_loop(task, system, {
+const result = agent_loop(harness, task, system, {
   loop_until_done: true,
   llm_caller: caller,
 })
@@ -157,7 +157,7 @@ You are a strict grader...
 """
 
 pub fn grade(path) {
-  return llm_call(read_file(path), GRADER_SYSTEM, {
+  return harness.llm.call(harness.fs.read_text(path), GRADER_SYSTEM, {
     provider: "auto",
     model: "local-gemma4-e4b",
   })
@@ -171,18 +171,18 @@ atomics: `atomic(0)`, `atomic_add(a, 1)`, `atomic_get(a)`.)
 ## Results and error handling
 
 ```harn
-const r = try { llm_call(prompt, nil, opts) }
+const r = try { harness.llm.call(prompt, nil, opts) }
 // Optional chaining short-circuits on Result.Err.
 const text = r?.text ?? "no response"
 // Explicit error inspection.
 if unwrap_err(r) != "" {
-  log("failed")
+  harness.stdio.log("failed")
 }
 
 // `try/catch` also works as an expression — the whole form evaluates to
 // the try body's tail value on success or the catch handler's tail value
 // on a caught throw, so simple fallbacks don't need Result gymnastics.
-const answer = try { llm_call(prompt, nil, opts).text } catch (e) { "fallback" }
+const answer = try { harness.llm.call(prompt, nil, opts).text } catch (e) { "fallback" }
 ```
 
 ## Concurrency
@@ -197,11 +197,11 @@ const doubled = parallel each xs { x -> x * 2 }
 
 // parallel settle: concurrent map that collects per-item Ok/Err.
 const outcome = parallel settle paths { p -> grade(p) }
-log(outcome.succeeded)
+harness.stdio.log(outcome.succeeded)
 
 // Cap in-flight workers so you don't overwhelm the backend.
 const results = parallel settle paths with { max_concurrent: 4 } { p ->
-  llm_call(p, nil, opts)
+  harness.llm.call(p, nil, opts)
 }
 ```
 
@@ -220,7 +220,7 @@ gen fn numbers() -> Stream<int> {
 }
 
 for n in numbers() {
-  log(n)
+  harness.stdio.log(n)
 }
 ```
 
@@ -239,7 +239,7 @@ Inside the script:
 
 ```harn
 fn grade_file(path) {
-  log(path)
+  harness.stdio.log(path)
 }
 
 for path in argv {
@@ -268,24 +268,23 @@ parameter supplies tuple context. Constant out-of-bounds indexes are
 ```harn
 const matches  = regex_match("[0-9]+", "abc 42 def 7")
 const swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
-const same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 const captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
 ```
 
-Both `regex_replace` and `regex_replace_all` replace every match;
-both support `$1`, `$2`, `${name}` backrefs from the `regex` crate.
+`regex_replace` replaces every match and supports `$1`, `$2`, and
+`${name}` backrefs from the `regex` crate.
 
 ## LLM calls
 
 ```harn
-const r = llm_call(prompt, system, {
+const r = harness.llm.call(prompt, system, {
   provider: "auto",        // infers from model prefix
   model: "local-gemma4-e4b",
 output: {schema: schema, validation: "error", stream_abort: true},
 schema_retries: 2,       // retry with corrective nudge on schema mismatch
 })
-log(r.text)            // the public answer (preferred for "the answer")
-log(r.data.verdict)    // parsed structured output
+harness.stdio.log(r.text)            // the public answer (preferred for "the answer")
+harness.stdio.log(r.data.verdict)    // parsed structured output
 ```
 
 Key options:

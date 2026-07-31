@@ -1,6 +1,6 @@
 import { task_plan_render_mermaid } from "std/agent/task_plan"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const plan = {
     schema_version: "1",
     objective: "Smoke-test the mermaid renderer",
@@ -18,11 +18,11 @@ pipeline main() {
     ],
   }
   const mermaid = task_plan_render_mermaid(plan)
-  __io_println(starts_with(mermaid, "flowchart TD"))
-  __io_println(contains(mermaid, "discover[\"discover: read_fact"))
-  __io_println(contains(mermaid, "gate((\"gate: human_gate"))
-  __io_println(contains(mermaid, "cmd[/\"cmd: deterministic_command"))
-  __io_println(contains(mermaid, "check{{\"check: verify"))
-  __io_println(contains(mermaid, "gate -- approved --> cmd"))
-  __io_println(contains(mermaid, "cmd --> check"))
+  harness.stdio.println(starts_with(mermaid, "flowchart TD"))
+  harness.stdio.println(contains(mermaid, "discover[\"discover: read_fact"))
+  harness.stdio.println(contains(mermaid, "gate((\"gate: human_gate"))
+  harness.stdio.println(contains(mermaid, "cmd[/\"cmd: deterministic_command"))
+  harness.stdio.println(contains(mermaid, "check{{\"check: verify"))
+  harness.stdio.println(contains(mermaid, "gate -- approved --> cmd"))
+  harness.stdio.println(contains(mermaid, "cmd --> check"))
 }

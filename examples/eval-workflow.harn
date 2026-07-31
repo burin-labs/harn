@@ -7,11 +7,13 @@
  *
  * Run with: cargo run --bin harn -- run examples/eval-workflow.harn
  */
-pipeline main(task) {
-  log("=== Eval Workflow ===")
+pipeline main(harness: Harness, task) {
+  harness.stdio.log("=== Eval Workflow ===")
   // Check baseline usage before any LLM calls
-  const usage_before = llm_usage()
-  log("Initial usage: ${usage_before.call_count} calls, ${usage_before.input_tokens} input tokens")
+  const usage_before = harness.obs.llm_usage()
+  harness.stdio.log(
+    "Initial usage: ${usage_before.call_count} calls, ${usage_before.input_tokens} input tokens",
+  )
   // Simulate an eval loop over multiple test cases
   const test_cases = [
     {input: "What is 2+2?", expected: "4", category: "math"},
@@ -22,7 +24,7 @@ pipeline main(task) {
   const total = len(test_cases)
   for tc in test_cases {
     // In production, replace with an actual llm_call:
-    //   let answer = llm_call(tc.input, "Answer in one word.")
+    //   let answer = harness.llm.call(tc.input, "Answer in one word.")
     const answer = tc.expected
     const correct = answer == tc.expected
     if correct {
@@ -41,17 +43,17 @@ pipeline main(task) {
   eval_metric("accuracy", accuracy, {total: total, passed: passed})
   eval_metric("test_suite_size", total)
   // Check final usage
-  const usage_after = llm_usage()
+  const usage_after = harness.obs.llm_usage()
   eval_metric("total_llm_calls", usage_after.call_count)
   eval_metric("total_input_tokens", usage_after.input_tokens)
   // Retrieve and display all recorded metrics
   const metrics = eval_metrics()
-  log("")
-  log("=== Recorded Metrics ===")
+  harness.stdio.log("")
+  harness.stdio.log("=== Recorded Metrics ===")
   for m in metrics {
-    log("  ${m.name} = ${m.value}")
+    harness.stdio.log("  ${m.name} = ${m.value}")
   }
-  log("")
-  log("Accuracy: ${passed}/${total} (${accuracy})")
-  log("Eval complete.")
+  harness.stdio.log("")
+  harness.stdio.log("Accuracy: ${passed}/${total} (${accuracy})")
+  harness.stdio.log("Eval complete.")
 }

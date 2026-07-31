@@ -127,18 +127,18 @@ pub fn flag_value(args: list<string>, name: string) -> string? {
   return nil
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const raw_version = flag_value(argv, "--version")
   if raw_version == nil {
-    __io_eprintln(
+    harness.stdio.eprintln(
       "usage: render_release_notes.harn --version VERSION [--output OUTPUT] [--repo REPO]",
     )
-    __io_eprintln("error: the following arguments are required: --version")
+    harness.stdio.eprintln("error: the following arguments are required: --version")
     return 2
   }
   const version = normalize_version(raw_version ?? "")
   if !harness.fs.exists(CHANGELOG) {
-    __io_eprintln("error: missing ${CHANGELOG}")
+    harness.stdio.eprintln("error: missing ${CHANGELOG}")
     return 1
   }
   const changelog = harness.fs.read_text(CHANGELOG)
@@ -146,18 +146,18 @@ pipeline main(task) {
   const result = try {
     extract_section(changelog, version)
   } catch (e) {
-    __io_eprintln("${e}")
+    harness.stdio.eprintln("${e}")
     return 1
   }
   const section = result
   const prev = previous_version(versions, version)
-  const repo = detect_repo(flag_value(argv, "--repo"))
+  const repo = detect_repo(harness.env, harness.process, flag_value(argv, "--repo"))
   const output = render_notes(section, repo, prev, version)
   const out_path = flag_value(argv, "--output")
   if out_path != nil {
     harness.fs.write_text(out_path ?? "", output)
   } else {
-    __io_print(output)
+    harness.stdio.print(output)
   }
   return 0
 }
@@ -166,15 +166,15 @@ pipeline main(task) {
  * Resolve the repo slug: explicit --repo, else $GITHUB_REPOSITORY, else
  * the GitHub `owner/name` parsed from `git remote get-url origin`.
  */
-fn detect_repo(explicit: string?) -> string? {
+fn detect_repo(env: HarnessEnv, process: HarnessProcess, explicit: string?) -> string? {
   if explicit != nil {
     return explicit
   }
-  const env_repo = harness.env.get("GITHUB_REPOSITORY")
+  const env_repo = env.get("GITHUB_REPOSITORY")
   if env_repo != nil && (env_repo ?? "") != "" {
     return env_repo
   }
-  const remote = harness.process.spawn_captured({cmd: "git", args: ["remote", "get-url", "origin"]})
+  const remote = process.run({program: "git", args: ["remote", "get-url", "origin"]})
   if !remote.success {
     return nil
   }

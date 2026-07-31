@@ -3,26 +3,26 @@ import "std/triggers"
 /**
  * CH-04 (#1875): when the window elapses before reaching `count`, the
  * default `expire_action` is `fire_partial`: the handler receives a
- * partial batch (length < count). `advance_time(ms)` advances the
+ * partial batch (length < count). `harness.testing.clock_advance(ms)` advances the
  * thread-local mock clock so the buffer is observed as expired during
- * the next `flush_trigger_aggregations()` call.
+ * the next `harness.channels.flush_aggregations()` call.
  */
-fn handle_batch(event) {
+fn handle_batch(harness: Harness, event) {
   const batch_len = if event.batch == nil {
     0
   } else {
     len(event.batch)
   }
-  emit_channel("batch.window.fired", {batch_size: batch_len})
+  harness.channels.append("batch.window.fired", {batch_size: batch_len})
 }
 
-pipeline test(task) {
-  mock_time(1000000)
+pipeline test(harness: Harness, task) {
+  harness.testing.clock_set(1000000)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "batch-window-" + unique,
       kind: "channel.emit",
@@ -41,15 +41,15 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const _ = emit_channel("batch.window.input", {seq: 1})
-  const _ = emit_channel("batch.window.input", {seq: 2})
-  const _ = emit_channel("batch.window.input", {seq: 3})
-  const before = channel_events("batch.window.fired")
-  __io_println("before-window:" + to_string(len(before)))
-  const _ = advance_time(601000)
-  flush_trigger_aggregations()
-  const after = channel_events("batch.window.fired")
-  __io_println("after-window:" + to_string(len(after)))
-  __io_println("batch_size:" + to_string(after[0].payload.batch_size))
-  unmock_time()
+  const _ = harness.channels.append("batch.window.input", {seq: 1})
+  const _ = harness.channels.append("batch.window.input", {seq: 2})
+  const _ = harness.channels.append("batch.window.input", {seq: 3})
+  const before = harness.channels.events("batch.window.fired")
+  harness.stdio.println("before-window:" + to_string(len(before)))
+  const _ = harness.testing.clock_advance(601000)
+  harness.channels.flush_aggregations()
+  const after = harness.channels.events("batch.window.fired")
+  harness.stdio.println("after-window:" + to_string(len(after)))
+  harness.stdio.println("batch_size:" + to_string(after[0].payload.batch_size))
+  harness.testing.clock_reset()
 }

@@ -20,13 +20,14 @@ const PROGRESS_SIGNAL = { p ->
   }
 }
 
-fn observe(config, state, score, wrote) {
+fn observe(agent: HarnessAgent, config, state, score, wrote) {
   const payload = if score == nil {
     {}
   } else {
     {verify_score: score}
   }
   return agent_stall_observe_tool_calls(
+    agent,
     "verify-state-seam",
     [{name: "edit", arguments: {}}],
     1,
@@ -46,8 +47,9 @@ fn observe(config, state, score, wrote) {
  * Drive one gate-bearing verification FAILURE (for the total-recurrence axis):
  * a substantive "run" call whose prior dispatch failed with `error_text`.
  */
-fn observe_fail(config, state, error_text) {
+fn observe_fail(agent: HarnessAgent, config, state, error_text) {
   return agent_stall_observe_tool_calls(
+    agent,
     "verify-state-churn",
     [{name: "run", arguments: {cmd: "test"}}],
     1,
@@ -63,7 +65,7 @@ fn observe_fail(config, state, error_text) {
   )
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // ---- PARITY: no progress_signal => signature axis, unchanged ----
   const base_state = agent_stall_initial_state()
   // Guard OFF => always false (today's default).
@@ -99,15 +101,15 @@ pipeline default() {
   }
   let s = agent_stall_initial_state()
   // Turn 1: first verify evidence (score 1) => the high-water is set, advance.
-  s = observe(cfg, s, 1, true).state
+  s = observe(harness.agent, cfg, s, 1, true).state
   assert(!agent_stall_no_net_progress(cfg, s), "turn1: first advance is not a stall")
   // Turns 2-3: writes land but the verifier stays flat (score 1) => accumulating,
   // but still under the 3-turn no-verifier limit.
-  s = observe(cfg, s, 1, true).state
-  s = observe(cfg, s, 1, true).state
+  s = observe(harness.agent, cfg, s, 1, true).state
+  s = observe(harness.agent, cfg, s, 1, true).state
   assert(!agent_stall_no_net_progress(cfg, s), "turn3: below the write-axis limit")
   // Turn 4: still flat + a write landed => write-axis cut fires (no long wait).
-  s = observe(cfg, s, 1, true).state
+  s = observe(harness.agent, cfg, s, 1, true).state
   assert(
     agent_stall_no_net_progress(cfg, s),
     "turn4: write-axis cut fires (seam changed the decision)",
@@ -115,12 +117,12 @@ pipeline default() {
   assert(s.verify_turns_since_advance == 3, "turn4: three flat turns since advance")
   assert(s.verify_wrote_since_advance, "turn4: a write landed during the stall")
   // Turn 5: the verifier finally advances (score 2) => the axis resets, no cut.
-  s = observe(cfg, s, 2, true).state
+  s = observe(harness.agent, cfg, s, 2, true).state
   assert(!agent_stall_no_net_progress(cfg, s), "turn5: a verifier advance clears the stall")
   assert(s.verify_turns_since_advance == 0, "turn5: counter reset on advance")
   assert(!s.verify_wrote_since_advance, "turn5: write flag cleared on advance")
   // A FLAT turn with no verify evidence (nil scalar) still counts as non-advance.
-  s = observe(cfg, s, nil, false).state
+  s = observe(harness.agent, cfg, s, nil, false).state
   assert(s.verify_turns_since_advance == 1, "nil scalar counts as flat, not advance")
   // ---- LIVE-SHAPE: TOTAL (non-consecutive) recurrence catches interleaved churn ----
   // The same failure signature recurs 3x with an OFF-signature failure churning
@@ -143,16 +145,16 @@ pipeline default() {
     no_progress_messages: 99,
   }
   let c = agent_stall_initial_state()
-  c = observe_fail(churn_cfg, c, "error A").state
-  c = observe_fail(churn_cfg, c, "error B").state
-  c = observe_fail(churn_cfg, c, "error A").state
+  c = observe_fail(harness.agent, churn_cfg, c, "error A").state
+  c = observe_fail(harness.agent, churn_cfg, c, "error B").state
+  c = observe_fail(harness.agent, churn_cfg, c, "error A").state
   assert(c.same_diagnostic_streak == 1, "churn: consecutive streak stays 1 (interleaved)")
   assert(
     !agent_stall_no_net_progress(churn_cfg, c),
     "churn: A total 2 is below the hard-recurrence threshold",
   )
-  c = observe_fail(churn_cfg, c, "error B").state
-  c = observe_fail(churn_cfg, c, "error A").state
+  c = observe_fail(harness.agent, churn_cfg, c, "error B").state
+  c = observe_fail(harness.agent, churn_cfg, c, "error A").state
   assert(
     c.same_diagnostic_streak == 1,
     "churn: STILL no consecutive streak (proves the TOTAL axis fired)",
@@ -161,5 +163,5 @@ pipeline default() {
     agent_stall_no_net_progress(churn_cfg, c),
     "churn: total recurrence (A x3) trips despite off-signature churn",
   )
-  log("stall verify-state axis ok")
+  harness.stdio.log("stall verify-state axis ok")
 }

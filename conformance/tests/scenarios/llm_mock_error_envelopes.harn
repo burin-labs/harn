@@ -1,7 +1,8 @@
 import { with_llm_script } from "std/testing"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [
       {
         error: {
@@ -15,18 +16,18 @@ pipeline default(task) {
       {text: "recovered", tool_calls: []},
     ],
     { ->
-      const first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
-      __io_println(first.ok)
-      __io_println(first.response == nil)
-      __io_println(first.error.status)
-      __io_println(first.error.kind)
-      __io_println(first.error.reason)
-      __io_println(first.error.category)
-      __io_println(first.error.provider)
-      __io_println(first.error.model)
-      __io_println(first.error.retry_after_ms)
-      const second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
-      __io_println(second.text)
+      const first = harness.llm.call_safe("first", nil, {provider: "mock", model: "mock-model"})
+      harness.stdio.println(first.ok)
+      harness.stdio.println(first.response == nil)
+      harness.stdio.println(first.error.status)
+      harness.stdio.println(first.error.kind)
+      harness.stdio.println(first.error.reason)
+      harness.stdio.println(first.error.category)
+      harness.stdio.println(first.error.provider)
+      harness.stdio.println(first.error.model)
+      harness.stdio.println(first.error.retry_after_ms)
+      const second = harness.llm.call("second", nil, {provider: "mock", model: "mock-model"})
+      harness.stdio.println(second.text)
     },
   )
 }

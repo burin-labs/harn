@@ -75,6 +75,7 @@ pub fn provider_tool_probe_campaign_probe_telemetry(report: dict) -> dict {
 }
 
 pub fn __probe_cell(
+  llm: HarnessLlm,
   route: ProviderToolProbeRoute,
   behavior: ProviderToolProbeBehavior,
   mode: string,
@@ -102,16 +103,19 @@ pub fn __probe_cell(
     "provider tool-probe did not produce a case verdict"
   }
   return __base_cell(
-    route,
-    behavior,
-    mode,
-    format,
-    status,
-    reason,
     {
-      tool_calling: report?.tool_calling ?? {},
-      telemetry: provider_tool_probe_campaign_probe_telemetry(report),
-      schema_version: report?.schema_version,
+      llm: llm,
+      route: route,
+      behavior: behavior,
+      mode: mode,
+      format: format,
+      status: status,
+      reason: reason,
+      observed: {
+        tool_calling: report?.tool_calling ?? {},
+        telemetry: provider_tool_probe_campaign_probe_telemetry(report),
+        schema_version: report?.schema_version,
+      },
     },
   )
     + {artifact_path: artifact_path, command: command}
@@ -189,6 +193,7 @@ pub fn __auth_readiness(routes: list<ProviderToolProbeRoute>, env: dict, env_sou
 }
 
 pub fn __skipped_cells_for_missing_env(
+  llm: HarnessLlm,
   route: ProviderToolProbeRoute,
   behavior: ProviderToolProbeBehavior,
   mode: string,
@@ -199,13 +204,16 @@ pub fn __skipped_cells_for_missing_env(
     cells = cells
       + [
       __base_cell(
-        route,
-        behavior,
-        mode,
-        format,
-        "skip",
-        "missing provider environment key; set one of: " + join(missing, ", "),
-        {missing_env_keys: missing, any_env_key_satisfies_route: true},
+        {
+          llm: llm,
+          route: route,
+          behavior: behavior,
+          mode: mode,
+          format: format,
+          status: "skip",
+          reason: "missing provider environment key; set one of: " + join(missing, ", "),
+          observed: {missing_env_keys: missing, any_env_key_satisfies_route: true},
+        },
       ),
     ]
   }
@@ -213,7 +221,9 @@ pub fn __skipped_cells_for_missing_env(
 }
 
 pub fn __run_tool_probe(
-  harness: Harness,
+  llm: HarnessLlm,
+  fs: HarnessFs,
+  process: HarnessProcess,
   route: ProviderToolProbeRoute,
   behavior: ProviderToolProbeBehavior,
   mode: string,
@@ -226,18 +236,20 @@ pub fn __run_tool_probe(
 ) -> list<ProviderToolProbeCell> {
   const missing = __missing_env_keys(route, env)
   if len(missing) > 0 {
-    return __skipped_cells_for_missing_env(route, behavior, mode, missing)
+    return __skipped_cells_for_missing_env(llm, route, behavior, mode, missing)
   }
   let cells: list<ProviderToolProbeCell> = []
   for format in behavior.tool_formats {
     const command = __tool_probe_command(
-      harn_bin,
-      route,
-      mode,
-      to_string(behavior.probe_case ?? "single_tool_call"),
-      format,
-      repeat,
-      timeout_secs,
+      {
+        harn_bin: harn_bin,
+        route: route,
+        mode: mode,
+        probe_case: to_string(behavior.probe_case ?? "single_tool_call"),
+        format: format,
+        repeat: repeat,
+        timeout_secs: timeout_secs,
+      },
     )
     const artifact_path = provider_tool_probe_campaign_artifact_path(
       route,
@@ -247,12 +259,10 @@ pub fn __run_tool_probe(
       output_dir,
       trial,
     )
-    const child = harness.process.spawn_captured(
-      {cmd: harn_bin, args: command[1:len(command)], env: env},
-    )
+    const child = process.run({program: harn_bin, args: command[1:len(command)], env: env})
     const stdout = child.stdout ?? ""
     if trim(stdout) != "" {
-      harness.fs.write_text(artifact_path, stdout)
+      fs.write_text(artifact_path, stdout)
     }
     const parsed = try {
       json_parse(stdout)
@@ -263,27 +273,30 @@ pub fn __run_tool_probe(
       cells = cells
         + [
         __base_cell(
-          route,
-          behavior,
-          mode,
-          format,
-          "error",
-          if trim(stdout) == "" {
-            trim(child.stderr ?? "provider tool-probe failed before producing JSON")
-          } else {
-            "provider tool-probe produced non-JSON stdout"
-          },
           {
-            exit_code: child.exit_code,
-            stderr: trim(child.stderr ?? ""),
-            telemetry: {
-              actual_usd: 0.0,
-              observed_cost_count: 0,
-              unpriced_case_count: 1,
-              request_attempt_count: 1,
-              retry_count: 0,
-              retry_accounting:
-                "the child process produced no parseable receipt; the campaign conservatively counts one unpriced attempt",
+            llm: llm,
+            route: route,
+            behavior: behavior,
+            mode: mode,
+            format: format,
+            status: "error",
+            reason: if trim(stdout) == "" {
+              trim(child.stderr ?? "provider tool-probe failed before producing JSON")
+            } else {
+              "provider tool-probe produced non-JSON stdout"
+            },
+            observed: {
+              exit_code: child.exit_code,
+              stderr: trim(child.stderr ?? ""),
+              telemetry: {
+                actual_usd: 0.0,
+                observed_cost_count: 0,
+                unpriced_case_count: 1,
+                request_attempt_count: 1,
+                retry_count: 0,
+                retry_accounting:
+                  "the child process produced no parseable receipt; the campaign conservatively counts one unpriced attempt",
+              },
             },
           },
         )
@@ -291,7 +304,8 @@ pub fn __run_tool_probe(
       ]
       continue
     }
-    cells = cells + [__probe_cell(route, behavior, mode, format, parsed, artifact_path, command)]
+    cells = cells
+      + [__probe_cell(llm, route, behavior, mode, format, parsed, artifact_path, command)]
   }
   return cells
 }
@@ -317,7 +331,7 @@ pub fn provider_tool_probe_campaign_artifact_path(
 }
 
 pub fn provider_tool_probe_campaign_scorecard_inputs(
-  harness: Harness,
+  fs: HarnessFs,
   cells: list<ProviderToolProbeCell>,
   runtime: ProviderToolProbeRuntimeReceipt,
   catalog: ProviderToolProbeCatalogReceipt,
@@ -325,7 +339,7 @@ pub fn provider_tool_probe_campaign_scorecard_inputs(
   let reports: list<dict> = []
   for cell in cells {
     const path = trim(to_string(cell?.artifact_path ?? ""))
-    if path == "" || !harness.fs.exists(path) {
+    if path == "" || !fs.exists(path) {
       continue
     }
     let already_present = false
@@ -338,22 +352,20 @@ pub fn provider_tool_probe_campaign_scorecard_inputs(
       continue
     }
     reports = reports
-      + [
-      {path: path, sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(path))},
-    ]
+      + [{path: path, sha256: "sha256:" + sha256(fs.read_bytes(path))}]
   }
   const identity = {
     schema_version: "harn.provider_tool_probe_scorecard_inputs.v1",
     runtime: runtime,
     catalog: catalog,
-    campaign_source: provider_tool_probe_campaign_source_receipt(harness),
+    campaign_source: provider_tool_probe_campaign_source_receipt(fs),
     reports: reports,
   }
   return identity
-    + {input_sha256: "sha256:" + harness.crypto.sha256(json_stringify(identity))}
+    + {input_sha256: "sha256:" + sha256(json_stringify(identity))}
 }
 
-pub fn provider_tool_probe_campaign_source_receipt(harness: Harness) -> dict {
+pub fn provider_tool_probe_campaign_source_receipt(fs: HarnessFs) -> dict {
   const paths = [
     "scripts/provider_tool_probe_campaign.harn",
     "scripts/provider_tool_probe_campaign/catalog.harn",
@@ -366,18 +378,17 @@ pub fn provider_tool_probe_campaign_source_receipt(harness: Harness) -> dict {
   ]
   let files: list<dict> = []
   for path in paths {
-    if harness.fs.exists(path) {
+    if fs.exists(path) {
       files = files
-        + [
-        {path: path, sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(path))},
-      ]
+        + [{path: path, sha256: "sha256:" + sha256(fs.read_bytes(path))}]
     }
   }
-  return {files: files, source_sha256: "sha256:" + harness.crypto.sha256(json_stringify(files))}
+  return {files: files, source_sha256: "sha256:" + sha256(json_stringify(files))}
 }
 
 pub fn provider_tool_probe_campaign_write_scorecard(
-  harness: Harness,
+  fs: HarnessFs,
+  process: HarnessProcess,
   harn_bin: string,
   cells: list<ProviderToolProbeCell>,
   output_dir: string,
@@ -385,12 +396,12 @@ pub fn provider_tool_probe_campaign_write_scorecard(
   catalog: ProviderToolProbeCatalogReceipt,
   env: dict,
 ) -> dict {
-  const inputs = provider_tool_probe_campaign_scorecard_inputs(harness, cells, runtime, catalog)
+  const inputs = provider_tool_probe_campaign_scorecard_inputs(fs, cells, runtime, catalog)
   const input_manifest = path_join(output_dir, "scorecard-inputs.json")
   const scorecard_json = path_join(output_dir, "scorecard.json")
   const scorecard_markdown = path_join(output_dir, "scorecard.md")
   const scorecard_receipt = path_join(output_dir, "scorecard-receipt.json")
-  harness.fs.write_text(input_manifest, json_stringify_pretty(inputs) + "\n")
+  fs.write_text(input_manifest, json_stringify_pretty(inputs) + "\n")
   if len(inputs.reports) == 0 {
     const receipt = {
       schema_version: "harn.provider_tool_probe_scorecard_receipt.v1",
@@ -399,7 +410,7 @@ pub fn provider_tool_probe_campaign_write_scorecard(
       input_manifest: input_manifest,
       input_sha256: inputs.input_sha256,
     }
-    harness.fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
+    fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
     return {
       scorecard_inputs_json: input_manifest,
       scorecard_receipt_json: scorecard_receipt,
@@ -410,9 +421,7 @@ pub fn provider_tool_probe_campaign_write_scorecard(
   for report in inputs.reports {
     args = args + ["--tool-probe-report", report.path]
   }
-  const json_child = harness.process.spawn_captured(
-    {cmd: harn_bin, args: args + ["--json"], env: env},
-  )
+  const json_child = process.run({program: harn_bin, args: args + ["--json"], env: env})
   if json_child.exit_code != 0 || trim(json_child.stdout ?? "") == "" {
     const receipt = {
       schema_version: "harn.provider_tool_probe_scorecard_receipt.v1",
@@ -423,19 +432,17 @@ pub fn provider_tool_probe_campaign_write_scorecard(
       command: [harn_bin] + args + ["--json"],
       exit_code: json_child.exit_code,
     }
-    harness.fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
+    fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
     return {
       scorecard_inputs_json: input_manifest,
       scorecard_receipt_json: scorecard_receipt,
       scorecard_status: receipt.status,
     }
   }
-  harness.fs.write_text(scorecard_json, json_child.stdout)
-  const markdown_child = harness.process.spawn_captured(
-    {cmd: harn_bin, args: args + ["--markdown"], env: env},
-  )
+  fs.write_text(scorecard_json, json_child.stdout)
+  const markdown_child = process.run({program: harn_bin, args: args + ["--markdown"], env: env})
   if markdown_child.exit_code == 0 && trim(markdown_child.stdout ?? "") != "" {
-    harness.fs.write_text(scorecard_markdown, markdown_child.stdout)
+    fs.write_text(scorecard_markdown, markdown_child.stdout)
   }
   const receipt = {
     schema_version: "harn.provider_tool_probe_scorecard_receipt.v1",
@@ -452,19 +459,19 @@ pub fn provider_tool_probe_campaign_write_scorecard(
     input_manifest: input_manifest,
     input_sha256: inputs.input_sha256,
     scorecard_json: scorecard_json,
-    scorecard_json_sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(scorecard_json)),
+    scorecard_json_sha256: "sha256:" + sha256(fs.read_bytes(scorecard_json)),
     scorecard_markdown: if markdown_child.exit_code == 0 {
       scorecard_markdown
     } else {
       ""
     },
     scorecard_markdown_sha256: if markdown_child.exit_code == 0 {
-      "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(scorecard_markdown))
+      "sha256:" + sha256(fs.read_bytes(scorecard_markdown))
     } else {
       ""
     },
   }
-  harness.fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
+  fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
   return {
     scorecard_inputs_json: input_manifest,
     scorecard_json: scorecard_json,

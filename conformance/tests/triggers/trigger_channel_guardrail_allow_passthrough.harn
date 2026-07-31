@@ -5,24 +5,24 @@ import { prompt_injection_scanner } from "std/channel_guardrails"
  * audit row is written and the receipt looks identical to an emit
  * without any guardrails registered.
  */
-pipeline default() {
-  pipeline_lifecycle_audit_log_take()
-  channel_guardrail_clear()
-  const _ = prompt_injection_scanner({})
-  const receipt = emit_channel("ch.guardrail.allow", {value: 42})
-  __io_println(receipt?.inserted)
-  __io_println(receipt?.blocked ?? false)
-  __io_println(receipt?.duplicate)
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.channels.guardrail_clear()
+  const _ = prompt_injection_scanner(harness.channels, {})
+  const receipt = harness.channels.append("ch.guardrail.allow", {value: 42})
+  harness.stdio.println(receipt?.inserted)
+  harness.stdio.println(receipt?.blocked ?? false)
+  harness.stdio.println(receipt?.duplicate)
   /* Confirm the durable journal has the entry. */
-  const history = channel_events("ch.guardrail.allow")
-  __io_println(len(history))
-  __io_println(history[0].payload.value)
+  const history = harness.channels.events("ch.guardrail.allow")
+  harness.stdio.println(len(history))
+  harness.stdio.println(history[0].payload.value)
   /* No guardrail audit fired. */
-  const audit = pipeline_lifecycle_audit_log_take()
-  __io_println(len(audit))
+  const audit = harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.stdio.println(len(audit))
   /* Listing returns the registered guardrail id. */
-  const ids = channel_guardrail_list()
-  __io_println(len(ids))
-  __io_println(channel_guardrail_unregister(ids[0]))
-  __io_println(len(channel_guardrail_list()))
+  const ids = harness.channels.guardrail_list()
+  harness.stdio.println(len(ids))
+  harness.stdio.println(harness.channels.guardrail_unregister(ids[0]))
+  harness.stdio.println(len(harness.channels.guardrail_list()))
 }

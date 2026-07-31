@@ -1,35 +1,39 @@
 import { agent_parse_tool_calls } from "std/agent/primitives"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const tool_code = agent_parse_tool_calls(
+    harness.agent,
     "```tool_code\n{\"name\":\"read_file\",\"args\":{\"path\":\"a.rs\"}}\n```",
     nil,
     "json",
   )
-  __io_println(tool_code.tool_calls[0].name)
-  __io_println(tool_code.tool_calls[0].arguments.path)
-  __io_println(len(tool_code.protocol_violations) == 1)
-  __io_println(contains(tool_code.protocol_violations[0].message, "```tool_code"))
+  harness.stdio.println(tool_code.tool_calls[0].name)
+  harness.stdio.println(tool_code.tool_calls[0].arguments.path)
+  harness.stdio.println(len(tool_code.protocol_violations) == 1)
+  harness.stdio.println(contains(tool_code.protocol_violations[0].message, "```tool_code"))
   const tilde = agent_parse_tool_calls(
+    harness.agent,
     "~~~tool\n{\"name\":\"read_file\",\"args\":{\"path\":\"b.rs\"}}\n~~~",
     nil,
     "json",
   )
-  __io_println(tilde.tool_calls[0].arguments.path)
-  __io_println(contains(tilde.protocol_violations[0].message, "~~~tool"))
+  harness.stdio.println(tilde.tool_calls[0].arguments.path)
+  harness.stdio.println(contains(tilde.protocol_violations[0].message, "~~~tool"))
   const bare_json = agent_parse_tool_calls(
+    harness.agent,
     "{\"name\":\"read_file\",\"args\":{\"path\":\"c.rs\"}}",
     nil,
     "json",
   )
-  __io_println(bare_json.tool_calls[0].arguments.path)
-  __io_println(contains(bare_json.protocol_violations[0].message, "bare JSON object"))
+  harness.stdio.println(bare_json.tool_calls[0].arguments.path)
+  harness.stdio.println(contains(bare_json.protocol_violations[0].message, "bare JSON object"))
   const tagged = agent_parse_tool_calls(
+    harness.agent,
     "<tool_call>\nread_file({ path: \"d.rs\" })\n</tool_call>",
     nil,
     "json",
   )
-  __io_println(len(tagged.tool_calls))
-  __io_println(len(tagged.protocol_violations) == 1)
-  __io_println(contains(tagged.protocol_violations[0].message, "<tool_call>"))
+  harness.stdio.println(len(tagged.tool_calls))
+  harness.stdio.println(len(tagged.protocol_violations) == 1)
+  harness.stdio.println(contains(tagged.protocol_violations[0].message, "<tool_call>"))
 }

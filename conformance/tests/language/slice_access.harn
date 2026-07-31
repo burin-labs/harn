@@ -1,11 +1,11 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const items = [10, 20, 30, 40, 50]
-  __io_println(items[1:3])
-  __io_println(items[:2])
-  __io_println(items[3:])
-  __io_println(items[-2:])
+  harness.stdio.println(items[1:3])
+  harness.stdio.println(items[:2])
+  harness.stdio.println(items[3:])
+  harness.stdio.println(items[-2:])
   const s = "hello world"
-  __io_println(s[0:5])
-  __io_println(s[6:])
-  __io_println(s[-5:])
+  harness.stdio.println(s[0:5])
+  harness.stdio.println(s[6:])
+  harness.stdio.println(s[-5:])
 }

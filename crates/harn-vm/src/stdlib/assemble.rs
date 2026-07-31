@@ -12,19 +12,25 @@ use crate::orchestration::{
     assemble_context as core_assemble, build_candidate_chunks, ArtifactRecord, AssembleDedup,
     AssembleOptions, AssembleStrategy, AssembledChunk, AssembledContext,
 };
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 use super::agents::parse_artifact_list;
 
 pub(crate) fn register_assemble_context_builtin(vm: &mut Vm) {
-    vm.register_async_builtin("assemble_context", |ctx, args| async move {
-        assemble_context_impl(&ctx, args).await
-    });
+    vm.register_builtin_def(&ASSEMBLE_CONTEXT_IMPL_DEF);
 }
 
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "assemble_context(options: dict) -> dict",
+    kind = "async",
+    category = "context"
+)]
 async fn assemble_context_impl(
-    ctx: &AsyncBuiltinCtx,
+    ctx: AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let options_value = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -50,7 +56,7 @@ async fn assemble_context_impl(
             candidates.iter().map(chunk_to_ranker_vm).collect(),
         ));
         let scores = invoke_ranker_callback(
-            ctx,
+            &ctx,
             ranker.as_ref().unwrap(),
             &query_vm,
             &chunks_vm,

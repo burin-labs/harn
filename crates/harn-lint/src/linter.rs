@@ -24,6 +24,7 @@ use crate::fixes::{
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
 use crate::rule::{Rule, RuleCtx};
 
+mod connector_effects;
 mod discarded_result;
 mod public_api_types;
 mod walk;
@@ -445,9 +446,8 @@ impl<'a> Linter<'a> {
             format!("replace `{}` with `{}`", lint.name, replacement)
         } else {
             format!(
-                "run `harn fix --apply --safety scope-local` to call `{replacement}` through the \
-                 VM-level `harness` binding, or opt into \
-                 `--harness-threading thread-params` for explicit parameter threading"
+                "run `harn fix --apply --safety surface-changing` to thread the explicit capability \
+                 parameter required by `{replacement}`"
             )
         };
         self.diagnostics.push(LintDiagnostic {
@@ -1471,6 +1471,13 @@ impl<'a> Linter<'a> {
     /// enclosing (non-current) scope. Shared by variable and parameter
     /// declaration so the two stay in lockstep.
     fn warn_if_shadows_outer_scope(&mut self, name: &str, span: Span) {
+        // Lifecycle callbacks bind their own root `harness` at execution boundaries.
+        // runtime-supplied `harness`, so warning about that nested authority
+        // boundary would force authors away from the canonical spelling.
+        // Same-scope redeclarations are still diagnosed above.
+        if name == "harness" {
+            return;
+        }
         if self.scopes.len() <= 1 {
             return;
         }

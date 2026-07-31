@@ -1,16 +1,18 @@
 import "std/hitl"
-import { clear_host_mocks, mock_host_response } from "std/testing"
 import "std/triggers"
 
-pub fn hitl_handler(event: TriggerEvent) -> dict {
-  const answer = ask_user("Should we continue handling " + event.kind + "?")
+pub fn hitl_handler(harness: Harness, event: TriggerEvent) -> dict {
+  const answer = harness.interaction.ask_user("Should we continue handling " + event.kind + "?")
   const approval: {
     approved: bool,
     reviewers: list<string>,
     approved_at: string,
     reason: string?,
     signatures: list<{reviewer: string, signed_at: string, signature: string}>,
-  } = request_approval("approve " + event.kind, {quorum: 2, reviewers: ["alice", "bob", "carol"]})
+  } = harness.interaction.request_approval(
+    "approve " + event.kind,
+    {quorum: 2, reviewers: ["alice", "bob", "carol"]},
+  )
   return {
     verdict: answer.verdict,
     event_id: event.id,
@@ -20,12 +22,12 @@ pub fn hitl_handler(event: TriggerEvent) -> dict {
   }
 }
 
-pipeline test(task) {
-  clear_host_mocks()
-  mock_host_response("hitl", "question", {answer: {verdict: "approved"}})
-  mock_host_response(
-    "hitl",
-    "approval",
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond("interaction", "question_response", {answer: {verdict: "approved"}})
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
     [
       {approved: true, reviewer: "alice", responded_at: "2026-04-20T12:00:00Z"},
       {approved: true, reviewer: "bob", responded_at: "2026-04-20T12:00:01Z"},
@@ -33,9 +35,9 @@ pipeline test(task) {
   )
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "hitl-replay-" + unique,
       kind: "issue.opened",
@@ -52,17 +54,17 @@ pipeline test(task) {
       package_name: nil,
     },
   )
-  const fired: DispatchHandle = trigger_fire(
+  const fired: DispatchHandle = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-hitl-replay"}},
   )
-  __io_println(fired.status == "dispatched")
-  __io_println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))
-  clear_host_mocks()
-  const replay: DispatchHandle = trigger_replay(fired.event_id)
-  __io_println(replay.status == "dispatched")
-  __io_println(contains(json_stringify(replay.result ?? {}), "\"verdict\":\"approved\""))
-  __io_println(replay.result?.first_reviewer == "alice")
-  __io_println(replay.result?.first_signed_at == fired.result?.first_signed_at)
-  __io_println(replay.result?.first_signature == fired.result?.first_signature)
+  harness.stdio.println(fired.status == "dispatched")
+  harness.stdio.println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))
+  harness.testing.clear()
+  const replay: DispatchHandle = harness.runtime.trigger_replay(fired.event_id)
+  harness.stdio.println(replay.status == "dispatched")
+  harness.stdio.println(contains(json_stringify(replay.result ?? {}), "\"verdict\":\"approved\""))
+  harness.stdio.println(replay.result?.first_reviewer == "alice")
+  harness.stdio.println(replay.result?.first_signed_at == fired.result?.first_signed_at)
+  harness.stdio.println(replay.result?.first_signature == fired.result?.first_signature)
 }

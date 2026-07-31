@@ -7,16 +7,16 @@ import "std/triggers"
  * matches, and emits a `triggers.reminder_inject.audit` lifecycle audit
  * entry recording the outcome.
  */
-pipeline test(task) {
-  const _ = lifecycle_audit_log_take()
-  const target_session = agent_session_open("trigger-reminder-inject-concrete")
-  agent_session_reset(target_session)
+pipeline test(harness: Harness, task) {
+  const _ = lifecycle_audit_log_take(harness.obs)
+  const target_session = harness.agent.open("trigger-reminder-inject-concrete")
+  harness.agent.reset(target_session)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const trigger_id = "trigger-reminder-inject-concrete-" + unique
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -41,24 +41,24 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const dispatch = trigger_fire(
+  const dispatch = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  __io_println(dispatch.status == "dispatched")
-  __io_println(dispatch.result?.status == "injected")
-  __io_println(dispatch.result?.target_kind == "concrete")
-  __io_println(dispatch.result?.target_session_id == target_session)
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.status == "injected")
+  harness.stdio.println(dispatch.result?.target_kind == "concrete")
+  harness.stdio.println(dispatch.result?.target_session_id == target_session)
   const reminders = transcript_events_by_kind(
-    agent_session_snapshot(target_session),
+    harness.agent.snapshot(target_session),
     "system_reminder",
   )
-  __io_println(len(reminders))
-  __io_println(reminders[0].reminder.body)
-  __io_println(reminders[0].reminder.tags[0])
-  __io_println(reminders[0].reminder.ttl_turns)
-  __io_println(reminders[0].reminder.dedupe_key)
-  const audits = lifecycle_audit_log_take()
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
+  harness.stdio.println(reminders[0].reminder.tags[0])
+  harness.stdio.println(reminders[0].reminder.ttl_turns)
+  harness.stdio.println(reminders[0].reminder.dedupe_key)
+  const audits = lifecycle_audit_log_take(harness.obs)
   let inject_audit_count = 0
   let injected_outcome = ""
   for audit in audits {
@@ -67,6 +67,6 @@ pipeline test(task) {
       injected_outcome = audit.payload.outcome
     }
   }
-  __io_println(inject_audit_count)
-  __io_println(injected_outcome)
+  harness.stdio.println(inject_audit_count)
+  harness.stdio.println(injected_outcome)
 }

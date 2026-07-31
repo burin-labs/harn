@@ -28,7 +28,7 @@ fn missing_core_fields(record) {
   return missing
 }
 
-fn mock_flow_for_provider(harness: Harness, name) {
+fn mock_flow_for_provider(net: HarnessNet, testing: HarnessTesting, name) {
   const base = "https://mock-oauth.example/" + name
   const record = provider(
     name,
@@ -46,8 +46,8 @@ fn mock_flow_for_provider(harness: Harness, name) {
   require record.token_url == base + "/token", name + " token override"
   require userinfo_url == base + "/userinfo", name + " userinfo override"
   require revoke_url == base + "/revoke", name + " revoke override"
-  http_mock_clear()
-  http_mock(
+  testing.http_mock_clear()
+  testing.http_mock(
     "POST",
     record.token_url,
     {
@@ -58,7 +58,7 @@ fn mock_flow_for_provider(harness: Harness, name) {
       headers: {"content-type": "application/json"},
     },
   )
-  http_mock(
+  testing.http_mock(
     "GET",
     userinfo_url,
     {
@@ -67,8 +67,8 @@ fn mock_flow_for_provider(harness: Harness, name) {
       headers: {"content-type": "application/json"},
     },
   )
-  http_mock("POST", revoke_url, {status: 200, body: "{\"revoked\":true}", headers: {}})
-  const token_resp = harness.net.post(
+  testing.http_mock("POST", revoke_url, {status: 200, body: "{\"revoked\":true}", headers: {}})
+  const token_resp = net.post(
     record.token_url,
     "grant_type=authorization_code&code=code-" + name
       + "&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback",
@@ -77,29 +77,29 @@ fn mock_flow_for_provider(harness: Harness, name) {
   require token_resp.status == 200, name + " token response"
   const token = json_parse(token_resp.body)
   require token.access_token == "access-" + name, name + " access token"
-  const profile_resp = harness.net.get(
+  const profile_resp = net.get(
     userinfo_url,
     {headers: {Authorization: "Bearer " + token.access_token}},
   )
   require profile_resp.status == 200, name + " userinfo response"
   const profile = json_parse(profile_resp.body)
   require profile.provider == name, name + " profile provider"
-  const revoke_resp = harness.net.post(
+  const revoke_resp = net.post(
     revoke_url,
     "token=" + token.access_token,
     {headers: {"Content-Type": "application/x-www-form-urlencoded"}},
   )
   require revoke_resp.status == 200, name + " revoke response"
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = testing.http_mock_calls({include_sensitive: true})
   require len(calls) == 3, name + " mock flow call count"
   require calls[0].method == "POST", name + " token call method"
   require contains(calls[0].body, "grant_type=authorization_code"), name + " token grant body"
   require calls[1].headers.authorization == "Bearer access-" + name, name + " userinfo bearer"
   require contains(calls[2].body, "token=access-" + name), name + " revoke body"
-  http_mock_clear()
+  testing.http_mock_clear()
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const names = provider_names()
   // Required providers must be present; the exact catalogue size is not pinned
   // (adding a provider is not a regression). The catalogue and the name list
@@ -112,7 +112,7 @@ pipeline test(task) {
   for name in names {
     assert_eq(missing_core_fields(catalog[name]), [], name + " carries core fields")
     assert_eq(catalog[name].id, name, name + " id")
-    mock_flow_for_provider(harness, name)
+    mock_flow_for_provider(harness.net, harness.testing, name)
   }
   const gh = github()
   assert_eq(gh.auth_url, "https://github.com/login/oauth/authorize", "github auth url")
@@ -154,5 +154,5 @@ pipeline test(task) {
   assert_eq(custom_provider.default_scopes, ["read"], "custom scopes")
   assert_eq(custom_provider.revoke_url, "https://idp.example/revoke", "custom override")
   assert_eq(custom_provider.refresh_handling.refresh_grant, "custom", "custom refresh mode")
-  log("oauth provider catalog ok")
+  harness.stdio.log("oauth provider catalog ok")
 }

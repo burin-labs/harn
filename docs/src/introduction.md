@@ -6,11 +6,11 @@
 <p class="tagline">A pipeline-oriented language for AI agent orchestration. LLM calls, tool use, concurrency, retries, and replay are built into the runtime.</p>
 
 ```harn
-const response = llm_call(
+const response = harness.llm.call(
   "Explain quicksort in two sentences.",
   "You are a computer science tutor."
 )
-log(response)
+harness.stdio.log(response)
 ```
 
 <div class="harn-cta-row">
@@ -26,18 +26,18 @@ log(response)
 Harn is a small language built around one observation: when you write an AI agent, most of your code is *coordination* — calling a model, dispatching a tool, retrying, fanning out work, persisting state, recovering from a crash, replaying a trace for debugging. Harn gives those patterns one runtime and one syntax surface.
 
 ```harn
-pipeline review(task) {
+pipeline review(harness: Harness, task) {
   const files = ["src/main.rs", "src/lib.rs"]
 
   const reviews = parallel each files { file ->
-    const code = read_file(file)
+    const code = harness.fs.read_text(file)
     retry 3 {
-      llm_call(code, "Review this Rust file and list any issues.")
+      harness.llm.call(code, "Review this Rust file and list any issues.")
     }
   }
 
   for review in reviews {
-    log(review)
+    harness.stdio.log(review)
   }
 }
 ```

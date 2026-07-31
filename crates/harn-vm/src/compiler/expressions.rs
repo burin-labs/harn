@@ -153,6 +153,39 @@ impl Compiler {
             self.emit_get_binding(name);
             return self.compile_value_call(args);
         }
+        if !self.source_callable_names.contains(name) {
+            let contract = harn_builtin_registry::builtin_entry(name);
+            let callable = contract.is_some_and(|entry| {
+                matches!(
+                    entry.contract.exposure,
+                    harn_builtin_meta::BuiltinExposure::PureGlobal
+                        | harn_builtin_meta::BuiltinExposure::CapabilityFunction { .. }
+                ) || (matches!(
+                    entry.contract.exposure,
+                    harn_builtin_meta::BuiltinExposure::PrivilegedWire
+                ) && self.options.privileged_wire_authority())
+            });
+            if contract.is_some() && !callable {
+                return Err(CompileError {
+                    message: format!(
+                        "`{name}` is not callable source API; effects must flow through a typed Harness capability"
+                    ),
+                    line: self.line,
+                });
+            }
+            if contract.is_none()
+                && harn_parser::builtin_signatures::is_builtin(name)
+                && !harn_parser::builtin_signatures::is_language_intrinsic(name)
+            {
+                return Err(CompileError {
+                    message: format!(
+                        "`{name}` has a legacy parser signature but no typed runtime contract; \
+                         declare it in the builtin manifest or route it through Harness"
+                    ),
+                    line: self.line,
+                });
+            }
+        }
 
         // Schema lowering: `schema_of(TypeAlias)` emits a composable schema
         // expression. Falls through to

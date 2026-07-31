@@ -6,7 +6,7 @@ import { workflow_stages } from "std/workflow/patterns"
  * equivalent hand-authored `workflow_graph({entry, nodes, edges})` — no new
  * node shape, no new runtime concept.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   // 1. Byte-identical to a hand-authored two-stage graph (linear edge auto-wired).
   const sugar = workflow_stages(
     {
@@ -30,17 +30,17 @@ pipeline default() {
   )
   // The substantive graph — node dicts, edges, entry, name — is byte-identical.
   // (Only the auto-generated top-level `id` differs, being a fresh uuid.)
-  __io_println(json_stringify(sugar.nodes) == json_stringify(hand.nodes))
-  __io_println(json_stringify(sugar.edges) == json_stringify(hand.edges))
-  __io_println(sugar.entry == hand.entry)
-  __io_println(sugar.name == hand.name)
+  harness.stdio.println(json_stringify(sugar.nodes) == json_stringify(hand.nodes))
+  harness.stdio.println(json_stringify(sugar.edges) == json_stringify(hand.edges))
+  harness.stdio.println(sugar.entry == hand.entry)
+  harness.stdio.println(sugar.name == hand.name)
   // 2. Bare-list form + default ids (`stage_<n>`) + first-stage entry.
   const bare = workflow_stages([{kind: "stage"}, {kind: "stage"}, {kind: "stage"}])
-  __io_println(json_stringify(keys(bare.nodes)))
-  __io_println(bare.entry)
-  __io_println(len(bare.edges))
-  __io_println(bare.edges[0].from + "->" + bare.edges[0].to)
-  __io_println(bare.edges[1].from + "->" + bare.edges[1].to)
+  harness.stdio.println(json_stringify(keys(bare.nodes)))
+  harness.stdio.println(bare.entry)
+  harness.stdio.println(len(bare.edges))
+  harness.stdio.println(bare.edges[0].from + "->" + bare.edges[0].to)
+  harness.stdio.println(bare.edges[1].from + "->" + bare.edges[1].to)
   // 3. Explicit edges override the linear default (branching graphs).
   const branched = workflow_stages(
     {
@@ -57,9 +57,9 @@ pipeline default() {
       ],
     },
   )
-  __io_println(len(branched.edges))
-  __io_println(branched.edges[1].branch)
+  harness.stdio.println(len(branched.edges))
+  harness.stdio.println(branched.edges[1].branch)
   // 4. The authored node body is preserved verbatim (id lifts to the map key).
-  __io_println(branched.nodes["impl"].kind)
-  __io_println(contains(json_stringify(keys(branched.nodes)), "impl"))
+  harness.stdio.println(branched.nodes["impl"].kind)
+  harness.stdio.println(contains(json_stringify(keys(branched.nodes)), "impl"))
 }

@@ -50,21 +50,20 @@ logs and progress always go to stderr.
 
 - File extension: `.harn`.
 - Entry points:
-  - Preferred capability-aware script entrypoint:
-    `fn main(harness: Harness) { ... }`.
-  - Workflow entrypoint: `pipeline default() { ... }` (pipeline mode —
+  - Script entrypoint: `fn main(harness: Harness) { ... }`.
+  - Pipeline entrypoint: `pipeline default(harness: Harness) { ... }` (pipeline mode —
     `compile_top_level_declarations` runs first, then the pipeline
     body).
   - Bare script with top-level statements for tiny one-off files.
 - Run: `harn run script.harn`.
-- Inline: `harn run -e 'log("hi")'`. The snippet is wrapped in
-  `pipeline main(task) { ... }`; leading `import "..."` /
+- Inline: `harn run -e 'harness.stdio.log("hi")'`. The snippet is wrapped in
+  `pipeline main(harness: Harness) { ... }`; leading `import "..."` /
   `import { x } from "..."` / `import * as ns from "..."` /
   `pub import { x } from "..."` lines are
   hoisted out of the wrapper. The temp file lives in the current
   directory so relative imports (`import "./lib"`) and `harn.toml`
   discovery resolve against your project, e.g.
-  `harn run -e $'import "./lib"\nlog(answer())'`. Imports must come
+  `harn run -e $'import "./lib"\nharness.stdio.log(answer())'`. Imports must come
   first — interleaved imports are not lifted.
 - Shebang: a `#!/usr/bin/env harn` line at byte offset 0 of a `.harn`
   file is skipped by the lexer, so executables on PATH can `chmod +x`
@@ -72,13 +71,43 @@ logs and progress always go to stderr.
 - CLI arguments: `harn run script.harn -- a b c` exposes
   `argv: list<string>` as a global (`argv == ["a", "b", "c"]`).
 - Exit code: any of three paths sets the process exit code.
-  - `exit(code)` terminates immediately with that code.
-  - `pipeline main()` (or any pipeline used as the entry) — the value
+  - `harness.runtime.exit(code)` terminates immediately with that code.
+  - `pipeline main(harness: Harness)` (or any pipeline used as the entry) — the value
     flowing out of the body sets the exit code:
     - `return n: int` → exits `n` (clamped 0..=255).
     - `return Err(msg)` → writes `msg` to stderr, exits 1.
     - `return Ok(_)` / no explicit return → exits 0.
   - Uncaught errors exit with 1 and a rendered diagnostic.
+
+### Effect authority
+
+Effects flow from the harness capability object; imports are pure.
+Importing a module binds code and types but never grants authority. Pass the
+narrowest nominal sub-handle a helper needs:
+
+```harn
+fn load_config(fs: HarnessFs, path: string) -> string {
+  return fs.read_text(path)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(load_config(harness.fs, "harn.toml"))
+}
+```
+
+Pure builtins remain ordinary globals. Effectful runtime operations are
+methods on the closed `Harness*` types; their typed contracts are the shared
+source for checking, policy, receipts, and reference generation. Test fixtures
+are scoped to one harness through `harness.testing`, including
+`respond`/`calls`, HTTP and transport mocks, and the virtual clock.
+
+Keep root `Harness` at entrypoints and genuine orchestration boundaries.
+Helpers accept the smallest coherent nominal capability interface they need.
+`capability-attenuation` warns when a helper takes root but uses only one
+sub-handle (and reports an informational suggestion for two). Harness values
+are runtime authority: never serialize, store, or checkpoint them. For public
+APIs with four or more easy-to-swap parameters of the same type,
+`homogeneous-positional-api` recommends one named closed record.
 
 ## Merge captain eval loop
 
@@ -252,23 +281,24 @@ in `crates/harn-vm/src/orchestration/playground/manifest.rs`.
 - Terminal capability calls also route through `Harness`: use
   `harness.term.width()` / `harness.term.height()` for dimensions and
   `harness.term.read_password(prompt?)` for no-echo password input.
-- `read_stdin()` slurps the rest of stdin to a `string` and returns `nil`
+- `harness.stdio.read_stdin()` slurps the rest of stdin to a `string` and returns `nil`
   at EOF.
-- `is_stdin_tty()`, `is_stdout_tty()`, `is_stderr_tty()` — `bool`,
+- `harness.stdio.is_stdin_tty()`, `harness.stdio.is_stdout_tty()`, `harness.stdio.is_stderr_tty()` — `bool`,
   uses `std::io::IsTerminal`. Use these to decide between rich
   interactive UI and pipe-friendly output.
 - `std/io` exposes structured interactive helpers: `is_tty(fd?)`,
-  `read_line({prompt?, timeout_ms?, trim?, echo?, raw?})`,
+  `harness.stdio.read_line({prompt?, timeout_ms?, trim?, echo?, raw?})`,
   `read_password(prompt?, timeout_ms?)`, and `write_stderr(text)`.
   Structured reads return `{ok, value?, status?, error?}` with statuses
   `ok`, `eof`, `timeout`, `interrupt`, or `error`.
-- `set_color_mode("auto"|"always"|"never")` controls whether
+- `harness.term.set_color_mode("auto"|"always"|"never")` controls whether
   `color`/`bold`/`dim` emit ANSI. Auto honors `NO_COLOR` and
   `FORCE_COLOR` env vars and only emits when stdout is a TTY.
 
-In tests: `mock_stdin(text)` / `unmock_stdin()`,
-`mock_tty(stream, bool)` / `unmock_tty()`,
-`capture_stderr_start()` / `capture_stderr_take()`.
+In tests: `harness.testing.stdin_set(text)` / `harness.testing.stdin_reset()`,
+`harness.testing.tty_set(stream, bool)` / `harness.testing.tty_reset()`,
+`harness.testing.capture_stderr_start()` /
+`harness.testing.capture_stderr_take()`.
 
 For long terminal artifacts, import `std/tui`:
 
@@ -293,32 +323,32 @@ menu, and honors `mock_stdin` under `prefer_external: "none"`.
 Use `std/command` for script-side harness commands. It runs through the same
 host command substrate as model-facing tools, but returns deterministic Harn
 records for retries, artifacts, tails, classification, and recovery hints.
-Use `harness.process.spawn_captured({cmd, args?, cwd?, env?, stdin?, timeout_ms?})`
+Use `harness.process.run({program, args?, cwd?, env?, stdin?, timeout_ms?})`
 when you only need one synchronous subprocess capture record:
 `{exit_code, stdout, stderr, duration_ms, success, timed_out}`.
 
 ```harn,ignore
 import { command_cancel, command_json, command_json_step, command_run, command_try, command_wait_for_output } from "std/command"
 
-const server = command_run(["my-server", "--port", "8080"], {background: true})
+const server = command_run(harness.tools, ["my-server", "--port", "8080"], {background: true})
 defer { command_cancel(server, {wait_result_ms: 5000}) }
-const ready = command_wait_for_output(server, "listening on 8080", {timeout_ms: 10000})
+const ready = command_wait_for_output(harness.tools, server, "listening on 8080", {timeout_ms: 10000})
 if !ready.matched {
   throw "server readiness failed: " + ready.status
 }
 
-const repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"], {
   capture: {max_inline_bytes: 65536},
 })
 
-const step = command_json_step("repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+const step = command_json_step(harness.agent, harness.tools, harness.clock, "repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
   retry: {max_attempts: 2, delay_ms: 0},
 })
 
-const fallback = command_try(
+const fallback = command_try(harness.agent, harness.tools, harness.clock,
   [
     {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
-    {source: "cli", run: fn() { return command_json(["gh", "api", "repos/burin-labs/harn"]) }},
+    {source: "cli", run: fn() { return command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"]) }},
   ],
   {normalize: { value, source -> return {source: source, name: value.name} }},
 )
@@ -333,26 +363,27 @@ absence.
   `["bash", "-lc", "cmd"]`-style shell wrappers to the script payload.
 - `shell_command_from_value(value)` accepts string, argv-list, or dict-shaped
   provider command values with `argv`, `command`, or `cmd` fields.
-- `command_json(spec, opts?)` parses stdout as JSON, returns `nil` for empty
+- `command_json(harness.agent, harness.tools, harness.clock, spec, opts?)` parses stdout as JSON, returns `nil` for empty
   output only with `allow_empty: true`, and supports `result: "record"` for
   `{ok:false,error,step}` instead of throwing. Command results and structured
   errors carry the canonical effective `cwd`, including when it was inherited.
-- `command_json_step(name, spec, opts?)` preserves `command_step` retry,
+- `command_json_step(harness.agent, harness.tools, harness.clock, name, spec, opts?)` preserves `command_step` retry,
   classify, recovery, artifact, and attempt fields, then adds `json` or
   `parse_error`.
-- `command_try(attempts, opts?)` is only for ordered equivalent probes. It adds
-  `fallback_index`, `fallback_total`, and per-attempt summaries; it is not a
-  retry system or provider framework.
-- `command_wait_for_output(handle, pattern, opts?)` parks on background output,
+- `command_try(harness.agent, harness.tools, harness.clock, attempts, opts?)` is
+  only for ordered equivalent probes. It adds `fallback_index`,
+  `fallback_total`, and per-attempt summaries; it is not a retry system or
+  provider framework.
+- `command_wait_for_output(harness.tools, handle, pattern, opts?)` parks on background output,
   exit, or timeout without polling. Use `source: "stdout" | "stderr" |
   "combined"`, `regex: true`, and `from_offset` when needed. A match reports
   byte offsets and leaves teardown to `command_cancel`.
 
 ## Time, sleep, monotonic clock
 
-- `now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).
-- `monotonic_ms()` — monotonic millis since process start (`int`).
-- `sleep(d)` / `sleep_ms(n)` — async sleep. **Mock-aware**: under
+- `harness.clock.now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).
+- `harness.clock.monotonic_ms()` — monotonic millis since process start (`int`).
+- `harness.clock.sleep_ms(d)` / `harness.clock.sleep_ms(n)` — async sleep. **Mock-aware**: under
   `mock_time`, both advance the mocked clock instantly instead of
   blocking — so tests of retry/backoff/timeout logic stay
   deterministic and fast. The same mock is observed by `now_ms`,
@@ -360,9 +391,9 @@ absence.
   the cron scheduler.
 - `yield_now()` — cooperative scheduling primitive. Lets sibling
   `parallel each` / spawned tasks make progress without advancing time.
-  Useful inside `mock_time(...)` blocks where you want one more poll
+  Useful inside `harness.testing.clock_set(...)` blocks where you want one more poll
   cycle but no clock movement.
-- `mock_time(ms)` / `advance_time(ms)` / `unmock_time()` — install,
+- `harness.testing.clock_set(ms)` / `harness.testing.clock_advance(ms)` / `harness.testing.clock_reset()` — install,
   advance, and tear down the mock. The clock stack nests, so a Rust
   test harness can install an outer mock and a Harn pipeline can layer
   its own on top.
@@ -389,11 +420,11 @@ End-exclusive slicing works on strings and lists:
 
 ```harn
 const s = "hello world"
-log(s[0:5])        // "hello"
-log(s[6:11])       // "world"
+harness.stdio.log(s[0:5])        // "hello"
+harness.stdio.log(s[6:11])       // "world"
 
 const xs = [1, 2, 3, 4, 5]
-log(xs[1:4])       // [2, 3, 4]
+harness.stdio.log(xs[1:4])       // [2, 3, 4]
 ```
 
 `substring(s, start, end)` also exists — the second argument is an
@@ -453,7 +484,7 @@ for x in items { ... }
 
 // enumerate: yields a list of {index, value} dicts.
 for {index, value} in items.enumerate() {
-  log("${index}: ${value}")
+  harness.stdio.log("${index}: ${value}")
 }
 
 // zip: yields [a, b] pairs — destructure with list pattern.
@@ -493,7 +524,7 @@ gen fn numbers() -> Stream<int> {
   emit 2
 }
 
-for n in numbers() { log(n) }
+for n in numbers() { harness.stdio.log(n) }
 ```
 
 `stream.*` works with any iterable source: lists, ranges, channels,
@@ -503,7 +534,7 @@ unless the name is a sink such as `collect`, `fold`, or `first`.
 ```harn
 // LLM token feed -> tap to log, then keep a bounded transcript.
 const chunks = stream.collect(
-  stream.tap(llm_stream_call("Summarize logs", nil, {provider: "mock"}), { chunk -> log(chunk.visible_delta) }),
+  stream.tap(harness.llm.stream_call("Summarize logs", nil, {provider: "mock"}), { chunk -> harness.stdio.log(chunk.visible_delta) }),
   {max: 200}
 )
 
@@ -538,7 +569,7 @@ Common operators:
 | `stream.merge(...)` / `stream.interleave(...)` / `stream.zip(a, b)` / `stream.race(...)` / `stream.broadcast(s, n)` | Combine or fan out streams. |
 | `stream.throttle(s, per_sec)` / `stream.debounce(s, window_ms)` | Basic emission pacing and burst coalescing. |
 
-`llm_stream_call(prompt, system?, options?)` returns
+`harness.llm.stream_call(prompt, system?, options?)` returns
 `Stream<{delta, visible_delta, partial, role, stop_reason}>` (typed as
 `LlmStreamChunk` from `std/llm/envelope`). It accepts the
 same options as `llm_call`; the `stream` option is still only the provider
@@ -556,7 +587,7 @@ const result = agent_stream_call(prompt, system, {
   provider: "openai",
   model: "gpt-5-mini",
   private: {open_tag: "<secret>", close_tag: "</secret>"},
-  on_delta: { delta, _event, _state -> print(delta) },
+  on_delta: { delta, _event, _state -> harness.stdio.print(delta) },
 })
 ```
 
@@ -586,7 +617,7 @@ You are a strict grader...
 
 pub fn grade_file(path) {
   // GRADER_SYSTEM is in scope here.
-  return llm_call("...", GRADER_SYSTEM, { ... })
+  return harness.llm.call("...", GRADER_SYSTEM, { ... })
 }
 ```
 
@@ -821,7 +852,7 @@ narrow to tuples.
   (`Result<int, string>` binds `v: int`, `e: string`).
 
 ```harn
-const r = try { llm_call("hi", nil, opts) }
+const r = try { harness.llm.call("hi", nil, opts) }
 const text = r?.text ?? "no response"
 ```
 
@@ -850,8 +881,8 @@ the verbose `try { foo() } / guard is_ok else / unwrap` boilerplate:
 
 ```harn
 fn fetch(prompt) {
-  // Without try*: try { llm_call(prompt) } / guard is_ok / unwrap
-  const response = try* llm_call(prompt)
+  // Without try*: try { harness.llm.call(prompt) } / guard is_ok / unwrap
+  const response = try* harness.llm.call(prompt)
   return parse(response)
 }
 
@@ -923,8 +954,8 @@ const results = parallel each paths { p -> process(p) }
 // parallel settle: like `each` but collects per-item Ok/Err and never
 // cancels — use it when every branch must run regardless of failures.
 const outcome = parallel settle paths { p -> grade(p) }
-log(outcome.succeeded)  // count
-log(outcome.failed)
+harness.stdio.log(outcome.succeeded)  // count
+harness.stdio.log(outcome.failed)
 for r in outcome.results {
   // r is Result.Ok(...) or Result.Err(...)
 }
@@ -934,7 +965,7 @@ const indices = parallel 8 { i -> fetch(i) }
 
 // Cap in-flight work to avoid overwhelming downstream services.
 const results = parallel settle paths with { max_concurrent: 4 } { p ->
-  llm_call(p, nil, opts)
+  harness.llm.call(p, nil, opts)
 }
 ```
 
@@ -962,8 +993,8 @@ const outcome = settle_with_abort(lanes, { lane, token ->
 // outcome.results is one Result per item in source order (std/settled applies).
 // A branch fails when it throws OR returns Result.Err — plain `parallel settle`
 // would record a returned Err as Ok(Err(..)) and count it a success.
-log(outcome.aborted, outcome.abandoned, outcome.reason?.code)
-log(decisive_error(outcome))  // first non-abandoned failure: the real cause
+harness.stdio.log(outcome.aborted, outcome.abandoned, outcome.reason?.code)
+harness.stdio.log(decisive_error(outcome))  // first non-abandoned failure: the real cause
 ```
 
 `max_failures: N` trips the token automatically after N failures;
@@ -1049,7 +1080,7 @@ in a for-loop:
 
 ```harn
 for (k, v) in {a: 1, b: 2}.iter() {
-  log("${k}: ${v}")
+  harness.stdio.log("${k}: ${v}")
 }
 ```
 
@@ -1066,7 +1097,7 @@ explicitly; `.zip` and `.enumerate` also emit pairs.
   mutating the source after `.iter()` doesn't affect the iter.
 - **String iteration**: yields chars (Unicode scalar values), not
   graphemes.
-- **Printing**: `log(it)` renders `<iter>` or `<iter (exhausted)>`
+- **Printing**: `harness.stdio.log(it)` renders `<iter>` or `<iter (exhausted)>`
   without draining.
 
 ### Ranges and iters
@@ -1088,8 +1119,6 @@ because only 5 elements flow through the pipeline.
 const matches  = regex_match("[0-9]+", "abc 42 def 7")   // ["42", "7"] or nil
 const swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 //           -> "world hello"
-const same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
-//           -> alias of regex_replace; every match replaced.
 const captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
 const words    = regex_split("a, b, c", ",\\s*")
 const ci       = regex_match("hello", "HeLLo", "i")
@@ -1098,8 +1127,8 @@ const body     = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
 const body2    = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
 ```
 
-`regex_replace` and `regex_replace_all` both replace every match and
-both support `$1`, `$2`, `${name}` backrefs plus the same optional
+`regex_replace` replaces every match and supports `$1`, `$2`,
+`${name}` backrefs plus the same optional
 `i`/`m`/`s`/`x` flags as `regex_match`. Inline regex flags such as
 `(?is)` use the same semantics as the trailing flags argument. Each
 `regex_captures` result has `match`, positional `groups` excluding the
@@ -1140,13 +1169,13 @@ const zip_entries = zip_extract(zip)     // [{path, content: bytes}]
 
 ```harn
 const rng = rng_seed(42)
-const roll = random_int(rng, 1, 6)
-const shuffled = random_shuffle(rng, [1, 2, 3, 4])
+const roll = harness.random.range(rng, 1, 6)
+const shuffled = harness.random.shuffle(rng, [1, 2, 3, 4])
 const grouped = group_by(["a", "bb", "c"], { s -> len(s) })
 const parts = partition([1, 2, 3, 4], { x -> x % 2 == 0 })
 const padded = str_pad("é", 3, ".", "both")
 const graphemes = unicode_graphemes("éx")
-const parsed = uuid_parse(uuid_v7())
+const parsed = uuid_parse(harness.random.uuid_v7())
 ```
 
 ### Postgres query helpers
@@ -1206,15 +1235,15 @@ for source-controlled fragments no typed helper covers.
 ## LLM surface
 
 ```harn
-const response = llm_call(prompt, system, options)
-log(response.text)           // the public answer (after tool/protocol projection)
-log(response.raw_text)       // pre-projection source (protocol tags intact)
-log(response.visible_text)   // sanitized human-visible output
-log(response.canonical_text) // canonical replay form of a tagged response
-log(response.usage.input_tokens)
-log(response.usage.output_tokens)
-log(response.outcome.kind)   // "complete" | "tool_use" | "truncated" | "refused" | "paused" | "empty"
-log(response.logprobs)       // present when requested and returned
+const response = harness.llm.call(prompt, system, options)
+harness.stdio.log(response.text)           // the public answer (after tool/protocol projection)
+harness.stdio.log(response.raw_text)       // pre-projection source (protocol tags intact)
+harness.stdio.log(response.visible_text)   // sanitized human-visible output
+harness.stdio.log(response.canonical_text) // canonical replay form of a tagged response
+harness.stdio.log(response.usage.input_tokens)
+harness.stdio.log(response.usage.output_tokens)
+harness.stdio.log(response.outcome.kind)   // "complete" | "tool_use" | "truncated" | "refused" | "paused" | "empty"
+harness.stdio.log(response.logprobs)       // present when requested and returned
 ```
 
 All call accounting lives under `usage` and the typed `outcome`
@@ -1285,7 +1314,7 @@ OpenAI-native hosted tools, remote MCP, previous-response chaining,
 background mode, or provider-side truncation/compaction:
 
 ```harn
-const r = llm_call(prompt, sys, {
+const r = harness.llm.call(prompt, sys, {
   provider: "openai",
   model: "gpt-5.4",
   api_mode: "responses",
@@ -1373,9 +1402,9 @@ convo = add_system(convo, "For the rest of this conversation, reply only in Fren
 convo = add_user(convo, "What is my name?")
 
 // Same script on every route:
-llm_call("", nil, {provider: "anthropic", model: "claude-opus-4-8", messages: transcript_messages(convo)})
-llm_call("", nil, {provider: "anthropic", model: "claude-haiku-4-5", messages: transcript_messages(convo)})
-llm_call("", nil, {provider: "openai",    model: "gpt-5.4",          messages: transcript_messages(convo)})
+harness.llm.call("", nil, {provider: "anthropic", model: "claude-opus-4-8", messages: transcript_messages(convo)})
+harness.llm.call("", nil, {provider: "anthropic", model: "claude-haiku-4-5", messages: transcript_messages(convo)})
+harness.llm.call("", nil, {provider: "openai",    model: "gpt-5.4",          messages: transcript_messages(convo)})
 ```
 
 Per-route behavior (capability-driven, not hardcoded):
@@ -1435,7 +1464,7 @@ to tag ACP `tool_call_update.executor` events so clients can render
 // omitted — back-compat path).
 registry = tool_define(registry, "look", "Read files", {
   parameters: {path: "string"},
-  handler: { args -> read_file(args.path) },
+  handler: { args -> harness.fs.read_text(args.path) },
 })
 
 // Host-bridge tool — handler-less by design.
@@ -1490,7 +1519,7 @@ const image = harn.mcp.upload_file(mcp.image_server, "photo.png", {
   accept: ["image/png", "image/jpeg"],
   max_size: 5242880,
 })
-mcp_call(mcp.image_server, "describe_image", {image: image})
+harness.tools.mcp_call(mcp.image_server, "describe_image", {image: image})
 
 registry = tool_define(registry, "inspect_upload", "Inspect text", {
   parameters: {upload: harn.mcp.file_input({accept: ["text/*"], max_size: 64})},
@@ -1510,15 +1539,15 @@ opt the call into progressive disclosure with `tool_search: "bm25"`:
 let registry = tool_registry()
 registry = tool_define(registry, "look", "Read files", {
   parameters: {path: {type: "string"}},
-  handler: { args -> read_file(args.path) },
+  handler: { args -> harness.fs.read_text(args.path) },
 })
 registry = tool_define(registry, "deploy", "Deploy to production", {
   parameters: {env: {type: "string"}},
   defer_loading: true,                 // schema held back until searched
-  handler: { args -> shell("deploy " + args.env) },
+  handler: { args -> harness.process.shell("deploy " + args.env) },
 })
 
-const r = llm_call(prompt, sys, {
+const r = harness.llm.call(prompt, sys, {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: registry,
@@ -1725,8 +1754,8 @@ pub skill deploy {
   effort "high"
   prompt "Follow the deployment runbook."
 
-  on_activate fn() { log("deploy activated") }
-  on_deactivate fn() { log("deploy deactivated") }
+  on_activate fn() { harness.stdio.log("deploy activated") }
+  on_deactivate fn() { harness.stdio.log("deploy deactivated") }
 }
 ```
 
@@ -1743,7 +1772,7 @@ Known-key validation in `skill_define`: `description`, `when_to_use`,
 ### Common patterns
 
 Structured output with automatic retry — prefer
-`llm_call_structured(prompt, schema, options?)`, which returns the
+`harness.llm.call_structured(prompt, schema, options?)`, which returns the
 validated data directly (no `.data` unwrap) and forces the schema
 defaults (`output: {schema, strict: true, validation: "error"}` and
 `schema_retries: 3`). Throws on exhausted retries or transport
@@ -1758,35 +1787,35 @@ const schema = {
     improvement: {type: "string"},
   },
 }
-const verdict = llm_call_structured(prompt, schema, {
+const verdict = harness.llm.call_structured(prompt, schema, {
   provider: "auto",
   model: "local-gemma4-e4b",
   system: "You are a strict grader.",
 })
-log(verdict.verdict)
+harness.stdio.log(verdict.verdict)
 ```
 
-Non-throwing variant `llm_call_structured_safe(prompt, schema,
+Non-throwing variant `harness.llm.call_structured_safe(prompt, schema,
 options?)` returns `{ok, data, error}` (same envelope as
 `llm_call_safe`, but with the validated `.data` pre-unwrapped):
 
 ```harn
-const r = llm_call_structured_safe(prompt, schema, {provider: "auto"})
+const r = harness.llm.call_structured_safe(prompt, schema, {provider: "auto"})
 if !r.ok {
-  log("structured call failed:", r.error.category, r.error.message)
+  harness.stdio.log("structured call failed:", r.error.category, r.error.message)
   return nil
 }
-log(r.data.verdict)
+harness.stdio.log(r.data.verdict)
 ```
 
-Diagnostic envelope `llm_call_structured_result(prompt, schema,
+Diagnostic envelope `harness.llm.call_structured_result(prompt, schema,
 options?)` returns the full failure-mode breakdown
 production agent pipelines need — `{ok, data, raw_text, error,
 error_category, attempts, repaired, extracted_json, usage, model,
 provider}`. Never throws; dispatch on `ok` / `error_category`:
 
 ```harn
-const r = llm_call_structured_result(prompt, schema, {
+const r = harness.llm.call_structured_result(prompt, schema, {
   provider: "auto",
   schema_retries: 2,
   // Optional repair pass — runs only when the main call's JSON is
@@ -1798,12 +1827,12 @@ const r = llm_call_structured_result(prompt, schema, {
   },
 })
 if r.ok {
-  log(r.data.verdict)
+  harness.stdio.log(r.data.verdict)
 } else {
   // error_category ∈ "transport" | "missing_json" | "schema_validation"
   // | "repair_failed" — plus retryable transport categories
   // ("rate_limit", "timeout", ...) when the underlying call failed.
-  log("grade failed:", r.error_category, "raw:", r.raw_text)
+  harness.stdio.log("grade failed:", r.error_category, "raw:", r.raw_text)
 }
 ```
 
@@ -1818,7 +1847,7 @@ Options: everything `llm_call` accepts flows through, plus
 through unchanged. The `repair` block is recognized only by
 `llm_call_structured_result`.
 
-After-the-fact recovery — `schema_recover(text, schema, opts?)`
+After-the-fact recovery—`harness.llm.recover_schema(text, schema, opts?)`
 turns malformed output that's already in your hand into a validated
 payload. Three deterministic stages followed by an optional one-shot
 LLM repair, returning the same `{ok, data, raw_text, error,
@@ -1832,23 +1861,23 @@ error_category, attempts, stage, repaired}` envelope shape:
 | `llm_repair` | Earlier stages failed and `repair` is enabled (default). | Single shot, `schema_retries: 0`. Set `{repair: false}` for fully deterministic recovery. `llm_repair` is the reported stage name, not an option key. |
 
 ```harn
-const raw = llm_call(prompt, sys, {provider: "auto"}).text
-const r = schema_recover(raw, schema)
+const raw = harness.llm.call(prompt, sys, {provider: "auto"}).text
+const r = harness.llm.recover_schema(raw, schema)
 if r.ok {
   process(r.data)                  // narrowed-shape dict
 } else {
-  log("recovery failed:", r.stage, r.error_category, r.error)
+  harness.stdio.log("recovery failed:", r.stage, r.error_category, r.error)
 }
 ```
 
 Use it as a drop-in replacement for hand-rolled `normalize_*()`
-chains downstream of `llm_call(...)` / Ollama prose responses, or
+chains downstream of `harness.llm.call(...)` / Ollama prose responses, or
 when you want a deterministic local recovery pass before paying for
 a structured re-call. The `repair` block accepts the same
 overrides as `llm_call_structured_result`'s `repair`:
 
 ```harn
-const r = schema_recover(raw, schema, {
+const r = harness.llm.recover_schema(raw, schema, {
   apply_defaults: true,            // schema defaults during validation
   repair: {
     enabled: true,
@@ -1869,14 +1898,14 @@ If you need the raw response (token counts, transcript, thinking
 trace) alongside the parsed data, call `llm_call` directly:
 
 ```harn
-const r = llm_call(prompt, sys, {
+const r = harness.llm.call(prompt, sys, {
   provider: "auto",
   model: "local-gemma4-e4b",
   output: {schema: schema, strict: true, validation: "error"},
   schema_retries: 2,
 })
-log(r.data.verdict)
-log(r.usage.input_tokens)
+harness.stdio.log(r.data.verdict)
+harness.stdio.log(r.usage.input_tokens)
 ```
 
 Schema-as-type (a `type` alias drives both the schema and the
@@ -1890,11 +1919,11 @@ type GraderOut = {
   summary: string,
 }
 
-const out: GraderOut = llm_call_structured(prompt, GraderOut, {
+const out: GraderOut = harness.llm.call_structured(prompt, GraderOut, {
   provider: "auto",
   system: sys,
 })
-log(out.verdict)     // narrowed to GraderOut
+harness.stdio.log(out.verdict)     // narrowed to GraderOut
 ```
 
 Reusable generic wrapper (narrows via the `Schema<T>` generic
@@ -1902,11 +1931,11 @@ param):
 
 ```harn
 fn grade<T>(prompt: string, schema: Schema<T>) -> T {
-  return llm_call_structured(prompt, schema, {provider: "auto"})
+  return harness.llm.call_structured(prompt, schema, {provider: "auto"})
 }
 
 const out: GraderOut = grade("Grade this", schema_of(GraderOut))
-log(out.verdict)
+harness.stdio.log(out.verdict)
 ```
 
 Use `SchemaContract<T>` for cross-field invariants after structural validation.
@@ -1923,7 +1952,7 @@ Batch grading at bounded concurrency:
 
 ```harn
 const outcome = parallel settle paths with { max_concurrent: 4 } { path ->
-  llm_call(read_file(path), GRADER_SYSTEM, {
+  harness.llm.call(harness.fs.read_text(path), GRADER_SYSTEM, {
     provider: "auto",
     model: "local-gemma4-e4b",
     output: {schema: grader_schema, strict: true, validation: "error"},
@@ -1997,7 +2026,7 @@ Helper policies in `std/agent/autocompact`:
 ### Transcript projection
 
 `transcript_project(transcript, opts?)` derives a model-visible prefix without
-mutating raw transcript history. `agent_loop(..., {transcript_projection: ...})`
+mutating raw transcript history. `agent_loop(harness, ..., {transcript_projection: ...})`
 applies the same projection before each provider turn and records a
 `transcript.projection` event. Built-in policies: `raw`,
 `clean_tool_repair`, `squash_failed_calls`, `summary_prefix`,
@@ -2045,7 +2074,7 @@ transitions.
 
 ## Read-only stance (experimental)
 
-`agent_loop({read_only_stance: {...}})` arms a least-privilege tool window
+`agent_loop(harness, {read_only_stance: {...}})` arms a least-privilege tool window
 for tasks classified as read-only (research/investigation): only tools whose
 annotations declare them read-only (`kind` read/search/think/fetch, or
 `side_effect_level` none/read_only — unannotated tools count as mutating)
@@ -2070,7 +2099,7 @@ const stance_opts: AgentLoopOptions = {
     hard_keep: ["ask_user"],
   },
 }
-agent_loop(task, nil, stance_opts)
+agent_loop(harness, task, nil, stance_opts)
 ```
 
 Ships default-OFF. This is the Harn mechanism for the tool-surface
@@ -2117,11 +2146,11 @@ match.
 
 ```harn
 const cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
-log(cleared.removed_count)
+harness.stdio.log(cleared.removed_count)
 ```
 
-`agent_loop(...)` enables canonical reminder providers by default; bare
-`llm_call(...)` does not. Providers are:
+`agent_loop(harness, ...)` enables canonical reminder providers by default; bare
+`harness.llm.call(...)` does not. Providers are:
 
 - `token_pressure` on `on_budget_threshold` at about 70/85/95% context
   use (`ttl_turns: 2`, critical threshold preserves across compaction).
@@ -2160,7 +2189,7 @@ import { AgentLoopOptions } from "std/agent/options"
 const reminder_opts: AgentLoopOptions = {
   reminders: {providers: ["-token_pressure", "-idle_nudge"]},
 }
-agent_loop(task, system, reminder_opts)
+agent_loop(harness, task, system, reminder_opts)
 ```
 
 Configure providers under `reminders.config`, e.g.
@@ -2235,13 +2264,13 @@ const result = agent_turn("Review this patch and fix obvious issues.", {
   provider: "openai",
   model: "gpt-5-mini",
 })
-log(result.visible_text)
-log(result.judge_decisions[0].verdict)
+harness.stdio.log(result.visible_text)
+harness.stdio.log(result.judge_decisions[0].verdict)
 ```
 
 ### `agent_loop`
 
-`agent_loop(prompt, system?, options?)` runs a multi-turn loop with
+`agent_loop(harness, prompt, system?, options?)` runs a multi-turn loop with
 tool dispatch. Build the options through the typed `AgentLoopOptions`
 alias from `std/agent/options` (`let opts: AgentLoopOptions = {...}`)
 or an `agent_preset(...)` / `agent_options(...)` constructor — this is
@@ -2321,7 +2350,7 @@ const stop_opts: AgentLoopOptions = {
   tools: registry,
   stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
 }
-agent_loop(task, sys, stop_opts)
+agent_loop(harness, task, sys, stop_opts)
 ```
 
 The check fires after each iteration's tool dispatch, so any other
@@ -2373,7 +2402,7 @@ assistant explanation, and returns `status: "input_guardrail"` with
 ```harn
 import { agent_input_guardrail } from "std/agent/guardrails"
 
-agent_loop(task, system, base_opts + agent_input_guardrail(
+agent_loop(harness, task, system, base_opts + agent_input_guardrail(
   { payload -> return cheap_policy_classifier(payload.user_message) },
   {confidence_threshold: 0.8},
 ))
@@ -2418,7 +2447,7 @@ const cadence_opts: AgentLoopOptions = {
     },
   },
 }
-agent_loop(task, system, cadence_opts)
+agent_loop(harness, task, system, cadence_opts)
 ```
 
 With `when: "stalled"`, stall diagnostics run the judge when
@@ -2450,7 +2479,7 @@ const scoped_opts: AgentLoopOptions = {
     on_escalation: { request -> {grant: "once", approver: "operator"} },
   },
 }
-agent_loop(task, system, scoped_opts)
+agent_loop(harness, task, system, scoped_opts)
 ```
 
 `allow` and `deny` accept tool-name globs, argument pattern lists, or VM
@@ -2466,7 +2495,7 @@ policy; escalation cannot widen a parent ceiling.
 
 `spawn_agent`, `wait_agent`, `resume_agent`, `suspend_agent`, `agent_stop`, and
 `list_agents` from `std/agent/workers` are the script-level lifecycle
-surface for delegated work. Layered on top, `agent_loop(...)` exposes a
+surface for delegated work. Layered on top, `agent_loop(harness, ...)` exposes a
 model-facing **lifecycle tool** so the agent can park itself between turns
 and so a parent loop can pause/resume/stop children. Full reference:
 `docs/src/agent-lifecycle.md`.
@@ -2475,7 +2504,7 @@ Four model-facing tools:
 
 | Tool | Use |
 |---|---|
-| `agent_await_resumption(reason, conditions?)` | The current worker self-parks. Registered automatically by `agent_loop(...)`. |
+| `agent_await_resumption(reason, conditions?)` | The current worker self-parks. Registered automatically by `agent_loop(harness, ...)`. |
 | `subagent_pause(handle, reason)` | Parent loop pauses a running child after its current turn settles. Opt-in via `subagents: true`. |
 | `subagent_resume(handle, input?, continue_transcript? = true)` | Parent loop resumes a suspended child. Opt-in via `subagents: true`. |
 | `subagent_stop(handle, graceful? = true, reason?)` | Parent loop stops a child. Graceful mode returns a recursive typed handoff summary; `graceful: false` hard-cancels. Opt-in via `subagents: true`. |
@@ -2489,7 +2518,7 @@ iterations_completed}` to the parent. Lifecycle calls emit
 `tool_call_audit` telemetry with `initiator` (one of `"self"`, `"parent"`,
 `"operator"`, `"triggered"`) and the supplied `reason`.
 
-Top-level loops use the same shape: a root `agent_loop(...)` that parks
+Top-level loops use the same shape: a root `agent_loop(harness, ...)` that parks
 returns `status: "suspended"` with `handle.snapshot_path`, and the CLI
 cold-restores it with `harn run --resume <snapshot_path>`.
 
@@ -2497,15 +2526,15 @@ cold-restores it with `harn run --resume <snapshot_path>`.
 // Self-park mid-loop until a review approval lands or 30 minutes pass.
 import { agent_await_resumption } from "std/agent/workers"
 
-const result = agent_loop("Wait for the maintainer's review.", nil, {
+const result = agent_loop(harness, "Wait for the maintainer's review.", nil, {
   provider: "openai",
   model: "gpt-5",
   tool_format: "native",
 })
 
 if result.status == "suspended" {
-  log(result.reason)               // model-supplied
-  log(result.handle.snapshot_path) // resumable snapshot on disk
+  harness.stdio.log(result.reason)               // model-supplied
+  harness.stdio.log(result.handle.snapshot_path) // resumable snapshot on disk
 }
 ```
 
@@ -2552,7 +2581,7 @@ and the runtime injects a single-shot `system_reminder` with
 `continue_transcript: false` to restart from the prior summary plus new
 input only.
 
-Daemon idle is a degenerate case: `agent_loop(..., {daemon: true})` and
+Daemon idle is a degenerate case: `agent_loop(harness, ..., {daemon: true})` and
 the `daemon_*` stdlib wrappers (see `docs/src/llm/agent_loop.md#daemon-stdlib-wrappers`)
 internally call `agent_await_resumption(...)` when no wake source is
 queued. The snapshot carries daemon-specific fields
@@ -2585,9 +2614,9 @@ Diagnostic codes for the suspend/resume namespace are `HARN-SUS-001..010`
 
 ### Durable agent channels
 
-Use `emit_channel(name, payload, options?)` for cross-run facts that should land
+Use `harness.channels.append(name, payload, options?)` for cross-run facts that should land
 in the active event log. Bare names default to tenant scope:
-`emit_channel("pr.merged", payload)` resolves to
+`harness.channels.append("pr.merged", payload)` resolves to
 `tenant:<current-or-default-tenant>:pr.merged`. Prefixes select a scope:
 `session:foo`, `pipeline:foo`, `tenant:foo`, `tenant:<tenant_id>:foo`, or
 `org:<org_id>:foo`; org scope currently fails with `HARN-CHN-002` until org
@@ -2599,35 +2628,35 @@ resolver also returns `HARN-CHN-001` for `pipeline:` outside a pipeline,
 context.
 
 ```harn
-const receipt = emit_channel("session:worker.ready", {worker: "lint"}, {
+const receipt = harness.channels.append("session:worker.ready", {worker: "lint"}, {
   id: "worker-ready-lint",
   ttl: 10m,
 })
-log(receipt.event_id)
-log(receipt.emitted_at.signature.starts_with("sha256:"))
+harness.stdio.log(receipt.event_id)
+harness.stdio.log(receipt.emitted_at.signature.starts_with("sha256:"))
 ```
 
 Each stored event includes `id`, fully resolved `name`, `payload`,
 `emitted_at` (signed), `emitted_by`, available `pipeline_id`, `session_id`, or
 `tenant_id`, and `ttl_ms` when `options.ttl` is provided. Reusing the same
 `options.id` on the same resolved channel is idempotent and returns the
-original `event_id`. Use `channel_events(name, options?)` for tests and local
+original `event_id`. Use `harness.channels.events(name, options?)` for tests and local
 inspection.
 
-Use `channel_subscribe(name, options?)` for live readers that need the same
-scope resolution as `emit_channel(...)`. This matters for session channels:
-`channel_subscribe("worker.ready", {scope: "session", session_id: "sess-1"})`
+Use `harness.channels.subscribe(name, options?)` for live readers that need the same
+scope resolution as `harness.channels.append(...)`. This matters for session channels:
+`harness.channels.subscribe("worker.ready", {scope: "session", session_id: "sess-1"})`
 observes the in-process session channel log, while raw `event_log.subscribe(...)`
 only sees the active EventLog backend.
-Use `channel_consumer_cursor(...)` and `channel_ack(...)` for durable consumers
+Use `harness.channels.consumer_cursor(...)` and `harness.channels.ack(...)` for durable consumers
 that need a high-water cursor without deleting shared channel events.
 
 ### Coordination ledger (`std/coordination`)
 
 Use `std/coordination` when agents need a durable, replayable coordination
 room instead of a host-local mailbox or assistant-visible prose protocol. The
-module wraps `emit_channel(...)`, `channel_events(...)`, `event_log.subscribe`,
-`channel_subscribe(...)`, and `std/memory` with a stable
+module wraps `harness.channels.append(...)`, `harness.channels.events(...)`, `event_log.subscribe`,
+`harness.channels.subscribe(...)`, and `std/memory` with a stable
 `harn.coordination.message.v1` envelope.
 
 ```harn
@@ -2691,7 +2720,7 @@ trigger_register({
   kind: "channel.emit",
   provider: "channel",
   match: {events: ["channel:pr.merged"]},
-  handler: { event -> kick_release(event.provider_payload.payload) },
+  handler: { harness, event -> kick_release(event.provider_payload.payload) },
 })
 ```
 
@@ -2711,7 +2740,7 @@ trigger_register({
   provider: "channel",
   match: {events: ["channel:pr.merged"]},
   batch: {count: 3, window: "1h", key: "repo"},
-  handler: { event -> cut_release(event.batch) },
+  handler: { harness, event -> cut_release(event.batch) },
 })
 ```
 
@@ -2731,7 +2760,7 @@ Pick the right primitive:
 | Hand off to one specific agent | Handoffs (`handoff(...)`, `@handoff`) |
 | Wait for an external event (GitHub, Slack, cron) | Provider trigger |
 | Park one agent until a specific event with a declared resume condition | Suspend/resume (`agent_await_resumption(reason, conditions)`) |
-| Emit a typed event to many subscribers | **Channels** (`emit_channel(...)`) |
+| Emit a typed event to many subscribers | **Channels** (`harness.channels.append(...)`) |
 | Periodic reminder into a running loop | **Channels + `batch` + `ReminderInject`** |
 
 Diagnostic codes: `HARN-CHN-001` (`pipeline:` outside a pipeline),
@@ -2763,7 +2792,7 @@ import { AgentLoopOptions } from "std/agent/options"
 const budgeted_opts: AgentLoopOptions = {
   autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
 }
-agent_loop(task, system, budgeted_opts)
+agent_loop(harness, task, system, budgeted_opts)
 ```
 
 `key` defaults to the loop's `session_id`; pick a stable identity (e.g.
@@ -2817,8 +2846,8 @@ Because `session_id` is exposed, the closure can call any
 ```harn
 const judge = { info ->
   if info.iteration % 3 != 0 { return nil }       // skip 2/3 turns
-  const snapshot = agent_session_snapshot(info.session_id)
-  const verdict = llm_call("...grade this transcript...", {
+  const snapshot = harness.agent.snapshot(info.session_id)
+  const verdict = harness.llm.call("...grade this transcript...", {
     provider: "openai", model: "gpt-5-mini",      // cheaper reflection model
     messages: [{role: "user", content: json_encode(snapshot)}],
     schema: {approved: "bool", feedback: "string"},
@@ -2830,7 +2859,7 @@ const judge = { info ->
   nil
 }
 
-agent_loop(task, system, {tools: registry, post_turn_callback: judge})
+agent_loop(harness, task, system, {tools: registry, post_turn_callback: judge})
 ```
 
 Hooks can also shape the next model turn. For example, once the required tool
@@ -2854,7 +2883,7 @@ mechanics required:
 - **Terminal-only review** — gate the body on `info.iteration ==
   expected_max - 1`, or check `info.session_successful_tools` for a
   terminal tool name. Skip the early turns and judge once at the end.
-- **Branch-and-replay** — call `agent_session_fork_at(info.session_id,
+- **Branch-and-replay** — call `harness.agent.fork_at(info.session_id,
   k)` to checkpoint at a known-good turn, then return `{stop: true}`
   to halt the live loop. The enclosing pipeline rebuilds with the
   branch (see snippet below). The runtime intentionally does *not*
@@ -2862,12 +2891,12 @@ mechanics required:
   in-flight tool dispatches.
 
   ```harn
-  const s = agent_session_open()
-  const main = agent_loop(task, sys, {session_id: s, tools: registry,
+  const s = harness.agent.open()
+  const main = agent_loop(harness, task, sys, {session_id: s, tools: registry,
     post_turn_callback: { info ->
       if judge_says_redo_from(info) {
-        const branch = agent_session_fork_at(info.session_id, judged_k)
-        agent_session_inject(branch, {role: "system",
+        const branch = harness.agent.fork_at(info.session_id, judged_k)
+        harness.agent.inject(branch, {role: "system",
           content: "Redo from turn ${judged_k} with: ${redirection}"})
         // Stash the branch id so the caller can pick it up.
         save_branch_id(branch)
@@ -2877,7 +2906,7 @@ mechanics required:
     },
   })
   if main.status == "stopped" {
-    agent_loop(task, sys, {session_id: load_branch_id(), tools: registry})
+    agent_loop(harness, task, sys, {session_id: load_branch_id(), tools: registry})
   }
   ```
 
@@ -2886,14 +2915,14 @@ mechanics required:
   scaffolding lives in `agent_loop`:
 
   ```harn
-  const base = agent_session_open()
-  const branch = agent_session_fork(base)
-  agent_session_inject(branch, {role: "system",
+  const base = harness.agent.open()
+  const branch = harness.agent.fork(base)
+  harness.agent.inject(branch, {role: "system",
     content: "Try the brute-force approach."})
 
   const outcomes = parallel settle [base, branch]
     with { max_concurrent: 2 } { sess ->
-      agent_loop(task, sys, {
+      agent_loop(harness, task, sys, {
         session_id: sess, tools: registry, max_iterations: 10,
       })
     }
@@ -2907,7 +2936,7 @@ mechanics required:
 
 The closure runs in a child VM (separate `output` buffer) and its
 return is parsed by `interpret_post_turn_callback_verdict`. Any
-captured `log()` output flows back to the parent VM unchanged. The
+captured `harness.stdio.log()` output flows back to the parent VM unchanged. The
 callback is awaited synchronously per turn, so it can be a heavy LLM call
 without races. Keep broad review strategies in
 `post_turn_callback` when the policy needs custom timing, branching, or
@@ -2966,35 +2995,35 @@ without a `session_id` (or with an empty string) mint an anonymous id
 and never touch the store — the one-shot call shape is preserved.
 
 ```harn
-const s = agent_session_open()                       // mint UUIDv7
-agent_session_inject(s, {role: "user", content: "hi"})
-const a = agent_loop("continue", nil, {session_id: s, provider: "mock"})
-const b = agent_loop("remember me?", nil, {session_id: s, provider: "mock"})
-const branch = agent_session_fork(s)                 // counterfactual
-const replay = agent_session_fork_at(s, 1)           // branch from a rebuilt prefix
-agent_session_close(branch)
-agent_session_close(replay)
+const s = harness.agent.open()                       // mint UUIDv7
+harness.agent.inject(s, {role: "user", content: "hi"})
+const a = agent_loop(harness, "continue", nil, {session_id: s, provider: "mock"})
+const b = agent_loop(harness, "remember me?", nil, {session_id: s, provider: "mock"})
+const branch = harness.agent.fork(s)                 // counterfactual
+const replay = harness.agent.fork_at(s, 1)           // branch from a rebuilt prefix
+harness.agent.close(branch)
+harness.agent.close(replay)
 ```
 
 Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
 `snapshot`, `ancestry`):
 
-- `agent_session_open(id?, opts?)` / `_close(id)` / `_exists(id)`. `opts` may
+- `harness.agent.open(id?, opts?)` / `_close(id)` / `_exists(id)`. `opts` may
   include `workspace_anchor` and `workspace_policy: {default_mount_mode}`.
-- `agent_session_current_id()` returns the innermost active session id or `nil`.
-- `agent_session_actor_chain(id?)` returns the RFC 8693 `{sub, act}` actor
+- `harness.agent.current_id()` returns the innermost active session id or `nil`.
+- `harness.agent.actor_chain(id?)` returns the RFC 8693 `{sub, act}` actor
   chain for `id`, or for the current active session when `id` is omitted.
-- `agent_session_workspace_anchor(id)` / `_set_workspace_anchor(id, anchor)`
+- `harness.agent.workspace_anchor(id)` / `_set_workspace_anchor(id, anchor)`
   read and replace the typed anchor.
-- `agent_session_workspace_policy(id)` / `_set_workspace_policy(id, policy)`
+- `harness.agent.workspace_policy(id)` / `_set_workspace_policy(id, policy)`
   read and update the default mount mode used when mounted roots omit
   `mount_mode`.
-- `agent_session_add_root(id, root, opts?)` / `_remove_root(id, root)` mount or
+- `harness.agent.add_root(id, root, opts?)` / `_remove_root(id, root)` mount or
   unmount additional roots. `opts.mount_mode` defaults from the session
   workspace policy.
-- `agent_session_list_roots(id)` returns `{primary, additional}` for the
+- `harness.agent.list_roots(id)` returns `{primary, additional}` for the
   current mounted roots.
-- `agent_session_reanchor(id, new_anchor, opts?)` atomically swaps the primary
+- `harness.agent.reanchor(id, new_anchor, opts?)` atomically swaps the primary
   anchor mid-run. `opts.carry_transcript` (default true) keeps the transcript;
   `false` forks into a fresh empty session. `opts.compact: true` runs
   compaction before the swap (requires `carry_transcript: true`). Emits an
@@ -3004,17 +3033,17 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
 - `register_path_scope_guard(opts?)` / `clear_path_scope_guard()` install a
   singleton PreToolUse hook that denies (or emits a `<scope-alert>` reminder
   for) tool calls whose path args escape the session anchor.
-- `agent_session_reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
-- `agent_session_inject(id, {role, content, …})` — missing `role` errors.
-- `agent_session_seed_from_jsonl(path, opts?)` creates a new session from a
+- `harness.agent.reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
+- `harness.agent.inject(id, {role, content, …})` — missing `role` errors.
+- `harness.agent.seed_from_jsonl(path, opts?)` creates a new session from a
   replayable `llm_transcript.jsonl` sidecar. Useful opts:
   `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`,
   `provider`, `model`, `source_agent`, `source_session_id`, `source_kind`,
   `source_label`, `source_provenance`, `recommend_compaction`.
-- `agent_session_compact(id, opts)` — supports LLM/truncate/observation-mask/custom
+- `harness.agent.compact(id, opts)` — supports LLM/truncate/observation-mask/custom
   compaction, accepts the same compaction policy fields as
   `transcript_auto_compact`, and errors on unknown option keys.
-- `agent_session_length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
+- `harness.agent.length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
 - `cancel_in_flight_tool_call(session_id, call_id, opts?)` — abort one
   in-flight tool call without closing the session. `opts.reason` is
   surfaced to the model, `opts.inject_reminder` (default `true`) queues
@@ -3034,7 +3063,7 @@ compacted the transcript, along with before/after message and event counts.
 ### Daemon wrappers
 
 Use the daemon stdlib wrappers when you want a first-class handle around
-`agent_loop(..., {daemon: true})`:
+`agent_loop(harness, ..., {daemon: true})`:
 
 - `daemon_spawn(config)` starts a persistent daemon and returns `{id, status, persist_path, ...}`.
 - `daemon_trigger(handle, event)` appends a durable FIFO trigger event.
@@ -3055,10 +3084,10 @@ with a `HostCallBridge` attached. Outside a bridge
 session they raise an error — don't call them from `harn run` in a
 plain terminal.
 
-- `host_tool_list()` returns `list<{name, description, schema}>` —
+- `harness.tools.list_registered()` returns `list<{name, description, schema}>` —
   every tool the attached host has registered. Call once per script;
   cache the result.
-- `host_tool_call(name, args)` invokes a host tool with a dict of
+- `harness.tools.invoke(name, args)` invokes a host tool with a dict of
   arguments. Returns an opaque value — narrow it yourself before
   field access (strict types mode treats this as an untyped boundary).
 
@@ -3071,11 +3100,11 @@ plain terminal.
   capability-aware primitives. Options make create, overwrite, parent
   creation, and `namespace`/`flush` durability explicit. Symlink destinations
   fail closed.
-- `glob(pattern, base?)` → list of matching paths. Pattern is matched
+- `harness.fs.glob(pattern, base?)` → list of matching paths. Pattern is matched
   against forward-slash paths relative to `base` (defaults to script
   source dir); `**` glob is supported.
 - `harness.fs.glob(pattern, base?)` is the capability-aware form and returns
-  the same matches as `glob(...)`.
+  the same matches as `harness.fs.glob(...)`.
 - `harness.fs.workspace_temp_dir()` returns the sandbox-visible workspace
   scratch directory, creating it lazily.
 - `harness.fs.mkdtemp_in_workspace(prefix?)` creates a unique directory under
@@ -3084,11 +3113,11 @@ plain terminal.
 - `harness.fs.mkdtemp(prefix?)` creates a uniquely named directory under the
   host temp dir. Use it only for host-temp work that does not need to be
   sandbox-visible; callers own cleanup with `harness.fs.delete(path)`.
-- `walk_dir(root, opts?)` → list of `{path, is_dir, is_file, depth}`.
+- `harness.fs.walk(root, opts?)` → list of `{path, is_dir, is_file, depth}`.
   `opts.max_depth: int` and `opts.follow_symlinks: bool` are honored.
-- `move_file(src, dst)` — `rename` with cross-filesystem copy+delete
+- `harness.fs.rename(src, dst)` — `rename` with cross-filesystem copy+delete
   fallback.
-- `read_lines(path)` → list of lines (no trailing newline). Handles
+- `harness.fs.read_lines(path)` → list of lines (no trailing newline). Handles
   CRLF correctly.
 - Direct runs can keep sandboxing on while writing outside the project with
   `harn run --write-root <path> script.harn`; the path is added to
@@ -3123,12 +3152,13 @@ Import with `import { pdf_bytes, write_pdf, extract_text, pdf_capabilities } fro
 `std/diff` exposes `diff_lines`, `unified_diff`, `colorize_diff`,
 `diff_summary`, `render_diff_stat`, `structural_diff`, and
 `changeset_summary`.
-`structural_diff(path_a, path_b, language_or_options?)` parses both files
+`structural_diff(ast, path_a, path_b, language_or_options?)` parses both files
 with the hostlib tree-sitter registry and returns changed syntax-node spans
 for human review. It is not patch-applicable. On unsupported languages,
 parse errors, or `max_bytes` / `max_nodes` / `max_graph_edges` limits, it
 returns `result: "fallback"`, `mode: "line"`, and a `line_diff` payload.
-`changeset_summary(files)` accepts `{path, before?, after?}` file images and
+`changeset_summary(ast, files)` accepts the narrow `HarnessAst` handle plus
+`{path, before?, after?}` file images and
 returns `harn.review_changeset.v1`: structural versus reshaped-only files,
 named symbol changes, and name-matched candidate `CALLS` relations explicitly
 labeled as heuristic. Unsupported inputs remain visible as degraded entries.
@@ -3183,8 +3213,8 @@ query_stringify([{key: "name", value: "ali ce"}])
 
 ### Date/time builtins
 
-- `date_now() -> {year, month, day, hour, minute, second, weekday, timestamp, iso8601}`.
-- `date_now_iso() -> string` returns current UTC as RFC 3339.
+- `harness.clock.now() -> {year, month, day, hour, minute, second, weekday, timestamp, iso8601}`.
+- `harness.clock.date_iso() -> string` returns current UTC as RFC 3339.
 - `date_parse(str) -> int | float` parses RFC 3339 / ISO 8601 first, then falls back to
   legacy digit extraction for malformed date-ish strings.
 - `date_format(ts, fmt?, tz?) -> string` supports chrono/strftime codes including `%A`,
@@ -3201,7 +3231,7 @@ query_stringify([{key: "name", value: "ali ce"}])
 
 - `http_get/post/put/patch/delete/request` return
   `{status, headers, body, ok}` for outbound HTTP calls.
-- `http_download(url, dst_path, options?)` streams a response body to disk and
+- `harness.net.download(url, dst_path, options?)` streams a response body to disk and
   returns `{bytes_written, status, headers, ok}`.
 - `http_stream_open/read/info/close` expose pull-based response streaming;
   `http_stream_read` returns `bytes` chunks and then `nil` at EOF.
@@ -3305,20 +3335,20 @@ Each primitive accepts named arguments (preferred) or the legacy
 positional form. Both lower to the same VM-enforced runtime.
 
 ```harn,ignore
-const answer  = ask_user(prompt: "choose A or B", schema: schema_of(Choice))
-const record  = request_approval(action: "merge_pr", args: {pr: 123}, quorum: 2,
+const answer  = harness.interaction.ask_user(prompt: "choose A or B", schema: schema_of(Choice))
+const record  = harness.interaction.request_approval(action: "merge_pr", args: {pr: 123}, quorum: 2,
                                reviewers: ["alice", "bob", "carol"])
-const result  = dual_control(n: 2, m: 3, action: destructive_step,
+const result  = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
                            approvers: ["alice", "bob", "carol"])
-const handle  = escalate_to(role: "oncall", reason: "deploy failed")
+const handle  = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
 ```
 
 - `ask_user<T>(prompt, schema?, timeout?, default?) -> T`
-- `request_approval(action, args?, detail?, quorum?, reviewers?, deadline?,
+- `harness.interaction.request_approval(action, args?, detail?, quorum?, reviewers?, deadline?,
   principal?, evidence_refs?, undo_metadata?, capabilities_requested?)
   -> {approved, reviewers, approved_at, reason, signatures}`
 - `dual_control<T>(n, m, action: fn() -> T, approvers?) -> T`
-- `escalate_to(role, reason)
+- `harness.interaction.escalate_to(role, reason)
   -> {request_id, role, reason, trace_id, status, accepted_at, reviewer}`
 - `hitl_pending({since?, until?, kinds?, agent?, limit?} | nil)
   -> list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>`
@@ -3346,7 +3376,7 @@ exercise the live trigger registry:
 - `trigger_register(config)` hot-installs a dynamic trigger and returns a
   `TriggerHandle`. `config.retry` accepts `{max, backoff}` with
   `backoff: "svix" | "immediate"`. `config.when_budget` accepts
-  `{max_cost_usd, tokens_max, timeout}` when `config.when` calls `llm_call(...)`.
+  `{max_cost_usd, tokens_max, timeout}` when `config.when` calls `harness.llm.call(...)`.
 - `trigger_fire(handle, event)` injects a synthetic `TriggerEvent` and returns a
   `DispatchHandle`.
 - `trigger_replay(event_id)` fetches an event from `triggers.events` and
@@ -3362,7 +3392,8 @@ Shared types live in `std/triggers`: `TriggerConfig`, `TriggerBinding`,
 
 Trust-graph helpers also live in `std/triggers`:
 
-- `handler_context()` returns the active trigger dispatch context or `nil`.
+- `harness.runtime.handler_context()` returns the active trigger dispatch
+  context or `nil`.
 - `trust_record(agent, action, approver, outcome, tier)` appends a manual
   trust record.
 - `trust_query(filters)` queries historical trust records, including
@@ -3383,7 +3414,7 @@ Current caveats:
 import "std/triggers"
 
 fn about_outages(event: TriggerEvent) -> bool {
-  const result = llm_call(
+  const result = harness.llm.call(
     "Is this message about outages? " + event.kind,
     nil,
     {provider: "mock", model: "gpt-4o-mini"},
@@ -3395,7 +3426,7 @@ const handle = trigger_register({
   id: "slack-outage-gate",
   kind: "slack.message",
   provider: "slack",
-  handler: fn(event) { return event.kind },
+  handler: fn(harness: Harness, event) { return event.kind },
   when: about_outages,
   when_budget: {max_cost_usd: 0.001, tokens_max: 500, timeout: "5s"},
   retry: nil,
@@ -3429,7 +3460,7 @@ import { triage_start_my_day } from "std/triage"
 const connector_events = []
 const feed = triage_start_my_day(connector_events, {emit: true})
 for event in feed.events {
-  log(event.summary)
+  harness.stdio.log(event.summary)
 }
 ```
 
@@ -3552,12 +3583,12 @@ const _accepted = bulletin_accept(bulletin, {decided_by: "user"})
 import { memory_open, memory_store, memory_recall, memory_summarize, memory_forget } from "std/memory"
 
 // Optional: configure the namespace once. Defaults to deterministic BM25.
-memory_open("workspace/acme", {backend: "hybrid", embed_dim: 1024, embed_model_hint: "voyage-2"})
+harness.memory.open("workspace/acme", {backend: "hybrid", embed_dim: 1024, embed_model_hint: "voyage-2"})
 
-memory_store("workspace/acme", "alice-profile", {text: "prefers Rust"}, ["profile"])
-const hits = memory_recall("workspace/acme", "rust", 5, {mode: "semantic"})
-const summary = memory_summarize("workspace/acme", {limit: 10})
-memory_forget("workspace/acme", {tag: "stale"})
+harness.memory.store("workspace/acme", "alice-profile", {text: "prefers Rust"}, ["profile"])
+const hits = harness.memory.recall("workspace/acme", "rust", 5, {mode: "semantic"})
+const summary = harness.memory.summarize("workspace/acme", {limit: 10})
+harness.memory.forget("workspace/acme", {tag: "stale"})
 ```
 
 - Append-only event log at `.harn/memory/<namespace>/events.jsonl`. Pass
@@ -3573,9 +3604,11 @@ memory_forget("workspace/acme", {tag: "stale"})
   `.harn/memory/<namespace>/vectors/<sanitized_model_hint>/<sha256(text)>.json`.
   Replays with the same event log and cache are deterministic without the
   host being attached.
-- In tests, register the embedder via `host_mock("memory", "embed", {result:
-  {vector: [...], dim: N, model: "..."}})`. Mocks can match on `params: {text,
-  model_hint}` for per-record vectors.
+- In tests, register the embedder on the exact harness:
+  `harness.testing.respond("memory", "embed",
+  {vector: [...], dim: N, model: "..."}, {text, model_hint})`.
+  The optional matcher selects per-record vectors, and
+  `harness.testing.calls()` proves which fixture fired.
 
 ### Durable steps (`step.run`)
 
@@ -3902,19 +3935,19 @@ needs a local cap.
 import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
 
 const backpressure = Backpressure()
-const pool = pool_create({
+const pool = pool_create(harness.agent, {
   name: "reviews",
   max_concurrent: 2,
   queue: fair_round_robin("tenant_id"),
   backpressure: backpressure.queue(100, "fail_submitter"),
 })
 
-const handle = pool.submit({ -> agent_loop("review", "You are a reviewer.") }, {
+const handle = pool.submit({ -> agent_loop(harness, "review", "You are a reviewer.") }, {
   tenant_id: "acme",
   priority: 10,
   idempotency_key: "review-pr-1984",
 })
-const result = pool_wait(handle)
+const result = pool_wait(harness.agent, handle)
 ```
 
 Pick-the-right-primitive:
@@ -3956,16 +3989,16 @@ Submit options:
 `pool.submit` returns a task handle (`_type: "pool_task"`) with `id`,
 `pool`, `pool_id`, `status`, `submitted_at`, `key`, `priority`, and
 (when terminal) `result` / `error` / `rejection_reason`.
-`pool_wait(handle)` (or a list of handles) blocks until terminal and
+`pool_wait(harness.agent, handle)` (or a list of handles) blocks until terminal and
 returns the final snapshot. `wait_agent(handle)` from
 `std/agent/workers` recognises pool task handles transparently.
 
 Inspection: `pool.size()`, `pool.snapshot()` (full dict with
 `active`, `queued`, `completed`, `failed`, `rejected`,
 `blocked_submitters`, `total`, selected `queue` / `backpressure`,
-per-task list, original `config`), `pool_get(name_or_id)`,
-`pool_list()`. Pipeline-scope pools also reload in-flight tasks past
-`stale_after_ms` as re-enqueued attempts; `pool_simulate_restart()`
+per-task list, original `config`), `pool_get(harness.agent, name_or_id)`,
+`pool_list(harness.agent)`. Pipeline-scope pools also reload in-flight tasks past
+`stale_after_ms` as re-enqueued attempts; `pool_simulate_restart(harness.agent)`
 drops the in-process registry for conformance tests.
 
 Route trigger events through a pool with the `SpawnToPool` handler
@@ -4007,7 +4040,7 @@ register_session_hook("user_prompt_submit", { event ->
   return nil
 })
 register_session_hook("file_edited", { event ->
-  log("edit: " + to_string(event?.path ?? ""))
+  harness.stdio.log("edit: " + to_string(event?.path ?? ""))
   return nil
 })
 ```
@@ -4089,11 +4122,11 @@ without string-sniffing:
 
 ```harn
 try {
-  const r = llm_call(user_prompt, nil, opts)
+  const r = harness.llm.call(user_prompt, nil, opts)
 } catch (e) {
   // e is {kind, reason, category, message, status?, retry_after_ms?, provider, model}
   if e.kind == "transient" && e.reason == "rate_limit" {
-    sleep(e.retry_after_ms ?? 1000)
+    harness.clock.sleep_ms(e.retry_after_ms ?? 1000)
     continue
   }
   throw e
@@ -4105,9 +4138,9 @@ Three helpers flatten the common recovery boilerplate:
 ```harn
 // Non-throwing envelope: the ok/response/error shape eliminates the
 // try/guard/unwrap/?.data boilerplate at every callsite.
-const r = llm_call_safe(user_prompt, nil, opts)
+const r = harness.llm.call_safe(user_prompt, nil, opts)
 if !r.ok {
-  log("llm_call failed:", r.error.category, r.error.message)
+  harness.stdio.log("llm_call failed:", r.error.category, r.error.message)
   return nil
 }
 const data = r.response.data
@@ -4117,10 +4150,10 @@ const data = r.response.data
 // pre-unwrapped and the schema-validated-JSON options are forced
 // by default (no repeated `output: {schema, validation: "error"}`
 // or `schema_retries` boilerplate at each callsite).
-const verdict = llm_call_structured(user_prompt, schema, {provider: "auto"})
+const verdict = harness.llm.call_structured(user_prompt, schema, {provider: "auto"})
 // ...or non-throwing:
-const r = llm_call_structured_safe(user_prompt, schema, {provider: "auto"})
-if !r.ok { log("structured call failed:", r.error.category); return nil }
+const r = harness.llm.call_structured_safe(user_prompt, schema, {provider: "auto"})
+if !r.ok { harness.stdio.log("structured call failed:", r.error.category); return nil }
 const data = r.data
 
 // Scoped permit acquisition + backoff for flaky providers. Retries on
@@ -4128,8 +4161,8 @@ const data = r.data
 // exponential backoff (capped at 30s). Composes with
 // HARN_RATE_LIMIT_<PROVIDER>_RPM/_TPM and provider/model catalog
 // `rate_limits` fields.
-const r = with_rate_limit("openai", fn() {
-  llm_call(user_prompt, nil, {provider: "openai"})
+const r = harness.llm.with_rate_limit("openai", fn() {
+  harness.llm.call(user_prompt, nil, {provider: "openai"})
 }, {max_retries: 5, backoff_ms: 500})
 ```
 
@@ -4151,15 +4184,15 @@ terminal reasons are `"auth_failure"`, `"context_overflow"`,
 deterministic provider decode or grammar-format failure. `llm_call` and
 `agent_loop` spend their retry budget only when `kind == "transient"`.
 
-Pair with `llm_mock({error: {category, message, retry_after_ms?}})` or
+Pair with `harness.llm.mock_enqueue({error: {category, message, retry_after_ms?}})` or
 the provider-envelope form
-`llm_mock({error: {status, kind, reason?, message?, retry_after_ms?}})`
+`harness.llm.mock_enqueue({error: {status, kind, reason?, message?, retry_after_ms?}})`
 to write deterministic tests for either helper's error path:
 
 ```harn
-llm_mock({error: {category: "rate_limit", message: "429", retry_after_ms: 2500}})
+harness.llm.mock_enqueue({error: {category: "rate_limit", message: "429", retry_after_ms: 2500}})
 try {
-  llm_call("hi", nil, {provider: "mock"})
+  harness.llm.call("hi", nil, {provider: "mock"})
 } catch (e) {
   assert(e.kind == "transient")
   assert(e.reason == "rate_limit")
@@ -4167,13 +4200,13 @@ try {
   assert(e.retry_after_ms == 2500)
 }
 
-llm_mock({error: {category: "rate_limit", message: "429"}})
-const r = llm_call_safe("hi", nil, {provider: "mock"})
+harness.llm.mock_enqueue({error: {category: "rate_limit", message: "429"}})
+const r = harness.llm.call_safe("hi", nil, {provider: "mock"})
 assert(!r.ok)
 assert(r.error.category == "rate_limit")
 
-llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
-const recovered = llm_call_safe("hi", nil, {provider: "mock"})
+harness.llm.mock_enqueue({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+const recovered = harness.llm.call_safe("hi", nil, {provider: "mock"})
 assert(!recovered.ok)
 assert(recovered.error.status == 503)
 assert(recovered.error.kind == "transient")
@@ -4183,7 +4216,7 @@ assert(recovered.error.reason == "upstream_unavailable")
 ## Composable LLM callers
 
 `agent_loop` accepts `llm_caller:` — a closure that owns the per-turn
-`llm_call(...)` invocation. Wrap with middleware from
+`harness.llm.call(...)` invocation. Wrap with middleware from
 `std/llm/handlers` to compose retry / fallback / shadow / logging /
 budget behavior without forking the loop:
 
@@ -4198,7 +4231,7 @@ const caller = compose([
 ])(default_llm_caller())
 
 const resilient_opts: AgentLoopOptions = {loop_until_done: true, llm_caller: caller}
-agent_loop(task, system, resilient_opts)
+agent_loop(harness, task, system, resilient_opts)
 ```
 
 The caller signature is `fn(call) -> {ok, value | status, error?}`
@@ -4220,7 +4253,7 @@ const route = agent_model_options({
   defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
 })
 const caller = with_retry(default_llm_caller(), {max_attempts: 3})
-agent_loop(task, system, route.options + {loop_until_done: true, llm_caller: caller})
+agent_loop(harness, task, system, route.options + {loop_until_done: true, llm_caller: caller})
 ```
 
 `agent_model_options` resolves explicit options, role env overrides such as
@@ -4253,7 +4286,7 @@ Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/
 
 `routing_policy({...})` builds a reusable handle that drives a chain of
 providers with failover, latency-aware racing, and per-call / session
-budget caps. Pipe it through `llm_call(... routing: policy ...)` to
+budget caps. Pipe it through `harness.llm.call(... routing: policy ...)` to
 replace ad-hoc `with_routing` + `with_retry` + `with_fallback`
 compositions with a single typed primitive.
 
@@ -4288,7 +4321,7 @@ const policy = routing_policy({
   max_refines_per_link: 1,                            // optional, default 1
 })
 
-const result = llm_call("Summarize this PR.", nil, {routing: policy})
+const result = harness.llm.call("Summarize this PR.", nil, {routing: policy})
 // result.routing = {policy, attempts: [{provider, model, status, duration_ms, cost_usd, error?, verifier_outcome?, verifier_signals?}], selected, session_cost_usd}
 ```
 
@@ -4356,7 +4389,7 @@ the schema-retry composition described above.
 
 ```harn,ignore
 // Inline ladder: ordered steps, cheapest first.
-const result = llm_call("Summarize this PR.", nil, {
+const result = harness.llm.call("Summarize this PR.", nil, {
   models: [
     "haiku",                                          // string sugar for {model: "haiku"}
     {model: "sonnet", label: "mid"},
@@ -4366,7 +4399,7 @@ const result = llm_call("Summarize this PR.", nil, {
 })
 
 // Named ladder resolved from the catalog ([model_ladders.<name>]).
-const result = llm_call("Summarize this PR.", nil, {ladder: "frugal"})
+const result = harness.llm.call("Summarize this PR.", nil, {ladder: "frugal"})
 ```
 
 Each step is `{model, provider?, options?, label?}`; a bare string is sugar for
@@ -4438,7 +4471,7 @@ const caller = compose_tool_callers([
 ])
 
 const audited_opts: AgentLoopOptions = {tools: registry, tool_caller: caller}
-agent_loop(task, system, audited_opts)
+agent_loop(harness, task, system, audited_opts)
 ```
 
 `with_audit_log` emits typed `ToolCallReceipt` records with rationale,
@@ -4517,9 +4550,9 @@ const run_command = preset_run_command({
   registry: registry,
   custom_rules: [],                                 // matched before the registry
   mode: tool_hooks_mode_rewrite_with_audit,         // default
-  inner: { args -> shell(args.command) },           // underlying executor
+  inner: { args -> harness.process.shell(args.command) }, // underlying executor
 })
-agent_loop(message, tools: {tools: [{name: "run_command", handler: run_command}]})
+agent_loop(harness, message, tools: {tools: [{name: "run_command", handler: run_command}]})
 ```
 
 - `stacks` opts catalogues in via `tool_hooks_filter` (catalogues with
@@ -4613,8 +4646,9 @@ Per-provider and per-model rate limiting is built in:
   legacy provider RPM. Env overrides config.
 - Or richer env overrides such as `HARN_RATE_LIMIT_MYPROVIDER_RPM=1000`
   and `HARN_RATE_LIMIT_MYPROVIDER_TPM=1000000`.
-- Or `llm_rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime.
-- Wrap individual call sites in `with_rate_limit(provider, fn, opts?)`
+- Or `harness.llm.rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime.
+- Wrap individual call sites in
+  `harness.llm.with_rate_limit(provider, fn, opts?)`
   to acquire a permit and auto-retry retryable failures.
 
 RPM/TPM shape sustained throughput; route `concurrency` and
@@ -4737,8 +4771,8 @@ import { client, exchange_code, request, start_authorization, token, token_excha
 const cli = client(
   providers().github,
   {
-    client_id: env("GH_CLIENT_ID"),
-    client_secret: env("GH_CLIENT_SECRET"),
+    client_id: harness.env.get("GH_CLIENT_ID"),
+    client_secret: harness.env.get("GH_CLIENT_SECRET"),
     scopes: ["read:user", "user:email"],
     redirect_uri: "http://127.0.0.1:8765/callback",
     storage: memory(),
@@ -4827,7 +4861,7 @@ encrypted file, a cloud platform, or a vault.
 import { memory, file, harn_cloud_session, harn_cloud_org, custom } from "std/oauth/storage"
 
 const mem = memory()                                       // ephemeral
-const disk = file("/var/lib/harn/oauth.bin", env("KEY"))   // AES-256-GCM
+const disk = file("/var/lib/harn/oauth.bin", harness.env.get("KEY"))   // AES-256-GCM
 const cloud = harn_cloud_session()                          // per-session
 const shared = harn_cloud_org()                             // org-scoped
 const vault = custom({get: my_get, set: my_set, delete: my_delete})
@@ -4865,11 +4899,11 @@ import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
 const token_set = device_flow(providers().github, {
-  client_id: env("GH_CLIENT_ID"),
+  client_id: harness.env.get("GH_CLIENT_ID"),
   scopes: ["read:user", "repo"],
-  storage: file("/var/lib/harn/ci.bin", env("HARN_OAUTH_KEY")),
+  storage: file("/var/lib/harn/ci.bin", harness.env.get("HARN_OAUTH_KEY")),
   on_user_code: { user_code, verification_uri ->
-    log("Open " + verification_uri + " and enter " + user_code)
+    harness.stdio.log("Open " + verification_uri + " and enter " + user_code)
   },
 })
 ```
@@ -4878,8 +4912,8 @@ const token_set = device_flow(providers().github, {
   is treated as a soft retry; `slow_down` bumps the interval by 5s;
   `expired_token` and `access_denied` raise.
 - **Cancellable.** Each inter-poll sleep is a cancellable point.
-- **Time-mock-friendly.** Polling routes through `sleep(ms)`, which
-  honors `mock_time(...)` / `advance_time(...)` for tests.
+- **Time-mock-friendly.** Polling routes through `harness.clock.sleep_ms(ms)`, which
+  honors `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)` for tests.
 - **Audit.** `oauth.device_flow.audit` `token_obtained` with presence
   flags only — never the `device_code` / `user_code` / access tokens.
 - **Provider support.** GitHub, Google, Microsoft, GitLab — the rest
@@ -4987,8 +5021,8 @@ for entry in drain_audit() {
 
 ## Prompt templates (`.harn.prompt` / `.prompt`)
 
-Load file-backed templates via `render("path.prompt", bindings)` or
-`render_prompt(...)`. Use `render_string(template, bindings)` when the
+Load file-backed templates via `harness.fs.render_prompt("path.prompt", bindings)` or
+`harness.fs.render_prompt(...)`. Use `harness.fs.render_template(template, bindings)` when the
 template source lives inline in a string literal. File paths resolve relative
 to the calling module's directory.
 
@@ -4998,8 +5032,8 @@ project root (nearest `harn.toml`) so refactors that move callers don't
 break asset references:
 
 ```harn,ignore
-render_prompt("@/prompts/tool-examples.harn.prompt", bindings)  // project-root
-render_prompt("@partials/tool-examples.harn.prompt", bindings)  // [asset_roots] alias
+harness.fs.render_prompt("@/prompts/tool-examples.harn.prompt", bindings)  // project-root
+harness.fs.render_prompt("@partials/tool-examples.harn.prompt", bindings)  // [asset_roots] alias
 ```
 
 Define aliases in `harn.toml`:
@@ -5009,11 +5043,11 @@ Define aliases in `harn.toml`:
 partials = "Sources/BurinCore/Resources/pipelines/partials"
 ```
 
-Both `render_prompt(...)` and `{{ include "@/..." }}` honor the same
+Both `harness.fs.render_prompt(...)` and `{{ include "@/..." }}` honor the same
 syntax. `harn check` validates the resolved files exist; bundle manifests
 and LSP go-to-definition follow `@`-paths to the target file.
 When an execution policy is active, file-backed templates and includes obey
-the same `workspace_roots` read boundary as `read_file(...)`.
+the same `workspace_roots` read boundary as `harness.fs.read_text(...)`.
 
 - `{{ name }}` — interpolation; nested with `{{ a.b[0] }}`.
 - `{{ if expr }}..{{ elif expr }}..{{ else }}..{{ end }}` — expression

@@ -18,7 +18,7 @@
  *
  * @effects: []
  * @errors: []
- * @example: pipeline_on_finish(on_finish_drain)
+ * @example: harness.agent.pipeline_on_finish(on_finish_drain)
  */
 /**
  * Read the current unsettled-state snapshot from a harness handle. A thin
@@ -28,7 +28,7 @@
  * @effects: [host]
  * @errors: []
  */
-pub fn unsettled_state(harness) {
+pub fn unsettled_state(harness: Harness) {
   return harness.unsettled_state()
 }
 
@@ -104,9 +104,9 @@ pub fn summary(state) {
  *
  * @effects: [host]
  * @errors: []
- * @example: pipeline_on_finish(on_finish_abandon)
+ * @example: harness.agent.pipeline_on_finish(on_finish_abandon)
  */
-pub fn on_finish_abandon(harness, return_value) {
+pub fn on_finish_abandon(harness: Harness, return_value) {
   const unsettled = harness.unsettled_state()
   if !is_empty(unsettled) {
     harness.emit_audit(
@@ -131,9 +131,9 @@ pub fn on_finish_abandon(harness, return_value) {
  *
  * @effects: [host]
  * @errors: []
- * @example: pipeline_on_finish(on_finish_drain)
+ * @example: harness.agent.pipeline_on_finish(on_finish_drain)
  */
-pub fn on_finish_drain(harness, return_value) {
+pub fn on_finish_drain(harness: Harness, return_value) {
   const unsettled = harness.unsettled_state()
   if is_empty(unsettled) {
     harness.emit_audit("pipeline_finalized", {reason: "no_unsettled"})
@@ -155,7 +155,7 @@ pub fn on_finish_drain(harness, return_value) {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: pipeline_on_finish(on_finish_block_until_settled(30s))
+ * @example: harness.agent.pipeline_on_finish(on_finish_block_until_settled(30s))
  */
 pub fn on_finish_block_until_settled(timeout = 30s, fallback = nil) {
   return { harness, return_value ->
@@ -186,7 +186,7 @@ pub fn on_finish_block_until_settled(timeout = 30s, fallback = nil) {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
+ * @example: harness.agent.pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
  */
 pub fn on_finish_handoff_to(target_pipeline, options = nil) {
   return { harness, return_value ->
@@ -214,8 +214,8 @@ pub fn on_finish_handoff_to(target_pipeline, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn lifecycle_audit_log_take() {
-  return pipeline_lifecycle_audit_log_take()
+pub fn lifecycle_audit_log_take(obs: HarnessObs) {
+  return obs.pipeline_lifecycle_audit_log_take()
 }
 
 /**
@@ -226,6 +226,6 @@ pub fn lifecycle_audit_log_take() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn lifecycle_audit_log_snapshot() {
-  return pipeline_lifecycle_audit_log_snapshot()
+pub fn lifecycle_audit_log_snapshot(obs: HarnessObs) {
+  return obs.pipeline_lifecycle_audit_log_snapshot()
 }

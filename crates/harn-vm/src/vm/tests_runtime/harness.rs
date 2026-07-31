@@ -36,6 +36,7 @@ pub(super) fn run_harn_with_options(source: &str, options: CompilerOptions) -> (
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 let result = vm.execute(&chunk).await.unwrap();
                 (vm.output().to_string(), result)
             })
@@ -65,6 +66,7 @@ pub(in crate::vm) fn run_harn_result_display_with_options(
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 let result = vm
                     .execute(&chunk)
                     .await
@@ -128,6 +130,7 @@ pub(in crate::vm) fn run_harn_at(path: &Path, source: &str) -> Result<(String, V
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 vm.set_source_info(&path.display().to_string(), source);
                 if let Some(parent) = path.parent() {
                     vm.set_source_dir(parent);
@@ -156,6 +159,7 @@ pub(super) fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 let result = vm.execute(&chunk).await?;
                 Ok((vm.output().to_string(), result))
             })
@@ -174,6 +178,7 @@ pub(in crate::vm) async fn run_harn_result_async(
 
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
+    vm.set_harness(crate::Harness::real());
     let result = vm.execute(&chunk).await?;
     Ok((vm.output().to_string(), result))
 }
@@ -198,6 +203,7 @@ where
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 setup(&mut vm);
                 let result = vm.execute(&chunk).await?;
                 Ok((vm.output().to_string(), result))
@@ -232,6 +238,7 @@ pub(super) fn run_vm(source: &str) -> String {
                 let chunk = Compiler::new().compile(&program).unwrap();
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 vm.execute(&chunk).await.unwrap();
                 vm.output().to_string()
             })
@@ -255,6 +262,7 @@ pub(super) fn run_vm_err(source: &str) -> String {
                 let chunk = Compiler::new().compile(&program).unwrap();
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 match vm.execute(&chunk).await {
                     Err(e) => format!("{e}"),
                     Ok(_) => panic!("Expected error"),
@@ -285,6 +293,7 @@ pub(super) fn run_harn_with_denied(
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 vm.set_denied_builtins(denied);
                 let result = vm.execute(&chunk).await?;
                 Ok((vm.output().to_string(), result))

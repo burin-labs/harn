@@ -335,15 +335,23 @@ pub struct RecordingSpan {
 
 impl RecordingSpan {
     pub fn finish(self, output: &Output) {
+        self.finish_parts(
+            output.status.code().unwrap_or(-1),
+            &output.stdout,
+            &output.stderr,
+        );
+    }
+
+    pub fn finish_parts(self, exit_code: i32, stdout: &[u8], stderr: &[u8]) {
         let duration = clock_mock::instant_now().duration_since(self.started_at);
         let entry = TapeEntry {
             program: self.program,
             args: self.args,
             cwd: self.cwd,
             env: BTreeMap::new(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(stdout).into_owned(),
+            stderr: String::from_utf8_lossy(stderr).into_owned(),
+            exit_code,
             duration_ms: duration.as_millis().min(u64::MAX as u128) as u64,
         };
         record_unified_spawn(&entry);

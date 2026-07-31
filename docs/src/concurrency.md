@@ -23,18 +23,18 @@ Launch background tasks and collect results:
 
 ```harn
 const handle = spawn {
-  sleep(1s)
+  harness.clock.sleep_ms(1s)
   "done"
 }
 
 const result = await(handle)  // blocks until complete
-log(result)                 // "done"
+harness.stdio.log(result)                 // "done"
 ```
 
 Cancel a task before it finishes:
 
 ```harn
-const handle = spawn { sleep(10s) }
+const handle = spawn { harness.clock.sleep_ms(10s) }
 cancel(handle)
 ```
 
@@ -56,7 +56,7 @@ it) after its siblings are cancelled.
 
 ```harn
 fn fetch(url) {
-  log(url)
+  harness.stdio.log(url)
 }
 
 scope {
@@ -111,7 +111,7 @@ Map over a collection concurrently:
 const files = ["a.txt", "b.txt", "c.txt"]
 
 const contents = parallel each files { file ->
-  read_file(file)
+  harness.fs.read_text(file)
 }
 ```
 
@@ -122,12 +122,12 @@ an eager list:
 
 ```harn
 const results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
-  sleep(ms)
+  harness.clock.sleep_ms(ms)
   ms
 } as stream
 
 for result in results {
-  log(result)
+  harness.stdio.log(result)
 }
 ```
 
@@ -150,14 +150,14 @@ const outcome = parallel settle items { item ->
   item * 10
 }
 
-log(outcome.succeeded)  // 2
-log(outcome.failed)     // 1
+harness.stdio.log(outcome.succeeded)  // 2
+harness.stdio.log(outcome.failed)     // 1
 
 for r in outcome.results {
   if is_ok(r) {
-    log(unwrap(r))
+    harness.stdio.log(unwrap(r))
   } else {
-    log(unwrap_err(r))
+    harness.stdio.log(unwrap_err(r))
   }
 }
 ```
@@ -187,9 +187,9 @@ const outcome = parallel settle [1, 2, 3] { item ->
   item * 10
 }
 
-log(outcome.succeeded)  // 3 — not 2
-log(outcome.failed)     // 0 — not 1
-log(outcome.results[1])  // Result.Ok(Result.Err({code: "terminal", ...}))
+harness.stdio.log(outcome.succeeded)  // 3 — not 2
+harness.stdio.log(outcome.failed)     // 0 — not 1
+harness.stdio.log(outcome.results[1])  // Result.Ok(Result.Err({code: "terminal", ...}))
 ```
 
 This matters whenever a branch reports a failing verdict as data rather than by
@@ -234,15 +234,15 @@ const outcome = settle_with_abort(lanes, { lane, token ->
     if abort_requested(token) {
       return Err({code: "stopped_waiting", message: "a sibling lane already failed"})
     }
-    sleep(10000)
+    harness.clock.sleep_ms(10000)
     polls = polls + 1
   }
   return Err({code: "timeout", message: "${lane} never became terminal"})
 }, {max_concurrent: 3})
 
-log(outcome.aborted)                 // true
-log(outcome.reason?.code)            // "lane_failed"
-log(decisive_error(outcome)?.code)   // "terminal" — never the lane that just stopped waiting
+harness.stdio.log(outcome.aborted)                 // true
+harness.stdio.log(outcome.reason?.code)            // "lane_failed"
+harness.stdio.log(decisive_error(outcome)?.code)   // "terminal" — never the lane that just stopped waiting
 ```
 
 `settle_with_abort(items, body, options?)` returns one `Result` per input item
@@ -311,7 +311,7 @@ Automatically retry a block that might fail:
 
 ```harn
 retry 3 {
-  http_get("https://flaky-api.example.com/data")
+  harness.net.get("https://flaky-api.example.com/data")
 }
 ```
 
@@ -325,7 +325,7 @@ Message-passing between concurrent tasks:
 
 ```harn
 const ch = channel("events")
-send(ch, {event: "start", timestamp: timestamp()})
+send(ch, {event: "start", timestamp: harness.clock.timestamp()})
 const msg = receive(ch)
 ```
 
@@ -345,7 +345,7 @@ spawn {
 }
 
 for chunk in ch {
-  log(chunk)
+  harness.stdio.log(chunk)
 }
 // prints "chunk 1" then "chunk 2", then the loop ends
 ```
@@ -354,9 +354,9 @@ This is especially useful with `llm_stream`, which returns a channel
 of response chunks:
 
 ```harn
-const stream = llm_stream("Tell me a story", "You are a storyteller")
+const stream = harness.llm.stream("Tell me a story", "You are a storyteller")
 for chunk in stream {
-  log(chunk)
+  harness.stdio.log(chunk)
 }
 ```
 
@@ -400,7 +400,7 @@ parallel 10 { i ->
   }
 }
 
-log(shared_get(budget)) // 10
+harness.stdio.log(shared_get(budget)) // 10
 ```
 
 Scopes are explicit:
@@ -434,7 +434,7 @@ critical section:
 
 ```harn,ignore
 const memo = shared_map({scope: "workflow_run", key: "memo"})
-const permit = sync_mutex_acquire("memo:customer-42", 250ms)
+const permit = harness.runtime.sync_mutex_acquire("memo:customer-42", 250ms)
 guard permit != nil else { throw "memo lock timeout" }
 try {
   shared_map_set(memo, "customer-42", compute_customer_summary())
@@ -456,7 +456,7 @@ spawn {
 }
 
 const msg = mailbox_receive(inbox)
-log(msg.kind)
+harness.stdio.log(msg.kind)
 ```
 
 `mailbox_send(target, value)` returns `false` when the target does not exist or
@@ -470,7 +470,7 @@ Examples:
 ```harn,ignore
 // Connector token refresh: only one task refreshes the token.
 const tokens = shared_map({scope: "tenant", tenant_id: "acme", key: "connector_tokens"})
-const lock = sync_mutex_acquire("token:acme:slack", 2s)
+const lock = harness.runtime.sync_mutex_acquire("token:acme:slack", 2s)
 guard lock != nil else { throw "token refresh busy" }
 try { shared_map_set(tokens, "slack", refresh_slack_token()) } finally { sync_release(lock) }
 
@@ -500,15 +500,15 @@ Thread-safe counters:
 
 ```harn
 const counter = atomic(0)
-log(atomic_get(counter))         // 0
+harness.stdio.log(atomic_get(counter))         // 0
 
 const before_add = atomic_add(counter, 5)
-log(before_add)                  // 0
-log(atomic_get(counter))         // 5
+harness.stdio.log(before_add)                  // 0
+harness.stdio.log(atomic_get(counter))         // 5
 
 const before_set = atomic_set(counter, 100)
-log(before_set)                  // 5
-log(atomic_get(counter))         // 100
+harness.stdio.log(before_set)                  // 5
+harness.stdio.log(atomic_get(counter))         // 100
 ```
 
 Atomic updates mutate the handle and return the previous integer value.
@@ -527,7 +527,7 @@ same resource mutually excludes regardless of where it appears:
 
 ```harn
 fn apply_charge(id) {
-  log(id)
+  harness.stdio.log(id)
 }
 
 const account_id = "acct-42"
@@ -554,7 +554,7 @@ or observable permits:
 ```harn
 fn update_index() { nil }
 
-const permit = sync_mutex_acquire("repo:index", 500ms)
+const permit = harness.runtime.sync_mutex_acquire("repo:index", 500ms)
 guard permit != nil else { throw "timed out waiting for repo index" }
 try {
   update_index()
@@ -571,7 +571,7 @@ Harn synchronization is intentionally higher-level than OS locks:
 |---|---|---|---|---|
 | `mutex { ... }` | process-local, per-call-site key | FIFO | cancellable | Small critical-section updates |
 | `mutex(resource) { ... }` | process-local, structural-value key | FIFO | cancellable | Guarding a named shared resource |
-| `sync_mutex_acquire(key, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Named critical sections |
+| `harness.runtime.sync_mutex_acquire(key, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Named critical sections |
 | `sync_rwlock_acquire(key, mode, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Shared readers / exclusive writers |
 | `sync_semaphore_acquire(key, capacity, permits?, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Bounded connector or model work |
 | `sync_gate_acquire(key, limit, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Fair runner admission |
@@ -590,9 +590,9 @@ primitives:
 
 ```harn
 const m = sync_metrics("gate", "workflow-runner")
-log(m?.acquisition_count)
-log(m?.timeout_count)
-log(m?.current_queue_depth)
+harness.stdio.log(m?.acquisition_count)
+harness.stdio.log(m?.timeout_count)
+harness.stdio.log(m?.current_queue_depth)
 ```
 
 Metrics include `acquisition_count`, `timeout_count`,
@@ -617,7 +617,7 @@ guard slot != nil else { throw "runner queue timed out" }
 try { workflow_execute("task", {}, [], {}) } finally { sync_release(slot) }
 
 // Critical-section update.
-const lock = sync_mutex_acquire("state:account-42", 250ms)
+const lock = harness.runtime.sync_mutex_acquire("state:account-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
 try { write_shared_state() } finally { sync_release(lock) }
 ```
@@ -661,11 +661,11 @@ is admitted as one full-window charge so unusually large work can still run,
 but the next reservation waits until the window clears. Duplicate bucket keys
 are rejected because they would make the atomic reservation ambiguous.
 
-For tests, combine `mock_time(...)` with `timeout_ms: 0` to assert admission or
+For tests, combine `harness.testing.clock_set(...)` with `timeout_ms: 0` to assert admission or
 timeout without real sleeps:
 
 ```harn
-mock_time(1000)
+harness.testing.clock_set(1000)
 
 const first = durable_rate_limit_acquire({key: "test", limit: 1, window_ms: 1s})
 const second = durable_rate_limit_acquire({
@@ -675,8 +675,8 @@ const second = durable_rate_limit_acquire({
   timeout_ms: 0,
 })
 
-log(first.ok)          // true
-log(second.timed_out) // true
+harness.stdio.log(first.ok)          // true
+harness.stdio.log(second.timed_out) // true
 ```
 
 ## Deadline
@@ -686,7 +686,7 @@ Set a timeout on a block of work:
 ```harn
 deadline 30s {
   // must complete within 30 seconds
-  agent_loop(task, system, {loop_until_done: true})
+  agent_loop(harness, task, system, {loop_until_done: true})
 }
 ```
 
@@ -698,7 +698,7 @@ loop, or on an uncaught throw:
 
 ```harn
 fn open(path) { return path }
-fn close(f) { log("closed ${f}") }
+fn close(f) { harness.stdio.log("closed ${f}") }
 
 const f = open("data.txt")
 defer { close(f) }
@@ -730,7 +730,7 @@ user-written `defer` blocks in LIFO order, so:
 
 ```harn
 const ch: owned<channel> = channel("log", 64)
-defer { log("user defer first (LIFO)") }
+defer { harness.stdio.log("user defer first (LIFO)") }
 // At scope exit: "user defer first (LIFO)" runs, then drop(ch).
 ```
 
@@ -757,11 +757,11 @@ frees up — fan-out stays bounded while the total work is unchanged.
 
 ```harn
 // Without a cap: all 200 requests hit the server at once.
-const results = parallel settle paths { p -> llm_call(p, nil, opts) }
+const results = parallel settle paths { p -> harness.llm.call(p, nil, opts) }
 
 // With max_concurrent=8: at most 8 in-flight calls at any moment.
 const results = parallel settle paths with { max_concurrent: 8 } { p ->
-  llm_call(p, nil, opts)
+  harness.llm.call(p, nil, opts)
 }
 ```
 
@@ -770,7 +770,7 @@ Negative values are treated as unlimited. The cap applies to every
 parallel mode, including the count form:
 
 ```harn
-fn process(i) { log(i) }
+fn process(i) { harness.stdio.log(i) }
 
 parallel 100 with { max_concurrent: 4 } { i ->
   process(i)
@@ -797,7 +797,7 @@ Configure provider limits via:
   This legacy form sets provider RPM.
 - `HARN_RATE_LIMIT_<PROVIDER>_TPM=1000000` or
   `HARN_RATE_LIMIT_<PROVIDER>_RPM=1000` for richer quota overrides.
-- `llm_rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime
+- `harness.llm.rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime
   from a pipeline.
 
 The controls compose: `max_concurrent` prevents caller-side bursts,
@@ -822,14 +822,14 @@ child tasks owned by the VM.
 Paginated fetch with bounded page fan-out:
 
 ```harn
-fn fetch_page(cursor) {
-  connector_call("notion", "search", {cursor: cursor, page_size: 100})
+fn fetch_page(net: HarnessNet, cursor) {
+  net.connector_call("notion", "search", {cursor: cursor, page_size: 100})
 }
 
-fn collect_pages(cursors) {
+fn collect_pages(net: HarnessNet, stdio: HarnessStdio, cursors) {
   const outcome = deadline 30s {
     parallel settle cursors with { max_concurrent: 4 } { cursor ->
-      fetch_page(cursor)
+      fetch_page(net, cursor)
     }
   }
 
@@ -838,7 +838,7 @@ fn collect_pages(cursors) {
     if is_ok(result) {
       pages = pages.appending(unwrap(result).items)
     } else {
-      log("page fetch failed: ${unwrap_err(result)}")
+      stdio.log("page fetch failed: ${unwrap_err(result)}")
     }
   }
   return pages
@@ -848,20 +848,20 @@ fn collect_pages(cursors) {
 Stream shutdown with cooperative cancellation:
 
 ```harn
-fn consume_stream(url) {
-  const stream = sse_connect(url)
-  defer { sse_close(stream) }
+fn consume_stream(net: HarnessNet, obs: HarnessObs, url) {
+  const stream = net.sse_connect(url)
+  defer { net.sse_close(stream) }
 
   while !is_cancelled() {
-    const event = sse_receive(stream, 5000)
+    const event = net.sse_receive(stream, 5000)
     if event == nil {
       continue
     }
-    event_log_emit("connector.events", event.kind, event.payload)
+    obs.event_log_emit("connector.events", event.kind, event.payload)
   }
 }
 
-const reader = spawn { consume_stream(binding.stream_url) }
+const reader = spawn { consume_stream(harness.net, harness.obs, binding.stream_url) }
 const shutdown = waitpoint_wait("connector.shutdown", {timeout: 1h})
 if shutdown.status == "completed" {
   cancel_graceful(reader, 2s)
@@ -886,11 +886,11 @@ const _streams = supervisor_start({
     kind: "connector_stream",
     restart: {mode: "on_failure", max_restarts: 8, window_ms: 60000, backoff_ms: 250, factor: 2, jitter_ms: 100, circuit_open_ms: 300000},
     task: { _ctx ->
-      const stream = sse_connect("https://example.invalid/events")
+      const stream = harness.net.sse_connect("https://example.invalid/events")
       while !is_cancelled() {
-        const event = sse_receive(stream, 5000)
+        const event = harness.net.sse_receive(stream, 5000)
         if event != nil {
-          event_log_emit("connector.github", event.kind, event.payload)
+          harness.obs.event_log_emit("connector.github", event.kind, event.payload)
         }
       }
     },
@@ -909,7 +909,7 @@ const _persona = supervisor_start({
     kind: "persona_loop",
     active_lease: "persona:review-captain",
     restart: {mode: "always", max_restarts: 10, window_ms: 300000, backoff_ms: 1000},
-    task: { _ctx -> agent_loop("watch the review inbox", nil, {mode: "daemon"}) },
+    task: { _ctx -> agent_loop(harness, "watch the review inbox", nil, {mode: "daemon"}) },
   }],
 })
 ```

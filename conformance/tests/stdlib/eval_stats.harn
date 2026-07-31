@@ -13,7 +13,7 @@ fn row(name, group, passes, trials, skips, timeouts, cost) {
   }
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const rows = [
     row("py-a", "python", 4, 4, 0, 0, 1.0),
     row("py-b", "python", 1, 4, 0, 1, 2.0),
@@ -182,5 +182,5 @@ pipeline test(task) {
   assert_eq(routing.under_escalated_cases, 1)
   assert_eq(round(routing.escalation_rate * 1000), 500)
   assert_eq(round(routing.convergence_at_frontier * 1000), 500)
-  log("stdlib eval stats ok")
+  harness.stdio.log("stdlib eval stats ok")
 }

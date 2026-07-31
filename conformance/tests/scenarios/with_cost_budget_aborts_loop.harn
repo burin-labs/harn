@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Cross-slice integration: agent_loop's llm_caller seam composes with
  * std/llm/handlers::with_budget. The synthetic caller burns 200 tokens per
@@ -7,7 +8,7 @@
  */
 import { with_budget } from "std/llm/handlers"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const synthetic = { _call ->
     return {
       ok: true,
@@ -21,8 +22,13 @@ pipeline default() {
       },
     }
   }
-  const caller = with_budget(synthetic, {max_total_tokens: 350, on_exceed: "short_circuit"})
+  const caller = with_budget(
+    harness,
+    synthetic,
+    {max_total_tokens: 350, on_exceed: "short_circuit"},
+  )
   const result = agent_loop(
+    harness,
     "hi",
     nil,
     {
@@ -34,5 +40,5 @@ pipeline default() {
       done_sentinel: "STOP",
     },
   )
-  __io_println(result.status)
+  harness.stdio.println(result.status)
 }

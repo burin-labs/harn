@@ -16,29 +16,29 @@ fn direct_schema_name_type() -> string {
   return schema_of(DirectTarget).properties.name.type
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   let direct_schema = schema_of(DirectTarget)
-  __io_println(direct_schema.type)
-  __io_println(direct_schema.required)
-  __io_println(direct_schema_name_type())
-  __io_println(direct_ok({name: "Ada", score: 2}))
-  __io_println(direct_ok({name: "Ada", score: "bad"}))
+  harness.stdio.println(direct_schema.type)
+  harness.stdio.println(direct_schema.required)
+  harness.stdio.println(direct_schema_name_type())
+  harness.stdio.println(direct_ok({name: "Ada", score: 2}))
+  harness.stdio.println(direct_ok({name: "Ada", score: "bad"}))
   let facade_schema = schema_of(FacadeTarget)
-  __io_println(facade_schema.type)
-  __io_println(facade_schema.required)
-  __io_println(schema_is({label: "via-facade"}, FacadeTarget))
-  __io_println(schema_is({label: 12}, FacadeTarget))
-  __io_println(
+  harness.stdio.println(facade_schema.type)
+  harness.stdio.println(facade_schema.required)
+  harness.stdio.println(schema_is({label: "via-facade"}, FacadeTarget))
+  harness.stdio.println(schema_is({label: 12}, FacadeTarget))
+  harness.stdio.println(
     schema_of(ImportedNested).properties.transport.properties.forwards_assistant_prefill.union[0]
       .type,
   )
-  __io_println(
+  harness.stdio.println(
     schema_of(GenericNested).properties.value.properties.forwards_assistant_prefill.union[0].type,
   )
-  __io_println(schema_of(OpenExtras).additional_properties.type)
-  __io_println(schema_is({model: "gpt-5"}, AgentLoopOptions))
-  __io_println(schema_is({model: 5}, AgentLoopOptions))
-  __io_println(schema_of(NestedReuse).type)
-  __io_println(schema_of(NestedReuse).properties.mids.union[0].type)
-  __io_println(schema_is({mids: {}}, NestedReuse))
+  harness.stdio.println(schema_of(OpenExtras).additional_properties.type)
+  harness.stdio.println(schema_is({model: "gpt-5"}, AgentLoopOptions))
+  harness.stdio.println(schema_is({model: 5}, AgentLoopOptions))
+  harness.stdio.println(schema_of(NestedReuse).type)
+  harness.stdio.println(schema_of(NestedReuse).properties.mids.union[0].type)
+  harness.stdio.println(schema_is({mids: {}}, NestedReuse))
 }

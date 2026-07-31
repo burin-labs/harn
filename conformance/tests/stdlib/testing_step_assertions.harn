@@ -10,24 +10,25 @@ import {
 } from "std/testing"
 
 @persona(name: "test_captain")
-fn test_captain(ctx) {
-  return checked_step(ctx)
+fn test_captain(clock: HarnessClock, ctx) {
+  return checked_step(clock, ctx)
 }
 
 @step(name: "checked_step")
-fn checked_step(ctx) {
+fn checked_step(clock: HarnessClock, ctx) {
   const wrapped = with_audit_receipt(
+    clock,
     fn() { return {value: ctx.value + ":done"} },
     {persona: "test_captain", step: "checked_step", started_at: "2026-01-01T00:00:00Z"},
   )
   return wrapped()
 }
 
-pipeline test() {
-  step_assertions_begin("test_captain")
-  const result = test_captain({value: "input"})
+pipeline test(harness: Harness) {
+  step_assertions_begin(harness.agent, "test_captain")
+  const result = test_captain(harness.clock, {value: "input"})
   assert_steps_ran(["checked_step"])
-  assert_step_received("checked_step", { event -> event.args[0].value == "input" })
+  assert_step_received("checked_step", { event -> event.args[1].value == "input" })
   assert_step_emitted("checked_step", { event -> event.output.result.value == "input:done" })
   assert_receipt_field(result.receipt, "/status", "success")
   assert_golden_transcript(
@@ -43,6 +44,6 @@ pipeline test() {
     },
     {events: [{type: "step", elapsed_ms: "<ms>", id: "<uuid>", payload: {value: "input:done"}}]},
   )
-  step_assertions_end()
-  __io_println("testing_step_assertions ok")
+  step_assertions_end(harness.agent)
+  harness.stdio.println("testing_step_assertions ok")
 }

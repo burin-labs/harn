@@ -9,13 +9,20 @@ import {
 } from "std/agent/progress"
 import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
-pipeline default() {
-  const session_id = "agent-progress-schema-" + uuid()
+pipeline default(harness: Harness) {
+  const session_id = "agent-progress-schema-" + harness.random.uuid()
   const captured = agent_capture_events(
+    harness.agent,
     session_id,
     fn() {
-      const session = agent_session_init("progress schema", nil, {session_id: session_id})
+      const session = agent_session_init(
+        harness.agent,
+        "progress schema",
+        nil,
+        {session_id: session_id},
+      )
       agent_progress(
+        harness.agent,
         {
           message: "normalizing",
           entries: [
@@ -29,7 +36,7 @@ pipeline default() {
           metadata: nil,
         },
       )
-      agent_session_finalize(session.session_id, "done")
+      agent_session_finalize(harness.agent, session.session_id, "done")
       return nil
     },
   )
@@ -52,21 +59,21 @@ pipeline default() {
     {name: "report_progress", description: "Report status.", system_prompt_nudge: nil},
   )
   const default_config = agent_progress_tool_config_normalize(nil)
-  __io_println("event_schema_ok=" + to_string(event_report.ok))
-  __io_println("payload_schema_ok=" + to_string(payload_report.ok))
-  __io_println("entry_count=" + to_string(len(event.entries)))
-  __io_println("first=" + event.entries[0].status + ":" + event.entries[0].priority)
-  __io_println(
+  harness.stdio.println("event_schema_ok=" + to_string(event_report.ok))
+  harness.stdio.println("payload_schema_ok=" + to_string(payload_report.ok))
+  harness.stdio.println("entry_count=" + to_string(len(event.entries)))
+  harness.stdio.println("first=" + event.entries[0].status + ":" + event.entries[0].priority)
+  harness.stdio.println(
     "second=" + event.entries[1].status + ":" + to_string(event.entries[1]?.priority ?? "none"),
   )
-  __io_println(
+  harness.stdio.println(
     "third=" + event.entries[2].status + ":" + to_string(event.entries[2]?.priority ?? "none"),
   )
-  __io_println("replace=" + to_string(event.replace))
-  __io_println("metadata_empty=" + to_string(len(event.metadata.keys()) == 0))
-  __io_println("bad_payload_ok=" + to_string(bad_payload.ok))
-  __io_println("bad_config_ok=" + to_string(bad_config.ok))
-  __io_println("config_name=" + config.name)
-  __io_println("config_nudge_nil=" + to_string(config.system_prompt_nudge == nil))
-  __io_println("default_config_name=" + default_config.name)
+  harness.stdio.println("replace=" + to_string(event.replace))
+  harness.stdio.println("metadata_empty=" + to_string(len(event.metadata.keys()) == 0))
+  harness.stdio.println("bad_payload_ok=" + to_string(bad_payload.ok))
+  harness.stdio.println("bad_config_ok=" + to_string(bad_config.ok))
+  harness.stdio.println("config_name=" + config.name)
+  harness.stdio.println("config_nudge_nil=" + to_string(config.system_prompt_nudge == nil))
+  harness.stdio.println("default_config_name=" + default_config.name)
 }

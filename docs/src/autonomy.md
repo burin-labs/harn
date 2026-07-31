@@ -23,7 +23,7 @@ import { autonomy_policy } from "std/agent/options"
 with_autonomy_policy(
   autonomy_policy("suggest", {agent: "release-captain", reviewers: ["maintainer"]}),
   fn() {
-    write_file("release-notes.md", "candidate")
+    harness.fs.write_text("release-notes.md", "candidate")
   },
 )
 ```
@@ -40,7 +40,7 @@ with_autonomy_policy(
     reviewers: ["maintainer"],
   },
   fn() {
-    write_file("docs/src/index.md", "# Docs")
+    harness.fs.write_text("docs/src/index.md", "# Docs")
   },
 )
 ```

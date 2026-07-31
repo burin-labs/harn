@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -14,8 +15,9 @@ import { llm_text, with_llm_script } from "std/testing"
  * and surfaces HARN-SUS-003 (worker is not suspended). The same
  * code path is exercised either way — only one resume can win.
  */
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -30,27 +32,28 @@ pipeline main() {
     ],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Park then race two resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
-      __io_println("pre_race_status=" + suspended.status)
-      const first = resume_agent(handle)
-      const done = wait_agent(handle)
-      __io_println("first_resume_status=" + first.status)
-      __io_println("post_first_status=" + done.status)
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println("pre_race_status=" + suspended.status)
+      const first = resume_agent(harness.agent, handle)
+      const done = wait_agent(harness.agent, handle)
+      harness.stdio.println("first_resume_status=" + first.status)
+      harness.stdio.println("post_first_status=" + done.status)
       const second = try {
-        resume_agent(handle)
+        resume_agent(harness.agent, handle)
       }
-      __io_println("second_resume_failed=" + to_string(is_err(second)))
+      harness.stdio.println("second_resume_failed=" + to_string(is_err(second)))
       const err_text = to_string(unwrap_err(second))
-      __io_println(
+      harness.stdio.println(
         "second_err_has_sus_code="
           + to_string(
           contains(err_text, "HARN-SUS-003") || contains(err_text, "HARN-SUS-006"),
         ),
       )
-      __io_println(
+      harness.stdio.println(
         "second_err_mentions_not_suspended="
           + to_string(contains(err_text, "not suspended")),
       )

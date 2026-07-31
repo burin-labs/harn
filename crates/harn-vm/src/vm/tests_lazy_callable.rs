@@ -1,6 +1,22 @@
 use std::sync::Arc;
 
+use crate::stdlib::register_vm_stdlib;
 use crate::{LazyPipelineCallable, LazyVmCallable, Vm, VmCallable, VmValue};
+
+fn pipeline_vm() -> Vm {
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    vm
+}
+
+fn pipeline_args(vm: &Vm, args: impl IntoIterator<Item = VmValue>) -> Vec<VmValue> {
+    std::iter::once(
+        vm.root_harness_value()
+            .expect("pipeline VM has root Harness authority"),
+    )
+    .chain(args)
+    .collect()
+}
 
 #[test]
 fn lazy_callable_reuses_one_vm_module_state_but_isolates_fresh_vms() {
@@ -94,18 +110,19 @@ async fn lazy_pipeline_callable_binds_arguments_and_returns_value() {
     std::fs::write(
         &module_path,
         r"
-pub pipeline run(value) {
+pub pipeline run(harness: Harness, value) {
   return {received: value}
 }
 ",
     )
     .expect("write pipeline module");
     let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
-    let mut vm = Vm::new();
+    let mut vm = pipeline_vm();
     vm.set_source_dir(caller_dir.path());
 
+    let args = pipeline_args(&vm, [VmValue::Int(42)]);
     let result = vm
-        .execute_callable(&callable, &[VmValue::Int(42)])
+        .execute_callable(&callable, &args)
         .await
         .expect("pipeline executes");
 
@@ -114,8 +131,9 @@ pub pipeline run(value) {
     };
     assert!(matches!(result.get("received"), Some(VmValue::Int(42))));
 
+    let args = pipeline_args(&vm, [VmValue::Int(43)]);
     let repeated = vm
-        .execute_callable(&callable, &[VmValue::Int(43)])
+        .execute_callable(&callable, &args)
         .await
         .expect("repeated pipeline execution does not bind exports into the caller");
     let VmValue::Dict(repeated) = repeated else {
@@ -138,15 +156,17 @@ async fn lazy_pipeline_callable_rejects_wrong_typed_argument() {
     std::fs::write(
         &module_path,
         r"
-pub pipeline run(value: int) -> int {
+pub pipeline run(harness: Harness, value: int) -> int {
   return value
 }
 ",
     )
     .expect("write pipeline module");
     let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
-    let error = Vm::new()
-        .execute_callable(&callable, &[VmValue::String("wrong".into())])
+    let mut vm = pipeline_vm();
+    let args = pipeline_args(&vm, [VmValue::String("wrong".into())]);
+    let error = vm
+        .execute_callable(&callable, &args)
         .await
         .expect_err("typed pipeline rejects the wrong runtime argument");
 
@@ -165,15 +185,17 @@ async fn lazy_pipeline_callable_resolves_module_type_alias_guard() {
         r"
 type Count = int
 
-pub pipeline run(value: Count) -> int {
+pub pipeline run(harness: Harness, value: Count) -> int {
   return value
 }
 ",
     )
     .expect("write pipeline module");
     let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
-    let error = Vm::new()
-        .execute_callable(&callable, &[VmValue::String("wrong".into())])
+    let mut vm = pipeline_vm();
+    let args = pipeline_args(&vm, [VmValue::String("wrong".into())]);
+    let error = vm
+        .execute_callable(&callable, &args)
         .await
         .expect_err("module alias guards the exported pipeline argument");
 
@@ -192,7 +214,7 @@ async fn lazy_pipeline_callable_accepts_explicit_nil_for_optional_shape_field() 
         r"
 type Options = {enabled?: bool}
 
-pub pipeline run(options: Options) -> bool {
+pub pipeline run(harness: Harness, options: Options) -> bool {
   return options.enabled == nil
 }
 ",
@@ -204,8 +226,10 @@ pub pipeline run(options: Options) -> bool {
         VmValue::Nil,
     )]));
 
-    let result = Vm::new()
-        .execute_callable(&callable, &[options])
+    let mut vm = pipeline_vm();
+    let args = pipeline_args(&vm, [options]);
+    let result = vm
+        .execute_callable(&callable, &args)
         .await
         .expect("optional shape field accepts explicit nil");
 

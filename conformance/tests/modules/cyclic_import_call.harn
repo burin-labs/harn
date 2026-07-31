@@ -4,7 +4,7 @@
 import { helper } from "cyclic_import_call_b"
 import { x_render } from "cyclic_import_call_x"
 
-pipeline default() {
-  __io_println(helper())
-  __io_println(x_render())
+pipeline default(harness: Harness) {
+  harness.stdio.println(helper())
+  harness.stdio.println(x_render())
 }

@@ -30,8 +30,8 @@ async fn file_fixture_runs_once_and_cow_value_isolates_parameterized_cases() {
         "suite/test_file_fixture.harn",
         r#"
 @test_fixture(scope: file)
-fn shared_fixture() -> dict {
-  append_file_locked("fixture-calls.log", "called\n")
+fn shared_fixture(harness: Harness) -> dict {
+  harness.fs.append_locked("fixture-calls.log", "called\n")
   return {items: [1]}
 }
 
@@ -166,8 +166,8 @@ pipeline test_broken(_fixture: int) {}
         "suite/z_later.harn",
         r#"
 @test_fixture(scope: file)
-fn later() -> int {
-  append_file_locked("later-fixture-ran.log", "unexpected\n")
+fn later(harness: Harness) -> int {
+  harness.fs.append_locked("later-fixture-ran.log", "unexpected\n")
   return 1
 }
 

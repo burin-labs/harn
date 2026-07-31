@@ -1,15 +1,16 @@
 import { debate } from "std/llm/ensemble"
 import { llm_call_count, llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const topic = "llm.ensemble.debate"
-  const cursor = event_log.latest(topic)
+  const cursor = harness.obs.event_log_latest(topic)
   const events = if cursor == nil {
-    event_log.subscribe({topic: topic})
+    harness.obs.event_log_subscribe({topic: topic})
   } else {
-    event_log.subscribe({topic: topic, from_cursor: cursor})
+    harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   }
   with_llm_script(
+    harness.llm,
     [
       llm_text("Paris is the capital of France."),
       llm_text("The answer is Paris, France."),
@@ -22,6 +23,8 @@ pipeline default() {
     ],
     { ->
       const result = debate(
+        harness.llm,
+        harness.obs,
         {
           prompt: "What is the capital of France?",
           debaters: ["alpha", "beta"],
@@ -32,15 +35,15 @@ pipeline default() {
         },
       )
       const event = events.next().value
-      __io_println(result.completed_rounds)
-      __io_println(result.stopped_early)
-      __io_println(result.stop_reason)
-      __io_println(llm_call_count())
-      __io_println(event.kind)
-      __io_println(event.payload.round)
-      __io_println(event.payload.requested_rounds)
-      __io_println(event.payload.consecutive_stable_rounds)
-      __io_println(event.payload.max_round_drift < 0.15)
+      harness.stdio.println(result.completed_rounds)
+      harness.stdio.println(result.stopped_early)
+      harness.stdio.println(result.stop_reason)
+      harness.stdio.println(llm_call_count(harness.llm))
+      harness.stdio.println(event.kind)
+      harness.stdio.println(event.payload.round)
+      harness.stdio.println(event.payload.requested_rounds)
+      harness.stdio.println(event.payload.consecutive_stable_rounds)
+      harness.stdio.println(event.payload.max_round_drift < 0.15)
     },
   )
 }

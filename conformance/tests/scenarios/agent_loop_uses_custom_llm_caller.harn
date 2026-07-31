@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Cross-slice integration: agent_loop's llm_caller seam composes with
  * std/llm/handlers::with_fallback. Caller A returns {ok: false, status: "auth"};
@@ -7,7 +8,7 @@
  */
 import { with_fallback } from "std/llm/handlers"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const caller_a = { _call -> return {ok: false, status: "auth", error: "bad-key"} }
   const caller_b = { _call ->
     return {
@@ -24,14 +25,19 @@ pipeline default() {
   }
   // Wrap the fallback in an outer caller so we can println the merged
   // fallback_index for the test before returning to agent_loop.
-  const inner = with_fallback([caller_a, caller_b])
+  const inner = with_fallback(harness.agent, [caller_a, caller_b])
   const observe = { call ->
     let env = inner(call)
-    __io_println("fallback_index=" + to_string(env?.fallback_index ?? -1))
-    __io_println("fallback_total=" + to_string(env?.fallback_total ?? -1))
+    harness.stdio.println("fallback_index=" + to_string(env?.fallback_index ?? -1))
+    harness.stdio.println("fallback_total=" + to_string(env?.fallback_total ?? -1))
     return env
   }
-  const result = agent_loop("hi", nil, {provider: "mock", llm_caller: observe, max_iterations: 1})
-  __io_println(result.status)
-  __io_println(result.visible_text)
+  const result = agent_loop(
+    harness,
+    "hi",
+    nil,
+    {provider: "mock", llm_caller: observe, max_iterations: 1},
+  )
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.visible_text)
 }

@@ -1,45 +1,45 @@
 // Test std/json module functions
 import { JsonParseFailure, merge, omit, pick } from "std/json"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Bare try over json_parse gives the canonical Result contract.
   const parsed_data: Result<unknown, JsonParseFailure> = try {
     json_parse("{\"name\":\"test\",\"value\":42}")
   }
   const data = unwrap(parsed_data)
-  __io_println(data.name)
-  __io_println(data.value)
+  harness.stdio.println(data.name)
+  harness.stdio.println(data.value)
   // Valid JSON null is Ok(nil), not a parse failure.
   const valid_null: Result<unknown, JsonParseFailure> = try {
     json_parse("null")
   }
-  __io_println(is_ok(valid_null))
-  __io_println(unwrap(valid_null))
+  harness.stdio.println(is_ok(valid_null))
+  harness.stdio.println(unwrap(valid_null))
   // Invalid JSON preserves the structured failure kind.
   const bad: Result<unknown, JsonParseFailure> = try {
     json_parse("not json {{{")
   }
-  __io_println(is_err(bad))
-  __io_println(unwrap_err(bad).kind)
+  harness.stdio.println(is_err(bad))
+  harness.stdio.println(unwrap_err(bad).kind)
   // Over-depth JSON has a distinct failure kind.
   const too_deep: Result<unknown, JsonParseFailure> = try {
     json_parse("[".repeat(129) + "0" + "]".repeat(129))
   }
-  __io_println(is_err(too_deep))
-  __io_println(unwrap_err(too_deep).kind)
+  harness.stdio.println(is_err(too_deep))
+  harness.stdio.println(unwrap_err(too_deep).kind)
   // merge: combine two dicts
   const merged = merge({a: 1, b: 2}, {b: 3, c: 4})
-  __io_println(merged.a)
-  __io_println(merged.b)
-  __io_println(merged.c)
+  harness.stdio.println(merged.a)
+  harness.stdio.println(merged.b)
+  harness.stdio.println(merged.c)
   // pick: select specific keys
   const picked = pick({a: 1, b: 2, c: 3}, ["a", "c"])
-  __io_println(json_stringify(picked))
+  harness.stdio.println(json_stringify(picked))
   // omit: remove specific keys
   const omitted = omit({a: 1, b: 2, c: 3}, ["b"])
-  __io_println(json_stringify(omitted))
+  harness.stdio.println(json_stringify(omitted))
   const non_finite = json_stringify([sqrt(-1.0)])
-  __io_println(non_finite)
+  harness.stdio.println(non_finite)
   const parsed_non_finite: list = json_parse(non_finite)
-  __io_println(parsed_non_finite[0])
+  harness.stdio.println(parsed_non_finite[0])
 }

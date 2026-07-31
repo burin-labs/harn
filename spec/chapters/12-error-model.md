@@ -103,8 +103,8 @@ site and the innermost catch handler exactly once, matching the
 
 ```harn,ignore
 fn fetch(prompt) {
-  // Without try*: try { llm_call(prompt) } / guard is_ok / unwrap
-  const response = try* llm_call(prompt)
+  // Without try*: try { harness.llm.call(prompt) } / guard is_ok / unwrap
+  const response = try* harness.llm.call(prompt)
   return parse(response)
 }
 

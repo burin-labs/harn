@@ -179,7 +179,12 @@ pub(super) fn sandboxed_output(
     let application = resolve_application_name(program);
     let sandbox_env = profile.environment_overrides(&sid_string)?;
     sandbox_trace(&trace_label, "AppContainer environment prepared");
-    let mut environment = environment_block(&config.env, &sandbox_env);
+    let mut environment = environment_block(
+        &config.env,
+        &sandbox_env,
+        config.closed_env,
+        &config.env_remove,
+    );
     let cwd = config.cwd.as_ref().map(|path| path_to_wide(path));
     let job = JobObject::create()?;
     sandbox_trace(&trace_label, "job object prepared");
@@ -841,9 +846,20 @@ fn resolve_application_name(program: &str) -> Option<Vec<u16>> {
 fn environment_block(
     overrides: &[(String, String)],
     sandbox_overrides: &[(String, String)],
+    closed_env: bool,
+    removed: &[String],
 ) -> Vec<u16> {
-    let mut values: Vec<(String, String)> = std::env::vars().collect();
+    let mut values: Vec<(String, String)> = if closed_env {
+        Vec::new()
+    } else {
+        std::env::vars().collect()
+    };
     upsert_env_pairs(&mut values, overrides);
+    values.retain(|(key, _)| {
+        !removed
+            .iter()
+            .any(|removed| key.eq_ignore_ascii_case(removed))
+    });
     upsert_env_pairs(&mut values, sandbox_overrides);
     values.sort_by(|left, right| {
         left.0
@@ -924,7 +940,12 @@ mod tests {
             ),
         ];
 
-        let decoded = decode_environment_block(&environment_block(&overrides, &sandbox_overrides));
+        let decoded = decode_environment_block(&environment_block(
+            &overrides,
+            &sandbox_overrides,
+            false,
+            &[],
+        ));
 
         assert!(decoded.iter().any(|entry| entry == "CUSTOM=kept"));
         assert!(decoded.iter().any(|entry| entry
@@ -937,6 +958,22 @@ mod tests {
                 == "TMP=C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp"));
         assert!(!decoded.iter().any(|entry| entry == "TEMP=C:\\outside"));
         assert!(!decoded.iter().any(|entry| entry == "TMP=C:\\outside"));
+    }
+
+    #[test]
+    fn environment_block_honors_closed_environment_and_removals() {
+        let overrides = vec![
+            ("KEEP".to_string(), "yes".to_string()),
+            ("REMOVE".to_string(), "no".to_string()),
+        ];
+        let decoded = decode_environment_block(&environment_block(
+            &overrides,
+            &[],
+            true,
+            &["remove".to_string()],
+        ));
+
+        assert_eq!(decoded, vec!["KEEP=yes"]);
     }
 
     fn decode_environment_block(block: &[u16]) -> Vec<String> {

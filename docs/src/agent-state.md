@@ -72,7 +72,7 @@ That means common agent code can usually say:
 ```harn
 import "std/agent_state"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const state = agent_state_init(".harn/state", {writer_id: "planner"})
   agent_state_write(state, "plan.md", "# Plan")
 }
@@ -87,7 +87,7 @@ Keys are always **relative** to the session root. Nested paths are fine:
 ```harn
 import "std/agent_state"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const state = agent_state_init(".harn/state", {writer_id: "planner"})
   agent_state_write(state, "plan.md", "# Plan")
   agent_state_write(state, "evidence/files.json", "{\"paths\":[]}")
@@ -198,7 +198,7 @@ in without changing the Harn-facing handle semantics.
 ```harn
 import "std/agent_state"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const state = agent_state_init(".harn/state", {
     session_id: "review-42",
     writer_id: "triage"
@@ -213,6 +213,6 @@ pipeline default() {
   const resumed = agent_state_resume(".harn/state", "review-42", {
     writer_id: "implement"
   })
-  log(agent_state_read(resumed, "plan.md"))
+  harness.stdio.log(agent_state_read(resumed, "plan.md"))
 }
 ```

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn note_tools() {
@@ -16,8 +17,9 @@ fn note_tools() {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       llm_text("_call>_call>"),
       llm_text("<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"),
@@ -25,6 +27,7 @@ pipeline default() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Write notes.txt.",
         nil,
         {
@@ -36,22 +39,24 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
-      __io_println(result.status)
-      __io_println(result.tools.successful[0])
-      __io_println(contains(retry_messages, "parse_guidance"))
-      __io_println(contains(retry_messages, "Stray text outside response tags"))
-      __io_println(!contains(retry_messages, "no_progress_streak"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(contains(retry_messages, "parse_guidance"))
+      harness.stdio.println(contains(retry_messages, "Stray text outside response tags"))
+      harness.stdio.println(!contains(retry_messages, "no_progress_streak"))
     },
   )
   // Single recovered text calls are no longer a retry boundary. The parser
   // canonicalizes the call for history, dispatches it, and the next model turn
   // should not be polluted with parse_guidance.
   with_llm_script(
+    harness.llm,
     [llm_text("write_note({ path: \"notes.txt\" })"), llm_text("<done>##DONE##</done>")],
     { ->
       const result = agent_loop(
+        harness,
         "Write notes.txt.",
         nil,
         {
@@ -63,18 +68,20 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const next_messages = json_stringify(calls[1].messages)
-      __io_println(result.status)
-      __io_println(result.tools.successful[0])
-      __io_println(!contains(next_messages, "parse_guidance"))
-      __io_println(!contains(next_messages, "Stray text outside response tags"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(!contains(next_messages, "parse_guidance"))
+      harness.stdio.println(!contains(next_messages, "Stray text outside response tags"))
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("_call>_call>"), llm_text("##DONE##")],
     { ->
       const result = agent_loop(
+        harness,
         "Write notes.txt.",
         nil,
         {
@@ -88,11 +95,11 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
-      __io_println(result.status)
-      __io_println(!contains(retry_messages, "parse_guidance"))
-      __io_println(!contains(retry_messages, "Stray text outside response tags"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(!contains(retry_messages, "parse_guidance"))
+      harness.stdio.println(!contains(retry_messages, "Stray text outside response tags"))
     },
   )
   // Partial success: one call parses and dispatches while a sibling call in the
@@ -100,6 +107,7 @@ pipeline default() {
   // still reach the model as parse_guidance, flagged has_partial_success so the
   // model knows the good call landed and only re-emits the bad one.
   with_llm_script(
+    harness.llm,
     [
       llm_text(
         "<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>\n"
@@ -109,6 +117,7 @@ pipeline default() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Write a.txt.",
         nil,
         {
@@ -120,19 +129,20 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
-      __io_println(result.status)
-      __io_println(result.tools.successful[0])
-      __io_println(contains(retry_messages, "parse_guidance"))
-      __io_println(contains(retry_messages, "parsed successfully and were dispatched"))
-      __io_println(!contains(retry_messages, "no_progress_streak"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(contains(retry_messages, "parse_guidance"))
+      harness.stdio.println(contains(retry_messages, "parsed successfully and were dispatched"))
+      harness.stdio.println(!contains(retry_messages, "no_progress_streak"))
     },
   )
   // Wrapper-corrupted batches are different from partial-success siblings:
   // multiple calls recovered from top-level stray text are ambiguous, so the
   // loop should dispatch none of them and ask for one clean retry.
   with_llm_script(
+    harness.llm,
     [
       llm_text(
         "<|assistant|>\n"
@@ -145,6 +155,7 @@ pipeline default() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Write one note.",
         nil,
         {
@@ -156,22 +167,24 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
-      __io_println(result.status)
-      __io_println(result.tools.successful[0])
-      __io_println(len(result.tools.successful))
-      __io_println(contains(retry_messages, "parse_guidance"))
-      __io_println(contains(retry_messages, "none were dispatched"))
-      __io_println(!contains(retry_messages, "parsed successfully and were dispatched"))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(len(result.tools.successful))
+      harness.stdio.println(contains(retry_messages, "parse_guidance"))
+      harness.stdio.println(contains(retry_messages, "none were dispatched"))
+      harness.stdio.println(!contains(retry_messages, "parsed successfully and were dispatched"))
     },
   )
   // If the retry budget ends on a complete parse drop, terminal ownership is
   // the harness boundary rather than the model that emitted the lost bytes.
   with_llm_script(
+    harness.llm,
     [llm_text("```\n<perform_action>\nsearch({ query: \"lost.txt\" })\n</perform_action>\n```")],
     { ->
       const result = agent_loop(
+        harness,
         "Write lost.txt.",
         nil,
         {
@@ -183,9 +196,9 @@ pipeline default() {
           tools: note_tools(),
         },
       )
-      __io_println(result.status)
-      __io_println(result.terminal_class)
-      __io_println(result.terminal.owner)
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.terminal_class)
+      harness.stdio.println(result.terminal.owner)
     },
   )
 }

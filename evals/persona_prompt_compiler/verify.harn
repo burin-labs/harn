@@ -24,9 +24,9 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("invalid persona prompt eval artifact: " + to_string(e))
     return 1
   }
-  const manifest_path = path_join(source_dir(), "harn.eval.toml")
+  const manifest_path = path_join(harness.fs.source_dir(), "harn.eval.toml")
   const eval_manifest = eval_pack_manifest(
-    toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()},
+    toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: harness.fs.source_dir()},
   )
   const eval_case = eval_manifest.cases.find({ entry -> entry.id == case_id })
   guard eval_case != nil else {
