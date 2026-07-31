@@ -31,7 +31,7 @@ use crate::{
     TriggerEvent, TriggerEventId, TriggerKind,
 };
 
-mod abi;
+pub mod abi;
 
 thread_local! {
     static ACTIVE_HARN_CONNECTOR_CTX: RefCell<Vec<ConnectorCtx>> = const { RefCell::new(Vec::new()) };

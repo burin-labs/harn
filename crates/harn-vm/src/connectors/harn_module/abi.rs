@@ -8,21 +8,38 @@ use crate::value::{VmClosure, VmValue};
 use crate::vm::Vm;
 use crate::ConnectorError;
 
+const METADATA_EXPORTS: [&str; 3] = ["provider_id", "kinds", "payload_schema"];
+
+// Metadata exports are pure and deliberately absent. This is the one
+// authoritative registry for exports the connector runtime invokes with root
+// authority. Contract validation and language tooling project from it.
+const RUNTIME_EXPORTS: [(&str, usize); 6] = [
+    ("init", 1),
+    ("activate", 1),
+    ("shutdown", 0),
+    ("normalize_inbound", 1),
+    ("call", 2),
+    ("poll_tick", 1),
+];
+
+/// Whether `name` is invoked by the connector runtime with root authority.
+pub fn is_runtime_export(name: &str) -> bool {
+    RUNTIME_EXPORTS
+        .iter()
+        .any(|(export, _host_arg_count)| *export == name)
+}
+
+/// Pure metadata exports required to identify a Harn connector module.
+pub const fn metadata_exports() -> &'static [&'static str] {
+    &METADATA_EXPORTS
+}
+
 pub(super) fn validate_runtime_export_abi(
     exports: &BTreeMap<String, Arc<VmClosure>>,
 ) -> Result<(), ConnectorError> {
-    // Metadata exports are pure and deliberately absent. Every export the
-    // runtime may invoke receives the root authority first; helpers inside the
+    // Every runtime export receives root authority first; helpers inside the
     // connector should immediately attenuate it to the nominal handles they
     // actually need.
-    const RUNTIME_EXPORTS: [(&str, usize); 6] = [
-        ("init", 1),
-        ("activate", 1),
-        ("shutdown", 0),
-        ("normalize_inbound", 1),
-        ("call", 2),
-        ("poll_tick", 1),
-    ];
     for (name, host_arg_count) in RUNTIME_EXPORTS {
         let Some(closure) = exports.get(name) else {
             continue;

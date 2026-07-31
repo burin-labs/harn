@@ -25,7 +25,14 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
     // this structural registration as stronger evidence than local body-use
     // counting; narrowing it would make the callback uncallable.
     let mut boundary_callbacks = BTreeSet::new();
+    let mut public_functions = BTreeSet::new();
     visit::walk_program(program, &mut |node| {
+        if let Node::FnDecl {
+            name, is_pub: true, ..
+        } = &node.node
+        {
+            public_functions.insert(name.clone());
+        }
         let Node::DictLiteral(entries) = &node.node else {
             return;
         };
@@ -41,6 +48,9 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
             }
         }
     });
+    let connector_module = harn_vm::connectors::harn_module::abi::metadata_exports()
+        .iter()
+        .all(|name| public_functions.contains(*name));
 
     for declaration in program {
         let (declaration, attributed_boundary) = match &declaration.node {
@@ -70,7 +80,14 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
                 params[1].type_expr.as_ref(),
                 Some(TypeExpr::Named(type_name)) if type_name == "TriggerEvent"
             );
-        if !attributed_boundary && !trigger_boundary && !boundary_callbacks.contains(name) {
+        let connector_boundary = connector_module
+            && *is_pub
+            && harn_vm::connectors::harn_module::abi::is_runtime_export(name);
+        if !attributed_boundary
+            && !trigger_boundary
+            && !connector_boundary
+            && !boundary_callbacks.contains(name)
+        {
             check_capability_attenuation(name, params, body, declaration, diagnostics);
         }
         if *is_pub {
@@ -271,6 +288,34 @@ mod tests {
         let diagnostics =
             lint("pub fn on_event(harness: Harness, event: TriggerEvent) { return event.kind }");
         assert!(diagnostics.iter().all(|d| d.rule != ATTENUATION_RULE));
+    }
+
+    #[test]
+    fn preserves_connector_runtime_export_boundaries() {
+        let diagnostics = lint(
+            "pub fn provider_id() { return \"example\" }\n\
+             pub fn kinds() { return [\"webhook\"] }\n\
+             pub fn payload_schema() { return {} }\n\
+             pub fn init(harness: Harness, ctx) { harness.runtime.store_set(\"ctx\", ctx) }\n\
+             pub fn normalize_inbound(harness: Harness, raw) { return {raw: raw, secret: harness.secrets.read(\"hook\")} }\n\
+             pub fn helper(harness: Harness) { harness.runtime.store_get(\"ctx\") }",
+        );
+        let attenuation = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.rule == ATTENUATION_RULE)
+            .collect::<Vec<_>>();
+        assert_eq!(attenuation.len(), 1);
+        assert!(attenuation[0].message.contains("helper `helper`"));
+    }
+
+    #[test]
+    fn ordinary_public_function_named_like_connector_export_is_not_exempt() {
+        let diagnostics = lint(
+            "pub fn call(harness: Harness, method, args) { harness.net.request(method, args.url) }",
+        );
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == ATTENUATION_RULE));
     }
 
     #[test]
