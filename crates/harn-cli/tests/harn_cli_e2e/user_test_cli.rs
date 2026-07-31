@@ -112,6 +112,82 @@ pipeline test_beta(task) {
 }
 
 #[test]
+fn cold_import_graph_is_reported_before_user_test_execution() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite = temp.path().join("suite");
+    std::fs::create_dir_all(&suite).expect("create suite");
+    for index in (0..32).rev() {
+        let helpers = (0..32)
+            .map(|helper| format!("fn helper_{index}_{helper}() {{ return {helper} }}\n"))
+            .collect::<String>();
+        let source = if index == 31 {
+            format!("{helpers}\npub fn value_31() {{ return 511 }}\n")
+        } else {
+            format!(
+                "{helpers}\nimport {{ value_{} }} from \"./module_{}\"\npub fn value_{index}() {{ return value_{}() }}\n",
+                index + 1,
+                index + 1,
+                index + 1,
+            )
+        };
+        std::fs::write(suite.join(format!("module_{index}.harn")), source)
+            .expect("write cold graph module");
+    }
+    std::fs::write(
+        suite.join("test_cold_graph.harn"),
+        r#"
+import { value_0 } from "./module_0"
+pipeline test_cold_graph(_task) { assert_eq(value_0(), 511) }
+"#,
+    )
+    .expect("write test");
+
+    let output = Command::new(binary_path())
+        .env("HARN_CACHE_DIR", temp.path().join("bytecode-cache"))
+        .args([
+            "test",
+            suite.to_str().expect("suite path is UTF-8"),
+            "--timeout",
+            "5000",
+            "--timing",
+            "--diagnose",
+        ])
+        .output()
+        .expect("spawn harn test");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let phase_line = stdout
+        .lines()
+        .find(|line| line.starts_with("Phase totals:"))
+        .unwrap_or_else(|| panic!("missing phase totals:\n{stdout}"));
+    let compile_ms = phase_line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("compile="))
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_else(|| panic!("missing compile phase value: {phase_line}"));
+
+    assert!(
+        compile_ms > 0,
+        "a deliberately cold 512-function module must be visible in the suite compile phase: {phase_line}"
+    );
+    assert!(
+        stdout.contains("compile=") && stdout.contains("(32 modules)"),
+        "aggregate module attribution must own the cold compile:\n{stdout}"
+    );
+    assert!(
+        stderr.contains("modules_compiled=0"),
+        "the case diagnostic must prove compilation finished before its execution clock:\n{stderr}"
+    );
+}
+
+#[test]
 fn empty_user_suite_pins_default_latency_representation() {
     let temp = tempfile::TempDir::new().expect("tempdir");
 

@@ -381,6 +381,7 @@ async fn run_tests_with_session_impl(
 
     let mut cases = discovery.cases;
     sort_cases_longest_first(&mut cases, &timings);
+    let module_preparation = session.prepare_import_graph(&case_files(&cases));
 
     let mut all_results = discovery.discovery_errors;
     let total_tests = cases.len();
@@ -428,7 +429,7 @@ async fn run_tests_with_session_impl(
     let total = all_results.len();
     let passed = all_results.iter().filter(|result| result.passed).count();
     let failed = total - passed;
-    let aggregate = AggregateTimings::from_results(collection_ms, &all_results);
+    let aggregate = AggregateTimings::from_results(collection_ms, module_preparation, &all_results);
 
     TestSummary {
         results: all_results,
@@ -502,6 +503,7 @@ async fn run_test_file_with_session_impl(
     let mut cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
     seed_imported_enum_candidates(path, &source, &mut cases);
     let skill_contexts = PreparedSkillContexts::prepare(&cases, cli_skill_dirs);
+    let _module_preparation = session.prepare_import_graph(&case_files(&cases));
 
     let mut results = Vec::with_capacity(cases.len());
     let execution_cwd = execution_cwd
@@ -807,6 +809,15 @@ fn count_files_with_cases(cases: &[TestCase]) -> usize {
         files.insert(case.file.as_path());
     }
     files.len()
+}
+
+fn case_files(cases: &[TestCase]) -> Vec<PathBuf> {
+    cases
+        .iter()
+        .map(|case| case.file.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn timings_key(file: &Path, name: &str) -> String {

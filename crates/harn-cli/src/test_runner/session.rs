@@ -2,21 +2,27 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 
+use super::reporting::SuiteModulePreparation;
+
 /// Reusable runtime state for repeated user-test runs.
 ///
-/// Each logical worker retains its own bounded prepared-module cache while
-/// every test case still receives a fresh VM and fresh runtime state. Keeping
-/// the cache per worker avoids introducing cross-worker contention while
-/// allowing watch mode and long-lived embedders to amortize module hydration.
+/// Logical workers share one bounded cache of immutable prepared bytecode while
+/// every test case still receives a fresh VM and fresh runtime state. Sharing
+/// lets the suite prepare its import graph once before per-test clocks start,
+/// instead of making one arbitrary test on every worker pay the cold compile.
 pub struct TestRunSession {
-    prepared_module_caches: Mutex<Vec<harn_vm::PreparedModuleCache>>,
+    prepared_module_cache: harn_vm::PreparedModuleCache,
+    workers: Mutex<usize>,
+    clock: std::sync::Arc<dyn harn_vm::clock::Clock>,
     stdio_available: bool,
 }
 
 impl Default for TestRunSession {
     fn default() -> Self {
         Self {
-            prepared_module_caches: Mutex::new(Vec::new()),
+            prepared_module_cache: harn_vm::PreparedModuleCache::default(),
+            workers: Mutex::new(0),
+            clock: harn_vm::clock::RealClock::arc(),
             stdio_available: true,
         }
     }
@@ -44,29 +50,37 @@ impl TestRunSession {
     }
 
     pub fn stats(&self) -> TestRunSessionStats {
-        self.prepared_module_caches
-            .lock()
-            .unwrap()
-            .iter()
-            .map(harn_vm::PreparedModuleCache::stats)
-            .fold(TestRunSessionStats::default(), |mut total, stats| {
-                total.workers += 1;
-                total.hits = total.hits.saturating_add(stats.hits);
-                total.misses = total.misses.saturating_add(stats.misses);
-                total.insertions = total.insertions.saturating_add(stats.insertions);
-                total.evictions = total.evictions.saturating_add(stats.evictions);
-                total.entries = total.entries.saturating_add(stats.entries);
-                total
-            })
+        let stats = self.prepared_module_cache.stats();
+        TestRunSessionStats {
+            workers: *self.workers.lock().unwrap(),
+            hits: stats.hits,
+            misses: stats.misses,
+            insertions: stats.insertions,
+            evictions: stats.evictions,
+            entries: stats.entries,
+        }
     }
 
     pub(super) fn prepared_module_cache(
         &self,
         worker_index: usize,
     ) -> harn_vm::PreparedModuleCache {
-        let mut caches = self.prepared_module_caches.lock().unwrap();
-        caches.resize_with(worker_index.saturating_add(1), Default::default);
-        caches[worker_index].clone()
+        let mut workers = self.workers.lock().unwrap();
+        *workers = (*workers).max(worker_index.saturating_add(1));
+        self.prepared_module_cache.clone()
+    }
+
+    pub(super) fn prepare_import_graph(
+        &self,
+        roots: &[std::path::PathBuf],
+    ) -> SuiteModulePreparation {
+        let started_ms = self.clock.monotonic_ms();
+        let modules = self.prepared_module_cache.prepare_import_graph(roots);
+        let duration_ms = self.clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64;
+        SuiteModulePreparation {
+            duration_ms,
+            modules,
+        }
     }
 
     pub(super) fn stdio_available(&self) -> bool {

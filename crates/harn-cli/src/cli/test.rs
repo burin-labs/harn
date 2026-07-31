@@ -30,7 +30,8 @@ pub(crate) struct TestArgs {
     #[arg(long)]
     pub junit: Option<String>,
     /// Per-test timeout in milliseconds. For user suites, this bounds only
-    /// pipeline execution; other targets bound their test case or subprocess.
+    /// pipeline execution; setup and shared import-graph compilation are
+    /// measured separately. Other targets bound their test case or subprocess.
     #[arg(long, default_value_t = 30_000)]
     pub timeout: u64,
     /// Explicitly authorize a named risky operation for user-test execution.

@@ -384,6 +384,73 @@ pipeline test_counter(_task) {
     );
 }
 
+#[tokio::test]
+async fn cold_import_graph_is_compiled_once_before_parallel_case_budgets_start() {
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    let temp = TempTestDir::new();
+    let cache_dir = temp.path().join("bytecode-cache");
+    let _cache_dir = ScopedEnvVar::set(
+        harn_vm::bytecode_cache::CACHE_DIR_ENV,
+        &cache_dir.to_string_lossy(),
+    );
+    let _cache_enabled = ScopedEnvVar::set(harn_vm::bytecode_cache::CACHE_ENABLED_ENV, "1");
+    for index in (0..16).rev() {
+        let source = if index == 15 {
+            "pub fn value_15() { return 255 }\n".to_string()
+        } else {
+            format!(
+                "import {{ value_{} }} from \"./module_{}\"\npub fn value_{index}() {{ return value_{}() }}\n",
+                index + 1,
+                index + 1,
+                index + 1,
+            )
+        };
+        temp.write(&format!("suite/module_{index}.harn"), &source);
+    }
+    temp.write(
+        "suite/test_first.harn",
+        r#"
+import { value_0 } from "./module_0"
+pipeline test_first(_task) { assert_eq(value_0(), 255) }
+"#,
+    );
+    temp.write(
+        "suite/test_second.harn",
+        r#"
+import { value_0 } from "./module_0"
+pipeline test_second(_task) { assert_eq(value_0(), 255) }
+"#,
+    );
+    let options = RunOptions {
+        parallel: true,
+        jobs: Some(2),
+        ..RunOptions::new(5_000)
+    };
+    let session = TestRunSession::default();
+
+    let summary = run_tests_with_session(&temp.path().join("suite"), &options, &session).await;
+
+    assert_eq!(summary.passed, 2, "{:?}", summary.results);
+    assert_eq!(
+        summary.aggregate.modules.modules_compiled, 16,
+        "the suite compile phase should prepare each transitive module exactly once"
+    );
+    assert!(
+        summary
+            .results
+            .iter()
+            .filter_map(|result| result.phases)
+            .all(|phases| phases.modules.modules_compiled == 0),
+        "no individual test execution may be billed for cold module compilation: {:?}",
+        summary.results
+    );
+    assert_eq!(
+        session.stats().workers,
+        2,
+        "both workers must consume the one shared prepared graph"
+    );
+}
+
 #[test]
 fn discover_test_files_returns_canonical_absolute_paths() {
     let temp = TempTestDir::new();
@@ -1128,7 +1195,7 @@ pipeline test_safe_text_patch_uses_case_state(task) {
 }
 
 #[tokio::test]
-async fn summary_aggregate_timings_sum_phases_across_results() {
+async fn summary_aggregate_timings_include_suite_preparation_and_case_phases() {
     let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
@@ -1141,19 +1208,26 @@ pipeline test_two(task) { assert_eq(2, 2) }
 
     let summary = run_tests(&temp.path().join("suite"), None, 5_000, false, &[]).await;
     assert_eq!(summary.passed, 2);
-    let per_test_sum: u64 = summary
+    let per_test_setup: u64 = summary
         .results
         .iter()
         .filter_map(|result| result.phases)
-        .map(|phases| phases.setup_ms.saturating_add(phases.compile_ms))
+        .map(|phases| phases.setup_ms)
         .sum();
-    let agg_sum = summary
-        .aggregate
-        .setup_ms
-        .saturating_add(summary.aggregate.compile_ms);
     assert_eq!(
-        per_test_sum, agg_sum,
-        "aggregate setup+compile must equal sum of per-test setup+compile"
+        per_test_setup, summary.aggregate.setup_ms,
+        "aggregate setup must equal the sum of per-test setup"
+    );
+    let per_test_compile: u64 = summary
+        .results
+        .iter()
+        .filter_map(|result| result.phases)
+        .map(|phases| phases.compile_ms)
+        .sum();
+    assert!(
+        summary.aggregate.compile_ms >= per_test_compile,
+        "aggregate compile includes suite graph preparation before per-test compile: {:?}",
+        summary.aggregate
     );
 }
 

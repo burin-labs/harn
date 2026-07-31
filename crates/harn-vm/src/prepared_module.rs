@@ -13,7 +13,12 @@ use harn_modules::DefKind;
 use parking_lot::Mutex;
 
 use crate::chunk::{Chunk, CompiledFunction};
-use crate::module_artifact::{ModuleArtifact, ModuleImportSpec};
+use crate::module_artifact::{
+    compile_module_artifact_from_source, compile_module_artifact_from_source_with_imported_enums,
+    ModuleArtifact, ModuleImportSpec,
+};
+use crate::module_source::ModuleSource;
+use crate::{ModulePhaseRecorder, ModulePhaseStats, VmError};
 const DEFAULT_MAX_ENTRIES: usize = 512;
 
 /// Immutable runtime form of one compiled module artifact.
@@ -142,6 +147,59 @@ impl PreparedModuleCache {
         }
     }
 
+    /// Prepare every import reachable from `roots` without instantiating or
+    /// executing module state.
+    ///
+    /// Root files themselves are entry programs, not runtime imports, so only
+    /// their transitive import closure is prepared. Invalid modules are left
+    /// uncached for the canonical VM load to diagnose.
+    pub fn prepare_import_graph(&self, roots: &[PathBuf]) -> ModulePhaseStats {
+        if roots.is_empty() {
+            return ModulePhaseStats::default();
+        }
+
+        let graph = harn_modules::build(roots);
+        let root_paths = roots
+            .iter()
+            .map(|path| harn_modules::canonical_path(path))
+            .collect::<std::collections::HashSet<_>>();
+        let recorder = ModulePhaseRecorder::new();
+
+        for path in graph.module_paths() {
+            if root_paths.contains(&harn_modules::canonical_path(&path)) {
+                continue;
+            }
+            if path.to_str().is_some_and(|path| path.starts_with("<std>/")) {
+                let _ = crate::vm::prepare_stdlib_module_artifact(&path, Some(&recorder));
+                continue;
+            }
+
+            let source = {
+                let _load_span = recorder.load_span();
+                match crate::module_source::read(&path) {
+                    Ok(source) => source,
+                    Err(_) => continue,
+                }
+            };
+            let mut imported_enum_candidates = graph
+                .imported_names_by_kind_for_file(&path, DefKind::Enum)
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<Vec<_>>();
+            imported_enum_candidates.sort_unstable();
+            let canonical = harn_modules::canonical_path(&path);
+            let _ = self.prepare(
+                &path,
+                &canonical,
+                &source,
+                Some(&imported_enum_candidates),
+                Some(&recorder),
+            );
+        }
+
+        recorder.snapshot()
+    }
+
     pub(crate) fn get(
         &self,
         canonical_path: &Path,
@@ -181,6 +239,62 @@ impl PreparedModuleCache {
         inner.entries.insert(key, Arc::clone(&artifact));
         inner.insertions = inner.insertions.saturating_add(1);
         artifact
+    }
+
+    pub(crate) fn prepare(
+        &self,
+        source_path: &Path,
+        canonical_path: &Path,
+        source: &ModuleSource,
+        imported_enum_candidates: Option<&[String]>,
+        recorder: Option<&ModulePhaseRecorder>,
+    ) -> Result<Arc<PreparedModuleArtifact>, VmError> {
+        let prepared = {
+            let _load_span = recorder.map(ModulePhaseRecorder::load_span);
+            self.get(canonical_path, source.sha256())
+        };
+        if let Some(prepared) = prepared {
+            return Ok(prepared);
+        }
+
+        // Disk cache hits skip parse + compile. The scoped prepared cache
+        // additionally skips deserialization and chunk hydration on later
+        // fresh VMs without sharing any runtime module state.
+        let lookup = {
+            let _load_span = recorder.map(ModulePhaseRecorder::load_span);
+            crate::bytecode_cache::load_module(source_path, source)
+        };
+        let cached = if let Some(artifact) = lookup.artifact {
+            artifact
+        } else {
+            let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
+            let compiled = match imported_enum_candidates {
+                Some(candidates) => compile_module_artifact_from_source_with_imported_enums(
+                    source_path,
+                    source.as_str(),
+                    candidates.iter().cloned(),
+                )?,
+                None => compile_module_artifact_from_source(source_path, source.as_str())?,
+            };
+            if let Some(span) = &mut compile_span {
+                span.mark_compile_succeeded();
+            }
+            drop(compile_span);
+            if let Err(err) = crate::bytecode_cache::store_module(&lookup.key, &compiled) {
+                if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+                    eprintln!(
+                        "[harn] module cache write skipped for {}: {err}",
+                        source_path.display()
+                    );
+                }
+            }
+            compiled
+        };
+        let prepared = {
+            let _load_span = recorder.map(ModulePhaseRecorder::load_span);
+            Arc::new(PreparedModuleArtifact::from_cached(cached))
+        };
+        Ok(self.insert(canonical_path.to_path_buf(), source.sha256(), prepared))
     }
 }
 
