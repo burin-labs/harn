@@ -1061,6 +1061,114 @@ fn ollama_chat_applies_env_runtime_overrides() {
 }
 
 #[test]
+fn observed_qwen_dispatch_receipt_matches_captured_egress_system() {
+    let _guard = env_guard();
+    let _allow_llm_transport = allow_stubbed_llm_transport();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+
+    runtime.block_on(async {
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let server = spawn_ollama_stub_with_body_capture(captured.clone());
+        let _ollama_host = ScopedEnvVar::set("OLLAMA_HOST", &format!("http://{}", server.addr()));
+        let _verbose = ScopedEnvVar::remove("HARN_LLM_TRANSCRIPT_VERBOSE");
+        let transcript_dir = std::env::temp_dir().join(format!(
+            "harn-observed-qwen-egress-{}",
+            uuid::Uuid::now_v7()
+        ));
+        let transcript_dir_string = transcript_dir.to_string_lossy().to_string();
+        crate::llm::agent_observe::push_llm_transcript_dir(&transcript_dir_string);
+
+        let mut opts = base_opts("ollama");
+        opts.model = "qwen3.5:30b".to_string();
+        opts.system = Some("you are an agent.".to_string());
+        opts.thinking = ThinkingConfig::Disabled;
+        opts.output_format = super::OutputFormat::Text;
+        opts.response_format = None;
+        opts.json_schema = None;
+        opts.output_schema = None;
+        opts.context_manifest = crate::llm::prompt::ContextAssemblyManifest::internal(
+            "test:system",
+            "test",
+            "llm_call",
+            opts.system.as_deref(),
+        );
+
+        let result = crate::llm::agent_observe::observed_llm_call(
+            &opts,
+            Some("native"),
+            None,
+            Some(0),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await
+        .expect("stubbed qwen call");
+        crate::llm::agent_observe::pop_llm_transcript_dir();
+        drop(server);
+        assert_eq!(result.text, "ok");
+
+        let body = captured
+            .lock()
+            .expect("captured body")
+            .clone()
+            .expect("request body");
+        let wire: serde_json::Value = serde_json::from_str(&body).expect("valid request json");
+        let wire_system = wire["messages"][0]["content"]
+            .as_str()
+            .expect("wire system message");
+        assert_eq!(wire_system, "/no_think\nyou are an agent.");
+
+        let transcript = std::fs::read_to_string(transcript_dir.join("llm_transcript.jsonl"))
+            .expect("transcript");
+        let events = transcript
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("event json"))
+            .collect::<Vec<_>>();
+        let manifest = &events
+            .iter()
+            .find(|event| event["type"] == "context_manifest")
+            .expect("context manifest")["manifest"];
+        let receipt = &events
+            .iter()
+            .find(|event| event["type"] == "provider_call_request")
+            .expect("provider request")["served_context"];
+        let system_event = events
+            .iter()
+            .find(|event| event["type"] == "system_prompt")
+            .expect("system prompt");
+
+        assert_eq!(system_event["content"], serde_json::json!(wire_system));
+        assert_eq!(
+            receipt["system_prompt_bytes"],
+            serde_json::json!(wire_system.len())
+        );
+        assert_eq!(
+            receipt["system_prompt_content_hash"],
+            system_event["content_hash"]
+        );
+        assert_eq!(
+            manifest["whole_prompt_digest"],
+            receipt["system_prompt_content_hash"]
+        );
+        assert_eq!(
+            manifest["system_prompt_bytes"],
+            receipt["system_prompt_bytes"]
+        );
+        assert_eq!(
+            manifest["egress_delta"]["bytes_added"],
+            serde_json::json!(10)
+        );
+
+        let _ = std::fs::remove_dir_all(transcript_dir);
+    });
+}
+
+#[test]
 fn ollama_qwen_text_tool_route_bypasses_chat_parser_with_raw_generate() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();

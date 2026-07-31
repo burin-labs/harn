@@ -164,11 +164,17 @@ time.
 The manifest accounts for the top-level system-prompt channel. Conversation
 messages are explicitly marked `served_context_digest_only` and remain covered
 by `served_context.messages_content_hash`; their per-message assembly is not
-claimed here. Provider-specific wire serialization after Harn's pre-egress
-boundary is likewise outside this manifest. The manifest names that boundary
-as `observed_llm_call_pre_egress`; context-assembling dispatch tiers that do not
-flow through `observed_llm_call` produce no manifest rather than an empty one.
-Digests are computed after the active transcript redaction policy.
+claimed here. Retained manifests name their boundary as
+`llm_request_payload_egress`, after capability-derived directives and
+route-specific system placement have produced the send-safe payload. When that
+conversion changes the system bytes, the manifest carries an `egress:system`
+segment and an `egress_delta` joining the options-side and payload-side byte
+counts and digests. Provider adapter transforms and wire serialization below
+`LlmRequestPayload` remain outside the contract. Context-assembling dispatch
+tiers that do not flow through `observed_llm_call` produce no manifest rather
+than an empty one. Digests are computed after the active transcript redaction
+policy. Readers continue to accept historical manifests whose boundary is
+`observed_llm_call_pre_egress`.
 
 Set `call_role` when a harness needs to distinguish semantic callers, for
 example `model.router`. Harn-owned paths already declare the same purpose

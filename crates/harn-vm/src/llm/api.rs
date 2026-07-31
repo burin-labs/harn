@@ -171,11 +171,19 @@ pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult,
 pub(crate) async fn vm_call_llm_full_single_route(
     opts: &LlmCallOptions,
 ) -> Result<LlmResult, VmError> {
+    let request = LlmRequestPayload::from(opts);
+    vm_call_llm_full_single_route_prepared(opts, &request).await
+}
+
+pub(crate) async fn vm_call_llm_full_single_route_prepared(
+    opts: &LlmCallOptions,
+    request: &LlmRequestPayload,
+) -> Result<LlmResult, VmError> {
     super::cost::check_llm_preflight_budget(opts)?;
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
     let mut deltas_open = true;
-    let mut call = Box::pin(vm_call_llm_full_inner(opts, Some(delta_tx)));
+    let mut call = Box::pin(vm_call_llm_full_inner_request(request, Some(delta_tx)));
     let result = loop {
         tokio::select! {
             maybe_delta = delta_rx.recv(), if deltas_open => {
@@ -209,8 +217,17 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route(
     opts: &LlmCallOptions,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
+    let request = LlmRequestPayload::from(opts);
+    vm_call_llm_full_streaming_single_route_prepared(opts, &request, delta_tx).await
+}
+
+pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
+    opts: &LlmCallOptions,
+    request: &LlmRequestPayload,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError> {
     super::cost::check_llm_preflight_budget(opts)?;
-    let result = vm_call_llm_full_inner(opts, Some(delta_tx)).await?;
+    let result = vm_call_llm_full_inner_request(request, Some(delta_tx)).await?;
     super::cost::record_llm_usage(&result)?;
     Ok(result)
 }
@@ -228,12 +245,21 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
     vm_call_llm_full_streaming_offthread_single_route(opts, delta_tx).await
 }
 
+#[cfg(test)]
 pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
     opts: &LlmCallOptions,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
-    super::cost::check_llm_preflight_budget(opts)?;
     let request = LlmRequestPayload::from(opts);
+    vm_call_llm_full_streaming_offthread_single_route_prepared(opts, request, delta_tx).await
+}
+
+pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
+    opts: &LlmCallOptions,
+    request: LlmRequestPayload,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError> {
+    super::cost::check_llm_preflight_budget(opts)?;
     let cached = super::trigger_predicate::lookup_cached_result(&request).is_some();
     let intercepted = crate::llm::providers::MockProvider::should_intercept_request(&request)
         || crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider);
@@ -270,14 +296,6 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
     .map_err(OffthreadLlmError::into_vm_error)?;
     super::cost::record_llm_usage(&result)?;
     Ok(result)
-}
-
-async fn vm_call_llm_full_inner(
-    opts: &LlmCallOptions,
-    delta_tx: Option<DeltaSender>,
-) -> Result<LlmResult, VmError> {
-    let request = LlmRequestPayload::from(opts);
-    vm_call_llm_full_inner_request(&request, delta_tx).await
 }
 
 async fn vm_call_llm_full_inner_request(

@@ -18,7 +18,9 @@
 //!   `content_hash` is stable redacted `blake3:`.
 //! - `context_manifest` `{content_hash, manifest}` — deduped typed bill of
 //!   materials for the system prompt. `manifest.segments` records every
-//!   contributor and `whole_prompt_digest` names the served system bytes.
+//!   contributor and `whole_prompt_digest` names the post-egress
+//!   `LlmRequestPayload` system bytes. An `egress_delta` records options-side
+//!   input whenever capability or system-placement normalization changes them.
 //! - `tool_schemas` `{schemas, hash, content_hash}` — deduped schemas with a
 //!   stable redacted `blake3:` content hash.
 //! - `message` `{role, content, iteration?}` — single message appended to
@@ -75,7 +77,7 @@
 //! (entries are redacted on write and the hash is taken over the redacted
 //! form). Forensics can therefore read the exact prompt, its assembly bill of
 //! materials, and schemas a given call was served instead of inferring them
-//! from a later normalization.
+//! from provider-adapter or wire serialization below `LlmRequestPayload`.
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -85,8 +87,9 @@ use crate::event_log::EventLog;
 use crate::value::{VmError, VmValue};
 
 use super::api::{
-    vm_call_llm_full_single_route, vm_call_llm_full_streaming_offthread_single_route,
-    vm_call_llm_full_streaming_single_route, DeltaSender,
+    vm_call_llm_full_single_route_prepared,
+    vm_call_llm_full_streaming_offthread_single_route_prepared,
+    vm_call_llm_full_streaming_single_route_prepared, DeltaSender,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
 use super::{api, cost, first_token, rate_limit, resolved_dispatch, routing, trace};
@@ -704,7 +707,7 @@ pub(crate) async fn observed_llm_call(
             b.send_call_start(&call_id, "llm", "llm_call", call_start_meta);
         }
 
-        dump_llm_request(
+        let request = dump_llm_request(
             iteration.unwrap_or(0),
             &call_id,
             &effective_tool_format,
@@ -740,12 +743,17 @@ pub(crate) async fn observed_llm_call(
                     None => delta_tx,
                 };
                 if offthread {
-                    Box::pin(vm_call_llm_full_streaming_offthread_single_route(
-                        opts, delta_tx,
+                    Box::pin(vm_call_llm_full_streaming_offthread_single_route_prepared(
+                        opts,
+                        request.clone(),
+                        delta_tx,
                     ))
                     .await
                 } else {
-                    Box::pin(vm_call_llm_full_streaming_single_route(opts, delta_tx)).await
+                    Box::pin(vm_call_llm_full_streaming_single_route_prepared(
+                        opts, &request, delta_tx,
+                    ))
+                    .await
                 }
             } else if offthread {
                 let delta_tx = match detector_ctx {
@@ -762,8 +770,10 @@ pub(crate) async fn observed_llm_call(
                         tx
                     }
                 };
-                Box::pin(vm_call_llm_full_streaming_offthread_single_route(
-                    opts, delta_tx,
+                Box::pin(vm_call_llm_full_streaming_offthread_single_route_prepared(
+                    opts,
+                    request.clone(),
+                    delta_tx,
                 ))
                 .await
             } else if let Some(sink) = delta_sink.clone() {
@@ -774,12 +784,18 @@ pub(crate) async fn observed_llm_call(
                     ]),
                     None => sink,
                 };
-                Box::pin(vm_call_llm_full_streaming_single_route(opts, delta_tx)).await
+                Box::pin(vm_call_llm_full_streaming_single_route_prepared(
+                    opts, &request, delta_tx,
+                ))
+                .await
             } else if let Some(ctx) = detector_ctx {
                 let delta_tx = spawn_detector_only_forwarder(ctx, first_token);
-                Box::pin(vm_call_llm_full_streaming_single_route(opts, delta_tx)).await
+                Box::pin(vm_call_llm_full_streaming_single_route_prepared(
+                    opts, &request, delta_tx,
+                ))
+                .await
             } else {
-                Box::pin(vm_call_llm_full_single_route(opts)).await
+                Box::pin(vm_call_llm_full_single_route_prepared(opts, &request)).await
             }
         })
         .await;
