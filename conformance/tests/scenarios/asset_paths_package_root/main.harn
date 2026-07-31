@@ -3,6 +3,7 @@
 // `@/...` and `@<alias>/...` resolve from the calling file's project
 // root (nearest `harn.toml` ancestor), so a renderer in a deeply
 // nested file uses the same path string as one at the project root.
+import { render_deep_alias } from "chain/00/caller"
 import "subdir/deeply/nested/caller"
 
 pipeline test() {
@@ -14,6 +15,10 @@ pipeline test() {
   // Deeply nested caller using the same `@/...` string — same output.
   __io_println(render_root("Alice"))
   __io_println(render_alias("Alice"))
+  // The leaf closure is reached through ten sibling imports whose raw
+  // joined path accumulates `..` components. The alias still resolves
+  // from this project's harn.toml.
+  __io_println(render_deep_alias("Alice"))
   // Templates can include each other via `@/...` regardless of nesting.
   __io_println(render_wrapper())
   // Inline templates passed to `render_string(...)` honor `@/...` in

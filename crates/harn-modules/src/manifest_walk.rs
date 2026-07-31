@@ -22,19 +22,19 @@
 //!   paths (the parent chain strictly shortens, so a symlink cannot make it
 //!   loop).
 //!
-//! The traversal is **lexical**: it ascends the parent chain of the path as
-//! written and returns paths in that same identity. It deliberately does *not*
-//! canonicalize, because the returned project root feeds lexical path-prefix
-//! guards elsewhere (workspace-root write guards, sandbox roots); flipping the
-//! returned identity (e.g. macOS `/var` → `/private/var`) would desync those
-//! prefix checks. Symlinks are still resolved *where it matters*: the `.git`
-//! and target-file probes stat through symlinks at the OS layer, so the stop
-//! and match decisions are physically correct even though the returned path is
-//! lexical. A wholesale canonical cutover — with every prefix-guard site
-//! audited — is a deliberate separate change, not a side effect of this
-//! consolidation.
+//! The traversal is **lexical**: it removes `.` and resolves `..` components,
+//! then ascends that normalized parent chain without resolving symlinks. It
+//! deliberately does *not* canonicalize, because the returned project root
+//! feeds lexical path-prefix guards elsewhere (workspace-root write guards,
+//! sandbox roots); flipping the returned identity (e.g. macOS `/var` →
+//! `/private/var`) would desync those prefix checks. Symlinks are still resolved
+//! *where it matters*: the `.git` and target-file probes stat through symlinks
+//! at the OS layer, so the stop and match decisions are physically correct even
+//! though the returned path is lexical. A wholesale canonical cutover — with
+//! every prefix-guard site audited — is a deliberate separate change, not a
+//! side effect of this consolidation.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Filename of the Harn project manifest.
 pub const MANIFEST_FILENAME: &str = "harn.toml";
@@ -73,13 +73,14 @@ pub fn find_nearest_ancestor(start: &Path, filename: impl AsRef<Path>) -> Option
     // Normalize to an absolute path so the walk works when `start` is a
     // relative or not-yet-existing path. Kept lexical on purpose — see the
     // module docs on why the returned identity must not be canonicalized.
-    let base = if start.is_absolute() {
+    let absolute = if start.is_absolute() {
         start.to_path_buf()
     } else {
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(start)
     };
+    let base = normalize_lexically(&absolute);
 
     let mut cursor: Option<PathBuf> = if base.is_dir() {
         Some(base)
@@ -109,6 +110,23 @@ pub fn find_nearest_ancestor(start: &Path, filename: impl AsRef<Path>) -> Option
     }
 
     None
+}
+
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 /// Walk up from `start` to the nearest `harn.toml`, returning the manifest
@@ -156,6 +174,26 @@ mod tests {
         touch(&file);
 
         let found = find_nearest_manifest(&file).expect("manifest found from a file path");
+        assert_eq!(found.dir, root);
+    }
+
+    #[test]
+    fn normalizes_parent_components_before_walking() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        touch(&root.join("harn.toml"));
+
+        let modules = root.join("modules");
+        let mut accumulated = modules.join("00");
+        for index in 0..=10 {
+            std::fs::create_dir_all(modules.join(format!("{index:02}"))).unwrap();
+        }
+        for index in 1..=10 {
+            accumulated = accumulated.join(format!("../{index:02}"));
+        }
+
+        let found = find_nearest_manifest(&accumulated)
+            .expect("manifest found through an import-chain-accumulated path");
         assert_eq!(found.dir, root);
     }
 
