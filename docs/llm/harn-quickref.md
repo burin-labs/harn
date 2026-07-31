@@ -3690,7 +3690,8 @@ Three concentric surfaces:
   `hook_vetoed`.
 - Any tool, persona, step, or session hook can also emit a typed reminder
   for the active session transcript. Return `{reminder: {body, tags?,
-  dedupe_key?, ttl_turns?, preserve_on_compact?, propagate?, role_hint?},
+  dedupe_key?, ttl_turns?, preserve_on_compact?, propagate?, authority?,
+  role_hint?},
   then?}` to combine the reminder with an existing action, return a bare
   reminder spec such as `{body: "Refresh context", tags: ["context"]}`,
   or return a session-hook effect list like `[{reminder: {...}}]`.
