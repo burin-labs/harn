@@ -43,6 +43,7 @@ pub use async_builtin::AsyncBuiltinCtx;
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use debug::{DebugAction, DebugState};
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
+pub(crate) use modules::prepare_stdlib_module_artifact;
 pub use modules::resolve_module_import_path;
 pub use state::{Vm, VmBaseline};
 

@@ -72,9 +72,9 @@ pub struct PhaseTimings {
     pub modules: harn_vm::ModulePhaseStats,
 }
 
-/// Cumulative worker-time across the run. Mirrors [`PhaseTimings`] plus the
-/// suite-level collection cost (discover + parse). Parallel case phases overlap,
-/// so these totals may exceed suite wall time.
+/// Cumulative worker-time across the run. Mirrors [`PhaseTimings`] plus
+/// suite-level collection and import-graph preparation. Parallel case phases
+/// overlap, so these totals may exceed suite wall time.
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct AggregateTimings {
     pub collection_ms: u64,
@@ -82,15 +82,28 @@ pub struct AggregateTimings {
     pub compile_ms: u64,
     pub execute_ms: u64,
     pub teardown_ms: u64,
-    /// Sum of per-case module attribution. Overlaps setup and execute.
+    /// Suite preparation plus per-case module attribution. Overlaps compile,
+    /// setup, and execute.
+    pub modules: harn_vm::ModulePhaseStats,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct SuiteModulePreparation {
+    pub duration_ms: u64,
     pub modules: harn_vm::ModulePhaseStats,
 }
 
 impl AggregateTimings {
-    pub(super) fn from_results(collection_ms: u64, results: &[TestResult]) -> Self {
+    pub(super) fn from_results(
+        collection_ms: u64,
+        module_preparation: SuiteModulePreparation,
+        results: &[TestResult],
+    ) -> Self {
         results.iter().filter_map(|result| result.phases).fold(
             Self {
                 collection_ms,
+                compile_ms: module_preparation.duration_ms,
+                modules: module_preparation.modules,
                 ..Self::default()
             },
             |acc, phases| Self {

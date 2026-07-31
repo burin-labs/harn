@@ -62,8 +62,11 @@ harn test conformance --timing --filter my_test
 
 For user tests, `--timeout` bounds only the pipeline execution phase. VM,
 stdlib, skill, and manifest setup is measured separately and cannot consume the
-test body's correctness budget. Use `--max-test-ms` when total wall time is a
-performance requirement, or `--max-execute-ms` to ratchet execution cost.
+test body's correctness budget. The selected files' import graph is compiled
+once into the suite's shared immutable prepared-module cache before any
+per-test clock starts; each test still instantiates fresh module state and runs
+module initialization in its own VM. Use `--max-test-ms` when total wall time
+is a performance requirement, or `--max-execute-ms` to ratchet execution cost.
 Conformance and other non-user targets continue to apply `--timeout` to their
 whole test case or subprocess.
 
@@ -77,19 +80,22 @@ Every user-test run prints p50/p90 latency from the runner's typed distribution.
 `--timing` adds average, p95/p99, slowest tests/files, and aggregate phases.
 Empty suites print `p50=n/a  p90=n/a (0 samples)`. Detailed timing prints module
 compile/load attribution separately and labels it as overlapping the phases.
-User JSON report schema v2 carries the same distribution, typed timeout
-metadata, and per-case phases. Conformance JSON schema v2 uses the same typed
-distribution owner. Module compile/load values overlap setup and execution and
+Cold module compilation overlaps the suite compile phase; module instantiation
+and initialization remain attributed to the test that executes them. User JSON
+report schema v2 carries the same distribution, typed timeout metadata, and
+per-case phases. Conformance JSON schema v2 uses the same typed distribution
+owner. Module compile/load values overlap compile, setup, and execution and
 must not be added to total wall time.
 
 Aggregate phase totals are cumulative worker-time. They reconcile with serial
 case work, but parallel cases overlap, so aggregate setup/compile/execute/
 teardown can exceed suite wall time. Discovery and worker-start failures remain
 typed result rows but are not samples in the per-test duration distribution.
-Module attribution is cumulative work-time too: concurrent child-VM spans are
-additive and can exceed their enclosing phase wall time. A prepared-artifact
-hit records load/instantiate with zero compiles; an existing per-VM module-cache
-hit records neither because it performs no fresh load.
+Module attribution is cumulative work-time too: suite preparation is followed
+by additive child-VM spans, which can exceed their enclosing phase wall time.
+A prepared-artifact hit records load/instantiate with zero compiles; an
+existing per-VM module-cache hit records neither because it performs no fresh
+load.
 
 Percentiles preserve Harn's existing test-renderer convention: sort ascending,
 select the zero-based index `floor(sample_count * percentile / 100)`, and clamp

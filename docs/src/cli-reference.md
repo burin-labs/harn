@@ -549,7 +549,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--verbose` / `-v` | Show per-test timing and detailed failures, including a passing test's captured `log`/`print`/`println` output (a failing test's captured output is always shown) |
 | `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
 | `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly. A failing user test's captured output is included as `<system-out>` |
-| `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup is measured separately and does not consume the pipeline-execution budget; other targets bound their test case or subprocess |
+| `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup and shared import-graph compilation are measured separately and do not consume the pipeline-execution budget; other targets bound their test case or subprocess |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for user-test execution; repeatable (for example `git.push`) |
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget |
 | `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget |

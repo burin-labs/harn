@@ -267,6 +267,20 @@ fn stdlib_module_artifact(
     Ok(compiled)
 }
 
+pub(crate) fn prepare_stdlib_module_artifact(
+    path: &Path,
+    recorder: Option<&super::ModulePhaseRecorder>,
+) -> Result<(), VmError> {
+    let Some(module) = path.to_str().and_then(|path| path.strip_prefix("<std>/")) else {
+        return Ok(());
+    };
+    let Some(source) = crate::stdlib_modules::get_stdlib_source(module) else {
+        return Ok(());
+    };
+    let synthetic = PathBuf::from(format!("<stdlib>/{module}.harn"));
+    stdlib_module_artifact(module, &synthetic, source, recorder).map(|_| ())
+}
+
 impl Vm {
     fn resolve_module_import_path(&self, base: &Path, path: &str) -> Result<PathBuf, VmError> {
         if let Some(guard) = &self.package_execution_guard {
@@ -990,57 +1004,13 @@ impl Vm {
                     source_cache.insert(file_path.clone(), Arc::clone(source.text()));
                 }
 
-                let prepared = {
-                    let _load_span = self.module_load_span();
-                    if bytecode_cache::cache_enabled() {
-                        self.prepared_module_cache.get(&canonical, source.sha256())
-                    } else {
-                        None
-                    }
-                };
-                if let Some(prepared) = prepared {
-                    prepared
-                } else {
-                    // Disk cache hits skip parse + compile. The scoped prepared
-                    // cache additionally skips deserialization and chunk hydration
-                    // on later fresh VMs without sharing any runtime module state.
-                    let lookup = {
-                        let _load_span = self.module_load_span();
-                        bytecode_cache::load_module(&file_path, &source)
-                    };
-                    let cached = if let Some(artifact) = lookup.artifact {
-                        artifact
-                    } else {
-                        let mut compile_span = self.module_compile_span();
-                        let compiled =
-                            compile_module_artifact_from_source(&file_path, source.as_str())?;
-                        if let Some(span) = &mut compile_span {
-                            span.mark_compile_succeeded();
-                        }
-                        drop(compile_span);
-                        if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
-                            if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
-                                eprintln!(
-                                    "[harn] module cache write skipped for {}: {err}",
-                                    file_path.display()
-                                );
-                            }
-                        }
-                        compiled
-                    };
-                    let mut prepared = {
-                        let _load_span = self.module_load_span();
-                        Arc::new(PreparedModuleArtifact::from_cached(cached))
-                    };
-                    if bytecode_cache::cache_enabled() {
-                        prepared = self.prepared_module_cache.insert(
-                            canonical.clone(),
-                            source.sha256(),
-                            prepared,
-                        );
-                    }
-                    prepared
-                }
+                self.prepared_module_cache.prepare(
+                    &file_path,
+                    &canonical,
+                    &source,
+                    None,
+                    self.module_phase_recorder.as_ref(),
+                )?
             };
 
             let module_source_dir = file_path.parent().map(|p| p.to_path_buf());
