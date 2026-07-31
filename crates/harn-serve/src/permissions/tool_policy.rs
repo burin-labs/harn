@@ -503,7 +503,7 @@ fn domain_from_url(value: &str) -> Option<String> {
 }
 
 fn glob_matches(pattern: &str, value: &str) -> bool {
-    pattern == "*" || harn_glob::match_path(pattern, value)
+    harn_glob::match_star_path(pattern, value)
 }
 
 #[cfg(test)]
@@ -625,10 +625,9 @@ mod tests {
         assert!(glob_matches("src/*.rs", "src/lib.rs"));
         assert!(!glob_matches("src/*.rs", "src/nested/lib.rs"));
         assert!(glob_matches("src/**/*.rs", "src/nested/lib.rs"));
-        assert!(
-            glob_matches("src/**/*.rs", "src/lib.rs"),
-            "tool policies use Harn's canonical zero-directory `**/` semantics"
-        );
+        assert!(!glob_matches("src/**/*.rs", "src/lib.rs"));
+        assert!(glob_matches("file?.rs", "file?.rs"));
+        assert!(!glob_matches("file?.rs", "file1.rs"));
         assert!(!glob_matches("run", "cargo run"));
         assert!(glob_matches("*", "a/b/c"));
     }

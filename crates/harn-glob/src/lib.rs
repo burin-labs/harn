@@ -14,6 +14,9 @@
 //! - [`match_path`] — slash-aware file-path globs: `*`/`?` never cross `/`,
 //!   `**` crosses directories. Use for path-shaped inputs (invariant globs,
 //!   skill manifests, workspace paths).
+//! - [`match_star_path`] — anchored star-only path patterns: `*` never crosses
+//!   `/`, `**` does, and every other character is literal. Use for persisted
+//!   permission-policy patterns whose historical contract must not broaden.
 //! - [`match_name`] — full glob syntax (`*`, `?`, `[...]`, `{a,b}`) over flat
 //!   identifiers where `/` has no special meaning (`*` crosses it). Use for
 //!   tool names, model ids, hook patterns, event names.
@@ -25,32 +28,89 @@
 /// Slash-aware glob matching for file paths.
 ///
 /// Semantics:
-/// - `*` matches any run of characters except `/`
+/// - a bare `*` matches any input; within a larger pattern, `*` does not cross
+///   `/`
 /// - `?` matches exactly one character except `/`
 /// - `**` matches any run of characters including `/` (a leading `**/` also
 ///   matches zero directories, so `src/**/*.rs` matches `src/main.rs`)
 /// - every other character matches itself; the whole path must be consumed
 #[must_use]
 pub fn match_path(pattern: &str, path: &str) -> bool {
-    match_path_bytes(pattern.as_bytes(), 0, path.as_bytes(), 0)
+    match_path_bytes(
+        pattern.as_bytes(),
+        0,
+        path.as_bytes(),
+        0,
+        PathOptions::CANONICAL,
+    )
 }
 
-fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bool {
+/// Anchored star-only path matching for persisted permission policies.
+///
+/// Semantics:
+/// - `*` matches any run of characters except `/`
+/// - `**` matches any run of characters including `/`
+/// - `**/` retains its literal slash, so `src/**/*.rs` does not match
+///   `src/main.rs`
+/// - every character other than `*` is literal, including `?`, `[` and `{`
+/// - the whole path must be consumed
+///
+/// These conservative details are load-bearing for allow rules: changing them
+/// could silently grant a broader scope than the policy author persisted.
+#[must_use]
+pub fn match_star_path(pattern: &str, path: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    match_path_bytes(
+        pattern.as_bytes(),
+        0,
+        path.as_bytes(),
+        0,
+        PathOptions::STAR_ONLY,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct PathOptions {
+    collapse_double_star_slash: bool,
+    question_mark_wildcard: bool,
+}
+
+impl PathOptions {
+    const CANONICAL: Self = Self {
+        collapse_double_star_slash: true,
+        question_mark_wildcard: true,
+    };
+    const STAR_ONLY: Self = Self {
+        collapse_double_star_slash: false,
+        question_mark_wildcard: false,
+    };
+}
+
+fn match_path_bytes(
+    pat: &[u8],
+    mut pi: usize,
+    path: &[u8],
+    mut si: usize,
+    options: PathOptions,
+) -> bool {
     while pi < pat.len() {
         match pat[pi] {
             b'*' => {
                 let double = pat.get(pi + 1) == Some(&b'*');
                 let mut next_pi = if double { pi + 2 } else { pi + 1 };
-                if double && pat.get(next_pi) == Some(&b'/') {
+                if double && options.collapse_double_star_slash && pat.get(next_pi) == Some(&b'/') {
                     next_pi += 1;
                     // `**/` matches zero or more complete directory segments.
                     // It must not start the next pattern in the middle of a
                     // segment (`**/bar` should not match `foobar`).
-                    if match_path_bytes(pat, next_pi, path, si) {
+                    if match_path_bytes(pat, next_pi, path, si, options) {
                         return true;
                     }
                     for try_si in si..path.len() {
-                        if path[try_si] == b'/' && match_path_bytes(pat, next_pi, path, try_si + 1)
+                        if path[try_si] == b'/'
+                            && match_path_bytes(pat, next_pi, path, try_si + 1, options)
                         {
                             return true;
                         }
@@ -67,13 +127,13 @@ fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bo
                     if !double && path[si..try_si].contains(&b'/') {
                         break;
                     }
-                    if match_path_bytes(pat, next_pi, path, try_si) {
+                    if match_path_bytes(pat, next_pi, path, try_si, options) {
                         return true;
                     }
                 }
                 return false;
             }
-            b'?' => {
+            b'?' if options.question_mark_wildcard => {
                 if si >= path.len() || path[si] == b'/' {
                     return false;
                 }
@@ -261,6 +321,17 @@ mod tests {
         assert!(match_path("src/**", "src/anything"));
         assert!(match_path("", ""));
         assert!(!match_path("", "x"));
+    }
+
+    #[test]
+    fn star_only_path_preserves_conservative_permission_semantics() {
+        assert!(match_star_path("src/*.rs", "src/lib.rs"));
+        assert!(!match_star_path("src/*.rs", "src/nested/lib.rs"));
+        assert!(match_star_path("src/**/*.rs", "src/nested/lib.rs"));
+        assert!(!match_star_path("src/**/*.rs", "src/lib.rs"));
+        assert!(match_star_path("file?.rs", "file?.rs"));
+        assert!(!match_star_path("file?.rs", "file1.rs"));
+        assert!(match_star_path("*", "a/b/c"));
     }
 
     // --- match_name: ported from hooks, llm_config, capabilities,
