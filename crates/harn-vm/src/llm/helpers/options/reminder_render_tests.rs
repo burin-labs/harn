@@ -230,7 +230,15 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
     assert_eq!(out[4]["role"], "user");
     assert_eq!(
         out[4]["content"],
-        "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n<directive authority=\"contract\">\nR\n</directive>\n</context-directives>"
+        [
+            "<context-directives>",
+            "Follow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.",
+            "<directive authority=\"contract\">",
+            "R",
+            "</directive>",
+            "</context-directives>",
+        ]
+        .join("\n")
     );
 }
 
@@ -251,7 +259,18 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
     assert_eq!(out[1]["role"], "user");
     assert_eq!(
         out[1]["content"],
-        "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n<directive authority=\"contract\">\nA\n</directive>\n<directive authority=\"corrective\">\nB\n</directive>\n</context-directives>"
+        [
+            "<context-directives>",
+            "Follow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.",
+            "<directive authority=\"contract\">",
+            "A",
+            "</directive>",
+            "<directive authority=\"corrective\">",
+            "B",
+            "</directive>",
+            "</context-directives>",
+        ]
+        .join("\n")
     );
 }
 
