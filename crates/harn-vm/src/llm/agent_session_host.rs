@@ -2145,7 +2145,7 @@ fn host_agent_session_totals_builtin(
     Ok(VmValue::dict(out))
 }
 
-/// Append a runtime-feedback note to the session as a synthetic user turn.
+/// Persist runtime feedback as a corrective directive in the session envelope.
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
@@ -2160,11 +2160,8 @@ fn host_agent_session_inject_feedback_builtin(
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let kind = args.get(1).map(|v| v.display()).unwrap_or_default();
     let content = args.get(2).map(|v| v.display()).unwrap_or_default();
-    crate::agent_sessions::inject_message(
-        &session_id,
-        super::agent_config::agent_feedback_message(&kind, &content),
-    )
-    .map_err(VmError::Runtime)?;
+    super::agent_config::inject_agent_feedback(&session_id, &kind, &content)
+        .map_err(VmError::Runtime)?;
     super::agent_runtime::emit_agent_event_sync(&AgentEvent::FeedbackInjected {
         session_id,
         kind,
@@ -2182,7 +2179,7 @@ fn host_agent_session_inject_feedback_builtin(
 /// synchronously, the same way `transcript.inject_reminder` does for a
 /// transcript value. `options` mirrors that shape — `body` required; optional
 /// `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`,
-/// `role_hint`. Same-`dedupe_key` reminders are replaced. The reminder renders
+/// `role_hint`, and `authority`. Same-`dedupe_key` reminders are replaced. The reminder renders
 /// into the next model prompt and the loop's existing `apply_reminder_post_turn`
 /// pass evicts it once its `ttl_turns` reaches zero. Returns the reminder id.
 #[harn_builtin(
@@ -3000,7 +2997,7 @@ async fn daemon_checkpoint_drain(
 ///
 /// Expects `options` shaped like the `session/remind` JSON-RPC params
 /// (`body`, `mode`, optional `tags`, `dedupe_key`, `ttl_turns`,
-/// `role_hint`, `propagate`, `preserve_on_compact`). Returns the
+/// `role_hint`, `authority`, `propagate`, `preserve_on_compact`). Returns the
 /// reminder id so callers can correlate with later
 /// `ReminderEmitted` events.
 /// Push a system-reminder onto the session's host bridge queue;

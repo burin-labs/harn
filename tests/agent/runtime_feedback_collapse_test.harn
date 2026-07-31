@@ -1,69 +1,80 @@
-import { agent_build_turn_messages } from "std/agent/preflight"
-import { agent_session_inject_feedback } from "std/agent/state"
+import {
+  agent_session_inject_feedback,
+  agent_session_inject_reminder,
+  agent_session_messages,
+} from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
 
-fn feedback_session(agent: HarnessAgent, random: HarnessRandom) {
-  const session = agent.open("runtime-feedback-collapse-" + random.uuid())
-  agent.inject(session, {role: "user", content: "Fix the failing test."})
-  return session
-}
-
-pipeline test_repeated_runtime_feedback_keeps_latest_with_count(harness: Harness, task) {
-  const session = feedback_session(harness.agent, harness.random)
-  agent_session_inject_feedback(
+pipeline test_feedback_and_reminders_share_one_provider_bound_envelope(harness: Harness, task) {
+  const session = harness.agent.open("feedback-envelope-" + harness.random.uuid())
+  harness.agent.inject(session, {role: "user", content: "Fix the failing test."})
+  agent_session_inject_feedback(harness.agent, session, "step_judge", "same residual")
+  agent_session_inject_feedback(harness.agent, session, "verify_completion", "same residual")
+  agent_session_inject_reminder(
     harness.agent,
     session,
-    "verify_completion",
-    "same verify residual\nline two",
+    {body: " same   residual ", authority: "contract", dedupe_key: "task-contract"},
   )
-  harness.agent.inject(session, {role: "assistant", content: "Trying another repair."})
-  agent_session_inject_feedback(
-    harness.agent,
-    session,
-    "verify_completion",
-    " same verify residual   line two ",
+  agent_session_inject_feedback(harness.agent, session, "parse_guidance", "emit valid JSON")
+  const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  assert_eq(len(reminders), 4, "every producer persists through the typed directive lifecycle")
+  assert_eq(
+    len(reminders.filter({ event -> event.reminder.authority == "corrective" }).to_list()),
+    3,
   )
-  agent_session_inject_feedback(
-    harness.agent,
-    session,
-    "step_judge",
-    "same verify residual line two",
+  assert_eq(harness.agent.snapshot(session).messages[0].content, "Fix the failing test.")
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      harness.llm.call(
+        "ignored",
+        "base system",
+        {
+          provider: "mock",
+          model: "mock",
+          messages: agent_session_messages(harness.agent, session),
+          session_id: session,
+        },
+      )
+      const call = harness.llm.mock_calls()[0]
+      const last = call.messages[len(call.messages) - 1]
+      assert_eq(last.role, "user")
+      assert(contains(last.content, "<context-directives>"))
+      assert(contains(last.content, "authority=\"contract\""))
+      assert(contains(last.content, "authority=\"corrective\""))
+      assert_eq(
+        len(split(last.content, "<directive authority=")) - 1,
+        2,
+        "the contract duplicate and one corrective directive survive",
+      )
+      assert(contains(last.content, "same   residual"))
+      assert(!contains(last.content, "<directive authority=\"corrective\">\nsame residual\n"))
+      assert(contains(last.content, "emit valid JSON"))
+      assert(
+        index_of(last.content, "authority=\"contract\"")
+          < index_of(
+          last.content,
+          "authority=\"corrective\"",
+        ),
+      )
+      assert(!contains(last.content, "runtime_feedback"))
+      assert(!contains(last.content, "step_judge"))
+      assert(!contains(last.content, "verify_completion"))
+    },
   )
-  agent_session_inject_feedback(
-    harness.agent,
-    session,
-    "verify_completion",
-    "same verify residual line two",
-  )
-  agent_session_inject_feedback(harness.agent, session, "verify_completion", "different residual")
-  const raw = harness.agent.snapshot(session).messages
-  const collapsed = agent_build_turn_messages(
-    harness.agent,
-    harness.clock,
-    {session_id: session},
-    {},
-    0,
-  )
-  assert_eq(len(raw), 7, "the audit transcript retains every injected copy")
-  assert_eq(len(collapsed), 5, "two earlier equivalent copies are removed from the prompt")
-  assert_eq(collapsed[0].content, "Fix the failing test.")
-  assert_eq(collapsed[1].content, "Trying another repair.")
-  assert(contains(collapsed[2].content, "kind=\"step_judge\""))
-  assert(contains(collapsed[3].content, "same verify residual line two"))
-  assert(contains(collapsed[3].content, "repeated 3 times"))
-  assert(contains(collapsed[3].content, "earlier copies collapsed"))
-  assert(contains(collapsed[4].content, "different residual"))
   harness.agent.close(session)
 }
 
-pipeline test_unique_and_non_feedback_messages_are_unchanged(harness: Harness, task) {
-  const session = feedback_session(harness.agent, harness.random)
-  harness.agent.inject(session, {role: "assistant", content: "working"})
-  agent_session_inject_feedback(harness.agent, session, "parse_guidance", "emit valid JSON")
-  harness.agent.inject(session, {role: "tool", content: "ok"})
-  const raw = harness.agent.snapshot(session).messages
-  assert_eq(
-    agent_build_turn_messages(harness.agent, harness.clock, {session_id: session}, {}, 0),
-    raw,
-  )
+pipeline test_feedback_dedupe_key_replaces_same_kind_before_render(harness: Harness, task) {
+  const session = harness.agent.open("feedback-key-dedupe-" + harness.random.uuid())
+  harness.agent.inject(session, {role: "user", content: "Repair the output."})
+  agent_session_inject_feedback(harness.agent, session, "parse_guidance", "first correction")
+  agent_session_inject_feedback(harness.agent, session, "parse_guidance", "latest correction")
+  const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  assert_eq(len(reminders), 1)
+  assert_eq(reminders[0].reminder.body, "latest correction")
+  assert_eq(reminders[0].reminder.dedupe_key, "runtime_feedback/parse_guidance")
+  assert_eq(reminders[0].reminder.authority, "corrective")
   harness.agent.close(session)
 }

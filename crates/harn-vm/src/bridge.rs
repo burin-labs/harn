@@ -677,6 +677,7 @@ fn session_remind_payload_from_value(
         "preserve_on_compact",
         "propagate",
         "role_hint",
+        "authority",
         "source",
         "tags",
         "ttl_turns",
@@ -745,6 +746,16 @@ fn session_remind_payload_from_value(
             ))
         }
     };
+    let authority = match string_field(map, "authority", false)?.as_deref() {
+        None | Some("contract") => crate::llm::helpers::DirectiveAuthority::Contract,
+        Some("corrective") => crate::llm::helpers::DirectiveAuthority::Corrective,
+        Some("advisory") => crate::llm::helpers::DirectiveAuthority::Advisory,
+        Some(_) => {
+            return Err(session_remind_shape_error(
+                "`authority` must be one of contract, corrective, or advisory",
+            ))
+        }
+    };
     Ok(crate::llm::helpers::SystemReminder {
         id: string_field(map, "id", false)?.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
         tags: tags_field(map)?,
@@ -753,6 +764,7 @@ fn session_remind_payload_from_value(
         preserve_on_compact: bool_field(map, "preserve_on_compact")?.unwrap_or(false),
         propagate,
         role_hint,
+        authority,
         source: crate::llm::helpers::ReminderSource::Bridge,
         body: string_field(map, "body", true)?.unwrap_or_default(),
         fired_at_turn,

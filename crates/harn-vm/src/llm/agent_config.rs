@@ -11,7 +11,8 @@ use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 use super::agent_observe::observed_llm_call;
 use super::helpers::{
     extract_llm_options, opt_bool, opt_str, system_prompt_event_metadata, system_prompt_metadata,
-    transcript_event, transcript_to_vm_with_event_prefix,
+    transcript_event, transcript_to_vm_with_event_prefix, DirectiveAuthority, ReminderSource,
+    SystemReminder,
 };
 use super::tools::build_assistant_response_message;
 
@@ -24,17 +25,30 @@ const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
     &PROMPT_EXPLAIN_BUILTIN_DEF,
 ];
 
-pub(crate) fn agent_feedback_message(kind: &str, content: &str) -> VmValue {
+fn agent_prefill_message(content: &str) -> VmValue {
     let mut msg = std::collections::BTreeMap::new();
-    if kind == PREFILL_ASSISTANT_FEEDBACK_KIND {
-        msg.put_str("role", "assistant");
-        msg.put_str("content", content);
-        return VmValue::dict(msg);
-    }
-    let body = format!("<runtime_feedback kind=\"{kind}\">\n{content}\n</runtime_feedback>");
-    msg.put_str("role", "user");
-    msg.put_str("content", body);
+    msg.put_str("role", "assistant");
+    msg.put_str("content", content);
     VmValue::dict(msg)
+}
+
+/// Persist model-facing runtime feedback through the same typed directive
+/// lifecycle as every structural reminder. `prefill_assistant` is provider
+/// history rather than a directive and deliberately remains an assistant turn.
+pub(crate) fn inject_agent_feedback(
+    session_id: &str,
+    kind: &str,
+    content: &str,
+) -> Result<(), String> {
+    if kind == PREFILL_ASSISTANT_FEEDBACK_KIND {
+        return crate::agent_sessions::inject_message(session_id, agent_prefill_message(content))
+            .map(|_| ());
+    }
+    let mut reminder = SystemReminder::new(content, ReminderSource::InPipeline, 0);
+    reminder.tags = vec!["runtime_feedback".to_string(), kind.to_string()];
+    reminder.dedupe_key = Some(format!("runtime_feedback/{kind}"));
+    reminder.authority = DirectiveAuthority::Corrective;
+    crate::agent_sessions::inject_reminder(session_id, reminder).map(|_| ())
 }
 
 fn system_prompt_transcript_metadata(system: Option<&String>) -> Option<serde_json::Value> {
@@ -380,8 +394,7 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
             ))
         }
     };
-    crate::agent_sessions::inject_message(&session_id, agent_feedback_message(&kind, &content))
-        .map_err(VmError::Runtime)?;
+    inject_agent_feedback(&session_id, &kind, &content).map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
 }
 

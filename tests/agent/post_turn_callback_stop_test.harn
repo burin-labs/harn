@@ -49,11 +49,19 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness,
       assert_eq(result?.stop_reason, "pace_cutoff")
       assert_eq(result?.llm?.iterations, 1)
       assert_eq(harness.runtime.shared_snapshot(verify_calls).value, 0)
-      assert(
-        json_stringify(transcript_messages(result?.transcript)).contains(
-          "Run stopped by host policy.",
-        ),
-        "policy stop message should be recorded as runtime feedback",
+      const policy_directives = transcript_events_by_kind(result.transcript, "system_reminder")
+        .filter(
+          { event ->
+            event?.reminder?.body == "Run stopped by host policy."
+              && event?.reminder?.authority
+              == "corrective"
+          },
+        )
+        .to_list()
+      assert_eq(
+        len(policy_directives),
+        1,
+        "policy stop message should be recorded as a corrective directive",
       )
     },
   )

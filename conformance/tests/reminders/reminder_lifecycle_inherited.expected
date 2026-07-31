@@ -6,4 +6,4 @@ reminder-lifecycle-inherited-child
 all
 transcript.reminder.fired
 true
-system
+user

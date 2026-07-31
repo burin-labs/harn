@@ -8,13 +8,13 @@ stdlib_provider
 transcript.reminder.fired
 true
 4
-developer
+user
 transcript.reminder.iteration_summary
 true
 4
 1
 stdlib_provider
-developer
+user
 transcript.reminder.dropped
 true
 bad-reminder

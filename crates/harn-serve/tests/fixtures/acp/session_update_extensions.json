@@ -243,6 +243,7 @@
         "_meta": {
           "harn": {
             "reminder": {
+              "authority": "contract",
               "body": "Refresh the compacted context before answering.",
               "reminderId": "reminder-1",
               "renderedRole": "developer",

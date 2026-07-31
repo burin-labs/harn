@@ -272,6 +272,7 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
             tags: vec!["token_pressure".to_string()],
             body: "Refresh the compacted context before answering.".to_string(),
             role_hint: "developer".to_string(),
+            authority: "contract".to_string(),
             rendered_role: "developer".to_string(),
             source: "stdlib_provider".to_string(),
             ttl_turns: Some(2),

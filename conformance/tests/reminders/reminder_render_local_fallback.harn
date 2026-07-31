@@ -2,10 +2,7 @@ import { agent_reminder_providers_fire, agent_session_messages } from "std/agent
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {
-  // Renders the plain-text fallback used for providers without a richer
-  // system-reminder envelope (mock provider here stands in for any model
-  // outside Anthropic/OpenAI/Gemini paths). role_hint "system" avoids the
-  // provider-capability lint while still routing through the local fallback.
+  // Mock stands in for routes without provider-specific directive behavior.
   harness.agent.clear_reminder_providers()
   harness.agent.register_reminder_provider(
     {
@@ -42,8 +39,9 @@ pipeline main(harness: Harness) {
       )
       const call = harness.llm.mock_calls()[0]
       const last = call.messages[len(call.messages) - 1]
-      harness.stdio.println(!contains(call.system, "System reminder:"))
-      harness.stdio.println(contains(last.content, "System reminder:"))
+      harness.stdio.println(!contains(call.system, "<context-directives>"))
+      harness.stdio.println(contains(last.content, "<context-directives>"))
+      harness.stdio.println(contains(last.content, "authority=\"contract\""))
       harness.stdio.println(contains(last.content, "local fallback reminder"))
       harness.stdio.println(!contains(last.content, "<system-reminder>"))
       harness.stdio.println(last.role)
@@ -51,8 +49,4 @@ pipeline main(harness: Harness) {
     },
   )
 }
-// SystemText reminders are kept OUT of the system string (so it stays
-// byte-stable across turns for the non-Anthropic prefix cache) and
-// folded into the trailing user message instead. The plain-prose body
-// and "no XML scaffolding" invariants are preserved at the new position.
-// Local fallback uses plain prose, not XML tags, now in the trailing message.
+// The fallback route shares the one directive envelope and fixed user slot.

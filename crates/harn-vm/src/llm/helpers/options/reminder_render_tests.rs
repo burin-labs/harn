@@ -1,7 +1,12 @@
 use super::*;
 use super::{reminders::*, system_prompt::*};
+use crate::llm::helpers::{DirectiveAuthority, ReminderRoleHint};
 
-fn reminder(role_hint: ReminderRoleHint, body: &str) -> SystemReminder {
+fn reminder(
+    role_hint: ReminderRoleHint,
+    authority: DirectiveAuthority,
+    body: &str,
+) -> SystemReminder {
     SystemReminder {
         id: "reminder-1".to_string(),
         tags: vec!["test".to_string()],
@@ -10,6 +15,7 @@ fn reminder(role_hint: ReminderRoleHint, body: &str) -> SystemReminder {
         preserve_on_compact: false,
         propagate: crate::llm::helpers::ReminderPropagate::Session,
         role_hint,
+        authority,
         source: crate::llm::helpers::ReminderSource::InPipeline,
         body: body.to_string(),
         fired_at_turn: 0,
@@ -18,78 +24,37 @@ fn reminder(role_hint: ReminderRoleHint, body: &str) -> SystemReminder {
 }
 
 #[test]
-fn anthropic_user_block_renders_as_xml_user_content_block() {
+fn every_route_and_legacy_role_hint_use_the_same_directive_shape() {
     crate::llm::capabilities::clear_user_overrides();
-    let caps = crate::llm::capabilities::lookup("mock", "claude-sonnet-4-7");
-    let rendered = render_pending_reminders(
-        &caps,
-        &[reminder(
+    for (provider, model) in [
+        ("mock", "claude-sonnet-4-7"),
+        ("mock", "o3"),
+        ("gemini", "gemini-2.5-flash"),
+    ] {
+        let caps = crate::llm::capabilities::lookup(provider, model);
+        for role_hint in [
+            ReminderRoleHint::System,
+            ReminderRoleHint::Developer,
+            ReminderRoleHint::UserBlock,
             ReminderRoleHint::EphemeralCache,
-            "remember <this>",
-        )],
-    );
-
-    let RenderedReminder::Message(message) = &rendered[0] else {
-        panic!("anthropic user block should render as a message");
-    };
-    assert_eq!(message["role"], "user");
-    assert!(message["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("<system-reminder>"));
-    assert!(message["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("remember &lt;this&gt;"));
-    assert_eq!(
-        message["content"][0]["cache_control"],
-        serde_json::json!({"type": "ephemeral"})
-    );
-}
-
-#[test]
-fn openai_developer_capability_renders_separate_developer_message() {
-    crate::llm::capabilities::clear_user_overrides();
-    let caps = crate::llm::capabilities::lookup("mock", "o3");
-    let rendered = render_pending_reminders(
-        &caps,
-        &[reminder(ReminderRoleHint::System, "keep policy in mind")],
-    );
-
-    let RenderedReminder::Message(message) = &rendered[0] else {
-        panic!("OpenAI developer route should render as a message");
-    };
-    assert_eq!(message["role"], "developer");
-    assert_eq!(
-        message["content"].as_str(),
-        Some("System reminder:\nkeep policy in mind")
-    );
-}
-
-#[test]
-fn gemini_xml_capability_renders_system_text_with_xml_scaffolding() {
-    crate::llm::capabilities::clear_user_overrides();
-    let caps = crate::llm::capabilities::lookup("gemini", "gemini-2.5-flash");
-    let rendered =
-        render_pending_reminders(&caps, &[reminder(ReminderRoleHint::System, "use context")]);
-
-    let RenderedReminder::SystemText(text) = &rendered[0] else {
-        panic!("Gemini route should fold reminder into system text");
-    };
-    assert_eq!(text, "<system-reminder>\nuse context\n</system-reminder>");
-}
-
-#[test]
-fn local_fallback_renders_plain_system_text() {
-    let caps = crate::llm::capabilities::Capabilities::default();
-    let rendered = render_pending_reminders(&caps, &[reminder(ReminderRoleHint::System, "plain")]);
-
-    assert_eq!(
-        rendered,
-        vec![RenderedReminder::SystemText(
-            "System reminder:\nplain".to_string()
-        )]
-    );
+        ] {
+            let rendered = render_pending_reminders(
+                &caps,
+                &[reminder(
+                    role_hint,
+                    DirectiveAuthority::Corrective,
+                    "remember <this>",
+                )],
+            );
+            assert_eq!(
+                rendered,
+                vec![RenderedReminder::SystemText(
+                    "<directive authority=\"corrective\">\nremember &lt;this&gt;\n</directive>"
+                        .to_string()
+                )]
+            );
+        }
+    }
 }
 
 #[test]
@@ -101,9 +66,7 @@ fn system_text_reminders_are_excluded_from_system_string() {
             dict(&[("content", s("appendix")), ("position", s("after"))]),
         ]),
     )]);
-    // A `SystemText` reminder must NOT appear in the assembled `system`
-    // string — it is routed to a trailing message instead so the system
-    // string stays cache-stable across turns.
+    // A directive must not enter the cache-sensitive system string.
     let prompt = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
@@ -113,14 +76,17 @@ fn system_text_reminders_are_excluded_from_system_string() {
     .expect("non-empty prompt");
     assert_eq!(prompt, "parts\n\nbase\n\nappendix");
 
-    // The reminder text instead lands as the trailing user message.
+    // The directive instead lands in the one trailing user envelope.
     let messages = apply_rendered_reminder_messages(
         vec![serde_json::json!({"role": "assistant", "content": "ok"})],
         &[RenderedReminder::SystemText("reminder".to_string())],
     );
     let last = messages.last().expect("trailing message");
     assert_eq!(last["role"], "user");
-    assert_eq!(last["content"], "reminder");
+    assert_eq!(
+        last["content"],
+        "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\nreminder\n</context-directives>"
+    );
 }
 
 fn s(text: &str) -> VmValue {
@@ -189,7 +155,8 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
             .expect("system prompt")
             .expect("non-empty prompt");
 
-    let pressure = "<system-reminder>\nContext is 82% full; wrap up.\n</system-reminder>";
+    let pressure =
+        "<directive authority=\"advisory\">\nContext is 82% full; wrap up.\n</directive>";
     let turn_n_plus_1 = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
@@ -202,7 +169,7 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
         turn_n, turn_n_plus_1,
         "system string must not change when the reminder set changes"
     );
-    assert!(!turn_n.contains("system-reminder"));
+    assert!(!turn_n.contains("context-directives"));
 
     // The reminder is present on turn N+1 — as the trailing user message,
     // not in the system string.
@@ -215,13 +182,18 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     // Turn N: no reminder anywhere in the message array.
     assert!(!serde_json::to_string(&msgs_n)
         .unwrap()
-        .contains("system-reminder"));
+        .contains("context-directives"));
     // Turn N+1: reminder folded into the trailing user turn (merged with
     // the existing user message rather than appended as a second user msg).
     assert_eq!(msgs_n_plus_1.len(), 1);
     let last = msgs_n_plus_1.last().expect("trailing message");
     assert_eq!(last["role"], "user");
-    assert_eq!(last["content"], format!("hello\n\n{pressure}"));
+    assert_eq!(
+        last["content"],
+        format!(
+            "hello\n\n<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n{pressure}\n</context-directives>"
+        )
+    );
 }
 
 #[test]
@@ -246,7 +218,7 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
     let out = apply_rendered_reminder_messages(
         messages,
         &[RenderedReminder::SystemText(
-            "<system-reminder>\nR\n</system-reminder>".to_string(),
+            "<directive authority=\"contract\">\nR\n</directive>".to_string(),
         )],
     );
     assert_eq!(out.len(), 5);
@@ -258,7 +230,7 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
     assert_eq!(out[4]["role"], "user");
     assert_eq!(
         out[4]["content"],
-        "<system-reminder>\nR\n</system-reminder>"
+        "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n<directive authority=\"contract\">\nR\n</directive>\n</context-directives>"
     );
 }
 
@@ -267,15 +239,19 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
     let out = apply_rendered_reminder_messages(
         vec![serde_json::json!({"role": "assistant", "content": "ok"})],
         &[
-            RenderedReminder::SystemText("<system-reminder>\nA\n</system-reminder>".to_string()),
-            RenderedReminder::SystemText("<system-reminder>\nB\n</system-reminder>".to_string()),
+            RenderedReminder::SystemText(
+                "<directive authority=\"contract\">\nA\n</directive>".to_string(),
+            ),
+            RenderedReminder::SystemText(
+                "<directive authority=\"corrective\">\nB\n</directive>".to_string(),
+            ),
         ],
     );
     assert_eq!(out.len(), 2);
     assert_eq!(out[1]["role"], "user");
     assert_eq!(
         out[1]["content"],
-        "<system-reminder>\nA\n</system-reminder>\n\n<system-reminder>\nB\n</system-reminder>"
+        "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n<directive authority=\"contract\">\nA\n</directive>\n<directive authority=\"corrective\">\nB\n</directive>\n</context-directives>"
     );
 }
 

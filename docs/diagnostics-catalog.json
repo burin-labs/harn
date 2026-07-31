@@ -1282,7 +1282,7 @@
     {
       "code": "HARN-RMD-003",
       "category": "RMD",
-      "summary": "user_block reminder role hint is not supported by the selected provider",
+      "summary": "retired provider-specific reminder role-hint diagnostic",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

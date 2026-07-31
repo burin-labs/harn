@@ -4,6 +4,7 @@
 // differences are visible without turning this command into a full coding
 // benchmark.
 import { agent_host_tools } from "std/agent/host_tools"
+import { agent_loop } from "std/agent/loop"
 import { agent_first_tool_format_override_warning_text } from "std/agent/options"
 import { agent_preset } from "std/agent/presets"
 import { parse, parser } from "std/cli/argparse"

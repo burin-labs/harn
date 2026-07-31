@@ -91,7 +91,6 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MutableCaptureAcrossParallel),
         Box::new(ReminderLifecycle),
         Box::new(ReminderProviderCount),
-        Box::new(ReminderRoleHint),
         Box::new(ApiDesign),
     ];
     // Ids address rules for per-rule config and `disable_rules`, so they
@@ -232,12 +231,6 @@ program_rule!(
     "reminder-provider-count",
     ast,
     crate::rules::reminder_provider_count::check_reminder_provider_count
-);
-program_rule!(
-    ReminderRoleHint,
-    "reminder-role-hint-capability",
-    ast,
-    crate::rules::reminder_role_hint::check_reminder_role_hint_capabilities
 );
 program_rule!(
     ApiDesign,

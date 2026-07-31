@@ -220,7 +220,7 @@ Reminder lifecycle errors are raised by `session/remind` and friends when the pa
 |---|---|---|---|
 | [`HARN-RMD-001`](#harn-rmd-001) | reminder lifecycle option key is not recognized | — | — |
 | [`HARN-RMD-002`](#harn-rmd-002) | reminder payload shape is invalid | — | — |
-| [`HARN-RMD-003`](#harn-rmd-003) | user_block reminder role hint is not supported by the selected provider | — | — |
+| [`HARN-RMD-003`](#harn-rmd-003) | retired provider-specific reminder role-hint diagnostic | — | — |
 | [`HARN-RMD-004`](#harn-rmd-004) | discardable reminder has no TTL | — | — |
 | [`HARN-RMD-005`](#harn-rmd-005) | reminder propagate value is not recognized | — | — |
 | [`HARN-RMD-006`](#harn-rmd-006) | reminder provider returned a malformed reminder spec | — | — |
@@ -2010,15 +2010,14 @@ when present, boolean `preserve_on_compact`, and one of the documented
 
 **Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
 
-user_block reminder role hint is not supported by the selected provider
+retired provider-specific reminder role-hint diagnostic
 
-The pipeline hardcodes `role_hint: "user_block"` while also selecting an LLM
-provider/model route that cannot render reminders as Anthropic-style user
-content blocks or OpenAI developer-role messages.
+This diagnostic is retired and retained only so stored diagnostics and tooling
+can continue to resolve its stable code. Directives now use one provider-neutral
+model-facing envelope and `role_hint` no longer selects a provider-specific
+slot.
 
-Use `role_hint: "system"` or `role_hint: "developer"` for provider-neutral
-reminders, or branch on provider capability flags before selecting a
-provider-specific reminder shape.
+Use `authority` to express `contract`, `corrective`, or `advisory` precedence.
 
 ### `HARN-RMD-004`
 

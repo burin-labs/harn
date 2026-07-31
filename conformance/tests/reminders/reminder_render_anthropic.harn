@@ -37,11 +37,12 @@ pipeline main(harness: Harness) {
         },
       )
       const call = harness.llm.mock_calls()[0]
-      harness.stdio.println(call.messages[0].role)
-      harness.stdio.println(contains(call.messages[0].content[0].text, "<system-reminder>"))
-      harness.stdio.println(contains(call.messages[0].content[0].text, "anthropic reminder"))
-      harness.stdio.println(call.messages[0].content[0].cache_control.type)
-      harness.stdio.println(call.messages[0].content[1].text)
+      const last = call.messages[len(call.messages) - 1]
+      harness.stdio.println(last.role)
+      harness.stdio.println(contains(last.content, "<context-directives>"))
+      harness.stdio.println(contains(last.content, "authority=\"contract\""))
+      harness.stdio.println(contains(last.content, "anthropic reminder"))
+      harness.stdio.println(!contains(last.content, "<system-reminder>"))
       harness.agent.clear_reminder_providers()
     },
   )

@@ -205,6 +205,7 @@ impl Dispatcher {
             preserve_on_compact,
             propagate,
             role_hint,
+            authority: crate::llm::helpers::DirectiveAuthority::Contract,
             source: crate::llm::helpers::ReminderSource::InPipeline,
             body: rendered_body,
             fired_at_turn: 0,

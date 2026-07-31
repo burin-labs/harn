@@ -17,6 +17,7 @@ pipeline main(harness: Harness, task) {
       body: "re-read auth.go",
       ttl_turns: 1,
       role_hint: "user_block",
+      authority: "corrective",
       dedupe_key: "runtime-feedback/grounding",
     },
   )
@@ -27,6 +28,7 @@ pipeline main(harness: Harness, task) {
   const before = transcript_events_by_kind(harness.agent.snapshot(s), "system_reminder")
   require len(before) == 1, "exactly one reminder is pending in the event stream"
   require before[0].reminder.body == "re-read auth.go", "reminder carries the body"
+  require before[0].reminder.authority == "corrective", "reminder carries typed authority"
   // One turn boundary later the ttl=1 reminder expires and is removed — so a note
   // injected at turn N is absent from the turn N+2 payload.
   const report = agent_session_apply_reminder_post_turn(harness.agent, s, 1)

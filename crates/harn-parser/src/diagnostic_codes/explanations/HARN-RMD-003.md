@@ -1,9 +1,8 @@
 # HARN-RMD-003
 
-The pipeline hardcodes `role_hint: "user_block"` while also selecting an LLM
-provider/model route that cannot render reminders as Anthropic-style user
-content blocks or OpenAI developer-role messages.
+This diagnostic is retired and retained only so stored diagnostics and tooling
+can continue to resolve its stable code. Directives now use one provider-neutral
+model-facing envelope and `role_hint` no longer selects a provider-specific
+slot.
 
-Use `role_hint: "system"` or `role_hint: "developer"` for provider-neutral
-reminders, or branch on provider capability flags before selecting a
-provider-specific reminder shape.
+Use `authority` to express `contract`, `corrective`, or `advisory` precedence.
