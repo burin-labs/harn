@@ -1,8 +1,8 @@
 import {
   agent_session_active_skills,
-  agent_session_messages,
   agent_session_record_skill_event,
   agent_session_set_active_skills,
+  agent_session_visible_messages,
 } from "std/agent/state"
 
 fn __skills_registry(opts) {
@@ -211,7 +211,7 @@ fn __merge_active_skills(left, right) {
 
 fn __latest_user_text(agent: HarnessAgent, session) {
   let latest = session?.task ?? ""
-  for message in agent_session_messages(agent, session.session_id) {
+  for message in agent_session_visible_messages(agent, session.session_id) {
     if message?.role == "user" {
       latest = message?.content ?? latest
     }

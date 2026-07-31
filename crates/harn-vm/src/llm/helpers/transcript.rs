@@ -146,6 +146,39 @@ pub enum ReminderPropagate {
     None,
 }
 
+/// Authority carried by every model-facing context directive.
+///
+/// The order is semantic, not presentational: contract directives override
+/// corrective directives, which override advisory directives. Keeping this on
+/// the persisted envelope lets reminder and runtime-feedback producers share
+/// one projection policy without guessing from tags or prose.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectiveAuthority {
+    #[default]
+    Contract,
+    Corrective,
+    Advisory,
+}
+
+impl DirectiveAuthority {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Contract => "contract",
+            Self::Corrective => "corrective",
+            Self::Advisory => "advisory",
+        }
+    }
+
+    pub(crate) fn priority(self) -> u8 {
+        match self {
+            Self::Contract => 3,
+            Self::Corrective => 2,
+            Self::Advisory => 1,
+        }
+    }
+}
+
 impl ReminderPropagate {
     #[allow(dead_code)] // reserved for the R-02+ wire renderers
     pub fn as_str(self) -> &'static str {
@@ -220,6 +253,7 @@ impl ReminderSource {
 ///     "preserve_on_compact": true,
 ///     "propagate": "session",
 ///     "role_hint": "system",
+///     "authority": "contract",
 ///     "source": "stdlib_provider",
 ///     "body": "Approaching context window cap.",
 ///     "fired_at_turn": 4
@@ -227,7 +261,7 @@ impl ReminderSource {
 /// }
 /// ```
 ///
-/// `tags`, `body`, `propagate`, `role_hint`, `source`, `fired_at_turn`,
+/// `tags`, `body`, `propagate`, `role_hint`, `authority`, `source`, `fired_at_turn`,
 /// and `preserve_on_compact` are required wire fields. `dedupe_key` and
 /// `ttl_turns` are optional — `dedupe_key: None` means each reminder is
 /// retained independently, and `ttl_turns: None` means "persist until
@@ -244,6 +278,8 @@ pub struct SystemReminder {
     pub preserve_on_compact: bool,
     pub propagate: ReminderPropagate,
     pub role_hint: ReminderRoleHint,
+    #[serde(default)]
+    pub authority: DirectiveAuthority,
     pub source: ReminderSource,
     pub body: String,
     pub fired_at_turn: i64,
@@ -264,6 +300,7 @@ impl SystemReminder {
             preserve_on_compact: false,
             propagate: ReminderPropagate::Session,
             role_hint: ReminderRoleHint::System,
+            authority: DirectiveAuthority::Contract,
             source,
             body: body.into(),
             fired_at_turn,
@@ -763,6 +800,7 @@ pub(crate) fn reminder_lifecycle_payload(
         "dedupe_key": &reminder.dedupe_key,
         "source": reminder.source.as_str(),
         "role_hint": reminder.role_hint.as_str(),
+        "authority": reminder.authority.as_str(),
         "ttl_turns": &reminder.ttl_turns,
         "propagate": reminder.propagate.as_str(),
         "originating_agent_id": &reminder.originating_agent_id,
@@ -927,6 +965,16 @@ pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
             _ => None,
         })
         .unwrap_or(ReminderRoleHint::System);
+    let authority = dict
+        .get("authority")
+        .and_then(string_value)
+        .and_then(|s| match s.as_str() {
+            "contract" => Some(DirectiveAuthority::Contract),
+            "corrective" => Some(DirectiveAuthority::Corrective),
+            "advisory" => Some(DirectiveAuthority::Advisory),
+            _ => None,
+        })
+        .unwrap_or_default();
     let source = dict
         .get("source")
         .and_then(string_value)
@@ -960,6 +1008,7 @@ pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
         preserve_on_compact,
         propagate,
         role_hint,
+        authority,
         source,
         body,
         fired_at_turn,
@@ -1070,6 +1119,7 @@ mod tests {
             preserve_on_compact: true,
             propagate: ReminderPropagate::Session,
             role_hint: ReminderRoleHint::Developer,
+            authority: DirectiveAuthority::Corrective,
             source: ReminderSource::StdlibProvider,
             body: "Approaching context window cap.".to_string(),
             fired_at_turn: 4,
@@ -1078,6 +1128,7 @@ mod tests {
         let json = serde_json::to_value(&reminder).expect("serialize reminder");
         assert_eq!(json["propagate"], "session");
         assert_eq!(json["role_hint"], "developer");
+        assert_eq!(json["authority"], "corrective");
         assert_eq!(json["source"], "stdlib_provider");
         assert_eq!(json["tags"][0], "token_pressure");
         assert_eq!(json["ttl_turns"], 3);

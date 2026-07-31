@@ -733,6 +733,7 @@ pub enum AgentEvent {
         tags: Vec<String>,
         body: String,
         role_hint: String,
+        authority: String,
         rendered_role: String,
         source: String,
         ttl_turns: Option<i64>,

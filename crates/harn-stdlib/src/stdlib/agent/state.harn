@@ -46,6 +46,18 @@ pub fn agent_session_messages(agent: HarnessAgent, session_id) {
 }
 
 /**
+ * Project the session through the canonical provider-visible directive slot
+ * without mutating durable transcript history.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_visible_messages(agent: HarnessAgent, session_id, messages = nil) -> list {
+  return agent.session_visible_messages(session_id, messages)
+}
+
+/**
  * agent_session_record_assistant.
  *
  * @effects: [host]
@@ -359,7 +371,9 @@ pub fn agent_session_totals(agent: HarnessAgent, session_id) {
 }
 
 /**
- * agent_session_inject_feedback.
+ * agent_session_inject_feedback. Persist one corrective directive in the
+ * model-facing context envelope. Equivalent feedback is deduplicated with
+ * structural directives at the typed reminder boundary.
  *
  * @effects: [host]
  * @errors: []
@@ -376,7 +390,7 @@ pub fn agent_session_inject_feedback(agent: HarnessAgent, session_id, kind, cont
  * path for hosts that drive the loop without an ACP HostBridge. `options`
  * mirrors `transcript.inject_reminder` (`body` required; optional `tags`,
  * `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`,
- * `role_hint`). Returns the reminder id.
+ * `role_hint`, `authority`). Returns the reminder id.
  *
  * @effects: [host]
  * @errors: [runtime]

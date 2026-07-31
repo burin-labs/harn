@@ -116,10 +116,13 @@ pipeline main(harness: Harness) {
       harness.stdio.println(result.status)
       harness.stdio.println(len(calls))
       const feedback_messages = json_stringify(calls[2].messages)
-      harness.stdio.println(contains(feedback_messages, "parse_guidance"))
+      const feedback_directives = calls[2].messages[len(calls[2].messages) - 1].content
+      harness.stdio.println(contains(feedback_directives, "<directive authority=\"corrective\">"))
       harness.stdio.println(contains(feedback_messages, "TRUNCATED"))
       harness.stdio.println(contains(feedback_messages, "native tool channel"))
       harness.stdio.println(!contains(feedback_messages, "<<EOF"))
+      require !contains(feedback_messages, "parse_guidance"),
+        "truncated-markup guidance omits its internal kind"
     },
   )
 }

@@ -353,6 +353,7 @@ mod tests {
             dedupe_key: None,
             source: source.to_string(),
             role_hint: "system".to_string(),
+            authority: "contract".to_string(),
             rendered_role: rendered_role.to_string(),
             body_bytes,
             rendered_bytes,

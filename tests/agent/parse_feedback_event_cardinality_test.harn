@@ -1,6 +1,6 @@
 // Run: harn test tests/agent/parse_feedback_event_cardinality_test.harn
 //
-// A parse-repair turn injects one runtime-feedback message into the transcript.
+// A parse-repair turn injects one corrective directive into the transcript.
 // Its observability stream must count that same logical injection exactly once.
 import {
   agent_capture_events,
@@ -66,13 +66,20 @@ pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
       }
       assert_eq(parse_guidance_events, 1)
       assert_eq(feedback_events, 1)
-      let transcript_feedback_messages = 0
-      for message in captured.result?.transcript?.messages ?? [] {
-        if contains(message?.content ?? "", "<runtime_feedback kind=\"parse_guidance\">") {
-          transcript_feedback_messages = transcript_feedback_messages + 1
-        }
-      }
-      assert_eq(transcript_feedback_messages, 1)
+      const corrective_directives = transcript_events_by_kind(
+        captured.result.transcript,
+        "system_reminder",
+      )
+        .filter(
+          { event ->
+            event?.reminder?.dedupe_key == "runtime_feedback/parse_guidance"
+              && event?.reminder
+              ?.authority
+              == "corrective"
+          },
+        )
+        .to_list()
+      assert_eq(len(corrective_directives), 1)
     },
   )
 }

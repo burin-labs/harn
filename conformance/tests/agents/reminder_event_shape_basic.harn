@@ -1,7 +1,7 @@
 /**
  * R-01: `system_reminder` events expose the full lifecycle envelope
  * (id/tags/dedupe_key/ttl_turns/preserve_on_compact/propagate/role_hint
- * /source/body/fired_at_turn) on a normalized transcript event.
+ * /authority/source/body/fired_at_turn) on a normalized transcript event.
  */
 pipeline main(harness: Harness) {
   const evt = transcript_reminder_event(
@@ -13,6 +13,7 @@ pipeline main(harness: Harness) {
       preserve_on_compact: true,
       propagate: "session",
       role_hint: "developer",
+      authority: "corrective",
       source: "stdlib_provider",
       fired_at_turn: 4,
     },
@@ -35,6 +36,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(evt?.reminder?.preserve_on_compact)
   harness.stdio.println(evt?.reminder?.propagate == "session")
   harness.stdio.println(evt?.reminder?.role_hint == "developer")
+  harness.stdio.println(evt?.reminder?.authority == "corrective")
   harness.stdio.println(evt?.reminder?.source == "stdlib_provider")
   harness.stdio.println(evt?.reminder?.fired_at_turn == 4)
   harness.stdio.println(len(evt?.reminder?.id) > 0)

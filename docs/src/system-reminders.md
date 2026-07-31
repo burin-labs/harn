@@ -3,17 +3,15 @@
 System reminders are typed, ephemeral transcript injections for a running
 agent session. They let Harn add ambient context at turn boundaries, such
 as token-pressure warnings, idle-session nudges, truncated-tool-output
-notices, post-compact recaps, or host file-change alerts, without
-pretending that context came from the user and without adding it to the
-durable message list.
+notices, post-compact recaps, host file-change alerts, and runtime corrective
+feedback without adding synthetic turns to the durable message list.
 
 A reminder is always a structured `system_reminder` transcript event. It
 has a stable lifecycle shape, can be deduped, can expire after a finite
 number of turns, can choose whether it survives compaction, and can state
-how far it should propagate to sub-agents. Rendering is provider-aware:
-the same reminder can become developer-role content, system prompt text,
-or an Anthropic-style `<system-reminder>` user content block depending on
-the selected model route. Lifecycle events are observable through
+how far it should propagate to sub-agents, and declares `contract`, `corrective`,
+or `advisory` authority. Every provider receives the same model-facing context
+envelope in one trailing user slot. Lifecycle events are observable through
 EventLog records and host-facing ACP `session/update` metadata.
 
 ## What and why
@@ -49,7 +47,8 @@ fields:
 | `ttl_turns` | positive int or `nil` | `nil` | Finite reminders expire after this many post-turn lifecycle passes. `nil` persists until cleared or compacted away. |
 | `preserve_on_compact` | bool | `false` | When `true`, compaction copies the reminder event into the compacted transcript. |
 | `propagate` | `"all"`, `"session"`, or `"none"` | `"session"` | Controls sub-agent inheritance. |
-| `role_hint` | `"system"`, `"developer"`, `"user_block"`, or `"ephemeral_cache"` | `"system"` | Preferred rendering slot; provider capabilities still decide the final wire shape. |
+| `authority` | `"contract"`, `"corrective"`, or `"advisory"` | `"contract"` | Conflict precedence inside the model-facing envelope. Contract overrides corrective; corrective overrides advisory. |
+| `role_hint` | `"system"`, `"developer"`, `"user_block"`, or `"ephemeral_cache"` | `"system"` | Retained for transcript and replay compatibility. It no longer selects a model-facing slot. |
 | `source` | `"stdlib_provider"`, `"hook"`, `"bridge"`, `"in_pipeline"`, or `"inherited"` | producer-specific | Origin marker used by audit and propagation. |
 | `fired_at_turn` | int | producer-specific | Turn index when the reminder was created. Pipelines without a turn counter use `0`. |
 | `id` | string | generated | Stable reminder id for audit, replay, and clearing. |
@@ -82,6 +81,7 @@ observers can inspect the same fields without special-casing the
     "preserve_on_compact": true,
     "propagate": "session",
     "role_hint": "developer",
+    "authority": "contract",
     "source": "stdlib_provider",
     "body": "Approaching context window cap.",
     "fired_at_turn": 4
@@ -94,6 +94,7 @@ observers can inspect the same fields without special-casing the
     "preserve_on_compact": true,
     "propagate": "session",
     "role_hint": "developer",
+    "authority": "contract",
     "source": "stdlib_provider",
     "body": "Approaching context window cap.",
     "fired_at_turn": 4
@@ -123,6 +124,7 @@ const injected = transcript.inject_reminder(transcript(), {
   preserve_on_compact: true,
   propagate: "session",
   role_hint: "developer",
+  authority: "contract",
 })
 
 const next_transcript = injected.transcript
@@ -133,7 +135,7 @@ harness.stdio.log(injected.deduped_count)
 The returned transcript has one additional `system_reminder` event and
 the same durable message list as the input transcript. `body` is
 required and must be non-empty. Optional `tags`, `dedupe_key`,
-`ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` fields
+`ttl_turns`, `preserve_on_compact`, `propagate`, `role_hint`, and `authority` fields
 are validated; unknown option keys fail fast.
 
 When `dedupe_key` is set, injection first removes any pending reminder
@@ -320,27 +322,25 @@ agent_loop(harness, task, system, {
 The provider list has a hard diagnostic guard: enabling more than eight
 distinct providers raises `HARN-RMD-007`.
 
-## Capability-aware rendering
+## One context-directive envelope
 
-`harness.llm.call(...)` loads pending reminders from the active `session_id`
-transcript, renders them after `system` fragments positioned `before` and
-the primary system prompt, but before fragments positioned `after`.
+`harness.llm.call(...)` loads pending directives from the active `session_id`
+transcript. The projection boundary applies one policy across structural
+reminders and runtime feedback:
 
-Rendering follows provider capabilities first, then `role_hint`:
+1. explicit `dedupe_key` collisions collapse by authority, then recency;
+2. whitespace-normalized duplicate bodies collapse by authority, then recency;
+3. survivors are ordered `contract`, `corrective`, then `advisory`;
+4. every survivor renders as `<directive authority="...">...</directive>` in
+   one `<context-directives>` envelope;
+5. the envelope is appended to the trailing user turn, or becomes one new
+   trailing user turn when the conversation ends in another role.
 
-| Provider capability / reminder hint | Wire shape |
-|---|---|
-| `prefers_role_developer` | Separate `role: "developer"` message containing `System reminder:\n...`. This wins for all hints. |
-| Anthropic wire format plus `role_hint: "user_block"` | Prepended user content block containing `<system-reminder>...</system-reminder>`. |
-| Anthropic wire format plus `role_hint: "ephemeral_cache"` | Same user content block, with `cache_control: {"type": "ephemeral"}` when prompt caching is supported. |
-| `prefers_xml_scaffolding` | System prompt text wrapped in `<system-reminder>` tags. |
-| Fallback providers | Plain system prompt text prefixed with `System reminder:`. |
-
-`role_hint` is a request, not a guarantee. Use provider-neutral
-`"system"` or `"developer"` unless the script is intentionally targeting
-an Anthropic-style user block. `HARN-RMD-003` reports hardcoded
-`role_hint: "user_block"` with a provider route that cannot preserve that
-shape.
+This slot and register are identical for Anthropic, OpenAI, Gemini, and local
+routes. The system string remains byte-stable as directives change. Diagnostic
+identity—source, tags, dedupe key, and runtime feedback kind—stays in typed
+events and is never copied into the model-visible envelope. `role_hint` remains
+readable on historical transcripts but does not create a second rendering path.
 
 ## Compaction interaction
 
@@ -354,7 +354,8 @@ rebuilds the transcript:
 
 - finite TTLs decrement at the pre-compaction boundary
 - expired reminders are dropped
-- reminders sharing a `dedupe_key` collapse to the newest event
+- directives sharing a `dedupe_key` or normalized body collapse by authority,
+  then recency
 - only `preserve_on_compact: true` reminders are copied into the compacted
   transcript
 - custom compactors receive surviving reminder payloads as their second
@@ -408,7 +409,7 @@ current explanation and remediation.
 |---|---|
 | `HARN-RMD-001` | Unknown option key or invalid strict producer option shape. |
 | `HARN-RMD-002` | Invalid bridge reminder payload shape. |
-| `HARN-RMD-003` | `user_block` role hint is unsupported by the selected provider route. |
+| `HARN-RMD-003` | Retired provider-specific role-hint diagnostic; retained for compatibility. |
 | `HARN-RMD-004` | Discardable reminder has no finite TTL. |
 | `HARN-RMD-005` | Unknown `propagate` value. |
 | `HARN-RMD-006` | Reminder provider returned a malformed reminder spec. |
@@ -427,8 +428,8 @@ events.
 
 | Event kind | Emitted when | Key payload fields |
 |---|---|---|
-| `transcript.reminder.injected` | A new reminder enters the pending queue. | `reminder_id`, `tags`, `dedupe_key`, `source`, `role_hint`, `ttl_turns`, `propagate` |
-| `transcript.reminder.fired` | A pending reminder is rendered into the next provider request. | `reminder_id`, `turn_number`, `rendered_role` |
+| `transcript.reminder.injected` | A new directive enters the pending queue. | `reminder_id`, `tags`, `dedupe_key`, `source`, `role_hint`, `authority`, `ttl_turns`, `propagate` |
+| `transcript.reminder.fired` | A pending directive is rendered into the next provider request. | `reminder_id`, `turn_number`, `authority`, `rendered_role` |
 | `transcript.reminder.deduped` | A new reminder or compaction replaces older pending reminders with the same `dedupe_key`. | `replaced_id`, `replacing_id`, `dedupe_key` |
 | `transcript.reminder.expired` | A reminder is removed by TTL expiry, compaction, or an explicit clear operation. | `reminder_id`, `reason` (`ttl`, `compaction`, or `cleared`) |
 | `transcript.reminder.dropped` | A malformed or unrenderable reminder cannot be used for the next provider request. | `reminder_id`, `reason` (`invalid` or `capability_mismatch`) |
@@ -440,7 +441,7 @@ notifications with `sessionUpdate: "reminder_emitted"` and
 `_meta.harn.reminder` metadata. Tool-call hook reminders attach a compact
 lifecycle report to `ToolCallReceipt.audit.reminders` when
 `with_audit_log(...)` is active. The receipt report identifies the hook
-event, tool call, reminder id, tags, dedupe key, source, role hint, TTL,
+event, tool call, reminder id, tags, dedupe key, source, role hint, authority, TTL,
 and dedupe count without copying the reminder body into the receipt.
 
 ## Cookbook
@@ -551,15 +552,15 @@ content is ambient context rather than user text.
     "dedupe_key": "workspace:deps",
     "ttl_turns": 1,
     "propagate": "none",
-    "mode": "finish_step"
+    "authority": "advisory"
   }
 }
 ```
 
-### Provider-specific ephemeral cache hint
+### One-turn advisory
 
-Use `ephemeral_cache` only when the route supports Anthropic-style user
-content blocks and prompt caching.
+Use `advisory` for helpful context that must yield to an active contract or
+corrective instruction.
 
 ```harn,ignore
 transcript.inject_reminder(transcript(), {
@@ -567,7 +568,7 @@ transcript.inject_reminder(transcript(), {
   tags: ["policy"],
   dedupe_key: "policy:turn",
   ttl_turns: 1,
-  role_hint: "ephemeral_cache",
+  authority: "advisory",
   propagate: "none",
 })
 ```

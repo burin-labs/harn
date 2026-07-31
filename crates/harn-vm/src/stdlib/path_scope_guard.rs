@@ -167,6 +167,7 @@ pub fn scope_alert_reminder(
         preserve_on_compact: false,
         propagate: ReminderPropagate::Session,
         role_hint: ReminderRoleHint::System,
+        authority: crate::llm::helpers::DirectiveAuthority::Corrective,
         source: ReminderSource::StdlibProvider,
         body,
         fired_at_turn: 0,

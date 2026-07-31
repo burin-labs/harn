@@ -53,6 +53,8 @@ pipeline default(harness: Harness) {
       const second_reminders = transcript_events_by_kind(second.transcript, "system_reminder")
       const first_body = first_reminders[len(first_reminders) - 1].reminder.body
       const second_body = second_reminders[len(second_reminders) - 1].reminder.body
+      const first_directives = calls[0].messages[len(calls[0].messages) - 1]
+      const second_directives = calls[1].messages[len(calls[1].messages) - 1]
       harness.stdio.println(changed)
       harness.stdio.println(len(calls))
       harness.stdio.println(calls[0].system == calls[1].system)
@@ -60,13 +62,13 @@ pipeline default(harness: Harness) {
         harness.agent.system_prompt(session_id)
           == first.transcript.metadata.system_prompt.content,
       )
-      harness.stdio.println(calls[0].messages[0].role == "developer")
-      harness.stdio.println(contains(calls[0].messages[0].content, "<workspace-anchor>"))
-      harness.stdio.println(contains(calls[0].messages[0].content, "primary: /workspace/a"))
-      harness.stdio.println(contains(calls[1].messages[0].content, "primary: /workspace/b"))
+      harness.stdio.println(first_directives.role == "user")
+      harness.stdio.println(contains(first_directives.content, "<context-directives>"))
+      harness.stdio.println(contains(first_directives.content, "primary: /workspace/a"))
+      harness.stdio.println(contains(second_directives.content, "primary: /workspace/b"))
       harness.stdio.println(
         contains(
-          calls[1].messages[0].content,
+          second_directives.content,
           "/workspace/c (mount_mode: read_only, mounted_at: 2026-05-24T00:00:01Z)",
         ),
       )

@@ -21,6 +21,9 @@ mod thinking;
 mod tool_search;
 mod validate;
 
+pub(crate) use reminders::{
+    apply_rendered_reminder_messages, pending_reminders_from_session, render_pending_reminders,
+};
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 
 #[cfg(test)]
@@ -47,8 +50,7 @@ pub(super) use crate::value::{VmError, VmValue};
 pub(super) use super::{
     emit_reminder_lifecycle_event, opt_bool, opt_float, opt_int, opt_str, reminder_from_event,
     vm_messages_to_json, vm_resolve_model, vm_resolve_provider, vm_value_dict_to_json,
-    vm_value_to_json, ReminderRoleHint, SystemReminder, REMINDER_DROPPED_EVENT_KIND,
-    SYSTEM_REMINDER_EVENT_KIND,
+    vm_value_to_json, SystemReminder, REMINDER_DROPPED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
 };
 
 // Public surface consumed by `super` (llm::helpers::mod).

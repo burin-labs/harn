@@ -593,17 +593,10 @@ pub fn __agent_loop_repeated_observation_recovery_feedback(warning) {
   } else {
     "the same tool"
   }
-  const signature = trim(to_string(warning?.signature ?? ""))
-  const signature_line = if signature != "" {
-    "\nRepeated call signature: " + signature
-  } else {
-    ""
-  }
   return "Repeated identical " + action + " calls are not making progress. "
     + "Do not issue that same call again. Change strategy with a targeted action "
     + "that changes evidence, such as reading the exact file or symbol named by "
     + "the task, then edit only once you have the needed facts."
-    + signature_line
 }
 
 pub fn __agent_loop_monologue_recovery_feedback(visible_text) {

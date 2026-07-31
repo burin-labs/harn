@@ -14,6 +14,7 @@ import {
   canon_slice_from_files,
   canon_slice_from_paths,
 } from "std/agent/canon"
+import { agent_session_visible_messages } from "std/agent/state"
 import { with_fs } from "std/testing"
 
 const INVARIANTS = """
@@ -195,9 +196,11 @@ pipeline main(harness: Harness, task) {
         slice,
         {canon_root: dir, files: slice.files},
       )
-      const messages = harness.agent.snapshot(session_id).messages
+      const messages = agent_session_visible_messages(harness.agent, session_id)
       harness.stdio.println(to_string(injected.injected))
       harness.stdio.println(to_string(contains(messages[len(messages) - 1].content, "harn-canon")))
+      require !contains(json_stringify(messages), "dedupe_key"),
+        "provider-visible feedback omits reminder bookkeeping"
       const router_session_id = harness.agent.open("canon-router-" + harness.random.uuid_v7())
       const pre_event = canon_event_router(
         harness,
@@ -256,7 +259,7 @@ pipeline main(harness: Harness, task) {
         ["src/main.foo"],
         {root: dir, canon_root: dir},
       )
-      const path_messages = harness.agent.snapshot(path_session_id).messages
+      const path_messages = agent_session_visible_messages(harness.agent, path_session_id)
       harness.stdio.println(to_string(path_injected.injected))
       harness.stdio.println(
         to_string(contains(path_messages[len(path_messages) - 1].content, "no_bad")),
@@ -270,7 +273,7 @@ pipeline main(harness: Harness, task) {
         ["src/main.foo"],
         {root: dir, project_root: dir},
       )
-      const auto_messages = harness.agent.snapshot(auto_session_id).messages
+      const auto_messages = agent_session_visible_messages(harness.agent, auto_session_id)
       harness.stdio.println(to_string(auto_injected.injected))
       harness.stdio.println(
         to_string(contains(auto_messages[len(auto_messages) - 1].content, "no_bad")),
@@ -287,7 +290,7 @@ pipeline main(harness: Harness, task) {
         ["paper.tex"],
         {root: dir, project_root: dir},
       )
-      const package_messages = harness.agent.snapshot(package_session_id).messages
+      const package_messages = agent_session_visible_messages(harness.agent, package_session_id)
       harness.stdio.println(to_string(package_injected.selected_pack_ids == ["latex"]))
       harness.stdio.println(to_string(package_injected.injected))
       harness.stdio.println(
@@ -333,7 +336,10 @@ pipeline main(harness: Harness, task) {
         ["paper.tex"],
         {root: dir, project_root: dir},
       )
-      const package_only_messages = harness.agent.snapshot(package_only_session_id).messages
+      const package_only_messages = agent_session_visible_messages(
+        harness.agent,
+        package_only_session_id,
+      )
       harness.stdio.println(to_string(package_only_injected.selected_pack_ids == ["latex"]))
       harness.stdio.println(to_string(package_only_injected.injected))
       harness.stdio.println(
@@ -358,7 +364,10 @@ pipeline main(harness: Harness, task) {
         ["paper.tex"],
         {root: dir, project_root: dir},
       )
-      const package_manifest_messages = harness.agent.snapshot(package_manifest_session_id).messages
+      const package_manifest_messages = agent_session_visible_messages(
+        harness.agent,
+        package_manifest_session_id,
+      )
       harness.stdio.println(to_string(package_manifest_injected.selected_pack_ids == ["latex"]))
       harness.stdio.println(to_string(package_manifest_injected.injected))
       harness.stdio.println(

@@ -677,6 +677,7 @@ fn session_remind_payload_from_value(
         "preserve_on_compact",
         "propagate",
         "role_hint",
+        "authority",
         "source",
         "tags",
         "ttl_turns",
@@ -733,18 +734,12 @@ fn session_remind_payload_from_value(
             ))
         }
     };
-    let role_hint = match string_field(map, "role_hint", false)?.as_deref() {
-        None => crate::llm::helpers::ReminderRoleHint::System,
-        Some("system") => crate::llm::helpers::ReminderRoleHint::System,
-        Some("developer") => crate::llm::helpers::ReminderRoleHint::Developer,
-        Some("user_block") => crate::llm::helpers::ReminderRoleHint::UserBlock,
-        Some("ephemeral_cache") => crate::llm::helpers::ReminderRoleHint::EphemeralCache,
-        Some(_) => {
-            return Err(session_remind_shape_error(
-                "`role_hint` must be one of system, developer, user_block, or ephemeral_cache",
-            ))
-        }
-    };
+    let role_hint =
+        authority::reminder_role_hint(string_field(map, "role_hint", false)?.as_deref())
+            .map_err(session_remind_shape_error)?;
+    let authority =
+        authority::directive_authority(string_field(map, "authority", false)?.as_deref())
+            .map_err(session_remind_shape_error)?;
     Ok(crate::llm::helpers::SystemReminder {
         id: string_field(map, "id", false)?.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
         tags: tags_field(map)?,
@@ -753,6 +748,7 @@ fn session_remind_payload_from_value(
         preserve_on_compact: bool_field(map, "preserve_on_compact")?.unwrap_or(false),
         propagate,
         role_hint,
+        authority,
         source: crate::llm::helpers::ReminderSource::Bridge,
         body: string_field(map, "body", true)?.unwrap_or_default(),
         fired_at_turn,

@@ -10,6 +10,35 @@ use harn_parser::TypeExpr;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
+pub(super) fn reminder_role_hint(
+    value: Option<&str>,
+) -> Result<crate::llm::helpers::ReminderRoleHint, &'static str> {
+    use crate::llm::helpers::ReminderRoleHint;
+
+    match value {
+        None | Some("system") => Ok(ReminderRoleHint::System),
+        Some("developer") => Ok(ReminderRoleHint::Developer),
+        Some("user_block") => Ok(ReminderRoleHint::UserBlock),
+        Some("ephemeral_cache") => Ok(ReminderRoleHint::EphemeralCache),
+        Some(_) => {
+            Err("`role_hint` must be one of system, developer, user_block, or ephemeral_cache")
+        }
+    }
+}
+
+pub(super) fn directive_authority(
+    value: Option<&str>,
+) -> Result<crate::llm::helpers::DirectiveAuthority, &'static str> {
+    use crate::llm::helpers::DirectiveAuthority;
+
+    match value {
+        None | Some("contract") => Ok(DirectiveAuthority::Contract),
+        Some("corrective") => Ok(DirectiveAuthority::Corrective),
+        Some("advisory") => Ok(DirectiveAuthority::Advisory),
+        Some(_) => Err("`authority` must be one of contract, corrective, or advisory"),
+    }
+}
+
 pub(super) fn inject_export_authority(
     vm: &Vm,
     closure: &VmClosure,

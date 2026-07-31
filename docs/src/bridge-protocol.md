@@ -149,7 +149,7 @@ into the next model request. Its payload lives at
         "tags": ["token_pressure"],
         "body": "Refresh the compacted context before answering.",
         "roleHint": "developer",
-        "renderedRole": "developer",
+        "renderedRole": "user",
         "source": "stdlib_provider",
         "ttlTurns": 2
       }

@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { agent_session_messages } from "std/agent/state"
+import { agent_session_visible_messages } from "std/agent/state"
 import "std/collections"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -86,9 +86,11 @@ pipeline default(harness: Harness) {
       harness.stdio.println(repair_stalls[0].warning.pattern)
       harness.stdio.println(repair_stalls[0].warning.count)
       harness.stdio.println(count_where(stalls, { s -> s.warning.pattern == "repeated_error" }))
-      const messages = json_stringify(agent_session_messages(harness.agent, session))
+      const messages = json_stringify(agent_session_visible_messages(harness.agent, session))
       harness.stdio.println(contains(messages, "AssertionError: expected 5 got 4"))
       harness.stdio.println(contains(messages, "Repair diagnostic"))
+      require !contains(messages, "stuck_same_diagnostic"),
+        "provider-visible repair feedback omits its internal classifier"
     },
   )
 }

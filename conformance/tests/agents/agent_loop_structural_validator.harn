@@ -73,10 +73,14 @@ pipeline default(harness: Harness) {
       harness.stdio.println(decisions[0].rule)
       harness.stdio.println(decisions[0].vetoed)
       harness.stdio.println(decisions[0].recommended_action.contains("tool call"))
-      const regen_messages = json_stringify(harness.llm.mock_calls()[1].messages)
+      const regen_call = harness.llm.mock_calls()[1]
+      const regen_messages = json_stringify(regen_call.messages)
+      const regen_directives = regen_call.messages[len(regen_call.messages) - 1].content
       harness.stdio.println(!regen_messages.contains("I fixed it already."))
-      harness.stdio.println(regen_messages.contains("structural_validator"))
+      harness.stdio.println(regen_directives.contains("<directive authority=\"corrective\">"))
       harness.stdio.println(regen_messages.contains("non_empty_when_writes_expected"))
+      require !regen_messages.contains("structural_validator"),
+        "provider-visible regeneration guidance omits its internal kind"
     },
   )
   with_llm_script(

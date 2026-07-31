@@ -3,103 +3,35 @@ use super::*;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RenderedReminder {
     SystemText(String),
-    Message(serde_json::Value),
 }
 
 impl RenderedReminder {
     fn rendered_role(&self) -> String {
-        match self {
-            Self::SystemText(_) => "system".to_string(),
-            Self::Message(message) => message
-                .get("role")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("system")
-                .to_string(),
-        }
+        "user".to_string()
     }
 
     fn rendered_bytes(&self) -> usize {
         match self {
             Self::SystemText(text) => text.len(),
-            Self::Message(message) => serde_json::to_string(message)
-                .map(|rendered| rendered.len())
-                .unwrap_or(0),
         }
     }
 }
 
-pub(super) fn reminder_xml_text(reminder: &SystemReminder) -> String {
+pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
     format!(
-        "<system-reminder>\n{}\n</system-reminder>",
+        "<directive authority=\"{}\">\n{}\n</directive>",
+        reminder.authority.as_str(),
         escape_xml_text(&reminder.body)
     )
 }
 
-pub(super) fn reminder_plain_text(reminder: &SystemReminder) -> String {
-    format!("System reminder:\n{}", reminder.body)
-}
-
-pub(super) fn reminder_system_text(
-    caps: &crate::llm::capabilities::Capabilities,
-    reminder: &SystemReminder,
-) -> String {
-    if caps.prefers_xml_scaffolding {
-        reminder_xml_text(reminder)
-    } else {
-        reminder_plain_text(reminder)
-    }
-}
-
-pub(super) fn reminder_developer_message(reminder: &SystemReminder) -> RenderedReminder {
-    RenderedReminder::Message(serde_json::json!({
-        "role": "developer",
-        "content": reminder_plain_text(reminder),
-    }))
-}
-
-pub(super) fn reminder_user_block_message(
-    caps: &crate::llm::capabilities::Capabilities,
-    reminder: &SystemReminder,
-    cache_control: bool,
-) -> RenderedReminder {
-    let mut block = serde_json::json!({
-        "type": "text",
-        "text": reminder_xml_text(reminder),
-    });
-    if cache_control && caps.prompt_caching {
-        block["cache_control"] = serde_json::json!({"type": "ephemeral"});
-    }
-    RenderedReminder::Message(serde_json::json!({
-        "role": "user",
-        "content": [block],
-    }))
-}
-
 pub(crate) fn render_pending_reminders(
-    caps: &crate::llm::capabilities::Capabilities,
+    _caps: &crate::llm::capabilities::Capabilities,
     reminders: &[SystemReminder],
 ) -> Vec<RenderedReminder> {
     reminders
         .iter()
-        .map(|reminder| {
-            if caps.prefers_role_developer {
-                return reminder_developer_message(reminder);
-            }
-            if caps.message_wire_format.is_anthropic() {
-                return match reminder.role_hint {
-                    ReminderRoleHint::UserBlock => {
-                        reminder_user_block_message(caps, reminder, false)
-                    }
-                    ReminderRoleHint::EphemeralCache => {
-                        reminder_user_block_message(caps, reminder, true)
-                    }
-                    ReminderRoleHint::System | ReminderRoleHint::Developer => {
-                        RenderedReminder::SystemText(reminder_system_text(caps, reminder))
-                    }
-                };
-            }
-            RenderedReminder::SystemText(reminder_system_text(caps, reminder))
-        })
+        .map(|reminder| RenderedReminder::SystemText(reminder_directive_text(reminder)))
         .collect()
 }
 
@@ -123,6 +55,7 @@ pub(super) fn rendered_reminder_lifecycle(
                 dedupe_key: reminder.dedupe_key.clone(),
                 source: reminder.source.as_str().to_string(),
                 role_hint: reminder.role_hint.as_str().to_string(),
+                authority: reminder.authority.as_str().to_string(),
                 rendered_role,
                 body_bytes: reminder.body.len(),
                 rendered_bytes: rendered.rendered_bytes(),
@@ -145,7 +78,7 @@ pub(super) fn emit_dropped_reminder_lifecycle(session_id: &str, reminder_id: Str
     );
 }
 
-pub(super) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminder> {
+pub(crate) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminder> {
     let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
         return Vec::new();
     };
@@ -195,92 +128,84 @@ pub(super) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<Sy
     if invalid_count > 0 {
         crate::agent_sessions::prune_invalid_reminder_events(session_id);
     }
-    dedupe_by_key_newest_wins(reminders)
+    dedupe_and_order_directives(reminders)
 }
 
-/// Collapse reminders that share a `dedupe_key` down to the newest occurrence,
-/// preserving first-seen order. `inject_reminder` already dedupes on the WRITE
-/// path, but a reminder event can enter the transcript through paths that don't
-/// (e.g. `preserve_on_compact` re-attachment after a compaction that rebuilds
-/// the event list). This read-boundary dedup is the single choke point through
-/// which every pending reminder flows into rendering and the `reminder_emitted`
-/// event, so enforcing it here guarantees at most one emission per `dedupe_key`
-/// per iteration regardless of how the duplicate arose. Reminders without a
-/// `dedupe_key` are independent and always retained.
-fn dedupe_by_key_newest_wins(reminders: Vec<SystemReminder>) -> Vec<SystemReminder> {
-    let mut newest_index_for_key: std::collections::HashMap<&str, usize> =
-        std::collections::HashMap::new();
-    for (index, reminder) in reminders.iter().enumerate() {
-        if let Some(key) = reminder.dedupe_key.as_deref() {
-            newest_index_for_key.insert(key, index);
+/// Enforce the directive envelope's one deduplication and precedence policy.
+/// Authority wins before recency, first for an explicit producer key and then
+/// for normalized model-visible content. The retained directives are emitted
+/// in contract > corrective > advisory order, with transcript order preserved
+/// inside a tier.
+fn dedupe_and_order_directives(reminders: Vec<SystemReminder>) -> Vec<SystemReminder> {
+    fn candidate_wins(
+        candidate: &(usize, SystemReminder),
+        current: &(usize, SystemReminder),
+    ) -> bool {
+        candidate.1.authority.priority() > current.1.authority.priority()
+            || (candidate.1.authority.priority() == current.1.authority.priority()
+                && candidate.0 > current.0)
+    }
+
+    let indexed: Vec<(usize, SystemReminder)> = reminders.into_iter().enumerate().collect();
+    let mut winner_for_key = std::collections::HashMap::<String, (usize, SystemReminder)>::new();
+    for candidate in &indexed {
+        let Some(key) = candidate.1.dedupe_key.as_ref() else {
+            continue;
+        };
+        match winner_for_key.get(key) {
+            Some(current) if !candidate_wins(candidate, current) => {}
+            _ => {
+                winner_for_key.insert(key.clone(), candidate.clone());
+            }
         }
     }
-    reminders
-        .iter()
-        .enumerate()
-        .filter(|(index, reminder)| match reminder.dedupe_key.as_deref() {
-            Some(key) => newest_index_for_key.get(key) == Some(index),
+    let keyed: Vec<(usize, SystemReminder)> = indexed
+        .into_iter()
+        .filter(|candidate| match candidate.1.dedupe_key.as_ref() {
+            Some(key) => winner_for_key
+                .get(key)
+                .is_some_and(|winner| winner.0 == candidate.0),
             None => true,
         })
-        .map(|(_, reminder)| reminder.clone())
-        .collect()
-}
+        .collect();
 
-pub(super) fn prepend_content_blocks(
-    content: &mut serde_json::Value,
-    mut blocks: Vec<serde_json::Value>,
-) {
-    if let serde_json::Value::Array(existing) = content {
-        blocks.append(existing);
-        *existing = blocks;
-        return;
+    let mut winner_for_body = std::collections::HashMap::<String, (usize, SystemReminder)>::new();
+    for candidate in &keyed {
+        let normalized = candidate
+            .1
+            .body
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        match winner_for_body.get(&normalized) {
+            Some(current) if !candidate_wins(candidate, current) => {}
+            _ => {
+                winner_for_body.insert(normalized, candidate.clone());
+            }
+        }
     }
-    if let serde_json::Value::String(text) = content {
-        blocks.push(serde_json::json!({"type": "text", "text": text.clone()}));
-        *content = serde_json::Value::Array(blocks);
-        return;
-    }
-    if content.is_null() {
-        *content = serde_json::Value::Array(blocks);
-        return;
-    }
-    blocks.push(std::mem::take(content));
-    *content = serde_json::Value::Array(blocks);
-}
-
-pub(super) fn try_prepend_user_reminder(
-    messages: &mut [serde_json::Value],
-    reminder: &serde_json::Value,
-) -> bool {
-    if reminder.get("role").and_then(|role| role.as_str()) != Some("user") {
-        return false;
-    }
-    let Some(blocks) = reminder
-        .get("content")
-        .and_then(|content| content.as_array())
-        .cloned()
-    else {
-        return false;
-    };
-    let Some(first) = messages.first_mut() else {
-        return false;
-    };
-    let Some(first_obj) = first.as_object_mut() else {
-        return false;
-    };
-    if first_obj.get("role").and_then(|role| role.as_str()) != Some("user") {
-        return false;
-    }
-    let content = first_obj
-        .entry("content".to_string())
-        .or_insert(serde_json::Value::Null);
-    prepend_content_blocks(content, blocks);
-    true
+    let mut retained: Vec<(usize, SystemReminder)> = keyed
+        .into_iter()
+        .filter(|candidate| {
+            let normalized = candidate
+                .1
+                .body
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            winner_for_body
+                .get(&normalized)
+                .is_some_and(|winner| winner.0 == candidate.0)
+        })
+        .collect();
+    retained.sort_by_key(|(index, reminder)| {
+        (std::cmp::Reverse(reminder.authority.priority()), *index)
+    });
+    retained.into_iter().map(|(_, reminder)| reminder).collect()
 }
 
 /// Append `text` to a message's `content`, preserving whatever shape the
-/// content already uses (string or array of content blocks). Mirrors the tail
-/// counterpart of [`prepend_content_blocks`].
+/// content already uses (string or array of content blocks).
 pub(super) fn append_text_to_message_content(content: &mut serde_json::Value, text: &str) {
     if let serde_json::Value::Array(existing) = content {
         existing.push(serde_json::json!({"type": "text", "text": text}));
@@ -302,8 +227,7 @@ pub(super) fn append_text_to_message_content(content: &mut serde_json::Value, te
 
 /// Fold the coalesced `SystemText` reminder block into the trailing message
 /// when that message is already a `user` turn, mirroring
-/// [`try_prepend_user_reminder`] but appending to the tail. Returns `false`
-/// when the last message is absent or not a `user` turn, so the caller can
+/// Returns `false` when the last message is absent or not a `user` turn, so the caller can
 /// instead append a fresh trailing `user` message. Appending strictly after
 /// the final message also guarantees we never split a tool_call/tool_result
 /// pair.
@@ -327,43 +251,33 @@ pub(super) fn try_append_user_reminder_text(
     true
 }
 
-pub(super) fn apply_rendered_reminder_messages(
+pub(crate) fn apply_rendered_reminder_messages(
     messages: Vec<serde_json::Value>,
     rendered: &[RenderedReminder],
 ) -> Vec<serde_json::Value> {
     let mut messages = messages;
-    let mut prefix = Vec::new();
     let mut system_text_blocks: Vec<&str> = Vec::new();
     for reminder in rendered {
         match reminder {
-            RenderedReminder::Message(message) => {
-                if !try_prepend_user_reminder(&mut messages, message) {
-                    prefix.push(message.clone());
-                }
-            }
-            // `SystemText` reminders used to be folded into the `system`
-            // string. They are now coalesced into a single trailing `user`
-            // message so the `system` string stays byte-identical across turns
-            // (keeping the llama.cpp / non-Anthropic KV prefix cache warm). The
-            // text is unchanged — `reminder_system_text` already wrapped each
-            // body in its `<system-reminder>` scaffolding.
             RenderedReminder::SystemText(text) => system_text_blocks.push(text),
         }
     }
-    prefix.extend(messages);
     if !system_text_blocks.is_empty() {
-        let coalesced = system_text_blocks.join("\n\n");
-        if !try_append_user_reminder_text(&mut prefix, &coalesced) {
-            prefix.push(serde_json::json!({"role": "user", "content": coalesced}));
+        let coalesced = format!(
+            "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n{}\n</context-directives>",
+            system_text_blocks.join("\n")
+        );
+        if !try_append_user_reminder_text(&mut messages, &coalesced) {
+            messages.push(serde_json::json!({"role": "user", "content": coalesced}));
         }
     }
-    prefix
+    messages
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::helpers::ReminderSource;
+    use crate::llm::helpers::{DirectiveAuthority, ReminderSource};
 
     fn reminder(body: &str, dedupe_key: Option<&str>) -> SystemReminder {
         let mut reminder = SystemReminder::new(body, ReminderSource::StdlibProvider, 0);
@@ -375,21 +289,39 @@ mod tests {
     /// re-attached across a compaction) must render/emit at most once per
     /// iteration. Newest wins; first-seen order is preserved.
     #[test]
-    fn dedup_keeps_newest_per_key_and_preserves_order() {
+    fn dedup_prefers_authority_then_recency_and_orders_the_envelope() {
         let input = vec![
             reminder("recap v1", Some("post_compact_recap")),
             reminder("workspace anchor", Some("workspace_anchor")),
             reminder("recap v2", Some("post_compact_recap")),
-            reminder("ad hoc", None),
-            reminder("ad hoc two", None),
+            {
+                let mut value = reminder("  workspace   anchor ", None);
+                value.authority = DirectiveAuthority::Advisory;
+                value
+            },
+            {
+                let mut value = reminder("correct the loop", None);
+                value.authority = DirectiveAuthority::Corrective;
+                value
+            },
         ];
-        let out = dedupe_by_key_newest_wins(input);
+        let out = dedupe_and_order_directives(input);
         let bodies: Vec<&str> = out.iter().map(|r| r.body.as_str()).collect();
-        // One recap (the newest), in the position of its newest occurrence;
-        // keyless reminders all survive.
         assert_eq!(
             bodies,
-            vec!["workspace anchor", "recap v2", "ad hoc", "ad hoc two"]
+            vec!["workspace anchor", "recap v2", "correct the loop"]
         );
+    }
+
+    #[test]
+    fn higher_authority_wins_even_when_the_duplicate_is_older() {
+        let mut contract = reminder("contract", Some("same"));
+        contract.authority = DirectiveAuthority::Contract;
+        let mut corrective = reminder("corrective", Some("same"));
+        corrective.authority = DirectiveAuthority::Corrective;
+
+        let out = dedupe_and_order_directives(vec![contract, corrective]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].body, "contract");
     }
 }

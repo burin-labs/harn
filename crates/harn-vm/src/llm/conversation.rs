@@ -12,8 +12,8 @@ use super::helpers::{
     transcript_event, transcript_id, transcript_message_list, transcript_reminder_event,
     transcript_reminder_event_from_value, transcript_resumption_event_from_value,
     transcript_summary_text, transcript_suspension_event_from_value, vm_add_role_message,
-    vm_message_value, vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource,
-    SystemReminder, REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND,
+    vm_message_value, vm_value_to_json, DirectiveAuthority, ReminderPropagate, ReminderRoleHint,
+    ReminderSource, SystemReminder, REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND,
     REMINDER_INJECTED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
 };
 
@@ -25,6 +25,7 @@ pub(crate) const INJECT_REMINDER_KEYS: &[&str] = &[
     "preserve_on_compact",
     "propagate",
     "role_hint",
+    "authority",
 ];
 const CLEAR_REMINDER_KEYS: &[&str] = &["id", "tag", "dedupe_key"];
 
@@ -822,6 +823,7 @@ pub(crate) fn parse_inject_reminder_options(
             .unwrap_or(ReminderPropagate::Session),
         role_hint: optional_reminder_role_hint(options, context)?
             .unwrap_or(ReminderRoleHint::System),
+        authority: optional_reminder_authority(options, context)?.unwrap_or_default(),
         source: ReminderSource::InPipeline,
         body: required_reminder_string(options, "body", context)?,
         fired_at_turn: 0,
@@ -1033,6 +1035,24 @@ fn optional_reminder_role_hint(
         .transpose()
 }
 
+fn optional_reminder_authority(
+    options: &crate::value::DictMap,
+    context: &str,
+) -> Result<Option<DirectiveAuthority>, VmError> {
+    optional_reminder_string(options, "authority", context)?
+        .map(|value| match value.as_str() {
+            "contract" => Ok(DirectiveAuthority::Contract),
+            "corrective" => Ok(DirectiveAuthority::Corrective),
+            "advisory" => Ok(DirectiveAuthority::Advisory),
+            _ => Err(reminder_code_error(
+                context,
+                Code::ReminderUnknownOption,
+                "`authority` must be one of contract, corrective, or advisory",
+            )),
+        })
+        .transpose()
+}
+
 fn reminder_payload(event: &VmValue) -> Option<&crate::value::DictMap> {
     let event = event.as_dict()?;
     if event.get("kind").map(|value| value.display()).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND)
@@ -1238,6 +1258,32 @@ mod tests {
             VmError::Thrown(VmValue::String(message)) => {
                 assert!(message.contains(Code::ReminderUnknownOption.as_str()));
                 assert!(message.contains("body"), "{message}");
+            }
+            other => panic!("expected thrown reminder error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_reminder_authority_reports_allowed_contract() {
+        let base = new_transcript_with(None, Vec::new(), None, None);
+        let err = transcript_inject_reminder_builtin(
+            &[
+                base,
+                dict(vec![
+                    ("body", vm_string("hello")),
+                    ("authority", vm_string("urgent")),
+                ]),
+            ],
+            &mut String::new(),
+        )
+        .expect_err("unknown authority should fail");
+        match err {
+            VmError::Thrown(VmValue::String(message)) => {
+                assert!(message.contains(Code::ReminderUnknownOption.as_str()));
+                assert!(
+                    message.contains("contract, corrective, or advisory"),
+                    "{message}"
+                );
             }
             other => panic!("expected thrown reminder error, got {other:?}"),
         }

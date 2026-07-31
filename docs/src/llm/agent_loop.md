@@ -135,7 +135,12 @@ Parser, stall, and completion-judge feedback pass through the same deterministic
 composer. Its `harn.agent_feedback_composition.v1` typed checkpoint records the
 surviving reason-coded messages and every suppression (duplicate,
 stop/continue contradiction, or unchanged next step) before model-visible
-feedback is injected.
+feedback is injected. Injection persists each message as a typed `corrective`
+directive, not a synthetic user transcript turn. At the provider boundary it
+shares the single `<context-directives>` envelope, fixed trailing slot,
+authority ordering, and normalized-content deduplication used by structural
+reminders. Feedback kinds remain available in `feedback_injected` events and
+directive tags but are not exposed to the model.
 
 Nested `llm` fields:
 

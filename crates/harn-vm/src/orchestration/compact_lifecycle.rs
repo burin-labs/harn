@@ -972,7 +972,9 @@ pub fn transcript_compactable_events(transcript: &crate::value::DictMap) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource};
+    use crate::llm::helpers::{
+        DirectiveAuthority, ReminderPropagate, ReminderRoleHint, ReminderSource,
+    };
     use crate::value::VmDictExt;
 
     fn reminder_event_value(body: &str, preserve: bool, ttl: Option<i64>) -> VmValue {
@@ -984,6 +986,7 @@ mod tests {
             preserve_on_compact: preserve,
             propagate: ReminderPropagate::Session,
             role_hint: ReminderRoleHint::System,
+            authority: DirectiveAuthority::Contract,
             source: ReminderSource::StdlibProvider,
             body: body.to_string(),
             fired_at_turn: 0,

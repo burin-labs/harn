@@ -366,14 +366,9 @@ pub(crate) fn assemble_system_prompt(
     // cannot drift. Dormant until a tool actually carries `guidance`.
     append_tool_guidance_fragments(&mut fragments, options);
 
-    // NB: `RenderedReminder::SystemText` reminders are intentionally NOT folded
-    // into the system fragments here. They are appended as a trailing `user`
-    // message in `apply_rendered_reminder_messages` so the assembled `system`
-    // string stays byte-identical across turns even as the live reminder set
-    // changes (token-pressure %, idle nudge, recap TTL), keeping the
-    // non-Anthropic prefix cache warm. `RenderedReminder::Message` reminders
-    // (Anthropic user blocks / OpenAI developer messages) are likewise handled
-    // on the message path with their `cache_control`, never here.
+    // Directives are intentionally NOT folded into the system fragments here.
+    // The one context envelope is appended at the trailing user slot so the
+    // assembled system string remains byte-identical as live directives change.
     let _ = rendered_reminders;
 
     let ctx = assemble_ctx(options);

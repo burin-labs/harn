@@ -2108,11 +2108,11 @@ is justified, consent-verified, and traced.
 
 ## Reminders
 
-System reminders are typed, ephemeral `system_reminder` transcript events
-for nudging a running agent without pretending the nudge is user input
-and without adding it to durable messages. They support `ttl_turns`,
-`dedupe_key`, `preserve_on_compact`, `propagate`, and provider-aware
-`role_hint` rendering. Full reference:
+System reminders are typed `system_reminder` transcript events for nudging a
+running agent without pretending the nudge is user input and without adding it
+to durable messages. They support `ttl_turns`, `dedupe_key`,
+`preserve_on_compact`, `propagate`, and an explicit `authority` tier:
+`contract`, `corrective`, or `advisory`. Full reference:
 `docs/src/system-reminders.md`.
 
 `transcript.inject_reminder(transcript, options)` appends a pending
@@ -2127,17 +2127,20 @@ const injected = transcript.inject_reminder(transcript(), {
   ttl_turns: 3,
   preserve_on_compact: true,
   propagate: "session",
-  role_hint: "developer",
+  authority: "advisory",
 })
 const t = injected.transcript
 ```
 
-`body` is required and must be non-empty. Optional `tags`,
-`dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and
-`role_hint` fields are validated; unknown option keys fail fast. A new
-reminder with the same `dedupe_key` replaces pending reminders with
-that key and emits `transcript.reminder.deduped` on
-`transcript.reminder.lifecycle` when an EventLog is active.
+`body` is required and must be non-empty. Optional `tags`, `dedupe_key`,
+`ttl_turns`, `preserve_on_compact`, `propagate`, `authority`, and legacy
+`role_hint` fields are validated; unknown option keys fail fast. Omitted
+`authority` defaults to `contract`. New and replayed reminders dedupe uniformly:
+an explicit `dedupe_key` wins, otherwise normalized body text is the key. When
+duplicates disagree, the highest authority survives (`contract` > `corrective`
+> `advisory`), then the newest reminder. Deduplication emits
+`transcript.reminder.deduped` on `transcript.reminder.lifecycle` when an EventLog
+is active.
 
 `transcript.clear_reminders(transcript, selector)` removes pending
 reminders and returns `{transcript, removed_count}`. Select by `id`,
@@ -2204,12 +2207,13 @@ or a session-hook effect list. Hosts inject ambient context with the
 bridge `session/remind` notification; `session/inject` remains user-role
 input.
 
-Rendering is capability-aware: routes that prefer developer-role
-instructions get separate developer messages; Anthropic routes can use
-`role_hint: "user_block"` or `"ephemeral_cache"` as
-`<system-reminder>` user content blocks; XML providers get
-`<system-reminder>` system text; fallback providers get plain
-`System reminder:` system text.
+Rendering is provider-neutral. Every route receives exactly one trailing user
+message containing a `<context-directives>` envelope. Its directives are
+ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
+order; internal tags, dedupe keys, and runtime signatures are not rendered.
+The system prompt remains byte-stable as reminders change. Persisted
+`role_hint` values remain accepted for replay compatibility but do not control
+placement or voice.
 
 Sub-agent handoffs carry a filtered `reminder_propagation` list.
 `propagate: "all"` reaches descendants, `"session"` reaches direct
@@ -3686,7 +3690,8 @@ Three concentric surfaces:
   `hook_vetoed`.
 - Any tool, persona, step, or session hook can also emit a typed reminder
   for the active session transcript. Return `{reminder: {body, tags?,
-  dedupe_key?, ttl_turns?, preserve_on_compact?, propagate?, role_hint?},
+  dedupe_key?, ttl_turns?, preserve_on_compact?, propagate?, authority?,
+  role_hint?},
   then?}` to combine the reminder with an existing action, return a bare
   reminder spec such as `{body: "Refresh context", tags: ["context"]}`,
   or return a session-hook effect list like `[{reminder: {...}}]`.

@@ -41,16 +41,19 @@ pipeline default(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
+      const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
       harness.stdio.println(result.status)
       harness.stdio.println(result.tools.successful[0])
-      harness.stdio.println(contains(retry_messages, "parse_guidance"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
       harness.stdio.println(contains(retry_messages, "Stray text outside response tags"))
       harness.stdio.println(!contains(retry_messages, "no_progress_streak"))
+      require !contains(retry_messages, "parse_guidance"),
+        "provider-visible guidance omits its internal kind"
     },
   )
   // Single recovered text calls are no longer a retry boundary. The parser
   // canonicalizes the call for history, dispatches it, and the next model turn
-  // should not be polluted with parse_guidance.
+  // should not be polluted with corrective parse guidance.
   with_llm_script(
     harness.llm,
     [llm_text("write_note({ path: \"notes.txt\" })"), llm_text("<done>##DONE##</done>")],
@@ -104,7 +107,7 @@ pipeline default(harness: Harness) {
   )
   // Partial success: one call parses and dispatches while a sibling call in the
   // same turn is malformed (unknown tool). The dropped call's diagnostic must
-  // still reach the model as parse_guidance, flagged has_partial_success so the
+  // still reach the model as corrective guidance, flagged has_partial_success so the
   // model knows the good call landed and only re-emits the bad one.
   with_llm_script(
     harness.llm,
@@ -131,11 +134,14 @@ pipeline default(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
+      const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
       harness.stdio.println(result.status)
       harness.stdio.println(result.tools.successful[0])
-      harness.stdio.println(contains(retry_messages, "parse_guidance"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
       harness.stdio.println(contains(retry_messages, "parsed successfully and were dispatched"))
       harness.stdio.println(!contains(retry_messages, "no_progress_streak"))
+      require !contains(retry_messages, "parse_guidance"),
+        "partial-success guidance omits its internal kind"
     },
   )
   // Wrapper-corrupted batches are different from partial-success siblings:
@@ -169,12 +175,15 @@ pipeline default(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
+      const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
       harness.stdio.println(result.status)
       harness.stdio.println(result.tools.successful[0])
       harness.stdio.println(len(result.tools.successful))
-      harness.stdio.println(contains(retry_messages, "parse_guidance"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
       harness.stdio.println(contains(retry_messages, "none were dispatched"))
       harness.stdio.println(!contains(retry_messages, "parsed successfully and were dispatched"))
+      require !contains(retry_messages, "parse_guidance"),
+        "all-dropped guidance omits its internal kind"
     },
   )
   // If the retry budget ends on a complete parse drop, terminal ownership is

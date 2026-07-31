@@ -12,8 +12,9 @@ pub(crate) use messages::{
 };
 pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub(crate) use options::{
-    assemble_system_prompt, compose_system_prompt, expects_structured_output, extract_json,
-    extract_llm_options, project_llm_options, resolve_catalog_thinking_config,
+    apply_rendered_reminder_messages, assemble_system_prompt, compose_system_prompt,
+    expects_structured_output, extract_json, extract_llm_options, pending_reminders_from_session,
+    project_llm_options, render_pending_reminders, resolve_catalog_thinking_config,
     resolve_thinking_config, system_prompt_event_metadata, system_prompt_metadata,
     validate_llm_option_keys,
 };
@@ -39,12 +40,13 @@ pub(crate) use transcript::{
 #[allow(unused_imports)]
 pub(crate) use transcript::{
     transcript_drain_decision_event, transcript_reminder_event, transcript_resumption_event,
-    transcript_suspension_event, DrainDecision, DrainDecisionAction, DrainDecisionItem,
-    DrainDecisionItemCategory, ReminderPropagate, ReminderRoleHint, ReminderSource, Resumption,
-    ResumptionInitiator, Suspension, SuspensionInitiator, SystemReminder,
-    DRAIN_DECISION_EVENT_KIND, REMINDER_DEDUPED_EVENT_KIND, REMINDER_DROPPED_EVENT_KIND,
-    REMINDER_EXPIRED_EVENT_KIND, REMINDER_FIRED_EVENT_KIND, REMINDER_INHERITED_EVENT_KIND,
-    REMINDER_INJECTED_EVENT_KIND, REMINDER_ITERATION_SUMMARY_EVENT_KIND, REMINDER_LIFECYCLE_TOPIC,
+    transcript_suspension_event, DirectiveAuthority, DrainDecision, DrainDecisionAction,
+    DrainDecisionItem, DrainDecisionItemCategory, ReminderPropagate, ReminderRoleHint,
+    ReminderSource, Resumption, ResumptionInitiator, Suspension, SuspensionInitiator,
+    SystemReminder, DRAIN_DECISION_EVENT_KIND, REMINDER_DEDUPED_EVENT_KIND,
+    REMINDER_DROPPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND, REMINDER_FIRED_EVENT_KIND,
+    REMINDER_INHERITED_EVENT_KIND, REMINDER_INJECTED_EVENT_KIND,
+    REMINDER_ITERATION_SUMMARY_EVENT_KIND, REMINDER_LIFECYCLE_TOPIC,
     REMINDER_PROVIDER_EVALUATED_EVENT_KIND, RESUMPTION_EVENT_KIND, SUSPENSION_EVENT_KIND,
     SYSTEM_REMINDER_EVENT_KIND,
 };

@@ -76,24 +76,29 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         len(decisions) > 0 && decisions[len(decisions) - 1]?.reason == "terminal_callback_continue",
         "adaptive budget decisions should record the terminal rescue extension",
       )
-      const messages = result?.transcript?.messages ?? []
+      const reminders = transcript_events_by_kind(result.transcript, "system_reminder")
       let saw_post_turn_feedback = false
       let saw_terminal_feedback = false
-      for message in messages {
-        if contains(message?.content ?? "", "<runtime_feedback kind=\"post_turn\">") {
+      for event in reminders {
+        if event?.reminder?.dedupe_key == "runtime_feedback/post_turn"
+          && event?.reminder?.authority
+          == "corrective" {
           saw_post_turn_feedback = true
         }
-        if contains(message?.content ?? "", "<runtime_feedback kind=\"terminal_callback\">") {
+        if event?.reminder?.dedupe_key == "runtime_feedback/terminal_callback"
+          && event?.reminder
+          ?.authority
+          == "corrective" {
           saw_terminal_feedback = true
         }
       }
       assert(
         saw_post_turn_feedback,
-        "post-turn callback feedback should keep the normal post_turn label",
+        "post-turn callback feedback should use a corrective directive",
       )
       assert(
         saw_terminal_feedback,
-        "terminal callback feedback should be labeled separately from post_turn feedback",
+        "terminal callback feedback should have its own corrective directive lifecycle",
       )
     },
   )

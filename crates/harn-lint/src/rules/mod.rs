@@ -15,7 +15,6 @@ pub(crate) mod optional_shorthand;
 pub(crate) mod parallel_capture;
 pub(crate) mod reminder_lifecycle;
 pub(crate) mod reminder_provider_count;
-pub(crate) mod reminder_role_hint;
 pub(crate) mod template_provider_identity;
 pub(crate) mod template_unknown_filter;
 pub(crate) mod template_variant_explosion;

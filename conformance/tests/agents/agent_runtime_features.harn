@@ -3,6 +3,7 @@ import {
   compact_retaining_current_plan,
 } from "std/agent/autocompact"
 import { agent_loop } from "std/agent/loop"
+import { agent_session_visible_messages } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn list_tools() {
@@ -200,9 +201,10 @@ pipeline test(harness: Harness, task) {
   )
   harness.stdio.println(stopped_after_tool_turn?.llm?.iterations == 1)
   harness.stdio.println(
-    json_stringify(transcript_messages(stopped_after_tool_turn?.transcript)).contains(
-      "handoff now",
-    ),
+    json_stringify(
+      agent_session_visible_messages(harness.agent, stopped_after_tool_turn.session_id),
+    )
+      .contains("handoff now"),
   )
   with_llm_script(
     harness.llm,

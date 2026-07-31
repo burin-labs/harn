@@ -1,3 +1,9 @@
+use super::super::schema::{
+    ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS,
+};
+use super::test_support::{self, update_harn_meta};
+use super::{AcpAgentEventSink, AcpOutput};
 use harn_vm::agent_events::{
     AgentEvent, AgentEventSink, AttachmentFlavor, AttachmentRendering, FsWatchEvent,
     HostInjectionProvenance, InjectionDelivery, SanitizationAction, SanitizationVerdict,
@@ -13,13 +19,6 @@ use harn_vm::orchestration::{
 };
 use harn_vm::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use tokio::sync::mpsc;
-
-use super::super::schema::{
-    ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_SESSION_UPDATE_EXTENSIONS,
-};
-use super::test_support::{self, update_harn_meta};
-use super::{AcpAgentEventSink, AcpOutput};
 mod plan_document;
 mod registration_fixtures;
 mod subagent_stop;
@@ -272,6 +271,7 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
             tags: vec!["token_pressure".to_string()],
             body: "Refresh the compacted context before answering.".to_string(),
             role_hint: "developer".to_string(),
+            authority: "contract".to_string(),
             rendered_role: "developer".to_string(),
             source: "stdlib_provider".to_string(),
             ttl_turns: Some(2),

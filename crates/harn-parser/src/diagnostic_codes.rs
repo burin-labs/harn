@@ -271,7 +271,7 @@ diagnostic_codes! {
     ModuleImportCompileFailed, "HARN-MOD-007", Mod, "imported module failed to compile";
     ReminderUnknownOption, "HARN-RMD-001", Rmd, "reminder lifecycle option key is not recognized";
     ReminderInvalidShape, "HARN-RMD-002", Rmd, "reminder payload shape is invalid";
-    ReminderUnsupportedUserBlockRoleHint, "HARN-RMD-003", Rmd, "user_block reminder role hint is not supported by the selected provider";
+    ReminderUnsupportedUserBlockRoleHint, "HARN-RMD-003", Rmd, "retired provider-specific reminder role-hint diagnostic";
     ReminderInfiniteDiscardable, "HARN-RMD-004", Rmd, "discardable reminder has no TTL";
     ReminderUnknownPropagate, "HARN-RMD-005", Rmd, "reminder propagate value is not recognized";
     ReminderProviderMalformedSpec, "HARN-RMD-006", Rmd, "reminder provider returned a malformed reminder spec";

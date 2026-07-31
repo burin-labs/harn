@@ -44,7 +44,12 @@ fn injected_kind_in(calls, idx, marker) {
   if idx >= len(calls) {
     return false
   }
-  return contains(json_stringify(calls[idx].messages), marker)
+  for message in calls[idx].messages {
+    if contains(to_string(message?.content ?? ""), marker) {
+      return true
+    }
+  }
+  return false
 }
 
 pipeline default(harness: Harness) {
@@ -72,10 +77,14 @@ pipeline default(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       harness.stdio.println("status=" + result.status)
-      harness.stdio.println("nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
+      harness.stdio.println(
+        "nudge=" + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
+      )
       harness.stdio.println(
         "native_instruction=" + to_string(injected_kind_in(calls, 1, "native tool interface")),
       )
+      require !contains(json_stringify(calls[1].messages), "missing_tool_call"),
+        "provider-visible nudge omits the internal feedback kind"
       harness.stdio.println("successful=" + json_stringify(result.tools.successful))
     },
   )

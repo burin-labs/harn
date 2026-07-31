@@ -479,8 +479,12 @@ fn coding_agent_suite_default_structural_validator_vetoes_phantom_completion() {
     let transcript = fs::read_to_string(output_dir.join("transcript_events.jsonl"))
         .expect("transcript events exist");
     assert!(
-        transcript.contains("<runtime_feedback kind=\\\"structural_validator\\\">"),
-        "default validator should inject runtime feedback; got:\n{transcript}"
+        transcript.contains("runtime_feedback/structural_validator"),
+        "default validator should persist a typed corrective directive; got:\n{transcript}"
+    );
+    assert!(
+        !transcript.contains("<runtime_feedback"),
+        "internal feedback markup must not be persisted as model-visible content; got:\n{transcript}"
     );
     assert!(
         transcript.contains("\\\"rule\\\":\\\"non_empty_when_writes_expected\\\""),
