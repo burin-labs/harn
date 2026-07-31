@@ -97,7 +97,11 @@ pipeline default(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       harness.stdio.println(result.status)
-      harness.stdio.println(contains(json_stringify(calls[3].messages), "parse_guidance"))
+      const retry_messages = json_stringify(calls[3].messages)
+      const retry_directives = calls[3].messages[len(calls[3].messages) - 1].content
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      require !contains(retry_messages, "parse_guidance"),
+        "truncation fallback omits its internal feedback kind"
     },
   )
   // (c) Clean stop + malformed call -> NOT auto-continue. The same truncated
@@ -127,7 +131,11 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println(result.status)
       harness.stdio.println(len(calls))
-      harness.stdio.println(contains(json_stringify(calls[1].messages), "parse_guidance"))
+      const retry_messages = json_stringify(calls[1].messages)
+      const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      require !contains(retry_messages, "parse_guidance"),
+        "malformed-call guidance omits its internal feedback kind"
     },
   )
   // (d) Length truncation with billed hidden work but no visible text/tool

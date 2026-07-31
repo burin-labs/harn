@@ -7,7 +7,7 @@
 // satisfies it on attempt 2 only after seeing the injected findings.
 import { goal, goal_reloop } from "std/agent/goal"
 import { agent_loop } from "std/agent/loop"
-import { agent_session_messages } from "std/agent/state"
+import { agent_session_messages, agent_session_visible_messages } from "std/agent/state"
 
 pipeline test(harness: Harness) {
   const g = goal(
@@ -81,7 +81,7 @@ pipeline test(harness: Harness) {
     "the agent re-ran once (2 attempts); got " + to_string(assistant_turns),
   )
   let findings_threaded = false
-  for m in messages {
+  for m in agent_session_visible_messages(harness.agent, session) {
     if to_string(m?.content ?? "").contains("CI is green") {
       findings_threaded = true
     }

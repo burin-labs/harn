@@ -43,7 +43,12 @@ fn injected_kind_in(calls, idx, marker) {
   if idx >= len(calls) {
     return false
   }
-  return contains(json_stringify(calls[idx].messages), marker)
+  for message in calls[idx].messages {
+    if contains(to_string(message?.content ?? ""), marker) {
+      return true
+    }
+  }
+  return false
 }
 
 fn edit_missing_tool_call_recovery() {
@@ -89,10 +94,14 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println("fenced.status=" + r.status)
       harness.stdio.println(
-        "fenced.nudge=" + to_string(injected_kind_in(calls, 1, "fenced_call_attempt")),
+        "fenced.nudge="
+          + to_string(
+          injected_kind_in(calls, 1, "<directive authority=\"corrective\">"),
+        ),
       )
       harness.stdio.println(
-        "fenced.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
+        "fenced.no_missing="
+          + to_string(!injected_kind_in(calls, 1, "appeared to intend a call")),
       )
     },
   )
@@ -122,10 +131,13 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println("missing.status=" + r.status)
       harness.stdio.println(
-        "missing.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")),
+        "missing.nudge="
+          + to_string(
+          injected_kind_in(calls, 1, "<directive authority=\"corrective\">"),
+        ),
       )
       harness.stdio.println(
-        "missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
+        "missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "wrapped a tool call")),
       )
     },
   )
@@ -156,10 +168,14 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println("multilingual.status=" + r.status)
       harness.stdio.println(
-        "multilingual.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")),
+        "multilingual.nudge="
+          + to_string(
+          injected_kind_in(calls, 1, "<directive authority=\"corrective\">"),
+        ),
       )
       harness.stdio.println(
-        "multilingual.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
+        "multilingual.not_fenced="
+          + to_string(!injected_kind_in(calls, 1, "wrapped a tool call")),
       )
     },
   )
@@ -184,10 +200,11 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println("realcall.successful=" + json_stringify(r.tools.successful))
       harness.stdio.println(
-        "realcall.no_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
+        "realcall.no_fenced=" + to_string(!injected_kind_in(calls, 1, "wrapped a tool call")),
       )
       harness.stdio.println(
-        "realcall.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
+        "realcall.no_missing="
+          + to_string(!injected_kind_in(calls, 1, "appeared to intend a call")),
       )
     },
   )
@@ -217,7 +234,8 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println("kwargshape.status=" + r.status)
       harness.stdio.println(
-        "kwargshape.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
+        "kwargshape.no_missing="
+          + to_string(!injected_kind_in(calls, 1, "appeared to intend a call")),
       )
     },
   )
@@ -252,11 +270,13 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println(
         "streak.none_after_progress="
-          + to_string(!injected_kind_in(calls, 1, "no_progress_streak")),
+          + to_string(
+          !injected_kind_in(calls, 1, "<directive authority=\"corrective\">"),
+        ),
       )
       let streak_fired = false
       for i in range(2, len(calls)) {
-        if injected_kind_in(calls, i, "no_progress_streak") {
+        if injected_kind_in(calls, i, "<directive authority=\"corrective\">") {
           streak_fired = true
         }
       }

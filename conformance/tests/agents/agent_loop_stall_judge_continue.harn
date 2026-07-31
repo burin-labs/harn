@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { agent_session_messages } from "std/agent/state"
+import { agent_session_messages, agent_session_visible_messages } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn events_of(events, kind) {
@@ -69,7 +69,7 @@ pipeline default(harness: Harness) {
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
       const judges = events_of(captured.events, "judge_decision")
-      const messages = json_stringify(agent_session_messages(harness.agent, session))
+      const messages = json_stringify(agent_session_visible_messages(harness.agent, session))
       harness.stdio.println(captured.result.status)
       harness.stdio.println(len(stalls))
       harness.stdio.println(len(judges))

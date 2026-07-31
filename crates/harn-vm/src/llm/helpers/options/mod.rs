@@ -21,6 +21,9 @@ mod thinking;
 mod tool_search;
 mod validate;
 
+pub(crate) use reminders::{
+    apply_rendered_reminder_messages, pending_reminders_from_session, render_pending_reminders,
+};
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 
 #[cfg(test)]

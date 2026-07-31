@@ -922,3 +922,22 @@ pub fn __agent_loop_fire_resume_continuity(agent: HarnessAgent, session, opts) {
   )
   return omit(opts, ["_resume_continuity"])
 }
+
+/**
+ * Construct one loop turn's direct caller options after visible projection.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn agent_direct_llm_options(turn_llm_opts, turn_prompt, session_id, iteration) -> dict {
+  return turn_llm_opts
+    + {
+    messages: turn_prompt.messages,
+    session_id: session_id,
+    tool_format: turn_llm_opts.tool_format,
+    _directives_rendered: true,
+    _iteration: iteration,
+    _system_fragments: turn_prompt.fragments,
+  }
+}

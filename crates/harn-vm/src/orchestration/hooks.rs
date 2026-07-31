@@ -14,6 +14,7 @@ use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, S
 use crate::value::{VmClosure, VmError, VmValue};
 
 mod post_tool;
+mod reminder_fields;
 mod vm_entry;
 use post_tool::{apply_post_tool_action, parse_post_tool_result};
 pub use post_tool::{PostToolAction, PostToolHookResult};
@@ -932,41 +933,6 @@ fn optional_reminder_spec_propagate(
         .transpose()
 }
 
-fn optional_reminder_spec_role_hint(
-    options: &crate::value::DictMap,
-    context: &str,
-) -> Result<Option<ReminderRoleHint>, VmError> {
-    optional_reminder_spec_string(options, "role_hint", context)?
-        .map(|value| match value.as_str() {
-            "system" => Ok(ReminderRoleHint::System),
-            "developer" => Ok(ReminderRoleHint::Developer),
-            "user_block" => Ok(ReminderRoleHint::UserBlock),
-            "ephemeral_cache" => Ok(ReminderRoleHint::EphemeralCache),
-            _ => Err(reminder_error(
-                context,
-                "`role_hint` must be one of system, developer, user_block, or ephemeral_cache",
-            )),
-        })
-        .transpose()
-}
-
-fn optional_reminder_spec_authority(
-    options: &crate::value::DictMap,
-    context: &str,
-) -> Result<Option<crate::llm::helpers::DirectiveAuthority>, VmError> {
-    optional_reminder_spec_string(options, "authority", context)?
-        .map(|value| match value.as_str() {
-            "contract" => Ok(crate::llm::helpers::DirectiveAuthority::Contract),
-            "corrective" => Ok(crate::llm::helpers::DirectiveAuthority::Corrective),
-            "advisory" => Ok(crate::llm::helpers::DirectiveAuthority::Advisory),
-            _ => Err(reminder_error(
-                context,
-                "`authority` must be one of contract, corrective, or advisory",
-            )),
-        })
-        .transpose()
-}
-
 fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, VmError> {
     let Some(options) = value.as_dict() else {
         return Err(reminder_error(
@@ -996,6 +962,12 @@ fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, V
             format!("unknown reminder option(s): {}", unknown.join(", ")),
         ));
     }
+    let role_hint = optional_reminder_spec_string(options, "role_hint", context)?;
+    let role_hint = reminder_fields::role_hint(role_hint.as_deref())
+        .map_err(|message| reminder_error(context, message))?;
+    let authority = optional_reminder_spec_string(options, "authority", context)?;
+    let authority = reminder_fields::authority(authority.as_deref())
+        .map_err(|message| reminder_error(context, message))?;
     Ok(SystemReminder {
         id: uuid::Uuid::now_v7().to_string(),
         tags: reminder_spec_tags(options, context)?,
@@ -1005,9 +977,8 @@ fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, V
             .unwrap_or(false),
         propagate: optional_reminder_spec_propagate(options, context)?
             .unwrap_or(ReminderPropagate::Session),
-        role_hint: optional_reminder_spec_role_hint(options, context)?
-            .unwrap_or(ReminderRoleHint::System),
-        authority: optional_reminder_spec_authority(options, context)?.unwrap_or_default(),
+        role_hint: role_hint.unwrap_or(ReminderRoleHint::System),
+        authority: authority.unwrap_or_default(),
         source: ReminderSource::Hook,
         body: required_reminder_spec_string(options, "body", context)?,
         fired_at_turn: 0,

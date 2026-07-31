@@ -4,7 +4,11 @@ import {
   agent_scratchpad_options,
   agent_scratchpad_recitation_fragment,
 } from "std/agent/scratchpad"
-import { agent_session_messages, agent_session_project_turn } from "std/agent/state"
+import {
+  agent_session_messages,
+  agent_session_project_turn,
+  agent_session_visible_messages,
+} from "std/agent/state"
 
 fn __agent_done_sentinel(opts) {
   const sentinel = opts?.done_sentinel
@@ -723,7 +727,7 @@ pub fn agent_build_turn_messages(
   const projected_messages = __agent_apply_projection(agent, session.session_id, raw_messages, opts)
   const decorator = opts?.message_decorator ?? opts?.decorate_message
   if !(opts?.timestamp_messages ?? opts?.message_timestamps ?? false) && decorator == nil {
-    return projected_messages
+    return agent_session_visible_messages(agent, session.session_id, projected_messages)
   }
   const timestamp = clock.date_iso()
   let out = []
@@ -734,5 +738,5 @@ pub fn agent_build_turn_messages(
     )
     index = index + 1
   }
-  return out
+  return agent_session_visible_messages(agent, session.session_id, out)
 }

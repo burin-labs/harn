@@ -78,7 +78,7 @@ pub(super) fn emit_dropped_reminder_lifecycle(session_id: &str, reminder_id: Str
     );
 }
 
-pub(super) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminder> {
+pub(crate) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminder> {
     let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
         return Vec::new();
     };
@@ -251,7 +251,7 @@ pub(super) fn try_append_user_reminder_text(
     true
 }
 
-pub(super) fn apply_rendered_reminder_messages(
+pub(crate) fn apply_rendered_reminder_messages(
     messages: Vec<serde_json::Value>,
     rendered: &[RenderedReminder],
 ) -> Vec<serde_json::Value> {

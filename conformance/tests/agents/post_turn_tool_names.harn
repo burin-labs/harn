@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { agent_session_visible_messages } from "std/agent/state"
 import { with_llm_script } from "std/testing"
 
 fn tools() {
@@ -75,7 +76,9 @@ pipeline default(harness: Harness) {
         },
       )
       harness.stdio.println(result.stop_reason)
-      const transcript = json_stringify(transcript_messages(result.transcript))
+      const transcript = json_stringify(
+        agent_session_visible_messages(harness.agent, result.session_id),
+      )
       harness.stdio.println(transcript.contains("tool_names=lookup,blocked"))
       harness.stdio.println(transcript.contains("successful=lookup"))
       harness.stdio.println(transcript.contains("rejected=blocked"))

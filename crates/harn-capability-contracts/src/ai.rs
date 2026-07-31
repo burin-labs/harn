@@ -577,6 +577,13 @@ capability_method!(
     "Read an agent session's messages."
 );
 capability_method!(
+    agent_session_visible_messages,
+    "harness.agent.session_visible_messages",
+    ["state.read@arg0"],
+    "__cap_agent_session_visible_messages(session_id: string, messages?: list|nil) -> list",
+    "Project an agent session's provider-visible messages."
+);
+capability_method!(
     agent_session_record_assistant,
     "harness.agent.session_record_assistant",
     ["state.write@arg0"],

@@ -61,6 +61,7 @@ mod tool_result_messages;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod plan_document;
+mod visible_messages;
 
 use plan_document::{next_plan_document_event, plan_artifact_from_result};
 
@@ -3583,6 +3584,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, HOST_SESSION_BUILTINS);
     live_transcript_journal::register_live_transcript_journal_primitives(vm);
+    visible_messages::register_visible_message_primitives(vm);
 }
 
 #[cfg(test)]
