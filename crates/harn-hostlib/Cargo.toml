@@ -113,7 +113,7 @@ grammar-data = [
 ]
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.45" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.46" }
 # Hostlib never issues Postgres queries, so it takes the VM lean and lets
 # the full CLI re-enable `pg.*` through its own direct harn-vm edge (Cargo
 # unifies the feature across the build graph).

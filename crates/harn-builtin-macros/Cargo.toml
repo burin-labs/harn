@@ -15,7 +15,7 @@ proc-macro = true
 syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = "1"
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.45" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.46" }
 
 [dev-dependencies]
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.46" }

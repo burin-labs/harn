@@ -3440,7 +3440,7 @@ dependencies = [
 
 [[package]]
 name = "harn-capability-contracts"
-version = "0.10.45"
+version = "0.10.46"
 dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
