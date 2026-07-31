@@ -184,6 +184,16 @@ async fn persisted_10k_event_tool_timeline_opens_under_500ms() {
     eprintln!("10k-event tool timeline elapsed: {elapsed:?}");
 
     assert_eq!(snapshot.nodes.len(), 5_000);
+    let timing_covered = snapshot
+        .nodes
+        .iter()
+        .filter(|node| node.start_ms.is_some() && node.duration_ms.is_some())
+        .count();
+    assert!(
+        timing_covered * 100 >= snapshot.nodes.len() * 99,
+        "completed-tool timing coverage was {timing_covered}/{}",
+        snapshot.nodes.len()
+    );
     assert!(
         elapsed < std::time::Duration::from_millis(500),
         "10k-event timeline took {elapsed:?}"
