@@ -3,14 +3,15 @@
 // this script keeps blueprint validation and policy lowering in Harn.
 import { persona_blueprint_compile } from "std/personas/compiler"
 
-fn __write(ok: bool, lowering = nil, error = nil) {
-  __io_println(json_stringify({ok: ok, lowering: lowering, error: error}))
+fn __write(stdio: HarnessStdio, ok: bool, lowering = nil, error = nil) {
+  stdio.println(json_stringify({ok: ok, lowering: lowering, error: error}))
 }
 
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PERSONA_BLUEPRINT_JSON", "")
   if raw == "" {
     __write(
+      harness.stdio,
       false,
       nil,
       {code: "missing_blueprint", message: "HARN_PERSONA_BLUEPRINT_JSON is required"},
@@ -21,6 +22,7 @@ fn main(harness: Harness) -> int {
     json_parse(raw)
   } catch (e) {
     __write(
+      harness.stdio,
       false,
       nil,
       {
@@ -30,7 +32,7 @@ fn main(harness: Harness) -> int {
     )
     return 0
   }
-  const compiled = persona_blueprint_compile(blueprint)
+  const compiled = persona_blueprint_compile(harness.llm, blueprint)
   if is_err(compiled) {
     const report = unwrap_err(compiled)
     const error = if len(report.errors) > 0 {
@@ -38,9 +40,9 @@ fn main(harness: Harness) -> int {
     } else {
       {code: "blueprint_invalid", message: "persona blueprint failed Harn validation"}
     }
-    __write(false, nil, error)
+    __write(harness.stdio, false, nil, error)
     return 0
   }
-  __write(true, unwrap(compiled), nil)
+  __write(harness.stdio, true, unwrap(compiled), nil)
   return 0
 }

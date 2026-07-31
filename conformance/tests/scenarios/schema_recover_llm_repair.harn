@@ -7,23 +7,24 @@ import { llm_text, with_llm_script } from "std/testing"
  * attempts=4 (parsed → regex → llm_repair; the extracted stage is
  * skipped when extract_json_from_text doesn't change the input).
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   with_llm_script(
+    harness.llm,
     [llm_text("{\"verdict\": \"pass\"}")],
     { ->
-      const r = schema_recover(
+      const r = harness.llm.recover_schema(
         "model said pass but failed to format it",
         schema,
         {provider: "mock"},
       )
-      __io_println(r.ok)
-      __io_println(r.stage)
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.stage)
       const data = r.data
       if data != nil {
-        __io_println(data.verdict)
+        harness.stdio.println(data.verdict)
       }
-      __io_println(r.repaired)
+      harness.stdio.println(r.repaired)
     },
   )
 }

@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const base = 10
   fn offset(x) {
     return x + base
   }
-  log(offset(5))
+  harness.stdio.log(offset(5))
 }

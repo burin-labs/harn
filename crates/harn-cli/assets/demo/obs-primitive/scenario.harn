@@ -39,19 +39,18 @@ import {
   events_take,
   gauge,
   histogram,
-  log,
   request_id,
   reset,
   start_span,
 } from "std/observability"
 
-fn record_session_put() {
-  const handle = start_span("harn.session.put", {"harn.session.id": "sess_demo"})
-  counter("harn.session.put_total", 1, {"harn.session.op": "put"})
-  histogram("harn.session.duration_ms", 12, {"harn.session.op": "put"})
-  gauge("harn.session.bytes", 256, {"harn.session.op": "put"})
-  log("session_put_complete", "info", {"harn.session.outcome": "ok"})
-  end_span(handle)
+fn record_session_put(obs: HarnessObs) {
+  const handle = start_span(obs, "harn.session.put", {"harn.session.id": "sess_demo"})
+  counter(obs, "harn.session.put_total", 1, {"harn.session.op": "put"})
+  histogram(obs, "harn.session.duration_ms", 12, {"harn.session.op": "put"})
+  gauge(obs, "harn.session.bytes", 256, {"harn.session.op": "put"})
+  obs.log("session_put_complete", "info", {"harn.session.outcome": "ok"})
+  end_span(obs, handle)
 }
 
 fn count_by_kind(events) {
@@ -75,20 +74,20 @@ fn count_by_kind(events) {
   return {span_end: span_end, metric: metric, log: log_count, other: other}
 }
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   // Route through the `test` backend so the scenario is fully offline
   // and the in-process buffer is the source of truth.
-  reset()
-  configure({backend: backends().test()})
-  record_session_put()
-  const events = events_take()
+  reset(harness.obs)
+  configure(harness.obs, {backend: backends().test()})
+  record_session_put(harness.obs)
+  const events = events_take(harness.obs)
   const counts = count_by_kind(events)
-  const req_id = request_id() ?? "<unbound>"
-  __io_println("obs_primitive_receipt={")
-  __io_println("  span_end_count: " + to_string_lossy(counts.span_end))
-  __io_println("  metric_count: " + to_string_lossy(counts.metric))
-  __io_println("  log_count: " + to_string_lossy(counts.log))
-  __io_println("  total_events: " + to_string_lossy(len(events)))
-  __io_println("  request_id: " + req_id)
-  __io_println("}")
+  const req_id = request_id(harness.obs) ?? "<unbound>"
+  harness.stdio.println("obs_primitive_receipt={")
+  harness.stdio.println("  span_end_count: " + to_string_lossy(counts.span_end))
+  harness.stdio.println("  metric_count: " + to_string_lossy(counts.metric))
+  harness.stdio.println("  log_count: " + to_string_lossy(counts.log))
+  harness.stdio.println("  total_events: " + to_string_lossy(len(events)))
+  harness.stdio.println("  request_id: " + req_id)
+  harness.stdio.println("}")
 }

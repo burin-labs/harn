@@ -1,14 +1,14 @@
-pipeline test(task) {
-  const t = timer_start("my_timer")
+pipeline test(harness: Harness, task) {
+  const t = harness.runtime.timer_start("my_timer")
   assert_eq(t.name, "my_timer")
   assert(t.start_ms > 0)
-  const ms = timer_end(t)
+  const ms = harness.runtime.timer_end(t)
   assert(ms >= 0)
-  log("timer ok")
+  harness.stdio.log("timer ok")
   // elapsed returns monotonic ms since first call
   const e1 = harness.clock.elapsed()
   const e2 = harness.clock.elapsed()
   assert(e1 >= 0)
   assert(e2 >= e1)
-  log("elapsed ok")
+  harness.stdio.log("elapsed ok")
 }

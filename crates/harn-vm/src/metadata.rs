@@ -682,6 +682,8 @@ pub(crate) fn with_state<R>(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "metadata_get(dir: string, namespace?: string|nil) -> dict|nil",
     category = "metadata"
 )]
@@ -725,6 +727,8 @@ fn metadata_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "metadata_resolve(dir: string, namespace?: string|nil) -> dict|nil",
     category = "metadata"
 )]
@@ -753,6 +757,8 @@ fn metadata_resolve_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "metadata_entries(namespace?: string|nil) -> list",
     category = "metadata"
 )]
@@ -804,6 +810,8 @@ fn metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "metadata_set(dir: string, namespace: string, data: dict) -> nil",
     category = "metadata"
 )]
@@ -815,7 +823,7 @@ fn metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let mut data = BTreeMap::new();
     if let VmValue::Dict(dict) = &data_val {
         for (k, v) in dict.iter() {
-            data.insert(k.to_string(), vm_to_json(v));
+            data.insert(k.to_string(), vm_to_json(v)?);
         }
     }
 
@@ -830,20 +838,20 @@ fn metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn metadata_fields_from_value(
     namespace: &str,
     value: &VmValue,
-) -> BTreeMap<FieldKey, serde_json::Value> {
+) -> Result<BTreeMap<FieldKey, serde_json::Value>, VmError> {
     let mut data = BTreeMap::new();
     match value {
         VmValue::Dict(dict) => {
             for (k, v) in dict.iter() {
-                data.insert(k.to_string(), vm_to_json(v));
+                data.insert(k.to_string(), vm_to_json(v)?);
             }
         }
         VmValue::String(_) if !namespace.is_empty() => {
-            data.insert(namespace.to_string(), vm_to_json(value));
+            data.insert(namespace.to_string(), vm_to_json(value)?);
         }
         _ => {}
     }
-    data
+    Ok(data)
 }
 
 fn classification_field<'a>(
@@ -1061,7 +1069,7 @@ pub(crate) fn project_metadata_host_set(
         .or_else(|| params.get("data"))
         .cloned()
         .unwrap_or(VmValue::Nil);
-    let data = metadata_fields_from_value(&namespace, &value);
+    let data = metadata_fields_from_value(&namespace, &value)?;
     if namespace.is_empty() || data.is_empty() {
         return Ok(VmValue::Nil);
     }
@@ -1104,7 +1112,11 @@ pub(crate) fn project_metadata_host_refresh_hashes(
     })
 }
 
-#[harn_builtin(sig = "metadata_save() -> nil", category = "metadata")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "metadata_save() -> nil", category = "metadata"
+)]
 fn metadata_save_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("metadata_save", |st| {
         st.save().map_err(VmError::Runtime)?;
@@ -1113,6 +1125,8 @@ fn metadata_save_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "metadata_stale(project?: string) -> dict",
     category = "metadata"
 )]
@@ -1169,7 +1183,11 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     })
 }
 
-#[harn_builtin(sig = "metadata_refresh_hashes() -> nil", category = "metadata")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "metadata_refresh_hashes() -> nil", category = "metadata"
+)]
 fn metadata_refresh_hashes_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("metadata_refresh_hashes", |st| {
         refresh_metadata_hashes(st);
@@ -1178,6 +1196,8 @@ fn metadata_refresh_hashes_impl(_args: &[VmValue], _out: &mut String) -> Result<
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "metadata_status(namespace?: string|nil) -> dict",
     category = "metadata"
 )]
@@ -1263,6 +1283,8 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "compute_content_hash(dir: string) -> string",
     category = "metadata"
 )]
@@ -1280,7 +1302,11 @@ fn compute_content_hash_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 }
 
 /// invalidate_facts is a no-op: facts live in the metadata namespace.
-#[harn_builtin(sig = "invalidate_facts(dir?: string) -> nil", category = "metadata")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "invalidate_facts(dir?: string) -> nil", category = "metadata"
+)]
 fn invalidate_facts_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Nil)
 }
@@ -1289,6 +1315,8 @@ fn invalidate_facts_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// inheritance from parent directories. Pass `{kind: "dir"}` to fall back
 /// to hierarchical directory resolution.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "path_metadata_get(path: string, namespace?: string|nil, opts?: dict|nil) -> dict|nil",
     category = "metadata"
 )]
@@ -1343,6 +1371,8 @@ fn path_metadata_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "path_metadata_set(path: string, namespace: string, data: dict, opts?: dict|nil) -> nil",
     category = "metadata"
 )]
@@ -1363,7 +1393,7 @@ fn path_metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let mut data = BTreeMap::new();
     if let VmValue::Dict(dict) = &data_val {
         for (k, v) in dict.iter() {
-            data.insert(k.to_string(), vm_to_json(v));
+            data.insert(k.to_string(), vm_to_json(v)?);
         }
     }
     if data.is_empty() {
@@ -1390,6 +1420,8 @@ fn path_metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// Lists stored file (and optionally directory) entries. Useful for
 /// iterating over precomputed enrichment artifacts.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "path_metadata_entries(namespace?: string|nil, opts?: dict|nil) -> list",
     category = "metadata"
 )]
@@ -1508,6 +1540,8 @@ fn fnv_hash(data: &[u8]) -> u64 {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "scan_directory(path?: string, pattern_or_options?: string|dict|nil, options?: dict|nil) -> list",
     category = "metadata"
 )]

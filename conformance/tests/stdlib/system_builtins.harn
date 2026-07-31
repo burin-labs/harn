@@ -1,22 +1,22 @@
 /** Test system attribute builtins */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // username should return a non-empty string
-  const user = username()
-  __io_println(len(user) > 0)
+  const user = harness.system.identity().username
+  harness.stdio.println(len(user) > 0)
   // platform should be one of the known values
-  const plat = platform()
-  __io_println(plat == "darwin" || plat == "linux" || plat == "windows")
+  const plat = harness.system.platform().os
+  harness.stdio.println(plat == "darwin" || plat == "linux" || plat == "windows")
   // arch should be non-empty
-  __io_println(len(arch()) > 0)
+  harness.stdio.println(len(harness.system.platform().arch) > 0)
   // home_dir should be non-empty
-  __io_println(len(home_dir()) > 0)
+  harness.stdio.println(len(harness.fs.home_dir()) > 0)
   // pid should be a positive integer
-  __io_println(pid() > 0)
+  harness.stdio.println(harness.system.identity().pid > 0)
   // cwd should be non-empty
-  __io_println(len(cwd()) > 0)
+  harness.stdio.println(len(harness.fs.cwd()) > 0)
   // date_iso should return ISO 8601 format
-  const iso = date_iso()
-  __io_println(len(iso) > 20)
-  __io_println(contains(iso, "T"))
-  __io_println(ends_with(iso, "Z"))
+  const iso = harness.clock.date_iso()
+  harness.stdio.println(len(iso) > 20)
+  harness.stdio.println(contains(iso, "T"))
+  harness.stdio.println(ends_with(iso, "Z"))
 }

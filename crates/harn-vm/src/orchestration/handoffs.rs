@@ -983,7 +983,7 @@ mod spawn_effect_tests {
     fn spawn_ceiling_clamps_to_allowed_capabilities() {
         let source = r#"fn main(harness: Harness) {
             harness.net.get("https://example.test")
-            harness.fs.read_file("/tmp/input")
+            harness.fs.read_text("/tmp/input")
         }"#;
         let mut ceiling = CapabilityPolicy::default();
         ceiling

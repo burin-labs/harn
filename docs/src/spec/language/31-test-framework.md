@@ -18,11 +18,11 @@ The test runner scans `.harn` files for pipelines whose names start with
 it completes without error; it fails if it throws or an assertion fails.
 
 ```harn
-pipeline test_addition() {
+pipeline test_addition(harness: Harness) {
   assert_eq(1 + 1, 2)
 }
 
-pipeline test_string_concat() {
+pipeline test_string_concat(harness: Harness) {
   const result = "hello" + " " + "world"
   assert_eq(result, "hello world")
 }
@@ -39,7 +39,7 @@ display name `pipeline[row]`.
   {name: "positive", args: [2, 3, 5]},
   {name: "negative", args: [-2, 1, -1]},
 ])
-pipeline add_case(left, right, expected) {
+pipeline add_case(harness: Harness, left, right, expected) {
   assert_eq(left + right, expected)
 }
 ```
@@ -65,7 +65,7 @@ fn fixture() -> dict {
   ],
   fixture: fixture,
 )
-pipeline test_query(fx: dict, input: string, expected: string) {
+pipeline test_query(harness: Harness, fx: dict, input: string, expected: string) {
   fx.rows.push(input)
   assert_eq("${fx.prefix}:${input}", expected)
 }

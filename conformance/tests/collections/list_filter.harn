@@ -1,5 +1,5 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const nums = [1, 2, 3, 4, 5]
   const big = nums.filter({ x -> x > 3 })
-  log(big)
+  harness.stdio.log(big)
 }

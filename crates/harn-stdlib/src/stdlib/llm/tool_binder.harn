@@ -10,22 +10,22 @@
 //   import { with_natural_language_executor } from "std/llm/tool_binder"
 //   import { compose_tool_callers, default_tool_caller } from "std/llm/tool_middleware"
 //
-//   let caller = compose_tool_callers([
-//     with_natural_language_executor({
+//   let caller = compose_tool_callers(harness, [
+//     with_natural_language_executor(harness, {
 //       provider: "cerebras",
 //       model: "gpt-oss-120b",
 //       timeout_ms: 500,
 //     }),
 //     default_tool_caller(),
 //   ])
-//   agent_loop(prompt, system, {tools: registry, tool_caller: caller})
+//   agent_loop(harness, prompt, system, {tools: registry, tool_caller: caller})
 //
 // Contract:
 //
 //   - `timeout_ms` is a wall-clock budget for an opt-in latency hop. If the
 //     binder overruns it, the envelope passes through unchanged and
 //     `audit.binder.status` is `"timeout"`. We do not cancel mid-flight
-//     (cancellation belongs in `agent_loop({deadline_ms})`); we observe the
+//     (cancellation belongs in `agent_loop(harness, {deadline_ms})`); we observe the
 //     breach.
 //   - Off by default. There is no implicit registration anywhere in the
 //     default agent pipeline. Activation requires explicit composition.
@@ -151,7 +151,7 @@ fn __binder_typed_opts(cfg) {
 // Prompt rendering
 // -------------------------------------------------------------------------------------------------
 
-fn __binder_prompt(envelope, intent, partial_args) -> string {
+fn __binder_prompt(fs: HarnessFs, envelope, intent, partial_args) -> string {
   let schema_for_prompt = if envelope.schema != nil {
     envelope.schema
   } else {
@@ -163,7 +163,7 @@ fn __binder_prompt(envelope, intent, partial_args) -> string {
   } else {
     "{}"
   }
-  return render_prompt(
+  return fs.render_prompt(
     "std/llm/prompts/tool_binder_user.harn.prompt",
     {
       tool_name: envelope.tool_name,
@@ -243,7 +243,7 @@ fn __binder_handle_failure(envelope, next, ctx, status, reason) {
 // Middleware
 // -------------------------------------------------------------------------------------------------
 
-fn __binder_validate_opts(cfg) {
+fn __binder_validate_opts(llm: HarnessLlm, cfg) {
   let typed = __binder_typed_opts(cfg)
   if typed.max_retries != 0 {
     throw "with_natural_language_executor: `max_retries` must be 0; retries defeat the latency win; got "
@@ -265,7 +265,7 @@ fn __binder_validate_opts(cfg) {
     typed.binder_fn
   } else {
     { binder_prompt, binder_system, binder_opts ->
-      llm_call(binder_prompt, binder_system, binder_opts)
+      llm.call(binder_prompt, binder_system, binder_opts)
     }
   }
   return {
@@ -314,7 +314,7 @@ pub fn natural_language_executor_schema_transform(opts = nil) {
 }
 
 /**
- * natural_language_executor_middleware(opts) -> {schema_transform, caller}
+ * natural_language_executor_middleware(harness, opts) -> {schema_transform, caller}
  *
  * Paired schema + execution middleware for the natural-language tool binder.
  * This mirrors `std/llm/tool_middleware::with_required_reason`, letting
@@ -323,12 +323,12 @@ pub fn natural_language_executor_schema_transform(opts = nil) {
  *
  * @effects: []
  * @errors: []
- * @example: natural_language_executor_middleware({provider: "cerebras", model: "gpt-oss-120b"})
+ * @example: natural_language_executor_middleware(harness, {provider: "cerebras", model: "gpt-oss-120b"})
  */
-pub fn natural_language_executor_middleware(opts) {
+pub fn natural_language_executor_middleware(harness: Harness, opts) {
   return {
     schema_transform: natural_language_executor_schema_transform(opts),
-    caller: with_natural_language_executor(opts),
+    caller: with_natural_language_executor(harness, opts),
   }
 }
 
@@ -359,7 +359,7 @@ fn __binder_passthrough(envelope, next, original_args, stripped_args, intent, ct
 }
 
 /**
- * with_natural_language_executor(opts) -> caller
+ * with_natural_language_executor(harness, opts) -> caller
  *
  * Intercepts a tool call, hands the planner-emitted natural-language
  * intent + the tool's JSON Schema to a latency-budgeted binder LLM,
@@ -384,8 +384,8 @@ fn __binder_passthrough(envelope, next, original_args, stripped_args, intent, ct
  * @effects: []
  * @errors: []
  */
-pub fn with_natural_language_executor(opts) {
-  let ctx = __binder_validate_opts(__binder_dict(opts))
+pub fn with_natural_language_executor(harness: Harness, opts) {
+  let ctx = __binder_validate_opts(harness.llm, __binder_dict(opts))
   return { envelope, next ->
     let tool_args = __binder_dict(envelope.tool_args)
     let raw_intent = tool_args[ctx.intent_field]
@@ -406,7 +406,7 @@ pub fn with_natural_language_executor(opts) {
     if skip != nil {
       return __binder_passthrough(envelope, next, tool_args, stripped_args, intent, ctx, skip)
     }
-    let prompt = __binder_prompt(envelope, intent, stripped_args)
+    let prompt = __binder_prompt(harness.fs, envelope, intent, stripped_args)
     let invoke_cfg = {
       provider: ctx.provider,
       model: ctx.model,

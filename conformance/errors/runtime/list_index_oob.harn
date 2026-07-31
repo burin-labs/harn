@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   let items = [1, 2, 3]
   items[10] = 99
 }

@@ -3,12 +3,9 @@
 //! # Why this exists
 //!
 //! Under `harn serve`, a fresh [`Vm`](crate::vm::Vm) is constructed per request,
-//! and dispatch runs on a multi-thread tokio runtime. The per-VM Postgres state
-//! ([`super::POOLS`] etc.) is **thread-local**, which is exactly right for the
-//! CLI one-shot model (one VM, one thread, deterministic teardown) but means a
-//! server re-opens a brand-new connection pool on every single request — the
-//! pool can never be reused across requests because the registry holding it
-//! lives on a thread the next request may not even run on.
+//! and dispatch runs on a multi-thread tokio runtime. VM-local resource
+//! authorities deliberately do not cross those request boundaries, so without
+//! this registry a server would open a new connection pool for every request.
 //!
 //! This module provides an **opt-in, process-lifetime** registry that an
 //! embedder (e.g. the harn-serve `SiteServer` wiring) installs **once** at
@@ -17,8 +14,8 @@
 //! options)` calls — across requests and across worker threads — return the
 //! **same** underlying [`PoolRecord`] (a cheap `Arc` clone of the sqlx `Pool`).
 //! When **not** installed (the default, and the entire CLI surface), behavior is
-//! byte-identical to before: every `pg_pool` builds its own pool in the
-//! thread-local registry.
+//! request-local: every `pg_pool` builds its own pool and returns a sealed VM
+//! resource authority over it.
 //!
 //! # Security: the pool key is the full connection identity
 //!

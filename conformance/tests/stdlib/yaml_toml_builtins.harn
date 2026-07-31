@@ -1,8 +1,8 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const yaml = yaml_parse("name: Ada\nage: 37\n")
   const toml_data = toml_parse("name = \"Ada\"\nage = 37\n")
-  log(yaml.name)
-  log(toml_data.age)
-  log(json_stringify(yaml_parse(yaml_stringify({name: "Ada", age: 37}))))
-  log(json_stringify(toml_parse(toml_stringify({name: "Ada", age: 37}))))
+  harness.stdio.log(yaml.name)
+  harness.stdio.log(toml_data.age)
+  harness.stdio.log(json_stringify(yaml_parse(yaml_stringify({name: "Ada", age: 37}))))
+  harness.stdio.log(json_stringify(toml_parse(toml_stringify({name: "Ada", age: 37}))))
 }

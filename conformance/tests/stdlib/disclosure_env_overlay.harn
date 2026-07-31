@@ -2,5 +2,5 @@ import { render } from "std/disclosure"
 
 fn main(harness: Harness) {
   const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
-  harness.stdio.println(render(chain, "slack", {project: false}))
+  harness.stdio.println(render(harness.env, harness.fs, chain, "slack", {project: false}))
 }

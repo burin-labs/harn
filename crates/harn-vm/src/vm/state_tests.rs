@@ -25,7 +25,9 @@ fn baseline_with_stdlib(source: &str) -> VmBaseline {
 
 #[test]
 fn vm_baseline_instantiates_clean_mutable_execution_state() {
-    let baseline = baseline_with_stdlib("pipeline main() { __io_println(stable_global) }");
+    let baseline = baseline_with_stdlib(
+        "pipeline main(harness: Harness) { harness.stdio.println(stable_global) }",
+    );
 
     let mut dirty = baseline.instantiate();
     dirty.stack.push(VmValue::Int(42));
@@ -114,10 +116,10 @@ async fn vm_baseline_rebinds_shared_state_builtins_per_instance() {
     local
         .run_until(async {
             let source = r#"
-pipeline main() {
-  const cell = shared_cell({scope: "task_group", key: "turn", initial: 0})
-  __io_println(shared_get(cell))
-  shared_set(cell, shared_get(cell) + 1)
+pipeline main(harness: Harness) {
+  const cell = harness.runtime.shared_cell({scope: "task_group", key: "turn", initial: 0})
+  harness.stdio.println(harness.runtime.shared_get(cell))
+  harness.runtime.shared_set(cell, harness.runtime.shared_get(cell) + 1)
 }"#;
             let chunk = crate::compile_source(source).expect("compile");
             let baseline = baseline_with_stdlib(source);

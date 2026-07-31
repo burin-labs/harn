@@ -55,6 +55,8 @@ concurrency = { max = 1 }
 
 Key fields: `id`, `kind`, `provider`, `handler`, `path` or `match.path`, `match.events`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.
 
+A nominal trigger handler has the boundary signature `fn on_event(harness: Harness, event: TriggerEvent)`. The runtime supplies the root `Harness` and the typed event. Keep `when` predicates pure as `fn should_handle(event: TriggerEvent) -> bool`; they do not receive authority. At the boundary, attenuate authority by passing helpers the smallest coherent nominal handles they need (for example `HarnessFs` or `HarnessLlm`). Root `Harness` parameters are appropriate for entrypoints and orchestration functions that genuinely coordinate several capabilities, but reusable helpers should not inherit process-wide authority by default. The `capability-attenuation` lint reports unnecessarily broad helper signatures and suggests the handles actually used.
+
 Audit a project before deploy with `harn routes <root> --json`; it reports each declarative trigger's route path, handler module, budgets, inferred host capabilities, vendor-lock disclosure, and prompt/template overhead without executing handler code.
 
 ## Handler variants
@@ -65,38 +67,42 @@ Audit a project before deploy with `harn routes <root> --json`; it reports each 
 import { SpawnToPool } from "std/triggers"
 import { pool_create } from "std/lifecycle/pool"
 
-pool_create({name: "pr-review-pool", max_concurrent: 4})
+fn configure_review_trigger(harness: Harness) {
+  pool_create(harness.agent, {name: "pr-review-pool", max_concurrent: 4})
 
-trigger_register({
-  kind: "issue.opened",
-  provider: "github",
-  handler: SpawnToPool({
-    pool: "pr-review-pool",
-    priority_from: "headers.priority",     // optional dotted JSON path
-    key_from: "tenant_id",                 // optional dotted JSON path
-    task_factory: { event -> { -> review(event) } },
-  }),
-  match: {events: ["issue.opened"]},
-})
+  harness.runtime.trigger_register({
+    kind: "issue.opened",
+    provider: "github",
+    handler: SpawnToPool({
+      pool: "pr-review-pool",
+      priority_from: "headers.priority",   // optional dotted JSON path
+      key_from: "tenant_id",               // optional dotted JSON path
+      task_factory: { event -> { -> review(event) } },
+    }),
+    match: {events: ["issue.opened"]},
+  })
+}
 ```
 
-The dispatcher invokes `task_factory(event)` per match, extracts priority + fair-queue key from the event payload (missing paths fall back to default priority 0 / null key), and submits the resulting closure to the named pool under its queue strategy + backpressure policy. Pool rejections (`drop_newest`, etc.) reuse the `lifecycle.pool.audit` channel that direct `pool.submit` calls emit on. The dispatch result is shaped as a `pool_task` handle so handlers can call `pool_wait(dispatch.result)` directly.
+The dispatcher invokes `task_factory(event)` per match, extracts priority + fair-queue key from the event payload (missing paths fall back to default priority 0 / null key), and submits the resulting closure to the named pool under its queue strategy + backpressure policy. Pool rejections (`drop_newest`, etc.) reuse the `lifecycle.pool.audit` channel that direct `pool.submit` calls emit on. The dispatch result is shaped as a `pool_task` handle so handlers can call `pool_wait(harness.agent, dispatch.result)` directly.
 
 ```harn
 import { ReminderInject } from "std/triggers"
 
-trigger_register({
-  kind: "channel.emit",
-  provider: "channel",
-  match: {events: ["channel:pr.merged"]},
-  handler: ReminderInject({
-    target: "current",                       // "current", "parent", a literal session id, or a closure
-    body: "PR {{ event.provider_payload.payload.number }} merged. Consider cutting a patch release.",
-    tags: ["release_reminder"],
-    ttl_turns: 1,
-    dedupe_key: "release_reminder",
-  }),
-})
+fn register_release_reminder(runtime: HarnessRuntime) {
+  runtime.trigger_register({
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:pr.merged"]},
+    handler: ReminderInject({
+      target: "current",                     // "current", "parent", a literal session id, or a closure
+      body: "PR {{ event.provider_payload.payload.number }} merged. Consider cutting a patch release.",
+      tags: ["release_reminder"],
+      ttl_turns: 1,
+      dedupe_key: "release_reminder",
+    }),
+  })
+}
 ```
 
 `ReminderInject` (#1876) injects a `SystemReminder` (#1815) into the target running session at its next turn boundary — no spawn, no resume, no signal. `target` resolves at dispatch time: `"current"` walks the owning session, `"parent"` walks its parent in the session lineage, any other string is a literal session id, and a closure `event -> string?` lets the trigger pick a target dynamically. `body` is a `.harn.prompt` template rendered against `{{ event }}` (the full trigger event), `{{ match }}` (`matched_at`), and `{{ batch }}` (when flow-control batching is in effect). `tags`, `ttl_turns`, `dedupe_key`, `propagate`, `role_hint`, and `preserve_on_compact` mirror `transcript.inject_reminder`. Missing target sessions are dropped gracefully with a `triggers.reminder_inject.audit` audit entry instead of failing the dispatch.

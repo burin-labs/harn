@@ -5,21 +5,22 @@ import { llm_text, with_llm_script } from "std/testing"
  * timeout errors with exponential backoff, then returns the successful
  * response. backoff_ms: 1 keeps the test fast.
  */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [
       {error: {category: "rate_limit", message: "429"}},
       {error: {category: "transient_network", message: "connection reset"}},
       llm_text("finally"),
     ],
     { ->
-      const r = with_rate_limit(
+      const r = harness.llm.with_rate_limit(
         "mock",
-        fn() { llm_call("hello", nil, {provider: "mock"}) },
+        fn() { harness.llm.call("hello", nil, {provider: "mock"}) },
         {backoff_ms: 1, max_retries: 5},
       )
-      __io_println(r.text)
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(r.text)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
 }

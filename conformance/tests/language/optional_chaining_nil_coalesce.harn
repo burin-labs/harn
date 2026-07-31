@@ -1,20 +1,20 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Optional chaining with nil coalescing
   const obj = {name: "Alice", age: 30}
-  log(obj.name ?? "unknown")
-  log(obj?.missing ?? "default")
+  harness.stdio.log(obj.name ?? "unknown")
+  harness.stdio.log(obj?.missing ?? "default")
   // Chained operations
   const nested = {inner: {value: 42}}
-  log(nested.inner.value ?? 0)
-  log(nested?.nonexistent?.value ?? 0)
+  harness.stdio.log(nested.inner.value ?? 0)
+  harness.stdio.log(nested?.nonexistent?.value ?? 0)
   // Nil coalescing with nil
   const x = nil
-  log(x ?? "fallback")
+  harness.stdio.log(x ?? "fallback")
   type Doc = {components: {schemas: dict<int>?}?}
   const doc: Doc = {components: nil}
-  log(len(doc.components?.schemas))
-  log(len(doc.components?.schemas ?? {}))
+  harness.stdio.log(len(doc.components?.schemas))
+  harness.stdio.log(len(doc.components?.schemas ?? {}))
   for entry in doc.components?.schemas {
-    log(entry.key)
+    harness.stdio.log(entry.key)
   }
 }

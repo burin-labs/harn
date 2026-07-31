@@ -17,18 +17,21 @@
  */
 import { verification_file_hash_snapshot } from "std/verification"
 
-fn seed_workspace(root: string) {
-  harness.fs.mkdir(root)
-  harness.fs.mkdir(path_join(root, "src"))
-  harness.fs.write_text(path_join(root, "src/app.rs"), "pub fn answer() -> i32 { 42 }\n")
-  harness.fs.write_text(path_join(root, "README.md"), "# verification demo\n")
+fn seed_workspace(fs: HarnessFs, root: string) {
+  fs.mkdir(root)
+  fs.mkdir(path_join(root, "src"))
+  fs.write_text(path_join(root, "src/app.rs"), "pub fn answer() -> i32 { 42 }\n")
+  fs.write_text(path_join(root, "README.md"), "# verification demo\n")
 }
 
-pipeline default(_task) {
-  const root = path_join(asset_root(), "verification-workspace")
-  seed_workspace(root)
-  const _ = hostlib_code_index_rebuild({root: root})
-  const before = verification_file_hash_snapshot(["src/app.rs", "src/missing.rs"])
+pipeline default(harness: Harness, _task) {
+  const root = path_join(harness.fs.runtime_paths().asset_root, "verification-workspace")
+  seed_workspace(harness.fs, root)
+  const _ = harness.code_index.rebuild({root: root})
+  const before = verification_file_hash_snapshot(
+    harness.code_index,
+    ["src/app.rs", "src/missing.rs"],
+  )
   require before.algorithm == "fnv1a64", "snapshot algorithm should be fnv1a64"
   require before.snapshot["src/app.rs"] != nil, "indexed file hash should be captured"
   require before.files[0]?.known, "indexed file should be known"
@@ -40,7 +43,10 @@ pipeline default(_task) {
     "pub fn answer() -> i32 { 43 }\npub fn extra() {}\n",
   )
   harness.fs.write_text(path_join(root, "src/new.rs"), "pub fn new_file() {}\n")
-  const after = verification_file_hash_snapshot(["src/app.rs", "src/new.rs", "src/missing.rs"])
+  const after = verification_file_hash_snapshot(
+    harness.code_index,
+    ["src/app.rs", "src/new.rs", "src/missing.rs"],
+  )
   const diagnostic = verification_diagnostic_classify(
     {
       rung: "R2",
@@ -60,9 +66,9 @@ pipeline default(_task) {
   require after.files[2]?.hash_source == "missing", "missing file should stay explicit"
   require diagnostic.status == "bound_fresh", "snapshot map should bind freshness"
   require diagnostic.feedsGates, "bound snapshot should feed verification gates"
-  __io_println("=== verification-snapshot demo ===")
-  __io_println("workspace: " + root)
-  __io_println(
+  harness.stdio.println("=== verification-snapshot demo ===")
+  harness.stdio.println("workspace: " + root)
+  harness.stdio.println(
     "initial seq "
       + to_string(before.seq)
       + ", changed hash source "
@@ -70,7 +76,7 @@ pipeline default(_task) {
       + ", new-file source "
       + (after.files[1]?.hash_source ?? ""),
   )
-  __io_println("")
+  harness.stdio.println("")
   const receipt = {
     receipt_kind: "verification_snapshot_receipt",
     algorithm: after.algorithm,
@@ -85,6 +91,6 @@ pipeline default(_task) {
     diagnostic_status: diagnostic.status,
     feeds_gates: diagnostic.feedsGates,
   }
-  __io_println(json_stringify(receipt))
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

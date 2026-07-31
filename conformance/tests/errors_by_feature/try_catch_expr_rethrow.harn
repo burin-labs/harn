@@ -1,7 +1,7 @@
 // When a typed catch in an expression-position try/catch does not match
 // the thrown error's type, the throw propagates past the expression —
 // the `let` binding is never established.
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   enum AppError {
     NotFound(msg)
   }
@@ -15,5 +15,5 @@ pipeline test(task) {
   } catch (e: AppError) {
     -1
   }
-  log("unreachable: ${v}")
+  harness.stdio.log("unreachable: ${v}")
 }

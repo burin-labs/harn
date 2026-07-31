@@ -20,12 +20,12 @@ You have a bug report and you want a fast read on it. Nothing to edit yet, no
 tools, no loop. One request:
 
 ```harn
-const hint = llm_call(
+const hint = harness.llm.call(
   "Bug: add(2,2) returned 5. One sentence: what's the likely cause?",
   "You are a careful Rust engineer.",
   {provider: "mock"},
 )
-log(hint.text)
+harness.stdio.log(hint.text)
 ```
 
 Three lines. [`llm_call`](../llm/llm_call.md) sends one prompt and hands back a
@@ -41,7 +41,7 @@ schema instead and get back typed data, validated, with a retry on the model's
 first malformed attempt:
 
 ```harn
-const triage = llm_call_structured(
+const triage = harness.llm.call_structured(
   "Triage this bug: add(2,2) returned 5 in src/math.rs.",
   {
     type: "object",
@@ -53,8 +53,8 @@ const triage = llm_call_structured(
   },
   {provider: "mock"},
 )
-log(triage.severity)
-log(triage.component)
+harness.stdio.log(triage.severity)
+harness.stdio.log(triage.component)
 ```
 
 Same call underneath. [`llm_call_structured`](../llm/llm_call.md#llm_call_structured)
@@ -79,13 +79,13 @@ transport retry already set.
 import { agent_preset } from "std/agent/presets"
 
 const opts = agent_preset("repair", {provider: "mock"})
-const run = agent_loop(
+const run = agent_loop(harness,
   "Fix the failing test test_add in src/math.rs, then run it to confirm.",
   opts?.system,
   opts,
 )
-log(run.status)
-log(run.visible_text)
+harness.stdio.log(run.status)
+harness.stdio.log(run.visible_text)
 ```
 
 `agent_preset` is not a new tier. It returns a plain `agent_loop` options dict
@@ -134,7 +134,7 @@ opts = {...opts, ...agent_completion_gate({
 opts = lane_policy(lane_rows, task, opts)
 opts = with_overlay(opts, overlay_rows, "repair")
 
-const run = agent_loop(task, opts?.system, opts)
+const run = agent_loop(harness, task, opts?.system, opts)
 ```
 
 Every one of those lines is opt-in. Governors bound spend

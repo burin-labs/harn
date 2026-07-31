@@ -44,7 +44,7 @@ impl HostlibCapability for VerdictCapability {
         // Resolves a host-owned execution handle (never a caller path), but stays
         // on the deterministic-tools gate: issuing a verdict is part of the same
         // opt-in tool surface as the `run_test` that produced the handle.
-        registry.register_gated_fn("verdict", ISSUE_BUILTIN, "issue", verdict_issue_builtin);
+        registry.register_fn("verdict", ISSUE_BUILTIN, "issue", verdict_issue_builtin);
     }
 }
 
@@ -418,11 +418,10 @@ mod tests {
                         r#"
 import {{ verdict_disposition, verdict_from_run }} from "std/agent/verdict"
 
-pipeline default(_task) {{
-  hostlib_enable("tools:deterministic")
-  const run = hostlib_tools_run_test({{cwd: "{}", timeout_ms: 120000}})
+pipeline default(harness: Harness, _task) {{
+  const run = harness.tools.run_test({{cwd: "{}", timeout_ms: 120000}})
   __test_overlap()
-  return verdict_disposition(verdict_from_run(harness, run))
+  return verdict_disposition(verdict_from_run(harness.verdict, run))
 }}
 "#,
                         harn_string(cwd)

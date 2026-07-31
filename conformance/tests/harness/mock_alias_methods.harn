@@ -1,4 +1,0 @@
-fn main(harness: Harness) {
-  harness.stdio.println(harness.random.u64())
-  harness.stdio.println(harness.net.http_get("https://alias.test"))
-}

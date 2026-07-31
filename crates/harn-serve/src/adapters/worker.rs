@@ -1174,7 +1174,7 @@ mod tests {
 import "std/triggers"
 
 @job("scan")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   let req = event.provider_payload.raw
   return {status: "ok", echo: req}
 }
@@ -1208,7 +1208,7 @@ pub fn scan(event: TriggerEvent) -> dict {
 import "std/triggers"
 
 @job("scan")
-pub fn run_scan(event: TriggerEvent) -> dict {
+pub fn run_scan(harness: Harness, event: TriggerEvent) -> dict {
   return {status: "ok", echo: event.provider_payload.raw}
 }
 "#,
@@ -1241,7 +1241,7 @@ pub fn run_scan(event: TriggerEvent) -> dict {
 import "std/triggers"
 
 @job("scan")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   let req = event.provider_payload.raw
   return {status: "ok", host: host_echo(req.repo)}
 }
@@ -1285,7 +1285,7 @@ import "std/triggers"
 
 @job("scan")
 @retry(max: 2, backoff: "linear")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   throw "boom"
 }
 "#,
@@ -1319,7 +1319,7 @@ pub fn scan(event: TriggerEvent) -> dict {
 import "std/triggers"
 
 @job("scan", retry: { max: 2, backoff: "linear" })
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   throw "boom"
 }
 "#,
@@ -1352,7 +1352,7 @@ import "std/triggers"
 
 @job("scan")
 @retry(max: 7, backoff: "svix")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   throw "boom"
 }
 "#,
@@ -1400,7 +1400,7 @@ import "std/triggers"
 
 @job("scan")
 @retry(max: 5, backoff: "linear")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   throw "boom"
 }
 "#,
@@ -1442,7 +1442,7 @@ import "std/triggers"
 
 @job("scan")
 @retry(max: 2, backoff: "linear")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   throw "boom"
 }
 "#,
@@ -1482,7 +1482,7 @@ import "std/triggers"
 
 @job("tick")
 @schedule("* * * * *", "UTC")
-pub fn run_tick(event: TriggerEvent) -> dict {
+pub fn run_tick(harness: Harness, event: TriggerEvent) -> dict {
   return {status: "ok"}
 }
 "#,
@@ -1525,7 +1525,7 @@ import "std/triggers"
 
 @job("scan")
 @queue("scan-jobs")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   return {status: "ok", echo: event.provider_payload.raw}
 }
 "#,
@@ -1636,7 +1636,7 @@ pub fn scan_b() -> dict { return {} }
 import "std/triggers"
 
 @job("scan")
-pub fn scan(event: TriggerEvent) -> dict {
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
   return {status: "ok", echo: event.provider_payload.raw}
 }
 "#,

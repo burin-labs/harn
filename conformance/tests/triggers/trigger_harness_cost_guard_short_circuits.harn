@@ -1,7 +1,7 @@
-pipeline test(task) {
-  const result = trigger_test_harness("cost_guard_short_circuits")
-  __io_println(result.ok)
-  __io_println(result.attempts[0].status == "cost_guard_blocked")
-  __io_println(result.details.limit_usd == 1.0)
-  __io_println(len(result.emitted) == 0)
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("cost_guard_short_circuits")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(result.attempts[0].status == "cost_guard_blocked")
+  harness.stdio.println(result.details.limit_usd == 1.0)
+  harness.stdio.println(len(result.emitted) == 0)
 }

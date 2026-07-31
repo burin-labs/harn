@@ -1,11 +1,12 @@
+import "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
  * S-11 (#1847): a subagent that self-parks via
- * `agent_await_resumption("blocked")` with no `conditions` enters the
+ * `agent_await_resumption(harness.agent, "blocked")` with no `conditions` enters the
  * "open" parked state — no auto-resume trigger is registered, the
  * snapshot has no auto_resume_trigger metadata, and only an explicit
- * operator/parent `resume_agent(handle)` can drive it forward.
+ * operator/parent `resume_agent(harness.agent, handle)` can drive it forward.
  *
  * Asserts:
  *   - The suspension surface reports `initiator: "self"` and
@@ -14,11 +15,12 @@ import { llm_text, with_llm_script } from "std/testing"
  *     on_event).
  *   - `suspension.auto_resume_trigger` is nil — the open park does not
  *     register a trigger handle with the dispatcher.
- *   - An operator-style `resume_agent(handle)` with no input drives the
+ *   - An operator-style `resume_agent(harness.agent, handle)` with no input drives the
  *     loop to completion.
  */
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -31,22 +33,23 @@ pipeline main() {
     ],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Park open until an operator resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
-      __io_println("status=" + suspended.status)
-      __io_println("initiator=" + (suspended?.suspension?.initiator ?? ""))
-      __io_println("reason=" + (suspended?.suspension?.reason ?? ""))
-      __io_println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
-      __io_println(
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println("status=" + suspended.status)
+      harness.stdio.println("initiator=" + (suspended?.suspension?.initiator ?? ""))
+      harness.stdio.println("reason=" + (suspended?.suspension?.reason ?? ""))
+      harness.stdio.println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
+      harness.stdio.println(
         "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
       )
-      const resumed = resume_agent(handle)
-      const done = wait_agent(handle)
-      __io_println("resume_status=" + resumed.status)
-      __io_println("final_status=" + done.status)
-      __io_println("has_transcript=" + to_string(done.has_transcript))
+      const resumed = resume_agent(harness.agent, handle)
+      const done = wait_agent(harness.agent, handle)
+      harness.stdio.println("resume_status=" + resumed.status)
+      harness.stdio.println("final_status=" + done.status)
+      harness.stdio.println("has_transcript=" + to_string(done.has_transcript))
     },
   )
 }

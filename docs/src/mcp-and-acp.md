@@ -21,14 +21,14 @@ Use `mcp_connect` to spawn an MCP server process and perform the
 initialize handshake:
 
 ```harn
-const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 
-const info = mcp_server_info(client)
-log("Connected to: ${info.name}")
+const info = harness.tools.mcp_server_info(client)
+harness.stdio.log("Connected to: ${info.name}")
 ```
 
-`mcp_server_info(...)` also exposes the raw initialize response and an
-`instructions` string when the server supplied one. `agent_loop(...,
+`harness.tools.mcp_server_info(...)` also exposes the raw initialize response and an
+`instructions` string when the server supplied one. `agent_loop(harness, ...,
 {mcp_servers: [...]})` can include those instructions as advisory context in
 the Harn-built system prompt; set `mcp_initialize_advisory: false` when a
 harness wants to keep server-provided advice out of model context.
@@ -36,13 +36,13 @@ harness wants to keep server-provided advice out of model context.
 ### Listing and calling tools
 
 ```harn
-const tools = mcp_list_tools(client)
+const tools = harness.tools.mcp_list_tools(client)
 for t in tools {
-  log("${t.name}: ${t.description}")
+  harness.stdio.log("${t.name}: ${t.description}")
 }
 
-const content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})
-log(content)
+const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/data.txt"})
+harness.stdio.log(content)
 ```
 
 `mcp_call` returns a string for single-text results, a list of content
@@ -65,13 +65,13 @@ harn.mcp.configure({
   },
 })
 
-const client = mcp_connect("python3", ["./image-server.py"])
+const client = harness.tools.mcp_connect("python3", ["./image-server.py"])
 const image = harn.mcp.upload_file(client, "photo.png", {
   accept: ["image/png", "image/jpeg"],
   max_size: 5242880,
 })
-const result = mcp_call(client, "describe_image", {image: image})
-log(result)
+const result = harness.tools.mcp_call(client, "describe_image", {image: image})
+harness.stdio.log(result)
 ```
 
 `harn.mcp.upload_file(...)` reads a local file under Harn's filesystem
@@ -86,20 +86,22 @@ against the declared media-type and size constraints before invoking the
 handler.
 
 ```harn
-let tools = tool_registry()
+fn register_upload_tool(tools_cap: HarnessTools) {
+  let tools = tool_registry()
 
-tools = tool_define(tools, "inspect_upload", "Inspect a small text file", {
-  parameters: {
-    upload: harn.mcp.file_input({
-      accept: ["text/*"],
-      max_size: 64,
-      description: "Small text file to inspect",
-    }),
-  },
-  handler: { args -> "received " + args.upload },
-})
+  tools = tool_define(tools, "inspect_upload", "Inspect a small text file", {
+    parameters: {
+      upload: tools_cap.mcp_file_input({
+        accept: ["text/*"],
+        max_size: 64,
+        description: "Small text file to inspect",
+      }),
+    },
+    handler: { args -> "received " + args.upload },
+  })
 
-mcp_tools(tools)
+  tools_cap.mcp_tools(tools)
+}
 ```
 
 Because SEP-2356 is still draft, the wire shape can change. The opt-in records
@@ -111,11 +113,11 @@ point when MCP ratifies file input support.
 ### Resources and prompts
 
 ```harn
-const resources = mcp_list_resources(client)
-const data = mcp_read_resource(client, "file:///tmp/config.json")
+const resources = harness.tools.mcp_list_resources(client)
+const data = harness.tools.mcp_read_resource(client, "file:///tmp/config.json")
 
-const prompts = mcp_list_prompts(client)
-const prompt = mcp_get_prompt(client, "review", {code: "fn main() {}"})
+const prompts = harness.tools.mcp_list_prompts(client)
+const prompt = harness.tools.mcp_get_prompt(client, "review", {code: "fn main() {}"})
 ```
 
 ### MCP client support matrix
@@ -138,7 +140,7 @@ when connected to Harn.
 | `resources/list`, `resources/read`, `resources/templates/list` | Supported through resource builtins |
 | `prompts/list`, `prompts/get` | Supported through prompt builtins |
 | `completion/complete` | Not exposed as a Harn builtin |
-| `roots/list` | Supported; Harn advertises `roots.listChanged`, serves resolved script/project roots, and exposes the same data through `harn.mcp.roots()` / `mcp_roots()` |
+| `roots/list` | Supported; Harn advertises `roots.listChanged`, serves resolved script/project roots, and exposes the same data through `harn.mcp.roots()` / `harness.tools.mcp_roots()` |
 | `sampling/createMessage` | Supported; Harn advertises sampling and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="sample"`). Approved requests route to Harn's `llm_call` and return `{role, content, model, stopReason}` to the originating server. Without an installed bridge, requests are declined with a structured `mcp.samplingDeclined` error so servers can fall back gracefully. |
 | `elicitation/create` | Supported; Harn advertises elicitation and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="elicit"`) |
 | MCP task methods and task-augmented requests | Unsupported; Harn does not advertise task support |
@@ -146,7 +148,7 @@ when connected to Harn.
 ### Disconnecting
 
 ```harn
-mcp_disconnect(client)
+harness.tools.mcp_disconnect(client)
 ```
 
 ### Auto-connection via harn.toml
@@ -221,7 +223,7 @@ Explicit control from user code:
 ```harn
 // Start the lazy server and hold it open.
 const client = mcp_ensure_active("github")
-const issues = mcp_call(client, "list_issues", {repo: "burin-labs/harn"})
+const issues = harness.tools.mcp_call(client, "list_issues", {repo: "burin-labs/harn"})
 
 // Release when done — lets the registry shut it down.
 mcp_release("github")
@@ -229,7 +231,7 @@ mcp_release("github")
 // Inspect current state.
 const status = mcp_registry_status()
 for s in status {
-  log("${s.name}: lazy=${s.lazy} active=${s.active} refs=${s.ref_count}")
+  harness.stdio.log("${s.name}: lazy=${s.lazy} active=${s.active} refs=${s.ref_count}")
 }
 ```
 
@@ -261,9 +263,9 @@ Fetch it from a pipeline:
 ```harn,ignore
 // Look up by registered server name.
 const card = mcp_server_card("notion")
-log(card.description)
+harness.stdio.log(card.description)
 for t in card.tools {
-  log("- ${t.name}")
+  harness.stdio.log("- ${t.name}")
 }
 
 // Or pass a URL / path directly.
@@ -312,10 +314,10 @@ no extra wiring needed.
 Use them in your pipeline:
 
 ```harn
-pipeline default(task) {
-  const tools = mcp_list_tools(mcp.filesystem)
-  const content = mcp_call(mcp.filesystem, "read_file", {path: "/tmp/data.txt"})
-  log(content)
+pipeline default(harness: Harness, task) {
+  const tools = harness.tools.mcp_list_tools(mcp.filesystem)
+  const content = harness.tools.mcp_call(mcp.filesystem, "read_file", {path: "/tmp/data.txt"})
+  harness.stdio.log(content)
 }
 ```
 
@@ -450,16 +452,16 @@ A complete example connecting to the filesystem MCP server, writing a
 file, and reading it back:
 
 ```harn
-const client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 
-mcp_call(client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"})
-const content = mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
-log(content)
+harness.tools.mcp_call(client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"})
+const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
+harness.stdio.log(content)
 
-const entries = mcp_call(client, "list_directory", {path: "/tmp"})
-log(entries)
+const entries = harness.tools.mcp_call(client, "list_directory", {path: "/tmp"})
+harness.stdio.log(entries)
 
-mcp_disconnect(client)
+harness.tools.mcp_disconnect(client)
 ```
 
 ## MCP server (exposing Harn as an MCP server)
@@ -471,10 +473,10 @@ client call into your Harn code.
 ### Defining tools
 
 Use `tool_registry()` and `tool_define()` to create tools, then register
-them with `mcp_tools()`:
+them with `harness.tools.mcp_tools()`:
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   let tools = tool_registry()
 
   tools = tool_define(tools, "greet", "Greet someone", {
@@ -492,7 +494,7 @@ pipeline main(task) {
     }
   })
 
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
 }
 ```
 
@@ -502,8 +504,8 @@ For large connector packages, use the compact governed Code Mode profile from
 ```harn
 import { composition_mcp_tools } from "std/composition"
 
-pipeline main(task) {
-  mcp_tools(composition_mcp_tools())
+pipeline main(harness: Harness) {
+  harness.tools.mcp_tools(composition_mcp_tools())
 }
 ```
 
@@ -517,23 +519,23 @@ compact Code Mode profile together.
 ### Defining resources and prompts
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   // Static resource
-  mcp_resource({
+  harness.tools.mcp_resource({
     uri: "docs://readme",
     name: "README",
     text: "# My Agent\nA demo MCP server."
   })
 
   // Dynamic resource template
-  mcp_resource_template({
+  harness.tools.mcp_resource_template({
     uri_template: "config://{key}",
     name: "Config Values",
     handler: { args -> "value for ${args.key}" }
   })
 
   // Prompt
-  mcp_prompt({
+  harness.tools.mcp_prompt({
     name: "review",
     description: "Code review prompt",
     arguments: [{name: "code", required: true}],
@@ -549,8 +551,8 @@ harn serve mcp agent.harn
 ```
 
 `harn serve mcp` auto-detects whether the script exposes its surface
-through `pub fn` exports or through the `mcp_tools(...)` /
-`mcp_resource(...)` / `mcp_prompt(...)` registration builtins shown
+through `pub fn` exports or through the `harness.tools.mcp_tools(...)` /
+`harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` methods shown
 above and serves the appropriate one over stdio or Streamable HTTP. All
 `print`/`println` output goes to stderr when stdio is the MCP transport.
 The server supports the `2025-11-25` and `2025-06-18` MCP protocol versions on
@@ -581,7 +583,7 @@ for registered resource URIs.
 | `resources/subscribe`, `resources/unsubscribe` | Supported for registered resource URIs; orchestrator topic resources emit update notifications |
 | `prompts/list`, `prompts/get` | Supported for registered prompts |
 | `completion/complete` | Supported for prompt arguments and resource template arguments |
-| `roots/list` | Supported outbound from script-driven handlers through `mcp_client_roots()` / `harn.mcp.client_roots()` |
+| `roots/list` | Supported outbound from script-driven handlers through `harness.tools.mcp_client_roots()` / `harn.mcp.client_roots()` |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not currently emitted by the orchestrator-mode catalog; Harn declares the `sampling` capability when acting as a client (see the [client matrix](#mcp-client-support-matrix)). |
 | `elicitation/create` | Supported outbound from script-driven handlers via `mcp_elicit(...)`; inbound client requests to the server are rejected with an explicit unsupported-feature error |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
@@ -932,8 +934,8 @@ ACP method. The request shape is:
 
 - `session_id` is required and identifies the source session to fork.
 - `keep_first` is optional; when present Harn uses
-  `agent_session_fork_at(session_id, keep_first, id?)`.
-- Without `keep_first`, Harn uses `agent_session_fork(session_id, id?)`.
+  `harness.agent.fork_at(session_id, keep_first, id?)`.
+- Without `keep_first`, Harn uses `harness.agent.fork(session_id, id?)`.
 - `id` is optional; when omitted Harn mints a fresh session id.
 - `branch_name` is optional session metadata that Harn mirrors into the
   forked session's title and `_meta.branch_name`.
@@ -1132,7 +1134,7 @@ The ACP wire surface is intentionally curated; scripts that need
 ad-hoc selectors still pass `model:` directly to `llm_call`.
 
 Per-call options always win over the pin — invoking
-`llm_call(..., {model: "..."})` ignores the session pin so prompts that
+`harness.llm.call(..., {model: "..."})` ignores the session pin so prompts that
 deliberately route to a different model aren't silently rebound. The
 existing conversation buffer, transcript metadata, and memory context
 are untouched by a model swap; only the resolver for the next prompt's
@@ -1184,8 +1186,8 @@ Lowering examples:
   or `chat_template_kwargs.enable_thinking=false` where the transport
   supports it.
 
-Per-call options still win: `llm_call(..., {thinking: ...})` and
-`llm_call(..., {effort: ...})` bypass the session thought pin.
+Per-call options still win: `harness.llm.call(..., {thinking: ...})` and
+`harness.llm.call(..., {effort: ...})` bypass the session thought pin.
 `session/fork` carries the parent's thought pin to the child, and later
 changes remain branch-local.
 
@@ -1502,7 +1504,7 @@ Delegated peers can include an RFC 8693 actor chain in
 `message.metadata.actor_chain`. Harn validates that shape, stores it on the A2A
 task metadata, and appends the served agent as the current `act` hop before
 executing the exported Harn function. Scripts can inspect the resulting chain
-with `agent_session_actor_chain()`.
+with `harness.agent.actor_chain()`.
 
 ### Canonical HTTP+JSON/REST binding
 

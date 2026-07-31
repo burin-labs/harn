@@ -1,3 +1,4 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 /**
  * with_scoped_executor — preemptively rejects tool names outside the
  * stage allowlist, decorates approved calls with `audit.scope`, and
@@ -36,48 +37,53 @@ fn envelope(name) {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const next = synthetic_next()
   // Allowed tool passes; audit.scope records the stage + allowlist.
   const research_mw = with_scoped_executor(
+    harness.runtime,
     {stage: "research", allowed_tools: ["search_files", "read_file"]},
   )
   const ok = research_mw(envelope("search_files"), next)
-  __io_println(ok.ok)
-  __io_println(ok.audit.scope.stage)
-  __io_println(join(ok.audit.scope.allowed_tools, ","))
-  __io_println(ok.audit.layers[0].status)
+  harness.stdio.println(ok.ok)
+  harness.stdio.println(ok.audit.scope.stage)
+  harness.stdio.println(join(ok.audit.scope.allowed_tools, ","))
+  harness.stdio.println(ok.audit.layers[0].status)
   // Disallowed tool short-circuits with `scope_violation`.
   const reject = research_mw(envelope("write_file"), next)
-  __io_println(reject.ok)
-  __io_println(reject.status)
-  __io_println(reject.error_category)
-  __io_println(reject.error)
-  __io_println(reject.audit.layers[0].status)
+  harness.stdio.println(reject.ok)
+  harness.stdio.println(reject.status)
+  harness.stdio.println(reject.error_category)
+  harness.stdio.println(reject.error)
+  harness.stdio.println(reject.audit.layers[0].status)
   // `on_violation: "raise"` throws instead of short-circuiting.
   const raising_mw = with_scoped_executor(
+    harness.runtime,
     {stage: "plan", allowed_tools: ["sketch_plan"], on_violation: "raise"},
   )
   try {
     raising_mw(envelope("edit_file"), next)
-    __io_println("no-throw")
+    harness.stdio.println("no-throw")
   } catch (e) {
-    __io_println("caught")
-    __io_println(e)
+    harness.stdio.println("caught")
+    harness.stdio.println(e)
   }
   // Missing `allowed_tools` skips the preemptive check; the middleware
   // still pushes a side_effect_level for the duration of `next`.
-  const ceiling_mw = with_scoped_executor({stage: "edit", side_effect_level: "workspace_write"})
+  const ceiling_mw = with_scoped_executor(
+    harness.runtime,
+    {stage: "edit", side_effect_level: "workspace_write"},
+  )
   const r3 = ceiling_mw(envelope("anything"), next)
-  __io_println(r3.ok)
-  __io_println(r3.audit.scope.stage)
-  __io_println(contains(r3.audit.scope.keys(), "allowed_tools"))
+  harness.stdio.println(r3.ok)
+  harness.stdio.println(r3.audit.scope.stage)
+  harness.stdio.println(contains(r3.audit.scope.keys(), "allowed_tools"))
   // Invalid on_violation rejects at middleware-construction time.
   try {
-    with_scoped_executor({stage: "x", allowed_tools: ["y"], on_violation: "log"})
-    __io_println("no-throw-ctor")
+    with_scoped_executor(harness.runtime, {stage: "x", allowed_tools: ["y"], on_violation: "log"})
+    harness.stdio.println("no-throw-ctor")
   } catch (e) {
-    __io_println("caught-ctor")
+    harness.stdio.println("caught-ctor")
   }
   // Defense-in-depth: the pushed CapabilityPolicy is visible to the
   // runtime's `enforce_current_policy_for_tool`, so even if a caller
@@ -106,14 +112,18 @@ pipeline default() {
   )
   const dispatch_next = { call ->
     return agent_dispatch_tool_call(
+      harness.tools,
       {name: "write_note", id: call.call_id, arguments: {path: "notes.txt"}},
       tools,
     )
   }
-  const dispatch_mw = with_scoped_executor({stage: "audit", allowed_tools: ["read_note"]})
+  const dispatch_mw = with_scoped_executor(
+    harness.runtime,
+    {stage: "audit", allowed_tools: ["read_note"]},
+  )
   // Envelope advertises an allowed name; `next` rewrites to the denied
   // name to simulate a misbehaving inner layer.
   const runtime_deny = dispatch_mw(envelope("read_note"), dispatch_next)
-  __io_println(runtime_deny.ok)
-  __io_println(runtime_deny.error_category)
+  harness.stdio.println(runtime_deny.ok)
+  harness.stdio.println(runtime_deny.error_category)
 }

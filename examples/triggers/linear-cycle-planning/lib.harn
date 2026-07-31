@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /** Turn a Linear issue change into a cycle-planning candidate. */
-pub fn on_issue_change(event: TriggerEvent) -> dict {
+pub fn on_issue_change(_harness: Harness, event: TriggerEvent) -> dict {
   const raw = event.provider_payload.raw
   return {
     action: "cycle_planning_candidate",

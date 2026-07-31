@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Spread in method calls: obj.method(...args) should work
   struct Calculator {
     base: int
@@ -13,10 +13,10 @@ pipeline test(task) {
   }
   const calc = Calculator({base: 100})
   const args = [1, 2]
-  log(calc.add(...args))
+  harness.stdio.log(calc.add(...args))
   const more = [10, 20, 30]
-  log(calc.sum_three(...more))
+  harness.stdio.log(calc.sum_three(...more))
   // Mixed: regular args + spread
   const pair = [5]
-  log(calc.add(3, ...pair))
+  harness.stdio.log(calc.add(3, ...pair))
 }

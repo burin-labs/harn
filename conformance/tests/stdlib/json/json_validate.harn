@@ -1,21 +1,21 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Basic type validation
   const str_schema = {type: "string"}
-  __io_println(json_validate("hello", str_schema))
+  harness.stdio.println(json_validate("hello", str_schema))
   const int_schema = {type: "int"}
-  __io_println(json_validate(42, int_schema))
+  harness.stdio.println(json_validate(42, int_schema))
   const float_schema = {type: "float"}
-  __io_println(json_validate(3.14, float_schema))
+  harness.stdio.println(json_validate(3.14, float_schema))
   const bool_schema = {type: "bool"}
-  __io_println(json_validate(true, bool_schema))
+  harness.stdio.println(json_validate(true, bool_schema))
   const list_schema = {type: "list"}
-  __io_println(json_validate([1, 2, 3], list_schema))
+  harness.stdio.println(json_validate([1, 2, 3], list_schema))
   const dict_schema = {type: "dict"}
-  __io_println(json_validate({name: "alice"}, dict_schema))
+  harness.stdio.println(json_validate({name: "alice"}, dict_schema))
   // Any type accepts anything
   const any_schema = {type: "any"}
-  __io_println(json_validate("whatever", any_schema))
-  __io_println(json_validate(42, any_schema))
+  harness.stdio.println(json_validate("whatever", any_schema))
+  harness.stdio.println(json_validate(42, any_schema))
   // Dict with required keys
   const schema = {
     type: "dict",
@@ -23,15 +23,15 @@ pipeline test(task) {
     properties: {name: {type: "string"}, age: {type: "int"}},
   }
   const data = {name: "alice", age: 30}
-  __io_println(json_validate(data, schema))
+  harness.stdio.println(json_validate(data, schema))
   // Nested dict validation
   const nested_schema = {
     type: "dict",
     properties: {address: {type: "dict", required: ["city"], properties: {city: {type: "string"}}}},
   }
   const nested_data = {address: {city: "NYC"}}
-  __io_println(json_validate(nested_data, nested_schema))
+  harness.stdio.println(json_validate(nested_data, nested_schema))
   // List items validation
   const list_items_schema = {type: "list", items: {type: "int"}}
-  __io_println(json_validate([1, 2, 3], list_items_schema))
+  harness.stdio.println(json_validate([1, 2, 3], list_items_schema))
 }

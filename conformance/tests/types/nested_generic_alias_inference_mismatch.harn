@@ -12,6 +12,6 @@ fn values<T>(_steps: list<Step<T>>) -> list<T> {
   return []
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const _: list<bool> = values([int_step(), string_step()])
 }

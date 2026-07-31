@@ -5,7 +5,7 @@ import {
   render_model_catalog_table,
 } from "std/llm/catalog"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const catalog = [
     {
       id: "alpha-expensive",
@@ -61,22 +61,24 @@ pipeline test(task) {
     },
   )
   const result = model_catalog_query(catalog, query)
-  __io_println(result.schemaVersion == 1)
-  __io_println(len(result.models) == 3)
-  __io_println(result.models[0].id == "alpha-cheap")
+  harness.stdio.println(result.schemaVersion == 1)
+  harness.stdio.println(len(result.models) == 3)
+  harness.stdio.println(result.models[0].id == "alpha-cheap")
   // Numeric sorts keep incomplete catalog rows last.
-  __io_println(result.models[2].id == "alpha-metadata-pending")
+  harness.stdio.println(result.models[2].id == "alpha-metadata-pending")
   // Query results retain runtime rows rather than a lossy table projection.
-  __io_println(result.models[0].pricing.cache_read_per_mtok == 0.2)
-  __io_println(result.models[0].tool_mode_parity_notes == "retry native tools")
+  harness.stdio.println(result.models[0].pricing.cache_read_per_mtok == 0.2)
+  harness.stdio.println(result.models[0].tool_mode_parity_notes == "retry native tools")
   const rendered = render_model_catalog_table(result.models, query)
-  __io_println(rendered.contains("pricing.cache_read"))
-  __io_println(rendered.contains("retry native tools"))
+  harness.stdio.println(rendered.contains("pricing.cache_read"))
+  harness.stdio.println(rendered.contains("retry native tools"))
   const augmented = catalog_with_installed_ollama_models(
     [{id: "curated", provider: "ollama", strengths: []}],
     ["curated", "local-only"],
   )
-  __io_println(len(augmented) == 2)
-  __io_println(augmented[0].installed && augmented[0].cataloged)
-  __io_println(augmented[1].id == "local-only" && augmented[1].installed && !augmented[1].cataloged)
+  harness.stdio.println(len(augmented) == 2)
+  harness.stdio.println(augmented[0].installed && augmented[0].cataloged)
+  harness.stdio.println(
+    augmented[1].id == "local-only" && augmented[1].installed && !augmented[1].cataloged,
+  )
 }

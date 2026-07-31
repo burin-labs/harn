@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -7,45 +8,51 @@ import { llm_text, with_llm_script } from "std/testing"
  * to fill `session/prompt`'s `stopReason` per the protocol at
  * https://agentclientprotocol.com/protocol/prompt-turn.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   // Natural completion → end_turn.
   with_llm_script(
+    harness.llm,
     [llm_text("all done")],
     { ->
-      const normal = agent_loop("hi", nil, {provider: "mock"})
-      __io_println(normal.acp_stop_reason)
+      const normal = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(normal.acp_stop_reason)
     },
   )
   with_llm_script(
+    harness.llm,
     [{text: "truncated", stop_reason: "max_tokens"}],
     { ->
-      const truncated = agent_loop("hi", nil, {provider: "mock"})
-      __io_println(truncated.acp_stop_reason)
+      const truncated = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(truncated.acp_stop_reason)
     },
   )
   with_llm_script(
+    harness.llm,
     [{text: "truncated", stop_reason: "length"}],
     { ->
-      const length = agent_loop("hi", nil, {provider: "mock"})
-      __io_println(length.acp_stop_reason)
+      const length = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(length.acp_stop_reason)
     },
   )
   with_llm_script(
+    harness.llm,
     [{text: "I cannot assist with that.", stop_reason: "refusal"}],
     { ->
-      const refused = agent_loop("hi", nil, {provider: "mock"})
-      __io_println(refused.acp_stop_reason)
+      const refused = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(refused.acp_stop_reason)
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("still working"), llm_text("still working")],
     { ->
       const capped = agent_loop(
+        harness,
         "hi",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 1},
       )
-      __io_println(capped.acp_stop_reason)
+      harness.stdio.println(capped.acp_stop_reason)
     },
   )
 }

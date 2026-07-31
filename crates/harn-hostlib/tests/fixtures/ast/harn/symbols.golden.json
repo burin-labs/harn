@@ -12,6 +12,6 @@
   {"name":"Task", "kind":"module", "container":null, "access_level":null, "signature":"impl Task", "start_row":19, "start_col":0, "end_row":23, "end_col":1},
   {"name":"summary", "kind":"method", "container":"Task", "access_level":null, "signature":"fn summary(title: string)", "start_row":20, "start_col":2, "end_row":22, "end_col":3},
   {"name":"normalize", "kind":"function", "container":null, "access_level":null, "signature":"fn normalize(task)", "start_row":25, "start_col":0, "end_row":27, "end_col":1},
-  {"name":"review", "kind":"function", "container":null, "access_level":null, "signature":"pipeline review(task)", "start_row":29, "start_col":0, "end_row":32, "end_col":1},
+  {"name":"review", "kind":"function", "container":null, "access_level":null, "signature":"pipeline review(harness: Harness, task)", "start_row":29, "start_col":0, "end_row":32, "end_col":1},
   {"name":"_notify", "kind":"function", "container":null, "access_level":null, "signature":"tool _notify(message)", "start_row":34, "start_col":0, "end_row":37, "end_col":1}
 ]

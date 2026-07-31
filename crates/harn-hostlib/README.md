@@ -244,51 +244,30 @@ scan root is inside a worktree; embedders and tests can supply a mock capability
 with `scan_project_with_git` when they need deterministic scanner behavior
 without depending on ambient checkout state.
 
-Unlike the `tools/` surface, the scanner is **not** gated by
-`hostlib_enable("tools:deterministic")`: producing a `ScanResult` is a
-read-only operation that doesn't mutate user state and the snapshot file
-already lives under `.harn/`, which the hostlib treats as a managed
-directory.
+Producing a `ScanResult` is a read-only operation and the snapshot file lives
+under `.harn/`, which the hostlib treats as a managed directory. Script
+authority is nevertheless explicit: callers use `harness.scanner.*`, and a
+helper that receives another nominal handle cannot reach the scanner.
 
-## Per-session opt-in for deterministic tools
+## Explicit deterministic-tool authority
 
 The deterministic-tool surface (`tools/{search, read_file, write_file,
 delete_file, list_directory, get_file_outline, git, run_command,
 read_command_output, run_test, run_build_command, inspect_test_results,
-manage_packages}`) is
-**gated**.
-`install_default` registers the contract for every method, but the
-handlers refuse to run until the pipeline opts in by calling
-
-```text
-hostlib_enable("tools:deterministic")
-```
-
-(a builtin registered alongside the rest of the `tools/` surface). This
-matches the safety story called out in
-[#567](https://github.com/burin-labs/harn/issues/567): a Harn script that
-hasn't asked for filesystem / git / search access cannot get it even
-though the contract is wired in. The same gate applies to process and
-package-manager tools. The opt-in is per-thread, so each VM gets an
-independent enable set.
-
-Embedders that want to enable the surface from Rust without going through
-the builtin can use [`tools::permissions::enable_for_test`] (test-only)
-or call `tools::permissions::enable("tools:deterministic")` directly.
+manage_packages}`) is exposed only through `HarnessTools`. Entrypoints receive
+root `Harness` and pass `harness.tools` to helpers that need deterministic
+tool authority. Direct global aliases and the thread-local `hostlib_enable`
+gate do not exist; policy enforcement occurs on the nominal receiver before
+the internal Rust handler is entered.
 
 ## Typed terminal sessions
 
-The `terminal_session` capability is separately gated. A pipeline must call
-
-```text
-hostlib_enable("terminal:session")
-```
-
-before it can start or operate a PTY. The capability accepts argv vectors,
-never shell strings, scrubs inherited secret-bearing environment variables,
-rejects explicit secret-bearing environment keys, applies the universal
-catastrophic-command floor, and bounds sessions, dimensions, input, capture
-cells, retained output, and waits.
+The `terminal_session` capability is exposed through
+`HarnessTerminalSession`. It accepts argv vectors, never shell strings, scrubs
+inherited secret-bearing environment variables, rejects explicit
+secret-bearing environment keys, applies the universal catastrophic-command
+floor, and bounds sessions, dimensions, input, capture cells, retained output,
+and waits.
 
 `portable-pty` cannot currently preserve Harn's restricted process sandbox.
 Consequently `terminal_session.start` fails with the typed

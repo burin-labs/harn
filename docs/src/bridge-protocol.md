@@ -823,8 +823,8 @@ Each normalized descriptor surfaced to scripts has exactly these keys:
 
 Invocation:
 
-- `host_tool_list()` returns the normalized list directly.
-- `host_tool_call(name, args)` then dispatches that tool through the
+- `harness.tools.list_registered()` returns the normalized list directly.
+- `harness.tools.invoke(name, args)` then dispatches that tool through the
   existing `builtin_call` bridge request using `name` as the builtin
   name and `args` as the single argument payload.
 
@@ -835,9 +835,10 @@ headless CLI runs, and cloud workers can share one shell-selection
 contract. Harn's standalone fallback exposes the same operations when no
 bridge host is attached.
 
-### `process.list_shells`
+### `harness.process.list_shells()`
 
-Called through `host_call("process.list_shells", {})`. The response is:
+Ordinary scripts call `harness.process.list_shells()`. The privileged host wire
+dispatches the registry-owned `process.list_shells` operation and returns:
 
 ```json
 {

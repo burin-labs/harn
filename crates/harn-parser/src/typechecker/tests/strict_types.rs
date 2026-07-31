@@ -376,10 +376,10 @@ pipeline t(task) {
 }
 
 #[test]
-fn test_cross_module_ambient_runtime_values_are_allowed() {
+fn test_cross_module_runtime_values_allow_explicit_harness() {
     let diags = check_source_with_imports(
         r#"import { parse, parser } from "std/cli/argparse"
-pipeline t(task) {
+pipeline t(harness: Harness, task) {
   const args = parse(parser({name: "test", args: []}), argv)
   const exists = harness.fs.exists(".")
   log({args: args, exists: exists, pi: pi, git: git})
@@ -453,10 +453,10 @@ fn test_renamed_stdlib_call_suggests_replacement() {
 }
 
 #[test]
-fn test_spawn_agent_literal_config_rejects_unknown_option_key() {
+fn test_worker_spawn_literal_config_allows_host_extension_keys() {
     let errs = errors(
-        r#"pipeline t(task) {
-  spawn_agent({
+        r#"pipeline t(harness: Harness, task) {
+  harness.agent.worker_spawn({
     task: "do it",
     node: {kind: "stage"},
     persmissions: {}
@@ -464,27 +464,21 @@ fn test_spawn_agent_literal_config_rejects_unknown_option_key() {
 }"#,
     );
     assert!(
-        errs.iter().any(
-            |m| m.contains("argument 1 `config`: unknown option `persmissions`")
-                && m.contains("did you mean `permissions`")
-        ),
-        "expected spawn_agent option-key typo error, got: {errs:?}"
+        errs.is_empty(),
+        "worker spawn config remains host-extensible and should not reject extension keys: {errs:?}"
     );
 }
 
 #[test]
-fn test_sub_agent_run_literal_options_rejects_unknown_option_key() {
+fn test_worker_spawn_literal_config_allows_provider_extension_keys() {
     let errs = errors(
-        r#"pipeline t(task) {
-  sub_agent_run("do it", {provider: "mock", backgroun: true})
+        r#"pipeline t(harness: Harness, task) {
+  harness.agent.worker_spawn({task: "do it", provider: "mock", backgroun: true})
 }"#,
     );
     assert!(
-        errs.iter().any(
-            |m| m.contains("argument 2 `options`: unknown option `backgroun`")
-                && m.contains("did you mean `background`")
-        ),
-        "expected sub_agent_run option-key typo error, got: {errs:?}"
+        errs.is_empty(),
+        "worker spawn config remains host-extensible and should not reject extension keys: {errs:?}"
     );
 }
 
@@ -549,13 +543,10 @@ fn test_cross_module_builtin_not_flagged() {
 }
 
 #[test]
-fn test_cross_module_hostlib_prefix_not_flagged() {
-    // `hostlib_*` names are registered onto the VM at runtime by
-    // `harn_hostlib::install_default`. The parser's static
-    // BUILTIN_SIGNATURES table does not (and should not) enumerate
-    // them, so the cross-module resolver treats the prefix as an
-    // opaque escape hatch — the same way `__`-prefixed names are
-    // treated.
+fn test_cross_module_hostlib_prefix_is_not_source_callable() {
+    // Hostlib implementations are runtime details. Source reaches them only
+    // through nominal Harness handles; the old ambient prefix is not an
+    // escape hatch.
     let diags =
         check_source_with_imports(r"pipeline t(task) { hostlib_code_index_stats({}) }", &[]);
     let errs: Vec<&String> = diags
@@ -564,7 +555,8 @@ fn test_cross_module_hostlib_prefix_not_flagged() {
         .map(|d| &d.message)
         .collect();
     assert!(
-        errs.is_empty(),
-        "hostlib_-prefixed call should not error, got: {errs:?}"
+        errs.iter()
+            .any(|message| message.contains("hostlib_code_index_stats")),
+        "ambient hostlib calls must be rejected in favor of Harness handles: {errs:?}"
     );
 }

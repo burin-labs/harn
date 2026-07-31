@@ -39,7 +39,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::orchestration::ProcessSandboxPreset;
@@ -61,6 +61,10 @@ mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
 mod paths;
+mod process_output;
+use process_output::apply_process_config;
+#[cfg(target_os = "windows")]
+pub(crate) use process_output::windows_command_output;
 pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
 mod policy;
@@ -109,6 +113,9 @@ pub enum FsAccess {
 pub struct ProcessCommandConfig {
     pub cwd: Option<PathBuf>,
     pub env: Vec<(String, String)>,
+    /// Environment keys removed after the inherited/session environment and
+    /// caller overlays have been composed.
+    pub env_remove: Vec<String>,
     pub stdin_null: bool,
     /// When `true`, the child starts from an EMPTY environment and receives only
     /// the pairs in [`ProcessCommandConfig::env`] — the closed-by-construction
@@ -301,6 +308,22 @@ pub fn register_sandbox_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
+    use harn_builtin_meta::CapabilityId;
+    vm.register_capability_method(
+        CapabilityId::System,
+        "sandbox_active_backend",
+        sandbox_active_backend_impl,
+    );
+    vm.register_capability_method(
+        CapabilityId::System,
+        "sandbox_backend_available",
+        sandbox_backend_available_impl,
+    );
+    vm.register_capability_method(
+        CapabilityId::System,
+        "sandbox_active_profile",
+        sandbox_active_profile_impl,
+    );
 }
 
 pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
@@ -310,6 +333,8 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
 ];
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sandbox_active_backend() -> string",
     category = "sandbox"
 )]
@@ -318,6 +343,8 @@ fn sandbox_active_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sandbox_backend_available() -> bool",
     category = "sandbox"
 )]
@@ -329,6 +356,8 @@ fn sandbox_backend_available_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "sandbox_active_profile() -> string",
     category = "sandbox"
 )]
@@ -1412,6 +1441,12 @@ fn sandboxed_process_config(
     }
     neutralize_rustc_wrapper(&mut resolved.env);
     inject_workspace_process_env(&mut resolved.env, policy);
+    resolved.env.retain(|(key, _)| {
+        !resolved
+            .env_remove
+            .iter()
+            .any(|removed| key.eq_ignore_ascii_case(removed))
+    });
     Ok(resolved)
 }
 
@@ -1624,24 +1659,6 @@ pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfil
         return None;
     }
     Some((policy, profile))
-}
-
-fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {
-    if let Some(cwd) = config.cwd.as_ref() {
-        command.current_dir(cwd);
-    }
-    // A policy-governed session builds a closed environment: clear the
-    // inherited parent env first so the child sees ONLY what the resolver
-    // admitted (allowlist + grants), already materialized in `config.env`.
-    // Outside a session, leave the inherited env in place and overlay
-    // `config.env` on top.
-    if config.closed_env {
-        command.env_clear();
-    }
-    command.envs(config.env.iter().map(|(key, value)| (key, value)));
-    if config.stdin_null {
-        command.stdin(Stdio::null());
-    }
 }
 
 fn spawn_error(error: std::io::Error) -> VmError {

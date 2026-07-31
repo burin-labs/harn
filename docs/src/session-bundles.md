@@ -97,7 +97,7 @@ and unsafe secret markers.
 ## Workspace anchor
 
 When the session that produced the run was opened with a typed
-`WorkspaceAnchor` (via `agent_session_open(id?, opts: {workspace_anchor:
+`WorkspaceAnchor` (via `harness.agent.open(id?, opts: {workspace_anchor:
 {primary, additional_roots?, anchored_at?}})` or
 `agent_session_set_workspace_anchor`), the anchor rides through transcript
 metadata into `bundle.workspace`:
@@ -133,6 +133,6 @@ the local machine.
 The workspace anchor moved from soft `RunRecord.metadata.{workspace_id,
 project_root, workspace_root}` keys to a typed `SessionState`
 field in v0.8.35 (#2215). Hosts populating the old keys must move to
-`agent_session_open(..., {workspace_anchor: ...})` or
-`agent_session_set_workspace_anchor(...)` — the legacy read path is
+`harness.agent.open(..., {workspace_anchor: ...})` or
+`harness.agent.set_workspace_anchor(...)` — the legacy read path is
 gone.

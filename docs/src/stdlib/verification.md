@@ -7,15 +7,15 @@ Harn policies consume explicit facts.
 
 ## File-Hash Snapshots
 
-`verification_file_hash_snapshot(paths)` captures current on-disk hashes for a
+`verification_file_hash_snapshot(harness.code_index, paths)` captures current on-disk hashes for a
 batch of workspace paths under one code-index sequence binding:
 
 ```harn
 import { verification_file_hash_snapshot } from "std/verification"
 
-pipeline default() {
-  const _ = hostlib_code_index_rebuild({root: "."})
-  const snap = verification_file_hash_snapshot(["src/main.zig", "build.zig"])
+pipeline default(harness: Harness) {
+  const _ = harness.code_index.rebuild({root: "."})
+  const snap = verification_file_hash_snapshot(harness.code_index, ["src/main.zig", "build.zig"])
   const verdict = verification_diagnostic_classify(
     {rung: "R2", rowId: "zig/file", at: snap.captured_at_ms, snapshot: snap.snapshot},
     snap.snapshot,
@@ -35,7 +35,7 @@ The returned shape includes:
   mtime, size, and last edit sequence.
 
 The hash algorithm is the same decimal FNV-1a 64-bit value used by
-`hostlib_code_index_file_hash` and `hostlib_code_index_changes_since`.
+`harness.code_index.file_hash` and `harness.code_index.changes_since`.
 Unknown-but-readable files are still included in `snapshot` with `known =
 false`, which lets a diagnostic bind to a newly created file before the next
 full code-index rebuild.
@@ -50,7 +50,7 @@ contract, while project stacks add rows without changing Rust or host glue:
 ```harn
 import { verification_affected_targets } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const affected = verification_affected_targets(
     ["crates/app/src/lib.rs", "apps/web/src/index.ts"],
     [
@@ -88,7 +88,7 @@ shape:
 ```harn
 import { verification_record_check_result } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const result = {success: false, exit_code: 1, duration_ms: 420, stderr: "failed"}
   const recorded = verification_record_check_result(
     "cargo/test",
@@ -145,7 +145,7 @@ version extraction pattern:
 ```harn
 import { verification_toolchain_facts } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const facts = verification_toolchain_facts([
     {
       id: "go/default",
@@ -189,7 +189,7 @@ Zig, or any other stack.
 ```harn
 import { verification_ladder_plan, verification_warm_state_facts } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const warm = verification_warm_state_facts([
     {
       id: "scala/full",
@@ -246,7 +246,7 @@ import {
   verification_teardown_warm_state,
 } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const row = {
     id: "scala/build-server",
     warmMode: {
@@ -281,7 +281,7 @@ matched rows:
 ```harn
 import { verification_ladder_plan } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const plan = verification_ladder_plan(
     {path: "src/main.zig", language: "zig", task: "post_edit"},
     {resource_classes: ["cheap", "moderate"], max_rung: "R3"},
@@ -327,7 +327,7 @@ verification status model from explicit host facts and Harn profile rows:
 ```harn
 import { verification_hud_model, verification_hud_text } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const model = verification_hud_model(
     {
       started_ms: 1000,
@@ -373,7 +373,7 @@ a host product or in agent-loop string heuristics:
 ```harn
 import { verification_diagnostic_delta } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const delta = verification_diagnostic_delta(
     {diagnostics: ["src/a.zig:10:2: error: missing writeEscaped"]},
     {diagnostics: ["src/a.zig:44:9: error: missing writeEscaped"]},
@@ -420,7 +420,7 @@ stale or unbound diagnostics to advisory, and then runs
 ```harn
 import { verification_gate_input } from "std/verification"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const current_hashes = {"src/writer.zig": "new"}
   const previous = {
     rung: "R2",

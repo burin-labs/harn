@@ -1,22 +1,22 @@
 /** Test structured error categories */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // throw_error creates categorized errors
   const r1 = try {
     throw_error("connection timed out", "timeout")
   }
-  __io_println(is_err(r1))
-  __io_println(error_category(unwrap_err(r1)))
+  harness.stdio.println(is_err(r1))
+  harness.stdio.println(error_category(unwrap_err(r1)))
   // is_timeout helper
-  __io_println(is_timeout(unwrap_err(r1)))
+  harness.stdio.println(is_timeout(unwrap_err(r1)))
   // rate limit
   const r2 = try {
     throw_error("too many requests", "rate_limit")
   }
-  __io_println(error_category(unwrap_err(r2)))
-  __io_println(is_rate_limited(unwrap_err(r2)))
+  harness.stdio.println(error_category(unwrap_err(r2)))
+  harness.stdio.println(is_rate_limited(unwrap_err(r2)))
   // generic error
   const r3 = try {
     throw "some error"
   }
-  __io_println(error_category(unwrap_err(r3)))
+  harness.stdio.println(error_category(unwrap_err(r3)))
 }

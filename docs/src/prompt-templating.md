@@ -2,17 +2,18 @@
 
 Harn ships a small template language for rendering `.harn.prompt` and `.prompt`
 asset files or inline template strings. It is invoked by the
-`render(path, bindings?)`, `render_prompt(path, bindings?)`, and
-`render_string(template, bindings?)` builtins (and, equivalently, via the
-`template.render` host capability). The engine is intentionally minimal — a
-rendering layer for prompts, not a scripting language — but it covers the
-ergonomics most prompt authors reach for: conditionals with `else`/`elif`,
-loops, includes, filters, comments, and whitespace control.
+`harness.fs.render_prompt(path, bindings?)` and
+`harness.fs.render_template(template, bindings?)` methods. Use
+`harness.fs.render_prompt_with_provenance(...)` when the caller also needs the
+resolved asset provenance. The engine is intentionally minimal—a rendering
+layer for prompts, not a scripting language—but it covers the ergonomics most
+prompt authors reach for: conditionals with `else`/`elif`, loops, includes,
+filters, comments, and whitespace control.
 
-Use `render_string(...)` when the template should live inline in source. Use
-`render(...)` / `render_prompt(...)` when the template should be loaded from a
-separate file relative to the calling module. The template syntax and error
-shape are identical across both entrypoints.
+Use `harness.fs.render_template(...)` when the template should live inline in
+source. Use `harness.fs.render_prompt(...)` when the template should be loaded
+from a separate file relative to the calling module. The template syntax and
+error shape are identical across both entrypoints.
 Under an active execution policy, file-backed templates and included templates
 must stay within the policy's `workspace_roots`; embedded `std/...` prompt
 assets do not touch the filesystem.
@@ -22,7 +23,7 @@ assets. These render without touching the filesystem and report stable
 `std://...` provenance URIs:
 
 ```harn,ignore
-const tool_contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+const tool_contract = harness.fs.render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
 ```
 
 Protected Rust orchestration paths are checked by `make lint-no-rust-prompt-prose`;
@@ -186,7 +187,7 @@ Refactor-safe alternatives to `../../partials/foo.harn.prompt`:
   ```
 
 These forms work in both the runtime template engine and the
-`render(...)` / `render_prompt(...)` builtins. `harn check` validates
+`harness.fs.render_prompt(...)` builtins. `harn check` validates
 them against `harn.toml`. See
 [modules.md](./modules.md#package-root-prompt-assets) for the full
 reference.
@@ -300,7 +301,7 @@ Typical cases:
 
 ## The `llm` scope
 
-When `render()` / `render_prompt()` / `render_string()` is invoked from
+When `harness.fs.render_prompt()` / `harness.fs.render_template()` is invoked from
 inside an LLM-aware frame (`llm_call`, the default handler stack, or
 `agent_loop`), the engine auto-injects a reserved `llm` binding so a
 single logical template can adapt its wire envelope per provider
@@ -332,7 +333,7 @@ fallback. Branch on `family` for human-readable identity checks;
 branch on `capabilities.*` for wire-format adaptation (native vs
 text-format tools, prompt caching, structured output, etc.).
 
-Bare `render()` calls outside any LLM frame leave `llm = nil`, so the
+Bare `harness.fs.render_prompt()` calls outside any LLM frame leave `llm = nil`, so the
 same template works in CI / doc-gen contexts as long as it guards with
 `{{ if llm }}`:
 
@@ -416,7 +417,7 @@ Capability dispatch is feature-based, not provider-string-based:
 
 ## Variant resolution in transcripts
 
-Every `render()` / `render_prompt()` call made under an LLM-aware frame
+Every `harness.fs.render_prompt()` call made under an LLM-aware frame
 (`llm_call`, `default_llm_caller`, `agent_loop`) emits a
 `template.render` event into the run's `llm_transcript.jsonl`. The event
 captures:
@@ -479,9 +480,9 @@ See [Editor integration](editor-integration.md#prompt-templates).
 
 ## Preflight checks
 
-`harn check` parses every template referenced by a literal `render(...)` /
-`render_prompt(...)` call and surfaces syntax errors before you run the
-pipeline. `render_string(...)` is available to the checker as a builtin, but
+`harn check` parses every template referenced by a literal `harness.fs.render_prompt(...)` /
+`harness.fs.render_prompt(...)` call and surfaces syntax errors before you run the
+pipeline. `harness.fs.render_template(...)` is available to the checker as a builtin, but
 its template body is evaluated at runtime because it comes from normal string
 expressions rather than a source-relative asset path. This catches things like
 an unterminated `{{ for }}` block at static time for file-backed templates,

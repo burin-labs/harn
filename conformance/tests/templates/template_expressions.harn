@@ -1,20 +1,20 @@
-pipeline default() {
-  __io_println(
-    render(
+pipeline default(harness: Harness) {
+  harness.stdio.println(
+    harness.fs.render_prompt(
       "fixtures/template/expressions.prompt",
       {count: 0, name: "x", active: false, role: "guest"},
     ),
   )
-  __io_println("---")
-  __io_println(
-    render(
+  harness.stdio.println("---")
+  harness.stdio.println(
+    harness.fs.render_prompt(
       "fixtures/template/expressions.prompt",
       {count: 5, name: "alice", active: true, role: "user"},
     ),
   )
-  __io_println("---")
-  __io_println(
-    render(
+  harness.stdio.println("---")
+  harness.stdio.println(
+    harness.fs.render_prompt(
       "fixtures/template/expressions.prompt",
       {count: 99, name: "bob", active: false, role: "admin"},
     ),

@@ -1,11 +1,17 @@
 import { timed } from "std/timing"
 
-pipeline default() {
-  enable_tracing(true)
-  const result = timed("outer", {}, { -> return timed("inner", {}, { -> return "done" }) })
-  __io_println(result.result.result)
-  __io_println(result.timing.span_id != result.result.timing.span_id)
-  __io_println(result.result.timing.parent_span_id == result.timing.span_id)
-  const user_timing_spans = trace_spans().filter({ s -> s.kind == "user_timing" }).to_list()
-  __io_println(len(user_timing_spans))
+pipeline default(harness: Harness) {
+  harness.obs.enable_tracing(true)
+  const result = timed(
+    harness.clock,
+    "outer",
+    {},
+    { -> return timed(harness.clock, "inner", {}, { -> return "done" }) },
+  )
+  harness.stdio.println(result.result.result)
+  harness.stdio.println(result.timing.span_id != result.result.timing.span_id)
+  harness.stdio.println(result.result.timing.parent_span_id == result.timing.span_id)
+  const user_timing_spans = harness.obs.trace_spans().filter({ s -> s.kind == "user_timing" })
+    .to_list()
+  harness.stdio.println(len(user_timing_spans))
 }

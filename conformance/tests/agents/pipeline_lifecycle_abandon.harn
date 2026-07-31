@@ -11,14 +11,14 @@
  */
 import { lifecycle_audit_log_take, on_finish_abandon } from "std/lifecycle"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("nightly-drain", {note: "abandon lifecycle"})
       const pre_state = harness.unsettled_state()
       harness.stdio.println("pre_partial=" + to_string(len(pre_state.partial_handoffs)))
       const result = on_finish_abandon(harness, return_value)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)
       harness.stdio.println("partial=" + to_string(audits[0].payload.counts.partial))

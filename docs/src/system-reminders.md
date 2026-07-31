@@ -126,8 +126,8 @@ const injected = transcript.inject_reminder(transcript(), {
 })
 
 const next_transcript = injected.transcript
-log(injected.reminder_id)
-log(injected.deduped_count)
+harness.stdio.log(injected.reminder_id)
+harness.stdio.log(injected.deduped_count)
 ```
 
 The returned transcript has one additional `system_reminder` event and
@@ -151,7 +151,7 @@ pending reminders:
 const cleared = transcript.clear_reminders(next_transcript, {
   tag: "token_pressure",
 })
-log(cleared.removed_count)
+harness.stdio.log(cleared.removed_count)
 ```
 
 Selectors support `id`, `tag`, and `dedupe_key`. At least one selector
@@ -191,7 +191,7 @@ persona hook.
 
 ### From a provider
 
-`agent_loop(...)` evaluates canonical reminder providers by default.
+`agent_loop(harness, ...)` evaluates canonical reminder providers by default.
 Register a custom provider with `register_reminder_provider({id,
 subscribes_to, evaluate})`. The `evaluate` closure receives
 `{event, session, session_id, payload, options, config}` and may return
@@ -218,7 +218,7 @@ register_reminder_provider({
   },
 })
 
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   reminders: {
     config: {
       workspace_guard: {enabled: true},
@@ -286,8 +286,8 @@ structured `already_delivered` error.
 
 ## Canonical stdlib providers
 
-Canonical providers are enabled by default inside `agent_loop(...)`.
-Bare `llm_call(...)` renders pending reminders from the selected session
+Canonical providers are enabled by default inside `agent_loop(harness, ...)`.
+Bare `harness.llm.call(...)` renders pending reminders from the selected session
 but does not evaluate providers.
 
 | Provider | Subscribes to | Config keys | Reminder behavior |
@@ -306,7 +306,7 @@ Disable every provider with `reminders: false` or
 provider id with `-`:
 
 ```harn,ignore
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   reminders: {
     providers: ["-token_pressure", "-idle_nudge"],
     config: {
@@ -322,7 +322,7 @@ distinct providers raises `HARN-RMD-007`.
 
 ## Capability-aware rendering
 
-`llm_call(...)` loads pending reminders from the active `session_id`
+`harness.llm.call(...)` loads pending reminders from the active `session_id`
 transcript, renders them after `system` fragments positioned `before` and
 the primary system prompt, but before fragments positioned `after`.
 
@@ -451,7 +451,7 @@ Use the canonical provider and override only the context window when the
 route or harness cannot infer it.
 
 ```harn,ignore
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   reminders: {
     config: {
       token_pressure: {context_window: 128000},
@@ -474,7 +474,7 @@ store_fact({
   evidence: [{kind: "FileRange", ref: "crates/harn-vm/src/cancel.rs:1"}],
 })
 
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   reminders: {
     config: {
       project_facts: {
@@ -493,18 +493,20 @@ Use a dedupe key per file so repeated file-watcher events collapse into
 one pending nudge.
 
 ```harn,ignore
-register_session_hook("file_edited", { event ->
-  const path = to_string(event?.path ?? "")
-  return {
-    reminder: {
-      body: "File changed externally: " + path + ". Re-read it before editing.",
-      tags: ["workspace", "file_changed"],
-      dedupe_key: "file_changed:" + path,
-      ttl_turns: 2,
-      propagate: "session",
-    },
-  }
-})
+pipeline main(harness: Harness) {
+  harness.agent.register_session_hook("file_edited", { _hook_harness, event ->
+    const path = to_string(event?.path ?? "")
+    return {
+      reminder: {
+        body: "File changed externally: " + path + ". Re-read it before editing.",
+        tags: ["workspace", "file_changed"],
+        dedupe_key: "file_changed:" + path,
+        ttl_turns: 2,
+        propagate: "session",
+      },
+    }
+  })
+}
 ```
 
 ### Memory-derived reminder
@@ -580,7 +582,7 @@ transcript_compact(snapshot, {
   strategy: "custom",
   custom_compactor: { messages, reminders ->
     for reminder in reminders {
-      log(reminder.body)
+      harness.stdio.log(reminder.body)
     }
     return transcript({messages: messages})
   },

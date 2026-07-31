@@ -1,8 +1,5 @@
 use super::*;
-use harn_hostlib::{
-    tools::{permissions, ToolsCapability},
-    BuiltinRegistry, HostlibCapability,
-};
+use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmDictExt;
 
 async fn request_json(
@@ -20,9 +17,6 @@ fn wire_path(path: &std::path::Path) -> String {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
-    permissions::reset();
-    permissions::enable_for_test();
-
     let dir = tempfile::TempDir::new().unwrap();
     let committed_file = dir.path().join("draft.txt");
     let discarded_file = dir.path().join("discard.txt");

@@ -7,16 +7,17 @@ import { llm_text, with_llm_script } from "std/testing"
  * This is the abstraction that lets script authors say `thinking: false`
  * uniformly without learning per-template prompt directives.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [llm_text("ok")],
     { ->
-      llm_call(
+      harness.llm.call(
         "say hi",
         "you are an agent.",
         {provider: "ollama", model: "qwen3:30b", thinking: {mode: "disabled"}},
       )
-      const qwen_disabled = llm_mock_calls()[0]
+      const qwen_disabled = harness.llm.mock_calls()[0]
       assert(
         qwen_disabled.system == "/no_think\nyou are an agent.",
         "Qwen3-on-Ollama with thinking:false should prepend /no_think to system",
@@ -24,14 +25,15 @@ pipeline test(task) {
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("ok")],
     { ->
-      llm_call(
+      harness.llm.call(
         "say hi",
         "you are an agent.",
         {provider: "ollama", model: "qwen3:30b", thinking: {mode: "enabled"}},
       )
-      const qwen_enabled = llm_mock_calls()[0]
+      const qwen_enabled = harness.llm.mock_calls()[0]
       assert(
         qwen_enabled.system == "you are an agent.",
         "thinking: enabled should leave system untouched",
@@ -39,14 +41,15 @@ pipeline test(task) {
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("ok")],
     { ->
-      llm_call(
+      harness.llm.call(
         "say hi",
         "/no_think\nyou are an agent.",
         {provider: "ollama", model: "qwen3:30b", thinking: {mode: "disabled"}},
       )
-      const qwen_idempotent = llm_mock_calls()[0]
+      const qwen_idempotent = harness.llm.mock_calls()[0]
       assert(
         qwen_idempotent.system == "/no_think\nyou are an agent.",
         "directive injection should be idempotent when already at head of system",
@@ -54,19 +57,20 @@ pipeline test(task) {
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("ok")],
     { ->
-      llm_call(
+      harness.llm.call(
         "say hi",
         "you are an agent.",
         {provider: "anthropic", model: "claude-haiku-4-7", thinking: {mode: "disabled"}},
       )
-      const anthropic_call = llm_mock_calls()[0]
+      const anthropic_call = harness.llm.mock_calls()[0]
       assert(
         anthropic_call.system == "you are an agent.",
         "providers without a directive capability should leave system untouched",
       )
-      log("llm_thinking_disable_directive tests passed")
+      harness.stdio.log("llm_thinking_disable_directive tests passed")
     },
   )
 }

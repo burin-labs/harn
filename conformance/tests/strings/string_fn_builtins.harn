@@ -1,7 +1,7 @@
-pipeline default() {
-  __io_println(trim("  hello  "))
-  __io_println(lowercase("HELLO"))
-  __io_println(uppercase("hello"))
+pipeline default(harness: Harness) {
+  harness.stdio.println(trim("  hello  "))
+  harness.stdio.println(lowercase("HELLO"))
+  harness.stdio.println(uppercase("hello"))
   const parts = split("a,b,c", ",")
-  __io_println(parts)
+  harness.stdio.println(parts)
 }

@@ -46,8 +46,8 @@ fn profile_text_and_json_roundtrip() {
     fs::write(
         &script,
         r#"
-pipeline main() {
-  __io_println("hello")
+pipeline main(harness: Harness) {
+  harness.stdio.println("hello")
 }
 "#,
     )
@@ -114,19 +114,19 @@ fn profile_records_step_spans_and_attributes_llm_to_step() {
     fs::write(
         &script,
         r#"
-fn classify(ctx) -> string {
-  const r = llm_call("classify ${ctx}", nil, {provider: "mock"})
+fn classify(llm: HarnessLlm, ctx) -> string {
+  const r = llm.call("classify ${ctx}", nil, {provider: "mock"})
   return r.text
 }
 
 @step(name: "classify_step", model: "claude-haiku-4-5", error_boundary: fail)
-fn classify_step(ctx) -> string {
-  return classify(ctx)
+fn classify_step(llm: HarnessLlm, ctx) -> string {
+  return classify(llm, ctx)
 }
 
-pipeline main() {
-  llm_mock_clear()
-  llm_mock({
+pipeline main(harness: Harness) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({
     match: "classify*",
     consume_match: false,
     text: "ok",
@@ -134,8 +134,8 @@ pipeline main() {
     output_tokens: 3,
     model: "claude-haiku-4-5",
   })
-  const out = classify_step("input")
-  __io_println(out)
+  const out = classify_step(harness.llm, "input")
+  harness.stdio.println(out)
 }
 "#,
     )
@@ -206,11 +206,11 @@ fn profile_json_includes_user_timing_bucket() {
         r#"
 import { timed } from "std/timing"
 
-pipeline main() {
-  timed("benchmark.work", {case_id: "fixture"}, { ->
+pipeline main(harness: Harness) {
+  timed(harness.clock, "benchmark.work", {case_id: "fixture"}, { ->
     return 7
   })
-  __io_println("done")
+  harness.stdio.println("done")
 }
 "#,
     )
@@ -263,8 +263,8 @@ fn profile_disabled_means_no_stderr_section() {
     fs::write(
         &script,
         r#"
-pipeline main() {
-  __io_println("hi")
+pipeline main(harness: Harness) {
+  harness.stdio.println("hi")
 }
 "#,
     )
@@ -301,15 +301,15 @@ pipeline main() {
 fn profile_attributes_wall_time_to_the_builtin_that_spent_it() {
     let tempdir = TempDir::new().expect("temp dir");
     let script = tempdir.path().join("builtin_script.harn");
-    // `sleep_ms` is a sync builtin, so it takes the sync fast path rather than
-    // the async dispatch path. Both must be observed: an observer wired to only
-    // one of them reports nothing while looking correct.
+    // Capability methods have both sync and async dispatch paths. Both must be
+    // observed: an observer wired to only one of them reports nothing while
+    // looking correct.
     fs::write(
         &script,
         r#"
-pipeline main() {
-  sleep_ms(60)
-  __io_println("done")
+pipeline main(harness: Harness) {
+  harness.clock.sleep_ms(60)
+  harness.stdio.println("done")
 }
 "#,
     )
@@ -351,7 +351,7 @@ pipeline main() {
     let slept = profile
         .top_builtins
         .iter()
-        .find(|bucket| bucket.name == "sleep_ms")
+        .find(|bucket| bucket.name == "harness.clock.sleep_ms")
         .unwrap_or_else(|| {
             panic!(
                 "the builtin that spent the wall time must be attributed, got: {:?}",
@@ -363,7 +363,7 @@ pipeline main() {
     // run reports `vm/residual 100%`, which names nothing.
     assert!(
         slept.total_ms >= 50,
-        "sleep_ms(60) must report the time it actually spent, got {}ms",
+        "harness.clock.sleep_ms(60) must report the time it actually spent, got {}ms",
         slept.total_ms
     );
 }
@@ -375,9 +375,9 @@ fn profile_disabled_means_no_builtin_attribution() {
     fs::write(
         &script,
         r#"
-pipeline main() {
-  sleep_ms(5)
-  __io_println("done")
+pipeline main(harness: Harness) {
+  harness.clock.sleep_ms(5)
+  harness.stdio.println("done")
 }
 "#,
     )

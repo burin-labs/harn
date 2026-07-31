@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Host capability exposing the harn-rules declarative rule engine to Harn (`rules.search` / `rules.report` / `rules.apply`)."
 
 [dependencies]
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.46" }
 harn-rules = { path = "../harn-rules", version = "=0.10.46" }
 harn-hostlib = { path = "../harn-hostlib", version = "=0.10.46", default-features = false, features = ["ast"] }
 harn-vm = { path = "../harn-vm", version = "=0.10.46" }

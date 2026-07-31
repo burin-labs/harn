@@ -5,16 +5,16 @@
  */
 type Task = {title: string, priority: "low" | "med" | "high", points: 1 | 2 | 3 | 5 | 8}
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const s = schema_of(Task)
   const json_schema = schema_to_json_schema(s)
   // JSON Schema canonical keys for the enum members.
-  __io_println(json_schema.type)
-  __io_println(json_schema.properties.priority.enum)
-  __io_println(json_schema.properties.points.enum)
+  harness.stdio.println(json_schema.type)
+  harness.stdio.println(json_schema.properties.priority.enum)
+  harness.stdio.println(json_schema.properties.points.enum)
   // Round-trip back and revalidate a known-good value.
   const back = schema_from_json_schema(json_schema)
-  __io_println(schema_is({title: "write spec", priority: "high", points: 5}, back))
-  __io_println(schema_is({title: "x", priority: "nope", points: 5}, back))
-  __io_println(schema_is({title: "x", priority: "low", points: 4}, back))
+  harness.stdio.println(schema_is({title: "write spec", priority: "high", points: 5}, back))
+  harness.stdio.println(schema_is({title: "x", priority: "nope", points: 5}, back))
+  harness.stdio.println(schema_is({title: "x", priority: "low", points: 4}, back))
 }

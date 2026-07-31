@@ -3,11 +3,14 @@
 import { self_consistency } from "std/llm/ensemble"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [llm_text("A"), llm_text("B"), llm_text("A"), llm_text("C"), llm_text("A")],
     { ->
       const result = self_consistency(
+        harness.agent,
+        harness.llm,
         "Pick a letter",
         "",
         {
@@ -18,11 +21,11 @@ pipeline default() {
           extract: { text -> text },
         },
       )
-      __io_println(result.ok)
-      __io_println(result.answer)
-      __io_println(result.answer_count)
-      __io_println(result.total)
-      __io_println(result.entropy > 0.0)
+      harness.stdio.println(result.ok)
+      harness.stdio.println(result.answer)
+      harness.stdio.println(result.answer_count)
+      harness.stdio.println(result.total)
+      harness.stdio.println(result.entropy > 0.0)
     },
   )
 }

@@ -6,13 +6,13 @@
 // against a previous IEEE-754 split that rendered as "$80.1.0000".
 import { format_usd } from "std/llm/economics"
 
-pipeline default() {
-  __io_println(format_usd(0.000045))
-  __io_println(format_usd(1.2345))
-  __io_println(format_usd(1234.5))
-  __io_println(format_usd(-1234.5))
-  __io_println(format_usd(1234.5, {sign: true}))
-  __io_println(format_usd(0.123456789, {precision: 2}))
-  __io_println(format_usd(1.0, {precision: 0}))
-  __io_println(format_usd(0.00027 * 300000))
+pipeline default(harness: Harness) {
+  harness.stdio.println(format_usd(0.000045))
+  harness.stdio.println(format_usd(1.2345))
+  harness.stdio.println(format_usd(1234.5))
+  harness.stdio.println(format_usd(-1234.5))
+  harness.stdio.println(format_usd(1234.5, {sign: true}))
+  harness.stdio.println(format_usd(0.123456789, {precision: 2}))
+  harness.stdio.println(format_usd(1.0, {precision: 0}))
+  harness.stdio.println(format_usd(0.00027 * 300000))
 }

@@ -49,7 +49,7 @@ fn argv_failure(code: string, arg: string, message: string) {
   )
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   assert_eq(help_requested(["--help"]), true)
   assert_eq(help_requested(["-h"]), true)
   assert_eq(help_requested(["--", "--help"]), false)

@@ -4,8 +4,9 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
+use crate::vm::Vm;
 
 thread_local! {
     static LLM_BUDGET: RefCell<Option<f64>> = const { RefCell::new(None) };
@@ -891,128 +892,98 @@ pub(crate) fn record_llm_usage(result: &crate::llm::api::LlmResult) -> Result<()
 }
 
 pub(crate) fn register_cost_builtins(vm: &mut Vm) {
-    vm.register_builtin("llm_cost", |args, _out| {
-        let model = args.first().map(|a| a.display()).unwrap_or_default();
-        let input_tokens = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
-        let output_tokens = args.get(2).and_then(|a| a.as_int()).unwrap_or(0);
-        // Return the cost as an exact `decimal` (not a binary `float`): the
-        // value names money, summing it should not drift, and the catalog
-        // rates are recovered exactly. Callers that want a formatted string
-        // pass the result to `llm_format_usd`, which accepts decimals.
-        let cost = calculate_cost_decimal(&model, input_tokens, output_tokens);
-        Ok(VmValue::decimal(cost))
-    });
+    vm.register_builtin_def(&TIKTOKEN_COUNT_TOKENS_IMPL_DEF);
+    vm.register_builtin_def(&TIKTOKEN_TOKENIZER_INFO_IMPL_DEF);
+    vm.register_builtin_def(&LLM_COST_IMPL_DEF);
+    vm.register_builtin_def(&LLM_PRICING_BUILTIN_DEF);
+    vm.register_builtin_def(&LLM_FORMAT_USD_BUILTIN_DEF);
+    vm.register_builtin_def(&LLM_COMPARE_COSTS_BUILTIN_DEF);
+    vm.register_builtin_def(&LLM_SESSION_COST_IMPL_DEF);
+    vm.register_builtin_def(&LLM_BUDGET_IMPL_DEF);
+    vm.register_builtin_def(&LLM_BUDGET_REMAINING_IMPL_DEF);
+}
 
-    vm.register_builtin_with_metadata(
-        VmBuiltinMetadata::sync_static("llm_pricing")
-            .signature_static("llm_pricing(model_or_dict, model?)")
-            .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-            .category_static("llm.economics")
-            .doc_static(
-                "Return catalog pricing for a model: \
-                {input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok, \
-                provider, model, source} or nil if the model has no priced entry.",
-            ),
-        llm_pricing_builtin,
-    );
+#[harn_builtin(exposure = "pure", effects = [], sig = "llm_cost(model: string, input_tokens: int, output_tokens: int) -> decimal", category = "llm.economics")]
+fn llm_cost_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let model = args.first().map(VmValue::display).unwrap_or_default();
+    let input_tokens = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
+    let output_tokens = args.get(2).and_then(VmValue::as_int).unwrap_or(0);
+    Ok(VmValue::decimal(calculate_cost_decimal(
+        &model,
+        input_tokens,
+        output_tokens,
+    )))
+}
 
-    vm.register_builtin_with_metadata(
-        VmBuiltinMetadata::sync_static("llm_format_usd")
-            .signature_static("llm_format_usd(amount, options?)")
-            .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-            .category_static("llm.economics")
-            .doc_static(
-                "Format a USD amount as a string. Default precision auto-scales: 6 decimals \
-                under $1, 4 decimals under $100, 2 decimals otherwise; pass {precision: N} to override.",
-            ),
-        llm_format_usd_builtin,
-    );
+#[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-ledger"], sig = "__llm_session_cost() -> dict", category = "llm.economics")]
+fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
+    let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
+    let mut result = BTreeMap::new();
+    result.insert("total_cost".to_string(), VmValue::Float(total_cost));
+    result.insert("input_tokens".to_string(), VmValue::Int(total_input));
+    result.insert("output_tokens".to_string(), VmValue::Int(total_output));
+    result.insert("call_count".to_string(), VmValue::Int(call_count));
+    Ok(VmValue::dict(result))
+}
 
-    vm.register_builtin_with_metadata(
-        VmBuiltinMetadata::sync_static("llm_compare_costs")
-            .signature_static("llm_compare_costs(candidates, opts)")
-            .arity(VmBuiltinArity::Exact(2))
-            .category_static("llm.economics")
-            .doc_static(
-                "Project a per-call cost across a list of {provider?, model} candidates given \
-                {input_tokens, output_tokens, cache_read_tokens?, cache_write_tokens?, calls?}. \
-                Returns a list sorted ascending by projected cost (unknown pricing trails).",
-            ),
-        llm_compare_costs_builtin,
-    );
-
-    vm.register_builtin("llm_session_cost", |_args, _out| {
-        let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
-        let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
-        let mut result = BTreeMap::new();
-        result.insert("total_cost".to_string(), VmValue::Float(total_cost));
-        result.insert("input_tokens".to_string(), VmValue::Int(total_input));
-        result.insert("output_tokens".to_string(), VmValue::Int(total_output));
-        result.insert("call_count".to_string(), VmValue::Int(call_count));
-        Ok(VmValue::dict(result))
-    });
-
-    vm.register_builtin("llm_budget", |args, _out| {
-        let max_cost = match args.first() {
-            Some(VmValue::Float(f)) => *f,
-            Some(VmValue::Int(n)) => *n as f64,
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "llm_budget: requires a numeric argument",
-                ))));
-            }
-        };
-        set_llm_cost_budget(Some(max_cost));
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("llm_budget_remaining", |_args, _out| {
-        let remaining = LLM_BUDGET.with(|budget| {
-            budget.borrow().map(|max| {
-                let spent = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
-                max - spent
-            })
-        });
-        match remaining {
-            Some(r) => Ok(VmValue::Float(r)),
-            None => Ok(VmValue::Nil),
+#[harn_builtin(exposure = "privileged_wire", effects = ["state.mutate@const=llm-cost-budget"], sig = "__llm_budget(max_cost: float | int) -> nil", category = "llm.economics")]
+fn llm_budget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let max_cost = match args.first() {
+        Some(VmValue::Float(value)) => *value,
+        Some(VmValue::Int(value)) => *value as f64,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "llm_budget: requires a numeric argument",
+            ))));
         }
+    };
+    set_llm_cost_budget(Some(max_cost));
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-budget"], sig = "__llm_budget_remaining() -> float?", category = "llm.economics")]
+fn llm_budget_remaining_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let remaining = LLM_BUDGET.with(|budget| {
+        budget.borrow().map(|max| {
+            let spent = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
+            max - spent
+        })
     });
+    Ok(remaining.map(VmValue::Float).unwrap_or(VmValue::Nil))
+}
 
-    vm.register_builtin_with_metadata(
-        VmBuiltinMetadata::sync_static("tiktoken_count_tokens")
-            .signature_static("tiktoken_count_tokens(text, model)")
-            .arity(VmBuiltinArity::Exact(2))
-            .category_static("llm.budget")
-            .doc_static("Count text tokens with the tiktoken encoder selected for a model."),
-        |args, _out| {
-            let text = args.first().map(|arg| arg.display()).unwrap_or_default();
-            let model = args.get(1).map(|arg| arg.display()).unwrap_or_default();
-            if model.trim().is_empty() {
-                return Err(VmError::Runtime(
-                    "tiktoken_count_tokens: model is required".to_string(),
-                ));
-            }
-            let estimate = super::token_count::tiktoken_count_text(&text, &model)
-                .map_err(|error| VmError::Runtime(format!("tiktoken_count_tokens: {error}")))?;
-            Ok(VmValue::Int(estimate.tokens))
-        },
-    );
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tiktoken_count_tokens(text: string, model: string) -> int",
+    category = "llm.budget"
+)]
+fn tiktoken_count_tokens_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(VmValue::display).unwrap_or_default();
+    let model = args.get(1).map(VmValue::display).unwrap_or_default();
+    if model.trim().is_empty() {
+        return Err(VmError::Runtime(
+            "tiktoken_count_tokens: model is required".to_string(),
+        ));
+    }
+    let estimate = super::token_count::tiktoken_count_text(&text, &model)
+        .map_err(|error| VmError::Runtime(format!("tiktoken_count_tokens: {error}")))?;
+    Ok(VmValue::Int(estimate.tokens))
+}
 
-    vm.register_builtin_with_metadata(
-        VmBuiltinMetadata::sync_static("tiktoken_tokenizer_info")
-            .signature_static("tiktoken_tokenizer_info(model)")
-            .arity(VmBuiltinArity::Exact(1))
-            .category_static("llm.budget")
-            .doc_static("Return the tiktoken encoder metadata used for a model token count."),
-        |args, _out| {
-            let model = args.first().map(|arg| arg.display()).unwrap_or_default();
-            Ok(tokenizer_info_to_vm_value(
-                &model,
-                super::token_count::tokenizer_info_for_model(&model),
-            ))
-        },
-    );
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tiktoken_tokenizer_info(model: string) -> dict",
+    category = "llm.budget"
+)]
+fn tiktoken_tokenizer_info_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let model = args.first().map(VmValue::display).unwrap_or_default();
+    Ok(tokenizer_info_to_vm_value(
+        &model,
+        super::token_count::tokenizer_info_for_model(&model),
+    ))
 }
 
 fn pricing_detail_to_vm_value(provider: &str, model: &str, detail: &PricingDetail) -> VmValue {
@@ -1075,6 +1046,7 @@ fn resolve_pricing_args(args: &[VmValue]) -> (String, String) {
     }
 }
 
+#[harn_builtin(exposure = "pure", effects = [], sig = "llm_pricing(model_or_dict: string | dict, model?: string) -> dict?", category = "llm.economics")]
 fn llm_pricing_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (provider, model) = resolve_pricing_args(args);
     if model.trim().is_empty() {
@@ -1087,6 +1059,7 @@ fn llm_pricing_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(exposure = "pure", effects = [], sig = "llm_format_usd(amount: decimal | float | int, options?: dict) -> string", category = "llm.economics")]
 fn llm_format_usd_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let amount = match args.first() {
         Some(VmValue::Float(value)) => *value,
@@ -1168,6 +1141,7 @@ fn format_usd_amount(amount: f64, precision: Option<usize>, sign_always: bool) -
     }
 }
 
+#[harn_builtin(exposure = "pure", effects = [], sig = "llm_compare_costs(candidates: list, options: dict) -> list", category = "llm.economics")]
 fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let candidates = match args.first() {
         Some(VmValue::List(items)) => items.clone(),

@@ -173,10 +173,12 @@ fn inline_mock_scope_survives_a_deterministic_executor_thread_hop() {
 fn fixture_script(prompt: &str) -> crate::Chunk {
     crate::compile_source(&format!(
         r#"
-yield_now()
-const response = llm_call("{prompt}", nil, {{provider: "mock"}})
-__io_println(response.text)
-__io_println(len(llm_mock_calls()))
+fn main(harness: Harness) {{
+harness.runtime.yield_now()
+const response = harness.llm.call("{prompt}", nil, {{provider: "mock"}})
+harness.stdio.println(response.text)
+harness.stdio.println(len(harness.llm.mock_calls()))
+}}
 "#
     ))
     .expect("compile fixture script")
@@ -186,21 +188,25 @@ __io_println(len(llm_mock_calls()))
 async fn concurrent_vms_isolate_inline_queues_and_call_logs() {
     let alpha = crate::compile_source(
         r#"
-llm_mock({text: "alpha"})
-yield_now()
-const response = llm_call("alpha prompt", nil, {provider: "mock"})
-__io_println(response.text)
-__io_println(len(llm_mock_calls()))
+fn main(harness: Harness) {
+harness.llm.mock_enqueue({text: "alpha"})
+harness.runtime.yield_now()
+const response = harness.llm.call("alpha prompt", nil, {provider: "mock"})
+harness.stdio.println(response.text)
+harness.stdio.println(len(harness.llm.mock_calls()))
+}
 "#,
     )
     .expect("compile alpha");
     let beta = crate::compile_source(
         r#"
-llm_mock({text: "beta"})
-yield_now()
-const response = llm_call("beta prompt", nil, {provider: "mock"})
-__io_println(response.text)
-__io_println(len(llm_mock_calls()))
+fn main(harness: Harness) {
+harness.llm.mock_enqueue({text: "beta"})
+harness.runtime.yield_now()
+const response = harness.llm.call("beta prompt", nil, {provider: "mock"})
+harness.stdio.println(response.text)
+harness.stdio.println(len(harness.llm.mock_calls()))
+}
 "#,
     )
     .expect("compile beta");

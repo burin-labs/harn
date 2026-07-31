@@ -2,21 +2,33 @@ use super::*;
 
 #[tokio::test]
 async fn round_trips_and_reaches_execution() {
+    struct MockModeGuard;
+    impl Drop for MockModeGuard {
+        fn drop(&mut self) {
+            harn_vm::llm::clear_cli_llm_mock_mode();
+        }
+    }
+
+    let mock = harn_vm::llm::parse_llm_mock_value(
+        &json!({"text": "ok", "model": "o3", "provider": "mock"}),
+    )
+    .expect("mock fixture");
+    harn_vm::llm::install_cli_llm_mocks(vec![mock]);
+    let _mock_mode = MockModeGuard;
+
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("agent.harn");
     std::fs::write(
         &script,
-        r#"pipeline main() {
-  llm_mock_clear()
-  llm_mock({text: "ok", model: "o3", provider: "mock"})
-  llm_call(prompt)
-  const call = llm_mock_calls()[0]
+        r#"pipeline main(harness: Harness) {
+  harness.llm.call(prompt, nil, {provider: "mock", model: "o3"})
+  const call = harness.llm.mock_calls()[0]
   assert(
     call.thinking.mode == "effort",
     "session reasoning mode reached provider: ${json_stringify(call.thinking)}",
   )
   assert(call.thinking.level == "high", "session reasoning effort reached provider")
-  __io_println("session-model-policy-fired")
+  harness.stdio.println("session-model-policy-fired")
 }
 "#,
     )
@@ -199,7 +211,11 @@ async fn round_trips_and_reaches_execution() {
 async fn updates_forks_clears_and_rejects_invalid_shape() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("agent.harn");
-    std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n").expect("write script");
+    std::fs::write(
+        &script,
+        "pipeline main(harness: Harness) { harness.stdio.println(prompt) }\n",
+    )
+    .expect("write script");
     let server = ApiServer::new(ApiServerConfig::for_pipeline(
         script.to_string_lossy().to_string(),
     ));

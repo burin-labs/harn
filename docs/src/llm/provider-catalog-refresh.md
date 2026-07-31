@@ -499,7 +499,7 @@ replace them without forking the entry script.
   claims; aggregator-owned sources fill gaps. Returns the canonical
   list plus a conflict log surfaced in the report.
 - `build_drift(observations, catalog)` — compares observations to a
-  catalog dict (live `llm_provider_catalog()` for `--live`, the
+  catalog dict (live `harness.llm.provider_catalog()` for `--live`, the
   bundled fixture for `--check`) and returns
   `{added, removed, changed, unknown_pricing, low_confidence,
   requires_key}`. Removals only fire when at least one source for

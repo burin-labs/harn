@@ -228,9 +228,13 @@ impl super::super::Vm {
                 Some(sub) => VmValue::harness(sub),
                 None if optional => VmValue::Nil,
                 None => {
+                    let fields = harn_builtin_meta::CapabilityId::ALL
+                        .iter()
+                        .map(|capability| format!("`{}`", capability.field_name()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     return Err(VmError::TypeError(format!(
-                        "cannot access property `{name}` on {} — Harness exposes `stdio`, \
-                         `clock`, `fs`, `env`, `random`, `net`, `system`",
+                        "cannot access property `{name}` on {} — Harness exposes {fields}",
                         handle.type_name(),
                     )));
                 }

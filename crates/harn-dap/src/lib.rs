@@ -29,12 +29,12 @@ use protocol::{DapMessage, DapResponse};
 /// when invoked as `harn-dap`.
 pub fn run() {
     // Defeat rlib dead-code stripping of the linkme distributed slice
-    // (linkme issue #36) before reading `all_builtin_signatures()`.
+    // (linkme issue #36) before reading `all_builtin_manifest()`.
     harn_vm::stdlib::force_link();
     // Install the macro-emitted builtin signature slice into the parser
     // registry so source-file typechecking inside DAP launch covers
     // `#[harn_builtin]`-migrated entries.
-    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+    harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
 
     // Shared seq counter spans both forward responses (debugger.next_seq)
     // and reverse requests (DapHostBridge.next_seq) so every adapter-

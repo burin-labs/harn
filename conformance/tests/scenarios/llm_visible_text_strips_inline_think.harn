@@ -12,10 +12,11 @@
 // `text`/`thinking` channels.)
 import { with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Inline-reasoning emitter: reasoning stripped from text/visible_text
   // and surfaced on the thinking channel.
   with_llm_script(
+    harness.llm,
     [
       {
         text: "<think>secret reasoning</think>The answer is 4",
@@ -24,15 +25,16 @@ pipeline default() {
       },
     ],
     { ->
-      const r = llm_call("hi", nil, {provider: "mock", model: "mock-model"})
-      __io_println("inline.visible=" + r.visible_text)
-      __io_println("inline.text=" + r.text)
-      __io_println("inline.thinking=" + (r.thinking ?? "(none)"))
+      const r = harness.llm.call("hi", nil, {provider: "mock", model: "mock-model"})
+      harness.stdio.println("inline.visible=" + r.visible_text)
+      harness.stdio.println("inline.text=" + r.text)
+      harness.stdio.println("inline.thinking=" + (r.thinking ?? "(none)"))
     },
   )
   // Non-inline route: the literal `<think>` block is preserved on the text
   // channel, and nothing is added to the thinking channel.
   with_llm_script(
+    harness.llm,
     [
       {
         text: "<think>secret reasoning</think>The answer is 4",
@@ -41,9 +43,9 @@ pipeline default() {
       },
     ],
     { ->
-      const r = llm_call("hi", nil, {provider: "mock", model: "mock-model"})
-      __io_println("plain.text=" + r.text)
-      __io_println("plain.thinking=" + (r.thinking ?? "(none)"))
+      const r = harness.llm.call("hi", nil, {provider: "mock", model: "mock-model"})
+      harness.stdio.println("plain.text=" + r.text)
+      harness.stdio.println("plain.thinking=" + (r.thinking ?? "(none)"))
     },
   )
 }

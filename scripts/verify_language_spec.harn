@@ -227,7 +227,7 @@ pub fn pad3(n: int) -> string {
  * is respected) and use its `debug/harn`, else fall back to
  * `cargo run --bin harn` which builds on demand.
  */
-fn harn_command_argv(subcommand: string) -> list<string> {
+fn harn_command_argv(harness: Harness, subcommand: string) -> list<string> {
   const bin_override = harness.env.get("HARN_CHECK_BIN")
   if bin_override != nil && bin_override != "" {
     return [bin_override, subcommand]
@@ -236,8 +236,8 @@ fn harn_command_argv(subcommand: string) -> list<string> {
   if harn_bin != nil && harn_bin != "" {
     return [harn_bin, subcommand]
   }
-  const meta = harness.process.spawn_captured(
-    {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
+  const meta = harness.process.run(
+    {program: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
   )
   if meta.success {
     const parsed = try {
@@ -256,33 +256,31 @@ fn harn_command_argv(subcommand: string) -> list<string> {
   return ["cargo", "run", "--quiet", "--bin", "harn", "--", subcommand]
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   if !harness.fs.exists(SPEC_PATH) {
-    __io_eprintln("error: missing ${SPEC_PATH}")
+    harness.stdio.eprintln("error: missing ${SPEC_PATH}")
     return 1
   }
   const fences = extract_harn_fences(harness.fs.read_text(SPEC_PATH))
   if fences.count == 0 {
-    __io_eprintln("error: no ```harn fences found in ${SPEC_PATH}")
+    harness.stdio.eprintln("error: no ```harn fences found in ${SPEC_PATH}")
     return 1
   }
   /* The runtime sandbox only permits writes inside the workspace root,
    * so the scratch directory lives there (and is removed afterward)
    * rather than under the system temp dir the Python version used. */
-  const mk = harness.process.spawn_captured(
-    {cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]},
-  )
+  const mk = harness.process.run({program: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]})
   if !mk.success {
-    __io_eprintln("error: could not create temp directory")
+    harness.stdio.eprintln("error: could not create temp directory")
     return 1
   }
   const tmpbase = mk.stdout.trim()
   /* Remove the scratch directory on every exit path — including an early
-   * return or a throw from `write_text`/`spawn_captured` below. Without this
+   * return or a throw from `write_text`/`harness.process.run` below. Without this
    * an interrupted run leaks a `harn-spec-verify-*` directory into the
    * workspace root, where it shows up as a confusing untracked entry. */
   defer {
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+    harness.process.run({program: "rm", args: ["-rf", tmpbase]})
   }
   let manifest_lines = []
   let failures = []
@@ -299,35 +297,35 @@ pipeline main(task) {
       + [
       "${name}: ${fence.heading} (${fence.mode}, spec line ${fence.line})",
     ]
-    const argv_prefix = harn_command_argv(fence.mode)
+    const argv_prefix = harn_command_argv(harness, fence.mode)
     const bin = argv_prefix[0]
     const args = if fence.mode == "parse" {
       argv_prefix.slice(1, argv_prefix.count) + ["--json", path]
     } else {
       argv_prefix.slice(1, argv_prefix.count) + [path]
     }
-    const result = harness.process.spawn_captured({cmd: bin, args: args})
+    const result = harness.process.run({program: bin, args: args})
     if result.exit_code != 0 {
       failures = failures + [{name: name, result: result}]
     }
   }
   if failures.count > 0 {
-    __io_eprintln("language spec verification failed")
-    __io_eprintln("")
-    __io_eprintln("Extracted examples:")
-    __io_eprintln(manifest_lines.join("\n"))
+    harness.stdio.eprintln("language spec verification failed")
+    harness.stdio.eprintln("")
+    harness.stdio.eprintln("Extracted examples:")
+    harness.stdio.eprintln(manifest_lines.join("\n"))
     for failure in failures {
-      __io_eprintln("")
-      __io_eprintln("FAIL: ${failure.name}")
+      harness.stdio.eprintln("")
+      harness.stdio.eprintln("FAIL: ${failure.name}")
       if failure.result.stdout != "" {
-        __io_eprintln(failure.result.stdout)
+        harness.stdio.eprintln(failure.result.stdout)
       }
       if failure.result.stderr != "" {
-        __io_eprintln(failure.result.stderr)
+        harness.stdio.eprintln(failure.result.stderr)
       }
     }
     return 1
   }
-  __io_println("verified ${fences.count} Harn code fences from spec/HARN_SPEC.md")
+  harness.stdio.println("verified ${fences.count} Harn code fences from spec/HARN_SPEC.md")
   return 0
 }

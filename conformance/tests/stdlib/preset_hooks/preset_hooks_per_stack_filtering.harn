@@ -3,34 +3,34 @@ import { preset_run_command } from "std/tool_hooks"
 /**
  * preset_hooks_per_stack_filtering (TH-07 #1900).
  *
- * `preset_run_command` calls `tool_hooks_filter(registry, stacks)`
+ * `preset_run_command` calls `harness.tools.hooks_filter(registry, stacks)`
  * before matching, so only rules whose catalogue stack is in the
  * opt-in list (or whose catalogue is stackless, e.g. universal) get a
  * chance to fire. Verified by running a python-flavored command
  * against both a rust-only wrapper (no match) and a python+rust
  * wrapper (match).
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const inner = { args -> {ok: true, ran: args.command} }
-  const rust_only = preset_run_command({stacks: ["rust"], inner: inner})
+  const rust_only = preset_run_command(harness, {stacks: ["rust"], inner: inner})
   /* A python `find . -name '*.py'` command would normally fire
    * `python.find_versus_rg`, but the python catalogue is filtered
    * out by the rust-only opt-in, so the wrapper falls through to
    * `inner` with the original command. */
   const py_against_rust = rust_only({command: "find . -name '*.py'"})
-  __io_println(py_against_rust.ok)
-  __io_println(py_against_rust.ran)
+  harness.stdio.println(py_against_rust.ok)
+  harness.stdio.println(py_against_rust.ran)
   /* Symmetric: a rust `cargo build` against a python-only wrapper. */
-  const py_only = preset_run_command({stacks: ["python"], inner: inner})
+  const py_only = preset_run_command(harness, {stacks: ["python"], inner: inner})
   const rust_against_py = py_only({command: "cargo build"})
-  __io_println(rust_against_py.ok)
-  __io_println(rust_against_py.ran)
+  harness.stdio.println(rust_against_py.ok)
+  harness.stdio.println(rust_against_py.ran)
   /* Opt-in to both stacks and each command hits its own rule. */
-  const both = preset_run_command({stacks: ["rust", "python"], inner: inner})
+  const both = preset_run_command(harness, {stacks: ["rust", "python"], inner: inner})
   const py_hit = both({command: "find . -name '*.py'"})
-  __io_println(py_hit.action)
-  __io_println(py_hit.rule_id)
+  harness.stdio.println(py_hit.action)
+  harness.stdio.println(py_hit.rule_id)
   const rust_hit = both({command: "cargo build"})
-  __io_println(rust_hit.action)
-  __io_println(rust_hit.rule_id)
+  harness.stdio.println(rust_hit.action)
+  harness.stdio.println(rust_hit.rule_id)
 }

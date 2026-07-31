@@ -2,7 +2,7 @@
 
 ## Typed tools for agent loops
 
-`agent_loop(...)` does not need a bespoke host tool for every deterministic
+`agent_loop(harness, ...)` does not need a bespoke host tool for every deterministic
 operation. The fastest path is usually to wrap pure stdlib logic in a typed
 tool and let the model call that tool directly.
 
@@ -151,10 +151,10 @@ the model-visible observation, so changing the prose does not change the
 structured facts. Unmarked dict returns retain their historical display-string
 behavior and do not gain promoted `data`.
 
-Then hand the registry to `agent_loop(...)`:
+Then hand the registry to `agent_loop(harness, ...)`:
 
 ```harn,ignore
-const result = agent_loop(
+const result = agent_loop(harness,
   "Read the screenshot, hash the extracted order id, and summarize the UI state.",
   "Use deterministic tools first. Prefer pure stdlib tools over free-form reasoning when possible.",
   {
@@ -164,7 +164,7 @@ const result = agent_loop(
   }
 )
 
-log(result.text)
+harness.stdio.log(result.text)
 ```
 
 ## Why this works
@@ -212,7 +212,7 @@ const tools = agent_command_tools(nil, {
   ],
 })
 
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   tools: tools,
   tool_format: "native",
   require_successful_tools: ["run_command", ["read_command_output", "read_command_output_tail"]],
@@ -253,7 +253,7 @@ want BM25, hybrid ranking, embeddings, or an LLM reranker for deferred tools.
 `agent_command_tools(...)` installs:
 
 - `run_command` — argv-first process execution through
-  `hostlib_tools_run_command`; can return an immediate progress snapshot while
+  `harness.tools.run_command`; can return an immediate progress snapshot while
   the command continues in the background. Foreground commands are tied to
   the invoking scope: on scope cancellation, `deadline` expiry, or VM drop
   the child's whole process group is SIGTERMed and, after a short grace,
@@ -291,7 +291,7 @@ subshells, backgrounded jobs, …) untouched — and is on by default; set
 embedder otherwise hand-rolls, wrapping the same hostlib filesystem primitives
 with the same root resolution and path-scope enforcement as `agent_read_tools`:
 
-- `write_file(path, content)` — create or overwrite a UTF-8 file, creating
+- `harness.fs.write_text(path, content)` — create or overwrite a UTF-8 file, creating
   missing parent directories.
 - `edit_file(path, old_string, new_string, replace_all?)` — exact-string
   replacement. Errors if `old_string` is absent, or if it occurs more than once
@@ -314,7 +314,7 @@ const tools = agent_edit_tools(agent_host_tools(nil, {root: repo_root}), {root: 
 
 Every edit tool is annotated honestly as mutating (`kind: edit`/`delete`,
 `side_effect_level: workspace_write`), so the read-only stance
-(`agent_loop({read_only_stance: {...}})`) hides them until the loop earns write
+(`agent_loop(harness, {read_only_stance: {...}})`) hides them until the loop earns write
 access, and tool-surface narrowing classifies them correctly. Because they are plain named tools, the
 `std/llm/tool_middleware` seams (`with_consent`, `with_audit_log`,
 `with_dry_run`, `with_idempotency`, …) wrap them without any per-tool support:
@@ -323,7 +323,7 @@ access, and tool-surface narrowing classifies them correctly. Because they are p
 import { agent_edit_tools } from "std/agent/host_tools"
 import { compose_tool_callers, default_tool_caller, with_audit_log, with_consent } from "std/llm/tool_middleware"
 
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   tools: agent_edit_tools(nil, {root: repo_root}),
   tool_format: "native",
   tool_caller: compose_tool_callers([
@@ -344,7 +344,7 @@ named step, retry according to this policy, keep a normalized step record, and
 hand a compact failure reference to a recovery agent." Use
 `std/agent/host_tools.agent_command_tools(...)` when the command runner itself
 should be exposed as model-facing tools inside an agent loop. Both layers share
-`hostlib_tools_run_command` and `hostlib_tools_read_command_output`, so command
+`harness.tools.run_command` and `harness.tools.read_command_output`, so command
 artifacts, IDs, output paths, and range readers behave the same.
 
 For JSON-emitting CLIs, keep parsing in the script-side command layer instead
@@ -353,7 +353,7 @@ of open-coding process execution plus `json_parse`:
 ```harn,ignore
 import { command_json } from "std/command"
 
-const repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"], {
   capture: {max_inline_bytes: 65536},
 })
 ```
@@ -432,7 +432,7 @@ let registry = tool_registry()
 registry = tool_define(registry, "deploy", "Deploy to production", {
   parameters: {env: {type: "string", enum: ["staging", "prod"]}},
   defer_loading: true,
-  handler: { args -> exec("deploy", args.env) },
+  handler: { args -> harness.process.exec("deploy", args.env) },
 })
 ```
 
@@ -446,7 +446,7 @@ API prefix but not the model's context).
 Turning progressive disclosure on is one option away:
 
 ```harn
-const r = llm_call(prompt, sys, {
+const r = harness.llm.call(prompt, sys, {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: registry,
@@ -505,7 +505,7 @@ tool_define(registry, "deploy_api", "Deploy the API", {
   parameters: {env: {type: "string", enum: ["staging", "prod"]}},
   defer_loading: true,
   namespace: "ops",
-  handler: { args -> exec("deploy", "api", args.env) },
+  handler: { args -> harness.process.exec("deploy", "api", args.env) },
 })
 ```
 
@@ -516,7 +516,7 @@ ID Harn cannot parse (`my-internal-gpt-clone-v2`) yet forward the OpenAI
 Responses payload unchanged. Opt into the hosted path with:
 
 ```harn
-llm_call(prompt, sys, {
+harness.llm.call(prompt, sys, {
   provider: "openrouter",
   model: "my-custom/gpt-forward",
   tools: registry,
@@ -600,7 +600,7 @@ deterministic tool receipts. Use OpenAI Responses `provider_tools` only when
 the provider should execute a hosted tool or remote MCP connector:
 
 ```harn
-const result = llm_call("Find the current policy and summarize it.", nil, {
+const result = harness.llm.call("Find the current policy and summarize it.", nil, {
   provider: "openai",
   model: "gpt-5.4",
   api_mode: "responses",
@@ -629,7 +629,7 @@ Use `mcp_servers` when an agent should use an MCP server's tool catalog without
 manually calling `mcp_connect`, `mcp_list_tools`, and `mcp_call`.
 
 ```harn
-const result = agent_loop(
+const result = agent_loop(harness,
   "Summarize the latest open issue and draft a reply.",
   "You are a concise triage assistant.",
   {

@@ -13,9 +13,11 @@
 // the violation stays.
 import { corpus_registry, probe } from "_tool_parse_probe"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // The most common single emission: JSON-quoted keys and two heredoc bodies.
   probe(
+    harness.agent,
+    harness.stdio,
     "canonical wrapper with json keys and heredocs",
     """<tool_call>
 edit({
@@ -38,6 +40,8 @@ EOF2
   // used to fail the line-start check and be shredded into a stray-text
   // violation.
   probe(
+    harness.agent,
+    harness.stdio,
     "back to back wrapper blocks, same line",
     """<tool_call>
 edit({ "action": "create", "path": "a.zig", "content": <<EOF
@@ -50,6 +54,8 @@ verify({})
     corpus_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "adjacent wrapper blocks with a space",
     """<tool_call>
 verify({})
@@ -59,6 +65,8 @@ run({ command: "zig build test" })
     corpus_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "done block adjacent to a wrapper block",
     """<tool_call>
 verify({})
@@ -67,6 +75,8 @@ verify({})
   )
   // Untagged prose in front of a good call is harmless envelope drift.
   probe(
+    harness.agent,
+    harness.stdio,
     "prose before a wrapper block",
     """We need to create BatteryProvider.swift and wire it into LiveSystemProvider.
 
@@ -76,6 +86,8 @@ look({ file: "Sources/SysMonCore/Providers.swift" })
     corpus_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "bare call inside stray prose",
     """Let me inspect the parser first.
 look({ file: "src/parse.zig" })
@@ -86,6 +98,8 @@ Then I will patch it.""",
   // wrapper. The wrapper tags are swallowed silently — they must not raise
   // unknown-tag violations.
   probe(
+    harness.agent,
+    harness.stdio,
     "invoke markup with a string attribute inside the wrapper",
     """<tool_call>
 <invoke name="look">
@@ -95,6 +109,8 @@ Then I will patch it.""",
     corpus_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "invoke markup in a function_calls wrapper",
     """<function_calls>
 <invoke name="look">
@@ -105,6 +121,8 @@ Then I will patch it.""",
     corpus_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "genuinely unterminated parameter still errors",
     """<tool_call>
 <invoke name="look">
@@ -114,6 +132,8 @@ Then I will patch it.""",
   // An edit-action verb used as the tool name folds to `edit` with the action
   // injected. The registered enum is the authority for the fold.
   probe(
+    harness.agent,
+    harness.stdio,
     "edit action verb as the tool name",
     """<tool_call>
 replace_range({
@@ -129,16 +149,32 @@ EOF
 </tool_call>""",
     corpus_registry(),
   )
-  probe("shell alias folds to run", "bash({ script: \"zig build test\" })", corpus_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "shell alias folds to run",
+    "bash({ script: \"zig build test\" })",
+    corpus_registry(),
+  )
   // The fold only applies when the resolved name is registered.
-  probe("genuinely unknown tool name", "frobnicate({ path: \"a.zig\" })", corpus_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "genuinely unknown tool name",
+    "frobnicate({ path: \"a.zig\" })",
+    corpus_registry(),
+  )
   // Terminal answer shapes: the model finished talking and omitted the close.
   probe(
+    harness.agent,
+    harness.stdio,
     "unclosed terminal user_response",
     "<user_response>Implemented the INI schema validation system with a `Schema` definition and a `cmdCheck` command.",
     corpus_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "unclosed terminal assistant_prose",
     """<assistant_prose>
 Implemented full INI schema validation:
@@ -149,6 +185,8 @@ Implemented full INI schema validation:
   // Not terminal: another block follows, so the unclosed tag keeps its
   // violation and the trailing block still parses.
   probe(
+    harness.agent,
+    harness.stdio,
     "unclosed response tag before a call stays strict",
     """<user_response>Done, verifying now.
 <tool_call>

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -5,7 +6,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * is decoupled from wall-clock — it counts turns and tool progress —
  * but pinning the test under `mock_time` proves the budget extension
  * decisions aren't quietly observing real time anywhere on the path
- * (e.g. a hidden `now_ms()` in stall diagnostics). Mirrors the
+ * (e.g. a hidden `harness.clock.now_ms()` in stall diagnostics). Mirrors the
  * `agent_loop_adaptive_budget` shape and exercises the
  * extend-on-progress path that captain presets rely on.
  */
@@ -25,10 +26,11 @@ fn lookup_tools() {
   return tools
 }
 
-pipeline default() {
-  mock_time(1700000000000)
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
   const start_ms = harness.clock.now_ms()
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "t1", name: "lookup", arguments: {q: "1"}}]},
       {tool_calls: [{id: "t2", name: "lookup", arguments: {q: "2"}}]},
@@ -37,6 +39,7 @@ pipeline default() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Inspect everything.",
         nil,
         {
@@ -47,14 +50,14 @@ pipeline default() {
           iteration_budget: {mode: "adaptive", initial: 2, max: 8, extend_by: 2},
         },
       )
-      __io_println(result.status)
-      __io_println(result.adaptive_budget.mode)
-      __io_println(result.adaptive_budget.initial)
-      __io_println(result.adaptive_budget.max)
-      __io_println(result.adaptive_budget.extensions_used >= 1)
-      __io_println(result.adaptive_budget.decisions[0].action)
-      __io_println(harness.clock.now_ms() == start_ms)
-      unmock_time()
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.adaptive_budget.mode)
+      harness.stdio.println(result.adaptive_budget.initial)
+      harness.stdio.println(result.adaptive_budget.max)
+      harness.stdio.println(result.adaptive_budget.extensions_used >= 1)
+      harness.stdio.println(result.adaptive_budget.decisions[0].action)
+      harness.stdio.println(harness.clock.now_ms() == start_ms)
+      harness.testing.clock_reset()
     },
   )
 }

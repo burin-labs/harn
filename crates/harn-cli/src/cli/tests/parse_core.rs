@@ -166,7 +166,6 @@ fn test_parses_fix_plan_json_args() {
         args.safety.map(|safety| safety.as_str()),
         Some("behavior-preserving")
     );
-    assert_eq!(args.harness_threading, HarnessThreadingMode::LocalGlobal);
     assert_eq!(args.path, PathBuf::from("main.harn"));
 }
 
@@ -180,8 +179,6 @@ fn test_parses_fix_apply_dry_run_args() {
         "--json",
         "--safety",
         "scope-local",
-        "--harness-threading",
-        "thread-params",
         "src/",
     ]);
 
@@ -195,7 +192,6 @@ fn test_parses_fix_apply_dry_run_args() {
         args.safety.map(|safety| safety.as_str()),
         Some("scope-local")
     );
-    assert_eq!(args.harness_threading, HarnessThreadingMode::ThreadParams);
     assert_eq!(args.path, PathBuf::from("src/"));
 }
 

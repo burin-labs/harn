@@ -1,6 +1,8 @@
+import { agent_loop } from "std/agent/loop"
+
 // `persistent` was removed. Harness authors must choose explicit
 // completion looping (`loop_until_done`) and explicit transcript/session
 // management.
-pipeline test(task) {
-  agent_loop("do work", nil, {provider: "mock", persistent: true, max_iterations: 1})
+pipeline test(harness: Harness, task) {
+  agent_loop(harness, "do work", nil, {provider: "mock", persistent: true, max_iterations: 1})
 }

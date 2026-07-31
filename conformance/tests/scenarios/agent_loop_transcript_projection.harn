@@ -1,6 +1,5 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
-
-const flaky_calls = atomic(0)
 
 /**
  * agent_loop applies transcript_projection at each turn boundary,
@@ -10,10 +9,10 @@ const flaky_calls = atomic(0)
  * projected prefix omits the failure while the raw transcript keeps
  * both turns intact.
  */
-fn flaky_tool() {
+fn flaky_tool(runtime: HarnessRuntime, flaky_calls) {
   let tools = tool_registry()
   const handler = fn(_args) {
-    const previous_calls = atomic_add(flaky_calls, 1)
+    const previous_calls = runtime.atomic_add(flaky_calls, 1)
     if previous_calls == 0 {
       throw "tool error: first try"
     }
@@ -67,9 +66,11 @@ fn gc_tools() {
   return tools
 }
 
-pipeline default() {
-  atomic_set(flaky_calls, 0)
+pipeline default(harness: Harness) {
+  const flaky_calls = harness.runtime.atomic(0)
+  harness.runtime.atomic_set(flaky_calls, 0)
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "call_1", name: "run", arguments: {step: "first"}}]},
       {tool_calls: [{id: "call_2", name: "run", arguments: {step: "second"}}]},
@@ -77,11 +78,12 @@ pipeline default() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "kick it off",
         "You are a test agent.",
         {
           provider: "mock",
-          tools: flaky_tool(),
+          tools: flaky_tool(harness.runtime, flaky_calls),
           tool_format: "native",
           max_iterations: 6,
           loop_until_done: true,
@@ -89,24 +91,25 @@ pipeline default() {
           transcript_projection: {policy: "clean_tool_repair"},
         },
       )
-      __io_println("status:" + result.status)
+      harness.stdio.println("status:" + result.status)
       const raw_messages = transcript_messages(result.transcript)
       const raw_text = json_stringify(raw_messages)
-      require atomic_get(flaky_calls) == 2, "flaky tool was invoked twice"
+      require harness.runtime.atomic_get(flaky_calls) == 2, "flaky tool was invoked twice"
       require len(split(raw_text, "tool error: first try")) - 1 == 1,
         "first tool call failed exactly once"
       require contains(raw_text, "[result of run]\\nok\\n[end of run result]"),
         "second tool call succeeded"
-      __io_println("raw_message_count:" + to_string(len(raw_messages)))
+      harness.stdio.println("raw_message_count:" + to_string(len(raw_messages)))
       const events = transcript_events_by_kind(result.transcript, "transcript.projection")
-      __io_println("projection_events:" + to_string(len(events) > 0))
-      __io_println("projection_policy:" + events[0].metadata.policy)
-      __io_println(
+      harness.stdio.println("projection_events:" + to_string(len(events) > 0))
+      harness.stdio.println("projection_policy:" + events[0].metadata.policy)
+      harness.stdio.println(
         "projection_safety_blocked:" + to_string(events[0].metadata.provider_safety_blocked),
       )
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -132,6 +135,7 @@ pipeline default() {
     ],
     { ->
       const gc_result = agent_loop(
+        harness,
         "complete projection GC task",
         "You are a projection test agent.",
         {
@@ -150,32 +154,36 @@ pipeline default() {
           scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
         },
       )
-      const gc_calls = llm_mock_calls()
+      const gc_calls = harness.llm.mock_calls()
       const projected_stale_body = json_stringify(gc_calls[2].messages[2].content)
       const projected_live_body = json_stringify(gc_calls[2].messages[3].content)
       const gc_events = transcript_events_by_kind(gc_result.transcript, "transcript.projection")
       const gc_projection = gc_events[len(gc_events) - 1]
-      __io_println("gc_status:" + gc_result.status)
-      __io_println("gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0))
-      __io_println(
+      harness.stdio.println("gc_status:" + gc_result.status)
+      harness.stdio.println(
+        "gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0),
+      )
+      harness.stdio.println(
         "gc_has_scratchpad_root:"
           + to_string(
           gc_projection.metadata.roots_consulted.contains("scratchpad"),
         ),
       )
-      __io_println(
+      harness.stdio.println(
         "gc_has_write_barrier:"
           + to_string(
           gc_projection.metadata.roots_consulted.contains("write_barrier"),
         ),
       )
-      __io_println(
+      harness.stdio.println(
         "gc_projected_reclaimed:"
           + to_string(
           contains(projected_stale_body, "reclaimed by reachability_gc"),
         ),
       )
-      __io_println("gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")))
+      harness.stdio.println(
+        "gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")),
+      )
     },
   )
 }

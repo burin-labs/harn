@@ -7,12 +7,12 @@
  *
  * Tracking: harn#1854.
  */
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "pre_finish",
-    { event ->
-      __io_println(
+    { _hook_harness, event ->
+      harness.stdio.println(
         "pre_finish: has_on_finish=" + to_string(event.has_on_finish) + " return_value="
           + to_string(
           event.return_value,
@@ -21,26 +21,26 @@ pipeline default() {
       return nil
     },
   )
-  register_session_hook(
+  harness.agent.register_session_hook(
     "post_finish",
-    { event ->
-      __io_println("post_finish: return_value=" + to_string(event.return_value))
+    { _hook_harness, event ->
+      harness.stdio.println("post_finish: return_value=" + to_string(event.return_value))
       return nil
     },
   )
-  register_session_hook(
+  harness.agent.register_session_hook(
     "on_unsettled_detected",
-    { event ->
-      __io_println("on_unsettled_detected fired (unexpected for P-01)")
+    { _hook_harness, event ->
+      harness.stdio.println("on_unsettled_detected fired (unexpected for P-01)")
       return nil
     },
   )
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { _harness, return_value ->
-      __io_println("on_finish: return_value=" + to_string(return_value))
+      harness.stdio.println("on_finish: return_value=" + to_string(return_value))
       return return_value + 100
     },
   )
-  __io_println("body done")
+  harness.stdio.println("body done")
   return 7
 }

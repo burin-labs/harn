@@ -6,7 +6,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
 }
 
 /** Normalize cron and quote stream events into a shared planning result. */
-pub fn on_market_event(event: TriggerEvent) -> dict {
+pub fn on_market_event(_harness: Harness, event: TriggerEvent) -> dict {
   const windowed = window_by(
     [event.provider_payload.raw],
     {

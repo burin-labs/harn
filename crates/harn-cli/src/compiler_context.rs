@@ -7,14 +7,14 @@ use std::path::Path;
 /// Every code path that drives the parser — `run()`, `execute_run()`,
 /// `parse_source_file()`, `analyze_file()`, every test harness — funnels
 /// through this single helper so the registry is always populated by the
-/// time the typechecker reads it. `install_builtin_signatures` is
+/// time the typechecker reads it. `install_builtin_manifest` is
 /// idempotent on identical `&'static` slices, so repeat calls are
 /// cheap (a `OnceLock::set` that no-ops after the first success).
 ///
 /// Tests cannot rely on `run()` having executed, so they must reach the
 /// parser via one of these entry points (which always do call this).
 pub(crate) fn ensure_builtin_signatures_installed() {
-    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+    harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
 }
 
 /// Build a compiler with the source file's imported enum names seeded from

@@ -84,223 +84,205 @@ pub(crate) fn string_discriminator(value: &VmValue, builtin: &str) -> Result<Str
 }
 
 pub(crate) fn register_collection_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("chunk", |_ctx, args| async move {
-        let items = list_arg(&args, "chunk")?;
-        let size = positive_usize_arg(&args, 1, 1, "chunk");
-        Ok(VmValue::List(std::sync::Arc::new(
-            items
-                .chunks(size)
-                .map(|chunk| VmValue::List(std::sync::Arc::new(chunk.to_vec())))
-                .collect(),
-        )))
-    });
+    for def in COLLECTION_ASYNC_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+    register_dict_builder_builtins(vm);
+}
 
-    vm.register_async_builtin("window", |_ctx, args| async move {
-        let items = list_arg(&args, "window")?;
-        let size = positive_usize_arg(&args, 1, 2, "window");
-        let step = positive_usize_arg(&args, 2, 1, "window");
-        if size > items.len() {
-            return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
-        }
-        let mut windows = Vec::new();
-        let mut start = 0;
-        while start + size <= items.len() {
-            windows.push(VmValue::List(std::sync::Arc::new(
-                items[start..start + size].to_vec(),
-            )));
-            start += step;
-        }
-        Ok(VmValue::List(std::sync::Arc::new(windows)))
-    });
+#[harn_builtin(exposure = "pure", effects = [], sig = "chunk(items: list, size: int) -> list", kind = "async", category = "collections")]
+async fn chunk_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "chunk")?;
+    let size = positive_usize_arg(&args, 1, 1, "chunk");
+    Ok(VmValue::List(Arc::new(
+        items
+            .chunks(size)
+            .map(|chunk| VmValue::List(Arc::new(chunk.to_vec())))
+            .collect(),
+    )))
+}
 
-    vm.register_async_builtin("group_by", |ctx, args| async move {
-        let items = list_arg(&args, "group_by")?;
-        let callable = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("group_by: callback is required".to_string()))?;
-        if !Vm::is_callable_value(callable) {
-            return Err(VmError::TypeError(format!(
-                "group_by: callback must be callable, got {}",
-                callable.type_name()
-            )));
+#[harn_builtin(exposure = "pure", effects = [], sig = "window(items: list, size?: int, step?: int) -> list", kind = "async", category = "collections")]
+async fn window_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "window")?;
+    let size = positive_usize_arg(&args, 1, 2, "window");
+    let step = positive_usize_arg(&args, 2, 1, "window");
+    if size > items.len() {
+        return Ok(VmValue::List(Arc::new(Vec::new())));
+    }
+    let mut windows = Vec::new();
+    let mut start = 0;
+    while start + size <= items.len() {
+        windows.push(VmValue::List(Arc::new(items[start..start + size].to_vec())));
+        start += step;
+    }
+    Ok(VmValue::List(Arc::new(windows)))
+}
+
+fn required_callable<'a>(
+    args: &'a [VmValue],
+    index: usize,
+    builtin: &str,
+) -> Result<&'a VmValue, VmError> {
+    let callable = args
+        .get(index)
+        .ok_or_else(|| VmError::Runtime(format!("{builtin}: callback is required")))?;
+    if !Vm::is_callable_value(callable) {
+        return Err(VmError::TypeError(format!(
+            "{builtin}: callback must be callable, got {}",
+            callable.type_name()
+        )));
+    }
+    Ok(callable)
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "group_by(items: list, key_fn: closure) -> dict", kind = "async", category = "collections")]
+async fn group_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "group_by")?;
+    let callable = required_callable(&args, 1, "group_by")?;
+    let mut vm = current_async_vm(&ctx, "group_by");
+    let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
+    for item in items.iter() {
+        let key = vm.call_callable_one(callable, item).await?;
+        let bucket = string_discriminator(&key, "group_by")?;
+        groups.entry(bucket).or_default().push(item.clone());
+    }
+    Ok(VmValue::dict(
+        groups
+            .into_iter()
+            .map(|(key, values)| {
+                (
+                    crate::value::intern_key(&key),
+                    VmValue::List(Arc::new(values)),
+                )
+            })
+            .collect::<crate::value::DictMap>(),
+    ))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "partition(items: list, predicate: closure) -> dict", kind = "async", category = "collections")]
+async fn partition_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "partition")?;
+    let callable = required_callable(&args, 1, "partition")?;
+    let mut vm = current_async_vm(&ctx, "partition");
+    let mut matched = Vec::new();
+    let mut no_match = Vec::new();
+    for item in items.iter() {
+        if vm.call_callable_one(callable, item).await?.is_truthy() {
+            matched.push(item.clone());
+        } else {
+            no_match.push(item.clone());
         }
-        let mut vm = current_async_vm(&ctx, "group_by");
-        let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
+    }
+    Ok(VmValue::dict(BTreeMap::from([
+        ("match".to_string(), VmValue::List(Arc::new(matched))),
+        ("no_match".to_string(), VmValue::List(Arc::new(no_match))),
+    ])))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "dedup_by(items: list, key_fn: closure) -> list", kind = "async", category = "collections")]
+async fn dedup_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "dedup_by")?;
+    let callable = required_callable(&args, 1, "dedup_by")?;
+    let mut vm = current_async_vm(&ctx, "dedup_by");
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for item in items.iter() {
+        let key = vm.call_callable_one(callable, item).await?;
+        if seen.insert(value_structural_hash_key(&key)) {
+            out.push(item.clone());
+        }
+    }
+    Ok(VmValue::List(Arc::new(out)))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "flat_map(items: list, callback: closure) -> list", kind = "async", category = "collections")]
+async fn flat_map_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "flat_map")?;
+    let callable = required_callable(&args, 1, "flat_map")?;
+    let mut vm = current_async_vm(&ctx, "flat_map");
+    let mut out = Vec::new();
+    for item in items.iter() {
+        match vm.call_callable_one(callable, item).await? {
+            VmValue::List(inner) => out.extend(inner.iter().cloned()),
+            other => out.push(other),
+        }
+    }
+    Ok(VmValue::List(Arc::new(out)))
+}
+
+async fn take_or_drop_while(
+    ctx: AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+    take: bool,
+    builtin: &str,
+) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, builtin)?;
+    let callable = required_callable(&args, 1, builtin)?;
+    let mut vm = current_async_vm(&ctx, builtin);
+    let mut out = Vec::new();
+    if take {
         for item in items.iter() {
-            let key = vm.call_callable_one(callable, item).await?;
-            let bucket = string_discriminator(&key, "group_by")?;
-            groups.entry(bucket).or_default().push(item.clone());
-        }
-        Ok(VmValue::dict(
-            groups
-                .into_iter()
-                .map(|(key, values)| {
-                    (
-                        crate::value::intern_key(&key),
-                        VmValue::List(std::sync::Arc::new(values)),
-                    )
-                })
-                .collect::<crate::value::DictMap>(),
-        ))
-    });
-
-    vm.register_async_builtin("partition", |ctx, args| async move {
-        let items = list_arg(&args, "partition")?;
-        let callable = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("partition: callback is required".to_string()))?;
-        if !Vm::is_callable_value(callable) {
-            return Err(VmError::TypeError(format!(
-                "partition: callback must be callable, got {}",
-                callable.type_name()
-            )));
-        }
-        let mut vm = current_async_vm(&ctx, "partition");
-        let mut matched = Vec::new();
-        let mut no_match = Vec::new();
-        for item in items.iter() {
-            let result = vm.call_callable_one(callable, item).await?;
-            if result.is_truthy() {
-                matched.push(item.clone());
-            } else {
-                no_match.push(item.clone());
-            }
-        }
-        Ok(VmValue::dict(BTreeMap::from([
-            (
-                "match".to_string(),
-                VmValue::List(std::sync::Arc::new(matched)),
-            ),
-            (
-                "no_match".to_string(),
-                VmValue::List(std::sync::Arc::new(no_match)),
-            ),
-        ])))
-    });
-
-    vm.register_async_builtin("dedup_by", |ctx, args| async move {
-        let items = list_arg(&args, "dedup_by")?;
-        let callable = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("dedup_by: callback is required".to_string()))?;
-        if !Vm::is_callable_value(callable) {
-            return Err(VmError::TypeError(format!(
-                "dedup_by: callback must be callable, got {}",
-                callable.type_name()
-            )));
-        }
-        let mut vm = current_async_vm(&ctx, "dedup_by");
-        let mut seen = HashSet::new();
-        let mut out = Vec::new();
-        for item in items.iter() {
-            let key = vm.call_callable_one(callable, item).await?;
-            if seen.insert(value_structural_hash_key(&key)) {
-                out.push(item.clone());
-            }
-        }
-        Ok(VmValue::List(std::sync::Arc::new(out)))
-    });
-
-    vm.register_async_builtin("flat_map", |ctx, args| async move {
-        let items = list_arg(&args, "flat_map")?;
-        let callable = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("flat_map: callback is required".to_string()))?;
-        if !Vm::is_callable_value(callable) {
-            return Err(VmError::TypeError(format!(
-                "flat_map: callback must be callable, got {}",
-                callable.type_name()
-            )));
-        }
-        let mut vm = current_async_vm(&ctx, "flat_map");
-        let mut out = Vec::new();
-        for item in items.iter() {
-            match vm.call_callable_one(callable, item).await? {
-                VmValue::List(inner) => out.extend(inner.iter().cloned()),
-                other => out.push(other),
-            }
-        }
-        Ok(VmValue::List(std::sync::Arc::new(out)))
-    });
-
-    vm.register_async_builtin("take_while", |ctx, args| async move {
-        let items = list_arg(&args, "take_while")?;
-        let callable = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("take_while: callback is required".to_string()))?;
-        if !Vm::is_callable_value(callable) {
-            return Err(VmError::TypeError(format!(
-                "take_while: callback must be callable, got {}",
-                callable.type_name()
-            )));
-        }
-        let mut vm = current_async_vm(&ctx, "take_while");
-        let mut out = Vec::new();
-        for item in items.iter() {
-            let result = vm.call_callable_one(callable, item).await?;
-            if !result.is_truthy() {
+            if !vm.call_callable_one(callable, item).await?.is_truthy() {
                 break;
             }
             out.push(item.clone());
         }
-        Ok(VmValue::List(std::sync::Arc::new(out)))
-    });
-
-    vm.register_async_builtin("drop_while", |ctx, args| async move {
-        let items = list_arg(&args, "drop_while")?;
-        let callable = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("drop_while: callback is required".to_string()))?;
-        if !Vm::is_callable_value(callable) {
-            return Err(VmError::TypeError(format!(
-                "drop_while: callback must be callable, got {}",
-                callable.type_name()
-            )));
-        }
-        let mut vm = current_async_vm(&ctx, "drop_while");
-        let mut out = Vec::new();
+    } else {
         let mut dropping = true;
         for item in items.iter() {
             if dropping {
-                let result = vm.call_callable_one(callable, item).await?;
-                if result.is_truthy() {
+                if vm.call_callable_one(callable, item).await?.is_truthy() {
                     continue;
                 }
                 dropping = false;
             }
             out.push(item.clone());
         }
-        Ok(VmValue::List(std::sync::Arc::new(out)))
-    });
-
-    vm.register_async_builtin("count_by", |ctx, args| async move {
-        let items = list_arg(&args, "count_by")?;
-        let callable = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("count_by: callback is required".to_string()))?;
-        if !Vm::is_callable_value(callable) {
-            return Err(VmError::TypeError(format!(
-                "count_by: callback must be callable, got {}",
-                callable.type_name()
-            )));
-        }
-        let mut vm = current_async_vm(&ctx, "count_by");
-        let mut counts: BTreeMap<String, i64> = BTreeMap::new();
-        for item in items.iter() {
-            let key = vm.call_callable_one(callable, item).await?;
-            let bucket = string_discriminator(&key, "count_by")?;
-            *counts.entry(bucket).or_insert(0) += 1;
-        }
-        Ok(VmValue::dict(
-            counts
-                .into_iter()
-                .map(|(key, count)| (crate::value::intern_key(&key), VmValue::Int(count)))
-                .collect::<crate::value::DictMap>(),
-        ))
-    });
-
-    register_dict_builder_builtins(vm);
+    }
+    Ok(VmValue::List(Arc::new(out)))
 }
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "take_while(items: list, predicate: closure) -> list", kind = "async", category = "collections")]
+async fn take_while_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    take_or_drop_while(ctx, args, true, "take_while").await
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "drop_while(items: list, predicate: closure) -> list", kind = "async", category = "collections")]
+async fn drop_while_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    take_or_drop_while(ctx, args, false, "drop_while").await
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "count_by(items: list, key_fn: closure) -> dict", kind = "async", category = "collections")]
+async fn count_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "count_by")?;
+    let callable = required_callable(&args, 1, "count_by")?;
+    let mut vm = current_async_vm(&ctx, "count_by");
+    let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+    for item in items.iter() {
+        let key = vm.call_callable_one(callable, item).await?;
+        let bucket = string_discriminator(&key, "count_by")?;
+        *counts.entry(bucket).or_insert(0) += 1;
+    }
+    Ok(VmValue::dict(
+        counts
+            .into_iter()
+            .map(|(key, count)| (crate::value::intern_key(&key), VmValue::Int(count)))
+            .collect::<crate::value::DictMap>(),
+    ))
+}
+
+const COLLECTION_ASYNC_BUILTINS: &[&VmBuiltinDef] = &[
+    &CHUNK_IMPL_DEF,
+    &WINDOW_IMPL_DEF,
+    &GROUP_BY_IMPL_DEF,
+    &PARTITION_IMPL_DEF,
+    &DEDUP_BY_IMPL_DEF,
+    &FLAT_MAP_IMPL_DEF,
+    &TAKE_WHILE_IMPL_DEF,
+    &DROP_WHILE_IMPL_DEF,
+    &COUNT_BY_IMPL_DEF,
+];
 
 /// Registers the native fast-paths for the `std/collections` and `std/json`
 /// option-builder helpers. The native paths build each result with one
@@ -316,12 +298,18 @@ fn register_dict_builder_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "__dict_filter_nil(d: dict) -> dict", category = "collections")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__dict_filter_nil(d: dict) -> dict", category = "collections"
+)]
 fn dict_filter_nil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     dict_filter_nil(args.first().unwrap_or(&VmValue::Nil))
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__dict_merge(a: dict, b: dict) -> dict",
     category = "collections"
 )]
@@ -333,6 +321,8 @@ fn dict_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__dict_pick(d: dict, keys: list) -> dict",
     category = "collections"
 )]
@@ -344,6 +334,8 @@ fn dict_pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__dict_pick_keys(d: dict, keys: list, drop_nil?: bool) -> dict",
     category = "collections"
 )]
@@ -356,6 +348,8 @@ fn dict_pick_keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__dict_omit(d: dict, keys: list) -> dict",
     category = "collections"
 )]
@@ -366,19 +360,29 @@ fn dict_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     )
 }
 
-#[harn_builtin(sig = "clone(value: any) -> any", category = "collections")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "clone(value: any) -> any", category = "collections"
+)]
 fn clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(shallow_clone(args.first().unwrap_or(&VmValue::Nil)))
 }
 
-#[harn_builtin(sig = "deep_clone(value: any) -> any", category = "collections")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "deep_clone(value: any) -> any", category = "collections"
+)]
 fn deep_clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(deep_clone_value(args.first().unwrap_or(&VmValue::Nil)))
 }
 
 #[harn_builtin(
-    sig = "deep_merge(a: dict, b: dict) -> dict",
+    exposure = "pure",
+    effects = [],
     aliases = ["__deep_merge"],
+    sig = "deep_merge(a: dict, b: dict) -> dict",
     category = "collections"
 )]
 fn deep_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -389,8 +393,10 @@ fn deep_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    sig = "unique(items: list) -> list",
+    exposure = "pure",
+    effects = [],
     aliases = ["__list_unique"],
+    sig = "unique(items: list) -> list",
     category = "collections"
 )]
 fn unique_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -398,8 +404,10 @@ fn unique_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 }
 
 #[harn_builtin(
-    sig = "dict_from_pairs(pairs: list) -> dict",
+    exposure = "pure",
+    effects = [],
     aliases = ["__dict_from_pairs"],
+    sig = "dict_from_pairs(pairs: list) -> dict",
     category = "collections"
 )]
 fn dict_from_pairs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

@@ -19,7 +19,7 @@
 //   * `envelope` / `write_envelope` — stable-shape JSON envelope wrappers
 //     for `--json` mode, with pinned top-level key ordering so snapshot
 //     tests stay stable across runs.
-//   * `mode()` — small helper for "am I in JSON mode?" so port scripts
+//   * `mode(harness)` — small helper for "am I in JSON mode?" so port scripts
 //     don't have to read `HARN_OUTPUT_JSON` directly.
 //   * Small coercion and shell-argv helpers for renderer scripts consuming
 //     JSON payloads collected by Rust shims.
@@ -34,8 +34,8 @@ import { is_tty } from "std/io"
  * @effects: [env.read]
  * @errors: []
  */
-pub fn mode(harness: Harness) -> string {
-  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+pub fn mode(env: HarnessEnv) -> string {
+  if env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     return "json"
   }
   return "human"
@@ -43,13 +43,13 @@ pub fn mode(harness: Harness) -> string {
 
 /**
  * True when the script should emit a JSON envelope instead of human
- * output. Sugar over `mode() == "json"`.
+ * output. Sugar over `mode(harness) == "json"`.
  *
  * @effects: [env.read]
  * @errors: []
  */
-pub fn json_mode(harness: Harness) -> bool {
-  return mode(harness) == "json"
+pub fn json_mode(env: HarnessEnv) -> bool {
+  return mode(env) == "json"
 }
 
 /**
@@ -128,15 +128,15 @@ pub fn cli_json_envelope(spec: CliJsonEnvelope) -> dict {
  *
  * @effects: [stdio.write]
  * @errors: []
- * @example: write_envelope(envelope({schema_version: 1, api_stability: "stable", payload: result}))
+ * @example: write_envelope(harness.stdio, harness.term, envelope({schema_version: 1, api_stability: "stable", payload: result}))
  */
-pub fn write_envelope(env: dict) {
-  const text = if is_tty(1) {
+pub fn write_envelope(stdio: HarnessStdio, term: HarnessTerm, env: dict) {
+  const text = if is_tty(term, 1) {
     json_stringify_pretty(env)
   } else {
     json_stringify(env)
   }
-  __io_println(text)
+  stdio.println(text)
 }
 
 /**
@@ -277,15 +277,15 @@ pub fn join_shell_argv(items: list, sep: string) -> string {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn print_list(harness: Harness, label: string, items: list) {
+pub fn print_list(stdio: HarnessStdio, label: string, items: list) {
   if items.count == 0 {
     return
   }
-  harness.stdio.println("  " + label + ":")
+  stdio.println("  " + label + ":")
   for item in items {
     const text = safe_string(item, "")
     if text != "" {
-      harness.stdio.println("    - " + text)
+      stdio.println("    - " + text)
     }
   }
 }
@@ -296,10 +296,10 @@ pub fn print_list(harness: Harness, label: string, items: list) {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn render_command(harness: Harness, label: string, argv: list) {
+pub fn render_command(stdio: HarnessStdio, label: string, argv: list) {
   if argv.count == 0 {
     return
   }
-  harness.stdio.println("  " + label + ":")
-  harness.stdio.println("    " + join_shell_argv(argv, " "))
+  stdio.println("  " + label + ":")
+  stdio.println("    " + join_shell_argv(argv, " "))
 }

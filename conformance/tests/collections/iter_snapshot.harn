@@ -1,9 +1,9 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Iter snapshots the source: reassigning the source binding to a new
   // list does not affect what the already-constructed iter yields.
   let xs = [1, 2, 3]
   const it = iter(xs)
   xs = xs + [99]
-  log(it.to_list())
-  log(xs)
+  harness.stdio.log(it.to_list())
+  harness.stdio.log(xs)
 }

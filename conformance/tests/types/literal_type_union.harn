@@ -6,22 +6,22 @@ type Verdict = "pass" | "fail" | "unclear"
 
 type Score = 0 | 1 | 2
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Assignable: a literal flows into its base-typed slot.
   const v: Verdict = "pass"
   const s: Score = 2
-  __io_println(v)
-  __io_println(s)
+  harness.stdio.println(v)
+  harness.stdio.println(s)
   // schema_of emits canonical enum JSON Schema.
   const vs = schema_of(Verdict)
   const ss = schema_of(Score)
-  __io_println(vs.type)
-  __io_println(vs.enum)
-  __io_println(ss.type)
-  __io_println(ss.enum)
+  harness.stdio.println(vs.type)
+  harness.stdio.println(vs.enum)
+  harness.stdio.println(ss.type)
+  harness.stdio.println(ss.enum)
   // schema_is accepts conforming values and rejects non-members.
-  __io_println(schema_is("fail", Verdict))
-  __io_println(schema_is("nope", Verdict))
-  __io_println(schema_is(1, Score))
-  __io_println(schema_is(5, Score))
+  harness.stdio.println(schema_is("fail", Verdict))
+  harness.stdio.println(schema_is("nope", Verdict))
+  harness.stdio.println(schema_is(1, Score))
+  harness.stdio.println(schema_is(5, Score))
 }

@@ -2,12 +2,12 @@ import { ansi_bg, ansi_strip, ansi_style, ansi_visible_len } from "std/ansi"
 import { diff_summary, unified_diff } from "std/diff"
 import { render_markdown_table, render_table } from "std/table"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const styled = ansi_style("hi", {fg: "red", bold: true}, {mode: "always"})
-  __io_println(json_stringify(styled))
-  __io_println(ansi_strip(styled))
-  __io_println(ansi_visible_len(styled))
-  __io_println(contains(ansi_bg("x", "bright_red", {mode: "always"}), "[101m"))
+  harness.stdio.println(json_stringify(styled))
+  harness.stdio.println(ansi_strip(styled))
+  harness.stdio.println(ansi_visible_len(styled))
+  harness.stdio.println(contains(ansi_bg("x", "bright_red", {mode: "always"}), "[101m"))
   const table = render_table(
     [{name: "api", status: "ok", count: 12}, {name: "web", status: "fail", count: 3}],
     {
@@ -18,13 +18,15 @@ pipeline test(task) {
       ],
     },
   )
-  __io_println(table)
-  __io_println(render_markdown_table([{name: "api"}], {columns: [{key: "name", header: "Name"}]}))
+  harness.stdio.println(table)
+  harness.stdio.println(
+    render_markdown_table([{name: "api"}], {columns: [{key: "name", header: "Name"}]}),
+  )
   const before = "a\nb\nc"
   const after = "a\nB\nc\nd"
   const summary = diff_summary(before, after)
-  __io_println(summary.changed)
-  __io_println(summary.insertions)
-  __io_println(summary.deletions)
-  __io_println(unified_diff(before, after, {path: "demo.txt"}))
+  harness.stdio.println(summary.changed)
+  harness.stdio.println(summary.insertions)
+  harness.stdio.println(summary.deletions)
+  harness.stdio.println(unified_diff(before, after, {path: "demo.txt"}))
 }

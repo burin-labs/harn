@@ -35,33 +35,33 @@ live in [LLM providers](./llm/providers.md#capability-matrix--harntoml-overrides
 
 ## llm_call
 
-Use `llm_call(prompt, system?, options?)` for a single model turn. It returns a
+Use `harness.llm.call(prompt, system?, options?)` for a single model turn. It returns a
 canonical dict with `text`, `visible_text`, `model`, `provider`, token usage,
 structured `data` when JSON mode is enabled, tool calls, thinking blocks, and a
 transcript.
 
 ```harn
-const result = llm_call("Translate to French: Hello, world", nil, {
+const result = harness.llm.call("Translate to French: Hello, world", nil, {
   provider: "openai",
   model: "gpt-4o",
   max_tokens: 1024,
 })
-log(result.text)
+harness.stdio.log(result.text)
 ```
 
-For schema-validated JSON, use `llm_call_structured(...)` or its safe/result
+For schema-validated JSON, use `harness.llm.call_structured(...)` or its safe/result
 envelope variants. See [LLM calls](./llm/llm_call.md) for the full options and
 return-value tables.
 
 ## llm_call_structured
 
-Use `llm_call_structured(prompt, schema, options?)` for schema-validated JSON
+Use `harness.llm.call_structured(prompt, schema, options?)` for schema-validated JSON
 responses. Safe and diagnostic-envelope variants are documented in
 [LLM calls](./llm/llm_call.md#llm_call_structured).
 
 ## llm_completion
 
-Use `llm_completion(prefix, suffix?, system?, options?)` for text continuation
+Use `harness.llm.completion(prefix, suffix?, system?, options?)` for text continuation
 and fill-in-the-middle generation. It shares provider, model, budget, and usage
 semantics with `llm_call`.
 
@@ -77,19 +77,19 @@ prefixing are covered in [LLM tools](./llm/tools.md).
 
 ## agent_loop
 
-Use `agent_loop(prompt, system?, options?)` when an agent should keep working
+Use `agent_loop(harness, prompt, system?, options?)` when an agent should keep working
 across turns. Persistent loops continue until the model emits the completion
 sentinel, a budget or iteration limit is reached, daemon state idles, or a tool
 policy fails.
 
 ```harn
-const result = agent_loop(
+const result = agent_loop(harness,
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
   {loop_until_done: true, profile: "tool_using"}
 )
-log(result.status)
-log(result.llm.iterations)
+harness.stdio.log(result.status)
+harness.stdio.log(result.llm.iterations)
 ```
 
 The result is namespaced as `llm`, `tools`, `trace`, `task_ledger`, and
@@ -171,7 +171,7 @@ Provider-specific endpoint, auth, readiness, and local-server notes are in
 
 ## Testing with mock LLM responses
 
-The `mock` provider and `llm_mock(...)` queue deterministic text, tool-call, and
+The `mock` provider and `harness.llm.mock_enqueue(...)` queue deterministic text, tool-call, and
 error responses without API keys. See
 [mock LLM responses](./llm/llm_call.md#testing-with-mock-llm-responses).
 Agent turns and built-in auxiliary calls carry Harn-owned mock purposes (for

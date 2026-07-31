@@ -1,19 +1,28 @@
-//! Process-global registry of builtin signatures.
+//! Process-global registry of builtin contracts.
 //!
 //! `harn-vm` owns the implementations and emits one `&'static BuiltinDef<H>`
 //! per `#[harn_builtin]`-annotated function via the `harn-builtin-macros`
-//! crate. At startup the driver (CLI, LSP, lint, serve, dap, tests) installs
-//! the full slice of signatures here; the parser/typechecker then reads them
-//! through [`installed_signatures`].
+//! crate. At startup the driver installs one immutable manifest containing
+//! the signature, source exposure, and effects for every name.
 //!
 //! This decouples `harn-parser` (which needs to see signatures to typecheck)
 //! from `harn-vm` (which owns the impls) without a dependency cycle —
 //! `harn-parser` depends only on this crate plus `harn-builtin-meta`, never
 //! on the vm.
 
-use std::sync::OnceLock;
+use std::collections::BTreeMap;
+use std::sync::{OnceLock, RwLock};
 
-use harn_builtin_meta::BuiltinSignature;
+use harn_builtin_meta::{BuiltinContract, BuiltinSignature};
+
+/// One name-keyed projection of a macro-emitted builtin definition. Aliases
+/// receive their own entry so signature and contract can never drift.
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinManifestEntry {
+    pub name: &'static str,
+    pub signature: &'static BuiltinSignature,
+    pub contract: BuiltinContract,
+}
 
 /// A complete description of one builtin: its signature, its aliases, the
 /// runtime handler (typed by the consumer via `H`), and optional metadata.
@@ -26,6 +35,9 @@ use harn_builtin_meta::BuiltinSignature;
 pub struct BuiltinDef<H: 'static> {
     /// Static signature consumed by the parser/typechecker.
     pub sig: BuiltinSignature,
+    /// Typed source exposure and effect contract. This is the semantic owner
+    /// consumed by every parser/runtime/policy projection.
+    pub contract: BuiltinContract,
     /// Additional names that share this impl + signature. Each alias gets
     /// its own [`BuiltinSignature`] entry at install time (with the same
     /// param/return types) so the typechecker accepts both.
@@ -62,6 +74,7 @@ impl<H: 'static> BuiltinDef<H> {
     pub const fn new(sig: BuiltinSignature, handler: H) -> Self {
         Self {
             sig,
+            contract: BuiltinContract::UNDECLARED,
             aliases: &[],
             handler,
             category: None,
@@ -73,49 +86,66 @@ impl<H: 'static> BuiltinDef<H> {
     }
 }
 
-/// Process-global slice of installed signatures, populated once by the
-/// driver. Reads via [`installed_signatures`] are O(1); writes via
-/// [`install_builtin_signatures`] are one-shot.
-static INSTALLED: OnceLock<&'static [&'static BuiltinSignature]> = OnceLock::new();
+static INSTALLED: OnceLock<RwLock<BTreeMap<&'static str, &'static BuiltinManifestEntry>>> =
+    OnceLock::new();
 
-/// Install the process-global signature registry. Called once by the driver
-/// (CLI, LSP, lint, serve, dap) at startup. Test harnesses that build a Vm
-/// via `harn_vm::stdlib::stdlib_probe_vm()` inherit the install through that
-/// helper.
+fn installed() -> &'static RwLock<BTreeMap<&'static str, &'static BuiltinManifestEntry>> {
+    INSTALLED.get_or_init(|| RwLock::new(BTreeMap::new()))
+}
+
+/// Install the process-global builtin manifest.
 ///
 /// # Panics
-/// Panics if called more than once with different slices. Repeat calls with
-/// the same pointer are tolerated (CLI + test harness can both call it).
-pub fn install_builtin_signatures(sigs: &'static [&'static BuiltinSignature]) {
-    if INSTALLED.set(sigs).is_err() {
-        assert!(
-            INSTALLED.get().copied().map(<[_]>::as_ptr) == Some(sigs.as_ptr()),
-            "install_builtin_signatures called twice with different slices — \
-             drivers should install once at startup"
-        );
+/// Multiple owners may contribute disjoint manifest fragments (for example
+/// the core runtime and an optional host capability crate). Reinstalling the
+/// same entries is idempotent; redefining an existing name panics.
+pub fn install_builtin_manifest(entries: &'static [&'static BuiltinManifestEntry]) {
+    let mut manifest = installed().write().expect("builtin manifest lock poisoned");
+    for entry in entries {
+        if let Some(previous) = manifest.insert(entry.name, entry) {
+            assert!(
+                std::ptr::eq(previous, *entry),
+                "builtin manifest name `{}` registered by multiple contracts",
+                entry.name
+            );
+        }
     }
 }
 
-/// Reset the installed slice — only callable from tests (`#[cfg(test)]`
-/// guarded). Avoids leaking state across in-process unit tests that need
-/// to swap the installed slice. **Not** for production use.
+/// Test-only one-shot manifest install.
 #[doc(hidden)]
-pub fn _test_only_reinstall(sigs: &'static [&'static BuiltinSignature]) {
-    // OnceLock has no public reset, but we can't avoid OnceLock semantics
-    // here. Tests that need to reinstall should call this exactly once
-    // before any other test calls `install_builtin_signatures`.
-    let _ = INSTALLED.set(sigs);
+pub fn _test_only_reinstall(entries: &'static [&'static BuiltinManifestEntry]) {
+    install_builtin_manifest(entries);
 }
 
-/// Read the installed signature slice. Returns an empty slice before the
-/// first call to [`install_builtin_signatures`] (e.g. in pure-parser unit
-/// tests that don't need a registry).
-pub fn installed_signatures() -> &'static [&'static BuiltinSignature] {
-    INSTALLED.get().copied().unwrap_or(&[])
+/// Read the installed manifest.
+pub fn installed_manifest() -> Vec<&'static BuiltinManifestEntry> {
+    installed()
+        .read()
+        .expect("builtin manifest lock poisoned")
+        .values()
+        .copied()
+        .collect()
+}
+
+/// Resolve one installed manifest entry.
+pub fn builtin_entry(name: &str) -> Option<&'static BuiltinManifestEntry> {
+    installed_manifest()
+        .iter()
+        .copied()
+        .find(|entry| entry.name == name)
+}
+
+/// Resolve the typed contract for one installed source name.
+pub fn builtin_contract(name: &str) -> Option<&'static BuiltinContract> {
+    builtin_entry(name).map(|entry| &entry.contract)
 }
 
 /// True when the registry has been populated. Useful for guards in parser
 /// code that wants to assert it's running in a configured driver context.
 pub fn is_installed() -> bool {
-    INSTALLED.get().is_some()
+    !installed()
+        .read()
+        .expect("builtin manifest lock poisoned")
+        .is_empty()
 }

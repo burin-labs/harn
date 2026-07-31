@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn keep<T>(a: T, b: T) -> T {
     return a
   }
@@ -6,5 +6,5 @@ pipeline test(task) {
   // matching heterogeneous list-literal inference; the call is legal and
   // the value is usable as either member after narrowing.
   const joined = keep(1, "x")
-  log(type_of(joined))
+  harness.stdio.log(type_of(joined))
 }

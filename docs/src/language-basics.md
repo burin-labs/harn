@@ -9,12 +9,12 @@ runtime wraps it in an implicit pipeline automatically:
 
 ```harn
 const x = 1 + 2
-log(x)
+harness.stdio.log(x)
 
 fn double(n) {
   return n * 2
 }
-log(double(5))
+harness.stdio.log(double(5))
 ```
 
 This is convenient for scripts, experiments, and small programs.
@@ -25,12 +25,12 @@ For larger programs, organize code into named pipelines. The runtime
 executes the pipeline named `default`, or the first one declared.
 
 ```harn
-pipeline default(task) {
-  log("Hello from the default pipeline")
+pipeline default(harness: Harness, task) {
+  harness.stdio.log("Hello from the default pipeline")
 }
 
-pipeline other(task) {
-  log("This only runs if called or if there's no default")
+pipeline other(harness: Harness, task) {
+  harness.stdio.log("This only runs if called or if there's no default")
 }
 ```
 
@@ -86,10 +86,10 @@ const status = "outer"
 
 if true {
   const status = "inner"
-  log(status)  // inner
+  harness.stdio.log(status)  // inner
 }
 
-log(status)    // outer
+harness.stdio.log(status)    // outer
 ```
 
 If you want to update an outer binding from inside a block, declare it with
@@ -229,8 +229,8 @@ These values are falsy: `false`, `nil`, `0`, `0.0`, `""`, `[]`, `{}`. Everything
 
 ```harn
 const name = "world"
-log("Hello, ${name}!")
-log("2 + 2 = ${2 + 2}")
+harness.stdio.log("Hello, ${name}!")
+harness.stdio.log("2 + 2 = ${2 + 2}")
 ```
 
 Any expression works inside `${}`.
@@ -327,13 +327,13 @@ nil instead of erroring when the receiver is nil:
 
 ```harn
 const user = nil
-log(user?.name)           // nil (no error)
-log(user?.greet("hi"))    // nil (method not called)
-log(user?.["name"])       // nil (subscript not evaluated)
+harness.stdio.log(user?.name)           // nil (no error)
+harness.stdio.log(user?.greet("hi"))    // nil (method not called)
+harness.stdio.log(user?.["name"])       // nil (subscript not evaluated)
 
 const d = {name: "Alice"}
-log(d?.name)              // Alice
-log(d?.["name"])          // Alice
+harness.stdio.log(d?.name)              // Alice
+harness.stdio.log(d?.["name"])          // Alice
 ```
 
 Chains propagate nil: `a?.b?.[0]?.c` returns nil if any step is nil.
@@ -344,14 +344,14 @@ Extract sublists or substrings using slice syntax:
 
 ```harn
 const items = [10, 20, 30, 40, 50]
-log(items[1:3])   // [20, 30]
-log(items[:2])    // [10, 20]
-log(items[3:])    // [40, 50]
-log(items[-2:])   // [40, 50]
+harness.stdio.log(items[1:3])   // [20, 30]
+harness.stdio.log(items[:2])    // [10, 20]
+harness.stdio.log(items[3:])    // [40, 50]
+harness.stdio.log(items[-2:])   // [40, 50]
 
 const s = "hello world"
-log(s[0:5])       // hello
-log(s[-5:])       // world
+harness.stdio.log(s[0:5])       // hello
+harness.stdio.log(s[-5:])       // world
 ```
 
 Negative indices count from the end. Omit start for 0, omit end for
@@ -381,8 +381,8 @@ fn compute_zero(x) {
   return Ok(result + 10)
 }
 
-log(compute(20))       // Result.Ok(20)
-log(compute_zero(20))  // Result.Err(division by zero)
+harness.stdio.log(compute(20))       // Result.Ok(20)
+harness.stdio.log(compute_zero(20))  // Result.Err(division by zero)
 ```
 
 Multiple `?` calls can be chained in a single function to build
@@ -394,22 +394,22 @@ Test whether a value is contained in a collection:
 
 ```harn
 // Lists
-log(3 in [1, 2, 3])          // true
-log(6 not in [1, 2, 3])      // true
+harness.stdio.log(3 in [1, 2, 3])          // true
+harness.stdio.log(6 not in [1, 2, 3])      // true
 
 // Strings (substring containment)
-log("world" in "hello world") // true
-log("xyz" not in "hello")     // true
+harness.stdio.log("world" in "hello world") // true
+harness.stdio.log("xyz" not in "hello")     // true
 
 // Dicts (key membership)
 const data = {name: "Alice", age: 30}
-log("name" in data)           // true
-log("email" not in data)      // true
+harness.stdio.log("name" in data)           // true
+harness.stdio.log("email" not in data)      // true
 
 // Sets
 const s = set(1, 2, 3)
-log(2 in s)                   // true
-log(5 not in s)               // true
+harness.stdio.log(2 in s)                   // true
+harness.stdio.log(5 not in s)               // true
 ```
 
 ## Control flow
@@ -418,11 +418,11 @@ log(5 not in s)               // true
 
 ```harn
 if score > 90 {
-  log("A")
+  harness.stdio.log("A")
 } else if score > 80 {
-  log("B")
+  harness.stdio.log("B")
 } else {
-  log("C")
+  harness.stdio.log("C")
 }
 ```
 
@@ -432,12 +432,12 @@ Can be used as an expression: `let grade = if score > 90 { "A" } else { "B" }`
 
 ```harn
 for item in [1, 2, 3] {
-  log(item)
+  harness.stdio.log(item)
 }
 
 // Dict iteration yields {key, value} entries sorted by key
 for entry in {a: 1, b: 2} {
-  log("${entry.key}: ${entry.value}")
+  harness.stdio.log("${entry.key}: ${entry.value}")
 }
 ```
 
@@ -446,7 +446,7 @@ for entry in {a: 1, b: 2} {
 ```harn
 let i = 0
 while i < 10 {
-  log(i)
+  harness.stdio.log(i)
   i = i + 1
 }
 ```
@@ -457,8 +457,8 @@ Safety limit of 10,000 iterations.
 
 ```harn
 match status {
-  "active" -> { log("Running") }
-  "stopped" -> { log("Halted") }
+  "active" -> { harness.stdio.log("Running") }
+  "stopped" -> { harness.stdio.log("Halted") }
 }
 ```
 
@@ -483,11 +483,11 @@ aloud. Add the trailing `exclusive` modifier when you want the half-open form.
 
 ```harn
 for i in 1 to 5 {              // inclusive: 1, 2, 3, 4, 5
-  log(i)
+  harness.stdio.log(i)
 }
 
 for i in 0 to 3 exclusive {    // half-open: 0, 1, 2
-  log(i)
+  harness.stdio.log(i)
 }
 ```
 
@@ -496,8 +496,8 @@ builtin. `range(n)` is equivalent to `0 to n exclusive`; `range(a, b)` is
 `a to b exclusive`. Both forms always produce half-open integer ranges.
 
 ```harn
-for i in range(5) { log(i) }        // 0, 1, 2, 3, 4
-for i in range(3, 7) { log(i) }      // 3, 4, 5, 6
+for i in range(5) { harness.stdio.log(i) }        // 0, 1, 2, 3, 4
+for i in range(3, 7) { harness.stdio.log(i) }      // 3, 4, 5, 6
 ```
 
 ### Iteration patterns
@@ -508,17 +508,17 @@ read better and avoid off-by-one bugs.
 ```harn
 // enumerate(): yields a list of {index, value} dicts.
 for {index, value} in ["a", "b", "c"].enumerate() {
-  log("${index}: ${value}")
+  harness.stdio.log("${index}: ${value}")
 }
 
 // zip(): yields [a, b] pairs — use list destructuring.
 for [name, score] in names.zip(scores) {
-  log("${name}: ${score}")
+  harness.stdio.log("${name}: ${score}")
 }
 
 // Dict iteration yields {key, value} entries sorted by key.
 for {key, value} in {a: 1, b: 2}.entries() {
-  log("${key} -> ${value}")
+  harness.stdio.log("${key} -> ${value}")
 }
 ```
 
@@ -565,12 +565,12 @@ fn sum(...nums) {
   }
   return total
 }
-log(sum(1, 2, 3))  // 6
+harness.stdio.log(sum(1, 2, 3))  // 6
 
-fn log(level, ...parts) {
-  log("[${level}] ${join(parts, " ")}")
+fn report(level, ...parts) {
+  harness.stdio.log("[${level}] ${join(parts, " ")}")
 }
-log("INFO", "server", "started")  // [INFO] server started
+report("INFO", "server", "started")  // [INFO] server started
 ```
 
 If no extra arguments are provided, the rest parameter is an empty list. A type
@@ -584,8 +584,8 @@ only integer extras and binds `nums` as `list<int>`.
 const square = { x -> x * x }
 const add = { a, b -> a + b }
 
-log(square(4))     // 16
-log(add(2, 3))     // 5
+harness.stdio.log(square(4))     // 16
+harness.stdio.log(add(2, 3))     // 5
 ```
 
 Closures capture the enclosing bindings they reference.
@@ -621,7 +621,7 @@ let n = 0
 const bump = { -> n = n + 1 }
 bump()
 bump()
-log(n)   // 2
+harness.stdio.log(n)   // 2
 ```
 
 Capture shares bindings, not values. Distinct variables stay independent:
@@ -638,7 +638,7 @@ let x: string? = "config"
 const clear = { -> x = nil }
 if x != nil {
   clear()          // x may be nil again after this call
-  log(x?.len())    // x is not narrowed here; use ?. (or x!) rather than x.len()
+  harness.stdio.log(x?.len())    // x is not narrowed here; use ?. (or x!) rather than x.len()
 }
 ```
 
@@ -682,7 +682,7 @@ const first_three_doubled_evens = xs
   .map({ x -> x * 2 })
   .take(3)
   .to_list()
-log(first_three_doubled_evens)  // [4, 8, 12]
+harness.stdio.log(first_three_doubled_evens)  // [4, 8, 12]
 ```
 
 Use `.enumerate()` to get `(index, value)` pairs in a for-loop:
@@ -690,7 +690,7 @@ Use `.enumerate()` to get `(index, value)` pairs in a for-loop:
 ```harn,ignore
 const items = ["a", "b", "c"]
 for (i, x) in items.iter().enumerate() {
-  log("${i}: ${x}")
+  harness.stdio.log("${i}: ${x}")
 }
 ```
 
@@ -699,7 +699,7 @@ them in a for-loop:
 
 ```harn,ignore
 for (k, v) in {a: 1, b: 2}.iter() {
-  log("${k}: ${v}")
+  harness.stdio.log("${k}: ${v}")
 }
 ```
 
@@ -808,11 +808,11 @@ real variable.
 ```harn
 const person = {name: "Alice", age: 30}
 const {name, age} = person
-log(name)  // "Alice"
-log(age)   // 30
+harness.stdio.log(name)  // "Alice"
+harness.stdio.log(age)   // 30
 
 const {name, debug: _} = {name: "Alice", debug: true}
-log(name)  // "Alice"
+harness.stdio.log(name)  // "Alice"
 ```
 
 ### List destructuring
@@ -820,11 +820,11 @@ log(name)  // "Alice"
 ```harn
 const items = [1, 2, 3, 4, 5]
 const [first, ...rest] = items
-log(first)  // 1
-log(rest)   // [2, 3, 4, 5]
+harness.stdio.log(first)  // 1
+harness.stdio.log(rest)   // [2, 3, 4, 5]
 
 const [_, second, _] = [10, 20, 30]
-log(second)  // 20
+harness.stdio.log(second)  // 20
 ```
 
 ### Renaming
@@ -834,7 +834,7 @@ Use `:` to bind a dict field to a different variable name:
 ```harn
 const data = {name: "Alice"}
 const {name: user_name} = data
-log(user_name)  // "Alice"
+harness.stdio.log(user_name)  // "Alice"
 ```
 
 ### Destructuring in for-in loops
@@ -842,11 +842,11 @@ log(user_name)  // "Alice"
 ```harn
 const entries = [{key: "a", value: 1}, {key: "b", value: 2}]
 for {key, value} in entries {
-  log("${key}: ${value}")
+  harness.stdio.log("${key}: ${value}")
 }
 
 for [_, value] in [[0, "x"], [1, "y"]] {
-  log(value)
+  harness.stdio.log(value)
 }
 ```
 
@@ -857,15 +857,15 @@ the value would otherwise be `nil`:
 
 ```harn
 const { name = "anon", role = "user" } = { name: "Alice" }
-log(name)  // Alice
-log(role)  // user
+harness.stdio.log(name)  // Alice
+harness.stdio.log(role)  // user
 
 const [a = 0, b = 0, c = 0] = [1, 2]
-log(c)     // 0
+harness.stdio.log(c)     // 0
 
 // Combine with renaming
 const { name: display = "Unknown" } = {}
-log(display)  // Unknown
+harness.stdio.log(display)  // Unknown
 ```
 
 ### Missing keys and empty rest
@@ -875,10 +875,10 @@ pattern with no remaining items gives an empty collection:
 
 ```harn
 const {name, email} = {name: "Alice"}
-log(email)  // nil
+harness.stdio.log(email)  // nil
 
 const [only, ...rest] = [42]
-log(rest)   // []
+harness.stdio.log(rest)   // []
 ```
 
 ## Collections
@@ -962,7 +962,7 @@ let sum = 0
 for item in set(10, 20, 30) {
   sum = sum + item
 }
-log(sum)  // 60
+harness.stdio.log(sum)  // 60
 ```
 
 Convert a set to a list with `to_list()`:
@@ -986,10 +986,10 @@ enum Status {
 
 const s = Status.Pending("waiting")
 match s.variant {
-  "Pending" -> { log(s.fields[0]) }
-  "Active" -> { log("ok") }
-  "Inactive" -> { log("inactive") }
-  "Failed" -> { log(s.fields[1]) }
+  "Pending" -> { harness.stdio.log(s.fields[0]) }
+  "Active" -> { harness.stdio.log("ok") }
+  "Inactive" -> { harness.stdio.log("inactive") }
+  "Failed" -> { harness.stdio.log(s.fields[1]) }
 }
 ```
 
@@ -1002,7 +1002,7 @@ struct Point {
 }
 
 const p = {x: 10, y: 20}
-log(p.x)
+harness.stdio.log(p.x)
 ```
 
 Structs can also be constructed with the struct name as a constructor,
@@ -1015,7 +1015,7 @@ struct Point {
 }
 
 const p = Point { x: 10, y: 20 }
-log(p.x)  // 10
+harness.stdio.log(p.x)  // 10
 ```
 
 Structs can declare type parameters when fields should stay connected:
@@ -1027,7 +1027,7 @@ struct Pair<A, B> {
 }
 
 const pair: Pair<int, string> = Pair { first: 1, second: "two" }
-log(pair.second)  // two
+harness.stdio.log(pair.second)  // two
 ```
 
 ### Impl blocks
@@ -1050,8 +1050,8 @@ impl Point {
 }
 
 const p = Point { x: 3, y: 4 }
-log(p.distance())       // 5.0
-log(p.translate(10, 20)) // Point({x: 13, y: 24})
+harness.stdio.log(p.distance())       // 5.0
+harness.stdio.log(p.translate(10, 20)) // Point({x: 13, y: 24})
 ```
 
 The first parameter must be `self`, which receives the struct instance.
@@ -1134,7 +1134,7 @@ Now you can write a function that accepts any `Displayable`:
 
 ```harn,ignore
 fn introduce(animal: Displayable) {
-  log("Meet: ${animal.display()}")
+  harness.stdio.log("Meet: ${animal.display()}")
 }
 
 const d = Dog({name: "Rex", breed: "Labrador"})
@@ -1185,7 +1185,7 @@ You can also use interfaces as constraints on generic type parameters:
 
 ```harn
 fn log_item<T>(item: T) where T: Displayable {
-  log("[LOG] ${item.display()}")
+  harness.stdio.log("[LOG] ${item.display()}")
 }
 ```
 
@@ -1232,7 +1232,7 @@ fn add(a, b, c) {
 }
 
 const nums = [1, 2, 3]
-log(add(...nums))  // 6
+harness.stdio.log(add(...nums))  // 6
 ```
 
 You can mix regular arguments and spread arguments:
@@ -1243,7 +1243,7 @@ fn add(a, b, c) {
 }
 
 const rest = [2, 3]
-log(add(1, ...rest))  // 6
+harness.stdio.log(add(1, ...rest))  // 6
 ```
 
 Spread works in method calls too:
@@ -1293,7 +1293,7 @@ const answer = ask {
   system: "You are a helpful assistant.",
   user: "What is 2 + 2?"
 }
-log(answer)
+harness.stdio.log(answer)
 ```
 
 Common fields include `system` (system prompt), `user` (user message),
@@ -1309,15 +1309,15 @@ const d3 = 2m      // 2 minutes
 const d4 = 1h      // 1 hour
 ```
 
-Durations can be passed to `sleep()` and used in `deadline` blocks.
+Durations can be passed to `harness.clock.sleep_ms()` and used in `deadline` blocks.
 
 ## Math constants
 
 `pi` and `e` are global constants (not functions):
 
 ```harn
-log(pi)    // 3.141592653589793
-log(e)     // 2.718281828459045
+harness.stdio.log(pi)    // 3.141592653589793
+harness.stdio.log(e)     // 2.718281828459045
 
 const area = pi * r * r
 ```
@@ -1329,10 +1329,10 @@ The `format` builtin supports both positional `{}` placeholders and named
 
 ```harn
 // Positional
-log(format("Hello, {}!", "world"))
+harness.stdio.log(format("Hello, {}!", "world"))
 
 // Named
-log(format("Hello {name}, you are {age}.", {name: "Alice", age: 30}))
+harness.stdio.log(format("Hello {name}, you are {age}.", {name: "Alice", age: 30}))
 ```
 
 For simple cases, string interpolation with `${}` is usually more
@@ -1340,7 +1340,7 @@ convenient:
 
 ```harn
 const name = "Alice"
-log("Hello, ${name}!")
+harness.stdio.log("Hello, ${name}!")
 ```
 
 ## Comments

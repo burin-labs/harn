@@ -679,7 +679,8 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
     let count = count as i32;
     Some(match op {
         // Push one value.
-        Constant | Nil | True | False | GetVar | GetArgc | GetLocalSlot | Closure | Dup => 1,
+        Constant | Nil | True | False | RootHarness | GetVar | GetArgc | GetLocalSlot | Closure
+        | Dup => 1,
         // Consume one value (into a binding / property / discard). `SetVar`,
         // `SetProperty` and the local-slot stores read their target by name
         // or slot index, so they only pop the value being stored.

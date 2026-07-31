@@ -4,10 +4,10 @@ fn needs_id(x: {id: string, ...rest}) -> string {
   return x.id
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const combined = merge({a: 1, b: 2}, {b: "override", c: true})
-  __io_println(combined.a)
-  __io_println(combined.b)
-  __io_println(combined.c)
-  __io_println(needs_id({id: "u1", name: "Ann", age: 3}))
+  harness.stdio.println(combined.a)
+  harness.stdio.println(combined.b)
+  harness.stdio.println(combined.c)
+  harness.stdio.println(needs_id({id: "u1", name: "Ann", age: 3}))
 }

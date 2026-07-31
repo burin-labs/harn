@@ -10,7 +10,7 @@ Common causes:
 
 - A pipeline that used to depend on wall-clock time or another
   non-deterministic input now produces a different resume payload on
-  replay. Capture the payload itself (or use `mock_time(...)`) so the
+  replay. Capture the payload itself (or use `harness.testing.clock_set(...)`) so the
   replayed runtime can reproduce the original value.
 - The journal entry was edited after the original run completed. The
   signed timestamp on the receipt detects this — verify the receipt's

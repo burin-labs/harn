@@ -53,9 +53,9 @@ pub enum Verdict {
  * @effects: [host]
  * @errors: [runtime]
  * @api_stability: experimental
- * @example: verdict_from_run(harness, run_result)
+ * @example: verdict_from_run(harness.verdict, run_result)
  */
-pub fn verdict_from_run(harness: Harness, run_result, subject = "") -> Verdict {
+pub fn verdict_from_run(verdict: HarnessVerdict, run_result, subject = "") -> Verdict {
   const handle = to_string(run_result?.result_handle ?? "")
   if handle == "" {
     return verdict_indeterminate(
@@ -63,7 +63,7 @@ pub fn verdict_from_run(harness: Harness, run_result, subject = "") -> Verdict {
       "run result carries no result_handle; not a host execution",
     )
   }
-  const r = harness.verdict.issue({result_handle: handle, subject: to_string(subject)})
+  const r = verdict.issue({result_handle: handle, subject: to_string(subject)})
   if r?.outcome == "pass" {
     return Verdict.Pass(r.receipt, to_string(r?.artifact_id ?? handle))
   }
@@ -82,10 +82,10 @@ pub fn verdict_from_run(harness: Harness, run_result, subject = "") -> Verdict {
  * @effects: [host]
  * @errors: [runtime]
  * @api_stability: experimental
- * @example: verdict_from_checkpoint(harness, cp, decided_pass, run_result)
+ * @example: verdict_from_checkpoint(harness.verdict, cp, decided_pass, run_result)
  */
 pub fn verdict_from_checkpoint(
-  harness: Harness,
+  verdict: HarnessVerdict,
   checkpoint,
   decided_pass: bool,
   run_result,
@@ -97,7 +97,7 @@ pub fn verdict_from_checkpoint(
   if !decided_pass {
     return verdict_fail("judge_vetoed", "")
   }
-  return verdict_from_run(harness, run_result, subject)
+  return verdict_from_run(verdict, run_result, subject)
 }
 
 /**
@@ -134,9 +134,9 @@ pub fn verdict_indeterminate(cause: string, detail = "") -> Verdict {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: verdict_all(harness, [v1, v2, v3])
+ * @example: verdict_all(harness.verdict, [v1, v2, v3])
  */
-pub fn verdict_all(harness: Harness, verdicts: list) -> Verdict {
+pub fn verdict_all(verdict: HarnessVerdict, verdicts: list) -> Verdict {
   for v in verdicts {
     match v {
       Fail(_reason, _detail) -> { return v }
@@ -168,7 +168,7 @@ pub fn verdict_all(harness: Harness, verdicts: list) -> Verdict {
       }
     }
   }
-  if !harness.verdict.same_run(proofs) {
+  if !verdict.same_run(proofs) {
     return verdict_indeterminate(
       "cross_run",
       "receipts span multiple runs; cannot combine into one pass",

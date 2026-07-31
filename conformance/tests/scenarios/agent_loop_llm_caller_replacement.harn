@@ -1,8 +1,10 @@
+import { agent_loop } from "std/agent/loop"
+
 /**
  * Custom llm_caller short-circuits llm_call with a hardcoded value;
  * agent_loop returns the caller's `value` payload as the visible text.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const fake_caller = { _call ->
     return {
       ok: true,
@@ -16,7 +18,7 @@ pipeline default() {
       },
     }
   }
-  const result = agent_loop("hi", nil, {provider: "mock", llm_caller: fake_caller})
-  __io_println(result.status)
-  __io_println(result.visible_text)
+  const result = agent_loop(harness, "hi", nil, {provider: "mock", llm_caller: fake_caller})
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.visible_text)
 }

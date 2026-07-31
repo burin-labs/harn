@@ -8,9 +8,8 @@ fn first_group(pattern, text) {
   return matches[0].groups[0]
 }
 
-pipeline test(task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-cli-" + uuid())
-  harness.fs.mkdir(root)
+pipeline test(harness: Harness, task) {
+  const root = harness.fs.mkdtemp("harn-orchestrator-cli-")
   const replay_marker = path_join(root, "replay-ready.marker")
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -20,12 +19,12 @@ pipeline test(task) {
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\nlet replay_marker = \""
       + replay_marker
-      + "\"\n\npub fn on_tick(event: TriggerEvent) {\n  log(event.kind)\n}\n\npub fn flaky_issue(event: TriggerEvent) -> dict {\n  if !file_exists(replay_marker) {\n    throw \"replay-me:\" + event.kind\n  }\n  return {kind: event.kind, event_id: event.id}\n}\n\npub fn always_fail(event: TriggerEvent) -> any {\n  throw \"discard-me:\" + event.kind\n}\n",
+      + "\"\n\npub fn on_tick(harness: Harness, event: TriggerEvent) {\n  harness.stdio.log(event.kind)\n}\n\npub fn flaky_issue(harness: Harness, event: TriggerEvent) -> dict {\n  if !harness.fs.exists(replay_marker) {\n    throw \"replay-me:\" + event.kind\n  }\n  return {kind: event.kind, event_id: event.id}\n}\n\npub fn always_fail(harness: Harness, event: TriggerEvent) -> any {\n  throw \"discard-me:\" + event.kind\n}\n",
   )
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = resolve_harn_bin(harness, repo_root)
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  const start = shell_at(
+  const start = harness.process.shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
       + harn_bin
@@ -44,11 +43,11 @@ pipeline test(task) {
     ),
     "connectors did not activate",
   )
-  const _ = shell("kill -TERM " + pid)
-  assert(wait_for_exit(pid), "orchestrator did not exit")
+  const _ = harness.process.shell("kill -TERM " + pid)
+  assert(wait_for_exit(harness.clock, harness.process, pid), "orchestrator did not exit")
   const state_dir = path_join(root, "state")
   const config_path = path_join(root, "harn.toml")
-  const inspect = exec(
+  const inspect = harness.process.exec(
     harn_bin,
     "orchestrator",
     "inspect",
@@ -57,7 +56,7 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  __io_println(
+  harness.stdio.println(
     inspect.success
       && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active")
       && inspect
@@ -69,7 +68,7 @@ pipeline test(task) {
       .contains("cron bindings=1")
       && inspect.stdout.contains("a2a-push bindings=2"),
   )
-  const inspect_json = exec(
+  const inspect_json = harness.process.exec(
     harn_bin,
     "orchestrator",
     "inspect",
@@ -80,7 +79,7 @@ pipeline test(task) {
     state_dir,
   )
   const inspect_data = json_parse(inspect_json.stdout)
-  __io_println(
+  harness.stdio.println(
     inspect_json.success
       && len(inspect_data.triggers ?? []) == 3
       && inspect_data.snapshot?.status == "stopped"
@@ -91,7 +90,7 @@ pipeline test(task) {
     )
       && contains(json_stringify(inspect_data.activations ?? []), "\"provider\":\"cron\""),
   )
-  const fire_replay = exec(
+  const fire_replay = harness.process.exec(
     harn_bin,
     "orchestrator",
     "fire",
@@ -101,7 +100,7 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  const fire_discard = exec(
+  const fire_discard = harness.process.exec(
     harn_bin,
     "orchestrator",
     "fire",
@@ -113,13 +112,13 @@ pipeline test(task) {
   )
   const replay_event_id = first_group("event_id=(\\S+)", fire_replay.stdout)
   assert(replay_event_id != nil, "missing replay event id")
-  __io_println(
+  harness.stdio.println(
     fire_replay.success
       && fire_replay.stdout.contains("status=dlq")
       && fire_discard.success
       && fire_discard.stdout.contains("status=dlq"),
   )
-  const dlq_list = exec(
+  const dlq_list = harness.process.exec(
     harn_bin,
     "orchestrator",
     "dlq",
@@ -133,14 +132,14 @@ pipeline test(task) {
   const discard_entry_id = first_group("(?m)^- (dlq_\\S+) binding=manual-discard", dlq_list.stdout)
   assert(replay_entry_id != nil, "missing replay dlq entry id")
   assert(discard_entry_id != nil, "missing discard dlq entry id")
-  __io_println(
+  harness.stdio.println(
     dlq_list.success
       && dlq_list.stdout.contains("binding=manual-replay")
       && dlq_list.stdout.contains(
       "binding=manual-discard",
     ),
   )
-  const dlq_list_json = exec(
+  const dlq_list_json = harness.process.exec(
     harn_bin,
     "orchestrator",
     "dlq",
@@ -152,7 +151,7 @@ pipeline test(task) {
     state_dir,
   )
   const dlq_data = json_parse(dlq_list_json.stdout)
-  __io_println(
+  harness.stdio.println(
     dlq_list_json.success
       && dlq_data.pending_entries == 2
       && len(dlq_data.entries ?? []) == 2
@@ -162,7 +161,7 @@ pipeline test(task) {
     )
       && contains(json_stringify(dlq_data.entries ?? []), "\"binding_id\":\"manual-discard\""),
   )
-  const inspect_after = exec(
+  const inspect_after = harness.process.exec(
     harn_bin,
     "orchestrator",
     "inspect",
@@ -171,14 +170,14 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  __io_println(
+  harness.stdio.println(
     inspect_after.success
       && inspect_after.stdout.contains("dispatch_failed trigger=manual-replay")
       && inspect_after.stdout
       .contains("dispatch_failed trigger=manual-discard"),
   )
   harness.fs.write_text(replay_marker, "ready")
-  const dlq_replay = exec(
+  const dlq_replay = harness.process.exec(
     harn_bin,
     "orchestrator",
     "dlq",
@@ -189,8 +188,8 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  __io_println(dlq_replay.success && dlq_replay.stdout.contains("status=dispatched"))
-  const direct_replay = exec(
+  harness.stdio.println(dlq_replay.success && dlq_replay.stdout.contains("status=dispatched"))
+  const direct_replay = harness.process.exec(
     harn_bin,
     "orchestrator",
     "replay",
@@ -202,14 +201,14 @@ pipeline test(task) {
     state_dir,
   )
   const direct_replay_data = json_parse(direct_replay.stdout)
-  __io_println(
+  harness.stdio.println(
     direct_replay.success
       && direct_replay_data.status == "dispatched"
       && direct_replay_data.replay_of_event_id
       == replay_event_id
       && direct_replay_data.binding_id == "manual-replay",
   )
-  const discard = exec(
+  const discard = harness.process.exec(
     harn_bin,
     "orchestrator",
     "dlq",
@@ -220,8 +219,8 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  __io_println(discard.success && discard.stdout.contains("state=discarded"))
-  const dlq_after = exec(
+  harness.stdio.println(discard.success && discard.stdout.contains("state=discarded"))
+  const dlq_after = harness.process.exec(
     harn_bin,
     "orchestrator",
     "dlq",
@@ -231,8 +230,8 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  __io_println(dlq_after.success && dlq_after.stdout.contains("pending_entries=0"))
-  const queue = exec(
+  harness.stdio.println(dlq_after.success && dlq_after.stdout.contains("pending_entries=0"))
+  const queue = harness.process.exec(
     harn_bin,
     "orchestrator",
     "queue",
@@ -241,13 +240,17 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  __io_println(
+  harness.stdio.println(
     queue.success
       && queue.stdout.contains("dispatcher_in_flight=0")
       && queue.stdout.contains(
       "inferred_pending_retries=0",
     ),
   )
-  __io_println(len(regex_captures("inbox_claims_written=([1-9][0-9]*)", queue.stdout)) == 1)
-  __io_println(len(regex_captures("inbox_active_entries=([1-9][0-9]*)", queue.stdout)) == 1)
+  harness.stdio.println(
+    len(regex_captures("inbox_claims_written=([1-9][0-9]*)", queue.stdout)) == 1,
+  )
+  harness.stdio.println(
+    len(regex_captures("inbox_active_entries=([1-9][0-9]*)", queue.stdout)) == 1,
+  )
 }

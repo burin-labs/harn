@@ -22,15 +22,17 @@ fn id_seq(id: string) -> int {
   return to_int(split(id, "_")[1])
 }
 
-pipeline main() {
-  const first = agent_parse_tool_calls(TWO_BLOCKS, sample_registry(), "text")
-  const second = agent_parse_tool_calls(TWO_BLOCKS, sample_registry(), "text")
-  __io_println("calls=${len(first.tool_calls)}")
-  __io_println("prefixed=${starts_with(first.tool_calls[0].id, "tc_")}")
-  __io_println("distinct_in_turn=${first.tool_calls[0].id != first.tool_calls[1].id}")
-  __io_println("consecutive=${id_seq(first.tool_calls[1].id) - id_seq(first.tool_calls[0].id)}")
-  __io_println("reused_across_turns=${first.tool_calls[1].id == second.tool_calls[0].id}")
-  __io_println(
+pipeline main(harness: Harness) {
+  const first = agent_parse_tool_calls(harness.agent, TWO_BLOCKS, sample_registry(), "text")
+  const second = agent_parse_tool_calls(harness.agent, TWO_BLOCKS, sample_registry(), "text")
+  harness.stdio.println("calls=${len(first.tool_calls)}")
+  harness.stdio.println("prefixed=${starts_with(first.tool_calls[0].id, "tc_")}")
+  harness.stdio.println("distinct_in_turn=${first.tool_calls[0].id != first.tool_calls[1].id}")
+  harness.stdio.println(
+    "consecutive=${id_seq(first.tool_calls[1].id) - id_seq(first.tool_calls[0].id)}",
+  )
+  harness.stdio.println("reused_across_turns=${first.tool_calls[1].id == second.tool_calls[0].id}")
+  harness.stdio.println(
     "advances_across_turns=${id_seq(second.tool_calls[0].id) > id_seq(first.tool_calls[1].id)}",
   )
 }

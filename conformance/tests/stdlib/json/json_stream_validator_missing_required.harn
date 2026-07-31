@@ -1,7 +1,8 @@
 import { stream_validator } from "std/json"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const validator = stream_validator(
+    harness.runtime,
     {
       type: "dict",
       required: ["name", "age"],
@@ -9,7 +10,7 @@ pipeline default(task) {
     },
   )
   const status = validator.feed("{\"name\":\"Ada\"}")
-  __io_println(status.variant)
-  __io_println(status.fields[0].path)
-  __io_println(validator.value() == nil)
+  harness.stdio.println(status.variant)
+  harness.stdio.println(status.fields[0].path)
+  harness.stdio.println(validator.value() == nil)
 }

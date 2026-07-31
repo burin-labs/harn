@@ -7,83 +7,92 @@ import { edit_batch_apply } from "std/edit"
  * further changes), per-file failure isolation, and the multi-match
  * selectors — all format-preserving via the shared byte-splice.
  */
-fn write_fixture(dir: string, name: string, body: string) -> string {
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
-  harness.fs.write_text(path, body)
+  fs.write_text(path, body)
   return path
 }
 
-pipeline default() {
-  hostlib_enable("tools:deterministic")
+pipeline default(harness: Harness) {
   const root = path_join(
-    harness.fs.temp_dir(),
-    "harn_batch_apply_" + to_string(harness.random.gen_range(100000, 999999)),
+    harness.fs.workspace_temp_dir(),
+    "harn_batch_apply_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   const query = "(function_item body: (block) @target)"
   // 1) Dry-run is the default: both files are previewed, nothing is written.
-  const a = write_fixture(root, "a.rs", "fn a() {\n    1\n}\n")
-  const b = write_fixture(root, "b.rs", "fn b() {\n    2\n}\n")
-  const preview = edit_batch_apply({paths: [a, b], query: query, replacement: "{ 0 }"})
-  __io_println(preview.ok && preview.result == "ok" && preview.dry_run)
-  __io_println(preview.summary.files_total == 2)
-  __io_println(preview.summary.files_changed == 2)
-  __io_println(preview.summary.files_written == 0)
-  __io_println(preview.files[0].result == "applied" && preview.files[0].changed)
-  __io_println(contains(preview.files[0].preview, "{ 0 }"))
+  const a = write_fixture(harness.fs, root, "a.rs", "fn a() {\n    1\n}\n")
+  const b = write_fixture(harness.fs, root, "b.rs", "fn b() {\n    2\n}\n")
+  const preview = edit_batch_apply(harness.ast, {paths: [a, b], query: query, replacement: "{ 0 }"})
+  harness.stdio.println(preview.ok && preview.result == "ok" && preview.dry_run)
+  harness.stdio.println(preview.summary.files_total == 2)
+  harness.stdio.println(preview.summary.files_changed == 2)
+  harness.stdio.println(preview.summary.files_written == 0)
+  harness.stdio.println(preview.files[0].result == "applied" && preview.files[0].changed)
+  harness.stdio.println(contains(preview.files[0].preview, "{ 0 }"))
   // Format outside the matched span (the `fn a()` header) is preserved.
-  __io_println(contains(preview.files[0].preview, "fn a() {"))
+  harness.stdio.println(contains(preview.files[0].preview, "fn a() {"))
   // Disk is untouched in dry-run.
-  __io_println(harness.fs.read_text(a) == "fn a() {\n    1\n}\n")
+  harness.stdio.println(harness.fs.read_text(a) == "fn a() {\n    1\n}\n")
   // 2) Apply for real: dry_run:false writes every changed file.
   const applied = edit_batch_apply(
+    harness.ast,
     {paths: [a, b], query: query, replacement: "{ 0 }", dry_run: false},
   )
-  __io_println(applied.summary.files_written == 2)
-  __io_println(harness.fs.read_text(a) == "fn a() { 0 }\n")
-  __io_println(harness.fs.read_text(b) == "fn b() { 0 }\n")
+  harness.stdio.println(applied.summary.files_written == 2)
+  harness.stdio.println(harness.fs.read_text(a) == "fn a() { 0 }\n")
+  harness.stdio.println(harness.fs.read_text(b) == "fn b() { 0 }\n")
   // 3) Idempotency (A6 hook): re-running the applied codemod still matches
   //    but produces identical bytes, so nothing changes and nothing writes.
   const again = edit_batch_apply(
+    harness.ast,
     {paths: [a, b], query: query, replacement: "{ 0 }", dry_run: false},
   )
-  __io_println(again.summary.files_changed == 0 && again.summary.files_written == 0)
-  __io_println(again.files[0].result == "applied" && !again.files[0].changed)
-  __io_println(again.files[0].before_sha256 == again.files[0].after_sha256)
+  harness.stdio.println(again.summary.files_changed == 0 && again.summary.files_written == 0)
+  harness.stdio.println(again.files[0].result == "applied" && !again.files[0].changed)
+  harness.stdio.println(again.files[0].before_sha256 == again.files[0].after_sha256)
   // 4) Per-file failure isolation: an unsupported grammar does not abort
   //    the batch; the supported file still applies.
-  const good = write_fixture(root, "good.rs", "fn g() {\n    7\n}\n")
-  const bad = write_fixture(root, "notes.unknownext", "free text\n")
-  const mixed = edit_batch_apply({paths: [good, bad], query: query, replacement: "{ 0 }"})
-  __io_println(!mixed.ok && mixed.summary.files_failed == 1)
-  __io_println(mixed.files[0].result == "applied")
-  __io_println(mixed.files[1].result == "unsupported_language")
+  const good = write_fixture(harness.fs, root, "good.rs", "fn g() {\n    7\n}\n")
+  const bad = write_fixture(harness.fs, root, "notes.unknownext", "free text\n")
+  const mixed = edit_batch_apply(
+    harness.ast,
+    {paths: [good, bad], query: query, replacement: "{ 0 }"},
+  )
+  harness.stdio.println(!mixed.ok && mixed.summary.files_failed == 1)
+  harness.stdio.println(mixed.files[0].result == "applied")
+  harness.stdio.println(mixed.files[1].result == "unsupported_language")
   // 5) No match leaves the file unchanged and fingerprinted identically.
   const none = edit_batch_apply(
+    harness.ast,
     {
       paths: [good],
       query: "(function_item name: (identifier) @name (#eq? @name \"zzz\") body: (block) @target)",
       replacement: "{ 0 }",
     },
   )
-  __io_println(none.files[0].result == "no_match" && !none.files[0].changed)
-  __io_println(none.files[0].before_sha256 == none.files[0].after_sha256)
+  harness.stdio.println(none.files[0].result == "no_match" && !none.files[0].changed)
+  harness.stdio.println(none.files[0].before_sha256 == none.files[0].after_sha256)
   // 6) `select: "unique"` reports `ambiguous` per file when >1 node matches.
-  const multi = write_fixture(root, "multi.rs", "fn a() { 1 }\nfn b() { 2 }\n")
-  const amb = edit_batch_apply({paths: [multi], query: query, replacement: "{ 0 }"})
-  __io_println(amb.files[0].result == "ambiguous" && amb.files[0].match_count == 2)
-  __io_println(!amb.files[0].changed && amb.summary.files_failed == 1)
+  const multi = write_fixture(harness.fs, root, "multi.rs", "fn a() { 1 }\nfn b() { 2 }\n")
+  const amb = edit_batch_apply(harness.ast, {paths: [multi], query: query, replacement: "{ 0 }"})
+  harness.stdio.println(amb.files[0].result == "ambiguous" && amb.files[0].match_count == 2)
+  harness.stdio.println(!amb.files[0].changed && amb.summary.files_failed == 1)
   // 7) `select: "all"` rewrites every match; `fix` aliases `replacement`.
-  const all = edit_batch_apply({paths: [multi], query: query, fix: "{ 0 }", select: "all"})
-  __io_println(all.files[0].result == "applied" && all.files[0].match_count == 2)
-  __io_println(contains(all.files[0].preview, "fn a() { 0 }"))
-  __io_println(contains(all.files[0].preview, "fn b() { 0 }"))
+  const all = edit_batch_apply(
+    harness.ast,
+    {paths: [multi], query: query, fix: "{ 0 }", select: "all"},
+  )
+  harness.stdio.println(all.files[0].result == "applied" && all.files[0].match_count == 2)
+  harness.stdio.println(contains(all.files[0].preview, "fn a() { 0 }"))
+  harness.stdio.println(contains(all.files[0].preview, "fn b() { 0 }"))
   // 8) `validate` (default) rejects an edit that would break the parse and
   //    leaves the file on disk untouched.
-  const vfile = write_fixture(root, "validate.rs", "fn v() { 1 }\n")
+  const vfile = write_fixture(harness.fs, root, "validate.rs", "fn v() { 1 }\n")
   const invalid = edit_batch_apply(
+    harness.ast,
     {paths: [vfile], query: query, replacement: "{ ( }", dry_run: false},
   )
-  __io_println(invalid.files[0].result == "syntax_error")
-  __io_println(harness.fs.read_text(vfile) == "fn v() { 1 }\n")
+  harness.stdio.println(invalid.files[0].result == "syntax_error")
+  harness.stdio.println(harness.fs.read_text(vfile) == "fn v() { 1 }\n")
 }

@@ -59,19 +59,23 @@ than parameterized.
 ```harn,ignore
 import { edit_extract_function } from "std/edit"
 
-pipeline default() {
-  hostlib_enable("tools:deterministic")
+pipeline default(harness: Harness) {
   // def report(base, qty):
   //     subtotal = base * qty   <- line 1
   //     audit(subtotal)         <- line 2
   //     ...
-  const preview = edit_extract_function({
-    path: "billing.py",
-    range: { start_line: 1, end_line: 2 },
-    new_name: "compute_subtotal",
-    dry_run: true,
-  })
-  log(preview.unified_diff[0].diff)
+  const preview = edit_extract_function(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {
+      path: "billing.py",
+      range: { start_line: 1, end_line: 2 },
+      new_name: "compute_subtotal",
+      dry_run: true,
+    },
+  )
+  harness.stdio.log(preview.unified_diff[0].diff)
   // def compute_subtotal(base, qty):     <- `base`/`qty` captured,
   //     subtotal = base * qty            <-  `audit` left as a free call
   //     audit(subtotal)
@@ -90,21 +94,25 @@ and fill the argument at all of its call sites in one atomic transaction.
 ```harn,ignore
 import { edit_add_parameter } from "std/edit"
 
-pipeline default() {
-  hostlib_enable("tools:deterministic")
+pipeline default(harness: Harness) {
   // fn scale(value: i64, factor: i64) -> i64 { ... }
   // called as scale(2, 3), scale(4, 5), scale(6, 7)
-  const result = edit_add_parameter({
-    path: "src/lib.rs",
-    symbol: { name: "scale" },
-    param: "offset: i64",
-    default: "0",            // default_fill: inserted at each call site
-  })
+  const result = edit_add_parameter(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {
+      path: "src/lib.rs",
+      symbol: { name: "scale" },
+      param: "offset: i64",
+      default: "0",            // default_fill: inserted at each call site
+    },
+  )
   if !result.ok {
-    log("refused: " + result.result + " — " + (result.details ?? ""))
+    harness.stdio.log("refused: " + result.result + " — " + (result.details ?? ""))
     return
   }
-  log("updated " + to_string(result.summary.files_touched) + " file(s)")
+  harness.stdio.log("updated " + to_string(result.summary.files_touched) + " file(s)")
   // fn scale(value: i64, factor: i64, offset: i64) -> i64 { ... }
   // scale(2, 3, 0), scale(4, 5, 0), scale(6, 7, 0)
 }
@@ -129,7 +137,7 @@ the `scale` example above:
 
 ```harn,ignore
 const check = run_command({ cmd: ["cargo", "check"], cwd: "." })
-log(check.exit_code == 0 ? "callers still compile" : check.stderr)
+harness.stdio.log(check.exit_code == 0 ? "callers still compile" : check.stderr)
 ```
 
 Supported languages for the signature family and return-type rewrites: rust,

@@ -10,6 +10,6 @@ fn poll(limit: int) -> int {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   poll(3)
 }

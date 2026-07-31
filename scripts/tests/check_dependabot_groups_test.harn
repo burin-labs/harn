@@ -9,7 +9,7 @@ fn valid_groups() {
 }
 
 @test
-pipeline test_actual_dependabot_document(task) {
+pipeline test_actual_dependabot_document(harness: Harness, task) {
   const text = harness.fs.read_text("../../.github/dependabot.yml")
   const groups = cargo_groups_from_text(text)
   assert_eq(cargo_group_errors(groups), [])
@@ -17,7 +17,7 @@ pipeline test_actual_dependabot_document(task) {
 }
 
 @test
-pipeline test_wildcard_positions(task) {
+pipeline test_wildcard_positions(harness: Harness, task) {
   assert_eq(dependabot_pattern_matches("wasmtime*", "wasmtime-wasi"), true)
   assert_eq(dependabot_pattern_matches("*-wasi", "wasmtime-wasi"), true)
   assert_eq(dependabot_pattern_matches("wasm*-wasi", "wasmtime-wasi"), true)
@@ -25,7 +25,7 @@ pipeline test_wildcard_positions(task) {
 }
 
 @test
-pipeline test_overlap_is_rejected(task) {
+pipeline test_overlap_is_rejected(harness: Harness, task) {
   const groups = valid_groups() + {wasi: {patterns: ["*-wasi"]}}
   const errors = cargo_group_errors(groups)
   assert_eq(
@@ -42,7 +42,7 @@ pipeline test_overlap_is_rejected(task) {
 }
 
 @test
-pipeline test_missing_group_is_rejected(task) {
+pipeline test_missing_group_is_rejected(harness: Harness, task) {
   const errors = cargo_group_errors({cranelift: valid_groups().cranelift})
   assert_eq(
     errors.filter({ error -> error.kind == "missing_group" }).map({ error -> error.group }),
@@ -51,7 +51,7 @@ pipeline test_missing_group_is_rejected(task) {
 }
 
 @test
-pipeline test_cargo_catch_all_is_rejected(task) {
+pipeline test_cargo_catch_all_is_rejected(harness: Harness, task) {
   const errors = cargo_group_errors(valid_groups() + {everything: {patterns: ["**"]}})
   assert_eq(
     errors.filter({ error -> error.kind == "catch_all" }),
@@ -60,7 +60,7 @@ pipeline test_cargo_catch_all_is_rejected(task) {
 }
 
 @test
-pipeline test_yaml_boundary_rejects_malformed_groups(task) {
+pipeline test_yaml_boundary_rejects_malformed_groups(harness: Harness, task) {
   const invalid =
     "version: 2\nupdates:\n  - package-ecosystem: cargo\n    groups:\n      wasmtime:\n        patterns: wasmtime*\n"
   assert_eq(

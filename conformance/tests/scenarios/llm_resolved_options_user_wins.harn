@@ -1,5 +1,5 @@
-pipeline test(task) {
-  const r = llm_resolved_options({model: "claude-sonnet-4-20250514", temperature: 0.42})
+pipeline test(harness: Harness, task) {
+  const r = harness.llm.resolved_options({model: "claude-sonnet-4-20250514", temperature: 0.42})
   assert_eq(r.temperature, 0.42)
-  log("llm_resolved_options_user_wins passed")
+  harness.stdio.log("llm_resolved_options_user_wins passed")
 }

@@ -123,7 +123,11 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "tool_synthesize(spec: dict) -> closure", category = "tools")]
+#[harn_builtin(
+    exposure = "harness.tools.synthesize",
+    effects = ["state.write@dynamic"],
+    sig = "tool_synthesize(spec: dict) -> closure", category = "tools"
+)]
 fn tool_synthesize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let spec = synthesize_tool_spec(args.first())?;
     let closure = compile_synthesized_tool_closure(&spec.id)?;
@@ -134,6 +138,8 @@ fn tool_synthesize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.synth_invoke",
+    effects = ["tool.mutate@dynamic", "state.read@arg0"],
     sig = "tool_synth_invoke(id: string, args?: any) -> any",
     category = "tools",
     kind = "async"
@@ -154,7 +160,11 @@ async fn tool_synth_invoke_impl(
     invoke_synthesized_tool(&id, call_args).await
 }
 
-#[harn_builtin(sig = "tool_synthesis_cache() -> list", category = "tools")]
+#[harn_builtin(
+    exposure = "harness.tools.synthesis_cache",
+    effects = ["state.mutate@const=tool-synthesis-cache"],
+    sig = "tool_synthesis_cache() -> list", category = "tools"
+)]
 fn tool_synthesis_cache_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let specs = TOOL_SYNTHESIS_CACHE.with(|cache| {
         cache
@@ -166,13 +176,19 @@ fn tool_synthesis_cache_impl(_args: &[VmValue], _out: &mut String) -> Result<VmV
     Ok(VmValue::List(std::sync::Arc::new(specs)))
 }
 
-#[harn_builtin(sig = "tool_synthesis_clear() -> nil", category = "tools")]
+#[harn_builtin(
+    exposure = "harness.tools.synthesis_clear",
+    effects = ["state.mutate@const=tool-synthesis-cache"],
+    sig = "tool_synthesis_clear() -> nil", category = "tools"
+)]
 fn tool_synthesis_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     clear_tool_synthesis_cache();
     Ok(VmValue::Nil)
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.current_registry",
+    effects = ["state.read@const=current-tool-registry"],
     sig = "__host_current_tool_registry() -> dict | closure | nil",
     category = "tools"
 )]
@@ -183,7 +199,11 @@ fn host_current_tool_registry_impl(
     Ok(current_tool_registry().unwrap_or(VmValue::Nil))
 }
 
-#[harn_builtin(sig = "plan_artifact(...args: any) -> dict", category = "tools")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "plan_artifact(...args: any) -> PlanArtifact", category = "tools"
+)]
 fn plan_artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = args.first().cloned().unwrap_or(VmValue::Nil);
     let json = crate::llm::vm_value_to_json(&input);
@@ -191,7 +211,11 @@ fn plan_artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(json_to_vm_value(&plan))
 }
 
-#[harn_builtin(sig = "plan_entries(...args: any) -> list", category = "tools")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "plan_entries(...args: any) -> list", category = "tools"
+)]
 fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = args.first().cloned().unwrap_or(VmValue::Nil);
     let json = crate::llm::vm_value_to_json(&input);
@@ -199,6 +223,8 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_registry() -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
@@ -213,6 +239,8 @@ fn tool_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_list(registry: {_type: \"tool_registry\", tools: list} | closure) -> list",
     category = "tools"
 )]
@@ -245,6 +273,8 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_find(registry: {_type: \"tool_registry\", tools: list} | closure, name: string) -> dict?",
     category = "tools"
 )]
@@ -280,6 +310,8 @@ fn tool_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_select(registry: {_type: \"tool_registry\", tools: list} | closure, names: list) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
@@ -330,6 +362,8 @@ fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_describe(registry: {_type: \"tool_registry\", tools: list} | closure) -> string",
     category = "tools"
 )]
@@ -380,6 +414,8 @@ fn tool_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.remove",
+    effects = ["state.mutate@arg0"],
     sig = "tool_remove(registry: {_type: \"tool_registry\", tools: list} | closure, name: string) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
@@ -428,6 +464,8 @@ fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_count(registry: {_type: \"tool_registry\", tools: list} | closure) -> int",
     category = "tools"
 )]
@@ -446,6 +484,8 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure, components?: dict) -> dict",
     category = "tools"
 )]
@@ -522,6 +562,8 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 // capability-gated system-prompt fragment, so a tool's instruction and the
 // tool itself share one source of truth and cannot drift.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_define(registry: {_type: \"tool_registry\", tools: list} | closure, name: string, description: string, config: dict) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
@@ -803,7 +845,11 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::dict(new_registry))
 }
 
-#[harn_builtin(sig = "tool_parse_call(text: string?) -> list", category = "tools")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tool_parse_call(text: string?) -> list", category = "tools"
+)]
 fn tool_parse_call_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
 
@@ -827,6 +873,8 @@ fn tool_parse_call_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_format_result(name: string, result: any) -> string",
     category = "tools"
 )]
@@ -850,6 +898,8 @@ fn tool_format_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_prompt(registry: {_type: \"tool_registry\", tools: list} | closure) -> string",
     category = "tools"
 )]
@@ -921,6 +971,8 @@ fn tool_prompt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_surface_validate(surface?: any, input?: any) -> dict",
     category = "tools"
 )]
@@ -937,6 +989,8 @@ fn tool_surface_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "tool_bind(registry?: {_type: \"tool_registry\", tools: list} | closure) -> dict | nil",
     category = "tools"
 )]
@@ -960,7 +1014,11 @@ fn tool_bind_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(registry)
 }
 
-#[harn_builtin(sig = "tool_ref(name: string) -> string", category = "tools")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tool_ref(name: string) -> string", category = "tools"
+)]
 fn tool_ref_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),
@@ -991,7 +1049,11 @@ fn tool_ref_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     ))))
 }
 
-#[harn_builtin(sig = "tool_def(name: string) -> dict", category = "tools")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tool_def(name: string) -> dict", category = "tools"
+)]
 fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),

@@ -133,9 +133,9 @@ fn release_smoke_workflow_errors(workflow, text: string) -> list<string> {
 }
 
 @test
-pipeline test_release_smoke_waits_for_finalized_build_output(task) {
-  const path = path_join(source_dir(), "../../.github/workflows/release-smoke.yml")
+pipeline test_release_smoke_waits_for_finalized_build_output(harness: Harness, task) {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/release-smoke.yml")
   const text = harness.fs.read_text(path)
-  const workflow = read_yaml(path)
+  const workflow = read_yaml(harness.fs, path)
   assert_eq(release_smoke_workflow_errors(workflow, text), [])
 }

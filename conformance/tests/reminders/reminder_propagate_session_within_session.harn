@@ -1,9 +1,9 @@
 import { agent_session_apply_reminder_post_turn } from "std/agent/state"
 
-pipeline main() {
-  const session = agent_session_open("reminder-propagate-session-within-session")
-  agent_session_reset(session)
-  agent_session_inject(
+pipeline main(harness: Harness) {
+  const session = harness.agent.open("reminder-propagate-session-within-session")
+  harness.agent.reset(session)
+  harness.agent.inject(
     session,
     transcript_reminder_event(
       {
@@ -15,17 +15,17 @@ pipeline main() {
       },
     ),
   )
-  const after_inject = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  const after_inject = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   // Advance two turns. Session-scoped reminders survive within the same
   // session as long as their TTL has not lapsed.
-  agent_session_apply_reminder_post_turn(session, 1)
-  agent_session_apply_reminder_post_turn(session, 2)
-  const after_turns = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  __io_println(len(after_inject))
-  __io_println(after_inject[0].reminder.propagate)
-  __io_println(after_inject[0].reminder.ttl_turns)
-  __io_println(len(after_turns))
-  __io_println(after_turns[0].reminder.body)
+  agent_session_apply_reminder_post_turn(harness.agent, session, 1)
+  agent_session_apply_reminder_post_turn(harness.agent, session, 2)
+  const after_turns = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  harness.stdio.println(len(after_inject))
+  harness.stdio.println(after_inject[0].reminder.propagate)
+  harness.stdio.println(after_inject[0].reminder.ttl_turns)
+  harness.stdio.println(len(after_turns))
+  harness.stdio.println(after_turns[0].reminder.body)
   // Two post-turn decrements should leave the TTL at 3.
-  __io_println(after_turns[0].reminder.ttl_turns)
+  harness.stdio.println(after_turns[0].reminder.ttl_turns)
 }

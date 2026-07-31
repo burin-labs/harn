@@ -1,12 +1,9 @@
 //! Agent / orchestration / sub-agent builtin signatures.
 
-use super::shapes::{
-    AGENT_SPAWN_CONFIG, LLM_CALL_RESULT, RESUME_CONDITIONS_OR_NIL, SESSION_SNAPSHOT,
-    SUB_AGENT_OPTIONS, SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
-};
+use super::shapes::{SESSION_SNAPSHOT, TRANSCRIPT};
 use super::{
-    BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DECIMAL, TY_DICT, TY_DICT_OR_NIL,
-    TY_FLOAT, TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
+    BuiltinSignature, Param, Ty, TY_ANY, TY_CLOSURE, TY_DECIMAL, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
+    TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
 /// `list | dict | Transcript | SessionSnapshot` — used for
@@ -24,11 +21,6 @@ const TY_MESSAGES_OR_TRANSCRIPT_OR_NIL: Ty =
 /// `dict | Schema<any>` — schema aliases type-check as `Schema<T>` but
 /// compile down to JSON-Schema dictionaries at runtime.
 const TY_SCHEMA_VALUE: Ty = Ty::Union(&[TY_DICT, Ty::Apply("Schema", &[TY_ANY])]);
-
-/// `dict | list` — return type for `wait_agent`, which yields a single
-/// worker summary for a scalar handle and a list of summaries when
-/// passed a list of handles.
-const TY_DICT_OR_LIST: Ty = Ty::Union(&[TY_DICT, TY_LIST]);
 
 /// `float | nil` — return for `llm_budget_remaining` (nil when no
 /// budget is set).
@@ -78,77 +70,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_MESSAGES_OR_TRANSCRIPT,
     ),
     BuiltinSignature::simple(
-        "agent",
-        &[
-            Param::new("name", TY_STRING),
-            Param::optional("config", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_await_resumption",
-        &[
-            Param::new("reason", TY_ANY),
-            Param::optional("conditions", RESUME_CONDITIONS_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_config",
-        &[Param::new("agent", TY_DICT), Param::new("prompt", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_fanout",
-        &[
-            Param::new("requests", TY_LIST),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "agent_daemon_snapshot",
-        &[
-            Param::new("session", TY_DICT),
-            Param::new("opts", TY_DICT),
-            Param::optional("daemon_state", TY_STRING),
-            Param::optional("iteration", TY_INT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_daemon_step",
-        &[
-            Param::new("session", TY_DICT),
-            Param::new("opts", TY_DICT),
-            Param::new("iteration", TY_INT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_dispatch_tool_batch",
-        &[
-            Param::new("calls", TY_LIST),
-            Param::optional("tools", TY_DICT_OR_NIL),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "agent_dispatch_tool_call",
-        &[
-            Param::new("call", TY_DICT),
-            Param::optional("tools", TY_DICT_OR_NIL),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_chat_loop",
-        &[Param::optional("opts", TY_DICT_OR_NIL)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
         "agent_chat_route_input",
         &[
             Param::new("line", TY_ANY),
@@ -160,57 +81,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "agent_chat_wait_for_user_tools",
         &[Param::optional("registry", TY_DICT_OR_NIL)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_llm_turn",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::optional("system", TY_STRING_OR_NIL),
-            Param::optional("options", TY_DICT),
-        ],
-        LLM_CALL_RESULT,
-    ),
-    BuiltinSignature::simple(
-        "agent_loop",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::optional("system", TY_STRING),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_lifecycle_tools",
-        &[
-            Param::optional("registry", TY_DICT_OR_NIL),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_parse_tool_calls",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("tools", TY_DICT_OR_NIL),
-            Param::optional("tool_format", TY_STRING_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_stop",
-        &[
-            Param::new("worker", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_turn",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::optional("opts", TY_DICT),
-        ],
         TY_DICT,
     ),
     BuiltinSignature::simple(
@@ -227,11 +97,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple("agent_preset_kinds", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "agent_name",
-        &[Param::new("agent", TY_DICT)],
-        TY_STRING_OR_NIL,
-    ),
     BuiltinSignature::simple(
         "agent_typed_output_checkpoint",
         &[
@@ -254,7 +119,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
-    BuiltinSignature::simple("close_agent", &[Param::new("handle", TY_ANY)], TY_DICT),
     BuiltinSignature::simple("conversation", &[], TY_LIST),
     BuiltinSignature::simple(
         "fixture_user",
@@ -264,7 +128,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
-    BuiltinSignature::simple("list_agents", &[], TY_LIST),
     BuiltinSignature::simple(
         "llm_budget",
         &[Param::new("max_cost", Ty::Union(&[TY_FLOAT, TY_INT]))],
@@ -328,34 +191,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
-        "parse_resume_conditions",
-        &[Param::optional("conditions", RESUME_CONDITIONS_OR_NIL)],
-        RESUME_CONDITIONS_OR_NIL,
-    ),
-    BuiltinSignature::simple(
-        "resume_agent",
-        &[
-            Param::new("worker_or_snapshot", TY_ANY),
-            Param::optional("resume_input", TY_ANY),
-            Param::optional("continue_transcript", TY_BOOL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "send_input",
-        &[Param::new("handle", TY_ANY), Param::new("task", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "suspend_agent",
-        &[
-            Param::new("worker", TY_ANY),
-            Param::optional("reason", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
         "scripted_user",
         &[
             Param::new("script", TY_ANY),
@@ -390,27 +225,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "simulated_user_status",
         &[Param::new("answerer", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "spawn_agent",
-        &[Param::new("config", AGENT_SPAWN_CONFIG)],
-        WORKER_SUMMARY,
-    ),
-    BuiltinSignature::simple(
-        "sub_agent_run",
-        &[
-            Param::new("task", TY_STRING),
-            Param::optional("options", SUB_AGENT_OPTIONS),
-        ],
-        Ty::Union(&[SUB_AGENT_RESULT, WORKER_SUMMARY]),
-    ),
-    BuiltinSignature::simple(
-        "sub_agent_request",
-        &[
-            Param::new("task", TY_STRING),
-            Param::optional("options", SUB_AGENT_OPTIONS),
-        ],
         TY_DICT,
     ),
     BuiltinSignature::simple(
@@ -450,14 +264,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_LIST,
     ),
     BuiltinSignature::simple(
-        "transcript_compact",
-        &[
-            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),
-            Param::optional("options", TY_DICT),
-        ],
-        TRANSCRIPT,
-    ),
-    BuiltinSignature::simple(
         "transcript_project",
         &[
             Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),
@@ -468,14 +274,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "transcript_events",
         &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "transcript_events_by_kind",
-        &[
-            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL),
-            Param::new("kind", TY_STRING),
-        ],
         TY_LIST,
     ),
     BuiltinSignature::simple(
@@ -565,27 +363,9 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TRANSCRIPT,
     ),
     BuiltinSignature::simple(
-        "transcript_stats",
-        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "transcript_summarize",
-        &[
-            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),
-            Param::optional("options", TY_DICT),
-        ],
-        TRANSCRIPT,
-    ),
-    BuiltinSignature::simple(
         "transcript_summary",
         &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_STRING_OR_NIL,
-    ),
-    BuiltinSignature::simple(
-        "wait_agent",
-        &[Param::new("handle", TY_ANY)],
-        TY_DICT_OR_LIST,
     ),
     BuiltinSignature::simple(
         "user_tools",
@@ -594,11 +374,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("registry", TY_ANY),
             Param::optional("options", TY_DICT_OR_NIL),
         ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "worker_trigger",
-        &[Param::new("handle", TY_ANY), Param::new("payload", TY_ANY)],
         TY_DICT,
     ),
 ];

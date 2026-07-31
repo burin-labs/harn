@@ -1,6 +1,6 @@
 import { assert_approx, assert_eq, with_llm_script } from "std/testing"
 
-pipeline test_structured_retry_cache_cost() {
+pipeline test_structured_retry_cache_cost(harness: Harness) {
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -8,6 +8,7 @@ pipeline test_structured_retry_cache_cost() {
     properties: {decision: {type: "string", enum: ["merge", "wait"]}},
   }
   with_llm_script(
+    harness.llm,
     [
       {
         text: "{\"decision\":42}",
@@ -27,19 +28,19 @@ pipeline test_structured_retry_cache_cost() {
       },
     ],
     { ->
-      const before = llm_session_cost().total_cost
-      const result = llm_call_structured_result(
+      const before = harness.llm.session_cost().total_cost
+      const result = harness.llm.call_structured_result(
         "Choose an action.",
         schema,
         {provider: "mock", schema_retries: 1, repair: {enabled: false}},
       )
-      const charged = llm_session_cost().total_cost - before
+      const charged = harness.llm.session_cost().total_cost - before
       assert_eq(result.ok, true)
       assert_eq(result.attempts, 2)
       assert_eq(result.usage.cache_read_tokens, 1000)
       assert_approx(result.usage.cost_usd, 0.0039)
       assert_approx(charged, 0.00624)
-      __io_println("ok")
+      harness.stdio.println("ok")
     },
   )
 }

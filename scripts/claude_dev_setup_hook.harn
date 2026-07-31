@@ -47,11 +47,11 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   if parsed?.cwd ?? false {
-    harness.stdio.println(claude_dev_setup_cwd(read_stdin() ?? ""))
+    harness.stdio.println(claude_dev_setup_cwd(harness.stdio.read_stdin() ?? ""))
     return nil
   }
   const context = to_string(parsed?.context ?? "")
@@ -60,5 +60,5 @@ fn main(harness: Harness) {
     return nil
   }
   harness.stdio.eprintln(usage())
-  exit(2)
+  harness.runtime.exit(2)
 }

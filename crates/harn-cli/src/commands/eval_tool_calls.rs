@@ -664,9 +664,9 @@ fn planner_script(
     // form like "CA" for `country_code` or "errors" for the user's
     // explicit plural). See discussion on #1698.
     format!(
-        "pipeline main() {{\n\
+        "pipeline main(harness: Harness) {{\n\
   const tools = json_parse({tools_lit})\n\
-  const response = llm_call(\n\
+  const response = harness.llm.call(\n\
     {prompt_lit},\n\
     nil,\n\
     {{\n\
@@ -677,7 +677,7 @@ fn planner_script(
       max_tokens: {max_tokens}\n\
     }},\n\
   )\n\
-  __io_println(json_stringify(response))\n\
+  harness.stdio.println(json_stringify(response))\n\
 }}\n"
     )
 }
@@ -694,9 +694,9 @@ fn binder_script(
     let provider_lit = json_string_literal(&binder.provider);
     let model_lit = json_string_literal(&binder.model);
     format!(
-        "pipeline main() {{\n\
+        "pipeline main(harness: Harness) {{\n\
   const schema = json_parse({schema_lit})\n\
-  const response = llm_call(\n\
+  const response = harness.llm.call(\n\
     {prompt_lit},\n\
     nil,\n\
     {{\n\
@@ -706,7 +706,7 @@ fn binder_script(
       max_tokens: {max_tokens}\n\
     }},\n\
   )\n\
-  __io_println(json_stringify(response))\n\
+  harness.stdio.println(json_stringify(response))\n\
 }}\n"
     )
 }
@@ -724,9 +724,9 @@ fn predicate_judge_script(
     let provider_lit = json_string_literal(&judge.provider);
     let model_lit = json_string_literal(&judge.model);
     format!(
-        "pipeline main() {{\n\
+        "pipeline main(harness: Harness) {{\n\
   const schema = json_parse({schema_lit})\n\
-  const response = llm_call(\n\
+  const response = harness.llm.call(\n\
     {prompt_lit},\n\
     nil,\n\
     {{\n\
@@ -736,7 +736,7 @@ fn predicate_judge_script(
       max_tokens: {max_tokens}\n\
     }},\n\
   )\n\
-  __io_println(json_stringify(response))\n\
+  harness.stdio.println(json_stringify(response))\n\
 }}\n"
     )
 }

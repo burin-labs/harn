@@ -222,7 +222,7 @@ fn collect_spawn_agent_sites(
 ) {
     if let Node::FunctionCall { name, args, .. } = &node.node {
         if name == "spawn_agent" {
-            if let Some(config) = args.first() {
+            if let Some(config) = args.last() {
                 let start = config.span.start.min(source.len());
                 let end = config.span.end.min(source.len());
                 if end > start {
@@ -355,7 +355,12 @@ fn collect_static_tool_surface_from_node(
                 );
             }
         }
-        Node::FunctionCall { name, args, .. } if name == "render_prompt" => {
+        Node::MethodCall { method, args, .. }
+            if matches!(
+                method.as_str(),
+                "render_prompt" | "render_prompt_with_provenance"
+            ) =>
+        {
             if let Some(target) = args.first().and_then(literal_template_path) {
                 prompt_targets.push(target);
             }
@@ -926,11 +931,16 @@ fn scan_node_preflight(
                 tags: None,
             }),
         },
-        Node::FunctionCall { name, args, .. } if name == "render" || name == "render_prompt" => {
+        Node::MethodCall { method, args, .. }
+            if matches!(
+                method.as_str(),
+                "render_prompt" | "render_prompt_with_provenance"
+            ) =>
+        {
             if let Some(template_path) = args.first().and_then(literal_template_path) {
                 if scan_stdlib_prompt_target(
                     &template_path,
-                    name,
+                    &format!("harness.fs.{method}"),
                     args[0].span,
                     file_path,
                     source,
@@ -999,7 +1009,7 @@ fn scan_node_preflight(
                         source: source.to_string(),
                         span: args[0].span,
                         message: format!(
-                            "preflight: {name} target '{}' does not exist at {}",
+                            "preflight: harness.fs.{method} target '{}' does not exist at {}",
                             template_path,
                             render_candidate_paths(&resolved)
                         ),
@@ -1033,7 +1043,7 @@ fn scan_node_preflight(
             }
         }
         Node::FunctionCall { name, args, .. } if name == "spawn_agent" => {
-            if let Some(agent_config) = args.first() {
+            if let Some(agent_config) = args.last() {
                 scan_spawn_agent_preflight(agent_config, file_path, source, diagnostics);
             }
             scan_children(

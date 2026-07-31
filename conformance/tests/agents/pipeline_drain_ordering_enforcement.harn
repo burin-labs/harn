@@ -18,14 +18,14 @@
  */
 import { lifecycle_audit_log_take } from "std/lifecycle"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       harness.handoff_to("triage-pipeline", {subagent: "worker://triage/42"})
       const ack = harness.acknowledge_trigger("trigger://inbox/event-1")
       harness.stdio.println("ack_status=" + ack.status)
       harness.stdio.println("ack_reason=" + ack.reason)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       return return_value
     },

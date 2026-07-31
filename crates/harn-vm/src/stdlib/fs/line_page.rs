@@ -225,6 +225,8 @@ fn page_value(page: LinePage) -> VmValue {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "read_lines_page_result(path: string, options?: dict) -> Result<{lines: list<{line: int, offset: int, text: string}>, next_offset: int, next_line: int, done: bool}, dict>",
     category = "fs",
     doc = "Read one byte- and record-bounded page of UTF-8 lines with a resumable cursor."

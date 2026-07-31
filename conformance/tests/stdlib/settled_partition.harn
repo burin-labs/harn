@@ -13,7 +13,7 @@ import {
   tally_by,
 } from "std/settled"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const results = [
     Ok({status: "pass"}),
     Err("bad-input"),
@@ -22,25 +22,25 @@ pipeline default() {
     Ok({status: "pass"}),
   ]
   const parts = partition(results)
-  __io_println(parts.ok_count)
-  __io_println(parts.err_count)
-  __io_println(len(parts.oks))
-  __io_println(len(parts.errs))
-  __io_println(len(oks(results)))
-  __io_println(len(errs(results)))
-  __io_println(count_oks(results))
-  __io_println(count_errs(results))
+  harness.stdio.println(parts.ok_count)
+  harness.stdio.println(parts.err_count)
+  harness.stdio.println(len(parts.oks))
+  harness.stdio.println(len(parts.errs))
+  harness.stdio.println(len(oks(results)))
+  harness.stdio.println(len(errs(results)))
+  harness.stdio.println(count_oks(results))
+  harness.stdio.println(count_errs(results))
   const summarized = summary(results)
-  __io_println(summarized.total)
-  __io_println(summarized.any_failed)
-  __io_println(summarized.all_ok)
+  harness.stdio.println(summarized.total)
+  harness.stdio.println(summarized.any_failed)
+  harness.stdio.println(summarized.all_ok)
   const mapped = map_settled(
     results,
     fn(value, idx) { return "ok#" + to_string(idx) + ":" + value.status },
     fn(error, idx) { return "err#" + to_string(idx) + ":" + to_string(error) },
   )
   for row in mapped {
-    __io_println(row)
+    harness.stdio.println(row)
   }
   const by_status = tally_by(
     results,
@@ -51,11 +51,11 @@ pipeline default() {
       return "error"
     },
   )
-  __io_println(by_status?.pass)
-  __io_println(by_status?.fail)
-  __io_println(by_status?.error)
+  harness.stdio.println(by_status?.pass)
+  harness.stdio.println(by_status?.fail)
+  harness.stdio.println(by_status?.error)
   const rows = enumerate_settled(results)
-  __io_println(rows[0].ok)
-  __io_println(rows[1].ok)
-  __io_println(rows[1].error)
+  harness.stdio.println(rows[0].ok)
+  harness.stdio.println(rows[1].ok)
+  harness.stdio.println(rows[1].error)
 }

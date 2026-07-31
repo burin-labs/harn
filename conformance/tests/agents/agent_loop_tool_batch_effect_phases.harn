@@ -8,31 +8,20 @@ import {
   agent_event_report,
   agent_tool_batch_disposition_event_schema,
 } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { with_llm_script } from "std/testing"
 
-const read_calls = atomic(0)
-
-const edit_calls = atomic(0)
-
-const delete_calls = atomic(0)
-
-const search_calls = atomic(0)
-
-const verify_calls = atomic(0)
-
-const done_calls = atomic(0)
-
-fn reset_counts() {
-  atomic_set(read_calls, 0)
-  atomic_set(edit_calls, 0)
-  atomic_set(delete_calls, 0)
-  atomic_set(search_calls, 0)
-  atomic_set(verify_calls, 0)
-  atomic_set(done_calls, 0)
+fn reset_counts(runtime: HarnessRuntime, counters) {
+  runtime.atomic_set(counters.read, 0)
+  runtime.atomic_set(counters.edit, 0)
+  runtime.atomic_set(counters.delete, 0)
+  runtime.atomic_set(counters.search, 0)
+  runtime.atomic_set(counters.verify, 0)
+  runtime.atomic_set(counters.done, 0)
 }
 
-fn phase_tools() {
+fn phase_tools(runtime: HarnessRuntime, counters) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -40,7 +29,7 @@ fn phase_tools() {
     "Observe current state.",
     {
       handler: { _args ->
-        atomic_add(read_calls, 1)
+        runtime.atomic_add(counters.read, 1)
         return "observed"
       },
       parameters: {},
@@ -53,7 +42,7 @@ fn phase_tools() {
     "Apply one atomic edit operation.",
     {
       handler: { args ->
-        atomic_add(edit_calls, 1)
+        runtime.atomic_add(counters.edit, 1)
         if args?.fail ?? false {
           throw "mutation rejected"
         }
@@ -77,7 +66,7 @@ fn phase_tools() {
     "Delete one resource.",
     {
       handler: { _args ->
-        atomic_add(delete_calls, 1)
+        runtime.atomic_add(counters.delete, 1)
         return "deleted"
       },
       parameters: {},
@@ -90,7 +79,7 @@ fn phase_tools() {
     "Observe the post-mutation state.",
     {
       handler: { _args ->
-        atomic_add(search_calls, 1)
+        runtime.atomic_add(counters.search, 1)
         return "searched"
       },
       parameters: {},
@@ -103,7 +92,7 @@ fn phase_tools() {
     "Verify the resulting state.",
     {
       handler: { _args ->
-        atomic_add(verify_calls, 1)
+        runtime.atomic_add(counters.verify, 1)
         return "verified"
       },
       parameters: {},
@@ -116,7 +105,7 @@ fn phase_tools() {
     "Certify terminal completion.",
     {
       handler: { _args ->
-        atomic_add(done_calls, 1)
+        runtime.atomic_add(counters.done, 1)
         return "done"
       },
       parameters: {},
@@ -208,13 +197,15 @@ fn receipt_counts(events) {
   }
 }
 
-fn run_phased() {
-  reset_counts()
-  const session = "effect-phases-" + uuid()
+fn run_phased(harness: Harness, counters) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-" + harness.random.uuid()
   const captured = agent_capture_events(
+    harness.agent,
     session,
     { ->
       return with_llm_script(
+        harness.llm,
         [
           {
             text: "##DONE##",
@@ -244,7 +235,7 @@ fn run_phased() {
         { ->
           const opts: AgentLoopOptions = {
             provider: "mock",
-            tools: phase_tools(),
+            tools: phase_tools(harness.runtime, counters),
             tool_format: "native",
             loop_until_done: true,
             max_iterations: 7,
@@ -252,7 +243,7 @@ fn run_phased() {
             stop_after_successful_tools: ["done"],
             session_id: session,
           }
-          return agent_loop("Observe, mutate, re-observe, verify, then finish.", nil, opts)
+          return agent_loop(harness, "Observe, mutate, re-observe, verify, then finish.", nil, opts)
         },
       )
     },
@@ -264,13 +255,15 @@ fn run_phased() {
   }
 }
 
-fn run_blocked_then_recovered() {
-  reset_counts()
-  const session = "effect-phases-blocked-" + uuid()
+fn run_blocked_then_recovered(harness: Harness, counters) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-blocked-" + harness.random.uuid()
   const captured = agent_capture_events(
+    harness.agent,
     session,
     { ->
       return with_llm_script(
+        harness.llm,
         [
           {
             tool_calls: [
@@ -293,7 +286,7 @@ fn run_blocked_then_recovered() {
         { ->
           const opts: AgentLoopOptions = {
             provider: "mock",
-            tools: phase_tools(),
+            tools: phase_tools(harness.runtime, counters),
             tool_format: "native",
             loop_until_done: true,
             max_iterations: 7,
@@ -301,7 +294,12 @@ fn run_blocked_then_recovered() {
             stop_after_successful_tools: ["done"],
             session_id: session,
           }
-          return agent_loop("Recover from a rejected mutation before verifying.", nil, opts)
+          return agent_loop(
+            harness,
+            "Recover from a rejected mutation before verifying.",
+            nil,
+            opts,
+          )
         },
       )
     },
@@ -313,34 +311,49 @@ fn run_blocked_then_recovered() {
   }
 }
 
-pipeline main() {
-  const phased = run_phased()
+pipeline main(harness: Harness) {
+  const counters = {
+    read: harness.runtime.atomic(0),
+    edit: harness.runtime.atomic(0),
+    delete: harness.runtime.atomic(0),
+    search: harness.runtime.atomic(0),
+    verify: harness.runtime.atomic(0),
+    done: harness.runtime.atomic(0),
+  }
+  const phased = run_phased(harness, counters)
   require phased.result.status == "done", "the phased batch should reach terminal completion"
-  require atomic_get(read_calls) == 1, "the observation call must execute once"
-  require atomic_get(edit_calls) == 1, "one atomic edit call must remain one mutation"
-  require atomic_get(delete_calls) == 1, "the delete call must execute once"
-  require atomic_get(search_calls) == 1, "post-mutation search must execute once"
-  require atomic_get(verify_calls) == 1, "verification must execute once"
-  require atomic_get(done_calls) == 1, "terminal completion must execute once"
+  require harness.runtime.atomic_get(counters.read) == 1, "the observation call must execute once"
+  require harness.runtime.atomic_get(counters.edit) == 1,
+    "one atomic edit call must remain one mutation"
+  require harness.runtime.atomic_get(counters.delete) == 1, "the delete call must execute once"
+  require harness.runtime.atomic_get(counters.search) == 1, "post-mutation search must execute once"
+  require harness.runtime.atomic_get(counters.verify) == 1, "verification must execute once"
+  require harness.runtime.atomic_get(counters.done) == 1, "terminal completion must execute once"
   require phased.receipts.total == 17, "every proposed call needs a disposition receipt"
   require phased.receipts.executed == 6, "each logical call should execute exactly once"
   require phased.receipts.deferred == 11, "later effect phases should be deferred"
   require phased.receipts.skipped == 0, "the successful path should not skip calls"
   require phased.receipts.reproposed == 11,
     "every deferred call should be recognized on re-proposal"
-  __io_println("phased.status=" + phased.result.status)
-  __io_println("phased.executed=" + to_string(phased.receipts.executed))
-  __io_println("phased.deferred=" + to_string(phased.receipts.deferred))
-  __io_println("phased.reproposed=" + to_string(phased.receipts.reproposed))
-  const blocked = run_blocked_then_recovered()
+  harness.stdio.println("phased.status=" + phased.result.status)
+  harness.stdio.println("phased.executed=" + to_string(phased.receipts.executed))
+  harness.stdio.println("phased.deferred=" + to_string(phased.receipts.deferred))
+  harness.stdio.println("phased.reproposed=" + to_string(phased.receipts.reproposed))
+  const blocked = run_blocked_then_recovered(harness, counters)
   require blocked.result.status == "done", "a fresh mutation should recover a blocked batch"
-  require atomic_get(edit_calls) == 2, "the rejected mutation and its recovery should both execute"
-  require atomic_get(verify_calls) == 1,
+  require harness.runtime.atomic_get(counters.edit) == 2,
+    "the rejected mutation and its recovery should both execute"
+  require harness.runtime.atomic_get(counters.verify) == 1,
     "verification re-proposed behind a blocking mutation result must not launch"
-  require atomic_get(done_calls) == 1, "completion must wait for recovered verification"
+  require harness.runtime.atomic_get(counters.done) == 1,
+    "completion must wait for recovered verification"
   require blocked.receipts.skipped == 2, "verify and done should be skipped behind the barrier"
-  __io_println("blocked.status=" + blocked.result.status)
-  __io_println("blocked.skipped=" + to_string(blocked.receipts.skipped))
-  __io_println("blocked.verify_calls=" + to_string(atomic_get(verify_calls)))
-  __io_println("blocked.done_calls=" + to_string(atomic_get(done_calls)))
+  harness.stdio.println("blocked.status=" + blocked.result.status)
+  harness.stdio.println("blocked.skipped=" + to_string(blocked.receipts.skipped))
+  harness.stdio.println(
+    "blocked.counters.verify=" + to_string(harness.runtime.atomic_get(counters.verify)),
+  )
+  harness.stdio.println(
+    "blocked.counters.done=" + to_string(harness.runtime.atomic_get(counters.done)),
+  )
 }

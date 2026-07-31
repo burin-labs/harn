@@ -6,6 +6,6 @@ pub fn should_handle(event: TriggerEvent) -> bool {
 }
 
 /** Log the issue triage handoff for a new GitHub issue. */
-pub fn on_new_issue(event: TriggerEvent) {
-  log("triaging ${event.kind}")
+pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
+  harness.stdio.log("triaging ${event.kind}")
 }

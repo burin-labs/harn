@@ -9,7 +9,7 @@
  */
 fn main(harness: Harness) {
   try {
-    harness.random.gen_u64()
+    harness.random.u64()
   } catch (e) {
   }
 }

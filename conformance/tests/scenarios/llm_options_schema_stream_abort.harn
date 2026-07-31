@@ -1,6 +1,6 @@
 import { llm_call_options } from "std/llm/options"
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   const projected = llm_call_options(
     {
       output: {schema: {type: "object"}, stream_abort: false},
@@ -9,9 +9,9 @@ fn main(_harness: Harness) {
       _internal_only: "keep",
     },
   )
-  __io_println(!projected.output.stream_abort)
-  __io_println(projected.equivalent_failover.max_routes)
-  __io_println(projected.equivalent_failover.on_no_dispatch)
-  __io_println(projected.internal_only == nil)
-  __io_println(projected._internal_only)
+  harness.stdio.println(!projected.output.stream_abort)
+  harness.stdio.println(projected.equivalent_failover.max_routes)
+  harness.stdio.println(projected.equivalent_failover.on_no_dispatch)
+  harness.stdio.println(projected.internal_only == nil)
+  harness.stdio.println(projected._internal_only)
 }

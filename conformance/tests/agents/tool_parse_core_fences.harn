@@ -9,10 +9,12 @@
 // code example, must stay text.
 import { probe, sample_registry } from "_tool_parse_probe"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // Both the fenced call and the bare one dispatch, and the fence markers are
   // stripped out of the visible prose rather than replayed to the user.
   probe(
+    harness.agent,
+    harness.stdio,
     "fenced and bare call both dispatch",
     """Here's how to use it:
 ```python
@@ -25,6 +27,8 @@ edit({ action: "create", path: "bare.go" })
   )
   // A tool name inside an inline code span is a mention, not an invocation.
   probe(
+    harness.agent,
+    harness.stdio,
     "inline code span mention is not a call",
     """I considered `edit({...})` but chose a different approach.
 edit({ action: "create", path: "real.go" })
@@ -36,6 +40,8 @@ edit({ action: "create", path: "real.go" })
   // the loop stalled. The flag resets at each newline — inline code never spans
   // lines — so the call on the following line still parses.
   probe(
+    harness.agent,
+    harness.stdio,
     "unbalanced backtick does not suppress a later call",
     """The file is `src/main.rs (note path).
 edit({ action: "create", path: "real.go" })
@@ -44,12 +50,16 @@ edit({ action: "create", path: "real.go" })
   )
   // A whole response that is one inline-wrapped call.
   probe(
+    harness.agent,
+    harness.stdio,
     "inline wrapped call as the entire response",
     "`edit({ action: \"create\", path: \"wrapped.go\" })`",
     sample_registry(),
   )
   // A whole response that is one fenced call, in three fence spellings.
   probe(
+    harness.agent,
+    harness.stdio,
     "fenced call as the entire response",
     """```typescript
 edit({ action: "create", path: "wrapped.go" })
@@ -58,6 +68,8 @@ edit({ action: "create", path: "wrapped.go" })
   )
   // Gemma's other native form: a ```tool_code fence around a bare call.
   probe(
+    harness.agent,
+    harness.stdio,
     "gemma tool_code fence",
     """```tool_code
 run({ command: "ls" })
@@ -66,6 +78,8 @@ run({ command: "ls" })
   )
   // A fenced batch edit whose `ops` carry a nested heredoc body.
   probe(
+    harness.agent,
+    harness.stdio,
     "fenced edit batch ops with nested heredoc",
     """```tool_code
 edit({ path: "tests/test_service.py", ops: [
@@ -81,6 +95,8 @@ EOF
   )
   // Function calls in a code example that name no registered tool are code.
   probe(
+    harness.agent,
+    harness.stdio,
     "non-tool calls in a code example stay prose",
     """Here is the target test body:
 
@@ -91,6 +107,8 @@ EOF
   )
   // Two calls in one response, in document order.
   probe(
+    harness.agent,
+    harness.stdio,
     "multiple calls in one response",
     """edit({ action: "create", path: "a.go", content: "a" })
 Then we will:
@@ -103,6 +121,8 @@ edit({ action: "patch", path: "b.go" })
   // marker before the cursor and call an odd count "inside a fence", which
   // dropped the call and injected a spurious violation.
   probe(
+    harness.agent,
+    harness.stdio,
     "tool call after an unbalanced fence",
     """<assistant_prose>
 Here is the rough shape:
@@ -117,6 +137,8 @@ edit({ action: "create", path: "a.rs", content: "x" })
   // A protocol tag inside a fence is an example, not a block; the real block
   // after it is the one that counts.
   probe(
+    harness.agent,
+    harness.stdio,
     "user_response inside a markdown fence is an example",
     """```xml
 <user_response>example only</user_response>
@@ -127,6 +149,8 @@ edit({ action: "create", path: "a.rs", content: "x" })
   // Same rule stated inline: a placeholder in backticks is prose about the
   // protocol, not a response block.
   probe(
+    harness.agent,
+    harness.stdio,
     "inline user_response placeholder is stray prose",
     """Use `<user_response>...</user_response>` as the wrapper.
 Actual answer in plain prose.""",

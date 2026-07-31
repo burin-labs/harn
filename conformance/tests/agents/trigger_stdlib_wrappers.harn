@@ -1,21 +1,21 @@
 import "std/triggers"
 
-fn ok_handler(event: TriggerEvent) -> dict {
+fn ok_handler(harness: Harness, event: TriggerEvent) -> dict {
   return {binding: "ok-trigger", kind: event.kind, provider: event.provider}
 }
 
-fn ok_when(event: TriggerEvent) -> bool {
+fn ok_when(_harness: Harness, event: TriggerEvent) -> bool {
   return event.kind == "issue.opened"
 }
 
-fn fail_handler(event: TriggerEvent) -> any {
+fn fail_handler(harness: Harness, event: TriggerEvent) -> any {
   throw "dlq:" + event.kind
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const ok_id = "ok-trigger-" + unique
   const fail_id = "fail-trigger-" + unique
@@ -53,39 +53,43 @@ pipeline test(task) {
     manifest_path: nil,
     package_name: nil,
   }
-  const ok_handle: TriggerHandle = trigger_register(ok_config)
-  const fail_handle: TriggerHandle = trigger_register(fail_config)
-  __io_println(ok_handle.id == ok_id && ok_handle.state == "active")
-  __io_println(fail_handle.id == fail_id && fail_handle.handler_kind == "local")
-  const bindings: list<TriggerBinding> = trigger_list()
+  const ok_handle: TriggerHandle = harness.runtime.trigger_register(ok_config)
+  const fail_handle: TriggerHandle = harness.runtime.trigger_register(fail_config)
+  harness.stdio.println(ok_handle.id == ok_id && ok_handle.state == "active")
+  harness.stdio.println(fail_handle.id == fail_id && fail_handle.handler_kind == "local")
+  const bindings: list<TriggerBinding> = harness.runtime.trigger_list()
   const listed_ok = bindings.find({ binding -> binding.id == ok_handle.id })
-  __io_println(len(bindings) == 2 && listed_ok?.provider == "webhook")
-  __io_println(listed_ok?.metrics?.received == 0)
-  const ok_fire: DispatchHandle = trigger_fire(
+  harness.stdio.println(len(bindings) == 2 && listed_ok?.provider == "webhook")
+  harness.stdio.println(listed_ok?.metrics?.received == 0)
+  const ok_fire: DispatchHandle = harness.runtime.trigger_fire(
     ok_handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-success"}},
   )
-  __io_println(ok_fire.status == "dispatched" && ok_fire.error == nil)
-  __io_println(contains(json_stringify(ok_fire.result ?? {}), "\"kind\":\"issue.opened\""))
-  const fail_fire: DispatchHandle = trigger_fire(
+  harness.stdio.println(ok_fire.status == "dispatched" && ok_fire.error == nil)
+  harness.stdio.println(contains(json_stringify(ok_fire.result ?? {}), "\"kind\":\"issue.opened\""))
+  const fail_fire: DispatchHandle = harness.runtime.trigger_fire(
     fail_handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-dlq"}},
   )
-  __io_println(fail_fire.status == "dlq" && contains(fail_fire.error ?? "", "dlq:issue.opened"))
-  const dlq_before: list<DlqEntry> = trigger_inspect_dlq()
+  harness.stdio.println(
+    fail_fire.status == "dlq" && contains(fail_fire.error ?? "", "dlq:issue.opened"),
+  )
+  const dlq_before: list<DlqEntry> = harness.runtime.trigger_inspect_dlq()
   const current_dlq_before = dlq_before.filter({ entry -> entry.binding_id == fail_handle.id })
-  __io_println(
+  harness.stdio.println(
     len(current_dlq_before) == 1 && current_dlq_before[0]?.event_id == fail_fire.event_id,
   )
-  __io_println(len(current_dlq_before[0]?.retry_history) == 1)
-  __io_println(current_dlq_before[0]?.event?.provider == "webhook")
-  const replay: DispatchHandle = trigger_replay(fail_fire.event_id)
-  __io_println(replay.status == "dlq" && replay.replay_of_event_id == fail_fire.event_id)
-  const dlq_after: list<DlqEntry> = trigger_inspect_dlq()
+  harness.stdio.println(len(current_dlq_before[0]?.retry_history) == 1)
+  harness.stdio.println(current_dlq_before[0]?.event?.provider == "webhook")
+  const replay: DispatchHandle = harness.runtime.trigger_replay(fail_fire.event_id)
+  harness.stdio.println(replay.status == "dlq" && replay.replay_of_event_id == fail_fire.event_id)
+  const dlq_after: list<DlqEntry> = harness.runtime.trigger_inspect_dlq()
   const current_dlq_after = dlq_after.filter({ entry -> entry.binding_id == fail_handle.id })
-  __io_println(len(current_dlq_after) == 1 && len(current_dlq_after[0]?.retry_history) == 2)
-  __io_println(current_dlq_after[0]?.retry_history?.[1]?.status == "replay_dlq")
-  const bindings_after: list<TriggerBinding> = trigger_list()
+  harness.stdio.println(
+    len(current_dlq_after) == 1 && len(current_dlq_after[0]?.retry_history) == 2,
+  )
+  harness.stdio.println(current_dlq_after[0]?.retry_history?.[1]?.status == "replay_dlq")
+  const bindings_after: list<TriggerBinding> = harness.runtime.trigger_list()
   const live_fail = bindings_after.find({ binding -> binding.id == fail_handle.id })
-  __io_println(live_fail?.metrics?.dlq == 2)
+  harness.stdio.println(live_fail?.metrics?.dlq == 2)
 }

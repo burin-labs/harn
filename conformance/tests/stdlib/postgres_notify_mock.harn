@@ -5,8 +5,8 @@ import "std/postgres"
  * The test asserts pg_notify serializes its payload as JSON and binds
  * (channel, payload) into the synthesized SQL `SELECT pg_notify($1, $2)`.
  */
-pipeline default() {
-  const db = pg_mock_pool(
+pipeline default(harness: Harness) {
+  const db = harness.testing.pg_mock_pool(
     [
       {
         sql: "SELECT pg_notify($1, $2)",
@@ -16,11 +16,11 @@ pipeline default() {
       {sql: "SELECT pg_notify($1, $2)", params: ["greetings", "hello"], rows_affected: 0},
     ],
   )
-  __io_println(pg_notify(db, "receipts_updated", {id: "r1"}))
-  __io_println(pg_notify(db, "greetings", "hello"))
+  harness.stdio.println(pg_notify(db, "receipts_updated", {id: "r1"}))
+  harness.stdio.println(pg_notify(db, "greetings", "hello"))
   const calls = pg_mock_calls(db)
-  __io_println(len(calls))
+  harness.stdio.println(len(calls))
   for call in calls {
-    __io_println(call.params[0])
+    harness.stdio.println(call.params[0])
   }
 }

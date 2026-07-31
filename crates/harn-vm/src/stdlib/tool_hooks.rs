@@ -506,7 +506,11 @@ pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "tool_rule(config: dict) -> dict", category = "tool_hooks")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tool_rule(config: dict) -> dict", category = "tool_hooks"
+)]
 fn tool_rule_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = require_dict(
         args.first()
@@ -518,7 +522,11 @@ fn tool_rule_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::dict(rule))
 }
 
-#[harn_builtin(sig = "catalogue(config: dict) -> dict", category = "tool_hooks")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "catalogue(config: dict) -> dict", category = "tool_hooks"
+)]
 fn catalogue_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = require_dict(
         args.first()
@@ -529,7 +537,11 @@ fn catalogue_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     build_catalogue(config)
 }
 
-#[harn_builtin(sig = "tool_hooks_registry() -> dict", category = "tool_hooks")]
+#[harn_builtin(
+    exposure = "harness.tools.hooks_registry",
+    effects = ["state.read@const=tool-hooks"],
+    sig = "tool_hooks_registry() -> dict", category = "tool_hooks"
+)]
 fn tool_hooks_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = crate::value::DictMap::new();
     registry.put_str("_type", REGISTRY_TYPE);
@@ -541,6 +553,8 @@ fn tool_hooks_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmVa
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.hooks_register",
+    effects = ["state.mutate@const=tool-hooks"],
     sig = "tool_hooks_register(registry: dict, catalogue: dict) -> dict",
     category = "tool_hooks"
 )]
@@ -605,6 +619,8 @@ fn tool_hooks_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.hooks_unregister",
+    effects = ["state.mutate@const=tool-hooks"],
     sig = "tool_hooks_unregister(registry: dict, catalogue_id: string) -> dict",
     category = "tool_hooks"
 )]
@@ -653,6 +669,8 @@ fn tool_hooks_unregister_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.hooks_filter",
+    effects = ["state.read@const=tool-hooks"],
     sig = "tool_hooks_filter(registry: dict, stacks?: any) -> dict",
     category = "tool_hooks"
 )]
@@ -720,6 +738,8 @@ fn tool_hooks_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.hooks_list",
+    effects = ["state.read@const=tool-hooks"],
     sig = "tool_hooks_list(registry: dict) -> list",
     category = "tool_hooks"
 )]
@@ -771,6 +791,8 @@ fn tool_hooks_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.hooks_match",
+    effects = ["state.read@const=tool-hooks"],
     sig = "tool_hooks_match(registry: dict, command: string, context?: any) -> list",
     category = "tool_hooks",
     kind = "async"
@@ -862,6 +884,8 @@ async fn tool_hooks_match_impl(
 // `harness` handle or transcript — they can run inside any tool
 // dispatch, including bare unit tests where no agent session exists.
 #[harn_builtin(
+    exposure = "harness.tools.hooks_emit_audit",
+    effects = ["observability.write@dynamic"],
     sig = "tool_hooks_emit_audit(kind: string, payload?: any) -> dict",
     category = "tool_hooks"
 )]
@@ -890,6 +914,8 @@ fn tool_hooks_emit_audit_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.hooks_inject_reminder",
+    effects = ["state.write@dynamic"],
     sig = "tool_hooks_inject_reminder(options: dict) -> dict",
     category = "tool_hooks"
 )]
@@ -979,6 +1005,8 @@ fn tool_hooks_inject_reminder_impl(
 // cache; the Rust helpers stay dumb on purpose so callers can swap
 // hashing / scope strategies without crossing the FFI boundary.
 #[harn_builtin(
+    exposure = "harness.tools.classifier_cache_get",
+    effects = ["state.read@arg0"],
     sig = "__tool_hooks_classifier_cache_get(key: string, now_ms?: int) -> any",
     category = "tool_hooks"
 )]
@@ -1008,6 +1036,8 @@ fn tool_hooks_classifier_cache_get_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.classifier_cache_put",
+    effects = ["state.write@arg0"],
     sig = "__tool_hooks_classifier_cache_put(key: string, value: any, now_ms?: int, ttl_ms?: int) -> nil",
     category = "tool_hooks"
 )]
@@ -1050,6 +1080,8 @@ fn tool_hooks_classifier_cache_put_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.tools.classifier_cache_clear",
+    effects = ["state.mutate@const=tool-hook-classifier-cache"],
     sig = "__tool_hooks_classifier_cache_clear() -> nil",
     category = "tool_hooks"
 )]

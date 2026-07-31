@@ -1,3 +1,5 @@
-pipeline default() {
-  __io_println(render_string("{{ section \"task\" }}x{{ endsection \"examples\" }}", {}))
+pipeline default(harness: Harness) {
+  harness.stdio.println(
+    harness.fs.render_template("{{ section \"task\" }}x{{ endsection \"examples\" }}", {}),
+  )
 }

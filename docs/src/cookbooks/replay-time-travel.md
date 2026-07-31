@@ -99,7 +99,7 @@ return [
 The plan runner installs a copy-on-write filesystem overlay while it
 evaluates the `.harn` file, then runs the returned ops through
 `edit.dry_run`, which opens and immediately discards a throw-away
-**staged-fs** overlay. Accidental `write_file(...)` / hostlib writes in the
+**staged-fs** overlay. Accidental `harness.fs.write_text(...)` / hostlib writes in the
 plan program do not touch the working tree. The human output lists the
 divergent files:
 

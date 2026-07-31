@@ -1,6 +1,6 @@
 # Host tools over the bridge
 
-`host_tool_list()` and `host_tool_call(name, args)` are the host-side
+`harness.tools.list_registered()` and `harness.tools.invoke(name, args)` are the host-side
 mirror of Harn's LLM-facing `tool_search` flow: the script can ask the
 host what tools exist right now, inspect their schemas, and invoke the
 one it actually needs.
@@ -21,9 +21,9 @@ payload.
 ```harn
 import { host_tool_available, host_tool_lookup } from "std/host"
 
-pipeline inspect_readme(task) {
+pipeline inspect_readme(harness: Harness, task) {
   if !host_tool_available("Read") {
-    log("Host does not expose a Read tool in this session")
+    harness.stdio.log("Host does not expose a Read tool in this session")
     return nil
   }
 
@@ -31,17 +31,17 @@ pipeline inspect_readme(task) {
   assert(read_tool != nil, "Read tool metadata should be present")
   assert(read_tool?.deprecated != true, "Read tool is deprecated on this host")
 
-  const result = host_tool_call("Read", {path: "README.md"})
-  log(result)
+  const result = harness.tools.invoke("Read", {path: "README.md"})
+  harness.stdio.log(result)
 }
 ```
 
 What happens at runtime:
 
-1. `host_tool_list()` sends `host/tools/list` to the active bridge host.
+1. `harness.tools.list_registered()` sends `host/tools/list` to the active bridge host.
 2. The host replies with tool descriptors: `name`, `description`,
    `schema`, and `deprecated`.
-3. `host_tool_call("Read", {path: "README.md"})` reuses the bridge's
+3. `harness.tools.invoke("Read", {path: "README.md"})` reuses the bridge's
    existing `builtin_call` path, so the host receives the dynamic tool
    invocation without Harn needing a second bespoke call protocol.
 
@@ -71,8 +71,8 @@ used compatibility field names such as `short_description` or
 
 ## Notes
 
-- Without a bridge host, `host_tool_list()` returns `[]`.
-- `host_tool_call(...)` requires an attached bridge host and throws if
+- Without a bridge host, `harness.tools.list_registered()` returns `[]`.
+- `harness.tools.invoke(...)` requires an attached bridge host and throws if
   none is active.
 - Hosts remain authoritative: if a tool disappears between discovery and
   invocation, the host error is surfaced to the script normally.

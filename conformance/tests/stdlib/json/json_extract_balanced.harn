@@ -1,14 +1,14 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Should extract first balanced JSON object, not span to last }
   const mixed = "The result was {\"a\": 1}. Later text {\"b\": 2}"
   const extracted = json_extract(mixed)
-  __io_println(extracted.a)
+  harness.stdio.println(extracted.a)
   // Nested JSON
   const nested = "Here is {\"outer\": {\"inner\": 42}} done"
   const result = json_extract(nested)
-  __io_println(result.outer.inner)
+  harness.stdio.println(result.outer.inner)
   // Array extraction
   const arr_text = "data: [1, 2, 3] end"
   const arr = json_extract(arr_text)
-  __io_println(arr)
+  harness.stdio.println(arr)
 }

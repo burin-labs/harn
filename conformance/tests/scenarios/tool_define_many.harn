@@ -1,6 +1,6 @@
 import { ToolDefinitionSpec, ToolRegistry, tool_define_many, tool_registry_from } from "std/tools"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const specs: list<ToolDefinitionSpec> = [
     {
       name: "search_code",
@@ -29,5 +29,5 @@ pipeline test(task) {
     [{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}],
   )
   assert(tool_count(fresh) == 1, "tool_registry_from creates a registry")
-  log("tool_define_many tests passed")
+  harness.stdio.log("tool_define_many tests passed")
 }

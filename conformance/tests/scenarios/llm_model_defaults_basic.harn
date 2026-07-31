@@ -1,10 +1,10 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // model_defaults may be populated or empty depending on harn.toml in the
   // surrounding environment. Assert only that the builtin returns a dict
   // rather than coupling the test to specific user/global config.
-  const defaults = llm_model_defaults("claude-sonnet-4-20250514")
+  const defaults = harness.llm.model_defaults("claude-sonnet-4-20250514")
   assert_eq(type_of(defaults), "dict")
-  const unknown = llm_model_defaults("definitely-not-a-real-model-id-zzzzz")
+  const unknown = harness.llm.model_defaults("definitely-not-a-real-model-id-zzzzz")
   assert_eq(type_of(unknown), "dict")
-  log("llm_model_defaults_basic passed")
+  harness.stdio.log("llm_model_defaults_basic passed")
 }

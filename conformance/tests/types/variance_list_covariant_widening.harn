@@ -3,11 +3,13 @@
 // `list<float>` slot hands over an independent copy, so pushing a float into
 // `ys` cannot corrupt the original `list<int>` that `xs` still names. Covariance
 // only breaks under *shared* mutable aliasing, which Harn does not have.
-pipeline default() {
+pipeline default(harness: Harness) {
   let xs: list<int> = [1, 2, 3]
   let ys: list<float> = xs
   ys = ys.appending(3.5)
-  __io_println("xs len " + to_string(len(xs)))
-  __io_println("ys len " + to_string(len(ys)))
-  __io_println("xs still all int: " + to_string((xs[0] ?? 0) + (xs[1] ?? 0) + (xs[2] ?? 0)))
+  harness.stdio.println("xs len " + to_string(len(xs)))
+  harness.stdio.println("ys len " + to_string(len(ys)))
+  harness.stdio.println(
+    "xs still all int: " + to_string((xs[0] ?? 0) + (xs[1] ?? 0) + (xs[2] ?? 0)),
+  )
 }

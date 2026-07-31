@@ -1,4 +1,4 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const template = """
 {{ section "system_framing" }}You are a build agent.{{ endsection }}
 {{ section "task" }}{{ if urgent }}Urgent: {{ end }}Build a tree CLI.{{ endsection }}
@@ -21,19 +21,21 @@ pipeline default() {
       {name: "print_tree", description: "Print the final tree"},
     ],
   }
-  __io_println("--- claude-xml ---")
-  __push_llm_render_context("anthropic", "claude-opus-4-7")
-  __io_println(render_string(template, bindings))
-  __pop_llm_render_context()
-  __io_println("--- gpt-markdown ---")
-  __push_llm_render_context("openai", "gpt-5.4")
-  __io_println(render_string(template, bindings))
-  __io_println(render("fixtures/template/section_partial.prompt", {name: "Alice"}))
-  __pop_llm_render_context()
-  __io_println("--- qwen-text-tools ---")
-  __push_llm_render_context("ollama", "qwen3.6:35b-a3b-coding-nvfp4")
-  __io_println(render_string(template, bindings))
-  __pop_llm_render_context()
-  __io_println("--- generic-fallback ---")
-  __io_println(render_string(template, bindings))
+  harness.stdio.println("--- claude-xml ---")
+  harness.agent.push_llm_render_context("anthropic", "claude-opus-4-7")
+  harness.stdio.println(harness.fs.render_template(template, bindings))
+  harness.agent.pop_llm_render_context()
+  harness.stdio.println("--- gpt-markdown ---")
+  harness.agent.push_llm_render_context("openai", "gpt-5.4")
+  harness.stdio.println(harness.fs.render_template(template, bindings))
+  harness.stdio.println(
+    harness.fs.render_prompt("fixtures/template/section_partial.prompt", {name: "Alice"}),
+  )
+  harness.agent.pop_llm_render_context()
+  harness.stdio.println("--- qwen-text-tools ---")
+  harness.agent.push_llm_render_context("ollama", "qwen3.6:35b-a3b-coding-nvfp4")
+  harness.stdio.println(harness.fs.render_template(template, bindings))
+  harness.agent.pop_llm_render_context()
+  harness.stdio.println("--- generic-fallback ---")
+  harness.stdio.println(harness.fs.render_template(template, bindings))
 }

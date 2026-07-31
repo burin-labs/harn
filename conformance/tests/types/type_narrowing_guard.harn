@@ -1,5 +1,5 @@
 /** Test guard statement narrowing applies to outer scope */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn require_string(x: string?) -> string {
     guard x != nil else {
       return "missing"
@@ -13,8 +13,8 @@ pipeline test(task) {
     }
     return "string: ${x}"
   }
-  log(require_string("hello"))
-  log(require_string(nil))
-  log(require_typeof("yes"))
-  log(require_typeof(42))
+  harness.stdio.log(require_string("hello"))
+  harness.stdio.log(require_string(nil))
+  harness.stdio.log(require_typeof("yes"))
+  harness.stdio.log(require_typeof(42))
 }

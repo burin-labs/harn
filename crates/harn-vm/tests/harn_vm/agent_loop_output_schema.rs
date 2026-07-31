@@ -25,7 +25,8 @@ use harn_vm::value::VmError;
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
+    let chunk = harn_vm::compile_source(&source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -69,9 +70,9 @@ fn out_lines(raw: &str) -> Vec<String> {
 fn off_shape_terminal_answer_reasks_once_and_validates() {
     let raw = run_with_bridge(
         r#"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const session = "output-schema-repair"
-  const repair_counter = shared_cell(
+  const repair_counter = harness.runtime.shared_cell(
     {scope: "task_group", key: "os-repair-" + session, initial: 0},
   )
   const schema = {
@@ -81,8 +82,8 @@ pipeline main(task) {
   }
   const mock_llm = { _call ->
     if _call?.opts?._output_contract_repair == true {
-      const snap = shared_snapshot(repair_counter)
-      shared_cas(repair_counter, snap, snap.value + 1)
+      const snap = harness.runtime.shared_snapshot(repair_counter)
+      harness.runtime.shared_cas(repair_counter, snap, snap.value + 1)
       return {ok: true, value: {text: "{\"answer\": 42}", provider: "mock", model: "mock"}}
     }
     return {
@@ -95,6 +96,7 @@ pipeline main(task) {
     }
   }
   const result = agent_loop(
+    harness,
     "answer",
     nil,
     {
@@ -108,10 +110,10 @@ pipeline main(task) {
       llm_caller: mock_llm,
     },
   )
-  log(result.status)
-  log(shared_get(repair_counter))
-  log(result.output_valid)
-  log(result.output.answer)
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(repair_counter))
+  harness.stdio.log(result.output_valid)
+  harness.stdio.log(result.output.answer)
 }
 "#,
     )
@@ -137,9 +139,9 @@ pipeline main(task) {
 fn already_valid_terminal_answer_fires_no_repair() {
     let raw = run_with_bridge(
         r#"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const session = "output-schema-direct"
-  const repair_counter = shared_cell(
+  const repair_counter = harness.runtime.shared_cell(
     {scope: "task_group", key: "os-direct-" + session, initial: 0},
   )
   const schema = {
@@ -149,8 +151,8 @@ pipeline main(task) {
   }
   const mock_llm = { _call ->
     if _call?.opts?._output_contract_repair == true {
-      const snap = shared_snapshot(repair_counter)
-      shared_cas(repair_counter, snap, snap.value + 1)
+      const snap = harness.runtime.shared_snapshot(repair_counter)
+      harness.runtime.shared_cas(repair_counter, snap, snap.value + 1)
     }
     return {
       ok: true,
@@ -162,6 +164,7 @@ pipeline main(task) {
     }
   }
   const result = agent_loop(
+    harness,
     "answer",
     nil,
     {
@@ -175,10 +178,10 @@ pipeline main(task) {
       llm_caller: mock_llm,
     },
   )
-  log(result.status)
-  log(shared_get(repair_counter))
-  log(result.output_valid)
-  log(result.output.answer)
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(repair_counter))
+  harness.stdio.log(result.output_valid)
+  harness.stdio.log(result.output.answer)
 }
 "#,
     )
@@ -205,7 +208,7 @@ pipeline main(task) {
 fn persistently_off_shape_yields_output_valid_false() {
     let raw = run_with_bridge(
         r#"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const session = "output-schema-fail"
   const schema = {
     type: "object",
@@ -223,6 +226,7 @@ pipeline main(task) {
     }
   }
   const result = agent_loop(
+    harness,
     "answer",
     nil,
     {
@@ -236,8 +240,8 @@ pipeline main(task) {
       llm_caller: mock_llm,
     },
   )
-  log(result.status)
-  log(result.output_valid)
+  harness.stdio.log(result.status)
+  harness.stdio.log(result.output_valid)
 }
 "#,
     )
@@ -256,7 +260,7 @@ pipeline main(task) {
 fn unset_output_leaves_run_unchanged() {
     let raw = run_with_bridge(
         r#"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const session = "output-schema-unset"
   const mock_llm = { _call ->
     return {
@@ -269,6 +273,7 @@ pipeline main(task) {
     }
   }
   const result = agent_loop(
+    harness,
     "answer",
     nil,
     {
@@ -281,9 +286,9 @@ pipeline main(task) {
       llm_caller: mock_llm,
     },
   )
-  log(result.status)
-  log(result?.output_valid == nil)
-  log(result?.output == nil)
+  harness.stdio.log(result.status)
+  harness.stdio.log(result?.output_valid == nil)
+  harness.stdio.log(result?.output == nil)
 }
 "#,
     )
@@ -304,8 +309,8 @@ pipeline main(task) {
 fn tool_calling_still_works_with_output_set() {
     let raw = run_with_bridge(
         r#"
-pipeline main(task) {
-  clear_tool_hooks()
+pipeline main(harness: Harness, task) {
+  harness.tools.clear_hooks()
   const session = "output-schema-tools"
   const registry = tool_registry()
   const tools = tool_define(
@@ -314,7 +319,7 @@ pipeline main(task) {
     "Return a fixed value.",
     {parameters: {}, handler: { _args -> return "looked up" }},
   )
-  const tool_counter = shared_cell(
+  const tool_counter = harness.runtime.shared_cell(
     {scope: "task_group", key: "os-tools-" + session, initial: 0},
   )
   const schema = {
@@ -326,9 +331,9 @@ pipeline main(task) {
     if _call?.opts?._output_contract_repair == true {
       return {ok: true, value: {text: "{\"answer\": 99}", provider: "mock", model: "mock"}}
     }
-    const snap = shared_snapshot(tool_counter)
+    const snap = harness.runtime.shared_snapshot(tool_counter)
     const n = snap.value
-    shared_cas(tool_counter, snap, n + 1)
+    harness.runtime.shared_cas(tool_counter, snap, n + 1)
     if n == 0 {
       return {
         ok: true,
@@ -351,6 +356,7 @@ pipeline main(task) {
     }
   }
   const result = agent_loop(
+    harness,
     "do the work",
     nil,
     {
@@ -365,10 +371,10 @@ pipeline main(task) {
       llm_caller: mock_llm,
     },
   )
-  log(result.status)
-  log(contains(result.tools.successful, "lookup"))
-  log(result.output_valid)
-  log(result.output.answer)
+  harness.stdio.log(result.status)
+  harness.stdio.log(contains(result.tools.successful, "lookup"))
+  harness.stdio.log(result.output_valid)
+  harness.stdio.log(result.output.answer)
 }
 "#,
     )

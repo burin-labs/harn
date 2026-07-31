@@ -9,10 +9,10 @@
  * genuine disk read, and stays gated. Only a path the layer already holds
  * is served from memory.
  */
-pipeline test(task) {
-  const root = source_dir() + "/testbench_fs_overlay_confined.fs-overlay"
+pipeline test(harness: Harness, task) {
+  const root = harness.fs.source_dir() + "/testbench_fs_overlay_confined.fs-overlay"
   const jail = harness.fs.temp_dir()
-  with_execution_policy(
+  harness.runtime.with_execution_policy(
     {
       sandbox_profile: "worktree",
       workspace_roots: [jail],
@@ -22,10 +22,10 @@ pipeline test(task) {
     { ->
       // Absorbed mutation: allowed, and visible in the diff.
       harness.fs.write_text(root + "/new.txt", "alpha")
-      const added = testbench_fs_diff().filter({ e -> e.kind == "added" })
-      __io_println(len(added) == 1)
+      const added = harness.testing.fs_diff().filter({ e -> e.kind == "added" })
+      harness.stdio.println(len(added) == 1)
       // The layer now holds this path, so the read is served from memory.
-      __io_println(harness.fs.read_text(root + "/new.txt") == "alpha")
+      harness.stdio.println(harness.fs.read_text(root + "/new.txt") == "alpha")
       // Pass-through read of a real file outside the jail: still refused.
       const denied = try {
         harness.fs.read_text(root + "/existing.txt")
@@ -33,14 +33,14 @@ pipeline test(task) {
       } catch (e) {
         e
       }
-      __io_println(denied != nil)
+      harness.stdio.println(denied != nil)
     },
   )
   // `exists` routes through the overlay too, so it reports the layer, not
   // the disk — it cannot witness that the write stayed virtual. The
   // disk-level evidence is that this case's sidecar is tracked in git and
   // the checkout stays clean across a run.
-  __io_println(harness.fs.exists(root + "/new.txt"))
+  harness.stdio.println(harness.fs.exists(root + "/new.txt"))
 }
 // An absorbed mutation is allowed under a policy that excludes its root.
 // A read the layer holds is absorbed; a pass-through read is not.

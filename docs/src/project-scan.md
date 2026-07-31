@@ -11,11 +11,11 @@ import "std/project"
 
 ## Fast fingerprint
 
-`project_fingerprint(path?)` returns the fast normalized repo profile that
+`harness.project.fingerprint(path?)` returns the fast normalized repo profile that
 skill-card and persona bootstraps can consume without paying for enrichment:
 
 ```harn
-const fp = project_fingerprint(".")
+const fp = harness.project.fingerprint(".")
 ```
 
 Typical fields:
@@ -50,24 +50,24 @@ Normalization rules:
 - Tags are lowercase and versionless.
 - Singular fields choose the dominant value in a stable precedence order, while
   the plural fields preserve every detected tag.
-- The catalog is local to Harn so `project_fingerprint(...)` remains fast and
+- The catalog is local to Harn so `harness.project.fingerprint(...)` remains fast and
   self-contained; downstream consumers consume the stable output tags rather
   than acting as a runtime dependency for detection.
 
 ## Context profiles
 
-`project_context_profile(path?, options?)` turns project signals into the prompt,
+`harness.project.context_profile(path?, options?)` turns project signals into the prompt,
 skill, and tool preset profile that an agent should activate for the current
 workspace:
 
 ```harn
 import "std/project"
 
-const profile = project_context_profile(".", {include_env_credentials: false})
+const profile = harness.project.context_profile(".", {include_env_credentials: false})
 ```
 
 The resolver composes existing signals instead of indexing code itself. It uses
-the shallow `project_fingerprint(...)` result when a caller has not supplied one,
+the shallow `harness.project.fingerprint(...)` result when a caller has not supplied one,
 reads Git remote configuration directly, and checks credential availability only
 by normalized alias such as `"github"`; secret values are never returned.
 
@@ -119,13 +119,13 @@ be included.
 
 ## What it returns
 
-`project_scan(path, options?)` resolves `path` to a directory and returns a
+`harness.project.scan(path, options?)` resolves `path` to a directory and returns a
 dictionary describing exactly that directory:
 
 ```harn
 import "std/project"
 
-const ev = project_scan(".", {tiers: ["ambient", "config"]})
+const ev = harness.project.scan(".", {tiers: ["ambient", "config"]})
 ```
 
 Typical fields:
@@ -154,22 +154,22 @@ When `tiers` includes `"config"`, the scan also fills in:
   confidence scoring. No config parsing.
 - `config`: deterministic config reads for files already found by `ambient`.
 
-If `tiers` is omitted, `project_scan(...)` defaults to `["ambient"]`.
+If `tiers` is omitted, `harness.project.scan(...)` defaults to `["ambient"]`.
 
 ## Polyglot repos
 
 Single-directory scans stay leaf-scoped on purpose. For polyglot repos and
-monorepos, use `project_scan_tree(...)` and let callers decide how to combine
+monorepos, use `harness.project.scan_tree(...)` and let callers decide how to combine
 sub-project evidence:
 
 ```harn
 import "std/project"
 
-const tree = project_scan_tree(".", {tiers: ["ambient"], depth: 3})
+const tree = harness.project.scan_tree(".", {tiers: ["ambient"], depth: 3})
 // {".": {...}, "frontend": {...}, "backend": {...}}
 ```
 
-`project_scan_tree(...)`:
+`harness.project.scan_tree(...)`:
 
 - always includes `"."` for the requested base directory
 - walks subdirectories deterministically
@@ -186,8 +186,8 @@ You can override those defaults with:
 
 ## Enrichment
 
-`project_enrich(path, options)` layers an L2, caller-owned enrichment pass on
-top of deterministic `project_scan(...)` evidence. The caller supplies the
+`harness.project.enrich(path, options)` layers an L2, caller-owned enrichment pass on
+top of deterministic `harness.project.scan(...)` evidence. The caller supplies the
 prompt template and the output schema; Harn owns prompt rendering, bounded file
 selection, schema-retry plumbing, and content-hash caching.
 
@@ -196,8 +196,8 @@ Typical use:
 ```harn
 import "std/project"
 
-const base = project_scan(".", {tiers: ["ambient", "config"]})
-const enriched = project_enrich(".", {
+const base = harness.project.scan(".", {tiers: ["ambient", "config"]})
+const enriched = harness.project.enrich(".", {
   base_evidence: base,
   prompt: "Project: {{package_name}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON.",
   schema: {
@@ -221,7 +221,7 @@ Bindings available to the template:
 - every top-level key from `base_evidence`
 - `files`: deterministic bounded file context as `{path, content, truncated}`
 
-`project_enrich(...)` now also augments the evidence with a deterministic `ci`
+`harness.project.enrich(...)` now also augments the evidence with a deterministic `ci`
 block unless `include_operator_meta: false` is set in the options. This is
 intended to surface the "operator meta-knowledge" a human reviewer picks up
 quickly in a new repo:
@@ -331,12 +331,12 @@ Notes:
   summary for that scope: `{total_dirs, enriched_dirs, stale_dirs, cache_hits,
   last_refresh, ...}`.
 
-`project_enrich(path, options?)` is the single-directory building block used by
+`harness.project.enrich(path, options?)` is the single-directory building block used by
 deep scan when the `enriched` tier is requested.
 
 ## Catalog
 
-`project_catalog()` returns the authoritative built-in catalog that drives
+`harness.project.catalog()` returns the authoritative built-in catalog that drives
 ambient detection. Each entry includes:
 
 - `id`

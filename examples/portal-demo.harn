@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const root = ".harn-runs"
   const dir = path_join(root, "portal-demo")
   harness.fs.mkdir(root)
@@ -47,12 +47,14 @@ pipeline main() {
     artifact({kind: "workspace_file", title: "beta.md", text: "beta content", relevance: 0.7}),
   ]
   const success = workflow_execute(
+    harness,
     "Assemble the report",
     graph_flow,
     graph_artifacts,
     {max_steps: 8, persist_path: path_join(dir, "portal-success.json")},
   )
   const replayed = workflow_execute(
+    harness,
     "Assemble the report",
     graph_flow,
     graph_artifacts,
@@ -86,13 +88,14 @@ pipeline main() {
     },
   )
   const failed = workflow_execute(
+    harness,
     "Write a note that will fail verification",
     failing_flow,
     [artifact({kind: "summary", text: "seed note", relevance: 0.6})],
     {max_steps: 4, persist_path: path_join(dir, "portal-failed.json")},
   )
-  __io_println(success?.status)
-  __io_println(replayed?.status)
-  __io_println(failed?.status)
-  __io_println(success?.run?.replay_fixture?._type)
+  harness.stdio.println(success?.status)
+  harness.stdio.println(replayed?.status)
+  harness.stdio.println(failed?.status)
+  harness.stdio.println(success?.run?.replay_fixture?._type)
 }

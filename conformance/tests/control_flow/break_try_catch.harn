@@ -1,4 +1,4 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   let found = 0
   for i in [1, 2, 3, 4, 5] {
     try {
@@ -7,8 +7,8 @@ pipeline default(task) {
       }
       found = i
     } catch (e) {
-      log(e)
+      harness.stdio.log(e)
     }
   }
-  log(found)
+  harness.stdio.log(found)
 }

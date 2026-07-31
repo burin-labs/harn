@@ -122,7 +122,7 @@ async fn execute_case_captures_log_output_for_a_passing_case() {
     let result = run_single_case(
         &temp,
         "test_probe",
-        "pipeline test_probe(_task) { log(\"HELLO_PROBE\"); return 1 }",
+        "pipeline test_probe(harness: Harness, _task) { harness.stdio.log(\"HELLO_PROBE\"); return 1 }",
     )
     .await;
 
@@ -142,7 +142,7 @@ async fn execute_case_captures_log_output_for_a_failing_case() {
     let result = run_single_case(
         &temp,
         "test_probe_fail",
-        "pipeline test_probe_fail(_task) { log(\"HELLO_FAIL_PROBE\"); assert(false, \"boom\") }",
+        "pipeline test_probe_fail(harness: Harness, _task) { harness.stdio.log(\"HELLO_FAIL_PROBE\"); assert(false, \"boom\") }",
     )
     .await;
 
@@ -482,8 +482,8 @@ async fn run_tests_uses_file_parent_as_execution_cwd_and_restores_shell_cwd() {
     temp.write(
         "suite/test_cwd.harn",
         r"
-pipeline test_current_dir(task) {
-  assert_eq(cwd(), source_dir())
+pipeline test_current_dir(harness: Harness, task) {
+  assert_eq(harness.fs.cwd(), harness.fs.source_dir())
 }
 ",
     );
@@ -508,16 +508,16 @@ async fn parallel_run_tests_uses_each_file_parent_as_execution_cwd() {
     temp.write(
         "suite/a/test_one.harn",
         r"
-pipeline test_one(task) {
-  assert_eq(cwd(), source_dir())
+pipeline test_one(harness: Harness, task) {
+  assert_eq(harness.fs.cwd(), harness.fs.source_dir())
 }
 ",
     );
     temp.write(
         "suite/b/test_two.harn",
         r"
-pipeline test_two(task) {
-  assert_eq(cwd(), source_dir())
+pipeline test_two(harness: Harness, task) {
+  assert_eq(harness.fs.cwd(), harness.fs.source_dir())
 }
 ",
     );
@@ -589,9 +589,9 @@ async fn user_tests_default_to_memory_event_log() {
     temp.write(
         "suite/test_store.harn",
         r#"
-pipeline test_store_builtin_uses_runner_event_log(task) {
-  store_set("test.key", "value")
-  assert_eq(store_get("test.key"), "value")
+pipeline test_store_builtin_uses_runner_event_log(harness: Harness, task) {
+  harness.runtime.store_set("test.key", "value")
+  assert_eq(harness.runtime.store_get("test.key"), "value")
 }
 "#,
     );
@@ -923,11 +923,11 @@ async fn parallel_pipelines_isolate_egress_policy_and_http_mocks() {
         .map(|index| {
             format!(
                 r#"
-pipeline test_policy_{index}(_task) {{
+pipeline test_policy_{index}(harness: Harness, _task) {{
   const url = "https://case-{index}.example.test/data"
-  egress_policy({{default: "deny", allow: ["case-{index}.example.test"]}})
-  http_mock("GET", url, {{status: 200, body: "case-{index}", headers: {{}}}})
-  const response = http_get(url)
+  harness.net.egress_policy({{default: "deny", allow: ["case-{index}.example.test"]}})
+  harness.testing.http_mock("GET", url, {{status: 200, body: "case-{index}", headers: {{}}}})
+  const response = harness.net.get(url)
   assert_eq(response.body, "case-{index}")
 }}
 "#
@@ -969,12 +969,12 @@ async fn environment_egress_policy_precedes_each_pipeline_policy() {
     temp.write(
         "suite/test_egress_environment.harn",
         r#"
-pipeline test_environment_one(_task) {
-  egress_policy({default: "allow"})
+pipeline test_environment_one(harness: Harness, _task) {
+  harness.net.egress_policy({default: "allow"})
 }
 
-pipeline test_environment_two(_task) {
-  egress_policy({default: "allow"})
+pipeline test_environment_two(harness: Harness, _task) {
+  harness.net.egress_policy({default: "allow"})
 }
 "#,
     );
@@ -1047,13 +1047,13 @@ async fn worker_resets_thread_local_state_between_cases() {
 // The leak probe pins the clock to a future-but-i64-safe value
 // (year ~2128) so a leaked mock is observable. Larger values overflow
 // the nanosecond conversion inside the mock clock.
-pipeline test_a_pins_clock(task) {
-  mock_time(5000000000000)
-  assert_eq(now_ms(), 5000000000000)
+pipeline test_a_pins_clock(harness: Harness, task) {
+  harness.testing.clock_set(5000000000000)
+  assert_eq(harness.clock.now_ms(), 5000000000000)
 }
 
-pipeline test_b_clock_is_fresh(task) {
-  const ms = now_ms()
+pipeline test_b_clock_is_fresh(harness: Harness, task) {
+  const ms = harness.clock.now_ms()
   assert(ms < 5000000000000, "clock mock leaked from previous test")
 }
 "#,
@@ -1092,20 +1092,20 @@ async fn user_tests_isolate_persistent_runtime_state_per_case() {
         temp.write(
             "suite/test_store_isolation.harn",
             r#"
-pipeline test_a_sets_store_value(task) {
-  store_set("test-only-key", "from-a")
-  assert_eq(store_get("test-only-key"), "from-a")
-  metadata_set(".", "test", {value: "from-a"})
-  metadata_save()
-  assert_eq(metadata_get(".", "test").value, "from-a")
-  checkpoint("test-only-key", "from-a")
-  assert_eq(checkpoint_get("test-only-key"), "from-a")
+pipeline test_a_sets_store_value(harness: Harness, task) {
+  harness.runtime.store_set("test-only-key", "from-a")
+  assert_eq(harness.runtime.store_get("test-only-key"), "from-a")
+  harness.project.metadata_set({dir: ".", namespace: "test", value: {value: "from-a"}})
+  harness.project.metadata_save({})
+  assert_eq(harness.project.metadata_get({dir: ".", namespace: "test"}).value, "from-a")
+  harness.runtime.checkpoint("test-only-key", "from-a")
+  assert_eq(harness.runtime.checkpoint_get("test-only-key"), "from-a")
 }
 
-pipeline test_b_has_fresh_store(task) {
-  assert_eq(store_get("test-only-key"), nil)
-  assert_eq(metadata_get(".", "test"), nil)
-  assert_eq(checkpoint_get("test-only-key"), nil)
+pipeline test_b_has_fresh_store(harness: Harness, task) {
+  assert_eq(harness.runtime.store_get("test-only-key"), nil)
+  assert_eq(harness.project.metadata_get({dir: ".", namespace: "test"}), nil)
+  assert_eq(harness.runtime.checkpoint_get("test-only-key"), nil)
 }
 "#,
         );
@@ -1157,15 +1157,15 @@ async fn user_tests_scope_conditional_replacement_locks_to_case_state() {
         r#"
 import { with_temp_dir } from "std/testing"
 
-pipeline test_safe_text_patch_uses_case_state(task) {
-  const _ = hostlib_enable("tools:deterministic")
+pipeline test_safe_text_patch_uses_case_state(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
       const path = root + "/notes.txt"
       harness.fs.write_text(path, "before\n")
-      const applied = hostlib_fs_safe_text_patch({path: path, content: "after\n"})
+      const applied = harness.fs.safe_text_patch({path: path, content: "after\n"})
       assert_eq(applied.result, "applied")
-      const stale = hostlib_fs_safe_text_patch(
+      const stale = harness.fs.safe_text_patch(
         {
           path: path,
           content: "stale\n",

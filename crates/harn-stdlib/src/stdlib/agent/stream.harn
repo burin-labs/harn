@@ -266,13 +266,13 @@ fn __stream_llm_options(options) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stream_call(prompt, system = nil, options = nil) {
+pub fn agent_stream_call(llm: HarnessLlm, prompt, system = nil, options = nil) {
   const cfg = __stream_dict(options)
   const llm_options = __stream_llm_options(cfg)
   let state = agent_private_stream_state(cfg)
   let stop_reason = nil
   const consumed = try {
-    for chunk in llm_stream_call(prompt, system, llm_options) {
+    for chunk in llm.stream_call(prompt, system, llm_options) {
       let delta = chunk?.delta ?? chunk?.visible_delta ?? ""
       let event = agent_private_stream_delta(state, delta, cfg)
       state = event.state

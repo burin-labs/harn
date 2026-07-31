@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use harn_builtin_meta::{BuiltinContract, BuiltinExposure};
+
 /// Runtime kind for a registered VM builtin.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VmBuiltinKind {
@@ -28,6 +30,7 @@ pub struct VmBuiltinMetadata {
     arity: Option<VmBuiltinArity>,
     category: Option<Cow<'static, str>>,
     doc: Option<Cow<'static, str>>,
+    contract: BuiltinContract,
 }
 
 impl VmBuiltinMetadata {
@@ -55,6 +58,7 @@ impl VmBuiltinMetadata {
             arity: None,
             category: None,
             doc: None,
+            contract: BuiltinContract::RUNTIME_INTERNAL,
         }
     }
 
@@ -66,6 +70,7 @@ impl VmBuiltinMetadata {
             arity: None,
             category: None,
             doc: None,
+            contract: BuiltinContract::RUNTIME_INTERNAL,
         }
     }
 
@@ -109,6 +114,16 @@ impl VmBuiltinMetadata {
         self
     }
 
+    pub fn with_contract(mut self, contract: BuiltinContract) -> Self {
+        assert!(
+            contract.is_declared(),
+            "dynamic builtin `{}` must supply a declared contract",
+            self.name
+        );
+        self.contract = contract;
+        self
+    }
+
     pub fn name(&self) -> &str {
         self.name.as_ref()
     }
@@ -131,5 +146,16 @@ impl VmBuiltinMetadata {
 
     pub fn doc(&self) -> Option<&str> {
         self.doc.as_deref()
+    }
+
+    pub const fn contract(&self) -> BuiltinContract {
+        self.contract
+    }
+
+    pub const fn is_source_visible(&self) -> bool {
+        !matches!(
+            self.contract.exposure,
+            BuiltinExposure::RuntimeInternal | BuiltinExposure::Undeclared
+        )
     }
 }

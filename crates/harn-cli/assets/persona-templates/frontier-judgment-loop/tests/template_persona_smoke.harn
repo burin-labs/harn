@@ -1,15 +1,15 @@
 import { template_persona } from "../src/template_persona"
 
-pipeline test_template_persona_smoke(task) {
-  llm_mock_clear()
-  llm_mock(
+pipeline test_template_persona_smoke(harness: Harness, task) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {text: "{\"decision\": \"ship\", \"confidence\": 0.92, \"rationale\": \"fixture is low risk\"}"},
   )
   const fixture = json_parse(harness.fs.read_text("../fixtures/happy_path.json"))
-  const result = template_persona({fixture: fixture})
+  const result = template_persona(harness, {fixture: fixture})
   assert_eq(result.status, "completed")
   assert_eq(result.state.decision, "ship")
   assert_eq(result.receipt.schema, "harn.receipt.v1")
-  __io_println(true)
-  __io_println(result.receipt.schema)
+  harness.stdio.println(true)
+  harness.stdio.println(result.receipt.schema)
 }

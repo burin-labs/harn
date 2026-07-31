@@ -44,6 +44,8 @@ impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
 
 /// Capture agent events emitted while executing a Harn closure.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_agent_capture_events(session_id: string, body: closure) -> dict",
     kind = "async",
     category = "agent.host",

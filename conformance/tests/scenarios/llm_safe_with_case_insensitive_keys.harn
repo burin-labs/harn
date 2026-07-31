@@ -2,15 +2,15 @@
 // keys; idempotent on already-normalized input.
 import { with_case_insensitive_keys } from "std/llm/safe"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const nested = {Outer: {Inner: 1, BLOB: [1, 2, {ChildKey: "v"}]}, Top: "ok"}
   const normalized = with_case_insensitive_keys(nested)
-  __io_println(normalized.outer.inner)
-  __io_println(normalized.outer.blob[2].childkey)
-  __io_println(normalized.top)
+  harness.stdio.println(normalized.outer.inner)
+  harness.stdio.println(normalized.outer.blob[2].childkey)
+  harness.stdio.println(normalized.top)
   const again = with_case_insensitive_keys(normalized)
-  __io_println(again.outer.inner)
-  __io_println(again.outer.blob[2].childkey == "v")
+  harness.stdio.println(again.outer.inner)
+  harness.stdio.println(again.outer.blob[2].childkey == "v")
   // primitives pass through
-  __io_println(with_case_insensitive_keys("plain"))
+  harness.stdio.println(with_case_insensitive_keys("plain"))
 }

@@ -9,19 +9,22 @@ transcripts and session management, context assembly, retries, tool routing, pro
 differences, persistence, replay, and evals.
 
 ```harn
-tool search(pattern: string) -> string {
-  description "Search the project"
-  return exec("rg", "--", pattern).stdout ?? ""
+fn main(harness: Harness) {
+  tool search(pattern: string) -> string {
+    description "Search the project"
+    return harness.process.exec("rg", "--", pattern).stdout ?? ""
+  }
+
+  const result = agent_loop(harness,
+    harness,
+    "Find the failing test and fix it.",
+    "You are a senior engineer.",
+    {loop_until_done: true, tools: search, max_iterations: 24},
+  )
+
+  harness.stdio.log(result.status)        // "done"
+  harness.stdio.log(result.visible_text)  // the agent's final answer
 }
-
-const result = agent_loop(
-  "Find the failing test and fix it.",
-  "You are a senior engineer.",
-  {loop_until_done: true, tools: search, max_iterations: 24},
-)
-
-log(result.status)        // "done"
-log(result.visible_text)  // the agent's final answer
 ```
 
 That loop is provider-agnostic, resumable, replayable, and produces a durable run record without any glue
@@ -128,35 +131,38 @@ wired through the Harn agent runtime.
 Tools are declared with typed parameters and an optional description:
 
 ```harn
-tool read(path: string) -> string {
-  description "Read a file"
-  return harness.fs.read_text(path)
-}
+fn main(harness: Harness) {
+  tool read(path: string) -> string {
+    description "Read a file"
+    return harness.fs.read_text(path)
+  }
 
-tool test(filter: string) -> string {
-  description "Run a targeted cargo test filter"
-  const result = exec("cargo", "test", filter)
-  return (result.stdout ?? "") + (result.stderr ?? "")
-}
+  tool test(filter: string) -> string {
+    description "Run a targeted cargo test filter"
+    const result = harness.process.exec("cargo", "test", filter)
+    return (result.stdout ?? "") + (result.stderr ?? "")
+  }
 
-const result = agent_loop(
-  "Fix the failing test and verify the change.",
-  "You are a senior engineer.",
-  {loop_until_done: true, tools: read, max_iterations: 24},
-)
+  const result = agent_loop(harness,
+    harness,
+    "Fix the failing test and verify the change.",
+    "You are a senior engineer.",
+    {loop_until_done: true, tools: read, max_iterations: 24},
+  )
+}
 ```
 
 For programmatic registration use `tool_define(...)`, which also preserves config keys such as `policy` for
 capability enforcement.
 
-Every turn's `llm_call(...)` can be wrapped with middleware to compose retry / fallback / shadow / budget /
+Every turn's `harness.llm.call(...)` can be wrapped with middleware to compose retry / fallback / shadow / budget /
 cache behavior, without touching the loop:
 
 ```harn
 import {default_llm_caller, with_retry, compose} from "std/llm/handlers"
 
 const caller = compose([with_retry({max_attempts: 4, backoff: "exponential"})])(default_llm_caller())
-agent_loop(task, system, {loop_until_done: true, llm_caller: caller})
+agent_loop(harness, task, system, {loop_until_done: true, llm_caller: caller})
 ```
 
 See [the LLM handlers catalog](docs/src/stdlib/llm-handlers.md) for the full module set (handlers, ensemble,
@@ -177,7 +183,7 @@ your UI/session integration.
 Capabilities are grouped below with pointers to the docs for depth. The full API is in the
 [builtin reference](https://harnlang.com/builtins.html).
 
-- **Agents & workflows** — `agent_loop(...)`, `sub_agent_run(...)`, and typed workflow graphs
+- **Agents & workflows** — `agent_loop(harness, ...)`, `sub_agent_run(...)`, and typed workflow graphs
   (`workflow_graph` / `workflow_execute`) with nodes, edges, validation, parallel map/join stages, retries,
   and resumable execution. Planner-oriented action graphs come from `import "std/agents"`.
 - **Delegated workers** — `spawn_agent` / `send_input` / `resume_agent` / `wait_agent` / `close_agent` with
@@ -193,7 +199,9 @@ Capabilities are grouped below with pointers to the docs for depth. The full API
 - **Providers & protocols** — normalized LLM output (`visible_text`, `tool_calls`, `blocks`, `provider`,
   `stop_reason`, …), composable LLM middleware, model-aware token counting, and remote MCP over stdio/HTTP
   with OAuth. Serve as an ACP backend, or run the A2A orchestrator.
-- **Testing & evals** — typed host and LLM mocking (`host_mock`, `llm_mock`, `import "std/testing"`), plus
+- **Testing & evals** — per-harness capability fixtures
+  (`harness.testing.respond(...)`, `harness.testing.calls()`,
+  `harness.llm.mock_enqueue(...)`, and `import "std/testing"`), plus
   portable eval packs and suites (`eval_pack`, `eval_suite_run`, `harn eval`, `harn test package --evals`)
   with rubric, threshold, timeout-ladder, and longitudinal-ledger grading as first-class runtime data.
 - **Packages & extensibility** — a manifest-backed extension ABI (`[exports]`, `[[package.tools]]`, `[llm]`
@@ -257,8 +265,8 @@ const graph = workflow_graph({
 })
 
 const run = workflow_execute("Refactor the parser error message and verify it.", graph, [], {max_steps: 8})
-log(run.status)
-log(run.path)
+harness.stdio.log(run.status)
+harness.stdio.log(run.path)
 ```
 
 `harn runs view --json <run.path>` gives the stable `harn.run_view.v1` projection, including stage summaries.

@@ -92,6 +92,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(ReminderLifecycle),
         Box::new(ReminderProviderCount),
         Box::new(ReminderRoleHint),
+        Box::new(ApiDesign),
     ];
     // Ids address rules for per-rule config and `disable_rules`, so they
     // must be unique. Checked in debug builds so a colliding id surfaces
@@ -237,6 +238,12 @@ program_rule!(
     "reminder-role-hint-capability",
     ast,
     crate::rules::reminder_role_hint::check_reminder_role_hint_capabilities
+);
+program_rule!(
+    ApiDesign,
+    "capability-attenuation",
+    ast,
+    crate::rules::api_design::check_api_design
 );
 
 program_rule!(

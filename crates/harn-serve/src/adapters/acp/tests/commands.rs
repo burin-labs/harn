@@ -16,10 +16,10 @@ async fn acp_advertises_and_dispatches_slash_commands() {
                 &pipeline_path,
                 "@command(name: \"review\", description: \"Review the diff\", \
                      hint: \"focus area\")\n\
-                     pipeline review_branch(task) {\n  \
-                       __io_println(\"REVIEW:\" + prompt)\n}\n\n\
-                     pipeline default(task) {\n  \
-                       __io_println(\"DEFAULT:\" + prompt)\n}\n",
+                     pipeline review_branch(harness: Harness, task) {\n  \
+                       harness.stdio.println(\"REVIEW:\" + prompt)\n}\n\n\
+                     pipeline default(harness: Harness, task) {\n  \
+                       harness.stdio.println(\"DEFAULT:\" + prompt)\n}\n",
             )
             .expect("write pipeline");
 
@@ -129,8 +129,8 @@ async fn acp_unknown_slash_invocation_falls_through_to_default_pipeline() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"known\", description: \"known\")\n\
-                     pipeline known(task) { __io_println(\"KNOWN\") }\n\n\
-                     pipeline default(task) { __io_println(\"DEFAULT:\" + prompt) }\n",
+                     pipeline known(harness: Harness, task) { harness.stdio.println(\"KNOWN\") }\n\n\
+                     pipeline default(harness: Harness, task) { harness.stdio.println(\"DEFAULT:\" + prompt) }\n",
             )
             .expect("write pipeline");
 
@@ -280,7 +280,7 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"alpha\", description: \"first\")\n\
-                     pipeline alpha(task) { __io_println(\"alpha\") }\n",
+                     pipeline alpha(harness: Harness, task) { harness.stdio.println(\"alpha\") }\n",
             )
             .expect("write initial pipeline");
 
@@ -315,9 +315,9 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"alpha\", description: \"first\")\n\
-                     pipeline alpha(task) { __io_println(\"alpha\") }\n\n\
+                     pipeline alpha(harness: Harness, task) { harness.stdio.println(\"alpha\") }\n\n\
                      @command(name: \"beta\", description: \"second\")\n\
-                     pipeline beta(task) { __io_println(\"beta\") }\n",
+                     pipeline beta(harness: Harness, task) { harness.stdio.println(\"beta\") }\n",
             )
             .expect("rewrite pipeline");
 
@@ -391,21 +391,21 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
 /// Drive an agent loop through a real ACP roundtrip and return the complete
 /// prompt result, including Harn's typed terminal extension.
 async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
-    let (request_tx, mut response_rx, server, session_id) = start_acp_channel_session().await;
-
-    // `agent_loop` requires the LLM/network capability ceiling.
-    // The default `ask` mode clamps to read-only; switch to `code`
-    // (`ActAuto` autonomy tier) so the test can exercise the loop.
-    request_tx
-        .send(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/set_mode",
-            "params": {"sessionId": session_id, "modeId": "code"},
-        }))
-        .expect("send session/set_mode");
-    let _ack = recv_json(&mut response_rx).await;
-    let _notification = recv_json(&mut response_rx).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pipeline_path = dir.path().join("agent-loop.harn");
+    std::fs::write(
+        &pipeline_path,
+        format!(
+            "import {{ agent_loop }} from \"std/agent/loop\"\n\
+             pipeline default(harness: Harness, task) {{\n{prompt_body}\n}}\n"
+        ),
+    )
+    .expect("write agent-loop pipeline");
+    let (request_tx, mut response_rx, server, session_id) = start_acp_code_session_with_config(
+        AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+        serde_json::json!(dir.path()),
+    )
+    .await;
 
     request_tx
         .send(serde_json::json!({
@@ -414,7 +414,7 @@ async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
             "method": "session/prompt",
             "params": {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": prompt_body}],
+                "prompt": [{"type": "text", "text": "hello"}],
             },
         }))
         .expect("send session/prompt");
@@ -447,9 +447,9 @@ async fn acp_session_prompt_reports_end_turn_when_loop_finishes_naturally() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let body = "llm_mock_clear()\n\
-                            llm_mock({text: \"all done\"})\n\
-                            agent_loop(\"hello\", nil, {provider: \"mock\"})";
+            let body = "harness.llm.mock_clear()\n\
+                            harness.llm.mock_enqueue({text: \"all done\"})\n\
+                            agent_loop(harness, \"hello\", nil, {provider: \"mock\"})";
             let result = run_acp_agent_loop_prompt(body).await;
             assert_eq!(result["stopReason"], "end_turn");
             assert_eq!(result["_meta"]["harn"]["terminal"]["kind"], "natural");
@@ -463,9 +463,9 @@ async fn acp_session_prompt_reports_max_tokens_from_provider_signal() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let body = "llm_mock_clear()\n\
-                            llm_mock({text: \"truncated\", stop_reason: \"max_tokens\"})\n\
-                            agent_loop(\"hello\", nil, {provider: \"mock\"})";
+            let body = "harness.llm.mock_clear()\n\
+                            harness.llm.mock_enqueue({text: \"truncated\", stop_reason: \"max_tokens\"})\n\
+                            agent_loop(harness, \"hello\", nil, {provider: \"mock\"})";
             let result = run_acp_agent_loop_prompt(body).await;
             assert_eq!(result["stopReason"], "max_tokens");
         })
@@ -477,9 +477,9 @@ async fn acp_session_prompt_reports_refusal_from_provider_signal() {
     let local = tokio::task::LocalSet::new();
     local
             .run_until(async {
-                let body = "llm_mock_clear()\n\
-                            llm_mock({text: \"I cannot assist with that.\", stop_reason: \"refusal\"})\n\
-                            agent_loop(\"hello\", nil, {provider: \"mock\"})";
+                let body = "harness.llm.mock_clear()\n\
+                            harness.llm.mock_enqueue({text: \"I cannot assist with that.\", stop_reason: \"refusal\"})\n\
+                            agent_loop(harness, \"hello\", nil, {provider: \"mock\"})";
                 let result = run_acp_agent_loop_prompt(body).await;
                 assert_eq!(result["stopReason"], "refusal");
             })
@@ -494,10 +494,10 @@ async fn acp_session_prompt_reports_max_turn_requests_when_iteration_cap_hit() {
                 // `loop_until_done: true` keeps the loop iterating on a
                 // text-only mock turn, and `max_iterations: 1` forces
                 // the cap to fire on iteration 1 → ACP `max_turn_requests`.
-                let body = "llm_mock_clear()\n\
-                            llm_mock({text: \"still working\"})\n\
-                            llm_mock({text: \"still working\"})\n\
-                            agent_loop(\"hello\", nil, {provider: \"mock\", loop_until_done: true, max_iterations: 1})";
+                let body = "harness.llm.mock_clear()\n\
+                            harness.llm.mock_enqueue({text: \"still working\"})\n\
+                            harness.llm.mock_enqueue({text: \"still working\"})\n\
+                            agent_loop(harness, \"hello\", nil, {provider: \"mock\", loop_until_done: true, max_iterations: 1})";
                 let result = run_acp_agent_loop_prompt(body).await;
                 assert_eq!(result["stopReason"], "max_turn_requests");
                 assert_eq!(

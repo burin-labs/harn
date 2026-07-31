@@ -12,7 +12,7 @@ fn make_tagger(tag) {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const base = { _call ->
     {
       ok: true,
@@ -27,5 +27,5 @@ pipeline default() {
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )
   // Order: c is innermost, runs first, then b, then a appends last.
-  __io_println(env.value.text)
+  harness.stdio.println(env.value.text)
 }

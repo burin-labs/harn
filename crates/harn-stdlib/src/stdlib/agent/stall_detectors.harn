@@ -75,11 +75,12 @@ pub type DetectorSpec = {
  * @api_stability: experimental
  */
 pub fn token_runaway_resolve_cap(
-  median: float,
-  stddev: float,
-  sigma: float,
-  fallback: float,
+  input: {median: float, stddev: float, sigma: float, fallback: float},
 ) -> float {
+  const median = input.median
+  const stddev = input.stddev
+  const sigma = input.sigma
+  const fallback = input.fallback
   if median <= 0.0 {
     return fallback
   }
@@ -114,10 +115,12 @@ pub fn token_runaway_decision(config: dict, obs: dict) -> dict {
   const sigma = to_float(config?.sigma ?? TOKEN_RUNAWAY_DEFAULT_SIGMA)
   const fallback = to_float(config?.fallback ?? 0.0)
   const cap = token_runaway_resolve_cap(
-    to_float(config?.median ?? 0.0),
-    to_float(config?.stddev ?? 0.0),
-    sigma,
-    fallback,
+    {
+      median: to_float(config?.median ?? 0.0),
+      stddev: to_float(config?.stddev ?? 0.0),
+      sigma: sigma,
+      fallback: fallback,
+    },
   )
   if cap <= 0.0 {
     return {action: "proceed", cap: cap, reason: "no_cap"}
@@ -167,7 +170,7 @@ pub fn __token_runaway_is_verification_result(result) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn token_runaway_made_progress(payload) -> bool {
+pub fn token_runaway_made_progress(agent: HarnessAgent, payload) -> bool {
   const results = if type_of(payload?.tool_results) == "list" {
     payload.tool_results
   } else {
@@ -179,7 +182,7 @@ pub fn token_runaway_made_progress(payload) -> bool {
     }
     // A verification result present this turn that is NOT a gate-bearing
     // failure = verification passed / advanced = real progress.
-    const gate = __agent_stall_gate_input(nil, result)
+    const gate = __agent_stall_gate_input(agent, nil, result)
     if !(gate?.gate_bearing_failure ?? false) {
       return true
     }
@@ -188,8 +191,8 @@ pub fn token_runaway_made_progress(payload) -> bool {
 }
 
 /**
- * token_runaway_post_turn(config) returns a `post_turn_callback` closure. It
- * reads the session's cumulative INPUT tokens (`agent_session_totals().input_tokens`
+ * token_runaway_post_turn(harness.agent, config) returns a `post_turn_callback` closure. It
+ * reads the session's cumulative INPUT tokens (`agent_session_totals(harness.agent).input_tokens`
  * — the re-sent ballooning context burin's guard keys on, NOT the input+output
  * `tokens_used` sum), classifies progress as a passing verification this turn
  * (`token_runaway_made_progress`, NOT "any tool succeeded"), and on an abort
@@ -201,12 +204,12 @@ pub fn token_runaway_made_progress(payload) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn token_runaway_post_turn(config: dict) {
+pub fn token_runaway_post_turn(agent: HarnessAgent, config: dict) {
   return { payload ->
     const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
-    const totals = agent_session_totals(session_id)
+    const totals = agent_session_totals(agent, session_id)
     const obs = {
-      making_progress: token_runaway_made_progress(payload),
+      making_progress: token_runaway_made_progress(agent, payload),
       tokens: to_float(totals?.input_tokens ?? 0),
     }
     const decision = token_runaway_decision(config, obs)
@@ -227,7 +230,7 @@ pub fn token_runaway_post_turn(config: dict) {
         threshold: to_int(decision.cap),
         tool_name: "",
       }
-      agent_emit_event(session_id, "agent_loop_stall_warning", warning)
+      agent_emit_event(agent, session_id, "agent_loop_stall_warning", warning)
       {
         message: "Token-runaway detector: output has grown well past this task's typical size ("
           + to_string(
@@ -306,12 +309,12 @@ pub fn detector_spec_token_runaway(spec: DetectorSpec) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn unified_detectors_post_turn(spec: DetectorSpec) {
+pub fn unified_detectors_post_turn(agent: HarnessAgent, spec: DetectorSpec) {
   const token_runaway = detector_spec_token_runaway(spec)
   if token_runaway == nil {
     return nil
   }
-  return token_runaway_post_turn(token_runaway)
+  return token_runaway_post_turn(agent, token_runaway)
 }
 
 /**

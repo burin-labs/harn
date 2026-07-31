@@ -10,10 +10,10 @@ fn recorded_header(headers, name) {
   return nil
 }
 
-pipeline test(task) {
-  egress_policy({allow: ["api.linear.app"], default: "deny"})
-  http_mock_clear()
-  http_mock(
+pipeline test(harness: Harness, task) {
+  harness.net.egress_policy({allow: ["api.linear.app"], default: "deny"})
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://api.linear.app/graphql",
     {
@@ -71,8 +71,7 @@ pipeline test(task) {
       ],
     },
   )
-  const ok = call(
-    "graphql",
+  const ok = call(harness, "graphql",
     {
       api_base_url: "https://api.linear.app/graphql",
       api_key: "lin_api_key",
@@ -82,14 +81,13 @@ pipeline test(task) {
   assert_eq(ok.data.viewer.id, "usr_1")
   assert_eq(ok.meta.observed_complexity, 12)
   assert_eq(ok.meta.rate_limit.requests_limit, 1500)
-  const calls = http_mock_calls()
+  const calls = harness.testing.http_mock_calls()
   const first_auth = recorded_header(calls[0].headers, "authorization")
   assert(first_auth == "lin_api_key" || first_auth == "[redacted]")
   const sent = json_parse(calls[0].body)
   assert_eq(sent["query"], "query Viewer { viewer { id } }")
   const failed = try {
-    call(
-      "graphql",
+    call(harness, "graphql",
       {
         api_base_url: "https://api.linear.app/graphql",
         access_token: "oauth-token",
@@ -102,8 +100,7 @@ pipeline test(task) {
   assert_eq(error.code, "graphql_error")
   assert_eq(error.errors[0].message, "Invalid token")
   assert_eq(error.errors[0].extensions.code, "AUTHENTICATION_ERROR")
-  const issues = call(
-    "list_issues",
+  const issues = call(harness, "list_issues",
     {
       api_base_url: "https://api.linear.app/graphql",
       access_token: "oauth-token",
@@ -117,8 +114,7 @@ pipeline test(task) {
   assert_eq(issues.page.has_next_page, true)
   assert_eq(issues.meta.observed_complexity, 48)
   assert_eq(issues.meta.rate_limit.requests_remaining, 49)
-  const updated = call(
-    "update_issue",
+  const updated = call(harness, "update_issue",
     {
       api_base_url: "https://api.linear.app/graphql",
       access_token: "oauth-token",
@@ -128,8 +124,7 @@ pipeline test(task) {
   )
   assert_eq(updated.success, true)
   assert_eq(updated.issue.title, "Updated")
-  const comment = call(
-    "create_comment",
+  const comment = call(harness, "create_comment",
     {
       api_base_url: "https://api.linear.app/graphql",
       access_token: "oauth-token",
@@ -138,8 +133,7 @@ pipeline test(task) {
     },
   )
   assert_eq(comment.comment.id, "com_1")
-  const search = call(
-    "search",
+  const search = call(harness, "search",
     {
       api_base_url: "https://api.linear.app/graphql",
       access_token: "oauth-token",
@@ -149,8 +143,7 @@ pipeline test(task) {
   )
   assert_eq(search.nodes[0].identifier, "ENG-2")
   const partial = try {
-    call(
-      "graphql",
+    call(harness, "graphql",
       {
         api_base_url: "https://api.linear.app/graphql",
         access_token: "oauth-token",
@@ -163,8 +156,7 @@ pipeline test(task) {
   assert_eq(partial_error.code, "graphql_error")
   assert_eq(partial_error.data.viewer.id, "usr_partial")
   const limited = try {
-    call(
-      "graphql",
+    call(harness, "graphql",
       {
         api_base_url: "https://api.linear.app/graphql",
         access_token: "oauth-token",
@@ -177,7 +169,7 @@ pipeline test(task) {
   assert_eq(limited_error.code, "rate_limited")
   assert_eq(limited_error.status, 400)
   assert_eq(limited_error.meta.rate_limit.requests_reset, 1776859300)
-  const all_calls = http_mock_calls()
+  const all_calls = harness.testing.http_mock_calls()
   const oauth_auth = recorded_header(all_calls[1].headers, "authorization")
   assert(oauth_auth == "Bearer oauth-token" || oauth_auth == "[redacted]")
   const list_request = json_parse(all_calls[2].body)
@@ -191,8 +183,7 @@ pipeline test(task) {
   assert(contains(comment_request.query, "commentCreate"))
   assert(contains(search_request.query, "searchIssues"))
   assert_eq(search_fallback_request.variables.term, "connector")
-  const malformed_header = call(
-    "graphql",
+  const malformed_header = call(harness, "graphql",
     {
       api_base_url: "https://api.linear.app/graphql",
       api_key: "lin_api_key",
@@ -201,8 +192,7 @@ pipeline test(task) {
   )
   assert_eq(malformed_header.data.viewer.id, "usr_3")
   assert_eq(malformed_header.meta.observed_complexity, 0)
-  const api_token = call(
-    "graphql",
+  const api_token = call(harness, "graphql",
     {
       api_base_url: "https://api.linear.app/graphql",
       api_token: "lin_api_token",
@@ -210,11 +200,10 @@ pipeline test(task) {
     },
   )
   assert_eq(api_token.data.viewer.id, "usr_api_token")
-  const api_token_calls = http_mock_calls()
+  const api_token_calls = harness.testing.http_mock_calls()
   const api_token_auth = recorded_header(api_token_calls[len(api_token_calls) - 1].headers, "authorization")
   assert(api_token_auth == "lin_api_token" || api_token_auth == "[redacted]")
-  const slash_token = call(
-    "graphql",
+  const slash_token = call(harness, "graphql",
     {
       api_base_url: "https://api.linear.app/graphql",
       access_token: "oauth/with/slash",
@@ -222,7 +211,7 @@ pipeline test(task) {
     },
   )
   assert_eq(slash_token.data.viewer.id, "usr_slash_token")
-  const slash_token_calls = http_mock_calls()
+  const slash_token_calls = harness.testing.http_mock_calls()
   const slash_token_auth = recorded_header(slash_token_calls[len(slash_token_calls) - 1].headers, "authorization")
   assert(slash_token_auth == "Bearer oauth/with/slash" || slash_token_auth == "[redacted]")
   // F8: api_base_url is validated before any HTTP attempt. Non-URL inputs
@@ -230,16 +219,14 @@ pipeline test(task) {
   // rejected with `disallowed_api_base_url` so OAuth tokens / API keys
   // cannot reach attacker-controlled origins.
   const invalid_url = try {
-    call(
-      "graphql",
+    call(harness, "graphql",
       {api_base_url: "not-a-url", api_key: "lin_api_key", query: "query Viewer { viewer { id } }"},
     )
   }
   assert(is_err(invalid_url))
   assert_eq(unwrap_err(invalid_url).code, "invalid_api_base_url")
   const disallowed_host = try {
-    call(
-      "graphql",
+    call(harness, "graphql",
       {
         api_base_url: "https://evil.example/graphql",
         api_key: "lin_api_key",
@@ -251,7 +238,7 @@ pipeline test(task) {
   assert_eq(unwrap_err(disallowed_host).code, "disallowed_api_base_url")
   // F9: secret refs that aren't in the linear/ namespace are rejected.
   const bad_secret = try {
-    call("graphql", {api_key_secret: "evil/api-token", query: "query Viewer { viewer { id } }"})
+    call(harness, "graphql", {api_key_secret: "evil/api-token", query: "query Viewer { viewer { id } }"})
   }
   assert(is_err(bad_secret))
   assert_eq(unwrap_err(bad_secret).code, "invalid_secret_ref")

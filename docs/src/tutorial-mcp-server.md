@@ -16,7 +16,7 @@ Start by creating a tool registry and attaching a few tools with explicit
 schemas:
 
 ```harn
-pipeline main(task) {
+pipeline main(harness: Harness) {
   let tools = tool_registry()
 
   tools = tool_define(tools, "greet", "Greet someone by name", {
@@ -34,7 +34,7 @@ pipeline main(task) {
     handler: { args -> to_string(args.a + args.b) }
   })
 
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
 }
 ```
 
@@ -47,15 +47,15 @@ Resources are good for static content, while resource templates are better for
 parameterized data.
 
 ```harn
-pipeline main(task) {
-  mcp_resource({
+pipeline main(harness: Harness) {
+  harness.tools.mcp_resource({
     uri: "docs://readme",
     name: "README",
     mime_type: "text/markdown",
     text: "# Harn MCP Demo\n\nThis server is implemented in Harn."
   })
 
-  mcp_resource_template({
+  harness.tools.mcp_resource_template({
     uri_template: "config://{key}",
     name: "Configuration values",
     mime_type: "text/plain",
@@ -81,8 +81,8 @@ state you want to expose without writing a dedicated tool for each lookup.
 Prompts let the client ask the server for structured guidance:
 
 ```harn
-pipeline main(task) {
-  mcp_prompt({
+pipeline main(harness: Harness) {
+  harness.tools.mcp_prompt({
     name: "code_review",
     description: "Review code for correctness and maintainability",
     arguments: [
@@ -106,7 +106,8 @@ client supply the final payload.
 
 ## 4. Run it
 
-Once the pipeline calls `mcp_tools()`, `mcp_resource()`, or `mcp_prompt()`,
+Once the pipeline calls `harness.tools.mcp_tools()`,
+`harness.tools.mcp_resource()`, or `harness.tools.mcp_prompt()`,
 launch the server with:
 
 ```bash
@@ -115,7 +116,8 @@ harn serve mcp examples/mcp_server.harn
 
 `harn serve mcp` automatically detects whether the script defines its
 surface through `pub fn` exports (the recommended path) or through the
-`mcp_tools(...)` / `mcp_resource(...)` / `mcp_prompt(...)` registration
+`harness.tools.mcp_tools(...)` / `harness.tools.mcp_resource(...)` /
+`harness.tools.mcp_prompt(...)` registration
 builtins shown above and serves the appropriate one over the requested
 transport.
 Use `--transport http` to expose the same MCP surface over Streamable HTTP.

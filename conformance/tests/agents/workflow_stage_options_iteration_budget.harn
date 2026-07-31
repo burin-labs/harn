@@ -1,16 +1,17 @@
+import { agent_loop } from "std/agent/loop"
 import { workflow_stage_agent_options } from "std/workflow/options"
 
-fn print_budget_error(options: dict, expected: string) {
+fn print_budget_error(harness: Harness, options: dict, expected: string) {
   const result = try {
-    agent_loop("budget validation probe", nil, options)
+    agent_loop(harness, "budget validation probe", nil, options)
     "no_error"
   } catch (e) {
     to_string(e)
   }
-  __io_println(contains(result, expected))
+  harness.stdio.println(contains(result, expected))
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const opts = workflow_stage_agent_options(
     {
       mode: "agent",
@@ -25,14 +26,14 @@ pipeline default() {
     },
   )
   const budget = opts.agent_loop_options?.iteration_budget
-  __io_println(type_of(budget))
-  __io_println(budget?.mode)
-  __io_println(budget?.initial)
-  __io_println(budget?.max)
-  __io_println(budget?.extend_by)
+  harness.stdio.println(type_of(budget))
+  harness.stdio.println(budget?.mode)
+  harness.stdio.println(budget?.initial)
+  harness.stdio.println(budget?.max)
+  harness.stdio.println(budget?.extend_by)
   // Keep the scalar cap visible for tooling that summarizes loop limits
   // without interpreting the structured budget.
-  __io_println(opts.agent_loop_options?.max_iterations)
+  harness.stdio.println(opts.agent_loop_options?.max_iterations)
   const sugar = workflow_stage_agent_options(
     {
       mode: "agent",
@@ -41,8 +42,8 @@ pipeline default() {
       host: {default_tool_format: "native"},
     },
   )
-  __io_println(type_of(sugar.agent_loop_options?.iteration_budget))
-  __io_println(sugar.agent_loop_options?.iteration_budget)
+  harness.stdio.println(type_of(sugar.agent_loop_options?.iteration_budget))
+  harness.stdio.println(sugar.agent_loop_options?.iteration_budget)
   const invalid_mode = workflow_stage_agent_options(
     {
       mode: "agent",
@@ -52,6 +53,7 @@ pipeline default() {
     },
   )
   print_budget_error(
+    harness,
     invalid_mode.agent_loop_options,
     "agent_loop: iteration_budget.mode must be \"fixed\" or \"adaptive\"",
   )
@@ -64,6 +66,7 @@ pipeline default() {
     },
   )
   print_budget_error(
+    harness,
     invalid_max.agent_loop_options,
     "agent_loop: `iteration_budget.max` must be a positive integer; got 0",
   )

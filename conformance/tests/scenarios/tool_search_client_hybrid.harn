@@ -1,6 +1,7 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -21,6 +22,7 @@ pipeline test(task) {
     {parameters: {command_id: {type: "string"}}, defer_loading: true, handler: { _ -> "output" }},
   )
   with_llm_script(
+    harness.llm,
     [
       {
         text: "searching",
@@ -30,6 +32,7 @@ pipeline test(task) {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "run a command",
         nil,
         {
@@ -55,7 +58,7 @@ pipeline test(task) {
       }
       assert(saw_hybrid, "query event records hybrid strategy")
       assert(promoted_run, "hybrid promotes the intended command runner first")
-      log("tool_search_client_hybrid tests passed")
+      harness.stdio.log("tool_search_client_hybrid tests passed")
     },
   )
 }

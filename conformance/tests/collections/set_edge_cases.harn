@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Sets with nested lists
   const l1 = [1, 2]
   const l2 = [3, 4]
@@ -33,5 +33,5 @@ pipeline test(task) {
   // Nil in sets
   const s5 = set(nil, 1, nil)
   assert_eq(len(s5), 2)
-  log("set edge cases ok")
+  harness.stdio.log("set edge cases ok")
 }

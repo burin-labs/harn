@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Create sets
   const s = set(1, 2, 3)
   assert_eq(len(s), 3)
@@ -53,5 +53,5 @@ pipeline test(task) {
   const tags = set("a", "b", "c")
   assert(set_contains(tags, "b"))
   assert(!set_contains(tags, "z"))
-  log("set ok")
+  harness.stdio.log("set ok")
 }

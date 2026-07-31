@@ -1,11 +1,12 @@
 import { stream_validate_chunk, stream_validate_create } from "std/json"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const validator = stream_validate_create(
+    harness.runtime,
     {type: "dict", required: ["age"], properties: {age: {type: "int"}}},
   )
   const r1 = stream_validate_chunk(validator, "{\"age\":\"")
-  __io_println(r1.verdict)
-  __io_println(r1.path)
-  __io_println(starts_with(r1.reason, "expected type 'int'"))
+  harness.stdio.println(r1.verdict)
+  harness.stdio.println(r1.path)
+  harness.stdio.println(starts_with(r1.reason, "expected type 'int'"))
 }

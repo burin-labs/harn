@@ -132,7 +132,9 @@ fn build_pack(args: &PackArgs) -> pack::PackOutcome {
 
 #[test]
 fn signed_harnpack_runs_end_to_end_and_reuses_cache() {
-    let fixture = HarnpackFixture::new("__io_println(\"signed-pack-greeting\")\n");
+    let fixture = HarnpackFixture::new(
+        "fn main(harness: Harness) { harness.stdio.println(\"signed-pack-greeting\") }\n",
+    );
     let outcome = build_pack(&fixture.pack_args(true));
     let sanitized_hash = outcome.bundle_hash.replace(':', "_");
 
@@ -185,7 +187,8 @@ fn signed_harnpack_runs_end_to_end_and_reuses_cache() {
 
 #[test]
 fn unsigned_harnpack_is_rejected_by_default() {
-    let fixture = HarnpackFixture::new("__io_println(\"unsigned\")\n");
+    let fixture =
+        HarnpackFixture::new("fn main(harness: Harness) { harness.stdio.println(\"unsigned\") }\n");
     build_pack(&fixture.pack_args(false));
 
     let outcome = execute(
@@ -213,7 +216,9 @@ fn unsigned_harnpack_is_rejected_by_default() {
 
 #[test]
 fn unsigned_harnpack_runs_with_allow_unsigned() {
-    let fixture = HarnpackFixture::new("__io_println(\"local-dev\")\n");
+    let fixture = HarnpackFixture::new(
+        "fn main(harness: Harness) { harness.stdio.println(\"local-dev\") }\n",
+    );
     build_pack(&fixture.pack_args(false));
 
     let outcome = execute(
@@ -234,7 +239,8 @@ fn unsigned_harnpack_runs_with_allow_unsigned() {
 
 #[test]
 fn tampered_harnpack_fails_verification() {
-    let fixture = HarnpackFixture::new("__io_println(\"original\")\n");
+    let fixture =
+        HarnpackFixture::new("fn main(harness: Harness) { harness.stdio.println(\"original\") }\n");
     build_pack(&fixture.pack_args(true));
 
     // Decompose + tamper + re-emit: flip a source byte without touching
@@ -272,8 +278,9 @@ fn tampered_harnpack_fails_verification() {
 
 #[test]
 fn dry_run_verify_returns_without_executing() {
-    let fixture =
-        HarnpackFixture::new("write_file(\"side-effect.txt\", \"oops\")\n__io_println(\"ran\")\n");
+    let fixture = HarnpackFixture::new(
+        "fn main(harness: Harness) {\n  harness.fs.write_text(\"side-effect.txt\", \"oops\")\n  harness.stdio.println(\"ran\")\n}\n",
+    );
     let outcome_pack = build_pack(&fixture.pack_args(true));
     let sanitized_hash = outcome_pack.bundle_hash.replace(':', "_");
 
@@ -324,7 +331,8 @@ fn dry_run_verify_returns_without_executing() {
 
 #[test]
 fn missing_signature_with_dry_run_still_refuses() {
-    let fixture = HarnpackFixture::new("__io_println(\"x\")\n");
+    let fixture =
+        HarnpackFixture::new("fn main(harness: Harness) { harness.stdio.println(\"x\") }\n");
     build_pack(&fixture.pack_args(false));
 
     let outcome = execute(

@@ -31,7 +31,8 @@ The following environment variables configure runtime behavior:
 ### Sandbox and egress
 
 These variables affect the confinement `harn run` installs by default. See
-[Sandbox mode](30-sandbox-mode.md) for the run-level sandbox and `egress_policy(config)`
+[Sandbox mode](30-sandbox-mode.md) for the run-level sandbox and
+`harness.net.egress_policy(config)`
 in the built-in method table for the full rule syntax.
 
 | Variable | Description |
@@ -45,7 +46,8 @@ in the built-in method table for the full rule syntax.
 
 Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}`.
 Any of these variables being set seeds the egress policy before
-`egress_policy(config)` runs, so a script that also declares a policy fails with
-`policy already configured from environment`. `harn run` keeps that policy
-process-wide. `harn test` seeds an isolated copy for each test pipeline, including
-under `--parallel`, so one pipeline cannot alter another's policy.
+`harness.net.egress_policy(config)` runs, so a script that also declares a
+policy fails with `policy already configured from environment`. The host seeds
+the root Harness for `harn run`; `harn test` seeds an isolated root for each
+test pipeline, including under `--parallel`, so one pipeline cannot alter
+another's policy.

@@ -1,4 +1,4 @@
-//! Deterministic helpers behind the `harness.crypto.*` capability surface.
+//! Deterministic helpers backing pure cryptographic builtins.
 
 use std::borrow::Cow;
 

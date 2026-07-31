@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 /**
@@ -30,8 +31,8 @@ fn probe_tools() {
   )
 }
 
-pipeline main() {
-  provider_capabilities_install(
+pipeline main(harness: Harness) {
+  harness.llm.provider_capabilities_install(
     """
 [[provider.testcatalog]]
 model_match = "native-fixture-*"
@@ -40,15 +41,17 @@ preferred_tool_format = "native"
 """,
   )
   defer {
-    provider_capabilities_clear()
+    harness.llm.provider_capabilities_clear()
   }
   with_llm_script(
+    harness.llm,
     [
       llm_tool_call("record_choice", {choice: "json"}),
       llm_text("Recorded.\n\n<done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Choose an output format and call record_choice.",
         "You are an agent.",
         {
@@ -58,12 +61,12 @@ preferred_tool_format = "native"
           tool_format: "native",
           allowed_tools: ["record_choice"],
           max_iterations: 3,
-          session_id: "native-mock-dispatch-" + uuid(),
+          session_id: "native-mock-dispatch-" + harness.random.uuid(),
         },
       )
-      const calls = llm_mock_calls()
-      __io_println(len(calls) >= 2)
-      __io_println(result.status)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls) >= 2)
+      harness.stdio.println(result.status)
     },
   )
 }

@@ -26,8 +26,12 @@ pub fn reset() {
   slack_connector_config = {}
 }
 
-fn __call(method, params = {}) {
-  return connector_call("slack", method, filter_nil(merge(slack_connector_config, params ?? {})))
+fn __call(net: HarnessNet, method, params = {}) {
+  return net.connector_call(
+    "slack",
+    method,
+    filter_nil(merge(slack_connector_config, params ?? {})),
+  )
 }
 
 fn __configured_slack_disclosure(options) {
@@ -43,7 +47,7 @@ fn __slack_disclosure_options(options) {
   return options?.disclosure_options ?? options?._harn?.disclosure_options ?? {}
 }
 
-fn __with_slack_disclosure(options) {
+fn __with_slack_disclosure(env: HarnessEnv, fs: HarnessFs, options) {
   const opts = options ?? {}
   if __configured_slack_disclosure(opts) != nil {
     return opts
@@ -52,7 +56,7 @@ fn __with_slack_disclosure(options) {
   if chain == nil {
     return opts
   }
-  const disclosure = slack_message_disclosure(chain, __slack_disclosure_options(opts))
+  const disclosure = slack_message_disclosure(env, fs, chain, __slack_disclosure_options(opts))
   const harn = merge(
     opts?._harn ?? {},
     {disclosure: merge(opts?._harn?.disclosure ?? {}, {slack: disclosure})},
@@ -69,9 +73,10 @@ fn __with_slack_disclosure(options) {
  * @effects: [net]
  * @errors: [ConnectorError]
  */
-pub fn post_message(channel, text, blocks = nil, options = nil) {
-  const opts = __with_slack_disclosure(options)
+pub fn post_message(harness: Harness, channel, text, blocks = nil, options = nil) {
+  const opts = __with_slack_disclosure(harness.env, harness.fs, options)
   return __call(
+    harness.net,
     "post_message",
     filter_nil(merge(opts, {channel: channel, text: text, blocks: blocks})),
   )
@@ -83,8 +88,9 @@ pub fn post_message(channel, text, blocks = nil, options = nil) {
  * @effects: [net]
  * @errors: [ConnectorError]
  */
-pub fn update_message(channel, ts, text, blocks = nil, options = nil) {
+pub fn update_message(net: HarnessNet, channel, ts, text, blocks = nil, options = nil) {
   return __call(
+    net,
     "update_message",
     filter_nil((options ?? {}) + {channel: channel, ts: ts, text: text, blocks: blocks}),
   )
@@ -96,8 +102,8 @@ pub fn update_message(channel, ts, text, blocks = nil, options = nil) {
  * @effects: [net]
  * @errors: [ConnectorError]
  */
-pub fn add_reaction(channel, ts, name, options = nil) {
-  return __call("add_reaction", (options ?? {}) + {channel: channel, ts: ts, name: name})
+pub fn add_reaction(net: HarnessNet, channel, ts, name, options = nil) {
+  return __call(net, "add_reaction", (options ?? {}) + {channel: channel, ts: ts, name: name})
 }
 
 /**
@@ -106,8 +112,8 @@ pub fn add_reaction(channel, ts, name, options = nil) {
  * @effects: [net]
  * @errors: [ConnectorError]
  */
-pub fn open_view(trigger_id, view, options = nil) {
-  return __call("open_view", (options ?? {}) + {trigger_id: trigger_id, view: view})
+pub fn open_view(net: HarnessNet, trigger_id, view, options = nil) {
+  return __call(net, "open_view", (options ?? {}) + {trigger_id: trigger_id, view: view})
 }
 
 /**
@@ -116,8 +122,8 @@ pub fn open_view(trigger_id, view, options = nil) {
  * @effects: [net]
  * @errors: [ConnectorError]
  */
-pub fn user_info(user_id, options = nil) {
-  return __call("user_info", (options ?? {}) + {user_id: user_id})
+pub fn user_info(net: HarnessNet, user_id, options = nil) {
+  return __call(net, "user_info", (options ?? {}) + {user_id: user_id})
 }
 
 /**
@@ -126,8 +132,8 @@ pub fn user_info(user_id, options = nil) {
  * @effects: [net]
  * @errors: [ConnectorError]
  */
-pub fn api_call(method, args = nil, options = nil) {
-  return __call("api_call", filter_nil((options ?? {}) + {method: method, args: args ?? {}}))
+pub fn api_call(net: HarnessNet, method, args = nil, options = nil) {
+  return __call(net, "api_call", filter_nil((options ?? {}) + {method: method, args: args ?? {}}))
 }
 
 /**
@@ -136,8 +142,8 @@ pub fn api_call(method, args = nil, options = nil) {
  * @effects: [net]
  * @errors: [ConnectorError]
  */
-pub fn upload_file(filename, content, options = nil) {
-  return __call("upload_file", (options ?? {}) + {filename: filename, content: content})
+pub fn upload_file(net: HarnessNet, filename, content, options = nil) {
+  return __call(net, "upload_file", (options ?? {}) + {filename: filename, content: content})
 }
 
 fn __slack_event(log_event) {
@@ -243,8 +249,9 @@ pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn wait_for_message(channel = nil, options = nil) {
+pub fn wait_for_message(runtime: HarnessRuntime, channel = nil, options = nil) {
   return wait_for(
+    runtime,
     merge(
       options ?? {},
       {source: message_source(channel, options), condition: { state -> state.matched }},
@@ -258,8 +265,9 @@ pub fn wait_for_message(channel = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn wait_for_reaction(channel = nil, reaction = nil, options = nil) {
+pub fn wait_for_reaction(runtime: HarnessRuntime, channel = nil, reaction = nil, options = nil) {
   return wait_for(
+    runtime,
     merge(
       options ?? {},
       {source: reaction_source(channel, reaction, options), condition: { state -> state.matched }},

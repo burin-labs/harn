@@ -1,40 +1,55 @@
-pipeline test(task) {
-  http_mock_clear()
-  transport_mock_clear()
-  http_mock("GET", "https://api.example.test/session", {status: 200, body: "pooled", headers: {}})
-  const session = http_session({timeout_ms: 100})
-  const response = http_session_request(session, "GET", "https://api.example.test/session", {})
+pipeline test(harness: Harness, task) {
+  harness.testing.http_mock_clear()
+  harness.testing.transport_mock_clear()
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.test/session",
+    {status: 200, body: "pooled", headers: {}},
+  )
+  const session = harness.net.session({timeout_ms: 100})
+  const response = harness.net.session_request(
+    session,
+    "GET",
+    "https://api.example.test/session",
+    {},
+  )
   assert_eq(response.status, 200)
   assert_eq(response.body, "pooled")
-  assert(http_session_close(session))
-  sse_mock("https://events.example.test/stream", [{event: "hello", data: "one", id: "1"}, "two"])
-  const stream = sse_connect("GET", "https://events.example.test/stream", {})
-  const opened = sse_receive(stream, 0)
-  const first = sse_receive(stream, 0)
-  const second = sse_receive(stream, 0)
-  const done = sse_receive(stream, 0)
+  assert(harness.net.session_close(session))
+  harness.testing.sse_mock(
+    "https://events.example.test/stream",
+    [{event: "hello", data: "one", id: "1"}, "two"],
+  )
+  const stream = harness.net.sse_connect("GET", "https://events.example.test/stream", {})
+  const opened = harness.net.sse_receive(stream, 0)
+  const first = harness.net.sse_receive(stream, 0)
+  const second = harness.net.sse_receive(stream, 0)
+  const done = harness.net.sse_receive(stream, 0)
   assert_eq(opened.type, "open")
   assert_eq(first.type, "event")
   assert_eq(first.event, "hello")
   assert_eq(first.data, "one")
   assert_eq(second.data, "two")
   assert_eq(done, nil)
-  websocket_mock("wss://socket.example.test/app", {messages: ["hello"], echo: true})
-  const socket = websocket_connect("wss://socket.example.test/app", {})
-  const greeting = websocket_receive(socket, 0)
+  harness.testing.websocket_mock("wss://socket.example.test/app", {messages: ["hello"], echo: true})
+  const socket = harness.net.websocket_connect("wss://socket.example.test/app", {})
+  const greeting = harness.net.websocket_receive(socket, 0)
   assert_eq(greeting.type, "text")
   assert_eq(greeting.data, "hello")
-  assert(websocket_send(socket, "ack", {}))
-  const echoed = websocket_receive(socket, 0)
+  assert(harness.net.websocket_send(socket, "ack", {}))
+  const echoed = harness.net.websocket_receive(socket, 0)
   assert_eq(echoed.data, "ack")
-  assert(websocket_close(socket))
-  websocket_mock("wss://socket.example.test/limited", ["too-long"])
-  const limited = websocket_connect("wss://socket.example.test/limited", {max_message_bytes: 3})
+  assert(harness.net.websocket_close(socket))
+  harness.testing.websocket_mock("wss://socket.example.test/limited", ["too-long"])
+  const limited = harness.net.websocket_connect(
+    "wss://socket.example.test/limited",
+    {max_message_bytes: 3},
+  )
   const limit_result = try {
-    websocket_receive(limited, 0)
+    harness.net.websocket_receive(limited, 0)
   }
   assert(is_err(limit_result))
-  assert(websocket_close(limited))
-  assert_eq(len(transport_mock_calls()), 6)
-  __io_println("transport_builtins_ok")
+  assert(harness.net.websocket_close(limited))
+  assert_eq(len(harness.testing.transport_mock_calls()), 6)
+  harness.stdio.println("transport_builtins_ok")
 }

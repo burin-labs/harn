@@ -57,6 +57,7 @@ impl Compiler {
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
         self.collect_imported_enum_candidates(program);
+        self.collect_source_callable_names(program);
         // Box module-level mutable `let`s that a top-level or pipeline-body
         // closure captures (harn#4479). Nested function-like bodies reseed
         // their own capture set when compiled.
@@ -91,6 +92,12 @@ impl Compiler {
     }
 
     pub fn with_options(options: CompilerOptions) -> Self {
+        // Compiler construction is the boundary that owns source-callability.
+        // Install the canonical contract manifest here so every entry path
+        // (programs, modules, named callables, and schema initializers) sees
+        // the same typed builtin surface even before a VM exists.
+        harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+
         Self {
             options,
             chunk: Chunk::new(),
@@ -100,6 +107,7 @@ impl Compiler {
             enum_variant_owners: std::collections::HashMap::new(),
             imported_enum_candidates: std::collections::HashSet::new(),
             imported_enum_candidates_authoritative: false,
+            source_callable_names: std::collections::HashSet::new(),
             predeclared_enum_declarations: std::collections::HashSet::new(),
             enum_catalog_scopes: Vec::new(),
             struct_layouts: std::collections::HashMap::new(),
@@ -129,7 +137,9 @@ impl Compiler {
     }
 
     pub(super) fn nested_body(&self) -> Self {
-        Self::for_nested_body(self.options)
+        let mut nested = Self::for_nested_body(self.options);
+        nested.source_callable_names = self.source_callable_names.clone();
+        nested
     }
 
     pub(super) fn nominal_type_names(&self) -> Vec<String> {
@@ -437,16 +447,31 @@ impl Compiler {
         let mut pipeline_emits_value = false;
         if let Some(sn) = main {
             self.compile_top_level_declarations(program)?;
-            if let Node::Pipeline { body, extends, .. } = peel_node(sn) {
+            if let Node::Pipeline {
+                params,
+                body,
+                extends,
+                ..
+            } = peel_node(sn)
+            {
                 self.compile_with_pipeline_captures(
                     program,
                     body,
                     extends.as_deref(),
                     |compiler| {
+                        let saved = std::mem::replace(&mut compiler.module_level, false);
+                        if let Some(harness) = params.first().filter(|param| {
+                            matches!(
+                                param.type_expr.as_ref(),
+                                Some(TypeExpr::Named(name)) if name == "Harness"
+                            )
+                        }) {
+                            compiler.chunk.emit(Op::RootHarness, compiler.line);
+                            compiler.emit_define_binding(&harness.name, false);
+                        }
                         if let Some(parent_name) = extends {
                             compiler.compile_parent_pipeline(program, parent_name)?;
                         }
-                        let saved = std::mem::replace(&mut compiler.module_level, false);
                         let result = compiler.compile_block(body);
                         compiler.module_level = saved;
                         result
@@ -471,12 +496,11 @@ impl Compiler {
                 self.compile_discarded_stmt(sn)?;
             }
             // E4.1 entrypoint convention: a top-level `fn main(harness: Harness)`
-            // is invoked automatically with the runtime-provided `harness`
-            // global. The typechecker rejects every other signature with
+            // is invoked automatically with the runtime-provided root
+            // capability. The typechecker rejects every other signature with
             // HARN-NAM-101 so we don't need to re-validate the shape here.
             if Self::has_top_level_fn_main(program) {
-                let harness_name = self.string_constant("harness");
-                self.chunk.emit_u16(Op::GetVar, harness_name, self.line);
+                self.chunk.emit(Op::RootHarness, self.line);
                 self.emit_named_call("main", 1);
                 pipeline_emits_value = true;
             }
@@ -532,16 +556,31 @@ impl Compiler {
 
         if let Some(sn) = target {
             self.compile_top_level_declarations(program)?;
-            if let Node::Pipeline { body, extends, .. } = peel_node(sn) {
+            if let Node::Pipeline {
+                body,
+                extends,
+                params,
+                ..
+            } = peel_node(sn)
+            {
                 self.compile_with_pipeline_captures(
                     program,
                     body,
                     extends.as_deref(),
                     |compiler| {
+                        let saved = std::mem::replace(&mut compiler.module_level, false);
+                        if let Some(harness) = params.first().filter(|param| {
+                            matches!(
+                                param.type_expr.as_ref(),
+                                Some(TypeExpr::Named(name)) if name == "Harness"
+                            )
+                        }) {
+                            compiler.chunk.emit(Op::RootHarness, compiler.line);
+                            compiler.emit_define_binding(&harness.name, false);
+                        }
                         if let Some(parent_name) = extends {
                             compiler.compile_parent_pipeline(program, parent_name)?;
                         }
-                        let saved = std::mem::replace(&mut compiler.module_level, false);
                         let result = compiler.compile_block(body);
                         compiler.module_level = saved;
                         result

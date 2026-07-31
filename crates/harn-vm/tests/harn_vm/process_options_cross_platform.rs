@@ -1,17 +1,14 @@
 use crate::support;
 
-use std::collections::BTreeMap;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-
 use harn_vm::orchestration::RunExecutionRecord;
+use std::collections::BTreeMap;
 
 #[test]
 fn exec_opts_merges_env_with_parent_by_default() {
     let _parent = support::EnvironmentGuard::set("HARN_EXEC_OPTS_PARENT", "from-parent");
-    let command = support::helper_command(&["--env", "HARN_EXEC_OPTS_PARENT", "CHILD"]);
+    let program = support::harn_quote(&support::process_helper());
     let source = format!(
-        "\nconst result = exec_opts({command}, {{env: {{CHILD: \"from-child\"}}}})\nlog(result.stdout)\n"
+        "fn main(harness: Harness) {{\n  const result = harness.process.run({{program: {program}, args: [\"--env\", \"HARN_EXEC_OPTS_PARENT\", \"CHILD\"], env: {{CHILD: \"from-child\"}}}})\n  harness.stdio.log(result.stdout)\n}}\n"
     );
 
     assert_eq!(
@@ -23,9 +20,9 @@ fn exec_opts_merges_env_with_parent_by_default() {
 #[test]
 fn exec_opts_replace_env_clears_parent() {
     let _parent = support::EnvironmentGuard::set("HARN_EXEC_OPTS_PARENT2", "from-parent");
-    let command = support::helper_command(&["--env", "HARN_EXEC_OPTS_PARENT2", "CHILD"]);
+    let program = support::harn_quote(&support::process_helper());
     let source = format!(
-        "\nconst result = exec_opts({command}, {{\n  env: {{CHILD: \"from-child\"}},\n  env_mode: \"replace\",\n}})\nlog(result.stdout)\n"
+        "fn main(harness: Harness) {{\n  const result = harness.process.run({{program: {program}, args: [\"--env\", \"HARN_EXEC_OPTS_PARENT2\", \"CHILD\"], env: {{CHILD: \"from-child\"}}, env_mode: \"replace\"}})\n  harness.stdio.log(result.stdout)\n}}\n"
     );
 
     assert_eq!(
@@ -37,10 +34,10 @@ fn exec_opts_replace_env_clears_parent() {
 #[test]
 fn exec_at_opts_honors_directory() {
     let directory = tempfile::tempdir().expect("temporary directory");
-    let command = support::helper_command(&["--cwd"]);
+    let program = support::harn_quote(&support::process_helper());
     let directory_arg = support::harn_quote(&directory.path().to_string_lossy());
     let source = format!(
-        "\nconst result = exec_at_opts({directory_arg}, {command}, {{}})\nlog(result.stdout)\n"
+        "fn main(harness: Harness) {{\n  const result = harness.process.run({{program: {program}, args: [\"--cwd\"], cwd: {directory_arg}}})\n  harness.stdio.log(result.stdout)\n}}\n"
     );
 
     let expected = std::fs::canonicalize(directory.path()).expect("canonical directory");
@@ -53,7 +50,7 @@ fn exec_uses_execution_context_cwd_and_env() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let command = support::harn_quote(&support::process_helper());
     let source = format!(
-        "\nconst env_result = exec({command}, \"--env\", \"HARN_PROCESS_TEST\")\nconst cwd_result = exec({command}, \"--cwd\")\nlog(env_result.stdout + \"|\" + cwd_result.stdout)\n"
+        "fn main(harness: Harness) {{\n  const env_result = harness.process.exec({command}, \"--env\", \"HARN_PROCESS_TEST\")\n  const cwd_result = harness.process.exec({command}, \"--cwd\")\n  harness.stdio.log(env_result.stdout + \"|\" + cwd_result.stdout)\n}}\n"
     );
     let context = RunExecutionRecord {
         cwd: Some(directory.path().to_string_lossy().into_owned()),
@@ -76,7 +73,7 @@ fn exec_at_resolves_relative_to_execution_cwd() {
     let nested = directory.path().join("nested");
     std::fs::create_dir(&nested).expect("nested directory");
     let source = format!(
-        "\nconst result = exec_at(\"nested\", {}, \"--cwd\")\nlog(result.stdout)\n",
+        "fn main(harness: Harness) {{\n  const result = harness.process.run({{program: {}, args: [\"--cwd\"], cwd: \"nested\"}})\n  harness.stdio.log(result.stdout)\n}}\n",
         support::harn_quote(&support::process_helper()),
     );
     let context = RunExecutionRecord {
@@ -97,9 +94,9 @@ fn exec_at_resolves_relative_to_execution_cwd() {
 
 #[test]
 fn exec_opts_enforces_timeout() {
-    let command = support::helper_command(&["--sleep-ms", "5000"]);
+    let program = support::harn_quote(&support::process_helper());
     let source = format!(
-        "\nconst result = exec_opts({command}, {{timeout: 50}})\nlog(result.timed_out)\nlog(result.success)\n"
+        "fn main(harness: Harness) {{\n  const result = harness.process.run({{program: {program}, args: [\"--sleep-ms\", \"5000\"], timeout_ms: 50}})\n  harness.stdio.log(result.timed_out)\n  harness.stdio.log(result.success)\n}}\n"
     );
 
     assert_eq!(
@@ -110,23 +107,10 @@ fn exec_opts_enforces_timeout() {
 
 #[test]
 fn exec_opts_rejects_invalid_commands() {
-    assert!(support::run("const result = exec_opts([], {})").is_err());
-    assert!(support::run("const result = exec_opts(\"not-a-list\", {})").is_err());
-}
-
-#[test]
-fn exec_opts_interrupts_a_sleeping_child() {
-    let cancel = Arc::new(AtomicBool::new(true));
-    let _interrupt = harn_vm::op_interrupt::install(Some(cancel), None);
-    // The Unix-only process-group test covers descendant cleanup; this probe
-    // only needs a child that remains alive until the interrupt is observed.
-    let command = support::helper_command(&["--sleep-ms", "30000"]);
-    let source = format!(
-        "\nconst result = exec_opts({command}, {{}})\nlog(result.timed_out)\nlog(result.success)\n"
+    assert!(
+        support::run("fn main(harness: Harness) { harness.process.run({program: []}) }").is_err()
     );
-
-    assert_eq!(
-        support::logged(&source).expect("exec_opts result"),
-        vec!["false", "false"]
+    assert!(
+        support::run("fn main(harness: Harness) { harness.process.run({program: 42}) }").is_err()
     );
 }

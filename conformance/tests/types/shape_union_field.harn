@@ -1,8 +1,8 @@
 /** Test shape validation with union type fields */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   fn process(data: {name: string, value: string | int}) {
-    __io_println(data.name)
-    __io_println(data.value)
+    harness.stdio.println(data.name)
+    harness.stdio.println(data.value)
   }
   process({name: "test", value: 42})
   process({name: "test2", value: "hello"})

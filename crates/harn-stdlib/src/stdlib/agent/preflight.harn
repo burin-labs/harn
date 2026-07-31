@@ -14,8 +14,8 @@ fn __agent_done_sentinel(opts) {
   return sentinel
 }
 
-fn __agent_tool_format(opts) {
-  return agent_tool_format(opts)
+fn __agent_tool_format(llm: HarnessLlm, opts) {
+  return agent_tool_format(llm, opts)
 }
 
 /**
@@ -31,7 +31,7 @@ fn __agent_tool_format(opts) {
  * code-bearing field"; `call_noun` and `final_answer` are the single source of
  * truth for the TAUGHT tool-call syntax — the bare noun for one call ("```tool
  * JSON block", "`<tool_call>` block", "native tool call") and the phrase for the
- * final-answer channel ("as plain text", "in a `<user_response>` block", "in
+ * final-answer harness.runtime.channel("as plain text", "in a `<user_response>` block", "in
  * concise assistant text"). The loop-completion contract, the no-progress nudge,
  * and the parse-guidance feedback all render from these fields, so the taught
  * syntax never drifts across surfaces. Extend this (not the prompts) to add a new
@@ -41,8 +41,8 @@ fn __agent_tool_format(opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_call_paradigm(options = nil) {
-  const format = __agent_tool_format(options)
+pub fn agent_tool_call_paradigm(llm: HarnessLlm, options = nil) {
+  const format = __agent_tool_format(llm, options)
   if format == "native" {
     return {
       kind: "native",
@@ -85,7 +85,7 @@ pub fn agent_tool_call_paradigm(options = nil) {
 /**
  * agent_render_tool_call_exemplar — render one exemplar tool call in the current
  * model's paradigm. `args` is a list of `{ key, value, body? }`; entries marked
- * `body: true` use the paradigm's escape-free body channel (heredoc for text),
+ * `body: true` use the paradigm's escape-free body harness.runtime.channel(heredoc for text),
  * everything else is a quoted scalar. Authors write the exemplar ONCE, abstractly,
  * and get a wire-correct call for whichever model is on the transcript.
  *
@@ -94,8 +94,8 @@ pub fn agent_tool_call_paradigm(options = nil) {
  * @api_stability: experimental
  * @example: agent_render_tool_call_exemplar("edit", [{key: "action", value: "create"}], opts)
  */
-pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
-  const p = agent_tool_call_paradigm(options)
+pub fn agent_render_tool_call_exemplar(llm: HarnessLlm, name, args, options = nil) {
+  const p = agent_tool_call_paradigm(llm, options)
   if p.kind == "json" {
     // Fenced-JSON: one ```tool block wrapping a single {name, args} object.
     // Both `body` and scalar args are ordinary JSON string/values — the JSON
@@ -133,8 +133,8 @@ pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_render_tool_call_prefix(name: string, options = nil) -> string {
-  const p = agent_tool_call_paradigm(options)
+pub fn agent_render_tool_call_prefix(llm: HarnessLlm, name: string, options = nil) -> string {
+  const p = agent_tool_call_paradigm(llm, options)
   if p.kind == "native" || name == "" {
     return ""
   }
@@ -170,15 +170,16 @@ pub fn agent_has_tools(opts = nil) -> bool {
   return true
 }
 
-fn __agent_loop_contract_prompt(opts) {
+fn __agent_loop_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
   const sentinel = __agent_done_sentinel(opts)
   const loop_until_done = opts?.loop_until_done ?? false
   if !loop_until_done && sentinel == nil {
     return ""
   }
-  const mode = __agent_tool_format(opts)
-  const paradigm = agent_tool_call_paradigm(opts)
+  const mode = __agent_tool_format(llm, opts)
+  const paradigm = agent_tool_call_paradigm(llm, opts)
   return loop_until_done_system_prompt(
+    fs,
     {
       loop_until_done: loop_until_done,
       exit_when_verified: opts?.exit_when_verified ?? false,
@@ -194,26 +195,28 @@ fn __agent_loop_contract_prompt(opts) {
   )
 }
 
-fn __agent_native_tool_contract_prompt(opts) {
-  if !agent_has_tools(opts) || __agent_tool_format(opts) != "native" {
+fn __agent_native_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
+  if !agent_has_tools(opts) || __agent_tool_format(llm, opts) != "native" {
     return ""
   }
   return render_agent_prompt_id(
+    fs,
     "agent.tool_contract_native",
     {done_sentinel: __agent_done_sentinel(opts)},
     opts,
   )
 }
 
-fn __agent_json_tool_contract_prompt(opts) {
-  if !agent_has_tools(opts) || __agent_tool_format(opts) != "json" {
+fn __agent_json_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
+  if !agent_has_tools(opts) || __agent_tool_format(llm, opts) != "json" {
     return ""
   }
   return render_agent_prompt_id(
+    fs,
     "agent.tool_contract_json",
     {
       done_sentinel: __agent_done_sentinel(opts),
-      body_hint: agent_tool_call_paradigm(opts).body_hint,
+      body_hint: agent_tool_call_paradigm(llm, opts).body_hint,
       expanded_schemas: __agent_tool_listing_prompt(opts.tools),
     },
     opts,
@@ -262,13 +265,14 @@ fn __agent_tool_listing_prompt(registry) {
   return trim(out)
 }
 
-fn __agent_text_tool_contract_prompt(opts) {
-  if opts?.tools == nil || __agent_tool_format(opts) == "native" {
+fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
+  if opts?.tools == nil || __agent_tool_format(llm, opts) == "native" {
     return ""
   }
   const turn_policy = opts?.turn_policy ?? {}
   const done_sentinel = __agent_done_sentinel(opts)
   return render_agent_prompt_id(
+    fs,
     "agent.tool_contract_text",
     {
       mode: "text",
@@ -282,26 +286,31 @@ fn __agent_text_tool_contract_prompt(opts) {
       expanded_schemas: __agent_tool_listing_prompt(opts.tools),
       compact_schemas: "",
       native_contract: render_agent_prompt_id(
+        fs,
         "agent.tool_contract_native",
         {done_sentinel: done_sentinel},
         opts,
       ),
       action_native_contract: render_agent_prompt_id(
+        fs,
         "agent.tool_contract_action_native",
         {done_sentinel: done_sentinel},
         opts,
       ),
       task_ledger_contract: render_agent_prompt_id(
+        fs,
         "agent.tool_contract_task_ledger",
         {done_sentinel: done_sentinel},
         opts,
       ),
       text_response_protocol: render_agent_prompt_id(
+        fs,
         "agent.tool_contract_text_response_protocol",
-        {done_sentinel: done_sentinel, body_hint: agent_tool_call_paradigm(opts).body_hint},
+        {done_sentinel: done_sentinel, body_hint: agent_tool_call_paradigm(llm, opts).body_hint},
         opts,
       ),
       action_text_contract: render_agent_prompt_id(
+        fs,
         "agent.tool_contract_action_text",
         {done_sentinel: done_sentinel},
         opts,
@@ -455,7 +464,7 @@ fn __agent_push_system_fragment(fragments, id, body) {
 /**
  * __with_prompt_fragment(agent_options, fragment) folds a single prompt
  * fragment onto `agent_options` via the per-turn
- * `context_profile.prompt_fragments` channel (#2631) — the write-side twin of
+ * `context_profile.prompt_fragments` harness.runtime.channel(#2631) — the write-side twin of
  * `agent_build_turn_system_fragments`, preserving any profile and fragments the
  * caller already set. A nil `fragment` is a no-op that still normalizes a
  * non-dict `agent_options` to `{}`. Shared by the fold family (`with_goal`,
@@ -508,7 +517,7 @@ fn __agent_context_profile_fragments(opts) {
   return fragments
 }
 
-fn __agent_primary_system_text(session, opts) {
+fn __agent_primary_system_text(agent: HarnessAgent, session, opts) {
   if opts?._primary_system != nil && opts._primary_system != "" {
     return opts._primary_system
   }
@@ -516,7 +525,7 @@ fn __agent_primary_system_text(session, opts) {
     return opts.system
   }
   if !__agent_has_system_prompt_options(opts) {
-    const stored_system = agent_session_system_prompt(session.session_id)
+    const stored_system = agent.system_prompt(session.session_id)
     if stored_system != nil && stored_system != "" {
       return stored_system
     }
@@ -555,12 +564,12 @@ fn __agent_primary_system_text(session, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_build_turn_system_fragments(session, opts, iteration) {
+pub fn agent_build_turn_system_fragments(harness: Harness, session, opts, iteration) {
   let fragments = []
   fragments = __agent_push_system_fragment(
     fragments,
     "system",
-    __agent_primary_system_text(session, opts),
+    __agent_primary_system_text(harness.agent, session, opts),
   )
   fragments = __agent_push_system_fragment(
     fragments,
@@ -586,27 +595,27 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
   fragments = __agent_push_system_fragment(
     fragments,
     "loop_contract",
-    __agent_loop_contract_prompt(opts),
+    __agent_loop_contract_prompt(harness.fs, harness.llm, opts),
   )
   fragments = __agent_push_system_fragment(
     fragments,
     "native_tool_contract",
-    __agent_native_tool_contract_prompt(opts),
+    __agent_native_tool_contract_prompt(harness.fs, harness.llm, opts),
   )
-  if opts?.tools != nil && __agent_tool_format(opts) == "json" {
+  if opts?.tools != nil && __agent_tool_format(harness.llm, opts) == "json" {
     fragments = __agent_push_system_fragment(
       fragments,
       "json_tool_contract",
-      __agent_json_tool_contract_prompt(opts),
+      __agent_json_tool_contract_prompt(harness.fs, harness.llm, opts),
     )
-  } else if opts?.tools != nil && __agent_tool_format(opts) != "native" {
+  } else if opts?.tools != nil && __agent_tool_format(harness.llm, opts) != "native" {
     fragments = __agent_push_system_fragment(
       fragments,
       "text_tool_contract",
-      __agent_text_tool_contract_prompt(opts),
+      __agent_text_tool_contract_prompt(harness.fs, harness.llm, opts),
     )
   }
-  const scratchpad_fragment = agent_scratchpad_recitation_fragment(session, opts)
+  const scratchpad_fragment = agent_scratchpad_recitation_fragment(harness.agent, session, opts)
   if scratchpad_fragment != nil {
     fragments = fragments.appending(scratchpad_fragment)
   }
@@ -620,9 +629,9 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_build_turn_system(session, opts, iteration) {
+pub fn agent_build_turn_system(harness: Harness, session, opts, iteration) {
   let parts = []
-  for fragment in agent_build_turn_system_fragments(session, opts, iteration) {
+  for fragment in agent_build_turn_system_fragments(harness, session, opts, iteration) {
     parts = parts.appending(fragment.body)
   }
   return join(parts, "\n\n")
@@ -646,7 +655,12 @@ fn __agent_reachability_projection(policy) {
   return policy == "reachability_gc" || policy == "context_gc" || policy == "tool_result_gc"
 }
 
-fn __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts) {
+fn __agent_projection_with_scratchpad_barrier(
+  agent: HarnessAgent,
+  session_id,
+  projection_opts,
+  opts,
+) {
   const policy_label = projection_opts?.policy ?? "raw"
   if !__agent_reachability_projection(policy_label) {
     return projection_opts
@@ -655,7 +669,7 @@ fn __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts)
   if !scratchpad_cfg.enabled {
     return projection_opts
   }
-  const snapshot = agent_session_snapshot(session_id) ?? {}
+  const snapshot = agent.snapshot(session_id) ?? {}
   const scratchpad = snapshot?.scratchpad
   if scratchpad == nil {
     return projection_opts
@@ -672,7 +686,7 @@ fn __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts)
   }
 }
 
-fn __agent_apply_projection(session_id, messages, opts) {
+fn __agent_apply_projection(agent: HarnessAgent, session_id, messages, opts) {
   let projection_opts = __agent_projection_options(opts)
   if projection_opts == nil {
     return messages
@@ -681,8 +695,13 @@ fn __agent_apply_projection(session_id, messages, opts) {
   if policy_label == "raw" {
     return messages
   }
-  projection_opts = __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts)
-  const projection = agent_session_project_turn(session_id, projection_opts)
+  projection_opts = __agent_projection_with_scratchpad_barrier(
+    agent,
+    session_id,
+    projection_opts,
+    opts,
+  )
+  const projection = agent_session_project_turn(agent, session_id, projection_opts)
   return projection?.messages ?? messages
 }
 
@@ -772,15 +791,21 @@ fn __agent_collapse_repeated_runtime_feedback(messages: list) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_build_turn_messages(session, opts, iteration) {
-  const raw_messages = agent_session_messages(session.session_id)
-  const projected_messages = __agent_apply_projection(session.session_id, raw_messages, opts)
+pub fn agent_build_turn_messages(
+  agent: HarnessAgent,
+  clock: HarnessClock,
+  session,
+  opts,
+  iteration,
+) {
+  const raw_messages = agent_session_messages(agent, session.session_id)
+  const projected_messages = __agent_apply_projection(agent, session.session_id, raw_messages, opts)
   const collapsed_messages = __agent_collapse_repeated_runtime_feedback(projected_messages)
   const decorator = opts?.message_decorator ?? opts?.decorate_message
   if !(opts?.timestamp_messages ?? opts?.message_timestamps ?? false) && decorator == nil {
     return collapsed_messages
   }
-  const timestamp = date_now_iso()
+  const timestamp = clock.date_iso()
   let out = []
   let index = 0
   for message in collapsed_messages {

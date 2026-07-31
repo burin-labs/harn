@@ -354,8 +354,8 @@ pub fn command_capture_rewrite(command, capture_path) {
   return command_capture_plan(command, capture_path)?.rewritten
 }
 
-fn __cc_new_capture_path() {
-  return path_join(harness.fs.temp_dir(), "harn-capture-" + uuid() + ".out")
+fn __cc_new_capture_path(fs: HarnessFs, random: HarnessRandom) {
+  return path_join(fs.workspace_temp_dir(), "harn-capture-" + random.uuid() + ".out")
 }
 
 fn __cc_posix_shell(word) {
@@ -374,9 +374,9 @@ fn __cc_posix_shell(word) {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: command_capture_plan_request({mode: "shell", command: "ls | wc -l"})
+ * @example: command_capture_plan_request(harness, {mode: "shell", command: "ls | wc -l"})
  */
-pub fn command_capture_plan_request(request) {
+pub fn command_capture_plan_request(harness: Harness, request) {
   if request == nil {
     return nil
   }
@@ -384,7 +384,7 @@ pub fn command_capture_plan_request(request) {
   if mode == "argv" {
     const argv = request?.argv ?? []
     if len(argv) >= 3 && argv[1] == "-c" && __cc_posix_shell(argv[0]) {
-      const capture_path = __cc_new_capture_path()
+      const capture_path = __cc_new_capture_path(harness.fs, harness.random)
       const plan = command_capture_plan(argv[2], capture_path)
       if plan == nil {
         return nil
@@ -404,10 +404,10 @@ pub fn command_capture_plan_request(request) {
     return nil
   }
   if mode == "shell" {
-    if platform() == "windows" {
+    if harness.system.platform().os == "windows" {
       return nil
     }
-    const capture_path = __cc_new_capture_path()
+    const capture_path = __cc_new_capture_path(harness.fs, harness.random)
     const plan = command_capture_plan(request?.command ?? "", capture_path)
     if plan == nil {
       return nil
@@ -426,7 +426,7 @@ pub fn command_capture_plan_request(request) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_capture_annotate(result, plan) {
+pub fn command_capture_annotate(fs: HarnessFs, result, plan) {
   if result == nil || plan == nil {
     return result
   }
@@ -434,7 +434,7 @@ pub fn command_capture_annotate(result, plan) {
   if path == nil {
     return result
   }
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     return result
   }
   const hint = "Filtered output is shown above. The full, unfiltered output of `"

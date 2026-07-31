@@ -1,7 +1,7 @@
 /** Test post-branch narrowing when one branch exits early */
 type NarrowDoc = {version: string}
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn early_return(x: string?) -> string {
     if x == nil {
       return "was nil"
@@ -32,9 +32,9 @@ pipeline test(task) {
     }
     return {version: version}
   }
-  log(early_return("hello"))
-  log(early_return(nil))
-  log(early_throw_else("world"))
-  log(early_throw_shape_return("v1").version)
-  log(early_throw_untyped_shape_return({version: "v2"}).version)
+  harness.stdio.log(early_return("hello"))
+  harness.stdio.log(early_return(nil))
+  harness.stdio.log(early_throw_else("world"))
+  harness.stdio.log(early_throw_shape_return("v1").version)
+  harness.stdio.log(early_throw_untyped_shape_return({version: "v2"}).version)
 }

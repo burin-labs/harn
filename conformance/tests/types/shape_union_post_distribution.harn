@@ -9,7 +9,7 @@ type Tag = "click" | "scroll"
 
 type Event<T> = {event: T, weight: int}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   fn classify(e: Event<Tag>) -> string {
     // `Event<Tag>` distributes to `Event<"click"> | Event<"scroll">`,
     // which the checker recognises as a tagged shape union discriminated
@@ -20,6 +20,6 @@ pipeline default() {
     }
   }
   // Narrowed to the `event: "click"` variant.
-  __io_println(classify({event: "click", weight: 3}))
-  __io_println(classify({event: "scroll", weight: 7}))
+  harness.stdio.println(classify({event: "click", weight: 3}))
+  harness.stdio.println(classify({event: "scroll", weight: 7}))
 }

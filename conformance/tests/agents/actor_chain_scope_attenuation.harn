@@ -1,4 +1,4 @@
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const narrower = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",
@@ -7,7 +7,7 @@ pipeline main(task) {
     },
     {raise: false, alert: false},
   )
-  __io_println(narrower.ok)
+  harness.stdio.println(narrower.ok)
   const equal = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",
@@ -16,7 +16,7 @@ pipeline main(task) {
     },
     {raise: false, alert: false},
   )
-  __io_println(equal.ok)
+  harness.stdio.println(equal.ok)
   const widened = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",
@@ -25,12 +25,12 @@ pipeline main(task) {
     },
     {raise: false, alert: false},
   )
-  __io_println(widened.ok)
-  __io_println(widened.error.kind)
-  __io_println(widened.error.mode)
-  __io_println(widened.error.parent_subject)
-  __io_println(widened.error.child_subject)
-  __io_println(widened.error.extra_scopes[0])
+  harness.stdio.println(widened.ok)
+  harness.stdio.println(widened.error.kind)
+  harness.stdio.println(widened.error.mode)
+  harness.stdio.println(widened.error.parent_subject)
+  harness.stdio.println(widened.error.child_subject)
+  harness.stdio.println(widened.error.extra_scopes[0])
   const strict = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",
@@ -39,6 +39,6 @@ pipeline main(task) {
     },
     {policy: {mode: "strict-subset", alert_on_violation: false}, raise: false, alert: false},
   )
-  __io_println(strict.ok)
-  __io_println(strict.error.mode)
+  harness.stdio.println(strict.ok)
+  harness.stdio.println(strict.error.mode)
 }

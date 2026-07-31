@@ -1,3 +1,5 @@
+import { CommandResult } from "std/command/results"
+
 pub type VerificationFileHashSnapshotEntry = {
   path: string,
   known: bool,
@@ -30,7 +32,7 @@ pub type VerificationCheckObservation = {
 }
 
 pub type VerificationRecordedCheck = {
-  result: dict,
+  result: CommandResult,
   observation: VerificationCheckObservation,
   row: dict?,
   snapshot: VerificationFileHashSnapshot?,
@@ -38,7 +40,7 @@ pub type VerificationRecordedCheck = {
 
 pub type VerificationStartedCheck = {
   row_id: string,
-  started: dict,
+  started: CommandResult,
   observation_options: dict,
   snapshot: VerificationFileHashSnapshot?,
 }

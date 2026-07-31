@@ -108,6 +108,8 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_sub_agent_run(request: dict) -> any",
     kind = "async",
     category = "agent.worker",
@@ -232,6 +234,8 @@ fn worker_mode_label(config: &WorkerConfig) -> &'static str {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_spawn(config: dict) -> any",
     kind = "async",
     category = "agent.worker",
@@ -252,6 +256,8 @@ async fn spawn_agent_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_send_input(worker: any, task: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -291,6 +297,8 @@ async fn send_input_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_trigger(worker: any, payload: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -368,6 +376,8 @@ async fn worker_trigger_builtin(
 /// `interrupted`) are rejected — the caller can spawn a fresh worker
 /// instead.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_suspend(worker: any, reason: any, options?: dict) -> any",
     kind = "async",
     category = "agent.worker",
@@ -677,6 +687,8 @@ pub(crate) fn all_registered_worker_ids() -> Vec<String> {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_top_level_agent_suspend(session_id: string, task: any, system: any, options: dict, reason: any, conditions?: any, iteration?: int) -> any",
     kind = "async",
     category = "agent.worker",
@@ -846,6 +858,8 @@ fn diagnostic_error(code: Code, message: impl Into<String>) -> VmError {
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_resume(worker_or_snapshot: any, input_or_options?: any, continue_transcript?: bool) -> any",
     kind = "async",
     category = "agent.worker",
@@ -943,6 +957,8 @@ pub(crate) async fn resume_worker_from_auto_resume_trigger(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_wait(worker_or_workers: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -974,6 +990,8 @@ async fn wait_agent_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_stop(worker: any, options: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -1025,6 +1043,8 @@ async fn stop_agent_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_close(worker: any) -> any",
     kind = "async",
     category = "agent.worker",
@@ -1052,6 +1072,8 @@ async fn close_agent_builtin(
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_worker_list() -> list",
     category = "agent.worker",
     runtime_only = true,
@@ -1069,6 +1091,8 @@ fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_resume_conditions_parse(conditions?: any) -> any",
     category = "agent.worker",
     runtime_only = true,

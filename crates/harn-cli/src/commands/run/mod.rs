@@ -431,14 +431,14 @@ pub(crate) async fn run_resume_with_skill_dirs(
 ) -> i32 {
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
 
-pipeline main(task) {
+pipeline main(harness: Harness) {
   const input = if len(argv) > 1 {
     argv[1]
   } else {
     nil
   }
-  const handle = resume_agent(argv[0], input, true)
-  return wait_agent(handle)
+  const handle = resume_agent(harness.agent, argv[0], input, true)
+  return wait_agent(harness.agent, handle)
 }
 "#;
     let tmp = match create_eval_temp_file() {

@@ -501,11 +501,14 @@ pub fn build_prompt(task) {
         write_file(
             &script,
             r#"
-pipeline default(task) {
-  llm_mock({text: "done"})
-  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
-  llm_mock({text: "stale if the run is not reset"})
-  __io_println(result.text)
+pipeline default(harness: Harness, task) {
+  harness.llm.mock_enqueue({text: "done"})
+  const result = harness.llm.call(
+    build_prompt(harness.env.get_or("HARN_TASK", "")),
+    "You are concise.",
+  )
+  harness.llm.mock_enqueue({text: "stale if the run is not reset"})
+  harness.stdio.println(result.text)
 }
 "#,
         );
@@ -528,9 +531,9 @@ pipeline default(task) {
         write_file(
             &script,
             r"
-pipeline default(task) {
-  const snapshot = llm_mock_snapshot()
-  __io_println(len(keys(snapshot.queue_remaining)))
+pipeline default(harness: Harness, task) {
+  const snapshot = harness.llm.mock_snapshot()
+  harness.stdio.println(len(keys(snapshot.queue_remaining)))
 }
 ",
         );
@@ -601,9 +604,12 @@ pub fn build_prompt(task) {
         write_file(
             &script,
             r#"
-pipeline default(task) {
-  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
-  __io_println(result.text)
+pipeline default(harness: Harness, task) {
+  const result = harness.llm.call(
+    build_prompt(harness.env.get_or("HARN_TASK", "")),
+    "You are concise.",
+  )
+  harness.stdio.println(result.text)
 }
 "#,
         );
@@ -642,14 +648,14 @@ pipeline default(task) {
         write_file(
             &script,
             r#"
-pipeline default(task) {
-  const first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
-  __io_println(first.ok)
-  __io_println(first.error.status)
-  __io_println(first.error.kind)
-  __io_println(first.error.reason)
-  const second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
-  __io_println(second.text)
+pipeline default(harness: Harness, task) {
+  const first = harness.llm.call_safe("first", nil, {provider: "mock", model: "mock-model"})
+  harness.stdio.println(first.ok)
+  harness.stdio.println(first.error.status)
+  harness.stdio.println(first.error.kind)
+  harness.stdio.println(first.error.reason)
+  const second = harness.llm.call("second", nil, {provider: "mock", model: "mock-model"})
+  harness.stdio.println(second.text)
 }
 "#,
         );

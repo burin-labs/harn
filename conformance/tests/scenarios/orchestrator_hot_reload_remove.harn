@@ -1,9 +1,12 @@
 import "../_common"
 
-pipeline default() {
-  const unique = uuid()
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const base = path_join(harness.fs.temp_dir(), "harn-orchestrator-hot-reload-remove-" + unique)
+pipeline default(harness: Harness) {
+  const unique = harness.random.uuid()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const base = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-orchestrator-hot-reload-remove-" + unique,
+  )
   const workspace = path_join(base, "workspace")
   const state_dir = path_join(base, "state")
   const binary = harness.env.get_or(
@@ -129,10 +132,10 @@ pipeline default() {
     sys.stdout.write(json.dumps({"status": result["status"], "triggers": len(snapshot.get("triggers") or [])}))
     PY
     """
-  const result = shell(script)
+  const result = harness.process.shell(script)
   assert(result?.success, result?.stderr)
   const summary = json_parse(result?.stdout)
   assert(summary.status == 404, "removed route returns 404 after reload")
   assert(summary.triggers == 0, "state snapshot no longer lists removed trigger")
-  log("orchestrator hot reload remove status: " + to_string(summary.status))
+  harness.stdio.log("orchestrator hot reload remove status: " + to_string(summary.status))
 }

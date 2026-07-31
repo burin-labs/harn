@@ -6,14 +6,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use harn_hostlib::fs::{self as host_fs, FsCapability, FsMode};
-use harn_hostlib::tools::permissions;
 use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
 fn registry() -> BuiltinRegistry {
-    permissions::reset();
-    permissions::enable_for_test();
     let mut registry = BuiltinRegistry::new();
     FsCapability.register_builtins(&mut registry);
     ToolsCapability.register_builtins(&mut registry);
@@ -617,11 +614,8 @@ fn safe_text_patch_serializes_concurrent_staged_commits() {
         let path_s = path_s.clone();
         let body = format!("winner-{label}\n");
         handles.push(thread::spawn(move || {
-            // tools:deterministic is thread-local; each spawned thread
-            // must re-enable the gate the registry helper installed on
-            // the main thread before driving `hostlib_fs_safe_text_patch`,
-            // which is gated on the deterministic-tools feature.
-            permissions::enable_for_test();
+            // Direct registry handlers are safe to drive from each contender;
+            // path and mutation policy are enforced above this internal seam.
             let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
                 ("session_id", vm_string(&session)),
                 ("path", vm_string(&path_s)),

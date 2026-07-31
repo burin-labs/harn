@@ -79,441 +79,444 @@ impl GitDataParser {
 }
 
 pub(crate) fn register_git_builtins(vm: &mut Vm) {
-    register_git_namespace(vm);
-
-    vm.register_async_builtin("git.repo.discover", |ctx, args| async move {
-        let path = required_path_arg(&args, 0, "git.repo.discover")?;
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.repo.discover",
-                action: "git.repo.discover",
-                cwd: path.clone(),
-                argv: vec![
-                    "git".to_string(),
-                    "rev-parse".to_string(),
-                    "--show-toplevel".to_string(),
-                    "--git-dir".to_string(),
-                    "--is-bare-repository".to_string(),
-                    "--is-inside-work-tree".to_string(),
-                ],
-                mutation: GitMutation::Read,
-                affected_paths: vec![display_path(&path)],
-                data_parser: GitDataParser::Discover {
-                    input: display_path(&path),
-                },
-            },
-        )
-        .await
-    });
-
-    vm.register_async_builtin("git.worktree.create", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.worktree.create")?;
-        let branch = required_string_arg(&args, 1, "git.worktree.create", "branch")?;
-        let path = required_string_arg(&args, 2, "git.worktree.create", "path")?;
-        let options = optional_dict_arg(&args, 3);
-        let force = bool_option(options, "force").unwrap_or(false);
-        let detach = bool_option(options, "detach").unwrap_or(false);
-        let base_ref = string_option(options, "base_ref")
-            .or_else(|| string_option(options, "base"))
-            .or_else(|| string_option(options, "start_point"));
-        let mut argv = vec!["git".to_string(), "worktree".to_string(), "add".to_string()];
-        if force {
-            argv.push("--force".to_string());
-        }
-        if detach {
-            argv.push("--detach".to_string());
-        } else {
-            argv.push("-B".to_string());
-            argv.push(branch.clone());
-        }
-        argv.push(path.clone());
-        if let Some(base_ref) = base_ref {
-            argv.push(base_ref);
-        }
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.worktree.create",
-                action: "git.worktree.create",
-                cwd: repo,
-                argv,
-                mutation: GitMutation::Mutating,
-                affected_paths: vec![path.clone()],
-                data_parser: GitDataParser::WorktreeCreate { branch, path },
-            },
-        )
-        .await
-    });
-
-    vm.register_async_builtin("git.worktree.remove", |ctx, args| async move {
-        let path = required_string_arg(&args, 0, "git.worktree.remove", "path")?;
-        let options = optional_dict_arg(&args, 1);
-        let force = bool_option(options, "force").unwrap_or(false);
-        let path_buf = PathBuf::from(&path);
-        if !path_buf.exists() {
-            return planned_or_noop_receipt(
-                "git.worktree.remove",
-                "git.worktree.remove",
-                GitMutation::Mutating,
-                path_buf
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .to_path_buf(),
-                vec![
-                    "git".to_string(),
-                    "worktree".to_string(),
-                    "remove".to_string(),
-                    path.clone(),
-                ],
-                vec![path.clone()],
-                json!({"path": path, "removed": false, "idempotent": true}),
-                "no_op",
-            )
-            .await;
-        }
-        let mut argv = vec![
-            "git".to_string(),
-            "worktree".to_string(),
-            "remove".to_string(),
-        ];
-        if force {
-            argv.push("--force".to_string());
-        }
-        argv.push(path.clone());
-        let cwd = path_buf
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.worktree.remove",
-                action: "git.worktree.remove",
-                cwd,
-                argv,
-                mutation: GitMutation::Mutating,
-                affected_paths: vec![path.clone()],
-                data_parser: GitDataParser::WorktreeRemove { path },
-            },
-        )
-        .await
-    });
-
-    vm.register_async_builtin("git.fetch", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.fetch")?;
-        let remote = required_string_arg(&args, 1, "git.fetch", "remote")?;
-        let refspecs = string_list_arg(&args, 2, "git.fetch", "refspecs")?.unwrap_or_default();
-        let mut argv = vec!["git".to_string(), "fetch".to_string(), remote.clone()];
-        argv.extend(refspecs);
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.fetch",
-                action: "git.fetch",
-                cwd: repo,
-                argv,
-                mutation: GitMutation::Mutating,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::Fetch,
-            },
-        )
-        .await
-    });
-
-    vm.register_async_builtin("git.rebase", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.rebase")?;
-        let base_ref = required_string_arg(&args, 1, "git.rebase", "base_ref")?;
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.rebase",
-                action: "git.rebase",
-                cwd: repo,
-                argv: vec!["git".to_string(), "rebase".to_string(), base_ref],
-                mutation: GitMutation::Risky,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::Rebase,
-            },
-        )
-        .await
-    });
-
-    vm.register_async_builtin("git.status", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.status")?;
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.status",
-                action: "git.status",
-                cwd: repo,
-                argv: vec![
-                    "git".to_string(),
-                    "status".to_string(),
-                    "--porcelain=v1".to_string(),
-                    "-z".to_string(),
-                    "--branch".to_string(),
-                ],
-                mutation: GitMutation::Read,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::Status,
-            },
-        )
-        .await
-    });
-
-    vm.register_async_builtin("git.conflicts", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.conflicts")?;
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.conflicts",
-                action: "git.conflicts",
-                cwd: repo,
-                argv: vec![
-                    "git".to_string(),
-                    "status".to_string(),
-                    "--porcelain=v1".to_string(),
-                    "-z".to_string(),
-                ],
-                mutation: GitMutation::Read,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::Conflicts,
-            },
-        )
-        .await
-    });
-
-    vm.register_async_builtin("git.push", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.push")?;
-        let remote = required_string_arg(&args, 1, "git.push", "remote")?;
-        let refspec = required_string_arg(&args, 2, "git.push", "refspec")?;
-        let lease = args.get(3).filter(|value| !matches!(value, VmValue::Nil));
-        let mut argv = vec!["git".to_string(), "push".to_string()];
-        let mut mutation = GitMutation::Mutating;
-        if let Some(lease) = lease {
-            let lease = parse_lease(lease, &refspec)?;
-            if let Some(actual_oid) =
-                verify_force_with_lease(&repo, &remote, &lease.ref_name, &lease.expected_oid)
-                    .await?
-            {
-                let message = format!(
-                    "git.push: lease_mismatch for {}; expected {}, found {}",
-                    lease.ref_name, lease.expected_oid, actual_oid
-                );
-                return synthetic_receipt(
-                    GitCommand {
-                        operation: "git.push",
-                        action: "git.push",
-                        cwd: repo,
-                        argv: vec![
-                            "git".to_string(),
-                            "push".to_string(),
-                            format!(
-                                "--force-with-lease={}:{}",
-                                lease.ref_name, lease.expected_oid
-                            ),
-                            remote,
-                            refspec.clone(),
-                        ],
-                        mutation: GitMutation::Risky,
-                        affected_paths: Vec::new(),
-                        data_parser: GitDataParser::Push {
-                            refspec: refspec.clone(),
-                        },
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_repo_discover",
+        |ctx, args| async move {
+            let path = required_path_arg(&args, 0, "git.repo.discover")?;
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.repo.discover",
+                    action: "git.repo.discover",
+                    cwd: path.clone(),
+                    argv: vec![
+                        "git".to_string(),
+                        "rev-parse".to_string(),
+                        "--show-toplevel".to_string(),
+                        "--git-dir".to_string(),
+                        "--is-bare-repository".to_string(),
+                        "--is-inside-work-tree".to_string(),
+                    ],
+                    mutation: GitMutation::Read,
+                    affected_paths: vec![display_path(&path)],
+                    data_parser: GitDataParser::Discover {
+                        input: display_path(&path),
                     },
-                    false,
-                    "lease_mismatch",
-                    json!({
-                        "ref": lease.ref_name,
-                        "expected_oid": lease.expected_oid,
-                        "actual_oid": actual_oid,
-                        "pushed": false,
-                    }),
-                    message,
+                },
+            )
+            .await
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_worktree_create",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.worktree.create")?;
+            let branch = required_string_arg(&args, 1, "git.worktree.create", "branch")?;
+            let path = required_string_arg(&args, 2, "git.worktree.create", "path")?;
+            let options = optional_dict_arg(&args, 3);
+            let force = bool_option(options, "force").unwrap_or(false);
+            let detach = bool_option(options, "detach").unwrap_or(false);
+            let base_ref = string_option(options, "base_ref")
+                .or_else(|| string_option(options, "base"))
+                .or_else(|| string_option(options, "start_point"));
+            let mut argv = vec!["git".to_string(), "worktree".to_string(), "add".to_string()];
+            if force {
+                argv.push("--force".to_string());
+            }
+            if detach {
+                argv.push("--detach".to_string());
+            } else {
+                argv.push("-B".to_string());
+                argv.push(branch.clone());
+            }
+            argv.push(path.clone());
+            if let Some(base_ref) = base_ref {
+                argv.push(base_ref);
+            }
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.worktree.create",
+                    action: "git.worktree.create",
+                    cwd: repo,
+                    argv,
+                    mutation: GitMutation::Mutating,
+                    affected_paths: vec![path.clone()],
+                    data_parser: GitDataParser::WorktreeCreate { branch, path },
+                },
+            )
+            .await
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_worktree_remove",
+        |ctx, args| async move {
+            let path = required_string_arg(&args, 0, "git.worktree.remove", "path")?;
+            let options = optional_dict_arg(&args, 1);
+            let force = bool_option(options, "force").unwrap_or(false);
+            let path_buf = PathBuf::from(&path);
+            if !path_buf.exists() {
+                return planned_or_noop_receipt(
+                    "git.worktree.remove",
+                    "git.worktree.remove",
+                    GitMutation::Mutating,
+                    path_buf
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .to_path_buf(),
+                    vec![
+                        "git".to_string(),
+                        "worktree".to_string(),
+                        "remove".to_string(),
+                        path.clone(),
+                    ],
+                    vec![path.clone()],
+                    json!({"path": path, "removed": false, "idempotent": true}),
+                    "no_op",
                 )
                 .await;
             }
-            argv.push(format!(
-                "--force-with-lease={}:{}",
-                lease.ref_name, lease.expected_oid
-            ));
-            mutation = GitMutation::Risky;
-        }
-        argv.push(remote);
-        argv.push(refspec.clone());
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.push",
-                action: "git.push",
-                cwd: repo,
-                argv,
-                mutation,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::Push { refspec },
-            },
-        )
-        .await
-    });
-
-    vm.register_async_builtin("git.diff", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.diff")?;
-        let selector = args.get(1);
-        let mut argv = vec!["git".to_string(), "diff".to_string()];
-        match selector {
-            Some(VmValue::String(range)) if !range.is_empty() => argv.push(range.to_string()),
-            Some(VmValue::List(paths)) => {
-                argv.push("--".to_string());
-                argv.extend(string_list_value(paths, "git.diff", "paths")?);
+            let mut argv = vec![
+                "git".to_string(),
+                "worktree".to_string(),
+                "remove".to_string(),
+            ];
+            if force {
+                argv.push("--force".to_string());
             }
-            Some(VmValue::Dict(options)) => {
-                if let Some(range) = string_option(Some(options), "range") {
-                    argv.push(range);
+            argv.push(path.clone());
+            let cwd = path_buf
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf();
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.worktree.remove",
+                    action: "git.worktree.remove",
+                    cwd,
+                    argv,
+                    mutation: GitMutation::Mutating,
+                    affected_paths: vec![path.clone()],
+                    data_parser: GitDataParser::WorktreeRemove { path },
+                },
+            )
+            .await
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_fetch",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.fetch")?;
+            let remote = required_string_arg(&args, 1, "git.fetch", "remote")?;
+            let refspecs = string_list_arg(&args, 2, "git.fetch", "refspecs")?.unwrap_or_default();
+            let mut argv = vec!["git".to_string(), "fetch".to_string(), remote.clone()];
+            argv.extend(refspecs);
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.fetch",
+                    action: "git.fetch",
+                    cwd: repo,
+                    argv,
+                    mutation: GitMutation::Mutating,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Fetch,
+                },
+            )
+            .await
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_rebase",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.rebase")?;
+            let base_ref = required_string_arg(&args, 1, "git.rebase", "base_ref")?;
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.rebase",
+                    action: "git.rebase",
+                    cwd: repo,
+                    argv: vec!["git".to_string(), "rebase".to_string(), base_ref],
+                    mutation: GitMutation::Risky,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Rebase,
+                },
+            )
+            .await
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_status",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.status")?;
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.status",
+                    action: "git.status",
+                    cwd: repo,
+                    argv: vec![
+                        "git".to_string(),
+                        "status".to_string(),
+                        "--porcelain=v1".to_string(),
+                        "-z".to_string(),
+                        "--branch".to_string(),
+                    ],
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Status,
+                },
+            )
+            .await
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_conflicts",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.conflicts")?;
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.conflicts",
+                    action: "git.conflicts",
+                    cwd: repo,
+                    argv: vec![
+                        "git".to_string(),
+                        "status".to_string(),
+                        "--porcelain=v1".to_string(),
+                        "-z".to_string(),
+                    ],
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Conflicts,
+                },
+            )
+            .await
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_push",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.push")?;
+            let remote = required_string_arg(&args, 1, "git.push", "remote")?;
+            let refspec = required_string_arg(&args, 2, "git.push", "refspec")?;
+            let lease = args.get(3).filter(|value| !matches!(value, VmValue::Nil));
+            let mut argv = vec!["git".to_string(), "push".to_string()];
+            let mut mutation = GitMutation::Mutating;
+            if let Some(lease) = lease {
+                let lease = parse_lease(lease, &refspec)?;
+                if let Some(actual_oid) =
+                    verify_force_with_lease(&repo, &remote, &lease.ref_name, &lease.expected_oid)
+                        .await?
+                {
+                    let message = format!(
+                        "git.push: lease_mismatch for {}; expected {}, found {}",
+                        lease.ref_name, lease.expected_oid, actual_oid
+                    );
+                    return synthetic_receipt(
+                        GitCommand {
+                            operation: "git.push",
+                            action: "git.push",
+                            cwd: repo,
+                            argv: vec![
+                                "git".to_string(),
+                                "push".to_string(),
+                                format!(
+                                    "--force-with-lease={}:{}",
+                                    lease.ref_name, lease.expected_oid
+                                ),
+                                remote,
+                                refspec.clone(),
+                            ],
+                            mutation: GitMutation::Risky,
+                            affected_paths: Vec::new(),
+                            data_parser: GitDataParser::Push {
+                                refspec: refspec.clone(),
+                            },
+                        },
+                        false,
+                        "lease_mismatch",
+                        json!({
+                            "ref": lease.ref_name,
+                            "expected_oid": lease.expected_oid,
+                            "actual_oid": actual_oid,
+                            "pushed": false,
+                        }),
+                        message,
+                    )
+                    .await;
                 }
-                if let Some(paths) = string_list_option(Some(options), "paths", "git.diff")? {
+                argv.push(format!(
+                    "--force-with-lease={}:{}",
+                    lease.ref_name, lease.expected_oid
+                ));
+                mutation = GitMutation::Risky;
+            }
+            argv.push(remote);
+            argv.push(refspec.clone());
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.push",
+                    action: "git.push",
+                    cwd: repo,
+                    argv,
+                    mutation,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Push { refspec },
+                },
+            )
+            .await
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_diff",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.diff")?;
+            let selector = args.get(1);
+            let mut argv = vec!["git".to_string(), "diff".to_string()];
+            match selector {
+                Some(VmValue::String(range)) if !range.is_empty() => argv.push(range.to_string()),
+                Some(VmValue::List(paths)) => {
                     argv.push("--".to_string());
-                    argv.extend(paths);
+                    argv.extend(string_list_value(paths, "git.diff", "paths")?);
                 }
+                Some(VmValue::Dict(options)) => {
+                    if let Some(range) = string_option(Some(options), "range") {
+                        argv.push(range);
+                    }
+                    if let Some(paths) = string_list_option(Some(options), "paths", "git.diff")? {
+                        argv.push("--".to_string());
+                        argv.extend(paths);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.diff",
-                action: "git.diff",
-                cwd: repo,
-                argv,
-                mutation: GitMutation::Read,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::Diff,
-            },
-        )
-        .await
-    });
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.diff",
+                    action: "git.diff",
+                    cwd: repo,
+                    argv,
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Diff,
+                },
+            )
+            .await
+        },
+    );
 
-    vm.register_async_builtin("git.merge_base", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.merge_base")?;
-        let left = required_string_arg(&args, 1, "git.merge_base", "left")?;
-        let right = required_string_arg(&args, 2, "git.merge_base", "right")?;
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.merge_base",
-                action: "git.merge_base",
-                cwd: repo,
-                argv: vec!["git".to_string(), "merge-base".to_string(), left, right],
-                mutation: GitMutation::Read,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::MergeBase,
-            },
-        )
-        .await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_merge_base",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.merge_base")?;
+            let left = required_string_arg(&args, 1, "git.merge_base", "left")?;
+            let right = required_string_arg(&args, 2, "git.merge_base", "right")?;
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.merge_base",
+                    action: "git.merge_base",
+                    cwd: repo,
+                    argv: vec!["git".to_string(), "merge-base".to_string(), left, right],
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::MergeBase,
+                },
+            )
+            .await
+        },
+    );
 
-    vm.register_async_builtin("git.tag_list", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.tag_list")?;
-        let options = optional_dict_arg(&args, 1);
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.tag_list",
-                action: "git.tag_list",
-                cwd: repo,
-                argv: tag_list_argv(options),
-                mutation: GitMutation::Read,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::TagList,
-            },
-        )
-        .await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_tag_list",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.tag_list")?;
+            let options = optional_dict_arg(&args, 1);
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.tag_list",
+                    action: "git.tag_list",
+                    cwd: repo,
+                    argv: tag_list_argv(options),
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::TagList,
+                },
+            )
+            .await
+        },
+    );
 
-    vm.register_async_builtin("git.describe", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.describe")?;
-        let options = optional_dict_arg(&args, 1);
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.describe",
-                action: "git.describe",
-                cwd: repo,
-                argv: describe_argv(options),
-                mutation: GitMutation::Read,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::Describe,
-            },
-        )
-        .await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_describe",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.describe")?;
+            let options = optional_dict_arg(&args, 1);
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.describe",
+                    action: "git.describe",
+                    cwd: repo,
+                    argv: describe_argv(options),
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Describe,
+                },
+            )
+            .await
+        },
+    );
 
-    vm.register_async_builtin("git.ls_remote", |ctx, args| async move {
-        let repo = repo_path_arg(&args, 0, "git.ls_remote")?;
-        let remote = required_string_arg(&args, 1, "git.ls_remote", "remote")?;
-        let options = optional_dict_arg(&args, 2);
-        let argv = ls_remote_argv(&remote, options)?;
-        run_git_command(
-            Some(&ctx),
-            GitCommand {
-                operation: "git.ls_remote",
-                action: "git.ls_remote",
-                cwd: repo,
-                argv,
-                mutation: GitMutation::Read,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::LsRemote { remote },
-            },
-        )
-        .await
-    });
-}
-
-fn register_git_namespace(vm: &mut Vm) {
-    let repo = namespace(&[("discover", "git.repo.discover")]);
-    let worktree = namespace(&[
-        ("create", "git.worktree.create"),
-        ("remove", "git.worktree.remove"),
-    ]);
-    let mut root = crate::value::DictMap::new();
-    root.put_str("_namespace", "git");
-    root.insert(crate::value::intern_key("repo"), repo);
-    root.insert(crate::value::intern_key("worktree"), worktree);
-    for (name, builtin) in [
-        ("fetch", "git.fetch"),
-        ("rebase", "git.rebase"),
-        ("status", "git.status"),
-        ("conflicts", "git.conflicts"),
-        ("push", "git.push"),
-        ("diff", "git.diff"),
-        ("merge_base", "git.merge_base"),
-        ("tag_list", "git.tag_list"),
-        ("describe", "git.describe"),
-        ("ls_remote", "git.ls_remote"),
-        ("repo_discover", "git.repo.discover"),
-        ("worktree_create", "git.worktree.create"),
-        ("worktree_remove", "git.worktree.remove"),
-    ] {
-        root.insert(
-            crate::value::intern_key(name),
-            VmValue::BuiltinRef(arcstr::ArcStr::from(builtin)),
-        );
-    }
-    vm.set_global("git", VmValue::dict(root));
-}
-
-fn namespace(entries: &[(&str, &str)]) -> VmValue {
-    VmValue::dict(
-        entries
-            .iter()
-            .map(|(name, builtin)| {
-                (
-                    crate::value::intern_key(name),
-                    VmValue::BuiltinRef(arcstr::ArcStr::from(*builtin)),
-                )
-            })
-            .collect::<crate::value::DictMap>(),
-    )
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Process,
+        "git_ls_remote",
+        |ctx, args| async move {
+            let repo = repo_path_arg(&args, 0, "git.ls_remote")?;
+            let remote = required_string_arg(&args, 1, "git.ls_remote", "remote")?;
+            let options = optional_dict_arg(&args, 2);
+            let argv = ls_remote_argv(&remote, options)?;
+            run_git_command(
+                Some(&ctx),
+                GitCommand {
+                    operation: "git.ls_remote",
+                    action: "git.ls_remote",
+                    cwd: repo,
+                    argv,
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::LsRemote { remote },
+                },
+            )
+            .await
+        },
+    );
 }
 
 async fn run_git_command(

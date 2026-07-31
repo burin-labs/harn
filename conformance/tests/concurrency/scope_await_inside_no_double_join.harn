@@ -1,11 +1,11 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Awaiting a task explicitly deregisters it from the nursery, so scope exit
   // neither double-joins nor cancels it.
   scope {
     const h = spawn {
       42
     }
-    log(await(h))
+    harness.stdio.log(await(h))
   }
-  log("done")
+  harness.stdio.log("done")
 }

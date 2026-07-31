@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn maybe_reset(x: string?, reset: bool) -> string {
     if x != nil {
       if reset {
@@ -8,5 +8,5 @@ pipeline test(task) {
     }
     return ""
   }
-  __io_println(maybe_reset("ok", false))
+  harness.stdio.println(maybe_reset("ok", false))
 }

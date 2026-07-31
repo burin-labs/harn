@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * `defer_loading` fields unchanged. The override lets the user assert
  * that capability and opt into the native path.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -29,7 +29,7 @@ pipeline test(task) {
   // Without the override: Harn cannot parse "my-internal-model", so
   // `mode: "native"` errors out.
   const err_without = try {
-    llm_call(
+    harness.llm.call(
       "x",
       nil,
       {
@@ -49,9 +49,10 @@ pipeline test(task) {
   // meta-tool. `provider_overrides` is keyed by provider name so the
   // same call can pass multiple provider-specific flags.
   with_llm_script(
+    harness.llm,
     [llm_text("ack")],
     { ->
-      llm_call(
+      harness.llm.call(
         "x",
         nil,
         {
@@ -62,13 +63,13 @@ pipeline test(task) {
           provider_options: {mock: {force_native_tool_search: true}},
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const meta = calls[0].tools[0]
       assert(calls[0].api_mode == "responses", "forced native search selects the Responses API")
       assert(meta.type == "tool_search", "escape hatch emits OpenAI meta-tool")
       assert(meta.mode == "hosted", "defaults to hosted mode")
       assert(len(calls[0].tools) == 1, "native search sends the hosted search meta-tool")
-      log("tool_search_provider_overrides tests passed")
+      harness.stdio.log("tool_search_provider_overrides tests passed")
     },
   )
 }

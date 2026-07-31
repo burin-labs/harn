@@ -10,7 +10,7 @@
 import { governor_decision } from "std/agent/governors"
 
 // burin-shaped policy: checkpoint = armed budget (1.0x), over_estimate =
-// expected_total + checkpoint (~2.0x), hard = exhausted extends/checks (3.0x).
+// expected_total + harness.runtime.checkpoint(~2.0x), hard = exhausted extends/checks (3.0x).
 const POLICY = {budget: 10.0, checkpoint: 1.0, hard: 3.0, over_estimate: 2.0, signal: "iterations"}
 
 fn row(consumed, made_progress) {
@@ -21,27 +21,27 @@ fn row(consumed, made_progress) {
   return decision.action + ":" + decision.reason
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // fraction 0.5, progressing -> proceed (below checkpoint).
-  __io_println(row(5.0, true))
+  harness.stdio.println(row(5.0, true))
   // fraction 1.0, no progress -> abort (burin cut at checkpoint).
-  __io_println(row(10.0, false))
+  harness.stdio.println(row(10.0, false))
   // fraction 1.0, progressing -> proceed (burin extend within estimate).
-  __io_println(row(10.0, true))
+  harness.stdio.println(row(10.0, true))
   // fraction 1.5, progressing -> proceed (still extending).
-  __io_println(row(15.0, true))
+  harness.stdio.println(row(15.0, true))
   // fraction 2.0, progressing -> warn (burin pace_check over estimate).
-  __io_println(row(20.0, true))
+  harness.stdio.println(row(20.0, true))
   // fraction 2.5, progressing -> warn.
-  __io_println(row(25.0, true))
+  harness.stdio.println(row(25.0, true))
   // fraction 2.0, no progress -> abort (no-progress overrides warn).
-  __io_println(row(20.0, false))
+  harness.stdio.println(row(20.0, false))
   // fraction 3.0, progressing -> abort (hard stop beats progress veto).
-  __io_println(row(30.0, true))
+  harness.stdio.println(row(30.0, true))
   // fraction 3.0, no progress -> abort (hard).
-  __io_println(row(30.0, false))
+  harness.stdio.println(row(30.0, false))
   // no budget -> proceed (inert).
-  __io_println(
+  harness.stdio.println(
     governor_decision(
       {budget: 0.0},
       {ceiling: 0.0, consumed: 5.0, made_progress: false, signal: "tokens"},

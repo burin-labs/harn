@@ -1,6 +1,6 @@
 /** Verifies native repo-scale text search from the harness filesystem surface. */
-pipeline test(task) {
-  const root = path_join(harness.fs.temp_dir(), "find_text_test")
+pipeline test(harness: Harness, task) {
+  const root = path_join(harness.fs.workspace_temp_dir(), "find_text_test")
   if harness.fs.exists(root) {
     harness.fs.delete(root)
   }
@@ -16,19 +16,19 @@ pipeline test(task) {
     "secret_token",
     {include: "**/*.harn", case_insensitive: true, preset: "source"},
   )
-  log(len(hits))
-  log(hits[0].line)
-  log(hits[0].col)
-  log(contains(hits[0].path, "src/main.harn"))
-  log(hits[0].text)
+  harness.stdio.log(len(hits))
+  harness.stdio.log(hits[0].line)
+  harness.stdio.log(hits[0].col)
+  harness.stdio.log(contains(hits[0].path, "src/main.harn"))
+  harness.stdio.log(hits[0].text)
   const limited = harness.fs.find_text(
     root,
     "secret_token",
     {case_insensitive: true, max_matches: 2},
   )
-  log(len(limited))
-  log(harness.fs.find_text(root, "secret_token", {mode: "exists", parallel: true}))
-  log(
+  harness.stdio.log(len(limited))
+  harness.stdio.log(harness.fs.find_text(root, "secret_token", {mode: "exists", parallel: true}))
+  harness.stdio.log(
     harness.fs.find_text(
       root,
       "secret_token",

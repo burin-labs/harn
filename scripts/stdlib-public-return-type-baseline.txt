@@ -110,7 +110,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/oauth/storage.harn
 # count    2  crates/harn-stdlib/src/stdlib/postgres/query.harn
 # count    6  crates/harn-stdlib/src/stdlib/stdlib_acp.harn
-# count    8  crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn
+# count    1  crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn
 # count   34  crates/harn-stdlib/src/stdlib/stdlib_agents.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_async.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_cache.harn
@@ -149,14 +149,14 @@
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_runtime.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_signal.harn
 # count    9  crates/harn-stdlib/src/stdlib/stdlib_slug.harn
-# count   25  crates/harn-stdlib/src/stdlib/stdlib_testing.harn
+# count   14  crates/harn-stdlib/src/stdlib/stdlib_testing.harn
 # count   17  crates/harn-stdlib/src/stdlib/stdlib_text.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_tool_hooks.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_triage.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_tui.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_web.harn
-# count    6  crates/harn-stdlib/src/stdlib/stdlib_worktree.harn
+# count    5  crates/harn-stdlib/src/stdlib/stdlib_worktree.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_xml.harn
 # count   21  crates/harn-stdlib/src/stdlib/verification_core.harn
 # count    6  crates/harn-stdlib/src/stdlib/verification_ladder.harn
@@ -681,7 +681,6 @@ crates/harn-stdlib/src/stdlib/agent/workers.harn::agent_name
 crates/harn-stdlib/src/stdlib/agent/workers.harn::agent_stop
 crates/harn-stdlib/src/stdlib/agent/workers.harn::close_agent
 crates/harn-stdlib/src/stdlib/agent/workers.harn::list_agents
-crates/harn-stdlib/src/stdlib/agent/workers.harn::resume_agent
 crates/harn-stdlib/src/stdlib/agent/workers.harn::send_input
 crates/harn-stdlib/src/stdlib/agent/workers.harn::spawn_agent
 crates/harn-stdlib/src/stdlib/agent/workers.harn::sub_agent_request
@@ -908,14 +907,7 @@ crates/harn-stdlib/src/stdlib/stdlib_acp.harn::harn_plan
 crates/harn-stdlib/src/stdlib/stdlib_acp.harn::plan
 crates/harn-stdlib/src/stdlib/stdlib_acp.harn::tool_call
 crates/harn-stdlib/src/stdlib/stdlib_acp.harn::tool_call_update
-crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn::agent_state_delete
-crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn::agent_state_handoff
 crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn::agent_state_handoff_key
-crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn::agent_state_init
-crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn::agent_state_list
-crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn::agent_state_read
-crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn::agent_state_resume
-crates/harn-stdlib/src/stdlib/stdlib_agent_state.harn::agent_state_write
 crates/harn-stdlib/src/stdlib/stdlib_agents.harn::continue_as_new
 crates/harn-stdlib/src/stdlib/stdlib_agents.harn::handoff_artifact
 crates/harn-stdlib/src/stdlib/stdlib_agents.harn::repair_task
@@ -1261,28 +1253,17 @@ crates/harn-stdlib/src/stdlib/stdlib_slug.harn::slug_verbs
 crates/harn-stdlib/src/stdlib/stdlib_slug.harn::slugify
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_golden_transcript
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_handoff_emitted
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_host_call_count
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_host_called
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_no_host_calls
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_receipt_field
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_step_emitted
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_step_received
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::assert_steps_ran
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::clear_host_mocks
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::host_calls
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::host_calls_for
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::llm_calls
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::mock_host_error
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::mock_host_response
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::mock_host_result
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::step_assertions_begin
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::step_assertions_end
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::step_events
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::step_events_clear
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::with_host_mocks
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::with_llm_mocks
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::with_llm_script
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::with_mocks
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::with_scenario
 crates/harn-stdlib/src/stdlib/stdlib_text.harn::detect_compile_error
 crates/harn-stdlib/src/stdlib/stdlib_text.harn::extract_paths

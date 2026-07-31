@@ -1,6 +1,6 @@
 import { bounded_loop } from "std/personas/prelude"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const opts = {
     persona: "loop_captain",
     step: "drain_queue",
@@ -11,6 +11,7 @@ pipeline test(task) {
     progress_required: true,
   }
   const completed = bounded_loop(
+    harness.clock,
     0,
     fn(state) {
       let next = state + 1
@@ -18,14 +19,19 @@ pipeline test(task) {
     },
     opts,
   )
-  __io_println(completed.status)
-  __io_println(completed.state)
-  __io_println(completed.iterations)
-  __io_println(completed.stopped_reason)
-  __io_println(completed.receipt.schema)
-  const stalled = bounded_loop(7, fn(state) { return {state: state, progress: false} }, opts)
-  __io_println(stalled.status)
-  __io_println(stalled.state)
-  __io_println(stalled.iterations)
-  __io_println(stalled.stopped_reason)
+  harness.stdio.println(completed.status)
+  harness.stdio.println(completed.state)
+  harness.stdio.println(completed.iterations)
+  harness.stdio.println(completed.stopped_reason)
+  harness.stdio.println(completed.receipt.schema)
+  const stalled = bounded_loop(
+    harness.clock,
+    7,
+    fn(state) { return {state: state, progress: false} },
+    opts,
+  )
+  harness.stdio.println(stalled.status)
+  harness.stdio.println(stalled.state)
+  harness.stdio.println(stalled.iterations)
+  harness.stdio.println(stalled.stopped_reason)
 }

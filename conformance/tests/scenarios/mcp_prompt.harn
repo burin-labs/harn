@@ -1,6 +1,6 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Register a prompt with arguments
-  const r = mcp_prompt(
+  const r = harness.tools.mcp_prompt(
     {
       name: "code_review",
       description: "Review code quality",
@@ -10,7 +10,7 @@ pipeline test(task) {
   )
   assert(r == nil, "mcp_prompt should return nil")
   // Register a prompt returning a message list
-  mcp_prompt(
+  harness.tools.mcp_prompt(
     {
       name: "pair_program",
       description: "Pair programming session",
@@ -22,5 +22,5 @@ pipeline test(task) {
       },
     },
   )
-  __io_println("mcp_prompt registered")
+  harness.stdio.println("mcp_prompt registered")
 }

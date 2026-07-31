@@ -1,6 +1,6 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const key = "dynamic"
   const d = {[key]: 42, fixed: 1}
-  log(d.dynamic)
-  log(d.fixed)
+  harness.stdio.log(d.dynamic)
+  harness.stdio.log(d.fixed)
 }

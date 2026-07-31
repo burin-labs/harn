@@ -1,25 +1,25 @@
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const data: unknown = {verdict: "pass", summary: "looks good"}
   if schema_is(data, GraderOut) {
     // data is narrowed to GraderOut here.
-    __io_println(data.verdict)
-    __io_println(data.summary)
+    harness.stdio.println(data.verdict)
+    harness.stdio.println(data.summary)
   } else {
-    __io_println("unreachable")
+    harness.stdio.println("unreachable")
   }
   // schema_of(T) produces the same dict schema, and narrowing works
   // through it too.
   if schema_is(data, schema_of(GraderOut)) {
-    __io_println(data.verdict.upper())
+    harness.stdio.println(data.verdict.upper())
   }
   // Negative narrowing: a value that fails validation does not reach
   // the then-branch.
   const bogus: unknown = {verdict: "maybe", summary: "x"}
   if schema_is(bogus, GraderOut) {
-    __io_println("unreachable")
+    harness.stdio.println("unreachable")
   } else {
-    __io_println("rejected")
+    harness.stdio.println("rejected")
   }
 }

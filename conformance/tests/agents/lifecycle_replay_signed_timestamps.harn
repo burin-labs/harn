@@ -15,9 +15,9 @@
  * Together these prove that lifecycle replay reads the original wall
  * time off the journal rather than reading it off the live clock.
  */
-pipeline default() {
-  const _ = mock_time(1700000002000)
-  const entry = lifecycle_receipt_record_suspension(
+pipeline default(harness: Harness) {
+  const _ = harness.testing.clock_set(1700000002000)
+  const entry = harness.agent.lifecycle_receipt_record_suspension(
     {
       handle: "worker://triage/99",
       session_id: "session-a",
@@ -27,13 +27,13 @@ pipeline default() {
     },
   )
   const recorded_at_ms = entry.payload.suspended_at.at_ms
-  __io_println("recorded_at_ms=" + to_string(recorded_at_ms))
+  harness.stdio.println("recorded_at_ms=" + to_string(recorded_at_ms))
   // Advance the wall clock between "record" and "replay" — the
   // journaled timestamp must stay pinned to the original.
-  const _ = advance_time(5000)
+  const _ = harness.testing.clock_advance(5000)
   const signed_ok = verify_lifecycle_receipt_signature("suspension_receipt", entry.payload)
-  __io_println("signed_verified=" + to_string(signed_ok.verified))
-  __io_println(
+  harness.stdio.println("signed_verified=" + to_string(signed_ok.verified))
+  harness.stdio.println(
     "journal_at_ms_stable=" + to_string(entry.payload.suspended_at.at_ms == 1700000002000),
   )
   // Tamper with at_ms — verification fails with HARN-SUS-013.
@@ -52,10 +52,10 @@ pipeline default() {
     },
   }
   const tampered_check = verify_lifecycle_receipt_signature("suspension_receipt", tampered)
-  __io_println("tampered_verified=" + to_string(tampered_check.verified))
-  __io_println(
+  harness.stdio.println("tampered_verified=" + to_string(tampered_check.verified))
+  harness.stdio.println(
     "tampered_error_has_sus_013=" + to_string(contains(tampered_check.error, "HARN-SUS-013")),
   )
-  const _ = unmock_time()
+  const _ = harness.testing.clock_reset()
   return "ok"
 }

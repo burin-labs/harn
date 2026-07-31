@@ -33,12 +33,14 @@ mod command_policy;
 pub(crate) mod compaction;
 mod compression;
 mod concurrency;
+pub(crate) use concurrency::cancelled_vm_error;
 mod connectors;
 mod cookies;
 mod cron;
 mod crypto;
 mod csv;
 mod datetime;
+pub(crate) use datetime::date_dict_from_millis;
 mod document;
 mod durable_step;
 mod event_log;
@@ -65,6 +67,7 @@ mod lifecycle_receipts;
 mod logging;
 pub mod long_running;
 mod math;
+pub(crate) use math::call_seeded_random_method;
 pub(crate) mod memory;
 mod monitors;
 mod multipart;
@@ -117,7 +120,6 @@ mod types;
 mod url_parse;
 mod vision;
 pub(crate) mod waitpoint;
-mod waitpoints;
 mod web;
 pub mod workflow_messages;
 pub(crate) mod xml;
@@ -135,7 +137,6 @@ pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
 
 /// Register core builtins: pure/deterministic, no I/O.
 pub fn register_core_stdlib(vm: &mut Vm) {
-    crate::runtime_context::register_runtime_context_builtins(vm);
     types::register_type_builtins(vm);
     math::register_math_builtins(vm);
     strings::register_string_builtins(vm);
@@ -218,7 +219,6 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     postgres::register_postgres_builtins(vm);
     #[cfg(feature = "sqlite")]
     sqlite::register_sqlite_builtins(vm);
-    waitpoints::register_waitpoint_builtins(vm);
     monitors::register_monitor_builtins(vm);
     hitl::register_hitl_builtins(vm);
     hitl_read::register_hitl_read_builtins(vm);
@@ -264,10 +264,11 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_core_stdlib(vm);
     register_io_stdlib(vm);
     register_agent_stdlib(vm);
-    if vm.global("harness").is_none() {
+    vm.project_declared_capability_methods();
+    if vm.harness().is_none() {
         vm.set_harness(crate::harness::Harness::real());
     }
-    harn_builtin_registry::install_builtin_signatures(all_builtin_signatures());
+    harn_builtin_registry::install_builtin_manifest(all_builtin_manifest());
 }
 
 pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {
@@ -287,8 +288,8 @@ fn stdlib_probe_vm() -> Vm {
     // Install the macro-emitted signatures into the parser registry so any
     // probe-driven name/metadata query (e.g. the alignment test) sees the
     // post-migration sig set. Idempotent under repeat install with the same
-    // pointer (which `all_builtin_signatures()` guarantees).
-    harn_builtin_registry::install_builtin_signatures(all_builtin_signatures());
+    // pointer (which `all_builtin_manifest()` guarantees).
+    harn_builtin_registry::install_builtin_manifest(all_builtin_manifest());
     vm
 }
 
@@ -308,7 +309,77 @@ fn stdlib_probe_vm() -> Vm {
 /// `linkme_distributed_slice_populates_with_all_builtins` catches a silent
 /// regression by asserting the slice is non-empty.
 pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
-    &macros::ALL_BUILTIN_DEFS
+    let defs = &macros::ALL_BUILTIN_DEFS;
+    validate_builtin_contracts(defs);
+    defs
+}
+
+fn validate_builtin_contracts(defs: &[&macros::VmBuiltinDef]) {
+    use harn_builtin_meta::BuiltinExposure;
+    let mut source_names = std::collections::BTreeSet::new();
+    let mut capability_methods = std::collections::BTreeSet::new();
+    for def in defs {
+        assert!(
+            def.contract.is_declared(),
+            "builtin `{}` has no typed exposure/effect contract",
+            def.sig.name
+        );
+        assert!(
+            !matches!(def.contract.exposure, BuiltinExposure::PureGlobal)
+                || def.contract.effects.is_empty(),
+            "ambient global builtin `{}` declares effects; effects must flow through Harness",
+            def.sig.name
+        );
+        if let BuiltinExposure::CapabilityFunction { authority_argument } = def.contract.exposure {
+            assert!(
+                !def.contract.effects.is_empty(),
+                "capability function `{}` must declare effects",
+                def.sig.name
+            );
+            assert!(
+                usize::from(authority_argument) < def.sig.params.len(),
+                "capability function `{}` authority argument is out of range",
+                def.sig.name
+            );
+        }
+        if def.runtime_only {
+            assert!(
+                matches!(def.contract.exposure, BuiltinExposure::RuntimeInternal),
+                "runtime_only builtin `{}` must use runtime_internal exposure",
+                def.sig.name
+            );
+        }
+        if let BuiltinExposure::HarnessMethod { method, .. } = def.contract.exposure {
+            assert!(
+                !method.is_empty(),
+                "harness method for `{}` cannot be empty",
+                def.sig.name
+            );
+            let BuiltinExposure::HarnessMethod { capability, method } = def.contract.exposure
+            else {
+                unreachable!()
+            };
+            assert!(
+                capability_methods.insert((capability, method)),
+                "duplicate contract for harness.{}.{}",
+                capability.field_name(),
+                method
+            );
+        }
+        if matches!(
+            def.contract.exposure,
+            BuiltinExposure::PureGlobal
+                | BuiltinExposure::CapabilityFunction { .. }
+                | BuiltinExposure::PrivilegedWire
+                | BuiltinExposure::HarnessMethod { .. }
+        ) {
+            assert!(
+                source_names.insert(def.sig.name),
+                "duplicate source contract name `{}`",
+                def.sig.name
+            );
+        }
+    }
 }
 
 /// Force-link entry point: a `pub fn` that touches `ALL_BUILTIN_DEFS` so
@@ -333,29 +404,102 @@ pub fn force_link() {
     );
 }
 
-/// Driver-facing helper: flatten the macro-emitted `BuiltinDef`s into a
-/// `&'static [&'static BuiltinSignature]` slice suitable for
-/// [`harn_builtin_registry::install_builtin_signatures`].
-///
-/// Aliases are expanded into their own `BuiltinSignature` entries (the
-/// allocation is leaked once at startup — process-lifetime is appropriate
-/// for a global registry).
-pub fn all_builtin_signatures() -> &'static [&'static harn_builtin_meta::BuiltinSignature] {
+/// Driver-facing immutable manifest for parser, IR, policy, and docs.
+pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::BuiltinManifestEntry] {
     use std::sync::OnceLock;
-    static AGG: OnceLock<Vec<&'static harn_builtin_meta::BuiltinSignature>> = OnceLock::new();
+    static AGG: OnceLock<Vec<&'static harn_builtin_registry::BuiltinManifestEntry>> =
+        OnceLock::new();
     AGG.get_or_init(|| {
-        let mut out: Vec<&'static harn_builtin_meta::BuiltinSignature> = Vec::new();
+        let mut out = Vec::new();
+        let mut capability_methods = std::collections::BTreeSet::new();
         for def in all_builtin_defs() {
             if def.runtime_only {
                 continue;
             }
-            out.push(&def.sig);
+            out.push(
+                Box::leak(Box::new(harn_builtin_registry::BuiltinManifestEntry {
+                    name: def.sig.name,
+                    signature: &def.sig,
+                    contract: def.contract,
+                })) as &'static harn_builtin_registry::BuiltinManifestEntry,
+            );
+            if let harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } =
+                def.contract.exposure
+            {
+                capability_methods.insert((capability, method));
+            }
             for alias in def.aliases {
-                let aliased = harn_builtin_meta::BuiltinSignature {
+                let signature = Box::leak(Box::new(harn_builtin_meta::BuiltinSignature {
                     name: alias,
                     ..def.sig
-                };
-                out.push(Box::leak(Box::new(aliased)));
+                }));
+                out.push(
+                    Box::leak(Box::new(harn_builtin_registry::BuiltinManifestEntry {
+                        name: alias,
+                        signature,
+                        contract: def.contract,
+                    })) as &'static harn_builtin_registry::BuiltinManifestEntry,
+                );
+            }
+        }
+        for entry in harn_capability_contracts::manifest() {
+            let harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } =
+                entry.contract.exposure
+            else {
+                unreachable!("leaf capability manifest contains a non-method contract")
+            };
+            if !capability_methods.insert((capability, method)) {
+                let runtime_entry = out
+                    .iter()
+                    .find(|candidate| candidate.contract.exposure == entry.contract.exposure)
+                    .expect("duplicate capability key must have a runtime manifest entry");
+                assert_eq!(
+                    runtime_entry.contract,
+                    entry.contract,
+                    "runtime effect contract drift for harness.{}.{}",
+                    capability.field_name(),
+                    method
+                );
+                assert_eq!(
+                    runtime_entry.signature,
+                    entry.signature,
+                    "runtime signature drift for harness.{}.{}",
+                    capability.field_name(),
+                    method
+                );
+                continue;
+            }
+            out.push(*entry);
+        }
+        for group in harn_builtin_meta::host_capabilities::HOST_CAPABILITY_GROUPS {
+            for method in group.methods {
+                if !capability_methods.insert((group.capability, *method)) {
+                    continue;
+                }
+                let internal_name: &'static str = Box::leak(
+                    format!("__cap_{}_{}", group.capability.field_name(), method).into_boxed_str(),
+                );
+                let params: &'static [harn_builtin_meta::Param] =
+                    Box::leak(Box::new([harn_builtin_meta::Param::new(
+                        "request",
+                        harn_builtin_meta::Ty::Named("dict"),
+                    )]));
+                let signature = Box::leak(Box::new(harn_builtin_meta::BuiltinSignature::simple(
+                    internal_name,
+                    params,
+                    harn_builtin_meta::Ty::Named("dict"),
+                )));
+                out.push(Box::leak(Box::new(
+                    harn_builtin_registry::BuiltinManifestEntry {
+                        name: internal_name,
+                        signature,
+                        contract: harn_builtin_meta::BuiltinContract::harness(
+                            group.capability,
+                            method,
+                            group.effects,
+                        ),
+                    },
+                )));
             }
         }
         out
@@ -380,17 +524,7 @@ pub fn stdlib_builtin_names() -> Vec<String> {
     let mut names = vm.builtin_names();
     // Special opcodes/keywords, not registered builtins, but linter
     // should recognize them as valid function calls.
-    for extra in [
-        "spawn",
-        "await",
-        "cancel",
-        "cancel_graceful",
-        "__signal_interrupted",
-        "__signal_off_interrupt",
-        "__signal_on_interrupt",
-        "__signal_raise",
-        "is_cancelled",
-    ] {
+    for extra in harn_parser::builtin_signatures::LANGUAGE_INTRINSICS {
         names.push(extra.to_string());
     }
     names
@@ -432,9 +566,7 @@ pub fn reset_stdlib_state() {
     hitl::reset_hitl_state();
     crate::http::reset_http_state();
     crate::external_agent::reset_external_agent_state();
-    jsonrpc::reset_jsonrpc_state();
     monitors::reset_monitor_state();
-    waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();
     triggers_stdlib::reset_auto_resume_timeouts();
     compaction::reset_compaction_state();
@@ -462,16 +594,16 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "current_thread")]
-    async fn register_vm_stdlib_installs_default_harness_handle() {
+    async fn register_vm_stdlib_passes_default_harness_only_to_main() {
         let chunk = crate::compile_source(
             r"
-fn __probe_global_harness_clock() {
-  const now = harness.clock.now_ms()
+fn __probe_harness_clock(clock: HarnessClock) {
+  const now = clock.now_ms()
   return now >= 0
 }
 
 fn main(harness: Harness) {
-  return __probe_global_harness_clock()
+  return __probe_harness_clock(harness.clock)
 }
 ",
         )
@@ -479,7 +611,8 @@ fn main(harness: Harness) {
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);
 
-        assert!(vm.global("harness").is_some());
+        assert!(vm.root_harness_value().is_some());
+        assert!(vm.global("harness").is_none());
         let result = vm
             .execute(&chunk)
             .await
@@ -513,6 +646,47 @@ fn main(harness: Harness) {
         assert!(
             checked > 0,
             "no re-exports were checked — the table or the module list is not being read"
+        );
+    }
+
+    #[test]
+    fn ambient_effect_builtin_allowlist_is_empty() {
+        let offenders = all_builtin_defs()
+            .iter()
+            .filter(|def| {
+                matches!(
+                    def.contract.exposure,
+                    harn_builtin_meta::BuiltinExposure::PureGlobal
+                ) && !def.contract.effects.is_empty()
+            })
+            .map(|def| def.sig.name)
+            .collect::<Vec<_>>();
+
+        assert!(
+            offenders.is_empty(),
+            "ambient effect builtins are forbidden; route these through Harness: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn every_source_named_runtime_callable_has_a_typed_contract() {
+        let manifest_names = all_builtin_manifest()
+            .iter()
+            .map(|entry| entry.name)
+            .collect::<std::collections::HashSet<_>>();
+        let offenders = stdlib_probe_vm()
+            .builtin_names()
+            .into_iter()
+            .filter(|name| {
+                !name.starts_with("__")
+                    && !manifest_names.contains(name.as_str())
+                    && !harn_parser::builtin_signatures::is_language_intrinsic(name)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            offenders.is_empty(),
+            "runtime callables without typed source contracts bypass the Harness gate: {offenders:?}"
         );
     }
 }

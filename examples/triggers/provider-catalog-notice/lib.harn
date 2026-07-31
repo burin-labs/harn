@@ -5,7 +5,7 @@ import "std/triggers"
  * ProviderNotice JSON file. The configured repository must be a dedicated,
  * clean worktree; the workflow itself retains the fail-closed validation.
  */
-pub fn run_provider_catalog_notice(_event: TriggerEvent) -> dict {
+pub fn run_provider_catalog_notice(harness: Harness, _event: TriggerEvent) -> dict {
   const root = harness.env.get_or("HARN_PROVIDER_NOTICE_WORKTREE", "")
   const notice = harness.env.get_or("HARN_PROVIDER_NOTICE_FILE", "")
   if root == "" || notice == "" {
@@ -29,7 +29,7 @@ pub fn run_provider_catalog_notice(_event: TriggerEvent) -> dict {
   if extraction != "" {
     args = args + ["--extraction", extraction]
   }
-  const result = harness.process.spawn_captured({cmd: "harn", args: args, cwd: root})
+  const result = harness.process.run({program: "harn", args: args, cwd: root})
   return {
     status: if result.exit_code == 0 {
       "completed"

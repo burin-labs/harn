@@ -14,6 +14,28 @@ use harn_vm::{Vm, VmError, VmValue};
 
 use crate::error::HostlibError;
 
+fn capability_for_module(module: &str) -> harn_builtin_meta::CapabilityId {
+    use harn_builtin_meta::CapabilityId;
+    match module {
+        "ast" => CapabilityId::Ast,
+        "code_index" => CapabilityId::CodeIndex,
+        "computer" => CapabilityId::Computer,
+        "embed" => CapabilityId::Embed,
+        "fs" => CapabilityId::Fs,
+        "fs_watch" => CapabilityId::FsWatch,
+        "host_lease" => CapabilityId::HostLease,
+        "host_conditions" => CapabilityId::System,
+        "scanner" => CapabilityId::Scanner,
+        "secret_store" => CapabilityId::SecretStore,
+        "terminal_session" => CapabilityId::TerminalSession,
+        "tools" => CapabilityId::Tools,
+        "verdict" => CapabilityId::Verdict,
+        "rules" => CapabilityId::Rules,
+        "lint" => CapabilityId::Lint,
+        unknown => panic!("hostlib module `{unknown}` has no typed capability id"),
+    }
+}
+
 /// Sync builtin handler signature. Mirrors the closure type accepted by
 /// [`harn_vm::Vm::register_builtin`]; we keep it `Send + Sync` so capability
 /// instances can be shared across threads if an embedder ever wants that.
@@ -119,38 +141,20 @@ impl BuiltinRegistry {
         });
     }
 
-    /// Like [`Self::register_fn`], but wraps the handler in the shared
-    /// deterministic-tools permission gate
-    /// ([`crate::tools::permissions::gated_handler`]).
-    pub(crate) fn register_gated_fn(
-        &mut self,
-        module: &'static str,
-        name: &'static str,
-        method: &'static str,
-        runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
-    ) {
-        self.register(RegisteredBuiltin {
-            name,
-            module,
-            method,
-            handler: crate::tools::permissions::gated_handler(name, runner),
-        });
-    }
-
     /// Register a deterministic command-execution builtin whose request must
     /// cross the VM command-policy boundary before the hostlib handler runs.
-    pub(crate) fn register_gated_command_fn(
+    pub(crate) fn register_command_fn(
         &mut self,
         module: &'static str,
         name: &'static str,
         method: &'static str,
         runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
     ) {
-        self.register_gated_fn(module, name, method, runner);
+        self.register_fn(module, name, method, runner);
         self.command_policy_builtins.insert(name);
     }
 
-    pub(crate) fn register_gated_async_fn<F, Fut>(
+    pub(crate) fn register_async_fn<F, Fut>(
         &mut self,
         module: &'static str,
         name: &'static str,
@@ -161,24 +165,7 @@ impl BuiltinRegistry {
         Fut: Future<Output = Result<VmValue, HostlibError>> + Send + 'static,
     {
         let runner = Arc::new(runner);
-        let handler: AsyncHandler = Arc::new(move |args| {
-            if !crate::tools::permissions::is_enabled(
-                crate::tools::permissions::FEATURE_TOOLS_DETERMINISTIC,
-            ) {
-                return Box::pin(async move {
-                    Err(HostlibError::Backend {
-                        builtin: name,
-                        message: format!(
-                            "feature `{}` is not enabled in this session — call \
-                             `hostlib_enable(\"{}\")` before invoking this capability",
-                            crate::tools::permissions::FEATURE_TOOLS_DETERMINISTIC,
-                            crate::tools::permissions::FEATURE_TOOLS_DETERMINISTIC,
-                        ),
-                    })
-                });
-            }
-            Box::pin(runner(args))
-        });
+        let handler: AsyncHandler = Arc::new(move |args| Box::pin(runner(args)));
         self.async_builtins.push(RegisteredAsyncBuiltin {
             name,
             module,
@@ -273,6 +260,7 @@ impl HostlibRegistry {
         for builtin in self.builtins.iter().cloned() {
             let module = builtin.module;
             let method = builtin.method;
+            let capability = capability_for_module(module);
             harn_vm::stdlib::host::register_callable_host_operation(
                 module,
                 method,
@@ -280,7 +268,7 @@ impl HostlibRegistry {
             );
             let handler = builtin.handler.clone();
             if self.builtins.uses_command_policy(builtin.name) {
-                vm.register_async_builtin(builtin.name, move |ctx, args| {
+                vm.register_async_capability_method(capability, method, move |ctx, args| {
                     let handler = handler.clone();
                     async move {
                         let request = crate::schemas::validate_request_args(
@@ -296,11 +284,6 @@ impl HostlibRegistry {
                                 builtin.name
                             ))
                         })?;
-                        if let Some(mocked) = harn_vm::stdlib::host::dispatch_mock_hostlib_call(
-                            module, method, params,
-                        ) {
-                            return mocked;
-                        }
                         let caller = serde_json::json!({
                             "surface": "hostlib",
                             "builtin": builtin.name,
@@ -379,8 +362,9 @@ impl HostlibRegistry {
                     }
                 });
             } else {
-                vm.register_builtin(
-                    builtin.name,
+                vm.register_capability_method(
+                    capability,
+                    method,
                     move |args, _out| -> Result<VmValue, VmError> {
                         let request = crate::schemas::validate_request_args(
                             builtin.name,
@@ -389,14 +373,7 @@ impl HostlibRegistry {
                             args,
                         )
                         .map_err(VmError::from)?;
-                        let validated_args = [request.clone()];
-                        if let Some(params) = request.as_dict() {
-                            if let Some(mocked) = harn_vm::stdlib::host::dispatch_mock_hostlib_call(
-                                module, method, params,
-                            ) {
-                                return mocked;
-                            }
-                        }
+                        let validated_args = [request];
                         handler(&validated_args).map_err(VmError::from)
                     },
                 );
@@ -405,25 +382,19 @@ impl HostlibRegistry {
         for builtin in self.builtins.async_builtins.iter().cloned() {
             let module = builtin.module;
             let method = builtin.method;
+            let capability = capability_for_module(module);
             harn_vm::stdlib::host::register_callable_host_operation(
                 module,
                 method,
                 "Hostlib schema-backed operation registered at runtime.",
             );
             let handler = builtin.handler.clone();
-            vm.register_async_builtin(builtin.name, move |_ctx, args| {
+            vm.register_async_capability_method(capability, method, move |_ctx, args| {
                 let handler = handler.clone();
                 async move {
                     let request =
                         crate::schemas::validate_request_args(builtin.name, module, method, &args)
                             .map_err(VmError::from)?;
-                    if let Some(params) = request.as_dict() {
-                        if let Some(mocked) = harn_vm::stdlib::host::dispatch_mock_hostlib_call(
-                            module, method, params,
-                        ) {
-                            return mocked;
-                        }
-                    }
                     let result = handler(vec![request]).await.map_err(VmError::from)?;
                     crate::schemas::validate_response(builtin.name, module, method, result)
                         .map_err(VmError::from)

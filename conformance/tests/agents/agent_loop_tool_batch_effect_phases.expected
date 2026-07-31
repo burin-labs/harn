@@ -4,5 +4,5 @@ phased.deferred=11
 phased.reproposed=11
 blocked.status=done
 blocked.skipped=2
-blocked.verify_calls=1
-blocked.done_calls=1
+blocked.counters.verify=1
+blocked.counters.done=1

@@ -1,17 +1,21 @@
-pipeline default() {
-  const session = emit_channel("scoped.session", {}, {scope: "session", id: "scope-session"})
-  const prefixed = emit_channel("session:scoped.prefixed", {}, {id: "scope-prefix"})
-  __io_println(session.name_resolved)
-  __io_println(prefixed.name_resolved)
-  __io_println(channel_events("scoped.session", {scope: "session"})[0].id)
+pipeline default(harness: Harness) {
+  const session = harness.channels.append(
+    "scoped.session",
+    {},
+    {scope: "session", id: "scope-session"},
+  )
+  const prefixed = harness.channels.append("session:scoped.prefixed", {}, {id: "scope-prefix"})
+  harness.stdio.println(session.name_resolved)
+  harness.stdio.println(prefixed.name_resolved)
+  harness.stdio.println(harness.channels.events("scoped.session", {scope: "session"})[0].id)
   const missing_pipeline = try {
-    emit_channel("pipeline:needs.context", {}, {id: "scope-pipeline"})
+    harness.channels.append("pipeline:needs.context", {}, {id: "scope-pipeline"})
   }
-  __io_println(is_err(missing_pipeline))
-  __io_println(contains(to_string(unwrap_err(missing_pipeline)), "HARN-CHN-001"))
+  harness.stdio.println(is_err(missing_pipeline))
+  harness.stdio.println(contains(to_string(unwrap_err(missing_pipeline)), "HARN-CHN-001"))
   const org_disabled = try {
-    emit_channel("org:burin-labs:pr.merged", {}, {id: "scope-org"})
+    harness.channels.append("org:burin-labs:pr.merged", {}, {id: "scope-org"})
   }
-  __io_println(is_err(org_disabled))
-  __io_println(contains(to_string(unwrap_err(org_disabled)), "HARN-CHN-002"))
+  harness.stdio.println(is_err(org_disabled))
+  harness.stdio.println(contains(to_string(unwrap_err(org_disabled)), "HARN-CHN-002"))
 }

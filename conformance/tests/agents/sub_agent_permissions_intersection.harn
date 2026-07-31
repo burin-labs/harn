@@ -1,3 +1,4 @@
+import { sub_agent_run } from "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
 fn write_tools() {
@@ -15,11 +16,13 @@ fn write_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [{tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]}],
     { ->
       const denied = sub_agent_run(
+        harness,
         "Try to write.",
         {
           provider: "mock",
@@ -30,10 +33,12 @@ pipeline main() {
           permissions: {allow: {write_note: { args -> true }}},
         },
       )
-      __io_println(!denied?.ok)
-      __io_println(denied.error?.category == "permission_denied")
-      __io_println(denied.error?.tool == "write_note")
-      __io_println(len(transcript_events_by_kind(denied?.transcript, "PermissionDeny")) == 1)
+      harness.stdio.println(!denied?.ok)
+      harness.stdio.println(denied.error?.category == "permission_denied")
+      harness.stdio.println(denied.error?.tool == "write_note")
+      harness.stdio.println(
+        len(transcript_events_by_kind(denied?.transcript, "PermissionDeny")) == 1,
+      )
     },
   )
 }

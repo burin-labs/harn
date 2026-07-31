@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   skill beta {
     description "Second skill"
     when_to_use "Use beta second"
@@ -28,5 +28,5 @@ pipeline test(task) {
   const tight_ev = skills_activation_evidence(registry, {budget: 170})
   assert(tight_ev.omitted.count() > 0, "a tight budget omits at least one skill")
   assert(tight_ev.shown.count() + tight_ev.omitted.count() == 2, "every skill is shown or omitted")
-  log("skills_load_skill_catalog passed")
+  harness.stdio.log("skills_load_skill_catalog passed")
 }

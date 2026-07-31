@@ -17,6 +17,19 @@ impl Compiler {
         self.compile_entry_imports(program)?;
         self.compile_top_level_declarations(program)?;
 
+        let fixture_expects_harness = fixture_name.is_some_and(|fixture_name| {
+            program.iter().any(|node| {
+                matches!(
+                    peel_node(node),
+                    Node::FnDecl { name, params, .. }
+                        if name == fixture_name
+                            && params.first().is_some_and(|param| matches!(
+                                param.type_expr.as_ref(),
+                                Some(harn_parser::TypeExpr::Named(name)) if name == "Harness"
+                            ))
+                )
+            })
+        });
         if let Some(fixture_name) = fixture_name {
             let fixture = self.string_constant(fixture_name);
             self.chunk.emit_u16(Op::GetVar, fixture, self.line);
@@ -40,6 +53,12 @@ impl Compiler {
         else {
             unreachable!("pipeline target was matched above");
         };
+        let expects_harness = params.first().is_some_and(|param| {
+            matches!(
+                param.type_expr.as_ref(),
+                Some(harn_parser::TypeExpr::Named(name)) if name == "Harness"
+            )
+        });
         let callable =
             self.compile_pipeline_callable(program, name, params, body, extends.as_deref())?;
         let function_index = self.chunk.functions.len();
@@ -54,6 +73,8 @@ impl Compiler {
         Ok(CompiledCallableEntry {
             bootstrap: self.chunk,
             has_fixture: fixture_name.is_some(),
+            fixture_expects_harness,
+            expects_harness,
         })
     }
 
@@ -66,15 +87,23 @@ impl Compiler {
         self.prepare_module_context(program);
         self.compile_entry_imports(program)?;
         self.compile_top_level_declarations(program)?;
-        let target = program.iter().any(
+        let target = program.iter().find(
             |node| matches!(peel_node(node), Node::FnDecl { name, .. } if name == function_name),
         );
-        if !target {
+        let Some(target) = target else {
             return Err(CompileError {
                 message: format!("Unknown function: {function_name}"),
                 line: self.line,
             });
-        }
+        };
+        let expects_harness = matches!(
+            peel_node(target),
+            Node::FnDecl { params, .. }
+                if params.first().is_some_and(|param| matches!(
+                    param.type_expr.as_ref(),
+                    Some(harn_parser::TypeExpr::Named(name)) if name == "Harness"
+                ))
+        );
         let function = self.string_constant(function_name);
         self.chunk.emit_u16(Op::GetVar, function, self.line);
         self.chunk.emit(Op::Return, self.line);
@@ -82,6 +111,8 @@ impl Compiler {
         Ok(CompiledCallableEntry {
             bootstrap: self.chunk,
             has_fixture: false,
+            fixture_expects_harness: false,
+            expects_harness,
         })
     }
 

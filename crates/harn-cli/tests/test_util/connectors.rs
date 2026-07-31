@@ -22,13 +22,13 @@ pub fn payload_schema() {
   return {harn_schema_name: "GitHubEventPayload", json_schema: {type: "object", additionalProperties: true}}
 }
 
-pub fn init(_ctx) {}
+pub fn init(_harness: Harness, _ctx) {}
 
-pub fn activate(_bindings) {}
+pub fn activate(_harness: Harness, _bindings) {}
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
-  const secret = secret_get("github/webhook-secret")
+  const secret = harness.secrets.read("github/webhook-secret")
   if !verify_hmac_signature(raw.body_text ?? "", header(raw.headers, "X-Hub-Signature-256"), secret) {
     return {type: "reject", status: 400, body: "invalid github signature"}
   }
@@ -43,7 +43,7 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }
 "#;
@@ -65,21 +65,21 @@ pub fn payload_schema() {
   return {harn_schema_name: "SlackEventPayload", json_schema: {type: "object", additionalProperties: true}}
 }
 
-pub fn init(_ctx) {}
+pub fn init(_harness: Harness, _ctx) {}
 
-pub fn activate(_bindings) {}
+pub fn activate(_harness: Harness, _bindings) {}
 
-fn verified_slack_signature(raw) {
+fn verified_slack_signature(secrets: HarnessSecrets, raw) {
   const timestamp = header(raw.headers, "X-Slack-Request-Timestamp")
   const signature = header(raw.headers, "X-Slack-Signature")
-  const secret = secret_get("slack/signing-secret")
+  const secret = secrets.read("slack/signing-secret")
   const expected = "v0=" + hmac_sha256(secret, "v0:" + timestamp + ":" + (raw.body_text ?? ""))
   return constant_time_eq(expected, signature)
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
-  if !verified_slack_signature(raw) {
+  if !verified_slack_signature(harness.secrets, raw) {
     return {type: "reject", status: 400, body: "invalid slack signature"}
   }
   if body.type == "url_verification" {
@@ -99,7 +99,7 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }
 "#;
@@ -123,11 +123,11 @@ pub fn payload_schema() {
   return {harn_schema_name: "NotionEventPayload", json_schema: {type: "object", additionalProperties: true}}
 }
 
-pub fn init(_ctx) {}
+pub fn init(_harness: Harness, _ctx) {}
 
-pub fn activate(_bindings) {}
+pub fn activate(_harness: Harness, _bindings) {}
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
   if body.verification_token != nil {
     return {
@@ -139,7 +139,7 @@ pub fn normalize_inbound(raw) {
       },
     }
   }
-  const secret = secret_get("notion/verification-token")
+  const secret = harness.secrets.read("notion/verification-token")
   if !verify_hmac_signature(raw.body_text ?? "", header(raw.headers, "X-Notion-Signature"), secret) {
     return {type: "reject", status: 400, body: "invalid notion signature"}
   }
@@ -154,7 +154,7 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }
 "#;

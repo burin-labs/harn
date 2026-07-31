@@ -12,9 +12,9 @@ pub(crate) use super::provider::{
 use super::{
     CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand, FlowCommand,
-    HarnessThreadingMode, HostCommand, HostLeaseCommand, HostLeasePriorityArg,
-    HostLeaseResourceClassArg, HostLeaseRunCommand, LocalCommand, McpCommand, McpMockCommand,
-    MergeCaptainCommand, ModelsBatchCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
+    HostCommand, HostLeaseCommand, HostLeasePriorityArg, HostLeaseResourceClassArg,
+    HostLeaseRunCommand, LocalCommand, McpCommand, McpMockCommand, MergeCaptainCommand,
+    ModelsBatchCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
     OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
     OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
     PackageRegistryCommand, PackageScaffoldCommand, PersonaCommand, ProjectTemplate,

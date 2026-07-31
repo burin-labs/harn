@@ -48,6 +48,17 @@ impl super::super::Vm {
         self.stack.push(VmValue::Bool(false));
     }
 
+    pub(super) fn execute_root_harness(&mut self) -> Result<(), VmError> {
+        let harness = self.root_harness.clone().ok_or_else(|| {
+            VmError::Runtime(
+                "entrypoint requires `Harness`, but the embedder supplied no root authority"
+                    .to_string(),
+            )
+        })?;
+        self.stack.push(harness);
+        Ok(())
+    }
+
     pub(super) fn execute_get_var(&mut self) -> Result<(), VmError> {
         let (chunk, idx) = {
             let frame = self.frames.last_mut().unwrap();

@@ -874,7 +874,7 @@ mod tests {
     async fn end_to_end_http_ok_handler() {
         let value = dispatch_value(
             r#"
-pub fn handler() -> dict {
+pub fn handler(harness: Harness) -> dict {
   return http_ok({greeting: "hi"})
 }
 "#,
@@ -891,7 +891,7 @@ pub fn handler() -> dict {
     async fn end_to_end_http_created_with_location() {
         let value = dispatch_value(
             r#"
-pub fn handler() -> dict {
+pub fn handler(harness: Harness) -> dict {
   return http_created({id: "sess_42"}, "/v1/sessions/sess_42")
 }
 "#,
@@ -999,11 +999,11 @@ pub fn handler() -> dict {
         // returning, so the codec sees a list of chunks.
         let value = dispatch_value(
             r#"
-pub fn handler() -> dict {
-  let chan = channel("body", 8)
-  send(chan, "first ")
-  send(chan, "second")
-  close_channel(chan)
+pub fn handler(harness: Harness) -> dict {
+  let chan = harness.runtime.channel("body", 8)
+  harness.runtime.send(chan, "first ")
+  harness.runtime.send(chan, "second")
+  harness.runtime.close_channel(chan)
   return http_stream(chan, "text/plain")
 }
 "#,

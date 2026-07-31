@@ -2,22 +2,28 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_progress } from "std/agent/progress"
 import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
-pipeline default() {
-  const session_id = "agent-progress-replace-" + uuid()
+pipeline default(harness: Harness) {
+  const session_id = "agent-progress-replace-" + harness.random.uuid()
   const captured = agent_capture_events(
+    harness.agent,
     session_id,
     fn() {
-      let session = agent_session_init("progress replace", nil, {session_id: session_id})
-      agent_progress({message: "initial"})
-      agent_progress({message: "append", replace: false})
-      agent_session_finalize(session.session_id, "done")
+      let session = agent_session_init(
+        harness.agent,
+        "progress replace",
+        nil,
+        {session_id: session_id},
+      )
+      agent_progress(harness.agent, {message: "initial"})
+      agent_progress(harness.agent, {message: "append", replace: false})
+      agent_session_finalize(harness.agent, session.session_id, "done")
       return nil
     },
   )
   const events = captured.events.filter({ event -> event.type == "progress_reported" })
   require len(events) == 2, "replace semantics should emit both updates"
-  __io_println("replace_count=" + to_string(len(events)))
-  __io_println("first_replace=" + to_string(events[0].replace))
-  __io_println("second_replace=" + to_string(events[1].replace))
-  __io_println("messages=" + events[0].message + "," + events[1].message)
+  harness.stdio.println("replace_count=" + to_string(len(events)))
+  harness.stdio.println("first_replace=" + to_string(events[0].replace))
+  harness.stdio.println("second_replace=" + to_string(events[1].replace))
+  harness.stdio.println("messages=" + events[0].message + "," + events[1].message)
 }

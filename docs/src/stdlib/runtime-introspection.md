@@ -20,7 +20,7 @@ fn search_workspace(_args) {
   return "results"
 }
 
-pipeline answer_identity_questions(task) {
+pipeline answer_identity_questions(harness: Harness, task) {
   let reg = tool_registry()
   reg = runtime_introspection_tools(reg)
   reg = tool_define(
@@ -34,7 +34,7 @@ pipeline answer_identity_questions(task) {
     },
   )
 
-  const result = agent_loop(
+  const result = agent_loop(harness,
     task,
     "You are a helpful coding assistant.",
     {tools: reg, model: "claude-opus-4-7"},
@@ -78,17 +78,17 @@ duplicate entries. Options:
 - `only` and `exclude` are mutually exclusive; `only` wins when both
   are set.
 
-## `runtime_introspection()`
+## `harness.runtime.introspection()`
 
 A direct read of the underlying snapshot, exposed as a builtin for
 tests, observability, and scripts that need the data without going
 through a tool call:
 
 ```harn
-const snap = runtime_introspection()
-log("provider=" + to_string(snap?.provider))
-log("model=" + to_string(snap?.model))
-log("harn=" + to_string(snap.harn_version))
+const snap = harness.runtime.introspection()
+harness.stdio.log("provider=" + to_string(snap?.provider))
+harness.stdio.log("model=" + to_string(snap?.model))
+harness.stdio.log("harn=" + to_string(snap.harn_version))
 ```
 
 All fields are `nil` until at least one `llm_call` has run on the

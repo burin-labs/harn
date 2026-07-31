@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   enum Status {
     Active
     Inactive
@@ -6,8 +6,8 @@ pipeline test(task) {
   }
   const s = Status.Pending("waiting for approval")
   match s.variant {
-    "Active" -> { log("active") }
-    "Inactive" -> { log("inactive") }
-    "Pending" -> { log("pending: ${s.fields[0]}") }
+    "Active" -> { harness.stdio.log("active") }
+    "Inactive" -> { harness.stdio.log("inactive") }
+    "Pending" -> { harness.stdio.log("pending: ${s.fields[0]}") }
   }
 }

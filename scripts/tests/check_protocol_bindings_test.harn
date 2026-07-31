@@ -31,7 +31,7 @@ MCPUnsupportedProtocolVersionError = _RoundTrip
 ToolCallReceipt = _RoundTrip
 """
 
-fn mkdirs(path: string) -> nil {
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
   let current = if path.starts_with("/") {
     "/"
@@ -47,17 +47,17 @@ fn mkdirs(path: string) -> nil {
     } else {
       path_join(current, part)
     }
-    if !harness.fs.exists(current) {
-      harness.fs.mkdir(current)
+    if !fs.exists(current) {
+      fs.mkdir(current)
     }
   }
   return nil
 }
 
-fn write_text(root: string, rel: string, text: string) -> nil {
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(dirname(path) ?? root)
-  harness.fs.write_text(path, text)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
   return nil
 }
 
@@ -83,13 +83,20 @@ fn fixture_payload(version: string) -> dict {
   }
 }
 
-fn write_fake_artifacts(root: string, binding_version: string, fixture_version: string) -> nil {
+fn write_fake_artifacts(
+  fs: HarnessFs,
+  root: string,
+  binding_version: string,
+  fixture_version: string,
+) -> nil {
   write_text(
+    fs,
     root,
     "spec/protocol-artifacts/python/harn_protocol.py",
     FAKE_PYTHON_BINDING.replace("{VERSION}", binding_version),
   )
   write_text(
+    fs,
     root,
     "spec/protocol-artifacts/fixtures/round_trip.json",
     json_stringify_pretty(fixture_payload(fixture_version)) + "\n",
@@ -98,7 +105,7 @@ fn write_fake_artifacts(root: string, binding_version: string, fixture_version: 
 }
 
 @test
-pipeline test_probe_args_pass_artifact_root_to_python(task) {
+pipeline test_probe_args_pass_artifact_root_to_python(harness: Harness, task) {
   const args = python_binding_probe_args("/tmp/artifacts")
   assert_eq(args[0], "-c")
   assert(args[1]?.contains("python bindings: OK"))
@@ -106,11 +113,12 @@ pipeline test_probe_args_pass_artifact_root_to_python(task) {
 }
 
 @test
-pipeline test_fake_python_binding_round_trip_passes(task) {
+pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
-      write_fake_artifacts(root, "test-version", "test-version")
-      const report = check_python_protocol_bindings("python3", root)
+      write_fake_artifacts(harness.fs, root, "test-version", "test-version")
+      const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert_eq(report.ok, true)
       assert_eq(report.stage, "ok")
       assert(to_string(report.stdout).contains("python bindings: OK"))
@@ -119,11 +127,12 @@ pipeline test_fake_python_binding_round_trip_passes(task) {
 }
 
 @test
-pipeline test_version_drift_is_reported_as_round_trip_failure(task) {
+pipeline test_version_drift_is_reported_as_round_trip_failure(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
-      write_fake_artifacts(root, "binding-version", "fixture-version")
-      const report = check_python_protocol_bindings("python3", root)
+      write_fake_artifacts(harness.fs, root, "binding-version", "fixture-version")
+      const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert_eq(report.ok, false)
       assert_eq(report.stage, "round_trip")
       assert(to_string(report.stderr).contains("version drift"))
@@ -132,8 +141,8 @@ pipeline test_version_drift_is_reported_as_round_trip_failure(task) {
 }
 
 @test
-pipeline test_current_repo_python_binding_round_trips(task) {
-  const report = check_python_protocol_bindings()
+pipeline test_current_repo_python_binding_round_trips(harness: Harness, task) {
+  const report = check_python_protocol_bindings(harness.fs, harness.process)
   assert_eq(report.ok, true)
   assert_eq(report.stage, "ok")
 }

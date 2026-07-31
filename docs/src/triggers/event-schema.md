@@ -8,15 +8,15 @@ same outer shape:
 ```harn
 import "std/triggers"
 
-fn on_event(event: TriggerEvent) {
+fn on_event(harness: Harness, event: TriggerEvent) {
   const payload = event.provider_payload
   if payload.provider == "github" && payload.event == "issues" {
-    log(payload.issue.title ?? "unknown")
+    harness.stdio.log(payload.issue.title ?? "unknown")
   }
 
   const signature = event.signature_status
   if signature.state == "failed" {
-    log(signature.reason)
+    harness.stdio.log(signature.reason)
   }
 }
 ```

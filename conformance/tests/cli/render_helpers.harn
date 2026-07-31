@@ -22,6 +22,6 @@ fn main(harness: Harness) {
   harness.stdio.println(json_stringify(safe_dict({ok: true})))
   harness.stdio.println(to_string(safe_list(["a", "b"]).count))
   harness.stdio.println(join_shell_argv(["harn", "run", "two words", "quote's"], " "))
-  print_list(harness, "items", ["one", "", 4, "two"])
-  render_command(harness, "cmd", ["harn", "run", "hello world"])
+  print_list(harness.stdio, "items", ["one", "", 4, "two"])
+  render_command(harness.stdio, "cmd", ["harn", "run", "hello world"])
 }

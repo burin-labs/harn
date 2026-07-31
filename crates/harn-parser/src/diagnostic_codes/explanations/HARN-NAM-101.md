@@ -17,7 +17,7 @@ mismatched signature.
 The `Harness` value gives the script typed access to its capability sub-handles
 via field access (`harness.stdio`, `harness.term`, `harness.clock`,
 `harness.fs`, `harness.env`, `harness.random`, `harness.net`,
-`harness.process`, `harness.crypto`, `harness.system`, `harness.llm`).
+`harness.process`, `harness.channels`, `harness.system`, `harness.llm`).
 Threading the handle through `main` replaces ambient stdio, terminal, clock,
 filesystem, environment, randomness, network, process, crypto, system, and LLM
 catalog globals.

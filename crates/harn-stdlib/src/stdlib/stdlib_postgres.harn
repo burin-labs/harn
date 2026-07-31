@@ -81,13 +81,13 @@
  * `pg_mock_pool(fixtures)` returns a deterministic mock so unit tests do
  * not need a live database.
  */
-type PgPool = {_type: "pg_pool", id: string}
+type PgPool = resource
 
-type PgTx = {_type: "pg_tx", id: string}
+type PgTx = resource
 
-type PgMockPool = {_type: "pg_mock_pool", id: string}
+type PgMockPool = resource
 
-type PgListener = {_type: "pg_listener", id: string}
+type PgListener = resource
 
 type PgHandle = PgPool | PgTx | PgMockPool
 

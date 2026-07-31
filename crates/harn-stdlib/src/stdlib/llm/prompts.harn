@@ -257,7 +257,7 @@ fn __schema_property_lines(properties) {
  * @effects: []
  * @errors: []
  */
-pub fn structured_output_preface(schema, opts) {
+pub fn structured_output_preface(fs: HarnessFs, schema, opts) {
   const options = opts ?? {}
   const template = options?.template
   if template != nil {
@@ -266,7 +266,7 @@ pub fn structured_output_preface(schema, opts) {
       schema_json: json_stringify(schema),
       prompt: options?.prompt ?? "",
     }
-    return render_prompt(to_string(template), bindings)
+    return fs.render_prompt(to_string(template), bindings)
   }
   const required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
     schema.required.sorted()

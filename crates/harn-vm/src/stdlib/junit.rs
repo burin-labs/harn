@@ -73,6 +73,8 @@ pub(crate) fn register_junit_builtins(vm: &mut Vm) {
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&PARSE_JUNIT_XML_IMPL_DEF];
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "parse_junit_xml(input: string | bytes | nil) -> list",
     category = "junit"
 )]

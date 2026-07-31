@@ -92,7 +92,7 @@ fn main(harness: Harness) {
   const raw = harness.env.get_or("HARN_EXPLAIN_ENTRY_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_EXPLAIN_ENTRY_JSON not set by dispatch shim")
-    exit(70)
+    harness.runtime.exit(70)
   }
   const entry = json_parse(raw)
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"

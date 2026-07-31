@@ -1,14 +1,14 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   try {
     const _r = harness.net.get("http://127.0.0.1:1", {timeout_ms: 100})
-    __io_println("unexpected_timeout_ms_success")
+    harness.stdio.println("unexpected_timeout_ms_success")
   } catch (e) {
-    __io_println("caught_timeout_ms")
+    harness.stdio.println("caught_timeout_ms")
   }
   try {
     const _r = harness.net.get("http://127.0.0.1:1", {timeout: 100})
-    __io_println("unexpected_timeout_alias_success")
+    harness.stdio.println("unexpected_timeout_alias_success")
   } catch (e2) {
-    __io_println("caught_timeout_alias")
+    harness.stdio.println("caught_timeout_alias")
   }
 }

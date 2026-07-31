@@ -48,7 +48,7 @@ pub fn ws_echo(msg: dict) -> string {
   return "echo:" + msg.data
 }
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   // Drive the handlers the way the site host would, then capture every
   // observable result in a receipt so the tape stays deterministic. Each
   // http_* envelope carries its HTTP status under the `status` key.
@@ -67,7 +67,7 @@ fn main(_harness: Harness) {
     conditional_cached_status: cached.status,
     ws_reply: ws_echo({type: "text", data: "hi"}),
   }
-  __io_println("=== harn-site receipt ===")
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== harn-site receipt ===")
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

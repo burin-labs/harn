@@ -8,7 +8,7 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  */
 import { first_available } from "std/lifecycle/combinators"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const nil_cb = { harness, _return_value ->
     harness.emit_audit("nil_called", {})
     return nil
@@ -21,17 +21,17 @@ pipeline default() {
     harness.emit_audit("never_called", {})
     return "never"
   }
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const chain = first_available([nil_cb, value_cb, never_cb])
       const result = chain(harness, return_value)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("result=" + result)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("kind_order=" + audits[0].kind + "," + audits[1].kind)
       const only_nils = first_available([nil_cb, nil_cb])
       const none = only_nils(harness, return_value)
-      const trailing = lifecycle_audit_log_take()
+      const trailing = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("none=" + to_string(none == nil))
       harness.stdio.println("trailing_count=" + to_string(len(trailing)))
       const empty = first_available([])

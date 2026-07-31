@@ -4,20 +4,20 @@
  * `let x: int = if cond { 1 }` must be a type error; `int?` works.
  * Adding `?? default` collapses the union back to `T`.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const cond = true
   const maybe: int? = if cond {
     42
   }
-  __io_println(maybe)
+  harness.stdio.println(maybe)
   const with_default: int = if cond {
     7
   }
     ?? 0
-  __io_println(with_default + 1)
+  harness.stdio.println(with_default + 1)
   const cond2 = false
   const none: int? = if cond2 {
     9
   }
-  __io_println(none)
+  harness.stdio.println(none)
 }

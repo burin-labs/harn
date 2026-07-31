@@ -5,8 +5,8 @@ import "std/runtime"
  * and image blocks. `host_mock` keeps the demo fully offline while preserving
  * the same `runtime.prompt_content` boundary used by an attached ACP host.
  */
-pipeline default(_task) {
-  host_mock(
+pipeline default(harness: Harness, _task) {
+  harness.testing.respond(
     "runtime",
     "prompt_content",
     [
@@ -14,7 +14,7 @@ pipeline default(_task) {
       {type: "image", media_type: "image/png", url: "https://example.invalid/screenshot.png"},
     ],
   )
-  const blocks = runtime_prompt_content()
+  const blocks = runtime_prompt_content(harness.runtime)
   const receipt = {
     receipt_kind: "runtime_prompt_content_receipt",
     block_count: len(blocks),
@@ -22,7 +22,7 @@ pipeline default(_task) {
     image_media_type: blocks[1]?.media_type,
     image_url: blocks[1]?.url,
   }
-  __io_println("=== typed runtime prompt content ===")
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== typed runtime prompt content ===")
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

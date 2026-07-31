@@ -1,14 +1,14 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // enable_tracing enables VM-level span collection
-  enable_tracing(true)
+  harness.obs.enable_tracing(true)
   // trace_spans returns the list (may be empty since pipeline span
   // is still in-flight, but it should return a list)
-  const spans = trace_spans()
+  const spans = harness.obs.trace_spans()
   assert(type_of(spans) == "list", "trace_spans should return a list")
   // trace_summary returns a formatted string
-  const summary = trace_summary()
+  const summary = harness.obs.trace_summary()
   assert(type_of(summary) == "string", "trace_summary should return a string")
-  // enable_tracing(false) disables collection
-  enable_tracing(false)
-  __io_println("trace spans ok")
+  // harness.obs.enable_tracing(false) disables collection
+  harness.obs.enable_tracing(false)
+  harness.stdio.println("trace spans ok")
 }

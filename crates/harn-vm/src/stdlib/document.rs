@@ -186,6 +186,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "document_render_pdf(source: string | bytes | nil, options?: dict) -> bytes",
     category = "document",
     doc = "Render text-like document input to valid PDF bytes using Harn's built-in cross-platform renderer."
@@ -202,6 +204,8 @@ fn document_render_pdf_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "document_extract_text(source: string | bytes | nil, options?: dict) -> string",
     category = "document",
     doc = "Extract normalized text from text, HTML, Markdown, or PDF byte input."
@@ -242,6 +246,8 @@ fn document_extract_text_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "document_pdf_capabilities(options?: dict) -> dict",
     category = "document",
     doc = "Describe the built-in PDF rendering and text extraction capabilities available in this Harn runtime."

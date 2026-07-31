@@ -612,9 +612,9 @@ fn __cl_ceiling_breaches(ledger, now_ms, cw) {
   return out
 }
 
-fn __cl_kill_handle(handle_id) {
+fn __cl_kill_handle(tools: HarnessTools, handle_id) {
   return try {
-    hostlib_tools_cancel_handle({handle_id: handle_id, timed_out: true})
+    tools.cancel_handle({handle_id: handle_id, timed_out: true})
   } catch (e) {
     nil
   }
@@ -632,7 +632,14 @@ fn __cl_kill_handle(handle_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) -> dict {
+pub fn command_ledger_apply_ceiling(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  ledger,
+  now_ms,
+  cw,
+  session_id,
+) -> dict {
   const breaches = __cl_ceiling_breaches(ledger, now_ms, cw)
   if len(breaches) == 0 {
     return {ledger: ledger, breached: false, escalated: false, receipts: []}
@@ -653,9 +660,9 @@ pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) -> dict {
           elapsed_ms: now_ms - row.started_at_ms,
         }
         receipts = receipts.appending(receipt)
-        agent_emit_event(session_id, "typed_checkpoint", receipt)
+        agent_emit_event(agent, session_id, "typed_checkpoint", receipt)
       } else {
-        let _ = __cl_kill_handle(row.handle_id)
+        let _ = __cl_kill_handle(tools, row.handle_id)
         out = command_ledger_retire(out, row.handle_id)
         const receipt = {
           schema: "harn.command_ledger_ceiling.v1",
@@ -666,7 +673,7 @@ pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) -> dict {
           elapsed_ms: now_ms - row.started_at_ms,
         }
         receipts = receipts.appending(receipt)
-        agent_emit_event(session_id, "typed_checkpoint", receipt)
+        agent_emit_event(agent, session_id, "typed_checkpoint", receipt)
       }
     } else {
       escalated = true
@@ -689,8 +696,8 @@ pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) -> dict {
 
 // -------------------------------------------------------------------------------------------------
 
-fn __cl_now_ms() -> int {
-  return harness.clock.now_ms()
+fn __cl_now_ms(clock: HarnessClock) -> int {
+  return clock.now_ms()
 }
 
 /**
@@ -712,7 +719,7 @@ fn __cl_now_ms() -> int {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_hold(session_id, ledger, cw, hold_state) -> dict {
+pub fn command_ledger_hold(harness: Harness, session_id, ledger, cw, hold_state) -> dict {
   let live = ledger
   let state = if type_of(hold_state) == "dict" {
     hold_state
@@ -724,8 +731,15 @@ pub fn command_ledger_hold(session_id, ledger, cw, hold_state) -> dict {
     if len(__cl_awaited_running(live)) == 0 && !__cl_has_terminal_awaited(live) {
       return {ledger: live, outcome: "resolved", hold_state: state, receipts: receipts}
     }
-    const now = __cl_now_ms()
-    const ceiling = command_ledger_apply_ceiling(live, now, cw, session_id)
+    const now = __cl_now_ms(harness.clock)
+    const ceiling = command_ledger_apply_ceiling(
+      harness.agent,
+      harness.tools,
+      live,
+      now,
+      cw,
+      session_id,
+    )
     live = ceiling.ledger
     for receipt in ceiling.receipts {
       receipts = receipts.appending(receipt)
@@ -754,9 +768,9 @@ pub fn command_ledger_hold(session_id, ledger, cw, hold_state) -> dict {
     }
     const earliest = __cl_earliest_deadline(live, cw)
     const timeout = max(0, earliest - now)
-    const woke = agent_session_await_inbox(session_id, timeout)
-    const entries = agent_session_drain_command_updates(session_id)
-    const now2 = __cl_now_ms()
+    const woke = agent_session_await_inbox(harness.agent, session_id, timeout)
+    const entries = agent_session_drain_command_updates(harness.agent, session_id)
+    const now2 = __cl_now_ms(harness.clock)
     if len(entries) > 0 {
       live = command_ledger_apply_updates(live, entries, now2, cw)
     }

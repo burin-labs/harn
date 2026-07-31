@@ -9,9 +9,9 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  *
  * Tracking: harn#1864 (S-14).
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const RB = ResumeBy()
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const suspension = {
         handle: "worker://triage/parent",
@@ -19,7 +19,7 @@ pipeline default() {
         conditions: nil,
       }
       const result = RB.parent_llm(harness, suspension)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("handled=" + to_string(result.handled))
       harness.stdio.println("mechanism=" + result.mechanism)
       harness.stdio.println("audit_count=" + to_string(len(audits)))

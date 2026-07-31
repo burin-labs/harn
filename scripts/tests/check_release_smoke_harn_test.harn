@@ -35,7 +35,7 @@ const RUNS = [
 ]
 
 @test
-pipeline test_release_smoke_direct_and_release_branch_coverage(task) {
+pipeline test_release_smoke_direct_and_release_branch_coverage(harness: Harness, task) {
   assert_eq(release_smoke_run_covers(RUNS[1], "v0.10.23"), true)
   assert_eq(
     release_smoke_run_covers(
@@ -53,7 +53,7 @@ pipeline test_release_smoke_direct_and_release_branch_coverage(task) {
 }
 
 @test
-pipeline test_release_smoke_log_fallback_is_bounded_and_newest_first(task) {
+pipeline test_release_smoke_log_fallback_is_bounded_and_newest_first(harness: Harness, task) {
   let visited: list<int> = []
   const selected = select_release_smoke_run(
     RUNS,
@@ -69,6 +69,6 @@ pipeline test_release_smoke_log_fallback_is_bounded_and_newest_first(task) {
 }
 
 @test
-pipeline test_release_smoke_missing_evidence_fails_closed(task) {
+pipeline test_release_smoke_missing_evidence_fails_closed(harness: Harness, task) {
   assert_eq(select_release_smoke_run(RUNS, "v9.9.9", { _ -> return "" }), nil)
 }

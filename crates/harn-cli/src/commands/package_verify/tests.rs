@@ -145,27 +145,20 @@ json_schema: {
   }
 }
 
-pub fn init(ctx) {
-  if !ctx.capabilities.secret_get {
-throw "secret_get capability missing"
-  }
-}
+pub fn init(_harness: Harness, _ctx) {}
 
-pub fn activate(bindings) {
+pub fn activate(harness: Harness, bindings) {
   active_bindings = bindings
-  metrics_inc("echo_activate_bindings", len(bindings))
+  harness.obs.metrics_inc("echo_activate_bindings", len(bindings))
 }
 
-pub fn shutdown() {
-  metrics_inc("echo_shutdown")
+pub fn shutdown(harness: Harness) {
+  harness.obs.metrics_inc("echo_shutdown")
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
-  const token = secret_get("echo/api-token")
-  event_log_emit("connectors.echo.contract", "normalize", {
-token: token,
-  })
+  const _token = harness.secrets.read("echo/api-token")
   return {
 type: "event",
 event: {
@@ -176,7 +169,7 @@ event: {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }
 "#,
@@ -206,7 +199,7 @@ name: "EchoEventPayload",
 json_schema: {type: "object"},
   }
 }
-pub fn normalize_inbound(_raw) {
+pub fn normalize_inbound(_harness: Harness, _raw) {
   return {type: "reject", status: 400}
 }
 "#,
@@ -240,7 +233,7 @@ connector = { harn = "./lib.harn" }
 pub fn provider_id() { return "echo" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "EchoEventPayload" }
-pub fn normalize_inbound(_raw) { return {type: "reject", status: 400} }
+pub fn normalize_inbound(_harness: Harness, _raw) { return {type: "reject", status: 400} }
 "#,
     )
     .unwrap();
@@ -263,7 +256,7 @@ body_json = { id = "evt-1" }
 pub fn provider_id() { return "echo" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "EchoEventPayload" }
-pub fn normalize_inbound(_raw) {
+pub fn normalize_inbound(_harness: Harness, _raw) {
   return {
 immediate_response: {status: 200, body: "ok"},
 event: {
@@ -290,8 +283,8 @@ async fn connector_check_reports_static_effect_policy_violations() {
 pub fn provider_id() { return "echo" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "EchoEventPayload" }
-pub fn normalize_inbound(_raw) {
-  http_get("https://example.invalid")
+pub fn normalize_inbound(harness: Harness, _raw) {
+  harness.net.get("https://example.invalid")
   return {type: "reject", status: 400}
 }
 "#,
@@ -300,7 +293,7 @@ pub fn normalize_inbound(_raw) {
         .await
         .unwrap_err();
     assert!(error.contains("connector-effect-policy"), "{error}");
-    assert!(error.contains("http_get"), "{error}");
+    assert!(error.contains("harness.net.get"), "{error}");
 }
 
 #[tokio::test]
@@ -326,7 +319,7 @@ fn read_indirect() {
   return read_file("ambient.txt")
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(_harness: Harness, raw) {
   const _body = raw.body_json
   read_indirect()
   return {type: "reject", status: 400}

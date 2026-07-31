@@ -9,7 +9,7 @@ write tests that need real subprocesses.
 
 A multi-tier deflake effort ([#1057]) removed wall-clock polling from the fast
 test suite. Before that work, many unit and integration tests used patterns like
-`tokio::time::sleep(Duration::from_millis(50))` or polling loops driven by
+`tokio::time::harness.clock.sleep_ms(Duration::from_millis(50))` or polling loops driven by
 `Instant::now()`. These patterns caused the suite to be sensitive to scheduler
 jitter and system load, and were the primary source of intermittent failures on
 CI and slow developer machines.
@@ -89,7 +89,7 @@ arbitrary epoch and advances only when you call `tokio::time::advance()`.
 async fn timeout_fires_after_deadline() {
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::time::harness.clock.sleep_ms(Duration::from_secs(5)).await;
         let _ = tx.send(());
     });
 
@@ -222,7 +222,7 @@ For subprocess tests that do not need real shell behavior, use `MockProcess`.
 It exposes a synchronous control channel so the test drives process state
 (exit code, stdout lines, signal receipt) without polling.
 
-### Unified `mock_time(...)` for Harn fixtures and stdlib builtins
+### Unified `harness.testing.clock_set(...)` for Harn fixtures and stdlib builtins
 
 Conformance fixtures and Rust-side tests that exercise stdlib timing
 builtins (`sleep`, `sleep_ms`, `now_ms`, `monotonic_ms`, `timestamp`,
@@ -233,17 +233,17 @@ everywhere a Harn script, a connector, or a Rust test would otherwise
 read it.
 
 ```harn
-pipeline test(task) {
-  mock_time(1700000000000)
+pipeline test(harness: Harness, task) {
+  harness.testing.clock_set(1700000000000)
   // sleep advances the mock; no wall-clock burn, no scheduler races.
-  sleep(50ms)
-  log(now_ms())          // 1700000000050
-  advance_time(1000)
-  log(monotonic_ms())    // 1050
+  harness.clock.sleep_ms(50ms)
+  harness.stdio.log(harness.clock.now_ms())          // 1700000000050
+  harness.testing.clock_advance(1000)
+  harness.stdio.log(harness.clock.monotonic_ms())    // 1050
   // yield_now lets sibling parallel-each tasks make progress without
   // advancing time at all.
   yield_now()
-  unmock_time()
+  harness.testing.clock_reset()
 }
 ```
 
@@ -256,7 +256,7 @@ Fixtures that genuinely need wall-clock time (real subprocess I/O,
 real socket-bound servers, scheduler tests timing real backoffs) are
 exempt via `CONFORMANCE_REAL_TIME_ALLOWLIST` in
 `scripts/lint_test_patterns.harn`. The lint catches new fixtures that
-sleep on a literal duration without either entering a `mock_time(...)`
+sleep on a literal duration without either entering a `harness.testing.clock_set(...)`
 block or being added to the allowlist with reviewer justification.
 
 ## Forbidden patterns
@@ -268,15 +268,15 @@ The script searches files under `crates/**/tests/**/*.rs`,
 
 | Pattern | Why it is banned | Approved alternative |
 |---|---|---|
-| `std::thread::sleep(` | Blocks the thread, races against scheduler | `tokio::time::pause()` + `advance()` |
-| `tokio::time::sleep(` (outside `start_paused`) | Non-deterministic; races against system load | `start_paused = true` + `advance()` |
+| `std::thread::harness.clock.sleep_ms(` | Blocks the thread, races against scheduler | `tokio::time::pause()` + `advance()` |
+| `tokio::time::harness.clock.sleep_ms(` (outside `start_paused`) | Non-deterministic; races against system load | `start_paused = true` + `advance()` |
 | `while … Instant::now()` | Wall-clock polling loop; flaky under load | `EventLog::subscribe()` + `timeout` |
 | `SystemTime::now()` in tests | Real wall-clock timestamp; non-reproducible | `MockClock` or injected timestamp |
 | `recv_timeout(Duration::from_millis(…))` | Busy-wait with a short literal timeout | `tokio::time::timeout` with event channel |
 | `#[ignore]` outside slow harn-cli integration tests | Hides regressions behind default-suite skips | run the test by default, or move subprocess coverage to the harn-cli E2E profile |
 | copied conformance subprocess wait helpers | Drifts retry ceilings and diagnostics between fixtures | import `conformance/tests/_common.harn` |
-| `random_int(20000, 45000)` for server ports | Races with other tests and local services | bind port `0` and read the readiness log |
-| `sleep(<literal>)` / `time.sleep(<literal>)` in `.harn` fixtures (outside `mock_time(...)`) | Wall-clock burn that races against scheduler load | wrap in `mock_time(...)` / `unmock_time()` and let the unified clock auto-advance, or add the file to `CONFORMANCE_REAL_TIME_ALLOWLIST` with justification |
+| `harness.random.range(20000, 45000)` for server ports | Races with other tests and local services | bind port `0` and read the readiness log |
+| `harness.clock.sleep_ms(<literal>)` / `time.sleep(<literal>)` in `.harn` fixtures (outside `harness.testing.clock_set(...)`) | Wall-clock burn that races against scheduler load | wrap in `harness.testing.clock_set(...)` / `harness.testing.clock_reset()` and let the unified clock auto-advance, or add the file to `CONFORMANCE_REAL_TIME_ALLOWLIST` with justification |
 
 ## Opting out
 
@@ -348,7 +348,7 @@ Use `flavor = "current_thread"` for paused-time tests.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn broken() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    tokio::time::sleep(Duration::from_millis(10)).await; // pause doesn't drive I/O
+    tokio::time::harness.clock.sleep_ms(Duration::from_millis(10)).await; // pause doesn't drive I/O
     let _ = listener.accept().await; // hangs
 }
 ```

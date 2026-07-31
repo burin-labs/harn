@@ -4,8 +4,8 @@
  */
 import { counts, is_empty, summary, unsettled_state } from "std/lifecycle"
 
-pipeline default() {
-  pipeline_on_finish(
+pipeline default(harness: Harness) {
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const state = harness.unsettled_state()
       const helper_state = unsettled_state(harness)

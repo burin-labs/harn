@@ -16,7 +16,7 @@ The simplest useful reviewer is just an LLM call with a strong system prompt.
 Keep the instructions short, specific, and opinionated:
 
 ```harn
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const system = """
 You are a senior code reviewer.
 Review the patch for correctness, security, maintainability, and tests.
@@ -27,12 +27,12 @@ Return:
 End with a short verdict.
 """
 
-  const review = llm_call(task, system, {
+  const review = harness.llm.call(task, system, {
     temperature: 0.2,
     max_tokens: 1200,
   })
 
-  log(review.text)
+  harness.stdio.log(review.text)
 }
 ```
 
@@ -45,15 +45,15 @@ is to read a small, explicit list of files and combine them with the patch.
 Keep the list short so the prompt stays focused.
 
 ```harn
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const files = ["src/main.rs", "src/lib.rs"]
   let context = ""
 
   for file in files {
-    context = context + "\n\n=== " + file + " ===\n" + read_file(file)
+    context = context + "\n\n=== " + file + " ===\n" + harness.fs.read_text(file)
   }
 
-  const review = llm_call(
+  const review = harness.llm.call(
     "Patch:\n" + task + "\n\nContext:\n" + context,
     """
 You are a strict code reviewer.
@@ -63,11 +63,11 @@ Do not invent missing context. If the context is insufficient, say so.
     {temperature: 0.2, max_tokens: 1400}
   )
 
-  log(review.text)
+  harness.stdio.log(review.text)
 }
 ```
 
-If you want to review a directory tree instead, use `list_dir()` and
+If you want to review a directory tree instead, use `harness.fs.list_dir()` and
 `parallel each` to gather files concurrently, then trim the result to the most
 relevant ones before calling the model.
 
@@ -78,8 +78,8 @@ small heuristic. Use `eval_metric()` to track whether the agent found issues
 and how often it asked for more context.
 
 ```harn
-pipeline default(task) {
-  const review = llm_call(
+pipeline default(harness: Harness, task) {
+  const review = harness.llm.call(
     task,
     "You are a code reviewer. Return a concise bullet list.",
     {temperature: 0.2}
@@ -89,7 +89,7 @@ pipeline default(task) {
   eval_metric("review_has_issue", has_issue)
   eval_metric("review_chars", review.text.count)
 
-  log(review.text)
+  harness.stdio.log(review.text)
 }
 ```
 

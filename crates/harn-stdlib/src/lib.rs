@@ -2,7 +2,10 @@
 //!
 //! This crate intentionally contains only static source strings so runtime and
 //! static tooling crates can share the same stdlib modules without depending on
-//! each other.
+//! each other. Loading this catalog is pure: modules cannot register ambient
+//! effects, and every effectful stdlib function must receive its typed Harness
+//! capability explicitly from the caller, including callbacks that may perform
+//! effects.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdlibSource {
@@ -288,7 +291,6 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "trust" => "stdlib/stdlib_trust.harn",
     "corrections" => "stdlib/stdlib_corrections.harn",
     "plan" => "stdlib/stdlib_plan.harn",
-    "waitpoints" => "stdlib/stdlib_waitpoints.harn",
     "waitpoint" => "stdlib/stdlib_waitpoint.harn",
     "monitors" => "stdlib/stdlib_monitors.harn",
     "worktree" => "stdlib/stdlib_worktree.harn",
@@ -859,10 +861,10 @@ mod tests {
         assert_eq!(exports[0].name, "workflow_execute");
         assert_eq!(
             exports[0].signature,
-            "workflow_execute(task, graph, artifacts = nil, options = nil)"
+            "workflow_execute(harness: Harness, task, graph, artifacts = nil, options = nil)"
         );
-        assert_eq!(exports[0].required_params, 2);
-        assert_eq!(exports[0].total_params, 4);
+        assert_eq!(exports[0].required_params, 3);
+        assert_eq!(exports[0].total_params, 5);
     }
 
     #[test]
@@ -977,10 +979,10 @@ mod tests {
             .expect("std/agent/workers should export suspend_agent");
         assert_eq!(
             suspend.signature,
-            "suspend_agent(worker, reason = \"\", options = nil)"
+            "suspend_agent(agents: HarnessAgent, worker, reason = \"\", options = nil)"
         );
-        assert_eq!(suspend.required_params, 1);
-        assert_eq!(suspend.total_params, 3);
+        assert_eq!(suspend.required_params, 2);
+        assert_eq!(suspend.total_params, 4);
 
         let resume = exports
             .iter()
@@ -988,10 +990,10 @@ mod tests {
             .expect("std/agent/workers should export resume_agent");
         assert_eq!(
             resume.signature,
-            "resume_agent(worker_or_snapshot, resume_input = nil, continue_transcript = true)"
+            "resume_agent( agents: HarnessAgent, worker_or_snapshot, resume_input = nil, continue_transcript = true, ) -> any"
         );
-        assert_eq!(resume.required_params, 1);
-        assert_eq!(resume.total_params, 3);
+        assert_eq!(resume.required_params, 2);
+        assert_eq!(resume.total_params, 4);
 
         let stop = exports
             .iter()
@@ -999,10 +1001,10 @@ mod tests {
             .expect("std/agent/workers should export agent_stop");
         assert_eq!(
             stop.signature,
-            "agent_stop(worker, options: AgentStopOptions = nil)"
+            "agent_stop(agents: HarnessAgent, worker, options: AgentStopOptions? = nil)"
         );
-        assert_eq!(stop.required_params, 1);
-        assert_eq!(stop.total_params, 2);
+        assert_eq!(stop.required_params, 2);
+        assert_eq!(stop.total_params, 3);
 
         let parse_resume = exports
             .iter()
@@ -1010,10 +1012,10 @@ mod tests {
             .expect("std/agent/workers should export parse_resume_conditions");
         assert_eq!(
             parse_resume.signature,
-            "parse_resume_conditions(conditions = nil) -> ResumeConditions?"
+            "parse_resume_conditions(agents: HarnessAgent, conditions = nil) -> ResumeConditions?"
         );
-        assert_eq!(parse_resume.required_params, 0);
-        assert_eq!(parse_resume.total_params, 1);
+        assert_eq!(parse_resume.required_params, 1);
+        assert_eq!(parse_resume.total_params, 2);
 
         let lifecycle = exports
             .iter()

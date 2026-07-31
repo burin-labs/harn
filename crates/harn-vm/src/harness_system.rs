@@ -165,6 +165,11 @@ pub fn memory_snapshot() -> Value {
 }
 
 /// Resident bytes for the current Harn process.
+///
+/// Linux sandboxes may deliberately hide `/proc`, which prevents `sysinfo`
+/// from reporting current RSS. In that case this returns the kernel's peak
+/// resident-set counter so memory telemetry remains available without adding
+/// filesystem authority.
 pub fn current_process_memory_bytes() -> Option<u64> {
     let pid = Pid::from_u32(std::process::id());
     let mut sys = System::new();
@@ -173,7 +178,30 @@ pub fn current_process_memory_bytes() -> Option<u64> {
         false,
         ProcessRefreshKind::nothing().with_memory(),
     );
-    sys.process(pid).map(|process| process.memory())
+    let reported = sys.process(pid).map(|process| process.memory());
+    reported.filter(|bytes| *bytes > 0).or_else(linux_peak_rss)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_peak_rss() -> Option<u64> {
+    use std::mem::MaybeUninit;
+
+    // SAFETY: getrusage initializes the pointed-to rusage on success. Linux
+    // reports ru_maxrss in KiB.
+    unsafe {
+        let mut usage = MaybeUninit::<libc::rusage>::zeroed();
+        if libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) != 0 {
+            return None;
+        }
+        u64::try_from(usage.assume_init().ru_maxrss)
+            .ok()?
+            .checked_mul(1024)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_peak_rss() -> Option<u64> {
+    None
 }
 
 /// Snapshot of attached GPUs. `sysinfo` does not expose GPU details
@@ -208,12 +236,33 @@ pub fn temperature_snapshot() -> Value {
 /// Snapshot of the host platform: os, arch, version, kernel.
 pub fn platform_snapshot() -> Value {
     json!({
-        "os": System::name(),
+        // Stable API identifier rather than sysinfo's display name (`Darwin`,
+        // `Linux`, ...), whose casing and vocabulary vary by host.
+        "os": canonical_os(),
         "arch": std::env::consts::ARCH,
         "version": System::os_version(),
         "kernel": System::kernel_version(),
         "long_os_version": System::long_os_version(),
         "hostname": System::host_name(),
+    })
+}
+
+fn canonical_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        std::env::consts::OS
+    }
+}
+
+/// Minimal identity exposed to explicitly authorized scripts.
+pub fn identity_snapshot() -> Value {
+    json!({
+        "username": std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_default(),
+        "hostname": System::host_name(),
+        "pid": std::process::id(),
     })
 }
 
@@ -400,6 +449,12 @@ mod tests {
         if let Some(bytes) = current_process_memory_bytes() {
             assert!(bytes > 0, "current process memory should be non-zero");
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_peak_rss_reports_self() {
+        assert!(linux_peak_rss().is_some_and(|bytes| bytes > 0));
     }
 
     #[test]

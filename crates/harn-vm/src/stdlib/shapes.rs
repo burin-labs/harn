@@ -10,7 +10,11 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "keys(dict: dict) -> list", category = "shapes")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "keys(dict: dict) -> list", category = "shapes"
+)]
 fn keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
         VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
@@ -22,7 +26,11 @@ fn keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "values(...args: any) -> list", category = "shapes")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "values(...args: any) -> list", category = "shapes"
+)]
 fn values_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
         VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
@@ -32,7 +40,11 @@ fn values_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     }
 }
 
-#[harn_builtin(sig = "entries(dict: dict) -> list", category = "shapes")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "entries(dict: dict) -> list", category = "shapes"
+)]
 fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
         VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
@@ -54,7 +66,11 @@ fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 // Runtime interface enforcement. Args: value, param_name, interface_name,
 // method_names_csv.
-#[harn_builtin(runtime_only = true, category = "shapes")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    runtime_only = true, category = "shapes"
+)]
 fn __assert_interface(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
     let param_name = args.get(1).map(|a| a.display()).unwrap_or_default();
@@ -87,7 +103,11 @@ fn __assert_interface(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(runtime_only = true, category = "shapes")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    runtime_only = true, category = "shapes"
+)]
 fn __assert_dict(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
     if matches!(val, VmValue::Dict(_)) {
@@ -100,7 +120,11 @@ fn __assert_dict(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     }
 }
 
-#[harn_builtin(runtime_only = true, category = "shapes")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    runtime_only = true, category = "shapes"
+)]
 fn __assert_list(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
     if matches!(val, VmValue::List(_)) {
@@ -113,7 +137,11 @@ fn __assert_list(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     }
 }
 
-#[harn_builtin(runtime_only = true, category = "shapes")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    runtime_only = true, category = "shapes"
+)]
 fn __assert_pair(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
     if matches!(val, VmValue::Pair(_)) {
@@ -135,7 +163,11 @@ fn __assert_pair(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     }
 }
 
-#[harn_builtin(runtime_only = true, category = "shapes")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    runtime_only = true, category = "shapes"
+)]
 fn __assert_schema(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().cloned().unwrap_or(VmValue::Nil);
     let param_name = match args.get(1) {
@@ -147,7 +179,11 @@ fn __assert_schema(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(runtime_only = true, category = "shapes")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    runtime_only = true, category = "shapes"
+)]
 fn __dict_rest(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let dict = args.first().cloned().unwrap_or(VmValue::Nil);
     let keys_list = args.get(1).cloned().unwrap_or(VmValue::Nil);
@@ -176,7 +212,11 @@ fn __dict_rest(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     }
 }
 
-#[harn_builtin(runtime_only = true, category = "shapes")]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    runtime_only = true, category = "shapes"
+)]
 fn __make_struct(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let struct_name = args.first().map(|a| a.display()).unwrap_or_default();
     let fields_dict = args.get(1).cloned().unwrap_or(VmValue::Nil);

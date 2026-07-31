@@ -9,11 +9,11 @@ async fn local_handler_round_trip_logs_outbox_lifecycle_and_action_graph() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
+pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return event.kind == "issues.opened"
 }
 "#,
@@ -80,7 +80,7 @@ async fn local_handler_receives_raw_body_as_bytes() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> dict {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> dict {
   return {
     raw_body_type: type_of(event.raw_body),
     raw_body_text: bytes_to_string(event.raw_body ?? bytes_from_string("")),
@@ -122,7 +122,7 @@ async fn enqueue_writes_raw_dispatch_and_redacted_observability_records() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return event.kind
 }
 "#,
@@ -400,7 +400,7 @@ async fn local_and_a2a_handlers_preserve_logical_output_and_replay_shape() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(_event: TriggerEvent) -> dict {
+pub fn local_fn(_harness: Harness, _event: TriggerEvent) -> dict {
   return {status: "triaged", labels: ["needs-owner"]}
 }
 "#,

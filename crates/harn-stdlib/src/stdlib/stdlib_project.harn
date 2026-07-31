@@ -40,8 +40,8 @@ type ProjectContextProfile = {
  * @effects: []
  * @errors: []
  */
-pub fn metadata_namespace(dir, namespace) {
-  return metadata_resolve(dir, namespace) ?? {}
+pub fn metadata_namespace(project: HarnessProject, dir, namespace) {
+  return project.metadata_get({dir: dir, namespace: namespace}) ?? {}
 }
 
 /**
@@ -50,13 +50,13 @@ pub fn metadata_namespace(dir, namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn metadata_local_namespace(dir, namespace) {
+pub fn metadata_local_namespace(project: HarnessProject, dir, namespace) {
   const normalized = if dir == "" {
     "."
   } else {
     dir
   }
-  for entry in metadata_entries(namespace) {
+  for entry in project.metadata_entries({namespace: namespace}) {
     if entry.dir == normalized {
       return entry.local ?? {}
     }
@@ -70,8 +70,11 @@ pub fn metadata_local_namespace(dir, namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn project_inventory(namespace) {
-  return {entries: metadata_entries(namespace), status: metadata_status(namespace)}
+pub fn project_inventory(project: HarnessProject, namespace) {
+  return {
+    entries: project.metadata_entries({namespace: namespace}),
+    status: project.metadata_status({namespace: namespace}),
+  }
 }
 
 /**
@@ -80,22 +83,22 @@ pub fn project_inventory(namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn project_root_package() -> string {
+pub fn project_root_package(fs: HarnessFs, project: HarnessProject) -> string {
   let root_package = ""
-  const root_enrichment = metadata_get("", "enrichment")
+  const root_enrichment = project.metadata_get({dir: "", namespace: "enrichment"})
   if root_enrichment?.rootPackageName {
     root_package = root_enrichment?.rootPackageName
   }
   if !root_package {
-    const src_enrichment = metadata_get("src", "enrichment")
+    const src_enrichment = project.metadata_get({dir: "src", namespace: "enrichment"})
     if src_enrichment?.rootPackageName {
       root_package = src_enrichment?.rootPackageName
     }
   }
   if !root_package {
-    const project_root = project_root() ?? ""
+    const project_root = fs.project_root() ?? ""
     if project_root {
-      const scan = project_scan(project_root, {tiers: ["ambient", "config"]})
+      const scan = project_scan(project, project_root, {tiers: ["ambient", "config"]})
       if scan?.package_name {
         root_package = scan.package_name
       }
@@ -110,8 +113,8 @@ pub fn project_root_package() -> string {
  * @effects: []
  * @errors: []
  */
-pub fn project_scan(path = ".", options = nil) {
-  return project_scan_native(path, options ?? {})
+pub fn project_scan(project: HarnessProject, path = ".", options = nil) {
+  return project.scan(path, options ?? {})
 }
 
 /**
@@ -121,8 +124,12 @@ pub fn project_scan(path = ".", options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn project_context_profile(path = ".", options = nil) -> ProjectContextProfile {
-  return project_context_profile_native(path, options ?? {})
+pub fn project_context_profile(
+  project: HarnessProject,
+  path = ".",
+  options = nil,
+) -> ProjectContextProfile {
+  return project.context_profile(path, options ?? {})
 }
 
 /**
@@ -131,8 +138,8 @@ pub fn project_context_profile(path = ".", options = nil) -> ProjectContextProfi
  * @effects: []
  * @errors: []
  */
-pub fn project_scan_tree(path = ".", options = nil) {
-  return project_scan_tree_native(path, options ?? {})
+pub fn project_scan_tree(project: HarnessProject, path = ".", options = nil) {
+  return project.scan_tree(path, options ?? {})
 }
 
 /**
@@ -141,8 +148,8 @@ pub fn project_scan_tree(path = ".", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn project_catalog() {
-  return project_catalog_native()
+pub fn project_catalog(project: HarnessProject) {
+  return project.catalog()
 }
 
 /**
@@ -151,8 +158,8 @@ pub fn project_catalog() {
  * @effects: []
  * @errors: []
  */
-pub fn project_enrich(path = ".", options = nil) {
-  return project_enrich_native(path, options ?? {})
+pub fn project_enrich(project: HarnessProject, path = ".", options = nil) {
+  return project.enrich(path, options ?? {})
 }
 
 /**
@@ -161,8 +168,8 @@ pub fn project_enrich(path = ".", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn project_scan_paths(path = ".", options = nil) {
-  return project_scan_tree(path, options).keys()
+pub fn project_scan_paths(project: HarnessProject, path = ".", options = nil) {
+  return project_scan_tree(project, path, options).keys()
 }
 
 /**
@@ -171,25 +178,25 @@ pub fn project_scan_paths(path = ".", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn project_deep_scan(path = ".", options = nil) {
+pub fn project_deep_scan(project: HarnessProject, clock: HarnessClock, path = ".", options = nil) {
   const opts = options ?? {}
   const namespace = opts?.namespace ?? "project-enrichment"
   const tiers = __project_deep_scan_tiers(opts)
   const walk_options = __project_deep_scan_walk_options(opts)
-  const walk = project_walk_tree_native(path, walk_options)
+  const walk = project.walk_tree(path, walk_options)
   const scope_dir = if len(walk) == 0 {
     "."
   } else {
     walk[0].dir
   }
-  let cache = __project_deep_scan_cache(namespace)
+  let cache = __project_deep_scan_cache(project, namespace)
   const signature = __project_deep_scan_signature(opts, tiers, walk_options)
   const incremental = if opts?.incremental == nil {
     true
   } else {
     opts.incremental
   }
-  const now = date_now().timestamp
+  const now = clock.timestamp()
   const max_staleness_seconds = opts?.max_staleness_seconds
   let tree = {}
   let cache_hits = 0
@@ -216,6 +223,7 @@ pub fn project_deep_scan(path = ".", options = nil) {
       continue
     }
     const record = __project_deep_scan_refresh_entry(
+      project,
       namespace,
       entry,
       tiers,
@@ -223,7 +231,7 @@ pub fn project_deep_scan(path = ".", options = nil) {
       signature,
       now,
     )
-    metadata_set(entry.dir, namespace, {_deep_scan: record})
+    project.metadata_set({dir: entry.dir, namespace: namespace, value: {_deep_scan: record}})
     cache[entry.dir] = {_deep_scan: record}
     tree[entry.path] = __project_deep_scan_select_tiers(record.evidence ?? {}, tiers)
     if tree[entry.path]?.enriched != nil {
@@ -246,8 +254,8 @@ pub fn project_deep_scan(path = ".", options = nil) {
       signature: signature,
     },
   }
-  metadata_set(scope_dir, namespace, {_deep_scan_status: status})
-  metadata_save()
+  project.metadata_set({dir: scope_dir, namespace: namespace, value: {_deep_scan_status: status}})
+  project.metadata_save({})
   return tree
 }
 
@@ -257,16 +265,16 @@ pub fn project_deep_scan(path = ".", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn project_deep_scan_status(namespace, path = ".") {
-  const scope_dir = __project_deep_scan_scope_dir(path)
-  const local = metadata_local_namespace(scope_dir, namespace)
+pub fn project_deep_scan_status(project: HarnessProject, namespace, path = ".") {
+  const scope_dir = __project_deep_scan_scope_dir(project, path)
+  const local = metadata_local_namespace(project, scope_dir, namespace)
   const status = local?._deep_scan_status
   if status != nil {
     return status
   }
   let total_dirs = 0
   let enriched_dirs = 0
-  for entry in metadata_entries(namespace) {
+  for entry in project.metadata_entries({namespace: namespace}) {
     const record = entry.local?._deep_scan
     if record == nil {
       continue
@@ -310,17 +318,17 @@ fn __project_deep_scan_walk_options(options) {
   }
 }
 
-fn __project_deep_scan_scope_dir(path) {
-  const scope = project_walk_tree_native(path, {depth: 0})
+fn __project_deep_scan_scope_dir(project: HarnessProject, path) {
+  const scope = project.walk_tree(path, {depth: 0})
   if len(scope) == 0 {
     return "."
   }
   return scope[0].dir
 }
 
-fn __project_deep_scan_cache(namespace) {
+fn __project_deep_scan_cache(project: HarnessProject, namespace) {
   let cache = {}
-  for entry in metadata_entries(namespace) {
+  for entry in project.metadata_entries({namespace: namespace}) {
     if entry.local != nil {
       cache[entry.dir] = entry.local
     }
@@ -415,16 +423,24 @@ fn __project_deep_scan_needs_refresh(
   return false
 }
 
-fn __project_deep_scan_refresh_entry(namespace, entry, tiers, enrichment, signature, now) {
+fn __project_deep_scan_refresh_entry(
+  project: HarnessProject,
+  namespace,
+  entry,
+  tiers,
+  enrichment,
+  signature,
+  now,
+) {
   const scan_tiers = __project_deep_scan_deterministic_tiers(tiers)
   const scan = if len(scan_tiers) == 0 {
     {}
   } else {
-    project_scan(entry.dir, {tiers: scan_tiers})
+    project_scan(project, entry.dir, {tiers: scan_tiers})
   }
   let evidence = __project_deep_scan_evidence(scan, tiers)
   if __project_has_tier(tiers, "enriched") {
-    evidence["enriched"] = project_enrich_native(
+    evidence["enriched"] = project.enrich(
       entry.dir,
       __project_deep_scan_enrichment_options(namespace, entry, evidence, enrichment),
     )
@@ -529,8 +545,8 @@ fn __project_deep_scan_last_refresh(current, next) {
  * @effects: []
  * @errors: []
  */
-pub fn project_stale(namespace) {
-  return metadata_status(namespace).stale
+pub fn project_stale(project: HarnessProject, namespace) {
+  return project.metadata_status({namespace: namespace}).stale
 }
 
 /**
@@ -539,8 +555,8 @@ pub fn project_stale(namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn project_stale_dirs(namespace) {
-  const stale = project_stale(namespace)
+pub fn project_stale_dirs(project: HarnessProject, namespace) {
+  const stale = project_stale(project, namespace)
   let dirs = []
   for dir in stale.tier1 {
     dirs = dirs + [dir]
@@ -557,8 +573,8 @@ pub fn project_stale_dirs(namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn project_requires_refresh(namespace) {
-  const status = metadata_status(namespace)
+pub fn project_requires_refresh(project: HarnessProject, namespace) {
+  const status = project.metadata_status({namespace: namespace})
   if status.stale.any_stale {
     return true
   }

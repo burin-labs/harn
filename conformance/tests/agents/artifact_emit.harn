@@ -1,17 +1,18 @@
 import { agent_capture_events } from "std/agent/events"
 
-pipeline main() {
-  const session = agent_session_open("artifact-emit-conformance")
-  agent_session_reset(session)
+pipeline main(harness: Harness) {
+  const session = harness.agent.open("artifact-emit-conformance")
+  harness.agent.reset(session)
   const captured = agent_capture_events(
+    harness.agent,
     session,
     fn() {
-      let mermaid = artifact_emit(
+      let mermaid = harness.agent.artifact_emit(
         "mermaid",
         "flowchart TD\n  A --> B",
         {session_id: session, artifact_id: "artifact-mermaid", title: "Flow"},
       )
-      let vega = artifact_emit(
+      let vega = harness.agent.artifact_emit(
         "vega-lite",
         {
           mark: "bar",
@@ -28,12 +29,12 @@ pipeline main() {
           provenance: {source: "fixture"},
         },
       )
-      let table = artifact_emit(
+      let table = harness.agent.artifact_emit(
         "table",
         {columns: ["name", "count"], rows: [{name: "a", count: 2}]},
         {session_id: session, artifact_id: "artifact-table"},
       )
-      let file = artifact_emit(
+      let file = harness.agent.artifact_emit(
         "file",
         {
           uri: "file:///tmp/report.pdf",
@@ -48,36 +49,40 @@ pipeline main() {
       return [mermaid, vega, table, file]
     },
   )
-  __io_println(len(captured.events))
-  __io_println(captured.events[0].type)
-  __io_println(captured.events[0].artifact_id)
-  __io_println(captured.events[0].spec.code.contains("A --> B"))
-  __io_println(captured.events[1].kind)
-  __io_println(captured.events[1].metadata.unit)
-  __io_println(captured.events[2].mime_type)
-  __io_println(captured.events[3].kind)
-  __io_println(captured.events[3].mime_type)
-  __io_println(captured.events[3].size_bytes)
-  __io_println(captured.events[3].spec.sha256)
-  __io_println(captured.events[3].fallback.contains("report.pdf"))
-  __io_println(captured.result[3].ok)
-  const snapshot_events = transcript_events_by_kind(agent_session_snapshot(session), "artifact")
-  __io_println(len(snapshot_events))
-  __io_println(snapshot_events[0].metadata.artifactId)
-  __io_println(snapshot_events[1].metadata.metadata.unit)
-  const imported = transcript_import(transcript_export(agent_session_snapshot(session)))
+  harness.stdio.println(len(captured.events))
+  harness.stdio.println(captured.events[0].type)
+  harness.stdio.println(captured.events[0].artifact_id)
+  harness.stdio.println(captured.events[0].spec.code.contains("A --> B"))
+  harness.stdio.println(captured.events[1].kind)
+  harness.stdio.println(captured.events[1].metadata.unit)
+  harness.stdio.println(captured.events[2].mime_type)
+  harness.stdio.println(captured.events[3].kind)
+  harness.stdio.println(captured.events[3].mime_type)
+  harness.stdio.println(captured.events[3].size_bytes)
+  harness.stdio.println(captured.events[3].spec.sha256)
+  harness.stdio.println(captured.events[3].fallback.contains("report.pdf"))
+  harness.stdio.println(captured.result[3].ok)
+  const snapshot_events = transcript_events_by_kind(harness.agent.snapshot(session), "artifact")
+  harness.stdio.println(len(snapshot_events))
+  harness.stdio.println(snapshot_events[0].metadata.artifactId)
+  harness.stdio.println(snapshot_events[1].metadata.metadata.unit)
+  const imported = transcript_import(transcript_export(harness.agent.snapshot(session)))
   const imported_events = transcript_events_by_kind(imported, "artifact")
-  __io_println(len(imported_events))
-  __io_println(imported_events[2].metadata.kind)
-  __io_println(imported_events[3].metadata.mimeType)
+  harness.stdio.println(len(imported_events))
+  harness.stdio.println(imported_events[2].metadata.kind)
+  harness.stdio.println(imported_events[3].metadata.mimeType)
   const svg_rejected = try {
-    artifact_emit("mermaid", "flowchart TD\n  A[<svg onload=alert(1)>]", {session_id: session})
+    harness.agent.artifact_emit(
+      "mermaid",
+      "flowchart TD\n  A[<svg onload=alert(1)>]",
+      {session_id: session},
+    )
     false
   } catch (e) {
     contains(json_stringify(e), "unsafe payload marker")
   }
   const external_rejected = try {
-    artifact_emit(
+    harness.agent.artifact_emit(
       "vega-lite",
       {
         mark: "line",
@@ -91,13 +96,13 @@ pipeline main() {
     contains(json_stringify(e), "external reference")
   }
   const raw_svg_kind_rejected = try {
-    artifact_emit("svg", "<svg></svg>", {session_id: session})
+    harness.agent.artifact_emit("svg", "<svg></svg>", {session_id: session})
     false
   } catch (e) {
     contains(json_stringify(e), "unsupported artifact kind")
   }
   const file_http_rejected = try {
-    artifact_emit(
+    harness.agent.artifact_emit(
       "file",
       {uri: "https://example.invalid/report.pdf", mime_type: "application/pdf"},
       {session_id: session},
@@ -107,7 +112,7 @@ pipeline main() {
     contains(json_stringify(e), "must not reference a network")
   }
   const file_payload_rejected = try {
-    artifact_emit(
+    harness.agent.artifact_emit(
       "file",
       {uri: "file:///tmp/report.pdf", mime_type: "application/pdf", base64: "JVBERi0xLjQ="},
       {session_id: session},
@@ -116,9 +121,9 @@ pipeline main() {
   } catch (e) {
     contains(json_stringify(e), "payloads are not allowed")
   }
-  __io_println(svg_rejected)
-  __io_println(external_rejected)
-  __io_println(raw_svg_kind_rejected)
-  __io_println(file_http_rejected)
-  __io_println(file_payload_rejected)
+  harness.stdio.println(svg_rejected)
+  harness.stdio.println(external_rejected)
+  harness.stdio.println(raw_svg_kind_rejected)
+  harness.stdio.println(file_http_rejected)
+  harness.stdio.println(file_payload_rejected)
 }

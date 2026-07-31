@@ -1,6 +1,6 @@
-pipeline test(task) {
-  __io_println("MiXeD".lower())
-  __io_println("MiXeD".upper())
-  __io_println("Title".to_lower())
-  __io_println("Title".to_upper())
+pipeline test(harness: Harness, task) {
+  harness.stdio.println("MiXeD".lower())
+  harness.stdio.println("MiXeD".upper())
+  harness.stdio.println("Title".to_lower())
+  harness.stdio.println("Title".to_upper())
 }

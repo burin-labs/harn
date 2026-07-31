@@ -10,13 +10,21 @@
 // model can tell which of several on-screen calls failed.
 import { probe, sample_registry } from "_tool_parse_probe"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   // The name is not in the registry: report it, list every available tool, and
   // do not truncate the list for a small registry.
-  probe("unknown tool name", "fictitious_tool({ x: 1 })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown tool name",
+    "fictitious_tool({ x: 1 })",
+    sample_registry(),
+  )
   // The same unknown name alongside a call that DOES parse. The valid call
   // still dispatches.
   probe(
+    harness.agent,
+    harness.stdio,
     "unknown tool name beside a valid call",
     """fictitious_tool({ x: 1 })
 edit({ action: "create", path: "a.go" })""",
@@ -24,23 +32,55 @@ edit({ action: "create", path: "a.go" })""",
   )
   // `read` is the highest-frequency real miss and the answer is always
   // `look({ intent: "read" })`, so the alias hint names that.
-  probe("read is aliased to look", "read({ path: \"a.go\" })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "read is aliased to look",
+    "read({ path: \"a.go\" })",
+    sample_registry(),
+  )
   // The model emitted its own test/source code where a call was expected. The
   // cause is a missing heredoc/content envelope, not an unknown tool.
-  probe("source code: it", "it({ x: 1 })", sample_registry())
-  probe("source code: expect", "expect({ x: 1 })", sample_registry())
-  probe("source code: describe", "describe({ x: 1 })", sample_registry())
-  probe("source code: assertServiceCount", "assertServiceCount({ x: 1 })", sample_registry())
+  probe(harness.agent, harness.stdio, "source code: it", "it({ x: 1 })", sample_registry())
+  probe(harness.agent, harness.stdio, "source code: expect", "expect({ x: 1 })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "source code: describe",
+    "describe({ x: 1 })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "source code: assertServiceCount",
+    "assertServiceCount({ x: 1 })",
+    sample_registry(),
+  )
   // A genuine close-miss typo still gets the suggestion, not the source-code
   // message.
-  probe("close miss typo", "edt({ action: \"create\" })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "close miss typo",
+    "edt({ action: \"create\" })",
+    sample_registry(),
+  )
   // `Label: known_tool(...)` where the label is not in the strip allowlist is
   // ambiguous. It must not silently execute, and the diagnostic names both the
   // observed prefix and the fix.
-  probe("unknown label prefix on a known tool", "Hint: run({ command: \"ls\" })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown label prefix on a known tool",
+    "Hint: run({ command: \"ls\" })",
+    sample_registry(),
+  )
   // The guardrail against false positives: the same prefix shape where the
   // identifier is NOT a known tool must not fire the near-miss diagnostic.
   probe(
+    harness.agent,
+    harness.stdio,
     "unknown label prefix on an unknown identifier",
     "Note: make_coffee({ strength: \"strong\" })",
     sample_registry(),
@@ -49,6 +89,8 @@ edit({ action: "create", path: "a.go" })""",
   // "unexpected character starting a value" from weak models. The error must
   // name the heredoc recovery and show the `<<` marker.
   probe(
+    harness.agent,
+    harness.stdio,
     "raw multi-line body teaches the heredoc",
     """edit({ action: "replace_range", path: "a.zig", content: // helper
 } })""",
@@ -57,17 +99,27 @@ edit({ action: "create", path: "a.go" })""",
   // Truncated mid-object: the model hit its token limit before the closing
   // brace. The diagnostic names the tool.
   probe(
+    harness.agent,
+    harness.stdio,
     "unclosed object literal",
     "edit({ action: \"create\", path: \"a.go\", content: `hello",
     sample_registry(),
   )
   // A bare scalar argument is nudged toward object-literal syntax.
-  probe("bare scalar argument", "edit(\"a.go\")", sample_registry())
+  probe(harness.agent, harness.stdio, "bare scalar argument", "edit(\"a.go\")", sample_registry())
   // A malformed object literal carries a `Raw:` preview of the offending span.
-  probe("object literal parse error preview", "edit({ action: })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "object literal parse error preview",
+    "edit({ action: })",
+    sample_registry(),
+  )
   // The legacy named-argument call form is rejected in favour of strict
   // object-literal syntax.
   probe(
+    harness.agent,
+    harness.stdio,
     "legacy named argument form",
     "edit(action=\"replace_body\", path=\"a.go\", new_body=`return 1`)",
     sample_registry(),
@@ -75,6 +127,8 @@ edit({ action: "create", path: "a.go" })""",
   // Over-recovery guard for the omitted-`)` rescue: a complete object followed
   // by stray words is a hard parse error, not a recoverable call.
   probe(
+    harness.agent,
+    harness.stdio,
     "omitted paren recovery rejects trailing garbage",
     "edit({ action: \"create\", path: \"a.rs\" } and then some stray words",
     sample_registry(),

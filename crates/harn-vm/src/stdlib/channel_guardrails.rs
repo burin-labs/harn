@@ -34,6 +34,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
+    exposure = "harness.channels.guardrail_register",
+    effects = ["state.mutate@const=channel-guardrails"],
     sig = "channel_guardrail_register(config: dict) -> string",
     category = "channel_guardrails"
 )]
@@ -56,6 +58,8 @@ fn channel_guardrail_register_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.channels.guardrail_unregister",
+    effects = ["state.mutate@const=channel-guardrails"],
     sig = "channel_guardrail_unregister(id: string) -> bool",
     category = "channel_guardrails"
 )]
@@ -77,6 +81,8 @@ fn channel_guardrail_unregister_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.channels.guardrail_list",
+    effects = ["state.read@const=channel-guardrails"],
     sig = "channel_guardrail_list() -> list",
     category = "channel_guardrails"
 )]
@@ -90,6 +96,8 @@ fn channel_guardrail_list_impl(_args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
+    exposure = "harness.channels.guardrail_clear",
+    effects = ["state.mutate@const=channel-guardrails"],
     sig = "channel_guardrail_clear() -> nil",
     category = "channel_guardrails"
 )]

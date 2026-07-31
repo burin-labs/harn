@@ -70,7 +70,7 @@ fn render_review_html(item) {
     + "</script></body></html>"
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const item = {id: "PR-512", title: "Switch billing webhooks to v2 signature"}
   const resource = ui_resource(
     "ui://harn-examples/review-form@v1",
@@ -112,16 +112,16 @@ pipeline default() {
   )
   ui_tool_result_validate(result)
   const mcp_meta = ui_tool_meta_to_mcp(result.meta)
-  __io_println("resource.uri=" + resource.uri)
-  __io_println("resource.permissions=" + to_string(resource.permissions))
-  __io_println("resource.validation.ok=" + to_string(resource.validation.ok))
-  __io_println("meta.visibility=" + mcp_meta.ui.visibility)
-  __io_println("meta.resourceUri=" + mcp_meta.ui.resourceUri)
+  harness.stdio.println("resource.uri=" + resource.uri)
+  harness.stdio.println("resource.permissions=" + to_string(resource.permissions))
+  harness.stdio.println("resource.validation.ok=" + to_string(resource.validation.ok))
+  harness.stdio.println("meta.visibility=" + mcp_meta.ui.visibility)
+  harness.stdio.println("meta.resourceUri=" + mcp_meta.ui.resourceUri)
   const apps_host = ui_select_for_host(result, {apps: true, profiles: ["mcp-app"]})
   const text_host = ui_select_for_host(result, nil)
-  __io_println("apps_host.selected=" + apps_host.selected)
-  __io_println("text_host.selected=" + text_host.selected)
-  __io_println("text_host.fallback=" + text_host.text_fallback.content)
+  harness.stdio.println("apps_host.selected=" + apps_host.selected)
+  harness.stdio.println("text_host.selected=" + text_host.selected)
+  harness.stdio.println("text_host.fallback=" + text_host.text_fallback.content)
   // Document the message envelopes the iframe emits — useful when wiring a
   // host bridge or writing host tests.
   const demo_call = ui_tool_call_envelope(
@@ -134,8 +134,8 @@ pipeline default() {
     "Signature library swap is mechanical",
     {id: "ctx-1"},
   )
-  __io_println("submit.method=" + demo_call.method)
-  __io_println("submit.params.name=" + demo_call.params.name)
-  __io_println("ctx.method=" + demo_ctx.method)
-  __io_println("ctx.params.model_visible=" + to_string(demo_ctx.params.model_visible))
+  harness.stdio.println("submit.method=" + demo_call.method)
+  harness.stdio.println("submit.params.name=" + demo_call.params.name)
+  harness.stdio.println("ctx.method=" + demo_ctx.method)
+  harness.stdio.println("ctx.params.model_visible=" + to_string(demo_ctx.params.model_visible))
 }

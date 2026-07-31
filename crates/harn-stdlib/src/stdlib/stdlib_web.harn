@@ -138,7 +138,7 @@ fn __web_not_modified(source_url, response, previous, fetched_at) {
  * @effects: [net, time]
  * @errors: []
  */
-pub fn web_fetch(url: string, options = nil) -> dict {
+pub fn web_fetch(harness: Harness, url: string, options = nil) -> dict {
   const opts = options ?? {}
   const method = uppercase(opts?.method ?? opts?.http_options?.method ?? "GET")
   let http_opts = opts?.http_options ?? opts
@@ -152,7 +152,7 @@ pub fn web_fetch(url: string, options = nil) -> dict {
     "miss"
   }
   if previous == nil && store_opts != nil {
-    const cached = cache_get(cache_key, store_opts)
+    const cached = cache_get(harness.llm, cache_key, store_opts)
     if cached.hit {
       previous = cached.value
       cache_status = "refresh"
@@ -164,18 +164,22 @@ pub fn web_fetch(url: string, options = nil) -> dict {
     opts?.conditional ?? true,
   )
   http_opts = http_opts + {headers: headers}
-  const response = harness.net.request(method, url, http_opts)
+  const response = if method == "GET" {
+    harness.net.get(url, http_opts)
+  } else {
+    harness.net.request(method, url, http_opts)
+  }
   const fetched_at = opts?.fetched_at ?? harness.clock.timestamp()
   if response.status == 304 && previous != nil {
     const not_modified = __web_not_modified(source_url, response, previous, fetched_at)
     if store_opts != nil {
-      cache_put(cache_key, not_modified, store_opts)
+      cache_put(harness.llm, cache_key, not_modified, store_opts)
     }
     return not_modified
   }
   const envelope = __web_fetch_envelope(source_url, response, fetched_at, cache_status)
   if store_opts != nil && envelope.ok {
-    cache_put(cache_key, envelope, store_opts)
+    cache_put(harness.llm, cache_key, envelope, store_opts)
   }
   return envelope
 }
@@ -280,7 +284,7 @@ fn __web_search_tool_options(base, args) {
   return merged + extra
 }
 
-fn __web_search_backend(opts) {
+fn __web_search_backend(env: HarnessEnv, opts) {
   const explicit = opts?.backend
   if type_of(explicit) == "dict" {
     return explicit
@@ -311,10 +315,10 @@ fn __web_search_backend(opts) {
       api: api,
     }
   }
-  const env_url = harness.env.get("HARN_WEB_SEARCH_URL")
+  const env_url = env.get("HARN_WEB_SEARCH_URL")
   if env_url != nil && env_url != "" {
     let headers = {}
-    const bearer = harness.env.get("HARN_WEB_SEARCH_BEARER_TOKEN")
+    const bearer = env.get("HARN_WEB_SEARCH_BEARER_TOKEN")
     if bearer != nil && bearer != "" {
       headers = {Authorization: "Bearer " + bearer}
     }
@@ -325,7 +329,7 @@ fn __web_search_backend(opts) {
       evidence: "search_api",
       api: {
         url: env_url,
-        query_param: harness.env.get_or("HARN_WEB_SEARCH_QUERY_PARAM", "q"),
+        query_param: env.get_or("HARN_WEB_SEARCH_QUERY_PARAM", "q"),
         headers: headers,
       },
     }
@@ -440,7 +444,7 @@ fn __web_search_api_item(item, api) {
   }
 }
 
-fn __web_search_api(query, opts, backend) {
+fn __web_search_api(harness: Harness, query, opts, backend) {
   const api = backend.api ?? opts.api
   const limit = opts?.limit ?? api?.limit ?? 10
   let fetch_options = api?.fetch_options ?? {}
@@ -464,7 +468,7 @@ fn __web_search_api(query, opts, backend) {
       headers: __web_search_merge_headers(fetch_options?.headers, api.headers),
     }
   }
-  const fetched = web_fetch(api.url, fetch_options)
+  const fetched = web_fetch(harness, api.url, fetch_options)
   const parsed_result: Result<unknown, JsonParseFailure> = try {
     json_parse(fetched.body)
   }
@@ -529,11 +533,11 @@ fn __web_search_api(query, opts, backend) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn web_search(query: string, options = nil) -> dict {
+pub fn web_search(harness: Harness, query: string, options = nil) -> dict {
   const opts = options ?? {}
-  const backend = __web_search_backend(opts)
+  const backend = __web_search_backend(harness.env, opts)
   if backend.kind == "api" {
-    return __web_search_api(query, opts, backend)
+    return __web_search_api(harness, query, opts, backend)
   }
   if backend.kind == "provider_hosted" {
     return __web_search_provider_results(query, opts, backend)
@@ -550,8 +554,8 @@ pub fn web_search(query: string, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verify_imports(paths, options = nil) -> dict {
-  return __verify_imports(paths, options ?? {})
+pub fn verify_imports(fs: HarnessFs, paths, options = nil) -> dict {
+  return fs.verify_imports(paths, options ?? {})
 }
 
 /**
@@ -562,7 +566,7 @@ pub fn verify_imports(paths, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn web_grounding_tools(registry = nil, options = nil) {
+pub fn web_grounding_tools(harness: Harness, registry = nil, options = nil) {
   const opts = options ?? {}
   let tools = registry ?? tool_registry()
   tools = tool_define(
@@ -581,7 +585,7 @@ pub fn web_grounding_tools(registry = nil, options = nil) {
         },
       },
       annotations: {readOnlyHint: true},
-      handler: { args -> web_search(args.query, __web_search_tool_options(opts, args)) },
+      handler: { args -> web_search(harness, args.query, __web_search_tool_options(opts, args)) },
       guidance:
         "For unfamiliar APIs, package names, or recent behavior, call web_search against authoritative docs or registries before coding. Prefer pinned docs and registry evidence over general web snippets, and carry source URLs into the answer or follow-up prompt.",
     },
@@ -603,7 +607,7 @@ pub fn web_grounding_tools(registry = nil, options = nil) {
       },
       annotations: {readOnlyHint: true},
       handler: { args ->
-        verify_imports(args.paths ?? [args.path], __web_search_tool_options(opts, args))
+        verify_imports(harness.fs, args.paths ?? [args.path], __web_search_tool_options(opts, args))
       },
       guidance:
         "After generating or editing code with imports, call verify_imports on the touched source files. Treat package_not_found and symbol_not_found as blockers. Treat fresh_package or low_trust_package warnings as a forced lookup trigger before proceeding.",
@@ -805,10 +809,15 @@ fn __web_path_for_robots(url) {
  * @effects: [net]
  * @errors: []
  */
-pub fn robots_allowed(url: string, user_agent: string = "*", options = nil) -> bool {
+pub fn robots_allowed(
+  harness: Harness,
+  url: string,
+  user_agent: string = "*",
+  options = nil,
+) -> bool {
   const opts = options ?? {}
   const robots_url = opts?.robots_url ?? __web_robots_url(url)
-  const response = web_fetch(robots_url, opts?.fetch_options ?? {})
+  const response = web_fetch(harness, robots_url, opts?.fetch_options ?? {})
   if !(response.ok ?? false) {
     return true
   }
@@ -850,12 +859,13 @@ fn __web_sitemap_locs(xml) {
   return urls
 }
 
-fn __web_sitemap_candidates(base_url, opts) {
+fn __web_sitemap_candidates(harness: Harness, base_url, opts) {
   if opts?.sitemap_urls != nil {
     return opts.sitemap_urls
   }
   let urls = []
   const robots = web_fetch(
+    harness,
     opts?.robots_url ?? web_origin_url(base_url, "/robots.txt"),
     opts?.fetch_options ?? {},
   )
@@ -880,17 +890,17 @@ fn __web_sitemap_candidates(base_url, opts) {
  * @effects: [net]
  * @errors: []
  */
-pub fn sitemap_urls(base_url: string, options = nil) -> list<string> {
+pub fn sitemap_urls(harness: Harness, base_url: string, options = nil) -> list<string> {
   const opts = options ?? {}
   const max_sitemaps = opts?.max_sitemaps ?? 10
   let found = []
   let count = 0
-  for sitemap_url in __web_sitemap_candidates(base_url, opts) {
+  for sitemap_url in __web_sitemap_candidates(harness, base_url, opts) {
     if count >= max_sitemaps {
       return found
     }
     count = count + 1
-    const response = web_fetch(sitemap_url, opts?.fetch_options ?? {})
+    const response = web_fetch(harness, sitemap_url, opts?.fetch_options ?? {})
     if response.ok {
       for loc in __web_sitemap_locs(response.body) {
         if !found.contains(loc) {

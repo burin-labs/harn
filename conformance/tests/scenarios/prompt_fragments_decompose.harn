@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * The per-turn primary system block is decomposed into individually
  * auditable fragments (#2632). `agent_build_turn_system_fragments` emits one
@@ -18,7 +19,7 @@ fn contains_id(items, needle) {
   return false
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const session = {session_id: "prompt-fragments-decompose"}
   const opts = {
     system: "You are a careful operator.",
@@ -32,9 +33,9 @@ pipeline test(task) {
     tool_format: "text",
   }
   // Joining the fragment bodies reproduces the legacy string exactly.
-  const fragments = agent_build_turn_system_fragments(session, opts, 0)
+  const fragments = agent_build_turn_system_fragments(harness, session, opts, 0)
   const joined = join(fragments.map(fn(f) { return f.body }), "\n\n")
-  const legacy = agent_build_turn_system(session, opts, 0)
+  const legacy = agent_build_turn_system(harness, session, opts, 0)
   assert(joined == legacy, "joined fragment bodies equal agent_build_turn_system")
   assert(len(fragments) >= 4, "primary block decomposed into multiple parts")
   // Every fragment is namespaced under the primary region.
@@ -44,7 +45,7 @@ pipeline test(task) {
   }
   // prompt_explain expands the channel as the primary region and traces each
   // part individually — no opaque single `primary` fragment remains.
-  const explained = prompt_explain({_system_fragments: fragments, tools: opts.tools})
+  const explained = harness.agent.prompt_explain({_system_fragments: fragments, tools: opts.tools})
   assert(explained.system == legacy, "prompt_explain system equals legacy string")
   const ids = explained.fragments.map(fn(t) { return t.id })
   assert(contains_id(ids, "primary:system"), "traces primary:system")
@@ -61,9 +62,11 @@ pipeline test(task) {
     prompt "Remove disk caches carefully."
   }
   with_llm_script(
+    harness.llm,
     [llm_text("Cleanup done.")],
     { ->
       const res = agent_loop(
+        harness,
         "run disk cleanup please",
         "You are a careful operator.",
         {
@@ -74,11 +77,11 @@ pipeline test(task) {
         },
       )
       assert(res?.status == "done", "live loop completes")
-      const recorded = llm_mock_calls()[0].system
+      const recorded = harness.llm.mock_calls()[0].system
       assert(contains(recorded, "## Active skills"), "live system surfaces active skills")
       assert(contains(recorded, "You are a careful operator."), "live system surfaces primary text")
       assert(!contains(recorded, "\n\n\n"), "no triple-newline runs in composed system")
-      log("prompt_fragments_decompose tests passed")
+      harness.stdio.log("prompt_fragments_decompose tests passed")
     },
   )
 }

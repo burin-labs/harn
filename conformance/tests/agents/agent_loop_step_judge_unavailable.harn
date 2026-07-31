@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -26,18 +27,21 @@ fn judge_decisions(captured) {
   return events_of(captured.events, "step_judge_decision")
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // --- Case 1: the judge model errors -> fail-open, but marked unavailable.
   with_llm_script(
+    harness.llm,
     [
       llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
       {error: {category: "generic", message: "judge backend 503"}},
     ],
     { ->
-      const session = "step-judge-unavail-" + uuid()
+      const session = "step-judge-unavail-" + harness.random.uuid()
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "What is 2 + 2?",
           nil,
           {
@@ -51,14 +55,15 @@ pipeline default() {
       )
       const decisions = judge_decisions(captured)
       const unavailable = decisions.filter({ d -> (d.judge_error ?? false) == true })
-      __io_println(len(unavailable))
-      __io_println(unavailable[0].reason)
-      __io_println(unavailable[0].verdict)
-      __io_println(unavailable[0].vetoed)
+      harness.stdio.println(len(unavailable))
+      harness.stdio.println(unavailable[0].reason)
+      harness.stdio.println(unavailable[0].verdict)
+      harness.stdio.println(unavailable[0].vetoed)
     },
   )
   // --- Case 2 (control): a genuine pass carries NO judge_error marker.
   with_llm_script(
+    harness.llm,
     [
       llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
       llm_text(
@@ -66,10 +71,12 @@ pipeline default() {
       ),
     ],
     { ->
-      const session = "step-judge-pass-" + uuid()
+      const session = "step-judge-pass-" + harness.random.uuid()
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "What is 2 + 2?",
           nil,
           {
@@ -84,8 +91,8 @@ pipeline default() {
       const decisions = judge_decisions(captured)
       const unavailable = decisions.filter({ d -> (d.judge_error ?? false) == true })
       const passes = decisions.filter({ d -> d.verdict == "pass" })
-      __io_println(len(unavailable))
-      __io_println(len(passes) > 0)
+      harness.stdio.println(len(unavailable))
+      harness.stdio.println(len(passes) > 0)
     },
   )
 }

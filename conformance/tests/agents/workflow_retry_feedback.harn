@@ -5,7 +5,7 @@ import { workflow_stage_retry_task } from "std/workflow/stage"
  * context contract and the bounded `feedback` template that the embedded
  * stage loop threads into a retry attempt's task.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const prior = {
     ok: true,
     result: {status: "failed", visible_text: "boom"},
@@ -20,7 +20,7 @@ pipeline default() {
   //    (alphabetical): attempt, error, findings, prior_text, stage, task,
   //    verification.
   const seen_keys = { ctx -> return join(keys(ctx), ",") }
-  __io_println(
+  harness.stdio.println(
     workflow_stage_retry_task(
       {
         policy: {repair_prompt_builder: seen_keys},
@@ -33,7 +33,7 @@ pipeline default() {
   )
   // 2. the builder's return becomes the retry task verbatim.
   const verbatim = { ctx -> return "REPLACEMENT for attempt " + to_string(ctx.attempt) }
-  __io_println(
+  harness.stdio.println(
     workflow_stage_retry_task(
       {
         policy: {repair_prompt_builder: verbatim},
@@ -46,7 +46,7 @@ pipeline default() {
   )
   // 3. the builder sees the prior attempt's verification findings.
   const findings_probe = { ctx -> return join(ctx.findings, "|") }
-  __io_println(
+  harness.stdio.println(
     workflow_stage_retry_task(
       {
         policy: {repair_prompt_builder: findings_probe},
@@ -61,9 +61,9 @@ pipeline default() {
   const fb = workflow_stage_retry_task(
     {policy: {feedback: true}, task: "do it", attempt: 1, prior: prior, node: {}},
   )
-  __io_println(contains(fb, "do it"))
-  __io_println(contains(fb, "Previous attempt 1 failed"))
-  __io_println(contains(fb, "expect_status: expected 0, got 7"))
+  harness.stdio.println(contains(fb, "do it"))
+  harness.stdio.println(contains(fb, "Previous attempt 1 failed"))
+  harness.stdio.println(contains(fb, "expect_status: expected 0, got 7"))
   // 5. feedback: {max_chars} truncates the injected findings.
   const big = {
     result: {visible_text: ""},
@@ -76,10 +76,10 @@ pipeline default() {
   const truncated = workflow_stage_retry_task(
     {policy: {feedback: {max_chars: 4}}, task: "base", attempt: 3, prior: big, node: {}},
   )
-  __io_println(contains(truncated, "Previous attempt 3 failed: asse"))
-  __io_println(contains(truncated, "assert_text"))
+  harness.stdio.println(contains(truncated, "Previous attempt 3 failed: asse"))
+  harness.stdio.println(contains(truncated, "assert_text"))
   // 6. no feedback and no builder → blind retry, task unchanged.
-  __io_println(
+  harness.stdio.println(
     workflow_stage_retry_task({policy: {}, task: "unchanged", attempt: 1, prior: prior, node: {}}),
   )
 }

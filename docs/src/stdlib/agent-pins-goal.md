@@ -78,7 +78,7 @@ const g = goal({
 })
 
 // Render the goal into every outbound request (existing fragment channel):
-const result = agent_loop("Proceed.", nil, with_goal({provider: "anthropic", done_judge: goal_judge(g)}, g))
+const result = agent_loop(harness, "Proceed.", nil, with_goal({provider: "anthropic", done_judge: goal_judge(g)}, g))
 
 // The machine-checkable floor:
 const floor = goal_check(g, {ci_green: false})   // {done: false, unmet: ["green"], ...}
@@ -96,7 +96,7 @@ const floor = goal_check(g, {ci_green: false})   // {done: false, unmet: ["green
   (running `goal_check` against the facts `opts.facts_fn(payload)` extracts), an
   unmet goal vetoes the completion and threads the unmet criteria into the
   transcript as feedback, and the agent re-runs — up to `opts.max_attempts`
-  (default 3). Spread it into `agent_loop(task, nil, goal_reloop(g, opts))`
+  (default 3). Spread it into `agent_loop(harness, task, nil, goal_reloop(g, opts))`
   rather than wrapping `agent_loop` in a hand-written loop.
 - `goal_pin(goal)` bridges a goal into a self-replacing `std/agent/pins` pin so
   the objective also survives compaction.

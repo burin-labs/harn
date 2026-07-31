@@ -9,6 +9,8 @@ use crate::value::{VmError, VmValue};
 
 /// Validate provider health, API key reachability, and optional model readiness.
 #[harn_builtin(
+    exposure = "harness.llm.healthcheck",
+    effects = ["llm.observe@dynamic", "network.observe@dynamic"],
     sig = "llm_healthcheck(provider_or_options?: string|dict, options?: dict|nil) -> dict",
     kind = "async",
     category = "llm.config"

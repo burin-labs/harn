@@ -4,15 +4,16 @@ import {
   context_maintenance_transition,
 } from "std/context/maintenance"
 
-fn __queue(job_id, event, options = nil) {
+fn __queue(stdio: HarnessStdio, job_id, event, options = nil) {
   const receipt = context_maintenance_queue_receipt(job_id, event, options ?? {})
-  log("queued " + receipt.job_id + " from " + to_string(receipt.lifecycle_event ?? "unknown"))
+  stdio.log("queued " + receipt.job_id + " from " + to_string(receipt.lifecycle_event ?? "unknown"))
   return receipt
 }
 
 /** Queue a deterministic scan/index refresh for changed files. */
-pub fn on_file_edited(event) {
+pub fn on_file_edited(harness: Harness, event: TriggerEvent) {
   return __queue(
+    harness.stdio,
     "context.refresh",
     event,
     {
@@ -24,9 +25,10 @@ pub fn on_file_edited(event) {
 }
 
 /** Queue fuzzy enrichment only when the host says idle consolidation is enabled. */
-pub fn on_session_idle(event) {
+pub fn on_session_idle(harness: Harness, event: TriggerEvent) {
   const status = event?.consolidate_on_idle ?? false ? "queued" : "skipped"
   return __queue(
+    harness.stdio,
     "context.crystallize",
     event,
     {
@@ -39,8 +41,9 @@ pub fn on_session_idle(event) {
 }
 
 /** Preserve durable context artifacts before compaction removes transcript detail. */
-pub fn on_pre_compact(event) {
+pub fn on_pre_compact(harness: Harness, event: TriggerEvent) {
   return __queue(
+    harness.stdio,
     "context.crystallize",
     event,
     {retry_hint: {retryable: false}, replay: {mode: "include"}, metadata: {lane: "pre_compact"}},
@@ -48,9 +51,10 @@ pub fn on_pre_compact(event) {
 }
 
 /** React to turn results without making the next foreground turn wait. */
-pub fn on_post_turn(event) {
+pub fn on_post_turn(harness: Harness, event: TriggerEvent) {
   const tool_names = event?.successful_tool_names ?? []
   return __queue(
+    harness.stdio,
     "context.refresh",
     event,
     {
@@ -63,8 +67,9 @@ pub fn on_post_turn(event) {
 }
 
 /** Flush final context/librarian artifacts after the session completes. */
-pub fn on_session_end(event) {
+pub fn on_session_end(harness: Harness, event: TriggerEvent) {
   return __queue(
+    harness.stdio,
     "context.crystallize",
     event,
     {

@@ -107,7 +107,7 @@ fn all_fields<'a>(lines: &'a [String], key: &str) -> Vec<&'a str> {
 fn mid_conversation_mount_bootstraps_only_the_delta() {
     let source = r#"
 import { agent_mcp_bootstrap_if_needed, agent_mcp_mount_additional } from "std/agent/mcp"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const session = {session_id: "sess-midconv"}
   // Initial loop-entry bootstrap of the pre-configured server `alpha`.
   const opts = {
@@ -115,19 +115,19 @@ pipeline main(task) {
     tools: {_type: "tool_registry", tools: [{name: "look"}]},
     policy: {tools: ["look"]},
   }
-  const booted = agent_mcp_bootstrap_if_needed(session, opts)
+  const booted = agent_mcp_bootstrap_if_needed(harness.tools, session, opts)
 
   // A skill activates mid-conversation declaring `alpha` (already mounted)
   // and `beta` (new). Mount only the delta.
   const skill_specs = [{name: "alpha", command: "true"}, {name: "beta", command: "true"}]
-  const out = agent_mcp_mount_additional(session, booted, skill_specs)
+  const out = agent_mcp_mount_additional(harness.tools, session, booted, skill_specs)
 
   const catalog = (out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") })
   const ceiling = out?.policy?.tools ?? []
-  log("catalog=" + join(catalog, ","))
-  log("ceiling=" + join(ceiling, ","))
-  log("delta_nonnil=" + to_string(out?._mcp_delta_bootstrap != nil))
-  log("server_ids=" + join((out?._mcp_server_info ?? []).map({ i -> to_string(i?.name ?? "") }), ","))
+  harness.stdio.log("catalog=" + join(catalog, ","))
+  harness.stdio.log("ceiling=" + join(ceiling, ","))
+  harness.stdio.log("delta_nonnil=" + to_string(out?._mcp_delta_bootstrap != nil))
+  harness.stdio.log("server_ids=" + join((out?._mcp_server_info ?? []).map({ i -> to_string(i?.name ?? "") }), ","))
 }
 "#;
     let lines = run_with_spec_aware_stub(source).expect("snippet runs");
@@ -164,21 +164,26 @@ pipeline main(task) {
 fn mounting_already_active_server_is_a_noop() {
     let source = r#"
 import { agent_mcp_bootstrap_if_needed, agent_mcp_mount_additional } from "std/agent/mcp"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const session = {session_id: "sess-noop"}
   const opts = {
     mcp_servers: [{name: "alpha", command: "true"}],
     tools: {_type: "tool_registry", tools: [{name: "look"}]},
     policy: {tools: ["look"]},
   }
-  const booted = agent_mcp_bootstrap_if_needed(session, opts)
-  const out = agent_mcp_mount_additional(session, booted, [{name: "alpha", command: "true"}])
+  const booted = agent_mcp_bootstrap_if_needed(harness.tools, session, opts)
+  const out = agent_mcp_mount_additional(
+    harness.tools,
+    session,
+    booted,
+    [{name: "alpha", command: "true"}],
+  )
 
   const catalog = (out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") })
   const ceiling = out?.policy?.tools ?? []
-  log("catalog=" + join(catalog, ","))
-  log("ceiling=" + join(ceiling, ","))
-  log("delta_nonnil=" + to_string(out?._mcp_delta_bootstrap != nil))
+  harness.stdio.log("catalog=" + join(catalog, ","))
+  harness.stdio.log("ceiling=" + join(ceiling, ","))
+  harness.stdio.log("delta_nonnil=" + to_string(out?._mcp_delta_bootstrap != nil))
 }
 "#;
     let lines = run_with_spec_aware_stub(source).expect("snippet runs");
@@ -209,12 +214,17 @@ pipeline main(task) {
 fn mid_conversation_mount_keeps_open_ceiling_open() {
     let source = r#"
 import { agent_mcp_mount_additional } from "std/agent/mcp"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const session = {session_id: "sess-open"}
   const opts = {tools: {_type: "tool_registry", tools: [{name: "look"}]}, policy: {tools: []}}
-  const out = agent_mcp_mount_additional(session, opts, [{name: "beta", command: "true"}])
-  log("catalog=" + join((out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") }), ","))
-  log("ceiling_len=" + to_string(len(out?.policy?.tools ?? [])))
+  const out = agent_mcp_mount_additional(
+    harness.tools,
+    session,
+    opts,
+    [{name: "beta", command: "true"}],
+  )
+  harness.stdio.log("catalog=" + join((out?.tools?.tools ?? []).map({ t -> to_string(t?.name ?? "") }), ","))
+  harness.stdio.log("ceiling_len=" + to_string(len(out?.policy?.tools ?? [])))
 }
 "#;
     let lines = run_with_spec_aware_stub(source).expect("snippet runs");

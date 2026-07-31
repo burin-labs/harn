@@ -191,7 +191,11 @@ fn __agent_loop_retry_with_default_predicate(
  * @effects: []
  * @errors: []
  */
-pub fn agent_apply_default_retry(options = nil, apply_options: AgentDefaultRetryApplyOptions = {}) {
+pub fn agent_apply_default_retry(
+  harness: Harness,
+  options = nil,
+  apply_options: AgentDefaultRetryApplyOptions = {},
+) {
   const opts: AgentRetryOptionBag = options ?? {}
   __validate_agent_loop_retry(opts)
   const wrap_existing = apply_options.wrap_existing ?? false
@@ -205,7 +209,7 @@ pub fn agent_apply_default_retry(options = nil, apply_options: AgentDefaultRetry
   const cfg = __agent_loop_retry_with_default_predicate(retry_cfg)
   if __retry_has_key(opts, "llm_caller") {
     const base = opts.llm_caller
-    return opts + {llm_caller: with_retry(base, cfg)}
+    return opts + {llm_caller: with_retry(harness, base, cfg)}
   }
   return opts + {_llm_retry: cfg}
 }

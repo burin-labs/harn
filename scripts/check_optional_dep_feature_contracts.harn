@@ -81,18 +81,18 @@ pub fn optional_dep_feature_contract_violations_from_text(
   return violations
 }
 
-fn checked_manifest_paths() -> list<string> {
+fn checked_manifest_paths(fs: HarnessFs) -> list<string> {
   let paths: list<string> = []
   for pattern in MANIFEST_GLOBS {
-    for path in harness.fs.glob(pattern) {
+    for path in fs.glob(pattern) {
       paths = paths + [path]
     }
   }
   return paths.sorted()
 }
 
-pipeline main(task) {
-  const paths = checked_manifest_paths()
+pipeline main(harness: Harness, task) {
+  const paths = checked_manifest_paths(harness.fs)
   let violations: list<string> = []
   for path in paths {
     violations = violations
@@ -102,13 +102,13 @@ pipeline main(task) {
     )
   }
   if violations.count > 0 {
-    __io_eprintln("optional dependency feature contract violations:")
+    harness.stdio.eprintln("optional dependency feature contract violations:")
     for item in violations {
-      __io_eprintln("  - " + item)
+      harness.stdio.eprintln("  - " + item)
     }
     return 1
   }
-  __io_println(
+  harness.stdio.println(
     "optional dependency feature contracts ok ("
       + to_string(paths.count)
       + " manifest(s))",

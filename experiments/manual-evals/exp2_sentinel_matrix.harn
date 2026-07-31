@@ -75,8 +75,14 @@ fn build_tools() -> dict {
   return registry
 }
 
-fn run_variant(label: string, mode: string, sentinel: string, registry: dict) -> dict {
-  log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
+fn run_variant(
+  harness: Harness,
+  label: string,
+  mode: string,
+  sentinel: string,
+  registry: dict,
+) -> dict {
+  harness.stdio.log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
   const task =
     "Investigate this small repo and tell me what the compute function does and how it is used in main."
   const system_prompt =
@@ -85,7 +91,7 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
     let names = info?.tool_names ?? []
     let count = info?.tool_count ?? 0
     let iter = info?.iteration ?? 0
-    log("  [${label}] iter=${iter} tools=${count} names=${names}")
+    harness.stdio.log("  [${label}] iter=${iter} tools=${count} names=${names}")
     nil
   }
   let opts = {
@@ -100,18 +106,18 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
   if sentinel != "(default)" {
     opts = opts + {done_sentinel: sentinel}
   }
-  const result = agent_loop(task, system_prompt, opts)
-  log("  [${label}] DONE status=${result.status} iters=${result.llm.iterations}")
+  const result = agent_loop(harness, task, system_prompt, opts)
+  harness.stdio.log("  [${label}] DONE status=${result.status} iters=${result.llm.iterations}")
   const visible = result?.visible_text ?? ""
   const visible_len = len(visible)
-  log("  [${label}] visible_len=${visible_len}")
+  harness.stdio.log("  [${label}] visible_len=${visible_len}")
   if visible_len > 0 {
     const head_len = if visible_len < 200 {
       visible_len
     } else {
       200
     }
-    log("  [${label}] visible[0..${head_len}]=${visible[:head_len]}")
+    harness.stdio.log("  [${label}] visible[0..${head_len}]=${visible[:head_len]}")
   }
   return {
     label: label,
@@ -121,16 +127,18 @@ fn run_variant(label: string, mode: string, sentinel: string, registry: dict) ->
   }
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const registry = build_tools()
   const results = [
-    run_variant("A:native+default", "native", "(default)", registry),
-    run_variant("B:native+empty", "native", "", registry),
-    run_variant("C:text+default", "text", "(default)", registry),
-    run_variant("D:text+empty", "text", "", registry),
+    run_variant(harness, "A:native+default", "native", "(default)", registry),
+    run_variant(harness, "B:native+empty", "native", "", registry),
+    run_variant(harness, "C:text+default", "text", "(default)", registry),
+    run_variant(harness, "D:text+empty", "text", "", registry),
   ]
-  log("\n========== EXP2 SUMMARY ==========")
+  harness.stdio.log("\n========== EXP2 SUMMARY ==========")
   for r in results {
-    log("${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}")
+    harness.stdio.log(
+      "${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}",
+    )
   }
 }

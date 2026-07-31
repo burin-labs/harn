@@ -28,9 +28,9 @@ fn expect_reject(label, metadata, marker) {
   }
 }
 
-pipeline test(task) {
-  const store = dynamic_registration_store()
-  const cursor_before = len(list_clients(store))
+pipeline test(harness: Harness, task) {
+  const store = dynamic_registration_store(harness.auth, harness.channels)
+  const cursor_before = len(list_clients(harness.auth, store))
   // Missing redirect_uris.
   expect_reject("missing redirect_uris", {}, "redirect_uris is required")
   // Empty redirect_uris list.
@@ -71,21 +71,43 @@ pipeline test(task) {
     "list",
   )
   // Validation never mutates the store.
-  assert_eq(len(list_clients(store)), cursor_before, "store unchanged by validation calls")
+  assert_eq(
+    len(list_clients(harness.auth, store)),
+    cursor_before,
+    "store unchanged by validation calls",
+  )
   // register_client must also reject and not insert.
   let caught = false
   try {
-    const _ = register_client(store, {redirect_uris: ["http://attacker.example/cb"]})
+    const _ = register_client(
+      harness.auth,
+      harness.channels,
+      store,
+      {redirect_uris: ["http://attacker.example/cb"]},
+    )
   } catch (err) {
     if contains(to_string(err), "HARN-OAU-005") {
       caught = true
     }
   }
   assert(caught, "register_client must throw HARN-OAU-005 on bad metadata")
-  assert_eq(len(list_clients(store)), cursor_before, "store unchanged after rejected registration")
+  assert_eq(
+    len(list_clients(harness.auth, store)),
+    cursor_before,
+    "store unchanged after rejected registration",
+  )
   // A valid registration after rejections still works.
-  const good = register_client(store, {redirect_uris: ["https://app.example/ok"]})
+  const good = register_client(
+    harness.auth,
+    harness.channels,
+    store,
+    {redirect_uris: ["https://app.example/ok"]},
+  )
   assert(good.client_id != nil, "valid registration after rejections succeeds")
-  assert_eq(len(list_clients(store)), cursor_before + 1, "valid registration appears in store")
-  log("oauth dynamic registration rejects ok")
+  assert_eq(
+    len(list_clients(harness.auth, store)),
+    cursor_before + 1,
+    "valid registration appears in store",
+  )
+  harness.stdio.log("oauth dynamic registration rejects ok")
 }

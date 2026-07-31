@@ -12,7 +12,6 @@
 mod analysis;
 mod builder;
 mod builder_expr;
-mod call_semantics;
 mod classify;
 mod invariants;
 mod spec_parse;
@@ -20,6 +19,7 @@ mod types;
 
 pub use analysis::*;
 pub(crate) use builder::*;
+pub use classify::literal_value;
 pub use invariants::*;
 pub use types::*;
 

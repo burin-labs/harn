@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -30,8 +31,9 @@ fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       llm_text("I should inspect app/Models/Entry.php before editing."),
       llm_text("I still need to read the Entry model, but I am only narrating."),
@@ -39,7 +41,7 @@ pipeline default() {
       llm_text("Read the Entry model. ##DONE##"),
     ],
     { ->
-      const session = "monologue-recovery-conformance-" + uuid()
+      const session = "monologue-recovery-conformance-" + harness.random.uuid()
       const opts: AgentLoopOptions = {
         provider: "mock",
         tools: toolset(),
@@ -59,8 +61,9 @@ pipeline default() {
         },
       }
       const captured = agent_capture_events(
+        harness.agent,
         session,
-        fn() { return agent_loop("Edit the target file after inspecting it.", nil, opts) },
+        fn() { return agent_loop(harness, "Edit the target file after inspecting it.", nil, opts) },
       )
       const receipts = events_of(captured.events, "typed_checkpoint").filter(
         { event -> event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1" },
@@ -68,13 +71,13 @@ pipeline default() {
       const decisions = events_of(captured.events, "loop_control_decision").filter(
         { event -> event.reason == "monologue_recovery_continue" },
       )
-      __io_println(captured.result.status)
-      __io_println(contains(captured.result.tools.successful, "look"))
-      __io_println(len(receipts))
-      __io_println(receipts[0].checkpoint.reason)
-      __io_println(receipts[0].checkpoint.warning.pattern)
-      __io_println(receipts[0].checkpoint.tool_count)
-      __io_println(len(decisions))
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(contains(captured.result.tools.successful, "look"))
+      harness.stdio.println(len(receipts))
+      harness.stdio.println(receipts[0].checkpoint.reason)
+      harness.stdio.println(receipts[0].checkpoint.warning.pattern)
+      harness.stdio.println(receipts[0].checkpoint.tool_count)
+      harness.stdio.println(len(decisions))
     },
   )
 }

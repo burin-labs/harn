@@ -6,20 +6,20 @@ import "std/postgres"
  * no-ops. The test asserts the call surface compiles and routes through
  * the mock fixture matcher (no real Postgres required).
  */
-pipeline default() {
-  const db = pg_mock_pool(
+pipeline default(harness: Harness) {
+  const db = harness.testing.pg_mock_pool(
     [
       {sql: "SAVEPOINT \"step1\"", rows_affected: 0},
       {sql: "RELEASE SAVEPOINT \"step1\"", rows_affected: 0},
       {sql: "ROLLBACK TO SAVEPOINT \"step1\"", rows_affected: 0},
     ],
   )
-  __io_println(pg_savepoint(db, "step1"))
-  __io_println(pg_release_savepoint(db, "step1"))
-  __io_println(pg_rollback_to_savepoint(db, "step1"))
+  harness.stdio.println(pg_savepoint(db, "step1"))
+  harness.stdio.println(pg_release_savepoint(db, "step1"))
+  harness.stdio.println(pg_rollback_to_savepoint(db, "step1"))
   const calls = pg_mock_calls(db)
-  __io_println(len(calls))
+  harness.stdio.println(len(calls))
   for call in calls {
-    __io_println(call.sql)
+    harness.stdio.println(call.sql)
   }
 }

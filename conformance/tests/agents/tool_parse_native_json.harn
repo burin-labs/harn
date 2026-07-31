@@ -15,8 +15,10 @@
 // vanished with no feedback at all.
 import { native_registry, probe } from "_tool_parse_probe"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   probe(
+    harness.agent,
+    harness.stdio,
     "openai array with string-encoded arguments",
     """I'll create the test file now.
 
@@ -25,18 +27,24 @@ pipeline main() {
   )
   // Pretty-printed, non-`call_`-prefixed id: whitespace- and id-agnostic.
   probe(
+    harness.agent,
+    harness.stdio,
     "pretty printed array with a non-call id",
     "[{ \"id\": \"0\", \"function\": { \"name\": \"read\", \"arguments\": \"{\\\"path\\\":\\\"main.go\\\"}\" } }]",
     native_registry(),
   )
   // Flat JSON-RPC / MCP envelope: name and args at the top level.
   probe(
+    harness.agent,
+    harness.stdio,
     "flat jsonrpc envelope",
     "[{\"name\":\"read\",\"arguments\":{\"path\":\"main.go\"}}]",
     native_registry(),
   )
   // gpt-oss emits `tool` instead of `name` after a reasoning preamble.
   probe(
+    harness.agent,
+    harness.stdio,
     "gpt-oss tool-key dialect after a preamble",
     """We should inspect the model first.
 
@@ -46,28 +54,38 @@ pipeline main() {
   // Flat envelope whose `arguments` is a JSON STRING, the OpenAI wire form that
   // local llama.cpp/vLLM/Ollama mimic templates emit.
   probe(
+    harness.agent,
+    harness.stdio,
     "flat envelope with string-encoded arguments",
     "{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}",
     native_registry(),
   )
   // The args slot is sometimes named `parameters`, and arrives unwrapped.
   probe(
+    harness.agent,
+    harness.stdio,
     "flat envelope with a parameters slot",
     "{\"name\":\"read\",\"parameters\":{\"path\":\"lib.rs\"}}",
     native_registry(),
   )
   // Object arguments rather than a JSON string.
   probe(
+    harness.agent,
+    harness.stdio,
     "array entry with object arguments",
     "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":{\"path\":\"main.go\"}}}]",
     native_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "two calls in one array",
     "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":\"{\\\"action\\\":\\\"create\\\",\\\"path\\\":\\\"a.go\\\",\\\"content\\\":\\\"pkg a\\\"}\"}},{\"id\":\"call_002\",\"type\":\"function\",\"function\":{\"name\":\"run\",\"arguments\":\"{\\\"command\\\":\\\"go test\\\"}\"}}]",
     native_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "prose before the array",
     """Let me read the file first to understand the structure.
 
@@ -80,6 +98,8 @@ Now I'll create the test:
   // used to byte-scan backwards with no char-boundary guard and PANIC on any
   // multi-byte char in the tail, aborting the turn before reaching the `]`.
   probe(
+    harness.agent,
+    harness.stdio,
     "non-ascii trailing content after the array",
     "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":\"{\\\"action\\\":\\\"create\\\",\\\"path\\\":\\\"café.go\\\",\\\"content\\\":\\\"pkg\\\"}\"}}] done ✅ — déjà vu 完了",
     native_registry(),
@@ -87,28 +107,38 @@ Now I'll create the test:
   // Negative: incidental prose JSON with a `name` key but no args object is a
   // package.json snippet, not a call.
   probe(
+    harness.agent,
+    harness.stdio,
     "prose json with a bare name key is not a call",
     "Here is the config: {\"name\":\"my-pkg\",\"version\":\"1.0.0\"}",
     native_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "plain prose has no native json",
     "Just some prose without any tool calls.",
     native_registry(),
   )
   // Unknown names in the native lane get the same diagnostics as the bare lane.
   probe(
+    harness.agent,
+    harness.stdio,
     "unknown tool in the native lane",
     "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"unknown_tool\",\"arguments\":\"{}\"}}]",
     native_registry(),
   )
   probe(
+    harness.agent,
+    harness.stdio,
     "malformed arguments string",
     "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":\"not valid json {\"}}]",
     native_registry(),
   )
   // Text format wins when both a bare call and a native array are present.
   probe(
+    harness.agent,
+    harness.stdio,
     "text format takes priority over native json",
     """edit({ action: "create", path: "a.go", content: "pkg a" })
 

@@ -196,7 +196,7 @@ pub fn process_file(text, path) -> dict {
   }
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const stdlib = "crates/harn-stdlib/src/stdlib"
   let allocation_removed = 0
   let stability_removed = 0
@@ -218,7 +218,7 @@ pipeline main(task) {
       files_changed = files_changed + 1
     }
   }
-  __io_println(
+  harness.stdio.println(
     "files changed: ${files_changed}; @allocation removed: ${allocation_removed}; @api_stability: stable removed: ${stability_removed}; trivial @example removed: ${example_removed}; rich @example kept: ${example_kept}",
   )
   return 0

@@ -4,30 +4,34 @@
 // llm_call_structured when you control the request.
 import { parse_first_json } from "std/llm/safe"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // JSON inside a code fence.
-  __io_println(json_stringify(parse_first_json("```json\n{\"ok\": true}\n```")))
-  __io_println("---")
+  harness.stdio.println(json_stringify(parse_first_json("```json\n{\"ok\": true}\n```")))
+  harness.stdio.println("---")
   // Leading prose + trailing garbage.
-  __io_println(json_stringify(parse_first_json("Here you go: {\"a\": 1, \"b\": [2, 3]} enjoy!")))
-  __io_println("---")
+  harness.stdio.println(
+    json_stringify(parse_first_json("Here you go: {\"a\": 1, \"b\": [2, 3]} enjoy!")),
+  )
+  harness.stdio.println("---")
   // A balanced-but-invalid prose span before the real payload is skipped.
-  __io_println(json_stringify(parse_first_json("{see below} for details: {\"real\": 1}")))
-  __io_println("---")
+  harness.stdio.println(json_stringify(parse_first_json("{see below} for details: {\"real\": 1}")))
+  harness.stdio.println("---")
   // Array payload.
-  __io_println(
+  harness.stdio.println(
     json_stringify(parse_first_json("results were [1, \"two\", {\"three\": 3}] overall")),
   )
-  __io_println("---")
+  harness.stdio.println("---")
   // Braces and escaped quotes inside strings survive the scan AND the parse.
-  __io_println(json_stringify(parse_first_json("{\"msg\": \"brace } and quote \\\" inside\"}")))
-  __io_println("---")
+  harness.stdio.println(
+    json_stringify(parse_first_json("{\"msg\": \"brace } and quote \\\" inside\"}")),
+  )
+  harness.stdio.println("---")
   // No JSON -> nil.
-  __io_println(to_string(parse_first_json("nothing structured here") ?? "nil"))
-  __io_println("---")
+  harness.stdio.println(to_string(parse_first_json("nothing structured here") ?? "nil"))
+  harness.stdio.println("---")
   // Balanced but never valid -> nil.
-  __io_println(to_string(parse_first_json("{not json at all}") ?? "nil"))
-  __io_println("---")
+  harness.stdio.println(to_string(parse_first_json("{not json at all}") ?? "nil"))
+  harness.stdio.println("---")
   // nil input -> nil.
-  __io_println(to_string(parse_first_json(nil) ?? "nil"))
+  harness.stdio.println(to_string(parse_first_json(nil) ?? "nil"))
 }

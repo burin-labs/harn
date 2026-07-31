@@ -2,14 +2,11 @@
 
 use std::fs;
 
-use harn_hostlib::tools::permissions;
 use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
 fn registry() -> BuiltinRegistry {
-    permissions::reset();
-    permissions::enable_for_test();
     let mut registry = BuiltinRegistry::new();
     ToolsCapability.register_builtins(&mut registry);
     registry

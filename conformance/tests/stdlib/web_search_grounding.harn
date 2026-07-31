@@ -18,8 +18,9 @@ fn has_import_status(items, package, symbol, status) {
   return false
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const curated = web_search(
+    harness,
     "fastapi dependency injection",
     {
       limit: 1,
@@ -40,8 +41,8 @@ pipeline test(task) {
   assert_eq(curated.backend.kind, "curated_index")
   assert_eq(curated.results[0].package, "fastapi")
   assert_eq(curated.results[0].provenance.evidence, "curated_index")
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://search.example/api*",
     {
@@ -62,6 +63,7 @@ pipeline test(task) {
     },
   )
   const api = web_search(
+    harness,
     "harn web",
     {
       api: {
@@ -80,13 +82,16 @@ pipeline test(task) {
     !contains(json_stringify(api), "SECRET_SEARCH_TOKEN"),
     "web_search redacts API credentials",
   )
-  const calls = http_mock_calls({redact_sensitive: false})
+  const calls = harness.testing.http_mock_calls({redact_sensitive: false})
   assert(
     contains(calls[0].url, "https://search.example/api?"),
     "web_search used web_fetch/http mock",
   )
   assert(contains(calls[0].url, "q=harn"), "web_search forwarded query")
-  const root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-web-grounding-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "package.json"),
@@ -109,6 +114,7 @@ pipeline test(task) {
   )
   harness.fs.write_text(lib_rs, "use serde::Serialize;\nuse hallucinate_crate::Thing;\n")
   const verified = verify_imports(
+    harness.fs,
     [app_py, ui_ts, lib_rs],
     {
       project_root: root,
@@ -175,12 +181,12 @@ pipeline test(task) {
     "low-trust package warning",
   )
   assert(has_finding(verified.warnings, "fresh_package", "fresh-slop"), "fresh package warning")
-  const explained = prompt_explain({tools: web_grounding_tools()})
+  const explained = harness.agent.prompt_explain({tools: web_grounding_tools(harness)})
   assert(contains(explained.system, "call web_search"), "search guidance is gated with the tool")
   assert(
     contains(explained.system, "call verify_imports"),
     "verify guidance is gated with the tool",
   )
   harness.fs.delete(root)
-  __io_println("web_search_grounding_ok")
+  harness.stdio.println("web_search_grounding_ok")
 }

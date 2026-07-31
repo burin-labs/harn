@@ -29,8 +29,10 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
   }
 }
 
-pub fn __live_cells(
-  harness: Harness,
+pub type ProviderToolProbeLiveCellsRequest = {
+  llm: HarnessLlm,
+  fs: HarnessFs,
+  process: HarnessProcess,
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
   harn_bin: string,
@@ -41,8 +43,24 @@ pub fn __live_cells(
   shard_count: int,
   shard_index: int,
   max_probes: int,
-  max_cost_usd: float = 10.0,
-) -> dict {
+  max_cost_usd?: float,
+}
+
+pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
+  const llm = request.llm
+  const fs = request.fs
+  const process = request.process
+  const routes = request.routes
+  const behaviors = request.behaviors
+  const harn_bin = request.harn_bin
+  const env = request.env
+  const repeat = request.repeat
+  const timeout_secs = request.timeout_secs
+  const output_dir = request.output_dir
+  const shard_count = request.shard_count
+  const shard_index = request.shard_index
+  const max_probes = request.max_probes
+  const max_cost_usd = request.max_cost_usd ?? 10.0
   let cells: list<ProviderToolProbeCell> = []
   let probe_units_total = 0
   let probe_units_selected = 0
@@ -75,7 +93,7 @@ pub fn __live_cells(
           for format in behavior.tool_formats {
             cells = cells
               + [
-              __planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs),
+              __planned_cell(llm, route, behavior, mode, format, harn_bin, repeat, timeout_secs),
             ]
           }
           continue
@@ -95,7 +113,9 @@ pub fn __live_cells(
               + {tool_formats: [format]}
             cells = cells
               + __run_tool_probe(
-              harness,
+              llm,
+              fs,
+              process,
               route,
               one_format_behavior,
               mode,
@@ -115,14 +135,16 @@ pub fn __live_cells(
   return {
     cells: cells,
     slice: __campaign_slice_receipt(
-      shard_count,
-      shard_index,
-      max_probes,
-      probe_units_total,
-      probe_units_selected,
-      executable_units_selected,
-      probe_units_excluded_by_shard,
-      probe_units_excluded_by_cap,
+      {
+        shard_count: shard_count,
+        shard_index: shard_index,
+        max_probes: max_probes,
+        probe_units_total: probe_units_total,
+        probe_units_selected: probe_units_selected,
+        executable_units_selected: executable_units_selected,
+        probe_units_excluded_by_shard: probe_units_excluded_by_shard,
+        probe_units_excluded_by_cap: probe_units_excluded_by_cap,
+      },
     )
       + {
       probe_executions_selected: probe_executions_selected,

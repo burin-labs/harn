@@ -28,11 +28,11 @@ pub fn __profile_defaults(profile) {
   throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
 }
 
-pub fn __completion_judge_defaults(value, opts) {
+pub fn __completion_judge_defaults(fs: HarnessFs, value, opts) {
   if type_of(value) == "bool" && value {
     return {
-      system: completion_judge_system_prompt(opts),
-      feedback_fallback: completion_judge_feedback_prompt(opts),
+      system: completion_judge_system_prompt(fs, opts),
+      feedback_fallback: completion_judge_feedback_prompt(fs, opts),
     }
   }
   return value
@@ -96,9 +96,9 @@ fn __explicit_provider(opts) {
   return provider
 }
 
-fn __resolved_model_id(model) -> string {
+fn __resolved_model_id(llm: HarnessLlm, model) -> string {
   const resolved = try {
-    llm_resolve_model(model)
+    llm.resolve_model(model)
   }
   if is_err(resolved) {
     return to_string(model)
@@ -106,17 +106,17 @@ fn __resolved_model_id(model) -> string {
   return to_string(unwrap(resolved)?.id ?? model)
 }
 
-fn __tool_format_pair(opts) -> {provider: string, model: string}? {
+fn __tool_format_pair(llm: HarnessLlm, opts) -> {provider: string, model: string}? {
   const raw_model = opts?.model
   if raw_model == nil || trim(to_string(raw_model)) == "" {
     return nil
   }
   const provider = __explicit_provider(opts)
   if provider != nil {
-    return {provider: provider, model: __resolved_model_id(raw_model)}
+    return {provider: provider, model: __resolved_model_id(llm, raw_model)}
   }
   const resolved = try {
-    llm_resolve_model(raw_model)
+    llm.resolve_model(raw_model)
   }
   if is_err(resolved) {
     return nil
@@ -401,17 +401,17 @@ fn __capability_gap_event(pair, requested, fallback) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_format_resolution(options = nil) {
+pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
   const opts = options ?? {}
   const explicit = __explicit_tool_format(opts)
   if explicit != nil {
     __validate_explicit_tool_format(explicit)
-    const pair = __tool_format_pair(opts)
+    const pair = __tool_format_pair(llm, opts)
     let preferred = nil
     let parity = nil
     if pair != nil {
       const caps = try {
-        provider_capabilities(pair.provider, pair.model)
+        llm.provider_capabilities(pair.provider, pair.model)
       }
       if !is_err(caps) {
         const resolved_caps = unwrap(caps)
@@ -433,7 +433,7 @@ pub fn agent_tool_format_resolution(options = nil) {
     // the route's `tool_mode_parity` forbids (e.g. `native` on a
     // `native_unreliable` route like deepseek-v3.2) to the route's safe
     // channel. If we honored the explicit pin verbatim here, the loop would
-    // build a prompt for the requested channel (native instructions, native
+    // build a prompt for the requested harness.runtime.channel(native instructions, native
     // tool schemas) while the wire actually ships the steered channel with no
     // matching tool surface — the model then sees no usable tool contract and
     // improvises unparseable prose. Steer the resolved format the same way the
@@ -464,10 +464,10 @@ pub fn agent_tool_format_resolution(options = nil) {
       tool_format_override_event: override_event,
     }
   }
-  const pair = __tool_format_pair(opts)
+  const pair = __tool_format_pair(llm, opts)
   if pair != nil {
     const caps = try {
-      provider_capabilities(pair.provider, pair.model)
+      llm.provider_capabilities(pair.provider, pair.model)
     }
     if !is_err(caps) {
       const preferred = __valid_tool_format(unwrap(caps)?.preferred_tool_format)
@@ -509,7 +509,7 @@ pub fn agent_tool_format_resolution(options = nil) {
 }
 
 // Mirror the Rust gate's target selection: prefer the route's declared
-// `preferred_tool_format` when it rides the recommended channel (so
+// `preferred_tool_format` when it rides the recommended harness.runtime.channel(so
 // deepseek-v3.2's explicit `text` carve-out is honored over a bare
 // `text`/`native` channel name), else fall back to the channel name.
 /**
@@ -519,8 +519,8 @@ pub fn agent_tool_format_resolution(options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_format(options = nil) {
-  const resolved = agent_tool_format_resolution(options)
+pub fn agent_tool_format(llm: HarnessLlm, options = nil) {
+  const resolved = agent_tool_format_resolution(llm, options)
   if resolved.tool_format != nil {
     return resolved.tool_format
   }

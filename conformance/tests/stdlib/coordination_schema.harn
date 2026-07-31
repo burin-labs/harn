@@ -18,10 +18,13 @@ import {
 } from "std/coordination"
 import { is_type } from "std/schema"
 
-pipeline default() {
-  mock_time(6000)
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(6000)
   const opts = {session_id: "coord-schema-session"}
   const receipt = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "schema",
     {
@@ -35,20 +38,23 @@ pipeline default() {
     },
     opts + {id: "coord-schema-1"},
   )
-  __io_println(is_type(receipt.message, coord_message_schema()))
-  __io_println(is_type(receipt, coord_receipt_schema()))
-  __io_println(coord_message_report(receipt.message).ok)
-  __io_println(coord_receipt_report(receipt).ok)
-  __io_println(coord_message_value(receipt.message).id)
-  __io_println(coord_receipt_value(receipt).message.data.repo)
+  harness.stdio.println(is_type(receipt.message, coord_message_schema()))
+  harness.stdio.println(is_type(receipt, coord_receipt_schema()))
+  harness.stdio.println(coord_message_report(receipt.message).ok)
+  harness.stdio.println(coord_receipt_report(receipt).ok)
+  harness.stdio.println(coord_message_value(receipt.message).id)
+  harness.stdio.println(coord_receipt_value(receipt).message.data.repo)
   const extended_message = receipt.message + {future_extension: {schema: "harn.future.v1"}}
   const extended_receipt = receipt + {future_extension: {schema: "harn.future.receipt.v1"}}
-  __io_println(coord_message_report(extended_message).ok)
-  __io_println(coord_receipt_report(extended_receipt).ok)
+  harness.stdio.println(coord_message_report(extended_message).ok)
+  harness.stdio.println(coord_receipt_report(extended_receipt).ok)
   const missing = coord_message_report({schema: "harn.coordination.message.v1", id: "missing"})
-  __io_println(!missing.ok)
-  __io_println(contains(join(missing.errors, "\n"), "\"scope\" is a required property"))
+  harness.stdio.println(!missing.ok)
+  harness.stdio.println(contains(join(missing.errors, "\n"), "\"scope\" is a required property"))
   const request = coord_request(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "schema",
     "agent-A",
@@ -61,6 +67,9 @@ pipeline default() {
     opts + {id: "coord-schema-request"},
   )
   const _ = coord_reply(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "schema",
     request,
@@ -73,17 +82,28 @@ pipeline default() {
     },
     opts + {id: "coord-schema-reply"},
   )
-  const inbox = coord_inbox("session", "schema", opts + {consumer_id: "agent-A"})
-  __io_println(is_type(inbox, coord_inbox_schema()))
-  __io_println(coord_inbox_report(inbox).ok)
+  const inbox = coord_inbox(
+    harness.runtime,
+    harness.channels,
+    "session",
+    "schema",
+    opts + {consumer_id: "agent-A"},
+  )
+  harness.stdio.println(is_type(inbox, coord_inbox_schema()))
+  harness.stdio.println(coord_inbox_report(inbox).ok)
   const inbox_with_events = coord_inbox(
+    harness.runtime,
+    harness.channels,
     "session",
     "schema",
     opts + {consumer_id: "agent-A", include_events: true},
   )
-  __io_println(is_type(inbox_with_events, coord_inbox_schema()))
-  __io_println(is_type(inbox_with_events.messages[0], coord_event_message_schema()))
+  harness.stdio.println(is_type(inbox_with_events, coord_inbox_schema()))
+  harness.stdio.println(is_type(inbox_with_events.messages[0], coord_event_message_schema()))
   const wait = coord_wait_reply(
+    harness.runtime,
+    harness.channels,
+    harness.clock,
     "session",
     "schema",
     request,
@@ -95,8 +115,8 @@ pipeline default() {
       timeout_ms: 0,
     },
   )
-  __io_println(is_type(wait, coord_wait_reply_schema()))
-  __io_println(coord_wait_reply_report(wait).ok)
-  __io_println(wait.reply.data.verdict)
-  unmock_time()
+  harness.stdio.println(is_type(wait, coord_wait_reply_schema()))
+  harness.stdio.println(coord_wait_reply_report(wait).ok)
+  harness.stdio.println(wait.reply.data.verdict)
+  harness.testing.clock_reset()
 }

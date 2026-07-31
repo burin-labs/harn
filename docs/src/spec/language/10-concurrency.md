@@ -72,7 +72,7 @@ const results = parallel each list with { max_concurrent: 4 } { item ->
 } as stream
 
 for result in results {
-  log(result)
+  harness.obs.log(result)
 }
 ```
 
@@ -153,7 +153,7 @@ const outcome = settle_with_abort(lanes, { lane, token ->
     if abort_requested(token) {
       return Err({code: "stopped_waiting", message: "a sibling lane failed"})
     }
-    sleep(poll_interval_ms)
+    harness.clock.sleep_ms(poll_interval_ms)
   }
   if lane_failed(lane) {
     let _ = request_abort(token, {code: "doomed", message: "lane ${lane} failed"})
@@ -215,7 +215,7 @@ inside an `if` block fires when control leaves that `if`. A `defer` inside a
 
 ```harn
 fn open(path) { path }
-fn close(f) { log("closing ${f}") }
+fn close(f) { harness.obs.log("closing ${f}") }
 const f = open("data.txt")
 defer { close(f) }
 // ... use f ...
@@ -284,7 +284,7 @@ When a VM exits, any un-awaited spawned tasks it owns are cancelled and aborted.
 import "std/signal"
 
 const registration = on_interrupt({ ->
-  agent_session_close(session, {status: "interrupted"})
+  harness.agent.close(session, {status: "interrupted"})
 }, {signals: ["SIGINT", "SIGTERM"], once: true})
 
 defer { off_interrupt(registration) }
@@ -335,12 +335,12 @@ is released when the block's scope exits, including `throw`, `return`, `break`,
 Named primitives return a permit value or `nil` on timeout:
 
 ```harn
-const lock = sync_mutex_acquire("state:customer-42", 250ms)
+const lock = harness.runtime.sync_mutex_acquire("state:customer-42", 250ms)
 const slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
 const gate = sync_gate_acquire("workflow-runner", 8, 5s)
 ```
 
-- `sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
+- `harness.runtime.sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
   mutex. Omitting `key` uses `"__default__"`.
 - `sync_semaphore_acquire(key, capacity, permits?, timeout?)` acquires a
   weighted permit from a named FIFO semaphore.
@@ -380,9 +380,9 @@ exchange outside the transcript.
 
 Named sessions may also carry a small `scratchpad` dict plus a monotonic
 `scratchpad_version`. The scratchpad is live session-local working memory, not a
-replayable transcript message. `agent_session_scratchpad(id)`,
-`agent_session_set_scratchpad(id, scratchpad, opts?)`, and
-`agent_session_clear_scratchpad(id, opts?)` are the direct state boundary.
+replayable transcript message. `harness.agent.scratchpad(id)`,
+`harness.agent.set_scratchpad(id, scratchpad, opts?)`, and
+`harness.agent.clear_scratchpad(id, opts?)` are the direct state boundary.
 Updates append compact `agent_scratchpad` transcript events that include
 action, version, source, reason, counts, and caller metadata without copying the
 full scratchpad into the event. Snapshots expose `scratchpad` and
@@ -390,7 +390,7 @@ full scratchpad into the event. Snapshots expose `scratchpad` and
 `metadata.agent_scratchpad` and `metadata.agent_scratchpad_version`.
 
 Named sessions may carry an RFC 8693 actor chain describing who the session is
-acting as and on whose behalf. `agent_session_actor_chain(id?)` returns the
+acting as and on whose behalf. `harness.agent.actor_chain(id?)` returns the
 canonical `{sub, act}` dict for an explicit session id, or for the current
 active session when `id` is omitted. Hosts bind the originating principal when a
 session enters execution, and child agent sessions push their deterministic
@@ -414,7 +414,7 @@ OpenTrustGraph record with `metadata.actor_chain` and
 `metadata.actor_chain_alert` so supervision tools can inspect the violation
 without treating nested actors as authorization grants.
 
-`agent_session_seed_from_jsonl(path, opts?)` creates a new session from a
+`harness.agent.seed_from_jsonl(path, opts?)` creates a new session from a
 replayable LLM transcript sidecar. Exact replay uses prompt-visible `message`
 events or full request snapshots; provider-response-only sidecars are
 assistant-response best effort and require `validate: false`. Options include
@@ -532,7 +532,7 @@ Use named synchronization around multi-step updates:
 
 ```harn
 const memo = shared_map({scope: "workflow_run", key: "memo"})
-const lock = sync_mutex_acquire("memo:customer-42", 250ms)
+const lock = harness.runtime.sync_mutex_acquire("memo:customer-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
 try {
   shared_map_set(memo, "customer-42", "summary")
@@ -651,7 +651,7 @@ spawn {
   close_channel(ch)
 }
 for item in ch {
-  log(item)    // prints "a", then "b"
+  harness.obs.log(item)    // prints "a", then "b"
 }
 // loop exits after channel is closed and all items are consumed
 ```
@@ -678,10 +678,10 @@ channel receives a value first:
 ```harn
 select {
   msg from ch1 {
-    log("ch1: ${msg}")
+    harness.obs.log("ch1: ${msg}")
   }
   msg from ch2 {
-    log("ch2: ${msg}")
+    harness.obs.log("ch2: ${msg}")
   }
 }
 ```
@@ -692,12 +692,12 @@ corresponding body. Only one case fires per select.
 #### timeout case
 
 ```harn
-fn handle(msg) { log(msg) }
+fn handle(msg) { harness.obs.log(msg) }
 const ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   timeout 5s {
-    log("timed out")
+    harness.obs.log("timed out")
   }
 }
 ```
@@ -707,12 +707,12 @@ If no channel produces a value within the duration, the timeout body runs.
 #### default case (non-blocking)
 
 ```harn
-fn handle(msg) { log(msg) }
+fn handle(msg) { harness.obs.log(msg) }
 const ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   default {
-    log("nothing ready")
+    harness.obs.log("nothing ready")
   }
 }
 ```
@@ -760,7 +760,7 @@ gen fn numbers(start: int, end: int) -> Stream<int> {
 }
 
 for n in numbers(1, 4) {
-  log(n)
+  harness.obs.log(n)
 }
 ```
 
@@ -784,9 +784,9 @@ action graph alongside webhook and cron events.
 
 #### Emit
 
-The runtime exposes two builtins. `emit_channel(name, payload,
+The runtime exposes two builtins. `harness.channels.append(name, payload,
 options?)` appends one event to the channel's EventLog topic and
-returns a `ChannelEmitReceipt`. `channel_events(name, options?)` reads
+returns a `ChannelEmitReceipt`. `harness.channels.events(name, options?)` reads
 the topic oldest-first for tests and diagnostics. Reference shapes are
 in `docs/src/builtins.md`; full prose is in `docs/src/agent-channels.md`.
 
@@ -875,9 +875,9 @@ Semantics:
   partition. Overflow drops the oldest entries with a structured
   `triggers.aggregation.buffer_overflow` warning.
 - Window expiration is driven by an implicit sweep at every emit and
-  by the explicit `flush_trigger_aggregations()` builtin; the latter
-  is the test affordance and pairs with `mock_time(...)` /
-  `advance_time(...)`.
+  by the explicit `harness.channels.flush_aggregations()` method; the latter
+  is the test affordance and pairs with
+  `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)`.
 
 Malformed configs (missing fields, non-positive `count`, unknown
 `expire_action`, wrong-typed `key`) raise `HARN-CHN-005`.
@@ -971,8 +971,9 @@ PoolHandle ::= {
 PoolScope ::= "session" | "pipeline" | "tenant" | "org"
 ```
 
-`pool_create(options?)` allocates a handle; `pool_get(name_or_id)`
-returns an existing one or `nil`; `pool_list()` enumerates the
+`pool_create(agent: HarnessAgent, options?)` allocates a handle;
+`pool_get(agent: HarnessAgent, name_or_id)` returns an existing one or `nil`;
+`pool_list(agent: HarnessAgent)` enumerates the
 runtime registry. Names are unique within a live VM registry, so
 callers use `pool_get` to reuse an existing pool. Pipeline-scope pools
 use a deterministic `(scope, scope_id, name)` id so re-creating the pool
@@ -998,14 +999,15 @@ PoolTaskHandle ::= {
 }
 ```
 
-`pool_wait(handle_or_handles)` blocks until terminal and returns the
-final snapshot (or list of snapshots). `wait_agent(handle)` from
+`pool_wait(agent: HarnessAgent, handle_or_handles)` blocks until terminal and
+returns the final snapshot (or list of snapshots).
+`wait_agent(agent: HarnessAgent, handle)` from
 `std/agent/workers` accepts pool task handles transparently by
 matching on `_type == "pool_task"`.
 
 #### Queue strategies
 
-`pool_create({queue: <descriptor>})` selects how the pool dequeues
+`pool_create(harness.agent, {queue: <descriptor>})` selects how the pool dequeues
 work when a worker slot frees:
 
 ```text
@@ -1030,7 +1032,7 @@ as a dict for dotted access.
 
 #### Backpressure
 
-`pool_create({backpressure: <descriptor>})` bounds the queue and
+`pool_create(harness.agent, {backpressure: <descriptor>})` bounds the queue and
 selects the overflow policy:
 
 ```text
@@ -1063,7 +1065,7 @@ sees a task handle whose terminal snapshot is
 | Scope | Storage | Survives | Notes |
 |---|---|---|---|
 | `session` | VM-scoped in-memory registry. | VM/session lifetime. | Default. Zero I/O. |
-| `pipeline` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Terminal and stale task metadata reload on next `pool_create({scope: "pipeline", ...})`. |
+| `pipeline` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Terminal and stale task metadata reload on next `pool_create(harness.agent, {scope: "pipeline", ...})`. |
 | `tenant`, `org` | Host-managed registry. | Tenant / org lifetime. | Currently rejected by the in-process runtime unless an embedding host implements tenant/org pool routing. |
 
 On pipeline-scope reload, persisted `Queued` or `Running` task records
@@ -1075,7 +1077,7 @@ the audit trail and allows the fresh submit to execute as a new task.
 `opts.stale_after_ms`) is retained as the freshness knob for future host
 backends. The store compacts opportunistically when
 `max_concurrent + |queue| + |terminal-since-compaction|` exceeds an
-internal threshold. `pool_simulate_restart()` drops the in-process
+internal threshold. `pool_simulate_restart(harness.agent)` drops the in-process
 registry without touching disk and is the conformance affordance for
 reload tests.
 

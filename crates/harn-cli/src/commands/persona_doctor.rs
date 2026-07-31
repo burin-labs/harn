@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use harn_lint::LintSeverity;
+use harn_parser::Node;
 use serde::Serialize;
 
 use crate::cli::PersonaDoctorArgs;
@@ -398,8 +399,7 @@ fn prompt_asset_check(
     }
     let uses_prompt_asset = entry_source
         .as_ref()
-        .and_then(|path| fs::read_to_string(path).ok())
-        .is_some_and(|source| source.contains("render_prompt(") || source.contains("render("));
+        .is_some_and(|path| source_uses_prompt_asset(path));
     let status = if uses_prompt_asset {
         DoctorStatus::Green
     } else {
@@ -410,6 +410,36 @@ fn prompt_asset_check(
         status,
         format!("{} prompt asset(s) validate", prompt_files.len()),
     )
+}
+
+fn source_uses_prompt_asset(path: &Path) -> bool {
+    let Ok(source) = fs::read_to_string(path) else {
+        return false;
+    };
+    let mut lexer = harn_lexer::Lexer::new(&source);
+    let Ok(tokens) = lexer.tokenize() else {
+        return false;
+    };
+    let mut parser = harn_parser::Parser::new(tokens);
+    let Ok(program) = parser.parse() else {
+        return false;
+    };
+    program.iter().any(|root| {
+        let mut found = false;
+        harn_parser::visit::walk_node(root, &mut |node| {
+            if matches!(
+                &node.node,
+                Node::MethodCall { method, .. }
+                    if matches!(
+                        method.as_str(),
+                        "render_prompt" | "render_prompt_with_provenance"
+                    )
+            ) {
+                found = true;
+            }
+        });
+        found
+    })
 }
 
 fn step_metadata_check(persona: &PersonaManifestEntry) -> DoctorCheck {

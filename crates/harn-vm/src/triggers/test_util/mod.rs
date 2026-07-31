@@ -971,11 +971,12 @@ impl TriggerTestHarness {
             refill_interval: StdDuration::from_mins(1),
         });
         let first_at_ms = self.clock.monotonic_now().as_millis() as u64;
-        let first = limiter.try_acquire(&provider, "fixture");
-        let second_blocked = !limiter.try_acquire(&provider, "fixture");
+        let first = limiter.try_acquire_at(&provider, "fixture", self.clock.monotonic_now());
+        let second_blocked =
+            !limiter.try_acquire_at(&provider, "fixture", self.clock.monotonic_now());
         self.clock.advance_std(StdDuration::from_mins(1)).await;
         let second_at_ms = self.clock.monotonic_now().as_millis() as u64;
-        let second = limiter.try_acquire(&provider, "fixture");
+        let second = limiter.try_acquire_at(&provider, "fixture", self.clock.monotonic_now());
 
         let first_event = synthetic_event("rate.limit", "rate-limit-1", None);
         let second_event = synthetic_event("rate.limit", "rate-limit-2", None);

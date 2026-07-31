@@ -4,6 +4,7 @@
 // mock LLM script and explicit callback verdicts, so it proves the loop
 // mechanics without sleeps, wall-clock polling, API calls, or broad eval
 // machinery.
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
@@ -36,8 +37,9 @@ fn terminal_callback_tools() {
   return tools
 }
 
-pipeline test_terminal_callback_can_continue_max_iteration_exit(task) {
+pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [
       llm_tool_call("inspect", {}, "inspect-1"),
       llm_tool_call("inspect", {}, "inspect-2"),
@@ -66,7 +68,7 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(task) {
           }
         },
       }
-      const result = agent_loop("Continue once, then finish.", nil, opts)
+      const result = agent_loop(harness, "Continue once, then finish.", nil, opts)
       assert_eq(result.status, "done")
       assert(result.llm.iterations >= 5, "terminal callback must allow the scripted rescue turn")
       const decisions = result?.adaptive_budget?.decisions ?? []

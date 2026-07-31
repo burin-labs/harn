@@ -168,7 +168,7 @@ fn __scope_classifier_fail_open(error, threshold) {
 /**
  * pre_turn_scope_classifier returns an opt-in hook for `agent_loop`.
  *
- * Pass the returned closure as `agent_loop({pre_turn_scope_classifier: ...})`.
+ * Pass the returned closure as `agent_loop(harness, {pre_turn_scope_classifier: ...})`.
  * The hook is disabled unless `enabled: true` is set. The default live path
  * uses the local Ollama small-model selector `ollama:qwen3:1.7b`; tests and
  * evals can pass `classifier` to provide a deterministic closure.
@@ -178,7 +178,7 @@ fn __scope_classifier_fail_open(error, threshold) {
  * @api_stability: experimental
  * @example: pre_turn_scope_classifier({enabled: true})
  */
-pub fn pre_turn_scope_classifier(opts = nil) {
+pub fn pre_turn_scope_classifier(agent: HarnessAgent, llm: HarnessLlm, opts = nil) {
   const cfg = opts ?? {}
   if type_of(cfg) != "dict" {
     throw "pre_turn_scope_classifier: opts must be a dict or nil; got " + type_of(cfg)
@@ -249,6 +249,8 @@ pub fn pre_turn_scope_classifier(opts = nil) {
       }
     }
     const checkpoint = agent_typed_output_checkpoint(
+      agent,
+      llm,
       "agent.scope_classifier",
       __scope_classifier_prompt(classifier_payload, recent_context),
       schema,

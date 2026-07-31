@@ -101,7 +101,8 @@ impl AcpServer {
             // `@command`-tagged decls, so a leading slash invocation can
             // only be the user expecting to invoke an advertised command
             // that doesn't exist. Surface a friendly error instead of
-            // wrapping `/foo args` into `pipeline main() { /foo args }`,
+            // wrapping `/foo args` into
+            // `pipeline main(harness: Harness) { /foo args }`,
             // which would fail with a generic "Compilation error" later.
             if parse_slash_invocation(&prompt_text).is_some() {
                 self.send_prompt_error(
@@ -112,7 +113,7 @@ impl AcpServer {
             }
             // Wrap inline prompt source in a pipeline so the compiler has
             // an entry point.
-            let wrapped = format!("pipeline main() {{\n{prompt_text}\n}}");
+            let wrapped = format!("pipeline main(harness: Harness) {{\n{prompt_text}\n}}");
             (wrapped, None)
         };
 

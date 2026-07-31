@@ -175,13 +175,13 @@ fn __render_main_harn(package_name: string) -> string {
     + "  if len(argv) > 0 {\n"
     + "    text = argv[0]\n"
     + "  }\n"
-    + "  const result = agent_dispatch_tool_call({name: "
+    + "  const result = agent_dispatch_tool_call(harness, {name: "
     + tool_name
     + ", arguments: {text: text}}, registry)\n"
     + "  if !result.ok {\n"
     + "    throw result.error?.message ?? \"tool call failed\"\n"
     + "  }\n"
-    + "  log(result.rendered_result)\n"
+    + "  harness.stdio.log(result.rendered_result)\n"
     + "}\n"
 }
 
@@ -194,12 +194,12 @@ fn __render_test_harn(package_name: string, ident: string) -> string {
     + ident
     + "_tool(task) {\n"
     + "  const registry = tools()\n"
-    + "  const ok = agent_dispatch_tool_call({name: "
+    + "  const ok = agent_dispatch_tool_call(harness, {name: "
     + tool_name
     + ", arguments: {text: \"hello\"}}, registry)\n"
     + "  assert(ok.ok, ok.error?.message ?? \"tool call should pass\")\n"
     + "  assert_eq(ok.rendered_result, \"hello\")\n"
-    + "  const bad = agent_dispatch_tool_call({name: "
+    + "  const bad = agent_dispatch_tool_call(harness, {name: "
     + tool_name
     + ", arguments: {}}, registry)\n"
     + "  assert(!bad.ok, \"schema validation should reject missing text\")\n"
@@ -286,14 +286,14 @@ fn __write(harness: Harness, dest: string, rel: string, content: string) {
       harness.fs.mkdir(parent)
     } catch (e) {
       harness.stdio.eprintln("failed to create " + parent + ": " + to_string(e))
-      exit(1)
+      harness.runtime.exit(1)
     }
   }
   try {
     harness.fs.write_text(path, content)
   } catch (e) {
     harness.stdio.eprintln("failed to write " + path + ": " + to_string(e))
-    exit(1)
+    harness.runtime.exit(1)
   }
 }
 
@@ -311,7 +311,7 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(
       "tool new: HARN_TOOL_{NAME,DEST,IDENT,HANDLER,HARN_RANGE,HARN_VERSION} must be set",
     )
-    exit(2)
+    harness.runtime.exit(2)
   }
   __write(harness, dest, "harn.toml", __render_harn_toml(name, description, harn_range))
   __write(harness, dest, "harn.lock", __render_harn_lock(harn_version))

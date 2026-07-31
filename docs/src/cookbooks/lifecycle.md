@@ -25,7 +25,7 @@ import { trigger_register } from "std/triggers"
 import { on_finish_handoff_to } from "std/lifecycle"
 
 // --- live ingest pipeline ---
-pipeline ingest(events) {
+pipeline ingest(harness: Harness, events) {
   // Any deferred items become partial-handoff envelopes via
   // harness.handoff_to so they show up in unsettled_state().
   pipeline_on_finish(on_finish_handoff_to("nightly-settle", {
@@ -44,7 +44,7 @@ pipeline ingest(events) {
 }
 
 // --- nightly settlement pipeline ---
-pipeline nightly_settle(envelope) {
+pipeline nightly_settle(harness: Harness, envelope) {
   const items = envelope.unsettled.partial_handoffs
   for item in items {
     settle_one(item.payload)
@@ -77,7 +77,7 @@ holds finish open until the per-item drain completes.
 A regulated team needs every disposition the settlement-agent loop
 makes to land in an external audit store (Splunk, BigQuery, S3), not
 just the per-run `pipeline.lifecycle.audit` topic. A
-`register_session_hook("on_drain_decision", ...)` callback observes
+`harness.agent.register_session_hook("on_drain_decision", ...)` callback observes
 each decision before it persists, and a composed `on_finish` callback
 runs the drain loop with telemetry around it.
 
@@ -85,9 +85,9 @@ runs the drain loop with telemetry around it.
 import { on_finish_drain } from "std/lifecycle"
 import { compose, with_telemetry } from "std/lifecycle/combinators"
 
-pipeline triage(input) {
+pipeline triage(harness: Harness, input) {
   // 1. Mirror every drain disposition to our external store.
-  register_session_hook("on_drain_decision", { event ->
+  harness.agent.register_session_hook("on_drain_decision", { _hook_harness, event ->
     audit_store_push({
       pipeline: event.pipeline_id,
       bucket: event.bucket,
@@ -137,11 +137,11 @@ fires so the operator dashboard shows the pause duration.
 ```harn,ignore
 import { spawn_agent, parse_resume_conditions } from "std/agent/workers"
 
-pipeline research_runner(task) {
+pipeline research_runner(harness: Harness, task) {
   // Bracket the suspend / resume gates with telemetry. The runtime
   // also fires its built-in `resume_continuity` reminder; this hook
   // wraps it with structured operator telemetry.
-  register_session_hook("post_resume", { event ->
+  harness.agent.register_session_hook("post_resume", { _hook_harness, event ->
     operator_dashboard_emit("agent.resumed", {
       handle: event.worker.handle,
       suspended_at_ms: event.suspended_at_ms,
@@ -191,9 +191,9 @@ fn during_business_hours(now_ms) -> bool {
   return hour >= 9 && hour < 17
 }
 
-pipeline supervised_agents() {
-  register_session_hook("pre_suspend", { event ->
-    if !during_business_hours(now_ms()) {
+pipeline supervised_agents(harness: Harness) {
+  harness.agent.register_session_hook("pre_suspend", { hook_harness, event ->
+    if !during_business_hours(hook_harness.clock.now_ms()) {
       return nil   // allow
     }
     return {
@@ -241,9 +241,9 @@ import { pipeline_lifecycle_audit_log_take } from "std/lifecycle"
 import { on_finish_drain } from "std/lifecycle"
 import { compose, with_telemetry } from "std/lifecycle/combinators"
 
-pipeline multi_suspend_fixture() {
+pipeline multi_suspend_fixture(harness: Harness) {
   // 1. Pin wall-clock so queued_at_ms / age_ms are reproducible.
-  mock_time(1_700_000_000_000)
+  harness.testing.clock_set(1_700_000_000_000)
 
   // 2. Capture audits via the per-run log instead of wall-clock spans.
   pipeline_on_finish(
@@ -254,18 +254,18 @@ pipeline multi_suspend_fixture() {
   //    a typed audit entry.
   const worker = spawn_research_worker()
   emit_external_event("operator.resume", {})
-  advance_time(60_000)
-  flush_trigger_aggregations()
+  harness.testing.clock_advance(60_000)
+  harness.channels.flush_aggregations()
 
   const worker2 = spawn_followup_worker(worker)
   emit_external_event("operator.resume", {})
-  advance_time(120_000)
-  flush_trigger_aggregations()
+  harness.testing.clock_advance(120_000)
+  harness.channels.flush_aggregations()
 
   return wait_agent(worker2)
 }
 
-pipeline assert_replay_determinism() {
+pipeline assert_replay_determinism(harness: Harness) {
   // 4. Drain the audit log; the conformance harness compares this
   //    byte-for-byte against the recorded fixture.
   const entries = pipeline_lifecycle_audit_log_take()

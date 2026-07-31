@@ -1,6 +1,6 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const ts = date_parse("1969-12-31T23:00:00Z")
-  __io_println(ts)
-  __io_println(date_format(ts, "%Y-%m-%d %H:%M:%S"))
-  __io_println(date_to_zone(ts, "America/Los_Angeles"))
+  harness.stdio.println(ts)
+  harness.stdio.println(date_format(ts, "%Y-%m-%d %H:%M:%S"))
+  harness.stdio.println(date_to_zone(ts, "America/Los_Angeles"))
 }

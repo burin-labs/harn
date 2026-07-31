@@ -200,7 +200,7 @@ async fn pipeline_on_finish_callback_replaces_return_value() {
             let mut vm = crate::Vm::new();
             crate::register_vm_stdlib(&mut vm);
             let chunk = crate::compile_source(
-                "pipeline default() { pipeline_on_finish({ _h, v -> v + 100 }); return 7 }",
+                "pipeline default(harness: Harness) { harness.agent.pipeline_on_finish({ _h, v -> v + 100 }); return 7 }",
             )
             .expect("compile");
             vm.execute(&chunk).await.expect("execute")
@@ -218,7 +218,8 @@ async fn pipeline_on_finish_callback_replaces_return_value() {
         .run_until(async {
             let mut vm = crate::Vm::new();
             crate::register_vm_stdlib(&mut vm);
-            let chunk = crate::compile_source("pipeline default() { return 7 }").expect("compile");
+            let chunk = crate::compile_source("pipeline default(harness: Harness) { return 7 }")
+                .expect("compile");
             vm.execute(&chunk).await.expect("execute")
         })
         .await;

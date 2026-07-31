@@ -7,8 +7,8 @@ walks every file in scope with tree-sitter to find identifier-context
 occurrences (skipping comments and string literals), and refuses to write if
 the new name already exists as an identifier in any rewritten file.
 
-When the host runs with a staged-fs session (`hostlib_fs_set_mode`), every
-touched file lands in the overlay; one `hostlib_fs_commit_staged` flips them
+When the host runs with a staged-fs session (`harness.fs.set_mode`), every
+touched file lands in the overlay; one `harness.fs.commit_staged` flips them
 atomically. Without a session, the host still buffers the full plan in memory
 and only writes after pre-flight passes, so a clean run is all-or-nothing.
 
@@ -25,38 +25,46 @@ import { edit_rename_symbol } from "std/edit"
 
 pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
   // Workspace must already be indexed; usually the host does this on
-  // startup. From a script you can run `hostlib_code_index_rebuild` first.
-  hostlib_fs_set_mode({ session_id: session_id, mode: "staged" })
+  // startup. From a script you can run `harness.code_index.rebuild` first.
+  harness.fs.set_mode({ session_id: session_id, mode: "staged" })
 
-  const plan = edit_rename_symbol({
-    symbol_ref: { name: "Widget", path: "src/lib.rs", kind: "Type" },
-    new_name: "Gadget",
-    scope: "workspace",
-    session_id: session_id,
-    dry_run: true,
-  })
+  const plan = edit_rename_symbol(harness.code_index,
+    harness.code_index,
+    {
+      symbol_ref: { name: "Widget", path: "src/lib.rs", kind: "Type" },
+      new_name: "Gadget",
+      scope: "workspace",
+      session_id: session_id,
+      dry_run: true,
+    },
+  )
 
   if !plan.ok {
-    println("rename refused: " + plan.result + " — " + (plan.details ?? ""))
+    harness.stdio.println("rename refused: " + plan.result + " — " + (plan.details ?? ""))
     return plan
   }
 
   // Review the staged plan before committing. `touched_files[*].edits[*]`
   // exposes byte and (row, col) spans on both sides of the edit.
   for file in plan.touched_files {
-    println("would rewrite " + file.path + " (" + str(len(file.edits)) + " edits)")
+    harness.stdio.println(
+      "would rewrite " + file.path + " (" + str(len(file.edits)) + " edits)",
+    )
   }
 
   // Drop dry_run to actually stage the writes, then commit.
-  const applied = edit_rename_symbol({
-    symbol_ref: { name: "Widget", path: "src/lib.rs", kind: "Type" },
-    new_name: "Gadget",
-    scope: "workspace",
-    session_id: session_id,
-  })
+  const applied = edit_rename_symbol(harness.code_index,
+    harness.code_index,
+    {
+      symbol_ref: { name: "Widget", path: "src/lib.rs", kind: "Type" },
+      new_name: "Gadget",
+      scope: "workspace",
+      session_id: session_id,
+    },
+  )
   if !applied.ok { return applied }
 
-  return hostlib_fs_commit_staged({ session_id: session_id })
+  return harness.fs.commit_staged({ session_id: session_id })
 }
 ```
 
@@ -72,15 +80,20 @@ pipeline rename_would_shadow(harness: Harness) {
   // `src/main.rs` defines both `Widget` and `Gadget`. Renaming Widget
   // to Gadget would create two `Gadget` definitions in the same file —
   // the host rejects before touching disk and surfaces the shadow site.
-  const result = edit_rename_symbol({
-    symbol_ref: { name: "Widget", path: "src/main.rs", kind: "Type" },
-    new_name: "Gadget",
-    scope: "workspace",
-  })
+  const result = edit_rename_symbol(harness.code_index,
+    harness.code_index,
+    {
+      symbol_ref: { name: "Widget", path: "src/main.rs", kind: "Type" },
+      new_name: "Gadget",
+      scope: "workspace",
+    },
+  )
 
   assert(result.result == "conflict")
   for site in result.conflicts {
-    println("shadow at " + site.path + ":" + str(site.row + 1) + ":" + str(site.col + 1))
+    harness.stdio.println(
+      "shadow at " + site.path + ":" + str(site.row + 1) + ":" + str(site.col + 1),
+    )
   }
   return result
 }

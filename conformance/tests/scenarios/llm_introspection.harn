@@ -1,13 +1,13 @@
-pipeline test(task) {
-  const info = llm_info()
+pipeline test(harness: Harness, task) {
+  const info = harness.obs.llm_info()
   assert_eq(type_of(info), "dict")
   // api_key_set should be bool regardless of env
   assert_eq(type_of(info.api_key_set), "bool")
-  log("llm_info ok")
-  const usage = llm_usage()
+  harness.stdio.log("llm_info ok")
+  const usage = harness.obs.llm_usage()
   assert_eq(usage.input_tokens, 0)
   assert_eq(usage.output_tokens, 0)
   assert_eq(usage.call_count, 0)
   assert_eq(usage.total_duration_ms, 0)
-  log("llm_usage ok")
+  harness.stdio.log("llm_usage ok")
 }

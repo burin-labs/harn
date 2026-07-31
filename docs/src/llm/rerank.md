@@ -19,8 +19,8 @@ const result = pairwise_rerank(candidates, {
   model_tier: "small",
 })
 
-log(result.ranked[0])
-log(result.scores)
+harness.stdio.log(result.ranked[0])
+harness.stdio.log(result.scores)
 ```
 
 ## pairwise_rerank
@@ -103,7 +103,7 @@ second argument:
 ```harn
 import { self_certainty } from "std/llm/rerank"
 
-const response = llm_call("Write a short release note.", nil, {
+const response = harness.llm.call("Write a short release note.", nil, {
   provider: "openai",
   logprobs: true,
   top_logprobs: 3,
@@ -120,7 +120,7 @@ It fails if the provider/model does not return token log probabilities.
 Provider support depends on the transport. Harn normalizes OpenAI-compatible
 chat-completion logprobs and legacy completion logprobs when providers return
 them, including local OpenAI-compatible servers. The mock provider accepts
-`llm_mock({text, logprobs: [...]})` for deterministic tests. Anthropic,
+`harness.llm.mock_enqueue({text, logprobs: [...]})` for deterministic tests. Anthropic,
 Bedrock, Gemini/Vertex, and native Ollama routes currently do not expose a
 normalized live logprob surface through `llm_call`, so use supplied logprobs
 or an OpenAI-compatible route for `self_certainty`.

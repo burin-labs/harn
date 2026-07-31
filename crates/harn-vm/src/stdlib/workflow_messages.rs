@@ -539,6 +539,8 @@ pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
 
 /// Enqueue a workflow signal message.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_signal",
+    effects = ["state.write@dynamic"],
     sig = "workflow.signal(target: string|dict, name: string, payload?: any) -> dict",
     category = "workflow.messages"
 )]
@@ -560,6 +562,8 @@ fn workflow_signal_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 /// Read the latest published workflow query value.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_query",
+    effects = ["state.read@dynamic"],
     sig = "workflow.query(target: string|dict, name: string) -> any",
     category = "workflow.messages"
 )]
@@ -582,6 +586,8 @@ fn workflow_query_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 /// Enqueue a workflow update and wait for a response.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_update",
+    effects = ["state.mutate@dynamic"],
     sig = "workflow.update(target: string|dict, name: string, payload?: any, options?: dict|nil) -> any",
     kind = "async",
     category = "workflow.messages"
@@ -621,6 +627,8 @@ async fn workflow_update_builtin(
 
 /// Publish a workflow query value.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_publish_query",
+    effects = ["state.write@dynamic"],
     sig = "workflow.publish_query(target: string|dict, name: string, value?: any) -> dict",
     category = "workflow.messages"
 )]
@@ -643,6 +651,8 @@ fn workflow_publish_query_builtin(args: &[VmValue], _out: &mut String) -> Result
 
 /// Receive the next workflow mailbox message.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_receive",
+    effects = ["state.observe@dynamic", "state.mutate@dynamic"],
     sig = "workflow.receive(target: string|dict) -> dict|nil",
     category = "workflow.messages"
 )]
@@ -664,6 +674,8 @@ fn workflow_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 /// Respond to a pending workflow update request.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_respond_update",
+    effects = ["state.write@dynamic"],
     sig = "workflow.respond_update(target: string|dict, request_id: string, value?: any, name?: string|nil) -> dict",
     category = "workflow.messages"
 )]
@@ -700,6 +712,8 @@ fn workflow_respond_update_builtin(
 
 /// Pause a workflow mailbox.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_pause",
+    effects = ["state.mutate@dynamic"],
     sig = "workflow.pause(target: string|dict) -> dict",
     category = "workflow.messages"
 )]
@@ -712,6 +726,8 @@ fn workflow_pause_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 /// Resume a workflow mailbox.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_resume",
+    effects = ["state.mutate@dynamic"],
     sig = "workflow.resume(target: string|dict) -> dict",
     category = "workflow.messages"
 )]
@@ -724,6 +740,8 @@ fn workflow_resume_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 /// Return workflow mailbox status.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_status",
+    effects = ["state.read@dynamic"],
     sig = "workflow.status(target: string|dict) -> dict",
     category = "workflow.messages"
 )]
@@ -737,6 +755,8 @@ fn workflow_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 /// Advance a workflow mailbox generation.
 #[harn_builtin(
+    exposure = "harness.runtime.workflow_continue_as_new",
+    effects = ["state.mutate@dynamic"],
     sig = "workflow.continue_as_new(target: string|dict) -> dict",
     category = "workflow.messages"
 )]
@@ -749,6 +769,8 @@ fn workflow_continue_as_new_builtin(
 
 /// Advance a workflow mailbox generation (top-level alias).
 #[harn_builtin(
+    exposure = "harness.runtime.continue_as_new",
+    effects = ["state.mutate@dynamic"],
     sig = "continue_as_new(target: string|dict) -> dict",
     category = "workflow.messages"
 )]

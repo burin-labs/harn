@@ -4,7 +4,6 @@
 use crate::value::VmDictExt;
 use std::sync::Arc;
 
-use crate::stdlib::harn_entry::register_harn_entrypoint_category;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
@@ -16,7 +15,6 @@ use super::helpers::{
 };
 use super::tools::build_assistant_response_message;
 
-const AGENT_STDLIB_ENTRYPOINT_CATEGORY: &str = "agent.stdlib";
 const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
 
 const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
@@ -311,13 +309,10 @@ fn push_structured_output_candidate(candidates: &mut Vec<String>, candidate: Str
     candidates.push(candidate);
 }
 
-pub(crate) fn register_agent_loop(vm: &mut Vm) {
-    register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
-}
+pub(crate) fn register_agent_loop(_vm: &mut Vm) {}
 
-pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
+pub fn register_agent_loop_with_bridge(_vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
     super::agent_runtime::install_current_host_bridge(bridge);
-    register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
@@ -326,6 +321,8 @@ pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
 
 /// Subscribe a Harn callback to events for an agent session.
 #[harn_builtin(
+    exposure = "harness.agent.subscribe",
+    effects = ["state.observe@arg0"],
     sig = "agent_subscribe(session_id: string, callback: closure) -> nil",
     category = "agent.host"
 )]
@@ -352,6 +349,8 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 /// Inject pending feedback into an agent session.
 #[harn_builtin(
+    exposure = "harness.agent.inject_feedback",
+    effects = ["state.write@arg0"],
     sig = "agent_inject_feedback(session_id: string, kind: string, content: string) -> nil",
     category = "agent.host"
 )]
@@ -388,6 +387,8 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
 
 /// Inject a typed host-originated event into an agent session.
 #[harn_builtin(
+    exposure = "harness.agent.inject_host_event",
+    effects = ["state.write@arg0"],
     sig = "agent_inject_host_event(session_id: string, injection: dict) -> dict",
     category = "agent.host"
 )]
@@ -430,7 +431,11 @@ fn agent_inject_host_event_builtin(
 /// so you can see exactly which capability-gated instructions are active and
 /// why. Session reminders are layered at live call time and are not included
 /// in this static view.
-#[harn_builtin(sig = "prompt_explain(options: dict?) -> dict", category = "agent")]
+#[harn_builtin(
+    exposure = "harness.agent.prompt_explain",
+    effects = ["state.read@dynamic"],
+    sig = "prompt_explain(options: dict?) -> dict", category = "agent"
+)]
 fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = match args.first() {
         Some(VmValue::Dict(map)) => Some((**map).clone()),
@@ -454,7 +459,7 @@ fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
     let b = bridge;
     let metadata = VmBuiltinMetadata::async_static("llm_call")
-        .signature_static("llm_call(prompt, system?, options?)")
+        .signature_static("harness.llm.call(prompt, system?, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 3 })
         .category_static("llm.host")
         .doc_static("Execute one bridge-observed LLM call and return the normalized result dict.");

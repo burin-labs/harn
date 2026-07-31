@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const base = transcript({source: "conformance"})
   const with_asset = transcript_add_asset(
     base,
@@ -17,12 +17,12 @@ pipeline main() {
       {type: "text", text: "review this diagram", visibility: "public"},
     ],
   )
-  __io_println(len(transcript_assets(multimodal)) == 1)
-  __io_println(transcript_messages(multimodal)[0].content[0].asset_id == asset_id)
-  __io_println(contains(transcript_render_visible(multimodal), "diagram.png"))
+  harness.stdio.println(len(transcript_assets(multimodal)) == 1)
+  harness.stdio.println(transcript_messages(multimodal)[0].content[0].asset_id == asset_id)
+  harness.stdio.println(contains(transcript_render_visible(multimodal), "diagram.png"))
   const forked = transcript_fork(multimodal)
-  __io_println(len(transcript_assets(forked)) == 1)
+  harness.stdio.println(len(transcript_assets(forked)) == 1)
   const imported = transcript_import(transcript_export(multimodal))
   const imported_assets = transcript_assets(imported)
-  __io_println(len(imported_assets) == 1)
+  harness.stdio.println(len(imported_assets) == 1)
 }

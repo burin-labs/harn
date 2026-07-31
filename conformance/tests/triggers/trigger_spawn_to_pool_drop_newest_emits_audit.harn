@@ -9,28 +9,31 @@ import "std/triggers"
  * matches `pool.submit({backpressure: bp.queue(1, "drop_newest")})` —
  * composing triggers with pools shouldn't introduce a parallel audit path.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const bp = Backpressure()
-  const gate = channel(nil, 1)
+  const gate = harness.runtime.channel(nil, 1)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const pool_name = "spawn-to-pool-drop-newest-demo-" + unique
   const _ = pool_create(
+    harness.agent,
     {name: pool_name, max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
   )
   // Filter to drop receipts so the assertion ignores the `pool_submit`
   // and `pool_dequeue` receipts emitted on the same topic by PL-06.
-  const stream = event_log.subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
+  const stream = harness.obs.event_log_subscribe(
+    {topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"},
+  )
   const task_factory = { _event ->
     return { ->
-      receive(gate)
+      harness.runtime.receive(gate)
       return "ok"
     }
   }
   const trigger_id = "trigger-spawn-to-pool-dropnew-" + unique
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -49,32 +52,32 @@ pipeline test(task) {
   )
   // First fire occupies the single active slot. Second occupies the queue.
   // Third should be evicted by drop_newest, leaving the result as rejected.
-  const warmup = trigger_fire(
+  const warmup = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "warmup-" + unique}},
   )
-  const queued = trigger_fire(
+  const queued = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "queued-" + unique}},
   )
-  const newest = trigger_fire(
+  const newest = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "newest-" + unique}},
   )
-  __io_println(warmup.status == "dispatched")
-  __io_println(queued.status == "dispatched")
-  __io_println(newest.status == "dispatched")
-  __io_println(newest.result?.status == "rejected")
-  __io_println(newest.result?.rejection_reason)
+  harness.stdio.println(warmup.status == "dispatched")
+  harness.stdio.println(queued.status == "dispatched")
+  harness.stdio.println(newest.status == "dispatched")
+  harness.stdio.println(newest.result?.status == "rejected")
+  harness.stdio.println(newest.result?.rejection_reason)
   // The pool emits its standard audit so trigger dispatch and direct
   // `pool.submit` callers see the same drop event.
   const audit = stream.next().value
-  __io_println(audit.payload.policy)
-  __io_println(audit.headers.schema)
+  harness.stdio.println(audit.payload.policy)
+  harness.stdio.println(audit.headers.schema)
   // Drain the gate so the two surviving tasks finish.
-  send(gate, "go")
-  send(gate, "go")
-  const results = pool_wait([warmup.result, queued.result])
-  __io_println(results[0].status)
-  __io_println(results[1].status)
+  harness.runtime.send(gate, "go")
+  harness.runtime.send(gate, "go")
+  const results = pool_wait(harness.agent, [warmup.result, queued.result])
+  harness.stdio.println(results[0].status)
+  harness.stdio.println(results[1].status)
 }

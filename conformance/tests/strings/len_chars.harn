@@ -1,13 +1,13 @@
 /** Test that len() counts characters, not bytes, for Unicode strings */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const ascii = "hello"
-  __io_println(len(ascii))
+  harness.stdio.println(len(ascii))
   // Multi-byte Unicode: "café" is 4 characters but 5 bytes
   const unicode = "café"
-  __io_println(len(unicode))
+  harness.stdio.println(len(unicode))
   // Emoji: one character, multiple bytes
   const emoji = "🎉"
-  __io_println(len(emoji))
+  harness.stdio.println(len(emoji))
   // Empty string
-  __io_println(len(""))
+  harness.stdio.println(len(""))
 }

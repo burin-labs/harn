@@ -85,7 +85,11 @@ impl McpOrchestratorService {
                 self.handle_logging_set_level(id, session, &params)
             }
             "tools/list" => self.handle_tools_list(id, &params),
-            "tools/call" => self.handle_tools_call(id, session, &params).await,
+            // Tool execution is the deepest request branch (trigger dispatch
+            // can enter a child VM and agent machinery). Keep that state
+            // machine behind one pointer instead of embedding it in the
+            // already broad protocol dispatcher frame.
+            "tools/call" => Box::pin(self.handle_tools_call(id, session, &params)).await,
             mcp_protocol::METHOD_TASKS_GET => self.handle_tasks_get(id, session, &params),
             mcp_protocol::METHOD_TASKS_RESULT => {
                 self.handle_tasks_result(id, session, &params).await

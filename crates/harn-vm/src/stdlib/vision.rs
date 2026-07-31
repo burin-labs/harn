@@ -222,20 +222,24 @@ fn install_test_backend(backend: Arc<dyn OcrBackend>) {
 }
 
 pub(crate) fn register_vision_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("vision_ocr", |_ctx, args| async move {
-        let input = normalize_image_input(args.first())?;
-        let options = parse_ocr_options(args.get(1))?;
-        let backend = current_backend();
-        let words = backend
-            .recognize(&input, &options)
-            .await
-            .map_err(|error| VmError::Runtime(format!("vision_ocr: {error}")))?;
-        let structured = build_structured_text(&words, &input, backend.name());
-        audit_vision_ocr_active("stdlib.vision_ocr", &input, &options, &structured, None).await;
-        let value = serde_json::to_value(&structured)
-            .map_err(|error| VmError::Runtime(format!("vision_ocr: {error}")))?;
-        Ok(crate::schema::json_to_vm_value(&value))
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::System,
+        "vision_ocr",
+        |_ctx, args| async move {
+            let input = normalize_image_input(args.first())?;
+            let options = parse_ocr_options(args.get(1))?;
+            let backend = current_backend();
+            let words = backend
+                .recognize(&input, &options)
+                .await
+                .map_err(|error| VmError::Runtime(format!("vision_ocr: {error}")))?;
+            let structured = build_structured_text(&words, &input, backend.name());
+            audit_vision_ocr_active("stdlib.vision_ocr", &input, &options, &structured, None).await;
+            let value = serde_json::to_value(&structured)
+                .map_err(|error| VmError::Runtime(format!("vision_ocr: {error}")))?;
+            Ok(crate::schema::json_to_vm_value(&value))
+        },
+    );
 }
 
 fn current_backend() -> Arc<dyn OcrBackend> {
@@ -1017,11 +1021,16 @@ mod tests {
         }));
 
         let mut vm = Vm::new();
-        register_vision_builtins(&mut vm);
+        crate::register_vm_stdlib(&mut vm);
+        let system = vm
+            .harness()
+            .and_then(|harness| harness.sub_handle("system"))
+            .expect("stdlib registration installs HarnessSystem");
         let result = vm
-            .call_named_builtin(
+            .call_harness_method(
+                &system,
                 "vision_ocr",
-                vec![crate::schema::json_to_vm_value(&serde_json::json!({
+                &[crate::schema::json_to_vm_value(&serde_json::json!({
                     "bytes_base64": "ZmFrZQ==",
                     "mime_type": "image/png",
                     "name": "sample.png",

@@ -14,10 +14,12 @@
  *     reminder is consumed on the next turn, not re-applied).
  */
 import { agent_lifecycle_tools } from "std/agent/workers"
+import { sub_agent_run, wait_agent } from "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -30,25 +32,29 @@ pipeline main() {
     ],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Park until parent resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 4},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       const lifecycle = agent_lifecycle_tools(tool_registry(), {subagents: true})
       const pause_tool = tool_find(lifecycle, "subagent_pause")
       const resume_tool = tool_find(lifecycle, "subagent_resume")
-      const pause_again = pause_tool.handler({handle: handle.id, reason: "parent re-pauses"})
-      const resumed = resume_tool.handler({handle: handle.id})
-      const done = wait_agent(handle)
-      __io_println("suspended_status=" + suspended.status)
-      __io_println("pause_again_status=" + pause_again.status)
-      __io_println("resume_status=" + resumed.status)
-      __io_println("final_status=" + done.status)
-      __io_println("has_transcript=" + to_string(done.has_transcript))
+      const pause_again = pause_tool.handler(
+        harness.agent,
+        {handle: handle.id, reason: "parent re-pauses"},
+      )
+      const resumed = resume_tool.handler(harness.agent, {handle: handle.id})
+      const done = wait_agent(harness.agent, handle)
+      harness.stdio.println("suspended_status=" + suspended.status)
+      harness.stdio.println("pause_again_status=" + pause_again.status)
+      harness.stdio.println("resume_status=" + resumed.status)
+      harness.stdio.println("final_status=" + done.status)
+      harness.stdio.println("has_transcript=" + to_string(done.has_transcript))
       const continuity = transcript_events_by_kind(done.transcript, "system_reminder").filter(
         { event -> event.reminder.dedupe_key == "resume_continuity" },
       )
-      __io_println("continuity_left=" + to_string(len(continuity)))
+      harness.stdio.println("continuity_left=" + to_string(len(continuity)))
     },
   )
 }

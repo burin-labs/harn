@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { agent_session_messages } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -6,17 +7,20 @@ fn judge_events(events) {
   return events.filter({ event -> event.type == "judge_decision" })
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       llm_text("<user_response>isolated final answer</user_response>"),
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"complete\"}"),
     ],
     { ->
-      const session = "done-judge-isolation-" + uuid()
+      const session = "done-judge-isolation-" + harness.random.uuid()
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "Finish once.",
           nil,
           {
@@ -30,16 +34,16 @@ pipeline default() {
           },
         ) },
       )
-      const messages = agent_session_messages(session)
+      const messages = agent_session_messages(harness.agent, session)
       const encoded = json_stringify(messages)
       const judges = judge_events(captured.events)
       require len(judges) == 1, "done_judge should emit one decision"
-      __io_println(captured.result.status)
-      __io_println(len(messages))
-      __io_println(contains(encoded, "isolated final answer"))
-      __io_println(!contains(encoded, "\"verdict\""))
-      __io_println(!contains(encoded, "complete"))
-      __io_println(len(llm_mock_calls()))
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(len(messages))
+      harness.stdio.println(contains(encoded, "isolated final answer"))
+      harness.stdio.println(!contains(encoded, "\"verdict\""))
+      harness.stdio.println(!contains(encoded, "complete"))
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
 }

@@ -5,10 +5,14 @@ import "std/memory"
  * full enumeration via memory_list (with status/flag filters), in-place update
  * by id, and "rejected stays queryable" (status, not tombstone).
  */
-pipeline default() {
-  const root = path_join(harness.fs.temp_dir(), "harn-mem-richer-" + uuid())
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-mem-richer-" + harness.random.uuid(),
+  )
   const ns = "agent/notes"
   memory_store(
+    harness.memory,
     ns,
     "note-a",
     {text: "alpha"},
@@ -23,6 +27,7 @@ pipeline default() {
     },
   )
   memory_store(
+    harness.memory,
     ns,
     "note-b",
     {text: "beta"},
@@ -30,30 +35,33 @@ pipeline default() {
     {root: root, id: "b1", now: "2026-04-29T00:00:01Z", status: "pending", scope: "user"},
   )
   // Full enumeration, newest first.
-  const all = memory_list(ns, {root: root})
-  __io_println(len(all))
-  __io_println(all[0].id)
-  __io_println(all[0].scope)
-  __io_println(all[1].flags.auto_surface)
+  const all = memory_list(harness.memory, ns, {root: root})
+  harness.stdio.println(len(all))
+  harness.stdio.println(all[0].id)
+  harness.stdio.println(all[0].scope)
+  harness.stdio.println(all[1].flags.auto_surface)
   // Filters.
-  __io_println(len(memory_list(ns, {root: root, status: "pending"})))
-  const surfaced = memory_list(ns, {root: root, flag: "auto_surface"})
-  __io_println(len(surfaced))
-  __io_println(surfaced[0].id)
+  harness.stdio.println(len(memory_list(harness.memory, ns, {root: root, status: "pending"})))
+  const surfaced = memory_list(harness.memory, ns, {root: root, flag: "auto_surface"})
+  harness.stdio.println(len(surfaced))
+  harness.stdio.println(surfaced[0].id)
   // In-place update by id.
   const upd = memory_update(
+    harness.memory,
     ns,
     "a1",
     {status: "accepted", flags: {auto_surface: false}},
     {root: root, now: "2026-04-29T00:00:02Z"},
   )
-  __io_println(upd.status)
-  __io_println(upd.flags.auto_surface)
+  harness.stdio.println(upd.status)
+  harness.stdio.println(upd.flags.auto_surface)
   // Rejected records stay queryable (soft status, not a tombstone).
-  memory_update(ns, "b1", {status: "rejected"}, {root: root})
-  __io_println(len(memory_list(ns, {root: root})))
-  __io_println(len(memory_list(ns, {root: root, status: "rejected"})))
+  memory_update(harness.memory, ns, "b1", {status: "rejected"}, {root: root})
+  harness.stdio.println(len(memory_list(harness.memory, ns, {root: root})))
+  harness.stdio.println(len(memory_list(harness.memory, ns, {root: root, status: "rejected"})))
   // Update to an unknown id is a no-op returning nil.
-  __io_println(memory_update(ns, "nope", {status: "x"}, {root: root}) == nil)
+  harness.stdio.println(
+    memory_update(harness.memory, ns, "nope", {status: "x"}, {root: root}) == nil,
+  )
   harness.fs.delete(root)
 }

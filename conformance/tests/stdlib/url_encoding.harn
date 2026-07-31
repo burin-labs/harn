@@ -1,15 +1,15 @@
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Basic URL encoding
   const encoded = url_encode("hello world")
-  __io_println(encoded)
+  harness.stdio.println(encoded)
   // Round-trip
   const decoded = url_decode(encoded)
-  __io_println(decoded)
+  harness.stdio.println(decoded)
   // Special characters
-  __io_println(url_encode("a=1&b=2"))
-  __io_println(url_decode("a%3D1%26b%3D2"))
+  harness.stdio.println(url_encode("a=1&b=2"))
+  harness.stdio.println(url_decode("a%3D1%26b%3D2"))
   // Plus decoding (form-encoded space)
-  __io_println(url_decode("hello+world"))
+  harness.stdio.println(url_decode("hello+world"))
   // Unreserved chars pass through
-  __io_println(url_encode("abc-123_test.file~ok"))
+  harness.stdio.println(url_encode("abc-123_test.file~ok"))
 }

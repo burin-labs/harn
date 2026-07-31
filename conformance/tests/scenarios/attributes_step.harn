@@ -22,7 +22,7 @@ fn verify_step(ctx) -> string {
 }
 
 @test
-pipeline test_step_attributes(task) {
+pipeline test_step_attributes(harness: Harness, task) {
   assert_eq(merge_captain("issue"), "verify:implement:plan:issue")
-  log("attributes_step ok")
+  harness.stdio.log("attributes_step ok")
 }

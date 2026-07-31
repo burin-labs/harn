@@ -66,6 +66,7 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     let source = source.replace("__HARN_TEST_SESSION_STORE_ROOT__", &session_store_root_path);
+    let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
     let chunk = harn_vm::compile_source(&source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -112,7 +113,7 @@ fn out_lines(raw: &str) -> Vec<String> {
 fn race_window_pipeline(session_id: &str, push_stop_before_dispatch: bool) -> String {
     let push_line = if push_stop_before_dispatch {
         format!(
-            r#"      agent_session_push_bridge_injection(
+            r#"      harness.agent.session_push_bridge_injection(
         "{session_id}",
         {{body: "STOP — abort the push", mode: "interrupt_immediate", role_hint: "system"}},
       )"#
@@ -124,10 +125,10 @@ fn race_window_pipeline(session_id: &str, push_stop_before_dispatch: bool) -> St
         r#"
 import {{ agent_session_push_bridge_injection }} from "std/agent/state"
 
-pipeline main(task) {{
-  clear_tool_hooks()
+pipeline main(harness: Harness, task) {{
+  harness.tools.clear_hooks()
   const registry = tool_registry()
-  const handler_calls = shared_cell({{scope: "task_group", key: "handler-{session_id}", initial: 0}})
+  const handler_calls = harness.runtime.shared_cell({{scope: "task_group", key: "handler-{session_id}", initial: 0}})
   const tools = tool_define(
     registry,
     "would_force_push",
@@ -135,17 +136,17 @@ pipeline main(task) {{
     {{
       parameters: {{}},
       handler: {{ _args ->
-        const hsnap = shared_snapshot(handler_calls)
-        shared_cas(handler_calls, hsnap, hsnap.value + 1)
+        const hsnap = harness.runtime.shared_snapshot(handler_calls)
+        harness.runtime.shared_cas(handler_calls, hsnap, hsnap.value + 1)
         return "would have force-pushed"
       }},
     }},
   )
-  const iteration_state = shared_cell({{scope: "task_group", key: "iter-{session_id}", initial: 0}})
+  const iteration_state = harness.runtime.shared_cell({{scope: "task_group", key: "iter-{session_id}", initial: 0}})
   const mock_llm = {{ _call ->
-    const snap = shared_snapshot(iteration_state)
+    const snap = harness.runtime.shared_snapshot(iteration_state)
     const n = snap.value
-    shared_cas(iteration_state, snap, n + 1)
+    harness.runtime.shared_cas(iteration_state, snap, n + 1)
     if n == 0 {{
 {push_line}
       return {{
@@ -164,6 +165,7 @@ pipeline main(task) {{
     }}
   }}
   const result = agent_loop(
+    harness,
     "do the push",
     nil,
     {{
@@ -177,7 +179,7 @@ pipeline main(task) {{
       llm_caller: mock_llm,
     }},
   )
-  log(result.status)
+  harness.stdio.log(result.status)
   const checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
   let skipped_count = 0
   for event in checkpoints {{
@@ -185,10 +187,10 @@ pipeline main(task) {{
       skipped_count = skipped_count + 1
     }}
   }}
-  log(skipped_count)
+  harness.stdio.log(skipped_count)
   const stats = transcript_stats(result.transcript)
-  log(stats.tool_result_message_count)
-  log(shared_get(handler_calls))
+  harness.stdio.log(stats.tool_result_message_count)
+  harness.stdio.log(harness.runtime.shared_get(handler_calls))
   const messages = transcript_messages(result.transcript)
   let placeholder_count = 0
   for message in messages {{
@@ -199,7 +201,7 @@ pipeline main(task) {{
       }}
     }}
   }}
-  log(placeholder_count)
+  harness.stdio.log(placeholder_count)
 }}
 "#
     )
@@ -290,7 +292,7 @@ fn pre_tool_dispatch_dispatches_when_no_injection_queued() {
 fn audit_only_pipeline(session_id: &str, queue_audit_only: bool) -> String {
     let push_block = if queue_audit_only {
         format!(
-            r#"  agent_session_push_bridge_injection(
+            r#"  harness.agent.session_push_bridge_injection(
     "{session_id}",
     {{body: "audit trail: agent finished the merge", mode: "audit_only", role_hint: "system"}},
   )"#
@@ -302,21 +304,22 @@ fn audit_only_pipeline(session_id: &str, queue_audit_only: bool) -> String {
         r#"
 import {{ agent_session_push_bridge_injection }} from "std/agent/state"
 
-pipeline main(task) {{
-  clear_tool_hooks()
+pipeline main(harness: Harness, task) {{
+  harness.tools.clear_hooks()
 {push_block}
-  const call_counter = shared_cell(
+  const call_counter = harness.runtime.shared_cell(
     {{scope: "task_group", key: "audit-only-llm-calls-{session_id}", initial: 0}},
   )
   const stub_llm = {{ _call ->
-    const snap = shared_snapshot(call_counter)
-    shared_cas(call_counter, snap, snap.value + 1)
+    const snap = harness.runtime.shared_snapshot(call_counter)
+    harness.runtime.shared_cas(call_counter, snap, snap.value + 1)
     return {{
       ok: true,
       value: {{text: "all set ##DONE##", tool_calls: [], provider: "mock", model: "mock"}},
     }}
   }}
   const result = agent_loop(
+    harness,
     "wrap up",
     nil,
     {{
@@ -328,8 +331,8 @@ pipeline main(task) {{
       llm_caller: stub_llm,
     }},
   )
-  log(result.status)
-  log(shared_get(call_counter))
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(call_counter))
   const reminder_events = transcript_events_by_kind(result.transcript, "system_reminder")
   let saw_audit_reminder = false
   for event in reminder_events {{
@@ -337,7 +340,7 @@ pipeline main(task) {{
       saw_audit_reminder = true
     }}
   }}
-  log(saw_audit_reminder)
+  harness.stdio.log(saw_audit_reminder)
   const checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
   let loop_exit_deliveries = 0
   for event in checkpoints {{
@@ -345,7 +348,7 @@ pipeline main(task) {{
       loop_exit_deliveries = loop_exit_deliveries + 1
     }}
   }}
-  log(loop_exit_deliveries)
+  harness.stdio.log(loop_exit_deliveries)
 }}
 "#
     )
@@ -435,7 +438,7 @@ fn audit_only_control_run_records_no_audit_reminder() {
 fn steer_pipeline(session_id: &str, push_steer_mid_turn: bool) -> String {
     let push_line = if push_steer_mid_turn {
         format!(
-            r#"      agent_session_push_user_message(
+            r#"      harness.agent.session_push_user_message(
         "{session_id}",
         {{content: "actually use auth_v2.go", mode: "steer"}},
       )"#
@@ -447,8 +450,8 @@ fn steer_pipeline(session_id: &str, push_steer_mid_turn: bool) -> String {
         r#"
 import {{ agent_session_push_user_message }} from "std/agent/state"
 
-pipeline main(task) {{
-  clear_tool_hooks()
+pipeline main(harness: Harness, task) {{
+  harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(
     registry,
@@ -456,14 +459,14 @@ pipeline main(task) {{
     "Test stand-in for an irreversible side-effect tool.",
     {{parameters: {{}}, handler: {{ _args -> return "would have force-pushed" }}}},
   )
-  const iteration_state = shared_cell({{scope: "task_group", key: "steer-iter-{session_id}", initial: 0}})
-  const call_counter = shared_cell({{scope: "task_group", key: "steer-calls-{session_id}", initial: 0}})
+  const iteration_state = harness.runtime.shared_cell({{scope: "task_group", key: "steer-iter-{session_id}", initial: 0}})
+  const call_counter = harness.runtime.shared_cell({{scope: "task_group", key: "steer-calls-{session_id}", initial: 0}})
   const mock_llm = {{ _call ->
-    const csnap = shared_snapshot(call_counter)
-    shared_cas(call_counter, csnap, csnap.value + 1)
-    const snap = shared_snapshot(iteration_state)
+    const csnap = harness.runtime.shared_snapshot(call_counter)
+    harness.runtime.shared_cas(call_counter, csnap, csnap.value + 1)
+    const snap = harness.runtime.shared_snapshot(iteration_state)
     const n = snap.value
-    shared_cas(iteration_state, snap, n + 1)
+    harness.runtime.shared_cas(iteration_state, snap, n + 1)
     if n == 0 {{
 {push_line}
       return {{
@@ -482,6 +485,7 @@ pipeline main(task) {{
     }}
   }}
   const result = agent_loop(
+    harness,
     "do the push",
     nil,
     {{
@@ -495,10 +499,10 @@ pipeline main(task) {{
       llm_caller: mock_llm,
     }},
   )
-  log(result.status)
-  log(shared_get(call_counter))
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(call_counter))
   const stats = transcript_stats(result.transcript)
-  log(stats.tool_result_message_count)
+  harness.stdio.log(stats.tool_result_message_count)
 
   const checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
   let mid_turn_deliveries = 0
@@ -513,8 +517,8 @@ pipeline main(task) {{
       }}
     }}
   }}
-  log(mid_turn_deliveries)
-  log(loop_exit_deliveries)
+  harness.stdio.log(mid_turn_deliveries)
+  harness.stdio.log(loop_exit_deliveries)
 
   // Walk the transcript messages IN ORDER to prove chronological splice:
   // the steer user message must land after the tool_result and before the
@@ -542,11 +546,11 @@ pipeline main(task) {{
     }}
     idx = idx + 1
   }}
-  log(steer_user_count)
+  harness.stdio.log(steer_user_count)
   if tool_result_idx >= 0 && steer_idx > tool_result_idx && last_assistant_idx > steer_idx {{
-    log("ok")
+    harness.stdio.log("ok")
   }} else {{
-    log("${{tool_result_idx}}/${{steer_idx}}/${{last_assistant_idx}}")
+    harness.stdio.log("${{tool_result_idx}}/${{steer_idx}}/${{last_assistant_idx}}")
   }}
 }}
 "#

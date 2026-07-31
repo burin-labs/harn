@@ -1,9 +1,9 @@
 import { extract_paths, int_to_string, truncate_head_tail } from "std/text"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const paths = extract_paths("See /foo/bar.txt for details")
-  __io_println(paths[0])
-  __io_println(int_to_string(17))
+  harness.stdio.println(paths[0])
+  harness.stdio.println(int_to_string(17))
   const short = truncate_head_tail("a\nb\nc\nd\ne\nf", 1)
-  __io_println(contains(short, "4 lines omitted"))
+  harness.stdio.println(contains(short, "4 lines omitted"))
 }

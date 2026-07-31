@@ -1,5 +1,5 @@
-pipeline test(task) {
-  webhook_intake_register(
+pipeline test(harness: Harness, task) {
+  harness.runtime.webhook_intake_register(
     {
       id: "sha1-without-opt-in",
       secret: "legacy-secret",

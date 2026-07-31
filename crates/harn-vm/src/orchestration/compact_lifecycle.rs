@@ -1,7 +1,7 @@
 //! Centralized compaction lifecycle.
 //!
 //! Every transcript compaction in the runtime — manual `transcript_compact()`,
-//! `agent_session_compact()`, `transcript_auto_compact()`, worker-transcript
+//! `harness.agent.compact()`, `transcript_auto_compact()`, worker-transcript
 //! compaction during resume, and host-script-driven auto-compaction — funnels
 //! through [`run_compaction_lifecycle`] so the hook contract, reminder
 //! lifecycle, and `AgentEvent::TranscriptCompacted` payload are identical
@@ -57,7 +57,7 @@ pub enum CompactMode {
     /// `transcript_compact()` stdlib builtin (user-initiated, transcript dict in,
     /// transcript dict out).
     Manual,
-    /// `agent_session_compact()` stdlib builtin (host-initiated, mutates an
+    /// `harness.agent.compact()` stdlib builtin (host-initiated, mutates an
     /// active agent session in place).
     Host,
     /// In-agent-loop automatic compaction emitted by host scripts after the

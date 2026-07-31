@@ -1,20 +1,20 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Test 1: Level filtering - set to error so debug/info/warn are suppressed
-  log_set_level("error")
-  log_debug("should_not_appear")
-  log_info("should_not_appear")
-  log_warn("should_not_appear")
-  __io_println("filtering_works")
+  harness.obs.set_level("error")
+  harness.obs.log_debug("should_not_appear")
+  harness.obs.log_info("should_not_appear")
+  harness.obs.log_warn("should_not_appear")
+  harness.stdio.println("filtering_works")
   // Test 2: All builtins exist and don't crash (keep level at error to suppress output)
-  log_debug("a")
-  log_info("b", {key: "val"})
-  log_warn("c", {n: 42})
+  harness.obs.log_debug("a")
+  harness.obs.log_info("b", {key: "val"})
+  harness.obs.log_warn("c", {n: 42})
   // Don't call log_error to keep output deterministic (it would emit JSON with a timestamp)
   // Test 3: Trace context builtins work
-  const span = trace_start("op")
-  const _tid = trace_id()
-  trace_end(span)
+  const span = harness.obs.trace_start("op")
+  const _tid = harness.obs.trace_id()
+  harness.obs.trace_end(span)
   // Reset level for subsequent tests
-  log_set_level("debug")
-  __io_println("all_builtins_ok")
+  harness.obs.set_level("debug")
+  harness.stdio.println("all_builtins_ok")
 }

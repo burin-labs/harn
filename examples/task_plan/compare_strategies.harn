@@ -548,9 +548,9 @@ fn __schema_for_strategy(strategy) {
   return nil
 }
 
-fn __model_capabilities(model) {
+fn __model_capabilities(harness: Harness, model) {
   const info = try {
-    llm_model_info(model)
+    harness.llm.model_info(model)
   } catch (e) {
     nil
   }
@@ -558,12 +558,12 @@ fn __model_capabilities(model) {
     return info.capabilities
   }
   const resolved = try {
-    llm_resolve_model(model)
+    harness.llm.resolve_model(model)
   } catch (e) {
     nil
   }
   if resolved != nil {
-    return provider_capabilities(resolved.provider, resolved.id)
+    return harness.llm.provider_capabilities(resolved.provider, resolved.id)
   }
   return {}
 }
@@ -585,15 +585,23 @@ fn __llm_options(model, max_tokens, schema, use_structured_output) {
   return opts
 }
 
-fn __call_model_once(model, prompt, system, max_tokens, schema, use_structured_output) {
+fn __call_model_once(
+  llm: HarnessLlm,
+  model,
+  prompt,
+  system,
+  max_tokens,
+  schema,
+  use_structured_output,
+) {
   const opts = __llm_options(model, max_tokens, schema, use_structured_output)
   let used_structured_output = use_structured_output
   const resp = try {
-    llm_call(prompt, system, opts)
+    llm.call(prompt, system, opts)
   } catch (e) {
     if use_structured_output {
       used_structured_output = false
-      llm_call(prompt, system, __llm_options(model, max_tokens, nil, false))
+      llm.call(prompt, system, __llm_options(model, max_tokens, nil, false))
     } else {
       throw e
     }
@@ -660,7 +668,15 @@ fn __merge_calls(first, second, text, retry_history) {
   }
 }
 
-fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_length) {
+fn __maybe_continue_length(
+  llm: HarnessLlm,
+  call,
+  model,
+  prompt,
+  system,
+  max_tokens,
+  retry_on_length,
+) {
   if !retry_on_length || !__is_length_finish(call.finish_reason) {
     return call + {retry_history: call?.retry_history ?? []}
   }
@@ -670,7 +686,15 @@ fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_len
     + call
     .text
     + "\n\nContinue exactly where you left off. Do not add preamble, markdown fences, or a fresh opening object."
-  const continuation = __call_model_once(model, continuation_prompt, system, max_tokens, nil, false)
+  const continuation = __call_model_once(
+    llm,
+    model,
+    continuation_prompt,
+    system,
+    max_tokens,
+    nil,
+    false,
+  )
   return __merge_calls(
     call,
     continuation,
@@ -679,7 +703,7 @@ fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_len
   )
 }
 
-fn __strategy_call(strategy, task, model, max_tokens, opts) {
+fn __strategy_call(llm: HarnessLlm, strategy, task, model, max_tokens, opts) {
   const schema = __schema_for_strategy(strategy)
   const use_structured = opts.structured_output && strategy != "baseline"
     && __structured_output_supported(
@@ -688,6 +712,7 @@ fn __strategy_call(strategy, task, model, max_tokens, opts) {
   let call = nil
   if strategy == "baseline" {
     call = __call_model_once(
+      llm,
       model,
       __baseline_prompt(task),
       __baseline_system(),
@@ -696,6 +721,7 @@ fn __strategy_call(strategy, task, model, max_tokens, opts) {
       false,
     )
     return __maybe_continue_length(
+      llm,
       call,
       model,
       __baseline_prompt(task),
@@ -706,6 +732,7 @@ fn __strategy_call(strategy, task, model, max_tokens, opts) {
   }
   if strategy == "burin_plan" {
     call = __call_model_once(
+      llm,
       model,
       __burin_prompt(task),
       __burin_system(),
@@ -714,6 +741,7 @@ fn __strategy_call(strategy, task, model, max_tokens, opts) {
       use_structured,
     )
     return __maybe_continue_length(
+      llm,
       call,
       model,
       __burin_prompt(task),
@@ -723,6 +751,7 @@ fn __strategy_call(strategy, task, model, max_tokens, opts) {
     )
   }
   call = __call_model_once(
+    llm,
     model,
     __typed_ir_prompt(task),
     __typed_ir_system(),
@@ -731,6 +760,7 @@ fn __strategy_call(strategy, task, model, max_tokens, opts) {
     use_structured,
   )
   return __maybe_continue_length(
+    llm,
     call,
     model,
     __typed_ir_prompt(task),
@@ -771,7 +801,7 @@ fn __repair_prompt(strategy, task, call, score) {
     + "\n\nReply with the corrected JSON object only. No prose, no markdown fences."
 }
 
-fn __maybe_repair_schema(strategy, task, model, max_tokens, opts, call, score) {
+fn __maybe_repair_schema(llm: HarnessLlm, strategy, task, model, max_tokens, opts, call, score) {
   if strategy == "baseline" || !opts.retry_on_schema_error || !__needs_schema_repair(score) {
     return {call: call, score: score}
   }
@@ -783,6 +813,7 @@ fn __maybe_repair_schema(strategy, task, model, max_tokens, opts, call, score) {
     __typed_ir_system()
   }
   const repair = __call_model_once(
+    llm,
     model,
     __repair_prompt(strategy, task, call, score),
     system,
@@ -799,10 +830,11 @@ fn __maybe_repair_schema(strategy, task, model, max_tokens, opts, call, score) {
   return {call: repaired, score: __strategy_score(strategy, repaired)}
 }
 
-fn __run_cell(strategy, task, trial, model, max_tokens, opts) {
-  const initial_call = __strategy_call(strategy, task, model, max_tokens, opts)
+fn __run_cell(llm: HarnessLlm, strategy, task, trial, model, max_tokens, opts) {
+  const initial_call = __strategy_call(llm, strategy, task, model, max_tokens, opts)
   const initial_score = __strategy_score(strategy, initial_call)
   const repaired = __maybe_repair_schema(
+    llm,
     strategy,
     task,
     model,
@@ -895,7 +927,7 @@ fn main(harness: Harness) -> int {
     structured_output: __has_flag(argv, "--structured-output"),
     retry_on_length: __has_flag(argv, "--retry-on-length"),
     retry_on_schema_error: __has_flag(argv, "--retry-on-schema-error"),
-    capabilities: __model_capabilities(model),
+    capabilities: __model_capabilities(harness, model),
   }
   const out_path = __parse_arg(argv, "--out=")
   const strategies = ["baseline", "burin_plan", "typed_ir"]
@@ -906,7 +938,15 @@ fn main(harness: Harness) -> int {
         harness.stdio.println(
           "[run ] " + task.id + " / " + strategy + " / trial " + to_string(trial),
         )
-        const record = __run_cell(strategy, task, trial, model, max_tokens[strategy], opts)
+        const record = __run_cell(
+          harness.llm,
+          strategy,
+          task,
+          trial,
+          model,
+          max_tokens[strategy],
+          opts,
+        )
         records = records + [record]
         harness.stdio.println(
           "[done] " + task.id + " / " + strategy + " / trial " + to_string(trial)

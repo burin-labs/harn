@@ -159,7 +159,7 @@ silent empty substitution.
 ```harn
 const deploy = skill_find(skills, "deploy")
 guard deploy != nil else {
-  exit(1)
+  harness.runtime.exit(1)
 }
 
 const rendered = skill_render(deploy, ["prod", "us-east-1"])
@@ -218,7 +218,7 @@ Copy-pasteable example:
 ```harn
 const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
 
-const result = agent_loop(
+const result = agent_loop(harness,
   "Help me ship this release",
   catalog,
   {

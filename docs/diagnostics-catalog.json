@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 68
+      "count": 70
     },
     {
       "id": "FMT",
@@ -690,7 +690,7 @@
     {
       "code": "HARN-NAM-101",
       "category": "NAM",
-      "summary": "`main` entrypoint must take a single `harness: Harness` parameter",
+      "summary": "`fn main` must take an explicit `harness: Harness` parameter",
       "repairs": [
         {
           "id": "bindings/thread-harness-needs-param",
@@ -2425,6 +2425,24 @@
       "code": "HARN-LNT-068",
       "category": "LNT",
       "summary": "prompt template names a filter the engine does not implement",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-069",
+      "category": "LNT",
+      "summary": "helper accepts root Harness but uses only narrow capability handles",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-070",
+      "category": "LNT",
+      "summary": "public API has too many same-typed positional parameters",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

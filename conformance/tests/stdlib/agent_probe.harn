@@ -3,16 +3,19 @@ import { probe, probe_eval, probe_typecheck } from "std/agent/probe"
 import { assert_error_contains } from "std/testing"
 import "../_common"
 
-pipeline test_agent_probe(_task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-agent-probe-" + uuid())
+pipeline test_agent_probe(harness: Harness, _task) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-agent-probe-" + harness.random.uuid(),
+  )
   const opts = {root: root, namespace: "agent/facts"}
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
   // --- eval probe: shell command, no expected → pass derived from exit code
-  const eval_pass = probe_eval("echo probe-eval-ok", opts + {now: "2026-05-23T22:00:00Z"})
+  const eval_pass = probe_eval(harness, "echo probe-eval-ok", opts + {now: "2026-05-23T22:00:00Z"})
   assert_eq(eval_pass.schema, "harn.probe.v1")
   assert_eq(eval_pass.kind, "eval")
   assert_eq(eval_pass.outcome, "pass")
@@ -22,6 +25,7 @@ pipeline test_agent_probe(_task) {
   assert(eval_pass.fact_id != nil && starts_with(eval_pass.fact_id, "fact_"))
   // --- eval probe with explicit expected (mismatch surfaces as fail)
   const eval_fail = probe(
+    harness,
     "Eval",
     "echo not-the-expected",
     opts + {expected: "expected", now: "2026-05-23T22:00:01Z"},
@@ -29,16 +33,17 @@ pipeline test_agent_probe(_task) {
   assert_eq(eval_fail.outcome, "fail")
   assert_eq(eval_fail.expected, "expected")
   // --- eval probe: non-zero exit derives fail without expected
-  const eval_exit_fail = probe_eval("false", opts + {now: "2026-05-23T22:00:02Z"})
+  const eval_exit_fail = probe_eval(harness, "false", opts + {now: "2026-05-23T22:00:02Z"})
   assert_eq(eval_exit_fail.outcome, "fail")
   assert_eq(eval_exit_fail.evidence.exit_code, 1)
   // --- store_fact: false skips auto-write but still returns a result
-  const no_fact = probe_eval("echo skipped", opts + {store_fact: false})
+  const no_fact = probe_eval(harness, "echo skipped", opts + {store_fact: false})
   assert_eq(no_fact.outcome, "pass")
   assert_eq(no_fact.fact_id, nil)
   // --- typecheck probe: clean fragment → 0 errors → pass
   const typecheck_pass = probe_typecheck(
-    "pipeline noop() { __io_println(\"hi\") }\n",
+    harness,
+    "pipeline noop(harness: Harness) { harness.stdio.println(\"hi\") }\n",
     opts + {harn_binary: harn_bin, now: "2026-05-23T22:00:03Z"},
   )
   assert_eq(typecheck_pass.kind, "typecheck")
@@ -46,20 +51,29 @@ pipeline test_agent_probe(_task) {
   assert(contains(typecheck_pass.observed, "errors=0"))
   // --- typecheck probe: type-error fragment → errors > 0 → fail
   const typecheck_fail = probe_typecheck(
-    "pipeline broken() { let x: int = \"oops\" __io_println(x) }\n",
+    harness,
+    "pipeline broken(harness: Harness) { let x: int = \"oops\" harness.stdio.println(x) }\n",
     opts + {harn_binary: harn_bin, now: "2026-05-23T22:00:04Z"},
   )
   assert_eq(typecheck_fail.outcome, "fail")
   assert(contains(typecheck_fail.observed, "errors="))
   // --- typecheck probe with expected error count
   const typecheck_match = probe_typecheck(
-    "pipeline broken() { let x: int = \"oops\" __io_println(x) }\n",
+    harness,
+    "pipeline broken(harness: Harness) { let x: int = \"oops\" harness.stdio.println(x) }\n",
     opts + {harn_binary: harn_bin, expected: 1, now: "2026-05-23T22:00:05Z"},
   )
   assert_eq(typecheck_match.outcome, "pass")
   assert_eq(typecheck_match.expected, 1)
   // --- recall the auto-stored facts (pass+fail+exit_fail+typecheck_pass+typecheck_fail+typecheck_match = 6)
-  const observations = recall_facts("probe", "Observation", 0.0, opts + {limit: 20})
+  const observations = recall_facts(
+    harness.clock,
+    harness.memory,
+    "probe",
+    "Observation",
+    0.0,
+    opts + {limit: 20},
+  )
   assert(len(observations) >= 5)
   let saw_pass = false
   let saw_fail = false
@@ -84,15 +98,18 @@ pipeline test_agent_probe(_task) {
   assert(saw_fail)
   assert(saw_typecheck)
   // --- stub kinds return unknown with confidence 0.4
-  const test_stub = probe("test", "anything", opts + {now: "2026-05-23T22:00:06Z"})
+  const test_stub = probe(harness, "test", "anything", opts + {now: "2026-05-23T22:00:06Z"})
   assert_eq(test_stub.outcome, "unknown")
   assert(contains(test_stub.observed, "not supported"))
-  const inspect_stub = probe("Inspect", "anything", opts + {now: "2026-05-23T22:00:07Z"})
+  const inspect_stub = probe(harness, "Inspect", "anything", opts + {now: "2026-05-23T22:00:07Z"})
   assert_eq(inspect_stub.outcome, "unknown")
   // --- validation errors
-  assert_error_contains({ -> probe("guess", "echo x", opts) }, "HARN-PROBE-002")
-  assert_error_contains({ -> probe("eval", "", opts) }, "HARN-PROBE-004")
-  assert_error_contains({ -> probe_eval("echo x", opts + {lang: "python"}) }, "HARN-PROBE-003")
+  assert_error_contains({ -> probe(harness, "guess", "echo x", opts) }, "HARN-PROBE-002")
+  assert_error_contains({ -> probe(harness, "eval", "", opts) }, "HARN-PROBE-004")
+  assert_error_contains(
+    { -> probe_eval(harness, "echo x", opts + {lang: "python"}) },
+    "HARN-PROBE-003",
+  )
   harness.fs.delete(root)
-  __io_println("agent probe ok")
+  harness.stdio.println("agent probe ok")
 }

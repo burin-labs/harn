@@ -6,11 +6,12 @@ import { llm_text, with_llm_script } from "std/testing"
  * scripts can assert that structured output, hosted tools, remote MCP, and
  * conversation controls survive option extraction without live credentials.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [llm_text("{\"ok\":true}")],
     { ->
-      const result = llm_call(
+      const result = harness.llm.call(
         "return a structured answer",
         nil,
         {
@@ -40,7 +41,7 @@ pipeline test(task) {
         },
       )
       assert(result.text == "{\"ok\":true}", "mock response returned")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) == 1, "one LLM call recorded")
       const call = calls[0]
       assert(call.api_mode == "responses", "Responses mode recorded")
@@ -61,7 +62,7 @@ pipeline test(task) {
       assert(call.compact, "standalone compaction flag recorded")
       assert(call.include[0] == "web_search_call.action", "include list recorded")
       assert(call.max_tool_calls == 2, "tool-call limit recorded")
-      log("openai_responses_mode_mock tests passed")
+      harness.stdio.log("openai_responses_mode_mock tests passed")
     },
   )
 }

@@ -752,12 +752,21 @@ pub fn maybe_push_active_step(function_name: &str, frame_depth: usize, args: &[V
         );
     }
     let step_name = definition.name.clone();
+    // The root Harness is invocation authority, not domain input. Keep it out
+    // of step transcripts so explicit authority does not pollute replay,
+    // assertions, or durable step identities with a non-serializable handle.
+    let recorded_args = match args.first() {
+        Some(VmValue::Harness(handle)) if handle.kind() == crate::harness::HarnessKind::Root => {
+            &args[1..]
+        }
+        _ => args,
+    };
     STEP_STACK.with(|stack| {
         stack.borrow_mut().push(ActiveStep::new(
             frame_depth,
             definition,
             persona,
-            args.to_vec(),
+            recorded_args.to_vec(),
             span_id,
             false,
         ));
@@ -1101,17 +1110,27 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &__PERSONA_OUTPUT_STYLE_DEF,
 ];
 
-#[harn_builtin(category = "step_runtime", runtime_only = true)]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    category = "step_runtime", runtime_only = true
+)]
 fn __register_step(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     register_step_from_dict(args.to_vec())
 }
 
-#[harn_builtin(category = "step_runtime", runtime_only = true)]
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    category = "step_runtime", runtime_only = true
+)]
 fn __register_persona(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     register_persona_from_dict(args.to_vec())
 }
 
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__persona_output_style(function?: string) -> dict",
     category = "step_runtime",
     runtime_only = true

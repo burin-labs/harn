@@ -25,11 +25,11 @@ use sqlx_core::connection::Connection;
 use sqlx_core::executor::Executor;
 use sqlx_core::row::Row;
 use sqlx_core::sql_str::AssertSqlSafe;
-use sqlx_postgres::{PgConnection, PgPool};
+use sqlx_postgres::PgConnection;
 
 use crate::value::{VmError, VmValue};
 
-use super::{handle_id, pool_by_id, recycle_pool_after_ddl, runtime_error, HANDLE_POOL};
+use super::{pool_record_from_handle, recycle_pool_after_ddl, runtime_error, PoolRecord};
 
 /// Stable advisory-lock key distinct from anything sqlx-migrate uses so
 /// running `pg_migrate` and `sqlx migrate` side-by-side during a
@@ -83,8 +83,7 @@ pub(super) async fn run(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             runtime_error("pg_migrate: second argument must be an options dict {dir, ...}")
         })?;
 
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_migrate")?;
-    let pool = pool_by_id(&pool_id)?;
+    let pool = pool_record_from_handle(pool_handle, "pg_migrate")?;
     let dir = dir_arg(&opts, "dir")?;
     let ledger = Ledger::parse(&opts)?;
 
@@ -125,11 +124,12 @@ pub(super) async fn run(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 // ---------------------------------------------------------------------------
 
 async fn run_harn(
-    pool: Arc<PgPool>,
+    record: Arc<PoolRecord>,
     dir: &Path,
     table_name: String,
     dry_run: bool,
 ) -> Result<VmValue, VmError> {
+    let pool = Arc::clone(&record.pool);
     let entries = discover_migrations(dir)?;
 
     let started = Instant::now();
@@ -184,7 +184,7 @@ async fn run_harn(
     // non-dry-run that actually applied something (M-5).
     if !dry_run && !applied_now.is_empty() {
         let max = pool.options().get_max_connections();
-        recycle_pool_after_ddl(pool.as_ref(), max).await;
+        recycle_pool_after_ddl(pool.as_ref(), &record.described_oids, max).await;
     }
 
     let available: Vec<String> = entries.iter().map(|entry| entry.name.clone()).collect();
@@ -534,11 +534,12 @@ fn discover_sqlx_migrations(dir: &Path) -> Result<Vec<SqlxMigration>, VmError> {
 }
 
 async fn run_sqlx(
-    pool: Arc<PgPool>,
+    record: Arc<PoolRecord>,
     dir: &Path,
     table_name: String,
     dry_run: bool,
 ) -> Result<VmValue, VmError> {
+    let pool = Arc::clone(&record.pool);
     let migrations = discover_sqlx_migrations(dir)?;
 
     let started = Instant::now();
@@ -561,7 +562,7 @@ async fn run_sqlx(
     // See `run_harn`: recycle prepared-statement caches after DDL (M-5).
     if !dry_run && !applied_now.is_empty() {
         let max = pool.options().get_max_connections();
-        recycle_pool_after_ddl(pool.as_ref(), max).await;
+        recycle_pool_after_ddl(pool.as_ref(), &record.described_oids, max).await;
     }
 
     let available: Vec<String> = migrations.iter().map(|m| m.name.clone()).collect();

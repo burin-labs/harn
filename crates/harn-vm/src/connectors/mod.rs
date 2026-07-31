@@ -1,7 +1,6 @@
 //! Connector traits and shared helpers for inbound event-source providers.
 //!
-//! Runtime connector contracts live here alongside their event, secret, and
-//! trigger dependencies.
+//! Runtime connector contracts live here alongside their event, secret, and trigger dependencies.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -41,8 +40,9 @@ pub mod webhook;
 pub use a2a_push::A2aPushConnector;
 pub use cron::{CatchupMode, CronConnector};
 pub use effect_policy::{
-    connector_export_denied_builtin_reason, connector_export_effect_class,
-    default_connector_export_policy, ConnectorExportEffectClass, HarnConnectorEffectPolicies,
+    connector_export_denied_builtin_reason, connector_export_denied_harness_method_reason,
+    connector_export_effect_class, default_connector_export_policy, ConnectorExportEffectClass,
+    HarnConnectorEffectPolicies,
 };
 pub use harn_module::{
     load_contract as load_harn_connector_contract, HarnConnector, HarnConnectorContract,
@@ -1623,11 +1623,20 @@ impl RateLimiterFactory {
     }
 
     pub fn try_acquire(&self, provider: &ProviderId, key: &str) -> bool {
+        self.try_acquire_at(provider, key, clock::instant_now())
+    }
+
+    pub(crate) fn try_acquire_at(
+        &self,
+        provider: &ProviderId,
+        key: &str,
+        now: clock::ClockInstant,
+    ) -> bool {
         let mut buckets = self.buckets.lock().expect("rate limiter mutex poisoned");
         let bucket = buckets
             .entry((provider.as_str().to_string(), key.to_string()))
             .or_insert_with(|| TokenBucket::full(self.config));
-        bucket.try_acquire(self.config, clock::instant_now())
+        bucket.try_acquire(self.config, now)
     }
 
     pub async fn acquire(&self, provider: &ProviderId, key: &str) {

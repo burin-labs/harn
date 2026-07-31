@@ -13,7 +13,7 @@ fn after_require(x: int?) -> int {
   return x + 1
 }
 
-pipeline default() {
-  __io_println(after_assert(41))
-  __io_println(after_require(9))
+pipeline default(harness: Harness) {
+  harness.stdio.println(after_assert(41))
+  harness.stdio.println(after_require(9))
 }

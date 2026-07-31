@@ -386,7 +386,13 @@ pub fn workflow_map_finalize(config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_execute_map_stage(node_id, node, artifacts = nil, opts = nil) {
+pub fn workflow_execute_map_stage(
+  _runtime: HarnessRuntime,
+  node_id,
+  node,
+  artifacts = nil,
+  opts = nil,
+) {
   const plan = __host_workflow_map_plan(node, __map_list(artifacts))
   const branches = parallel each plan.items with { max_concurrent: plan.max_concurrent } { item ->
     try {

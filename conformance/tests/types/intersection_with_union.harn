@@ -14,9 +14,9 @@ fn label(rec: Tagged) -> string {
   return type_of(rec)
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Intersection branch: this dict has both id and kind.
-  __io_println(label({id: "a", kind: "node"}))
+  harness.stdio.println(label({id: "a", kind: "node"}))
   // Plain shape branch: just the label field.
-  __io_println(label({label: "fallback"}))
+  harness.stdio.println(label({label: "fallback"}))
 }

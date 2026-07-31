@@ -115,7 +115,7 @@
       "patterns": [
         {
           "name": "keyword.control.harn",
-          "match": "\\b(if|else|for|in|while|match|return|break|continue|try|catch|throw|finally|import|from|spawn|parallel|defer|retry|guard|deadline|to|exclusive|require|yield|emit|mutex|select|request_approval|dual_control|ask_user|escalate_to)\\b"
+          "match": "\\b(if|else|for|in|while|match|return|break|continue|try|catch|throw|finally|import|from|spawn|parallel|defer|retry|guard|deadline|to|exclusive|require|yield|emit|mutex|select)\\b"
         },
         {
           "name": "keyword.declaration.harn",

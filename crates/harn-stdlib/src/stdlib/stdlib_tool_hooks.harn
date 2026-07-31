@@ -4,7 +4,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * std/tool_hooks — preset `run_command` wrapper for the catalogue-driven
  * "command faux-pas" library (epic #1884).
  *
- * `preset_run_command(config)` returns a closure usable as a `run_command`
+ * `preset_run_command(harness, config)` returns a closure usable as a `run_command`
  * tool handler. The closure matches each command against:
  *   1. `custom_rules` — user-priority overrides matched before anything else.
  *   2. The catalogues registered on `config.registry`, narrowed to the
@@ -35,7 +35,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: preset_run_command({stacks: ["rust"], inner: shell_runner})
+ * @example: preset_run_command(harness, {stacks: ["rust"], inner: shell_runner})
  */
 fn __preset_command_text(args) -> string {
   const kind = type_of(args)
@@ -130,9 +130,9 @@ fn __preset_reminder_body(rule, original_command, command, action) {
  * envelope still flows so audit consumers know a rule fired.
  *
  * Side effects:
- *   * `tool_hooks_emit_audit("tool_rewrite", payload)` records the
+ *   * `harness.tools.hooks_emit_audit("tool_rewrite", payload)` records the
  *     rule + original + rewritten command on the lifecycle audit log.
- *   * `tool_hooks_inject_reminder({tags: ["tool_rewritten"], ...})`
+ *   * `harness.tools.hooks_inject_reminder({tags: ["tool_rewritten"], ...})`
  *     queues a 1-turn reminder summarizing the rewrite for the agent's
  *     next turn (no-op outside an active agent session, but always
  *     produces a `tool_hooks.reminder_injected` audit entry).
@@ -140,17 +140,17 @@ fn __preset_reminder_body(rule, original_command, command, action) {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: preset_run_command({mode: tool_hooks_mode_rewrite_with_audit})
+ * @example: preset_run_command(harness, {mode: tool_hooks_mode_rewrite_with_audit})
  */
-pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
+pub fn tool_hooks_mode_rewrite_with_audit(tools: HarnessTools, rule, args, inner) {
   const original_command = __preset_command_text(args)
   const rewritten_command = __preset_invoke_rewrite(rule?.rewrite, original_command, rule)
   const envelope = __preset_envelope(rule, original_command, rewritten_command)
-  tool_hooks_emit_audit(
+  tools.hooks_emit_audit(
     "tool_rewrite",
     __preset_audit_payload(rule, original_command, rewritten_command),
   )
-  tool_hooks_inject_reminder(
+  tools.hooks_inject_reminder(
     {
       tags: ["tool_rewritten"],
       body: __preset_reminder_body(rule, original_command, rewritten_command, "rewrite"),
@@ -172,18 +172,18 @@ pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
  * tool_error / system_reminder to the agent. Never invokes `inner`.
  *
  * Side effects:
- *   * `tool_hooks_emit_audit("tool_denied", payload)` records the
+ *   * `harness.tools.hooks_emit_audit("tool_denied", payload)` records the
  *     denied rule + command on the lifecycle audit log.
  *
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: preset_run_command({mode: tool_hooks_mode_deny_with_explanation})
+ * @example: preset_run_command(harness, {mode: tool_hooks_mode_deny_with_explanation})
  */
-pub fn tool_hooks_mode_deny_with_explanation(rule, args, _inner) {
+pub fn tool_hooks_mode_deny_with_explanation(tools: HarnessTools, rule, args, _inner) {
   const original_command = __preset_command_text(args)
   const envelope = __preset_envelope(rule, original_command, original_command)
-  tool_hooks_emit_audit(
+  tools.hooks_emit_audit(
     "tool_denied",
     __preset_audit_payload(rule, original_command, original_command),
   )
@@ -199,18 +199,18 @@ pub fn tool_hooks_mode_deny_with_explanation(rule, args, _inner) {
  * call-site can audit without executing.
  *
  * Side effects:
- *   * `tool_hooks_emit_audit("tool_rule_warning", payload)` records
+ *   * `harness.tools.hooks_emit_audit("tool_rule_warning", payload)` records
  *     the matched rule + command on the lifecycle audit log.
  *
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: preset_run_command({mode: tool_hooks_mode_passthrough_only_audit})
+ * @example: preset_run_command(harness, {mode: tool_hooks_mode_passthrough_only_audit})
  */
-pub fn tool_hooks_mode_passthrough_only_audit(rule, args, inner) {
+pub fn tool_hooks_mode_passthrough_only_audit(tools: HarnessTools, rule, args, inner) {
   const original_command = __preset_command_text(args)
   const envelope = __preset_envelope(rule, original_command, original_command)
-  tool_hooks_emit_audit(
+  tools.hooks_emit_audit(
     "tool_rule_warning",
     __preset_audit_payload(rule, original_command, original_command),
   )
@@ -445,14 +445,14 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
   const cache_key = __classifier_cache_key(classifier_cfg.scope, original_command)
   const now = harness.clock.now_ms()
   const cached = if classifier_cfg.cache_ttl_ms > 0 {
-    __tool_hooks_classifier_cache_get(cache_key, now)
+    harness.tools.classifier_cache_get(cache_key, now)
   } else {
     nil
   }
   const verdict = if cached != nil {
     cached
   } else {
-    const envelope = llm_call_safe(
+    const envelope = harness.llm.call_safe(
       original_command,
       classifier_cfg.meta_prompt,
       __classifier_build_options(classifier_cfg),
@@ -460,7 +460,7 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
     const text = __classifier_extract_text(envelope)
     const parsed = __classifier_parse_verdict(text)
     if parsed.kind != "error" && classifier_cfg.cache_ttl_ms > 0 {
-      __tool_hooks_classifier_cache_put(cache_key, parsed, now, classifier_cfg.cache_ttl_ms)
+      harness.tools.classifier_cache_put(cache_key, parsed, now, classifier_cfg.cache_ttl_ms)
     }
     parsed
   }
@@ -469,7 +469,7 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
    * the audit payload echoes the command but the classifier never
    * blocks the caller's dispatch on its own faults. */
   if verdict.kind == "error" {
-    tool_hooks_emit_audit(
+    harness.tools.hooks_emit_audit(
       "tool_hook_classifier_verdict",
       __classifier_audit_payload(
         classifier_cfg,
@@ -484,7 +484,7 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
   /* Below-threshold or `allow` verdicts → passthrough, audited so the
    * observer can verify "we asked, model wasn't sure / said allow". */
   if verdict.kind == "allow" || verdict.confidence < classifier_cfg.threshold {
-    tool_hooks_emit_audit(
+    harness.tools.hooks_emit_audit(
       "tool_hook_classifier_verdict",
       __classifier_audit_payload(
         classifier_cfg,
@@ -502,27 +502,27 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
    * the wrapper's primary `mode` — the classifier verdict expresses
    * the desired action explicitly. */
   const synth_rule = __classifier_synth_rule(verdict, classifier_cfg, original_command)
-  tool_hooks_emit_audit(
+  harness.tools.hooks_emit_audit(
     "tool_hook_classifier_verdict",
     __classifier_audit_payload(classifier_cfg, original_command, verdict, cache_hit, verdict.kind),
   )
   if verdict.kind == "deny" {
-    return tool_hooks_mode_deny_with_explanation(synth_rule, args, inner)
+    return tool_hooks_mode_deny_with_explanation(harness.tools, synth_rule, args, inner)
   }
-  return tool_hooks_mode_rewrite_with_audit(synth_rule, args, inner)
+  return tool_hooks_mode_rewrite_with_audit(harness.tools, synth_rule, args, inner)
 }
 
 /**
  * `llm_call_safe` keeps the wrapper resilient: on transport errors
  * we audit + passthrough rather than blowing up the dispatch loop.
  */
-fn __preset_custom_registry(custom_rules) {
+fn __preset_custom_registry(tools: HarnessTools, custom_rules) {
   // Build a synthetic catalogue when the caller supplied custom rules.
   // The catalogue is stack-agnostic (no `stack` field) so it survives
   // the catalogue-stack filter below, and individual rule `applies_to`
   // lists still drive per-rule stack scoping.
-  return tool_hooks_register(
-    tool_hooks_registry(),
+  return tools.hooks_register(
+    tools.hooks_registry(),
     catalogue({id: "preset_run_command/custom", rules: custom_rules}),
   )
 }
@@ -537,7 +537,7 @@ fn __preset_custom_registry(custom_rules) {
  *   * `stacks` — opt-in list (e.g. `["rust", "python"]`). Defaults to `[]`,
  *     which keeps every registered catalogue and every rule whose
  *     `applies_to` is empty.
- *   * `registry` — a `tool_hooks_registry()` value. Defaults to an empty
+ *   * `registry` — a `harness.tools.hooks_registry()` value. Defaults to an empty
  *     registry, so a caller using only `custom_rules` does not have to
  *     materialize an empty registry by hand.
  *   * `custom_rules` — list of `tool_rule(...)` values matched before the
@@ -576,9 +576,9 @@ fn __preset_custom_registry(custom_rules) {
  * @effects: [llm]
  * @errors: ["preset_run_command: llm_classifier.model must be a non-empty string"]
  * @api_stability: experimental
- * @example: agent_loop(message, tools: {tools: [{name: "run_command", handler: preset_run_command({stacks: ["rust"]})}]})
+ * @example: agent_loop(harness, message, tools: {tools: [{name: "run_command", handler: preset_run_command(harness, {stacks: ["rust"]})}]})
  */
-pub fn preset_run_command(config = nil) {
+pub fn preset_run_command(harness: Harness, config = nil) {
   const cfg = config ?? {}
   if type_of(cfg) != "dict" {
     throw "preset_run_command: config must be a dict"
@@ -593,7 +593,8 @@ pub fn preset_run_command(config = nil) {
    * catalogue per opted-in stack. Callers that supply `registry:` keep
    * full control — tests, vendor overrides, and migration paths are
    * unaffected. (TH-04 #1897) */
-  const {registry = tool_hooks_seed_registry(stacks), custom_rules = []} = cfg ?? {}
+  const default_registry = tool_hooks_seed_registry(harness.env, harness.tools, stacks)
+  const {registry = default_registry, custom_rules = []} = cfg ?? {}
   if type_of(custom_rules) != "list" {
     throw "preset_run_command: `custom_rules` must be a list of tool_rule values"
   }
@@ -604,10 +605,10 @@ pub fn preset_run_command(config = nil) {
   } else {
     __classifier_validate_config(cfg.llm_classifier)
   }
-  const filtered_registry = tool_hooks_filter(registry, stacks)
+  const filtered_registry = harness.tools.hooks_filter(registry, stacks)
   const has_custom = len(custom_rules) > 0
   const custom_registry = if has_custom {
-    __preset_custom_registry(custom_rules)
+    __preset_custom_registry(harness.tools, custom_rules)
   } else {
     nil
   }
@@ -615,14 +616,14 @@ pub fn preset_run_command(config = nil) {
   return { args ->
     const command = __preset_command_text(args)
     if custom_registry != nil {
-      const custom_matches = tool_hooks_match(custom_registry, command, context)
+      const custom_matches = harness.tools.hooks_match(custom_registry, command, context)
       if len(custom_matches) > 0 {
-        return mode(custom_matches[0], args, inner)
+        return mode(harness.tools, custom_matches[0], args, inner)
       }
     }
-    const matches = tool_hooks_match(filtered_registry, command, context)
+    const matches = harness.tools.hooks_match(filtered_registry, command, context)
     if len(matches) > 0 {
-      return mode(matches[0], args, inner)
+      return mode(harness.tools, matches[0], args, inner)
     }
     if classifier_cfg != nil {
       return __classifier_run(harness, classifier_cfg, args, inner)

@@ -39,3 +39,22 @@ log(x)
         "same-scope should not trigger shadow-variable: {diags:?}"
     );
 }
+
+#[test]
+fn test_nested_harness_boundary_does_not_warn() {
+    let diags = lint_source(
+        r"
+pipeline default(harness: Harness) {
+  register({
+    handler: { harness, event ->
+      harness.stdio.println(event.kind)
+    },
+  })
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "shadow-variable"),
+        "nested runtime-supplied Harness boundaries use the canonical name: {diags:?}"
+    );
+}

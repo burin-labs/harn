@@ -57,23 +57,23 @@ pub fn single_quoted_words(text: string) -> list<string> {
   return dedup(out)
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   if !harness.fs.exists(SPEC) {
-    __io_eprintln("error: missing ${SPEC}")
+    harness.stdio.eprintln("error: missing ${SPEC}")
     return 1
   }
   if !harness.fs.exists(TOKEN_RS) {
-    __io_eprintln("error: missing ${TOKEN_RS}")
+    harness.stdio.eprintln("error: missing ${TOKEN_RS}")
     return 1
   }
   const section = grammar_section(harness.fs.read_text(SPEC))
   if section == nil {
-    __io_eprintln("error: could not find the `## Grammar` section in ${SPEC}")
+    harness.stdio.eprintln("error: could not find the `## Grammar` section in ${SPEC}")
     return 1
   }
   const lexer = lexer_keywords(harness.fs.read_text(TOKEN_RS))
   if lexer == nil {
-    __io_eprintln("error: could not find `pub const KEYWORDS` in ${TOKEN_RS}")
+    harness.stdio.eprintln("error: could not find `pub const KEYWORDS` in ${TOKEN_RS}")
     return 1
   }
   const known = lexer + CONTEXTUAL
@@ -85,19 +85,19 @@ pipeline main(task) {
     }
   }
   if drift.count > 0 {
-    __io_eprintln(
+    harness.stdio.eprintln(
       "error: the spec grammar uses keyword literal(s) that are neither reserved keywords nor known contextual keywords:",
     )
-    __io_eprintln("  - ${drift.sorted().join(", ")}")
-    __io_eprintln(
+    harness.stdio.eprintln("  - ${drift.sorted().join(", ")}")
+    harness.stdio.eprintln(
       "hint: a keyword may have been renamed/removed in crates/harn-lexer/src/token.rs without updating the spec grammar.",
     )
-    __io_eprintln(
+    harness.stdio.eprintln(
       "      if it is a new contextual keyword, add it to CONTEXTUAL in scripts/check_grammar_keywords.harn.",
     )
     return 1
   }
-  __io_println(
+  harness.stdio.println(
     "grammar keyword vocabulary OK (${literals.count} literals checked against the lexer)",
   )
   return 0

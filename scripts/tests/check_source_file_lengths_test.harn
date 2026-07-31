@@ -1,21 +1,21 @@
 import { with_temp_dir } from "std/testing"
 import "../check_source_file_lengths.harn"
 
-fn mkdirs(path: string) -> nil {
+fn mkdirs(harness: Harness, path: string) -> nil {
   if path == "" || path == "." || harness.fs.exists(path) {
     return nil
   }
   const parent = dirname(path) ?? ""
   if parent != "" && parent != path {
-    mkdirs(parent)
+    mkdirs(harness, parent)
   }
   harness.fs.mkdir(path)
   return nil
 }
 
-fn write_text(root: string, rel: string, text: string) -> nil {
+fn write_text(harness: Harness, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(dirname(path) ?? root)
+  mkdirs(harness, dirname(path) ?? root)
   harness.fs.write_text(path, text)
   return nil
 }
@@ -24,13 +24,13 @@ fn source_text(lines: int) -> string {
   return "source line\n".repeat(lines)
 }
 
-fn write_source(root: string, rel: string, lines: int) -> nil {
-  write_text(root, rel, source_text(lines))
+fn write_source(harness: Harness, root: string, rel: string, lines: int) -> nil {
+  write_text(harness, root, rel, source_text(lines))
   return nil
 }
 
-fn write_baseline(root: string, source_path: string, lines: int) -> nil {
-  write_text(root, baseline_path_for(source_path), to_string(lines) + "\n")
+fn write_baseline(harness: Harness, root: string, source_path: string, lines: int) -> nil {
+  write_text(harness, root, baseline_path_for(source_path), to_string(lines) + "\n")
   return nil
 }
 
@@ -39,7 +39,7 @@ fn finding_kinds(findings: list<SourceLengthFinding>) -> list<string> {
 }
 
 @test
-pipeline test_logical_line_count_handles_final_lines_and_crlf(task) {
+pipeline test_logical_line_count_handles_final_lines_and_crlf(harness: Harness, task) {
   assert_eq(logical_line_count(""), 0)
   assert_eq(logical_line_count("one"), 1)
   assert_eq(logical_line_count("one\n"), 1)
@@ -49,7 +49,7 @@ pipeline test_logical_line_count_handles_final_lines_and_crlf(task) {
 }
 
 @test
-pipeline test_cap_and_new_oversized_source_rules(task) {
+pipeline test_cap_and_new_oversized_source_rules(harness: Harness, task) {
   const at_cap = [{path: "crates/example/src/cap.rs", lines: 1500}]
   assert_eq(evaluate_inventory(at_cap, []).count, 0)
   const findings = evaluate_inventory([{path: "crates/example/src/large.rs", lines: 1501}], [])
@@ -59,7 +59,7 @@ pipeline test_cap_and_new_oversized_source_rules(task) {
 }
 
 @test
-pipeline test_exact_existing_count_passes_and_growth_fails(task) {
+pipeline test_exact_existing_count_passes_and_growth_fails(harness: Harness, task) {
   const baseline = [
     {
       kind: "valid",
@@ -79,7 +79,7 @@ pipeline test_exact_existing_count_passes_and_growth_fails(task) {
 }
 
 @test
-pipeline test_shrink_requires_tightening_or_shard_deletion(task) {
+pipeline test_shrink_requires_tightening_or_shard_deletion(harness: Harness, task) {
   const baseline = [
     {
       kind: "valid",
@@ -95,7 +95,7 @@ pipeline test_shrink_requires_tightening_or_shard_deletion(task) {
 }
 
 @test
-pipeline test_invalid_and_orphan_baselines_fail_closed(task) {
+pipeline test_invalid_and_orphan_baselines_fail_closed(harness: Harness, task) {
   const malformed = parse_baseline(
     baseline_path_for("crates/example/src/malformed.rs"),
     "not-a-number\n",
@@ -124,7 +124,7 @@ pipeline test_invalid_and_orphan_baselines_fail_closed(task) {
 }
 
 @test
-pipeline test_baseline_parser_requires_canonical_positive_integer(task) {
+pipeline test_baseline_parser_requires_canonical_positive_integer(harness: Harness, task) {
   const path = baseline_path_for("crates/example/src/lib.rs")
   assert_eq(
     baseline_path_for("tools\\new.rs"),
@@ -149,38 +149,39 @@ pipeline test_baseline_parser_requires_canonical_positive_integer(task) {
 }
 
 @test
-pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
+pipeline test_source_scope_includes_tests_benches_and_stdlib_only(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
-      write_source(root, "crates/app/src/lib.rs", 1)
-      write_source(root, "crates/app/tests/integration.rs", 1)
-      write_source(root, "crates/app/benches/latency.rs", 1)
-      write_source(root, "bench/src/bin/bench.rs", 1)
-      write_source(root, "tree-sitter-harn/bindings/rust/lib.rs", 1)
-      write_source(root, "tools/new.rs", 1)
-      write_source(root, "spec/protocol-artifacts/harn-protocol.rs", 1)
-      write_source(root, "crates/harn-stdlib/src/stdlib/agent/loop.harn", 1)
-      write_source(root, "crates/harn-stdlib/tests/fixture.harn", 1)
-      write_source(root, "conformance/tests/case.harn", 1)
-      write_source(root, "scripts/helper.harn", 1)
-      write_source(root, "crates/app/target/debug/generated.rs", 1)
-      write_source(root, "crates/app/.target/debug/generated.rs", 1)
-      write_source(root, ".harn-runs/performance/home/registry/generated.rs", 1)
-      write_source(root, ".harn-toolchain-cache/cargo-target/debug/generated.rs", 1)
-      write_source(root, ".target-4688/debug/build/pkg/out/generated.rs", 1)
-      write_source(root, "target-codex0-4942/debug/build/pkg/out/generated.rs", 1)
-      write_source(root, "target-source/src/lib.rs", 1)
+      write_source(harness, root, "crates/app/src/lib.rs", 1)
+      write_source(harness, root, "crates/app/tests/integration.rs", 1)
+      write_source(harness, root, "crates/app/benches/latency.rs", 1)
+      write_source(harness, root, "bench/src/bin/bench.rs", 1)
+      write_source(harness, root, "tree-sitter-harn/bindings/rust/lib.rs", 1)
+      write_source(harness, root, "tools/new.rs", 1)
+      write_source(harness, root, "spec/protocol-artifacts/harn-protocol.rs", 1)
+      write_source(harness, root, "crates/harn-stdlib/src/stdlib/agent/loop.harn", 1)
+      write_source(harness, root, "crates/harn-stdlib/tests/fixture.harn", 1)
+      write_source(harness, root, "conformance/tests/case.harn", 1)
+      write_source(harness, root, "scripts/helper.harn", 1)
+      write_source(harness, root, "crates/app/target/debug/generated.rs", 1)
+      write_source(harness, root, "crates/app/.target/debug/generated.rs", 1)
+      write_source(harness, root, ".harn-runs/performance/home/registry/generated.rs", 1)
+      write_source(harness, root, ".harn-toolchain-cache/cargo-target/debug/generated.rs", 1)
+      write_source(harness, root, ".target-4688/debug/build/pkg/out/generated.rs", 1)
+      write_source(harness, root, "target-codex0-4942/debug/build/pkg/out/generated.rs", 1)
+      write_source(harness, root, "target-source/src/lib.rs", 1)
       // Below the repo root, a `target-` directory stays in scope even when it
       // carries a `debug/` artifact dir — only a ROOT `target-*` is treated as
       // a per-worktree Cargo target. The path deliberately avoids a `build/`
       // component: `files_below` inherits `walk_dir`'s built-in ignore set, so
       // no fixture can assert anything about a path under `target/`, `build/`,
       // `dist/`, `node_modules/`, `coverage/`, `venv/`, or `__pycache__/`.
-      write_source(root, "crates/app/target-codex0-4942/debug/generated.rs", 1)
-      write_source(root, "tree-sitter-harn/node_modules/pkg/binding.rs", 1)
-      write_text(root, "crates/app/src/not-source.txt", "text\n")
+      write_source(harness, root, "crates/app/target-codex0-4942/debug/generated.rs", 1)
+      write_source(harness, root, "tree-sitter-harn/node_modules/pkg/binding.rs", 1)
+      write_text(harness, root, "crates/app/src/not-source.txt", "text\n")
       assert_eq(
-        source_files(root),
+        source_files(harness, root),
         [
           "bench/src/bin/bench.rs",
           "crates/app/benches/latency.rs",
@@ -203,7 +204,7 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
 // reconciles the inventory against git to close it; these pin that reconciliation
 // without walking the repo, so the suite stays hermetic and fast.
 @test
-pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(task) {
+pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(harness: Harness, task) {
   // `build` is one of the directory names `walk_dir` refuses to descend into,
   // so a source tree under it is tracked by git and invisible to the ratchet.
   assert_eq(
@@ -216,7 +217,7 @@ pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(task) {
 }
 
 @test
-pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(task) {
+pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(harness: Harness, task) {
   assert_eq(unscanned_sources(["a.rs", "b.rs"], ["b.rs", "a.rs"]), [])
   // Nothing is tracked under a synthetic root, so a fixture run reports nothing
   // rather than flagging every file the fixture never committed.
@@ -224,7 +225,7 @@ pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(task) {
 }
 
 @test
-pipeline test_unscanned_sources_excludes_generated_and_sorts(task) {
+pipeline test_unscanned_sources_excludes_generated_and_sorts(harness: Harness, task) {
   // Generated protocol artifacts are deliberately outside the ratchet, so their
   // absence from the inventory is not a coverage hole.
   assert_eq(unscanned_sources([], ["spec/protocol-artifacts/harn-protocol.rs"]), [])
@@ -232,7 +233,7 @@ pipeline test_unscanned_sources_excludes_generated_and_sorts(task) {
 }
 
 @test
-pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(task) {
+pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(harness: Harness, task) {
   const sources = [
     {path: "crates/z/src/lib.rs", lines: 1700},
     {path: "crates/a/src/lib.rs", lines: 1600},
@@ -284,46 +285,57 @@ pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(task) {
 }
 
 @test
-pipeline test_tightening_and_removal_apply_end_to_end(task) {
+pipeline test_tightening_and_removal_apply_end_to_end(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
       const big = "crates/example/src/big.rs"
       const small = "crates/example/src/small.rs"
-      write_source(root, big, 1600)
-      write_source(root, small, 20)
-      write_baseline(root, big, 1600)
-      assert_eq(check_source_file_lengths(root).findings.count, 0)
-      write_source(root, big, 1550)
-      const report = check_source_file_lengths(root)
+      write_source(harness, root, big, 1600)
+      write_source(harness, root, small, 20)
+      write_baseline(harness, root, big, 1600)
+      assert_eq(check_source_file_lengths(harness, root).findings.count, 0)
+      write_source(harness, root, big, 1550)
+      const report = check_source_file_lengths(harness, root)
       assert_eq(finding_kinds(report.findings), ["stale_baseline"])
-      const tighten = plan_baseline_update(source_inventory(root), baseline_inventory(root))
+      const tighten = plan_baseline_update(
+        source_inventory(harness, root),
+        baseline_inventory(harness, root),
+      )
       assert_eq(tighten.count, 1)
       assert_eq(tighten[0]?.kind, "write")
       assert_eq(tighten[0]?.lines, 1550)
-      apply_baseline_edits(root, tighten)
-      assert_eq(check_source_file_lengths(root).findings.count, 0)
-      write_source(root, big, 1500)
-      const remove = plan_baseline_update(source_inventory(root), baseline_inventory(root))
+      apply_baseline_edits(harness, root, tighten)
+      assert_eq(check_source_file_lengths(harness, root).findings.count, 0)
+      write_source(harness, root, big, 1500)
+      const remove = plan_baseline_update(
+        source_inventory(harness, root),
+        baseline_inventory(harness, root),
+      )
       assert_eq(remove.count, 1)
       assert_eq(remove[0]?.kind, "delete")
-      apply_baseline_edits(root, remove)
-      assert_eq(check_source_file_lengths(root).findings.count, 0)
+      apply_baseline_edits(harness, root, remove)
+      assert_eq(check_source_file_lengths(harness, root).findings.count, 0)
     },
   )
 }
 
 @test
-pipeline test_normal_update_never_exempts_or_records_growth(task) {
+pipeline test_normal_update_never_exempts_or_records_growth(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
       const old = "crates/example/src/old.rs"
       const added = "crates/example/src/added.rs"
-      write_source(root, old, 1601)
-      write_baseline(root, old, 1600)
-      write_source(root, added, 1501)
-      const edits = plan_baseline_update(source_inventory(root), baseline_inventory(root))
+      write_source(harness, root, old, 1601)
+      write_baseline(harness, root, old, 1600)
+      write_source(harness, root, added, 1501)
+      const edits = plan_baseline_update(
+        source_inventory(harness, root),
+        baseline_inventory(harness, root),
+      )
       assert_eq(edits.count, 0)
-      const report = check_source_file_lengths(root)
+      const report = check_source_file_lengths(harness, root)
       assert_eq(finding_kinds(report.findings), ["new_oversized_source", "growth"])
       assert_eq(report.findings[0]?.path, added)
       assert_eq(report.findings[1]?.path, old)
@@ -332,18 +344,22 @@ pipeline test_normal_update_never_exempts_or_records_growth(task) {
 }
 
 @test
-pipeline test_deleted_source_leaves_stale_shard_until_update(task) {
+pipeline test_deleted_source_leaves_stale_shard_until_update(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
       const deleted = "crates/example/src/deleted.rs"
-      write_baseline(root, deleted, 1600)
-      const report = check_source_file_lengths(root)
+      write_baseline(harness, root, deleted, 1600)
+      const report = check_source_file_lengths(harness, root)
       assert_eq(finding_kinds(report.findings), ["orphan_baseline"])
-      const edits = plan_baseline_update(source_inventory(root), baseline_inventory(root))
+      const edits = plan_baseline_update(
+        source_inventory(harness, root),
+        baseline_inventory(harness, root),
+      )
       assert_eq(edits.count, 1)
       assert_eq(edits[0]?.kind, "delete")
-      apply_baseline_edits(root, edits)
-      assert_eq(check_source_file_lengths(root).findings.count, 0)
+      apply_baseline_edits(harness, root, edits)
+      assert_eq(check_source_file_lengths(harness, root).findings.count, 0)
     },
   )
 }

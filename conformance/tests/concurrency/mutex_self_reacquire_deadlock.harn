@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   mutex("resource") {
     mutex("resource") {
-      log("unreachable: re-acquiring the same keyed mutex self-deadlocks")
+      harness.stdio.log("unreachable: re-acquiring the same keyed mutex self-deadlocks")
     }
   }
 }

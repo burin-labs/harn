@@ -304,7 +304,7 @@ fn direct_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         | "websocket_server" => {
             out.insert("network.http".to_string());
         }
-        "exec" | "exec_at" | "shell" | "shell_at" | "spawn_captured" => {
+        "exec" | "exec_at" | "shell" | "shell_at" => {
             out.insert("process.exec".to_string());
         }
         "llm_call"
@@ -367,9 +367,7 @@ fn direct_effects(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
 
 fn host_call_surface(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    if !direct_capabilities(call).is_empty()
-        || matches!(call.display_name.as_str(), "harness.crypto.sha256")
-    {
+    if !direct_capabilities(call).is_empty() {
         out.insert(call.display_name.clone());
     }
     if call.name == "host_call" {
@@ -404,24 +402,27 @@ fn literal_as_str(value: &LiteralValue) -> Option<&str> {
 }
 
 fn capability_label(capability: Capability) -> String {
-    match capability {
-        Capability::WorkspaceMutation => "workspace.write_text",
-        Capability::CommandExecution => "process.exec",
-        Capability::NetworkAccess => "network.http",
-        Capability::ConnectorAccess => "connector.call",
-        Capability::ModelCall => "llm.call",
-        Capability::WorkerDispatch => "worker.dispatch",
-        Capability::HumanApproval => "human.approval",
-        Capability::AutonomyPolicy => "autonomy.policy",
-    }
-    .to_string()
+    capability.canonical().to_string()
 }
 
 fn effect_label(capability: Capability, operation: &str) -> String {
     match capability {
-        Capability::WorkspaceMutation => "fs.write".to_string(),
-        Capability::CommandExecution => "process.exec".to_string(),
-        Capability::NetworkAccess => "net.http".to_string(),
+        Capability::FilesystemRead
+        | Capability::WorkspaceMutation
+        | Capability::CommandExecution
+        | Capability::NetworkAccess
+        | Capability::ModelCall
+        | Capability::WorkerDispatch
+        | Capability::Stdio
+        | Capability::Environment
+        | Capability::Clock
+        | Capability::Random
+        | Capability::Secret
+        | Capability::Observability
+        | Capability::Channel
+        | Capability::State
+        | Capability::HumanApproval
+        | Capability::AutonomyPolicy => capability.canonical().to_string(),
         Capability::ConnectorAccess => {
             if operation == "template.render" {
                 "template.render".to_string()
@@ -429,10 +430,6 @@ fn effect_label(capability: Capability, operation: &str) -> String {
                 "connector.call".to_string()
             }
         }
-        Capability::ModelCall => "llm.call".to_string(),
-        Capability::WorkerDispatch => "worker.dispatch".to_string(),
-        Capability::HumanApproval => "human.approval".to_string(),
-        Capability::AutonomyPolicy => "autonomy.policy".to_string(),
     }
 }
 

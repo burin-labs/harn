@@ -1,5 +1,5 @@
 /** Test the never type and unreachable() builtin */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // unreachable() throws at runtime
   fn test_unreachable_throws() -> string {
     try {
@@ -36,9 +36,9 @@ pipeline test(task) {
     }
     unreachable(x)
   }
-  log(test_unreachable_throws())
-  log(test_unreachable_with_value())
-  log(branch_type(true))
-  log(exhaustive_check("hello"))
-  log(exhaustive_check(42))
+  harness.stdio.log(test_unreachable_throws())
+  harness.stdio.log(test_unreachable_with_value())
+  harness.stdio.log(branch_type(true))
+  harness.stdio.log(exhaustive_check("hello"))
+  harness.stdio.log(exhaustive_check(42))
 }

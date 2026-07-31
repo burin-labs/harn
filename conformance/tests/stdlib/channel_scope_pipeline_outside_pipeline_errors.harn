@@ -4,10 +4,10 @@
  * not establish a pipeline runtime overlay (only orchestrator workflows do),
  * so this is the conformance signal for the missing-context guard.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const pipeline_emit = try {
-    emit_channel("pipeline:stage.done", {n: 1}, {id: "outside-pipeline"})
+    harness.channels.append("pipeline:stage.done", {n: 1}, {id: "outside-pipeline"})
   }
-  __io_println(is_err(pipeline_emit))
-  __io_println(contains(to_string(unwrap_err(pipeline_emit)), "HARN-CHN-001"))
+  harness.stdio.println(is_err(pipeline_emit))
+  harness.stdio.println(contains(to_string(unwrap_err(pipeline_emit)), "HARN-CHN-001"))
 }

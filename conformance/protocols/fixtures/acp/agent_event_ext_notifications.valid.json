@@ -142,7 +142,7 @@
         "result": null,
         "runId": "cmp-2",
         "sessionId": "session-1",
-        "snippetHash": "sha256:67d844681154387a2adfd1e6e797b73dc6d0b688a9d0ef83edd7fafdd70954fb",
+        "snippetHash": "sha256:cece894820918a7586744d6bba556cc4b40261d9539272bc29eef2913f3662ce",
         "stderr": null,
         "stdout": null
       }
@@ -218,7 +218,7 @@
         "result": null,
         "runId": "cmp-2",
         "sessionId": "session-1",
-        "snippetHash": "sha256:67d844681154387a2adfd1e6e797b73dc6d0b688a9d0ef83edd7fafdd70954fb",
+        "snippetHash": "sha256:cece894820918a7586744d6bba556cc4b40261d9539272bc29eef2913f3662ce",
         "stderr": null,
         "stdout": null
       }

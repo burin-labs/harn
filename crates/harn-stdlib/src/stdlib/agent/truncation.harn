@@ -10,20 +10,26 @@ import { truncate_text } from "std/text"
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_report_truncation(original: any, retained: any, detail: string) -> nil {
+pub fn agent_report_truncation(
+  agent: HarnessAgent,
+  original: any,
+  retained: any,
+  detail: string,
+) -> nil {
   const source = to_string(original ?? "")
   const kept = to_string(retained ?? "")
   const dropped_bytes = bytes_len(bytes_from_string(source)) - bytes_len(bytes_from_string(kept))
   if dropped_bytes <= 0 {
     return nil
   }
-  const session_id = agent_session_current_id()
+  const session_id = agent.current_id()
   // Pure projection helpers can be evaluated before a session exists. The
   // model-facing owners run inside a session and therefore have an event sink.
   if type_of(session_id) != "string" || session_id == "" {
     return nil
   }
   let _ = agent_emit_event(
+    agent,
     session_id,
     "boundary_failure",
     {
@@ -44,11 +50,16 @@ pub fn agent_report_truncation(original: any, retained: any, detail: string) -> 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_truncate_prompt_text(text: any, limit: int, detail: string) -> string {
+pub fn agent_truncate_prompt_text(
+  agent: HarnessAgent,
+  text: any,
+  limit: int,
+  detail: string,
+) -> string {
   const value = to_string(text ?? "")
   const truncated = truncate_text(value, limit)
   if len(value) > limit {
-    let _ = agent_report_truncation(value, substring(value, 0, limit), detail)
+    let _ = agent_report_truncation(agent, value, substring(value, 0, limit), detail)
   }
   return truncated
 }
@@ -60,6 +71,6 @@ pub fn agent_truncate_prompt_text(text: any, limit: int, detail: string) -> stri
  * @errors: []
  * @api_stability: experimental
  */
-pub fn prompt_cap(text: any, limit: int, kind: string) -> string {
-  return agent_truncate_prompt_text(text, limit, "command " + kind + " truncated")
+pub fn prompt_cap(agent: HarnessAgent, text: any, limit: int, kind: string) -> string {
+  return agent_truncate_prompt_text(agent, text, limit, "command " + kind + " truncated")
 }

@@ -16,6 +16,7 @@
  * passes `path`, so a schema inferred from observed arguments would visibly
  * differ from the one the model was served.
  */
+import { agent_loop } from "std/agent/loop"
 import { llm_done, llm_text, llm_tool_call, with_llm_mocks } from "std/testing"
 import { tool_registry_from } from "std/tools"
 
@@ -64,10 +65,10 @@ fn main(harness: Harness) -> int {
     [first_turn]
   }
   const result = with_llm_mocks(
+    harness.llm,
     responses,
     { _ ->
-      agent_loop(
-        "read main.rs and report",
+      agent_loop(harness, "read main.rs and report",
         "You are a coding agent.",
         {
           model: "mock",
@@ -80,7 +81,7 @@ fn main(harness: Harness) -> int {
       )
     },
   )
-  const persisted = run_record_save(
+  const persisted = harness.fs.run_record_save(
     run_record(
       {
         id: run_id,

@@ -1,21 +1,21 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const op = {type: "read_file", name: "test"}
-  __io_println(op.type)
-  __io_println(op.name)
+  harness.stdio.println(op.type)
+  harness.stdio.println(op.name)
   const cfg = {match: "pattern", for: "user", enum: "status"}
-  __io_println(cfg.match)
-  __io_println(cfg.for)
-  __io_println(cfg.enum)
+  harness.stdio.println(cfg.match)
+  harness.stdio.println(cfg.for)
+  harness.stdio.println(cfg.enum)
   const gates = {
     request_approval: true,
     ask_user: "owner",
     dual_control: 2,
     escalate_to: "frontier",
   }
-  __io_println(gates.request_approval)
-  __io_println(gates.ask_user)
-  __io_println(gates.dual_control)
-  __io_println(gates.escalate_to)
+  harness.stdio.println(gates.request_approval)
+  harness.stdio.println(gates.ask_user)
+  harness.stdio.println(gates.dual_control)
+  harness.stdio.println(gates.escalate_to)
   const flow = {
     finally: "cleanup",
     require: "policy",
@@ -23,10 +23,10 @@ pipeline default() {
     skill: "review",
     eval_pack: "smoke",
   }
-  __io_println(flow.finally)
-  __io_println(flow.require)
-  __io_println(flow.select)
-  __io_println(flow.skill)
-  __io_println(flow.eval_pack)
-  __io_println(json_stringify({eval_pack: "smoke"}))
+  harness.stdio.println(flow.finally)
+  harness.stdio.println(flow.require)
+  harness.stdio.println(flow.select)
+  harness.stdio.println(flow.skill)
+  harness.stdio.println(flow.eval_pack)
+  harness.stdio.println(json_stringify({eval_pack: "smoke"}))
 }

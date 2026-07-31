@@ -1,7 +1,7 @@
 import { verification_ladder_plan } from "std/verification"
 
-pipeline test(task) {
-  verification_profiles_set(
+pipeline test(harness: Harness, task) {
+  harness.runtime.verification_profiles_set(
     {
       rows: [
         {
@@ -91,7 +91,7 @@ pipeline test(task) {
     },
   )
   const query = {path: "src/a.tx", language: "toolchainx", task: "post_edit"}
-  const matches = verification_profile_matches(query)
+  const matches = harness.runtime.verification_profile_matches(query)
   assert_eq(matches[0].row.id, "tx/parse")
   assert_eq(matches[1].row.id, "tx/unit")
   assert_eq(matches[2].row.id, "tx/full-stale")
@@ -103,6 +103,7 @@ pipeline test(task) {
   assert_eq(matches[8].row.id, "tx/r1-fast")
   assert_eq(matches[9].row.id, "any/full")
   const plan = verification_ladder_plan(
+    harness.runtime,
     query,
     {resource_classes: ["cheap", "moderate"], allow_stale_prone: false},
   )
@@ -133,10 +134,11 @@ pipeline test(task) {
   assert_eq(plan.skipped[3].reason, "stale_prone_filtered")
   assert_eq(plan.skipped[4].row_id, "any/full")
   assert_eq(plan.skipped[4].reason, "resource_class_filtered")
-  const bounded = verification_ladder_plan(query, {max_rung: "R1"})
+  const bounded = verification_ladder_plan(harness.runtime, query, {max_rung: "R1"})
   assert_eq(len(bounded.selected), 5)
   assert_eq(bounded.selected[0].row_id, "tx/parse")
   const numeric_bounded = verification_ladder_plan(
+    harness.runtime,
     query,
     {min_rung: 1, max_rung: 2, resource_classes: ["cheap", "moderate"], allow_stale_prone: false},
   )
@@ -144,14 +146,15 @@ pipeline test(task) {
   assert_eq(numeric_bounded.selected[0].row_id, "tx/r1-fast")
   assert_eq(numeric_bounded.selected[1].row_id, "tx/unit")
   const limited = verification_ladder_plan(
+    harness.runtime,
     query,
     {resource_classes: ["cheap", "moderate"], allow_stale_prone: false, limit: 3},
   )
   assert_eq(len(limited.selected), 3)
   assert_eq(limited.selected[2].row_id, "tx/r0-fast-moderate")
-  verification_profiles_set({rows: []})
-  const empty = verification_ladder_plan(query)
+  harness.runtime.verification_profiles_set({rows: []})
+  const empty = verification_ladder_plan(harness.runtime, query)
   assert_eq(empty.fallback, true)
   assert_eq(empty.reason, "no_profile_rows")
-  __io_println("verification ladder plan ok")
+  harness.stdio.println("verification ladder plan ok")
 }

@@ -1,14 +1,14 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // -0.0 and 0.0 are distinct float literals: dividing by them yields -inf vs
   // +inf. The constant pool must not collapse them onto one slot (which made
   // the sign depend on which literal was interned first).
   const neg = -0.0
   const pos = 0.0
-  log(1.0 / neg)
-  log(1.0 / pos)
+  harness.stdio.log(1.0 / neg)
+  harness.stdio.log(1.0 / pos)
   // Reversed declaration order — results must be identical, not flipped.
   const pos2 = 0.0
   const neg2 = -0.0
-  log(1.0 / pos2)
-  log(1.0 / neg2)
+  harness.stdio.log(1.0 / pos2)
+  harness.stdio.log(1.0 / neg2)
 }

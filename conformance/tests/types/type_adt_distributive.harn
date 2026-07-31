@@ -16,24 +16,24 @@
  */
 type Action = "create" | "edit"
 
-type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
+type ActionContainer<T> = {action: T, process_action: fn(HarnessStdio, T) -> nil}
 
-fn process_create(a: "create") {
-  __io_println("create " + a)
+fn process_create(stdio: HarnessStdio, a: "create") {
+  stdio.println("create " + a)
 }
 
-fn process_edit(a: "edit") {
-  __io_println("edit " + a)
+fn process_edit(stdio: HarnessStdio, a: "edit") {
+  stdio.println("edit " + a)
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Scalar case: each annotation distributes `ActionContainer<Action>`
   // into `ActionContainer<"create"> | ActionContainer<"edit">`; the
   // literal-tagged shape on the RHS then fits one specific branch.
   const c1: ActionContainer<Action> = {action: "create", process_action: process_create}
   const c2: ActionContainer<Action> = {action: "edit", process_action: process_edit}
-  c1.process_action(c1.action)
-  c2.process_action(c2.action)
+  c1.process_action(harness.stdio, c1.action)
+  c2.process_action(harness.stdio, c2.action)
   // List case: the TS playground example verbatim. A heterogeneous
   // list of container instances assigns into `list<ActionContainer<Action>>`
   // because the element type distributes.
@@ -42,6 +42,6 @@ pipeline test(task) {
     {action: "edit", process_action: process_edit},
   ]
   for c in containers {
-    c.process_action(c.action)
+    c.process_action(harness.stdio, c.action)
   }
 }

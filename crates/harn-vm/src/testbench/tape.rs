@@ -561,12 +561,16 @@ impl TapeRecorder {
     /// Append a record built from `kind`. The recorder stamps the seq
     /// number and timing metadata; callers only worry about the payload.
     pub fn record(&self, kind: TapeRecordKind) {
-        let seq = self.next_seq.fetch_add(1, Ordering::SeqCst);
         let virtual_time_ms = clock_mock::now_ms();
         let monotonic_ms = clock_mock::instant_now()
             .duration_since(self.started_at)
             .as_millis()
             .min(i64::MAX as u128) as i64;
+        self.record_at(kind, virtual_time_ms, monotonic_ms);
+    }
+
+    fn record_at(&self, kind: TapeRecordKind, virtual_time_ms: i64, monotonic_ms: i64) {
+        let seq = self.next_seq.fetch_add(1, Ordering::SeqCst);
         let record = TapeRecord {
             seq,
             phase: TapePhase::from_u8(self.phase.load(Ordering::SeqCst)),
@@ -703,6 +707,23 @@ where
     };
     if let Some(kind) = build(&recorder) {
         recorder.record(kind);
+    }
+}
+
+/// Push a record stamped by an exact capability-owned clock.
+///
+/// The unified testbench clock remains the default for ambient runtime axes,
+/// while nominal Harness clocks use this path so an attenuated test clock does
+/// not leak into unrelated VMs or lose fidelity metadata.
+pub fn with_active_recorder_clock<F>(clock: &dyn harn_clock::Clock, build: F)
+where
+    F: FnOnce(&Arc<TapeRecorder>) -> Option<TapeRecordKind>,
+{
+    let Some(recorder) = active_recorder() else {
+        return;
+    };
+    if let Some(kind) = build(&recorder) {
+        recorder.record_at(kind, harn_clock::now_wall_ms(clock), clock.monotonic_ms());
     }
 }
 

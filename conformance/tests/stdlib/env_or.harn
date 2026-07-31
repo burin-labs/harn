@@ -1,12 +1,12 @@
 /** env_or returns the env var when set, or the default otherwise. */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // Unlikely-to-be-set var → default path.
   const model = harness.env.get_or("HARN_TEST_UNSET_VAR_28_XYZ", "ollama:qwen3:30b-a3b")
-  __io_println(model)
+  harness.stdio.println(model)
   // The default can be any value, not just a string.
   const port = harness.env.get_or("HARN_TEST_UNSET_VAR_28_PORT", 8080)
-  __io_println(port)
+  harness.stdio.println(port)
   // nil default survives when the env var is unset.
   const missing = harness.env.get_or("HARN_TEST_UNSET_VAR_28_NONE", nil)
-  __io_println(missing == nil)
+  harness.stdio.println(missing == nil)
 }

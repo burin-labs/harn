@@ -3,19 +3,19 @@
 // routes correctly when scope is omitted or set to "session".
 import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
 
-pipeline default() {
-  const pool = pool_create({name: "session-demo", max_concurrent: 1})
-  log(pool.scope)
-  log(pool.durable)
+pipeline default(harness: Harness) {
+  const pool = pool_create(harness.agent, {name: "session-demo", max_concurrent: 1})
+  harness.stdio.log(pool.scope)
+  harness.stdio.log(pool.durable)
   const h1 = pool.submit({ -> 11 })
-  const r1 = pool_wait(h1)
-  log(r1.status)
-  log(r1.result)
+  const r1 = pool_wait(harness.agent, h1)
+  harness.stdio.log(r1.status)
+  harness.stdio.log(r1.result)
   // After restart, the registry forgets the pool entirely. Re-creating
   // by the same name observes a fresh handle with no carried-over
   // tasks.
-  pool_simulate_restart()
-  const again = pool_create({name: "session-demo", max_concurrent: 1})
-  log(again.scope)
-  log(again.total)
+  pool_simulate_restart(harness.agent)
+  const again = pool_create(harness.agent, {name: "session-demo", max_concurrent: 1})
+  harness.stdio.log(again.scope)
+  harness.stdio.log(again.total)
 }

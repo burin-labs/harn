@@ -67,32 +67,32 @@ Harnesses that need to host ACP-style browser or agent streams can expose an
 upgrade route directly from Harn:
 
 ```harn
-pipeline acp_websocket_echo() {
-  const server = websocket_server("127.0.0.1:8787", {})
-  websocket_route(server, "/acp", {
-    auth: {bearer: env("ACP_TOKEN")},
+pipeline acp_websocket_echo(harness: Harness) {
+  const server = harness.net.websocket_server("127.0.0.1:8787", {})
+  harness.net.websocket_route(server, "/acp", {
+    auth: {bearer: harness.env.get("ACP_TOKEN")},
     max_message_bytes: 1048576,
     send_buffer_messages: 64,
     idle_timeout_ms: 30000,
   })
 
   while true {
-    const accepted = websocket_accept(server, 30000)
+    const accepted = harness.net.websocket_accept(server, 30000)
     if accepted == nil || accepted?.type == "timeout" {
       continue
     }
     const conn = accepted ?? {}
 
-    const frame = websocket_receive(conn, 30000) ?? {}
+    const frame = harness.net.websocket_receive(conn, 30000) ?? {}
     if frame?.type == "text" {
       const request = json_parse(frame.data)
-      websocket_send(conn, json_stringify({
+      harness.net.websocket_send(conn, json_stringify({
         jsonrpc: "2.0",
         id: request.id,
         result: {echo: request.method},
       }), {})
     } else if frame?.type == "close" {
-      websocket_close(conn)
+      harness.net.websocket_close(conn)
     }
   }
 }

@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use harn_vm::llm::enable_tracing;
 use harn_vm::{
-    clear_host_call_bridge, register_checkpoint_builtins, register_http_builtins,
-    register_llm_builtins, register_metadata_builtins, register_store_builtins, register_vm_stdlib,
-    set_host_call_bridge, DebugAction, Vm, VmError,
+    clear_host_call_bridge, register_checkpoint_builtins, register_metadata_builtins,
+    register_store_builtins, register_vm_stdlib, set_host_call_bridge, DebugAction, Vm, VmError,
 };
 use serde_json::json;
 
@@ -52,8 +51,6 @@ impl Debugger {
             vm.set_source_info(path, source);
         }
         register_vm_stdlib(&mut vm);
-        register_http_builtins(&mut vm);
-        register_llm_builtins(&mut vm);
 
         // Root metadata/store/checkpoint state at the nearest harn.toml
         // (falling back to the source file's directory) so pipelines that

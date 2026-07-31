@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const items = [1, 2, 3]
   const outcome = parallel settle items { item ->
     if item == 2 {
@@ -6,13 +6,13 @@ pipeline test(task) {
     }
     item * 10
   }
-  log(outcome.succeeded)
-  log(outcome.failed)
+  harness.stdio.log(outcome.succeeded)
+  harness.stdio.log(outcome.failed)
   for r in outcome.results {
     if is_ok(r) {
-      log(unwrap(r))
+      harness.stdio.log(unwrap(r))
     } else {
-      log(unwrap_err(r))
+      harness.stdio.log(unwrap_err(r))
     }
   }
 }

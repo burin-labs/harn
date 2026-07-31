@@ -5,5 +5,6 @@
     "XDG_CACHE_HOME": "relative/cache",
     "XDG_CONFIG_HOME": "relative/config",
     "XDG_DATA_HOME": ""
-  }
+  },
+  "expect_stdio": "true\ntrue\ntrue\n"
 }

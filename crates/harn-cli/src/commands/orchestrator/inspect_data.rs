@@ -890,7 +890,7 @@ budget = { daily_cost_usd = 1.0 }
             r#"
 import "std/triggers"
 
-pub fn on_ok(event: TriggerEvent) -> dict {
+pub fn on_ok(harness: Harness, event: TriggerEvent) -> dict {
   return {tenant: event.headers.tenant}
 }
 "#,

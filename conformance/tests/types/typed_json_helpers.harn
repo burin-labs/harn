@@ -4,20 +4,20 @@
 // and `omit` preserve the `dict<string, V>` value contract.
 import { merge, omit, pick } from "std/json"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const scores: dict<string, int> = {alice: 1, bob: 2}
   const bonus: dict<string, int> = {bob: 5, carol: 3}
   const combined: dict<string, int> = merge(scores, bonus)
-  __io_println(combined.alice)
-  __io_println(combined.bob)
-  __io_println(combined.carol)
+  harness.stdio.println(combined.alice)
+  harness.stdio.println(combined.bob)
+  harness.stdio.println(combined.carol)
   const kept: dict<string, int> = pick(scores, ["alice"])
-  __io_println(kept.alice)
-  __io_println(contains(kept.keys(), "bob"))
+  harness.stdio.println(kept.alice)
+  harness.stdio.println(contains(kept.keys(), "bob"))
   const dropped: dict<string, int> = omit(scores, ["bob"])
-  __io_println(dropped.alice)
-  __io_println(contains(dropped.keys(), "bob"))
+  harness.stdio.println(dropped.alice)
+  harness.stdio.println(contains(dropped.keys(), "bob"))
   const extras = merge({region: "us"}, {tier: "gold"})
-  __io_println(extras.region)
-  __io_println(extras.tier)
+  harness.stdio.println(extras.region)
+  harness.stdio.println(extras.tier)
 }

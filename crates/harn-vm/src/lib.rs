@@ -164,9 +164,10 @@ pub fn initialize_runtime() -> Result<(), environment_registry::EnvironmentValid
 /// the long-lived implementation under `triggers::test_util::clock` so all
 /// callers go through one source of truth.
 pub mod clock_mock {
+    pub(crate) use crate::triggers::test_util::clock::scope_capability_clock;
     pub use crate::triggers::test_util::clock::{
-        active_mock_clock, advance, clear_overrides, install_override, instant_now, is_mocked,
-        now_ms, now_utc, sleep, ClockInstant, ClockOverrideGuard, MockClock,
+        active_clock, active_mock_clock, advance, clear_overrides, install_override, instant_now,
+        is_mocked, now_ms, now_utc, sleep, ClockInstant, ClockOverrideGuard, MockClock,
     };
 
     /// Runtime audit for capabilities that observe real wall-clock or
@@ -210,7 +211,7 @@ pub use compiler::*;
 pub use connectors::{
     active_connector_client, active_metrics_registry, clear_active_connector_clients,
     clear_active_metrics_registry, connector_export_denied_builtin_reason,
-    connector_export_effect_class,
+    connector_export_denied_harness_method_reason, connector_export_effect_class,
     cron::{CatchupMode, CronConnector},
     default_connector_export_policy,
     harn_module::{
@@ -232,10 +233,10 @@ pub use corrections::{
     CORRECTION_EVENT_KIND, CORRECTION_SCHEMA_V0,
 };
 pub use harness::{
-    DenyEvent, Harness, HarnessCall, HarnessClock, HarnessCrypto, HarnessEnv, HarnessFs,
-    HarnessKind, HarnessLlm, HarnessNet, HarnessObs, HarnessProcess, HarnessRandom, HarnessSecrets,
-    HarnessStdio, HarnessSystem, HarnessTenant, HarnessTerm, MockAwareClock, MockHarnessBuilder,
-    VmHarness,
+    DenyEvent, Harness, HarnessAgent, HarnessCall, HarnessChannels, HarnessClock, HarnessEnv,
+    HarnessFs, HarnessKind, HarnessLlm, HarnessMemory, HarnessNet, HarnessObs, HarnessPostgres,
+    HarnessProcess, HarnessRandom, HarnessSecrets, HarnessSqlite, HarnessStdio, HarnessSystem,
+    HarnessTenant, HarnessTerm, HarnessTesting, MockHarnessBuilder, VmHarness,
 };
 pub use harness_auth::{
     current_auth_principal, enter_auth_principal, AuthPrincipal, AuthPrincipalScopeGuard,

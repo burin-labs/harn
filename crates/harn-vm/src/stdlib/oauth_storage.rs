@@ -114,6 +114,8 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
 ];
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_storage_memory_handle() -> dict",
     category = "oauth_storage"
 )]
@@ -130,6 +132,8 @@ fn oauth_storage_memory_handle_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_storage_file_handle(path: string, secret: any) -> dict",
     category = "oauth_storage"
 )]
@@ -140,6 +144,8 @@ fn oauth_storage_file_handle_impl(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_storage_cloud_handle(scope: string) -> dict",
     category = "oauth_storage"
 )]
@@ -161,6 +167,8 @@ fn oauth_storage_cloud_handle_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_storage_get(handle: dict, key: string) -> any",
     kind = "async",
     category = "oauth_storage"
@@ -175,6 +183,8 @@ async fn oauth_storage_get_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_storage_set(handle: dict, key: string, token_set: dict, ttl_seconds?: int) -> nil",
     kind = "async",
     category = "oauth_storage"
@@ -192,6 +202,8 @@ async fn oauth_storage_set_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_storage_delete(handle: dict, key: string) -> nil",
     kind = "async",
     category = "oauth_storage"
@@ -207,6 +219,8 @@ async fn oauth_storage_delete_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__oauth_storage_with_refresh_lock(handle: dict, key: string, body: closure) -> any",
     kind = "async",
     category = "oauth_storage"

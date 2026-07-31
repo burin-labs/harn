@@ -2,12 +2,12 @@
  * Iterators are read-only, so element-type widening is sound:
  * an `iter<int>` flows into an `iter<float>`-typed slot.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn sink(ys: iter<float>) -> int {
     return 0
   }
   fn pipe(xs: iter<int>) -> int {
     return sink(xs)
   }
-  __io_println("ok")
+  harness.stdio.println("ok")
 }

@@ -1,17 +1,17 @@
-# Secret store (hostlib)
+# Secret store
 
 The `secret_store` capability is a small, sync host primitive for storing
 per-application credentials in the operating system's native secret store,
 with a portable JSON file fallback for headless environments. It is
-registered automatically by `harn_hostlib::install_default` and exposes
-four builtins:
+registered by the host adapter and exposed only through the nominal
+`HarnessSecretStore` interface:
 
-| Builtin                            | Returns                                    |
+| Method                             | Returns                                    |
 |------------------------------------|--------------------------------------------|
-| `hostlib_secret_store_get`         | `{account, key, value, backend}`           |
-| `hostlib_secret_store_set`         | `{account, key, backend}`                  |
-| `hostlib_secret_store_delete`      | `{account, key, deleted, backend}`         |
-| `hostlib_secret_store_list`        | `{account, keys, backend}`                 |
+| `harness.secret_store.get`         | `{account, key, value, backend}`           |
+| `harness.secret_store.set`         | `{account, key, backend}`                  |
+| `harness.secret_store.delete`      | `{account, key, deleted, backend}`         |
+| `harness.secret_store.list`        | `{account, keys, backend}`                 |
 
 `value` is `nil` when the key is absent. `backend` is `"keyring"` or
 `"file"` so callers can surface backend status without re-deriving it.

@@ -212,10 +212,10 @@ pub fn runner_tier_errors(workflow) -> list<string> {
 }
 
 fn main(harness: Harness) {
-  const workflow = read_yaml(WORKFLOW_PATH, nil)
+  const workflow = read_yaml(harness.fs, WORKFLOW_PATH, nil)
   guard workflow != nil else {
     harness.stdio.eprintln("could not read ${WORKFLOW_PATH}")
-    exit(1)
+    harness.runtime.exit(1)
   }
   const jobs = workflow?.jobs ?? {}
   const tiered = jobs.keys().filter({ name -> (jobs[name]?.env?.[TIER_ENV] ?? "") != "" }).to_list()
@@ -225,7 +225,7 @@ fn main(harness: Harness) {
     for error in errors {
       harness.stdio.eprintln("  - " + error)
     }
-    exit(1)
+    harness.runtime.exit(1)
   }
   harness.stdio.println(
     "runner-tier contract: OK (${len(jobs.keys())} jobs scanned, "

@@ -48,6 +48,8 @@ pub(crate) const PARSE_HOST_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
 /// post-thinking-strip text every unit offset indexes, and each unit ships the
 /// bytes it covers pre-sliced so the Harn walk never re-slices the source.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_scan_units(text: string, spec: dict) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -76,6 +78,8 @@ fn host_tool_scan_units_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 /// consumed}` with the byte length through the closing paren, or `{ok: false,
 /// error}` carrying the model-facing diagnostic.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_parse_call_expr(text: string, name: string) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -100,6 +104,8 @@ fn host_tool_parse_call_expr_builtin(
 /// `name` names the tool the literal belongs to and appears only in the error
 /// message. Returns `{ok: true, value, consumed}` or `{ok: false, error}`.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_parse_object_literal(text: string, name: string) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -128,6 +134,8 @@ fn host_tool_parse_object_literal_builtin(
 /// primitive is for the text the composition holds *after* peeling something
 /// off — a narration block, a line prefix — where no unit boundary exists.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_call_head(text: string) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -145,6 +153,8 @@ fn host_tool_call_head_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 /// `{` or the object is never closed — a balanced object is at least two bytes,
 /// so zero is unambiguous.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_balanced_json_len(text: string) -> int",
     category = "agent.host",
     runtime_only = true
@@ -166,6 +176,8 @@ fn host_tool_balanced_json_len_builtin(
 /// invalid. Keeping those apart is what lets the composition tell a truncated
 /// response from a malformed one instead of reporting both the same way.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_json_stream(text: string) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -227,6 +239,8 @@ fn json_stream(text: &str) -> serde_json::Value {
 /// decodes to the literal `&lt;` rather than collapsing to `<`. Callers must
 /// invoke this at most once per value; a second pass is not idempotent.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_decode_entities(value: any, entities: dict) -> any",
     category = "agent.host",
     runtime_only = true
@@ -330,6 +344,8 @@ fn decode_entities(raw: &str, table: &[(String, String)]) -> String {
 /// what the canonical history entry replays, so a turn with leading raw code
 /// does not become "what the agent said" on the next turn.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_render_call(name: string, arguments: any) -> string",
     category = "agent.host",
     runtime_only = true
@@ -349,6 +365,8 @@ fn host_tool_render_call_builtin(args: &[VmValue], _out: &mut String) -> Result<
 /// `{kind, ...}` projection, while strings preserve uncommon paths that were
 /// already rendered there.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__host_tool_render_parts(parts: list) -> string",
     category = "agent.host"
 )]
@@ -465,6 +483,8 @@ fn host_tool_render_parts_builtin(args: &[VmValue], _out: &mut String) -> Result
 /// does not make a call inert — a composition that treats the fenced branch as
 /// prose-only silently stops dispatching real calls.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_scan_bare_calls(text: string, tools?: dict|nil) -> dict",
     category = "agent.host",
     runtime_only = true
@@ -497,6 +517,8 @@ fn host_tool_scan_bare_calls_builtin(
 /// one VM boundary crossing. Results align by index with `units`; non-text
 /// units carry `nil` because Harn still owns which unit kinds are meaningful.
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "__host_tool_scan_bare_units(units: list<dict>, tools?: dict|nil) -> list<dict|nil>",
     category = "agent.host"
 )]

@@ -32,6 +32,12 @@ pub struct HandlerSpec {
     pub span: Span,
     pub body: Vec<SNode>,
     pub invariants: Vec<InvariantSpec>,
+    /// Nominal capability handles available directly in this handler.
+    ///
+    /// Keeping this structural lets IR analysis attribute `fs.write_text(...)`
+    /// exactly like `harness.fs.write_text(...)` without guessing from local
+    /// variable names.
+    pub capability_handles: BTreeMap<String, harn_builtin_meta::CapabilityId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,16 +175,23 @@ pub enum LiteralValue {
 }
 
 impl LiteralValue {
-    pub(crate) fn as_str(&self) -> Option<&str> {
+    pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(value) | Self::Identifier(value) => Some(value.as_str()),
             _ => None,
         }
     }
 
-    pub(crate) fn dict_field(&self, key: &str) -> Option<&LiteralValue> {
+    pub fn dict_field(&self, key: &str) -> Option<&LiteralValue> {
         match self {
             Self::Dict(entries) => entries.get(key),
+            _ => None,
+        }
+    }
+
+    pub fn list_items(&self) -> Option<&[LiteralValue]> {
+        match self {
+            Self::List(items) => Some(items),
             _ => None,
         }
     }
@@ -186,25 +199,44 @@ impl LiteralValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Capability {
+    FilesystemRead,
     WorkspaceMutation,
     CommandExecution,
     NetworkAccess,
     ConnectorAccess,
     ModelCall,
     WorkerDispatch,
+    Stdio,
+    Environment,
+    Clock,
+    Random,
+    Secret,
+    Observability,
+    Channel,
+    State,
     HumanApproval,
     AutonomyPolicy,
 }
 
 impl Capability {
-    pub(crate) fn canonical(self) -> &'static str {
+    /// Stable policy/graph label for this capability family.
+    pub const fn canonical(self) -> &'static str {
         match self {
+            Self::FilesystemRead => "fs.read",
             Self::WorkspaceMutation => "fs.write",
             Self::CommandExecution => "process.exec",
             Self::NetworkAccess => "network.access",
             Self::ConnectorAccess => "mcp.connector",
             Self::ModelCall => "llm.model",
             Self::WorkerDispatch => "worker.dispatch",
+            Self::Stdio => "stdio.access",
+            Self::Environment => "env.read",
+            Self::Clock => "clock.access",
+            Self::Random => "random.read",
+            Self::Secret => "secret.access",
+            Self::Observability => "observability.emit",
+            Self::Channel => "channel.access",
+            Self::State => "state.access",
             Self::HumanApproval => "human.approval",
             Self::AutonomyPolicy => "autonomy.policy",
         }
@@ -212,6 +244,7 @@ impl Capability {
 
     pub(crate) fn from_policy_name(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
+            "fs.read" | "filesystem.read" => Some(Self::FilesystemRead),
             "fs.write" | "fs.writes" | "workspace.write" | "workspace.mutate"
             | "workspace.mutation" | "filesystem.write" | "filesystem.mutate" => {
                 Some(Self::WorkspaceMutation)
@@ -227,6 +260,14 @@ impl Capability {
             }
             "llm.model" | "model" | "llm" | "model.call" => Some(Self::ModelCall),
             "worker.dispatch" | "worker" | "delegated.worker" | "a2a" => Some(Self::WorkerDispatch),
+            "stdio.access" | "stdio" => Some(Self::Stdio),
+            "env.read" | "env" | "environment" => Some(Self::Environment),
+            "clock.access" | "clock" => Some(Self::Clock),
+            "random.read" | "random" => Some(Self::Random),
+            "secret.access" | "secret" | "secrets" => Some(Self::Secret),
+            "observability.emit" | "observability" => Some(Self::Observability),
+            "channel.access" | "channel" | "channels" => Some(Self::Channel),
+            "state.access" | "state" => Some(Self::State),
             "human.approval" | "approval" | "hitl" => Some(Self::HumanApproval),
             "autonomy.policy" | "autonomy" => Some(Self::AutonomyPolicy),
             _ => None,
@@ -239,18 +280,21 @@ pub struct CapabilityEffect {
     pub capability: Capability,
     pub operation: String,
     pub path: Option<String>,
+    pub access: harn_builtin_meta::EffectAccess,
 }
 
 impl CapabilityEffect {
-    pub(crate) fn new(
+    pub(crate) fn from_contract(
         capability: Capability,
         operation: impl Into<String>,
         path: Option<String>,
+        access: harn_builtin_meta::EffectAccess,
     ) -> Self {
         Self {
             capability,
             operation: operation.into(),
             path,
+            access,
         }
     }
 }

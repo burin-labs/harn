@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // The propagated error is deterministic: branch 0 fails immediately while
   // branch 1 is still yielding, so branch 0's error is the one reported —
   // the first failure in source order among branches that actually failed.
@@ -8,7 +8,7 @@ pipeline test(task) {
       throw "branch zero failed"
     }
     for _ in range(0, 64) {
-      yield_now()
+      harness.runtime.yield_now()
     }
     throw "branch one failed"
   }

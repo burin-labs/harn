@@ -1,22 +1,24 @@
 import { with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [],
     { ->
-      llm_call(
+      harness.llm.call(
         "disabled",
         nil,
         {provider: "mock", model: "mock-model", thinking: {mode: "disabled"}},
       )
-      const disabled = llm_mock_calls()[0].thinking
+      const disabled = harness.llm.mock_calls()[0].thinking
       assert(disabled.mode == "disabled", "disabled mode reaches mock provider")
     },
   )
   with_llm_script(
+    harness.llm,
     [],
     { ->
-      llm_call(
+      harness.llm.call(
         "enabled",
         nil,
         {
@@ -25,45 +27,48 @@ pipeline test(task) {
           thinking: {mode: "enabled", budget_tokens: 8000},
         },
       )
-      const enabled = llm_mock_calls()[0].thinking
+      const enabled = harness.llm.mock_calls()[0].thinking
       assert(enabled.mode == "enabled", "enabled mode reaches mock provider")
       assert(enabled.budget_tokens == 8000, "enabled budget reaches mock provider")
     },
   )
   with_llm_script(
+    harness.llm,
     [],
     { ->
-      llm_call(
+      harness.llm.call(
         "adaptive",
         nil,
         {provider: "mock", model: "claude-opus-4-7", thinking: {mode: "adaptive"}},
       )
-      const adaptive = llm_mock_calls()[0].thinking
+      const adaptive = harness.llm.mock_calls()[0].thinking
       assert(adaptive.mode == "adaptive", "adaptive mode reaches mock provider")
     },
   )
   with_llm_script(
+    harness.llm,
     [],
     { ->
-      llm_call(
+      harness.llm.call(
         "effort",
         nil,
         {provider: "mock", model: "o3", thinking: {mode: "effort", level: "high"}},
       )
-      const effort = llm_mock_calls()[0].thinking
+      const effort = harness.llm.mock_calls()[0].thinking
       assert(effort.mode == "effort", "effort mode reaches mock provider")
       assert(effort.level == "high", "effort level reaches mock provider")
     },
   )
   with_llm_script(
+    harness.llm,
     [{text: "reasoned answer", thinking_summary: "checked constraints"}],
     { ->
-      const openai_effort = llm_call(
+      const openai_effort = harness.llm.call(
         "openai reasoning",
         nil,
         {provider: "openai", model: "o3", thinking: {mode: "effort", level: "high"}},
       )
-      const openai_call = llm_mock_calls()[0].thinking
+      const openai_call = harness.llm.mock_calls()[0].thinking
       assert(openai_call.mode == "effort", "openai effort mode reaches mock transport")
       assert(openai_call.level == "high", "openai effort level reaches mock transport")
       assert(openai_effort.text == "reasoned answer", "openai effort call uses mock response")
@@ -71,7 +76,7 @@ pipeline test(task) {
         openai_effort.thinking_summary == "checked constraints",
         "mock summary surfaces on result",
       )
-      log("llm_thinking_config tests passed")
+      harness.stdio.log("llm_thinking_config tests passed")
     },
   )
 }

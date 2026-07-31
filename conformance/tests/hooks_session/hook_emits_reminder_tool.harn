@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn hook_reminder_tools() {
@@ -10,15 +11,15 @@ fn hook_reminder_tools() {
   )
 }
 
-pipeline main() {
-  clear_tool_hooks()
-  register_tool_hook(
+pipeline main(harness: Harness) {
+  harness.tools.clear_hooks()
+  harness.tools.register_hook(
     {
       pattern: "hooked_tool",
-      pre: { _event ->
+      pre: { _hook_harness, _event ->
         return {reminder: {body: "pre tool reminder", tags: ["tool"], role_hint: "developer"}}
       },
-      post: { event ->
+      post: { _hook_harness, event ->
         return {
           reminder: {body: "post tool reminder", tags: ["tool"], dedupe_key: "post-tool"},
           then: {result: event.result.text + ":post-hook"},
@@ -27,12 +28,14 @@ pipeline main() {
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "tool_1", name: "hooked_tool", arguments: {}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(
+        harness,
         "call the hooked tool",
         nil,
         {
@@ -45,13 +48,13 @@ pipeline main() {
         },
       )
       const events = transcript_events_by_kind(result.transcript, "system_reminder")
-      __io_println(result.status)
-      __io_println(len(events))
-      __io_println(events[0].reminder.body)
-      __io_println(events[0].reminder.role_hint)
-      __io_println(events[1].reminder.body)
-      __io_println(events[1].reminder.source)
-      clear_tool_hooks()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(events))
+      harness.stdio.println(events[0].reminder.body)
+      harness.stdio.println(events[0].reminder.role_hint)
+      harness.stdio.println(events[1].reminder.body)
+      harness.stdio.println(events[1].reminder.source)
+      harness.tools.clear_hooks()
     },
   )
 }

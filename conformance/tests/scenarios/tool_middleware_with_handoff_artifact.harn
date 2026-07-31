@@ -7,8 +7,6 @@
  */
 import { with_handoff_artifact } from "std/llm/tool_middleware"
 
-const captured = atomic(0)
-
 fn next_with_result(payload) {
   return { call ->
     return {
@@ -49,28 +47,29 @@ fn full_handoff_payload() {
   }
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
+  const captured = harness.runtime.atomic(0)
   // (1) Tool returns `{__handoff: <full handoff>}` — middleware emits the
   // typed handoff record on audit.handoff and fires the sink.
   const mw = with_handoff_artifact(
     {
       sink: { _record, _call ->
-        let _ = atomic_add(captured, 1)
+        let _ = harness.runtime.atomic_add(captured, 1)
       },
     },
   )
   const r1 = mw(envelope("escalate"), next_with_result({__handoff: full_handoff_payload()}))
-  __io_println(r1.ok)
-  __io_println(r1.audit.kind)
-  __io_println(r1.audit.handoff.source_persona)
-  __io_println(r1.audit.handoff.target_persona_or_human.id)
-  __io_println(r1.audit.handoff.task)
-  __io_println(atomic_get(captured))
+  harness.stdio.println(r1.ok)
+  harness.stdio.println(r1.audit.kind)
+  harness.stdio.println(r1.audit.handoff.source_persona)
+  harness.stdio.println(r1.audit.handoff.target_persona_or_human.id)
+  harness.stdio.println(r1.audit.handoff.task)
+  harness.stdio.println(harness.runtime.atomic_get(captured))
   // (2) Tool returned a plain result — no handoff emission, no sink fire.
   const r2 = mw(envelope("read_file"), next_with_result("contents"))
-  __io_println(r2.ok)
-  __io_println(r2.audit?.handoff == nil)
-  __io_println(atomic_get(captured))
+  harness.stdio.println(r2.ok)
+  harness.stdio.println(r2.audit?.handoff == nil)
+  harness.stdio.println(harness.runtime.atomic_get(captured))
   // (3) custom detect closure: pull the handoff out of an unconventional
   // result key.
   const mw2 = with_handoff_artifact(
@@ -85,8 +84,8 @@ pipeline default() {
     },
   )
   const r3 = mw2(envelope("rollup"), next_with_result({escalation: full_handoff_payload()}))
-  __io_println(r3.audit.handoff.target_persona_or_human.id)
-  __io_println(r3.audit.handoff.source_persona)
+  harness.stdio.println(r3.audit.handoff.target_persona_or_human.id)
+  harness.stdio.println(r3.audit.handoff.source_persona)
   // (4) source override populates source_persona when the payload omits it.
   const mw3 = with_handoff_artifact({source: "ship_captain"})
   const abbreviated = {
@@ -95,6 +94,6 @@ pipeline default() {
     reason: "Rollback pending",
   }
   const r4 = mw3(envelope("escalate"), next_with_result({__handoff: abbreviated}))
-  __io_println(r4.audit.handoff.source_persona)
-  __io_println(r4.audit.handoff.target_persona_or_human.kind)
+  harness.stdio.println(r4.audit.handoff.source_persona)
+  harness.stdio.println(r4.audit.handoff.target_persona_or_human.kind)
 }

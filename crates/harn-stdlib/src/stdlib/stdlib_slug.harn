@@ -146,20 +146,20 @@ pub fn slug_dictionary() {
 /**
  * Generate a non-secret human-readable slug from the default or supplied dictionary.
  *
- * Options: `segments`, `separator`, `pattern`, `prefix`, `suffix`, `rng`, and
- * `dictionary`.
+ * Options: `segments`, `separator`, `pattern`, `prefix`, `suffix`, and
+ * `dictionary`. Randomness always flows through `harness.random`.
  *
  * @effects: ["random"]
  * @errors: []
  */
-pub fn random_slug(options = nil) {
+pub fn random_slug(random: HarnessRandom, options = nil) {
   const opts = __slug_options(options)
   let words = []
   let index = 0
   while index < opts.segments {
     const kind = __slug_segment_kind(opts.pattern, index, opts.segments)
     const bucket = __slug_bucket(kind, opts.dictionary)
-    words = words + [__slug_random_word(bucket, opts.rng)]
+    words = words + [__slug_random_word(random, bucket)]
     index = index + 1
   }
   return __slug_join_with_affixes(words, opts)
@@ -203,9 +203,9 @@ pub fn deterministic_slug(value, options = nil) {
  * @effects: ["random"]
  * @errors: []
  */
-pub fn slug(value = nil, options = nil) {
+pub fn slug(random: HarnessRandom, value = nil, options = nil) {
   if value == nil {
-    return random_slug(options)
+    return random_slug(random, options)
   }
   return slug_from(value, options)
 }
@@ -245,7 +245,6 @@ fn __slug_options(options) {
     prefix: prefix,
     suffix: suffix,
     salt: raw?.salt ?? "",
-    rng: raw?.rng,
     dictionary: {
       adjectives: __slug_nonempty_list(custom_dictionary?.adjectives, __SLUG_ADJECTIVES),
       nouns: __slug_nonempty_list(custom_dictionary?.nouns, __SLUG_NOUNS),
@@ -293,13 +292,8 @@ fn __slug_bucket(kind, dictionary) {
   return dictionary.nouns
 }
 
-fn __slug_random_word(bucket, rng) {
-  let word = nil
-  if rng != nil {
-    word = random_choice(rng, bucket)
-  } else {
-    word = harness.random.choice(bucket)
-  }
+fn __slug_random_word(random: HarnessRandom, bucket) {
+  const word = random.choice(bucket)
   if word == nil && len(bucket) > 0 {
     return bucket[0]
   }

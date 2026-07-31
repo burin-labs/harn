@@ -40,7 +40,7 @@ lowering produces a `WorkflowGraph` that `workflow_validate`,
       "kind": "agent_loop",
       "prompt": "...",
       "tools": ["read", "edit", "run"],
-      "effects": ["writes_files"],
+      "effects": ["workspace_write"],
       "agent_loop": {"max_iterations": 8, "done_sentinel": "DONE"}
     },
     "verify": {"kind": "verify", "verify": {"command": "cargo test -p auth", "expect_status": 0}}
@@ -49,7 +49,7 @@ lowering produces a `WorkflowGraph` that `workflow_validate`,
     {"from": "discover", "to": "implement"},
     {"from": "implement", "to": "verify"}
   ],
-  "capabilities": {"tools": ["read", "edit", "grep", "run"], "side_effect_level": "writes_files"},
+  "capabilities": {"tools": ["read", "edit", "grep", "run"], "side_effect_level": "workspace_write"},
   "verification": {"primary": "verify"},
   "unknowns": [{"id": "limiter_crate", "question": "...", "resolved_by_node": "discover"}],
   "compaction_policy": {"threshold_tokens": 8000, "preserve_recent": 8},

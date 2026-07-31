@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -14,9 +15,10 @@ import { llm_text, with_llm_script } from "std/testing"
  * deterministic. The two suspended workers coexist between the second
  * `wait_agent` and the first `resume_agent`.
  */
-pipeline main() {
+pipeline main(harness: Harness) {
   // Stage worker A: park, then complete.
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -33,30 +35,32 @@ pipeline main() {
     ],
     { ->
       const handle_a = sub_agent_run(
+        harness,
         "Worker A: park until resumed.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended_a = wait_agent(handle_a)
+      const suspended_a = wait_agent(harness.agent, handle_a)
       const handle_b = sub_agent_run(
+        harness,
         "Worker B: park until resumed.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended_b = wait_agent(handle_b)
-      __io_println("a_suspended=" + suspended_a.status)
-      __io_println("b_suspended=" + suspended_b.status)
-      __io_println("distinct_ids=" + to_string(suspended_a.id != suspended_b.id))
-      __io_println(
+      const suspended_b = wait_agent(harness.agent, handle_b)
+      harness.stdio.println("a_suspended=" + suspended_a.status)
+      harness.stdio.println("b_suspended=" + suspended_b.status)
+      harness.stdio.println("distinct_ids=" + to_string(suspended_a.id != suspended_b.id))
+      harness.stdio.println(
         "distinct_snapshots=" + to_string(suspended_a.snapshot_path != suspended_b.snapshot_path),
       )
-      const _resumed_a = resume_agent(handle_a)
-      const done_a = wait_agent(handle_a)
-      const still_b = wait_agent(handle_b)
-      __io_println("a_after_resume=" + done_a.status)
-      __io_println("b_still_suspended=" + still_b.status)
-      const _resumed_b = resume_agent(handle_b)
-      const done_b = wait_agent(handle_b)
-      __io_println("b_after_resume=" + done_b.status)
-      __io_println("a_unchanged=" + done_a.status)
+      const _resumed_a = resume_agent(harness.agent, handle_a)
+      const done_a = wait_agent(harness.agent, handle_a)
+      const still_b = wait_agent(harness.agent, handle_b)
+      harness.stdio.println("a_after_resume=" + done_a.status)
+      harness.stdio.println("b_still_suspended=" + still_b.status)
+      const _resumed_b = resume_agent(harness.agent, handle_b)
+      const done_b = wait_agent(harness.agent, handle_b)
+      harness.stdio.println("b_after_resume=" + done_b.status)
+      harness.stdio.println("a_unchanged=" + done_a.status)
     },
   )
 }

@@ -1,48 +1,48 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   // Dict destructuring
   const {name, age} = {name: "Alice", age: 30}
-  __io_println(name)
-  __io_println(age)
+  harness.stdio.println(name)
+  harness.stdio.println(age)
   // List destructuring
   const [first, second, third] = [10, 20, 30]
-  __io_println(first)
-  __io_println(second)
-  __io_println(third)
+  harness.stdio.println(first)
+  harness.stdio.println(second)
+  harness.stdio.println(third)
   // Dict with rename
   const {name: user_name} = {name: "Bob"}
-  __io_println(user_name)
+  harness.stdio.println(user_name)
   // List rest
   const [head, ...tail] = [1, 2, 3, 4]
-  __io_println(head)
-  __io_println(tail)
+  harness.stdio.println(head)
+  harness.stdio.println(tail)
   // Dict rest
   const {name: n, ...extras} = {name: "Carol", age: 25, role: "dev"}
-  __io_println(n)
-  __io_println(extras)
+  harness.stdio.println(n)
+  harness.stdio.println(extras)
   // For-in with destructuring
   const entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
   for {name: label, val: v} in entries {
-    __io_println("${label}=${v}")
+    harness.stdio.println("${label}=${v}")
   }
   // Var destructuring
   let {x, y} = {x: 1, y: 2}
-  __io_println(x + y)
+  harness.stdio.println(x + y)
   x = 10
   y = 20
-  __io_println(x)
+  harness.stdio.println(x)
   // Function return destructuring
   fn get_point() {
     return {x: 42, y: 99}
   }
   const {x: px, y: py} = get_point()
-  __io_println(px)
-  __io_println(py)
+  harness.stdio.println(px)
+  harness.stdio.println(py)
   // List destructuring from function
   fn get_triple() {
     return [100, 200, 300]
   }
   const [a, b, c] = get_triple()
-  __io_println(a)
-  __io_println(b)
-  __io_println(c)
+  harness.stdio.println(a)
+  harness.stdio.println(b)
+  harness.stdio.println(c)
 }

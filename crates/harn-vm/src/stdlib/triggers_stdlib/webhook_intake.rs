@@ -23,6 +23,8 @@ use super::args::{
 };
 
 #[harn_builtin(
+    exposure = "harness.runtime.webhook_intake_register",
+    effects = ["state.mutate@dynamic"],
     sig = "webhook_intake_register(...args: any) -> dict",
     kind = "async",
     category = "triggers"
@@ -38,6 +40,8 @@ async fn webhook_intake_register_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.webhook_intake_feed",
+    effects = ["state.mutate@dynamic"],
     sig = "webhook_intake_feed(...args: any) -> dict",
     kind = "async",
     category = "triggers"
@@ -56,6 +60,8 @@ async fn webhook_intake_feed_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.webhook_intake_deregister",
+    effects = ["state.mutate@dynamic"],
     sig = "webhook_intake_deregister(...args: any) -> bool",
     kind = "async",
     category = "triggers"
@@ -69,6 +75,8 @@ async fn webhook_intake_deregister_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.webhook_intake_list",
+    effects = ["state.read@const=webhook-intake"],
     sig = "webhook_intake_list(...args: any) -> list",
     category = "triggers"
 )]
@@ -82,6 +90,8 @@ fn webhook_intake_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmVa
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.webhook_intake_recent",
+    effects = ["state.read@const=webhook-intake"],
     sig = "webhook_intake_recent(...args: any) -> list",
     kind = "async",
     category = "triggers"

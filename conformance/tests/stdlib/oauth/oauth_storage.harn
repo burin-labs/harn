@@ -50,26 +50,29 @@ fn exercise_backend(label, store, expect_kind) {
   require_nil(label + ".get(missing)", store.get("never-stored"))
 }
 
-fn exercise_memory() {
-  exercise_backend("memory", memory(), "memory")
+fn exercise_memory(auth: HarnessAuth) {
+  exercise_backend("memory", memory(auth), "memory")
   // Independent memory handles do not share state.
-  const a = memory()
-  const b = memory()
+  const a = memory(auth)
+  const b = memory(auth)
   a.set("shared-key", {access_token: "from-a"}, 60)
   require_nil("memory.isolation", b.get("shared-key"))
 }
 
 fn exercise_file(harness: Harness) {
-  const path = path_join(harness.fs.temp_dir(), "harn-oauth-storage-" + uuid() + ".bin")
+  const path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-oauth-storage-" + harness.random.uuid() + ".bin",
+  )
   const key = "high-entropy-test-key-must-be-long-enough"
-  const s = file(path, key)
+  const s = file(harness.auth, path, key)
   exercise_backend("file", s, "file")
   // After exercise_backend deletes both keys the file should be gone.
   if harness.fs.exists(path) {
     throw "file: expected file to be removed once empty"
   }
   // Persistence + at-rest encryption: re-open with the same key.
-  const s2 = file(path, key)
+  const s2 = file(harness.auth, path, key)
   s2.set("github", {access_token: "persistent"}, 600)
   const raw = harness.fs.read_text(path)
   if contains(raw, "persistent") {
@@ -79,10 +82,10 @@ fn exercise_file(harness: Harness) {
   if envelope.version != 1 {
     throw "file: envelope version should be 1, got " + to_string(envelope.version)
   }
-  const s3 = file(path, key)
+  const s3 = file(harness.auth, path, key)
   require_token("file.persistence", s3.get("github"), "persistent")
   // Wrong key fails fast.
-  const bad = file(path, "wrong-key")
+  const bad = file(harness.auth, path, "wrong-key")
   let saw_error = false
   try {
     const _ = bad.get("github")
@@ -95,13 +98,14 @@ fn exercise_file(harness: Harness) {
   s3.delete("github")
 }
 
-fn exercise_custom() {
+fn exercise_custom(auth: HarnessAuth) {
   // Delegate to an in-process memory backend so the user-supplied
   // closures exercise real state without relying on closure capture
   // semantics. The contract is what matters here: get/set/delete are
   // dispatched to the closures the caller registered.
-  const inner = memory()
+  const inner = memory(auth)
   const s = custom(
+    auth,
     {
       get: { key -> inner.get(key) },
       set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },
@@ -113,8 +117,9 @@ fn exercise_custom() {
     throw "custom: expected id=test-vault, got " + s.id
   }
   exercise_backend("custom", s, "custom")
-  const locked_inner = memory()
+  const locked_inner = memory(auth)
   const locked = custom(
+    auth,
     {
       get: { key -> locked_inner.get(key) },
       set: { key, tok, ttl = nil -> locked_inner.set(key, tok, ttl) },
@@ -135,18 +140,17 @@ fn exercise_custom() {
   }
 }
 
-fn exercise_cloud(scope, factory, expect_kind) {
-  host_mock_clear()
-  host_mock("oauth_storage", "cloud_set", {result: nil})
-  host_mock("oauth_storage", "cloud_delete", {result: nil})
-  host_mock("oauth_storage", "cloud_acquire_refresh_lock", {result: {lease_id: "lease-" + scope}})
-  host_mock("oauth_storage", "cloud_release_refresh_lock", {result: nil})
-  host_mock(
-    "oauth_storage",
-    "cloud_get",
-    {result: {access_token: "cloud-tok", refresh_token: "cloud-rfr", scopes: ["repo"]}},
+fn exercise_cloud(auth: HarnessAuth, testing: HarnessTesting, scope, factory, expect_kind) {
+  testing.clear()
+  testing.respond("auth", "oauth_storage_set", nil)
+  testing.respond("auth", "oauth_storage_delete", nil)
+  testing.respond("auth", "oauth_storage_with_refresh_lock", "locked-" + scope)
+  testing.respond(
+    "auth",
+    "oauth_storage_get",
+    {access_token: "cloud-tok", refresh_token: "cloud-rfr", scopes: ["repo"]},
   )
-  const s = factory()
+  const s = factory(auth)
   if s.scope != scope {
     throw "cloud[" + scope + "]: expected scope field, got " + to_string(s.scope)
   }
@@ -160,54 +164,48 @@ fn exercise_cloud(scope, factory, expect_kind) {
   if locked != "locked-" + scope {
     throw "cloud[" + scope + "].with_refresh_lock returned " + to_string(locked)
   }
-  const calls = host_mock_calls()
-  if len(calls) != 5 {
-    throw "cloud[" + scope + "]: expected 5 host calls, got " + to_string(len(calls))
+  const calls = testing.calls()
+  if len(calls) != 4 {
+    throw "cloud[" + scope + "]: expected 4 capability calls, got " + to_string(len(calls))
   }
-  if calls[0].operation != "cloud_set" {
-    throw "cloud[" + scope + "]: first call should be cloud_set, got " + calls[0].operation
+  if calls[0].capability != "auth" || calls[0].method != "oauth_storage_set" {
+    throw "cloud[" + scope + "]: first call should be auth.oauth_storage_set"
   }
-  if calls[0].params.scope != scope {
-    throw "cloud[" + scope + "]: cloud_set carried scope=" + to_string(calls[0].params.scope)
+  if calls[0].args[0].scope != scope {
+    throw "cloud[" + scope + "]: storage handle carried scope=" + to_string(calls[0].args[0].scope)
   }
-  if calls[1].operation != "cloud_get" || calls[1].params.scope != scope {
-    throw "cloud[" + scope + "]: cloud_get call shape mismatch"
+  if calls[1].method != "oauth_storage_get" || calls[1].args[0].scope != scope {
+    throw "cloud[" + scope + "]: oauth_storage_get call shape mismatch"
   }
-  if calls[2].operation != "cloud_delete" || calls[2].params.scope != scope {
-    throw "cloud[" + scope + "]: cloud_delete call shape mismatch"
+  if calls[2].method != "oauth_storage_delete" || calls[2].args[0].scope != scope {
+    throw "cloud[" + scope + "]: oauth_storage_delete call shape mismatch"
   }
-  if calls[3].operation != "cloud_acquire_refresh_lock" || calls[3].params.scope != scope {
-    throw "cloud[" + scope + "]: cloud_acquire_refresh_lock call shape mismatch"
+  if calls[3].method != "oauth_storage_with_refresh_lock" || calls[3].args[0].scope != scope {
+    throw "cloud[" + scope + "]: oauth_storage_with_refresh_lock call shape mismatch"
   }
-  if calls[3].params.timeout_seconds == nil || calls[3].params.timeout_seconds <= 0 {
-    throw "cloud[" + scope + "]: refresh lock timeout missing"
-  }
-  if calls[4].operation != "cloud_release_refresh_lock" || calls[4].params.scope != scope {
-    throw "cloud[" + scope + "]: cloud_release_refresh_lock call shape mismatch"
-  }
-  if calls[4].params.lock.lease_id != "lease-" + scope {
-    throw "cloud[" + scope + "]: release did not carry lock lease"
-  }
-  host_mock_clear()
+  testing.clear()
 }
 
 fn exercise_namespace(harness: Harness) {
-  const ns = storage()
+  const ns = storage(harness.auth, harness.secrets)
   if ns.memory.kind != "memory" {
-    throw "storage(): expected memory handle on namespace"
+    throw "storage(harness): expected memory handle on namespace"
   }
   if ns.harn_cloud_session.kind != "harn_cloud_session" {
-    throw "storage(): expected harn_cloud_session handle on namespace"
+    throw "storage(harness): expected harn_cloud_session handle on namespace"
   }
   if ns.harn_cloud_org.kind != "harn_cloud_org" {
-    throw "storage(): expected harn_cloud_org handle on namespace"
+    throw "storage(harness): expected harn_cloud_org handle on namespace"
   }
-  const path = path_join(harness.fs.temp_dir(), "harn-oauth-storage-ns-" + uuid() + ".bin")
+  const path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-oauth-storage-ns-" + harness.random.uuid() + ".bin",
+  )
   const s = ns.file(path, "ns-key")
   s.set("ns", {access_token: "ns-tok"}, 60)
   require_token("namespace.file", s.get("ns"), "ns-tok")
   s.delete("ns")
-  const inner = memory()
+  const inner = memory(harness.auth)
   const cs = ns.custom(
     {
       get: { key -> inner.get(key) },
@@ -219,12 +217,12 @@ fn exercise_namespace(harness: Harness) {
   require_token("namespace.custom", cs.get("ns"), "ns-custom")
 }
 
-pipeline test(task) {
-  exercise_memory()
+pipeline test(harness: Harness, task) {
+  exercise_memory(harness.auth)
   exercise_file(harness)
-  exercise_custom()
-  exercise_cloud("session", harn_cloud_session, "harn_cloud_session")
-  exercise_cloud("org", harn_cloud_org, "harn_cloud_org")
+  exercise_custom(harness.auth)
+  exercise_cloud(harness.auth, harness.testing, "session", harn_cloud_session, "harn_cloud_session")
+  exercise_cloud(harness.auth, harness.testing, "org", harn_cloud_org, "harn_cloud_org")
   exercise_namespace(harness)
-  log("oauth storage ok")
+  harness.stdio.log("oauth storage ok")
 }

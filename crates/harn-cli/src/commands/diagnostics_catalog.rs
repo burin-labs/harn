@@ -380,7 +380,7 @@ const fn category_intro(category: Category) -> Option<&'static str> {
         Category::Cap => "A host capability call (file I/O, network, HITL approval, tool host, etc.) \
             failed static validation. Capabilities are the trust boundary between Harn scripts and \
             the embedding host, so checks are strict by design.",
-        Category::Llm => "An `llm_call(...)` invocation violates the schema Harn enforces. \
+        Category::Llm => "A `harness.llm.call(...)` invocation violates the schema Harn enforces. \
             Schema-validated, provider-portable LLM calls are a load-bearing Harn contract; drift in \
             the options table is rejected at check time.",
         Category::Orc => "An orchestration construct — agent / workflow / pipeline / tool definition, \

@@ -14,7 +14,7 @@ fn expect_redacted(label, input, expected_pattern, expected_raw_substring) {
   }
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // The catalog must include every default provider so audit
   // consumers can rely on the names being stable across releases.
   const catalog = default_patterns()
@@ -92,5 +92,5 @@ pipeline test(task) {
     "bearer_token",
     "abcdef123456_extra-pad",
   )
-  log("token_redaction defaults ok")
+  harness.stdio.log("token_redaction defaults ok")
 }

@@ -5,9 +5,9 @@ import {
   agent_private_text_filter,
 } from "std/agent/stream"
 
-pipeline default() {
-  __io_println(agent_private_text_filter("hello <secret>hide me</secret> world"))
-  __io_println("[" + agent_private_text_filter("hello <secret>hide me") + "]")
+pipeline default(harness: Harness) {
+  harness.stdio.println(agent_private_text_filter("hello <secret>hide me</secret> world"))
+  harness.stdio.println("[" + agent_private_text_filter("hello <secret>hide me") + "]")
   let state = agent_private_stream_state()
   let visible = []
   for delta in ["he", "llo <se", "cret>hide", "</secret> world"] {
@@ -17,14 +17,14 @@ pipeline default() {
   }
   const done = agent_private_stream_finish(state)
   visible = visible + [done.visible_delta]
-  __io_println(join(visible, "|"))
-  __io_println(done.visible_text)
-  __io_println(done.unterminated_private)
+  harness.stdio.println(join(visible, "|"))
+  harness.stdio.println(done.visible_text)
+  harness.stdio.println(done.unterminated_private)
   let split = agent_private_stream_state()
   const a = agent_private_stream_delta(split, "visible <sec")
   split = a.state
   const b = agent_private_stream_finish(split)
-  __io_println("[" + a.visible_delta + "]")
-  __io_println("[" + b.visible_text + "]")
-  __io_println(b.withheld_suffix)
+  harness.stdio.println("[" + a.visible_delta + "]")
+  harness.stdio.println("[" + b.visible_text + "]")
+  harness.stdio.println(b.withheld_suffix)
 }

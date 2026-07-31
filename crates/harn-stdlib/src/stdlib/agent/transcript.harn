@@ -766,8 +766,8 @@ pub fn agent_transcript_normalize_report(records) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_read(path: string, options = {}) -> list {
-  return agent_transcript_normalize(read_jsonl(path, options ?? {}))
+pub fn agent_transcript_read(fs: HarnessFs, path: string, options = {}) -> list {
+  return agent_transcript_normalize(read_jsonl(fs, path, options ?? {}))
 }
 
 /**
@@ -777,8 +777,8 @@ pub fn agent_transcript_read(path: string, options = {}) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_read_report(path: string, options = {}) -> dict {
-  return agent_transcript_normalize_report(read_jsonl(path, options ?? {}))
+pub fn agent_transcript_read_report(fs: HarnessFs, path: string, options = {}) -> dict {
+  return agent_transcript_normalize_report(read_jsonl(fs, path, options ?? {}))
 }
 
 /**

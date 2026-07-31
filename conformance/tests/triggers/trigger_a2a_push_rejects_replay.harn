@@ -1,6 +1,6 @@
-pipeline test(task) {
-  const result = trigger_test_harness("a2a_push_rejects_replay")
-  __io_println(result.ok)
-  __io_println(result.details.jti == "a2a-jti-replay")
-  __io_println(result.details.replay_rejected)
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("a2a_push_rejects_replay")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(result.details.jti == "a2a-jti-replay")
+  harness.stdio.println(result.details.replay_rejected)
 }

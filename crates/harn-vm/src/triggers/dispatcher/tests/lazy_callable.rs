@@ -63,7 +63,7 @@ async fn lazy_dispatcher(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn lazy_module_initializes_under_context_and_shares_state_across_dispatches() {
+async fn lazy_module_shares_state_and_handler_observes_dispatch_context() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -75,16 +75,15 @@ async fn lazy_module_initializes_under_context_and_shares_state_across_dispatche
                 r#"
 import "std/triggers"
 
-let initialized_context = handler_context()
 let counter = 0
 
-pub fn should_handle(event: TriggerEvent) -> bool {
+pub fn should_handle(_harness: Harness, event: TriggerEvent) -> bool {
   return event.kind == "issues.opened"
 }
 
-pub fn local_fn(_event: TriggerEvent) -> dict {
+pub fn local_fn(harness: Harness, _event: TriggerEvent) -> dict {
   counter = counter + 1
-  return {count: counter, action: initialized_context.action}
+  return {count: counter, action: harness.runtime.handler_context().action}
 }
 "#,
             )
@@ -102,7 +101,22 @@ pub fn local_fn(_event: TriggerEvent) -> dict {
                     .await
                     .expect("lazy trigger dispatch succeeds");
                 assert_eq!(outcomes.len(), 1);
-                assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+                let lifecycle = read_topic(
+                    dispatcher.event_log.clone(),
+                    crate::TRIGGERS_LIFECYCLE_TOPIC,
+                )
+                .await;
+                let predicate_evaluations = lifecycle
+                    .iter()
+                    .filter(|(_, event)| event.kind == "predicate.evaluated")
+                    .map(|(_, event)| event.payload.clone())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    outcomes[0].status,
+                    DispatchStatus::Succeeded,
+                    "outcome={:?}, predicate_evaluations={predicate_evaluations:?}",
+                    outcomes[0]
+                );
                 let result = outcomes[0].result.as_ref().expect("handler result");
                 assert_eq!(result["count"], expected_count);
                 assert!(result["action"].as_str().is_some());
@@ -124,7 +138,7 @@ async fn lazy_initializer_observes_dispatch_capability_policy() {
                 r"
 let initialized_policy = __test_current_policy()
 
-pub fn local_fn(_event: any) -> string {
+pub fn local_fn(_harness: Harness, _event: TriggerEvent) -> string {
   return initialized_policy
 }
 ",
@@ -145,7 +159,7 @@ pub fn local_fn(_event: any) -> string {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn lazy_initializer_observes_preexisting_dispatch_cancellation() {
+async fn lazy_handler_observes_preexisting_dispatch_cancellation() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -156,9 +170,8 @@ async fn lazy_initializer_observes_preexisting_dispatch_cancellation() {
             std::fs::write(
                 &module_path,
                 r#"
-write_file("cancel-marker.txt", "initialized")
-
-pub fn local_fn(_event: any) -> string {
+pub fn local_fn(harness: Harness, _event: TriggerEvent) -> string {
+  harness.fs.write_text("cancel-marker.txt", "initialized")
   return "handled"
 }
 "#,
@@ -176,7 +189,7 @@ pub fn local_fn(_event: any) -> string {
             assert_eq!(outcomes[0].status, DispatchStatus::Cancelled);
             assert!(
                 !marker.exists(),
-                "initializer ran before cancellation was installed"
+                "handler ran after cancellation was installed"
             );
         })
         .await;

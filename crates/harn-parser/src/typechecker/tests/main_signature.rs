@@ -38,6 +38,27 @@ fn accepts_underscore_harness_opt_out() {
 }
 
 #[test]
+fn root_authority_is_not_an_ambient_name() {
+    let diags = check_source(
+        r#"fn helper() {
+  harness.stdio.println("ambient")
+}
+
+fn main(_harness: Harness) {
+  helper()
+}"#,
+    );
+    assert!(
+        diags.iter().any(|diag| {
+            diag.severity == DiagnosticSeverity::Error
+                && diag.message.contains("harness")
+                && diag.message.contains("undefined")
+        }),
+        "an unbound `harness` must be rejected outside explicit parameters: {diags:?}"
+    );
+}
+
+#[test]
 fn rejects_zero_arg_main() {
     let diags = nam_101("fn main() {}");
     assert_eq!(diags.len(), 1);

@@ -186,15 +186,25 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "json_stringify(value: any) -> string", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "json_stringify(value: any) -> string", category = "json"
+)]
 fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
+    reject_harness_serialization(val, "json_stringify")?;
     Ok(VmValue::String(arcstr::ArcStr::from(vm_value_to_json(val))))
 }
 
-#[harn_builtin(sig = "json_stringify_pretty(value: any) -> string", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "json_stringify_pretty(value: any) -> string", category = "json"
+)]
 fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
+    reject_harness_serialization(val, "json_stringify_pretty")?;
     ensure_serializable_depth(val, "json_stringify_pretty")?;
     serde_json::to_string_pretty(&vm_value_to_data_value(val))
         .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
@@ -205,7 +215,44 @@ fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
         })
 }
 
-#[harn_builtin(sig = "json_parse(text: string?) -> any", category = "json")]
+fn reject_harness_serialization(value: &VmValue, builtin: &str) -> Result<(), VmError> {
+    match value {
+        VmValue::Harness(handle) => Err(VmError::TypeError(format!(
+            "{builtin}: {} is runtime authority and cannot be serialized",
+            handle.type_name()
+        ))),
+        VmValue::List(items) => items
+            .iter()
+            .try_for_each(|item| reject_harness_serialization(item, builtin)),
+        VmValue::Dict(entries) => entries
+            .values()
+            .try_for_each(|item| reject_harness_serialization(item, builtin)),
+        VmValue::Set(items) => items
+            .items()
+            .iter()
+            .try_for_each(|item| reject_harness_serialization(item, builtin)),
+        VmValue::EnumVariant(value) => value
+            .fields
+            .iter()
+            .try_for_each(|item| reject_harness_serialization(item, builtin)),
+        VmValue::StructInstance(value) => value.fields.iter().try_for_each(|item| {
+            item.as_ref()
+                .map(|item| reject_harness_serialization(item, builtin))
+                .unwrap_or(Ok(()))
+        }),
+        VmValue::Pair(value) => {
+            reject_harness_serialization(&value.0, builtin)?;
+            reject_harness_serialization(&value.1, builtin)
+        }
+        _ => Ok(()),
+    }
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "json_parse(text: string?) -> any", category = "json"
+)]
 fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(cached) = JSON_PARSE_CACHE.with(|cache| cache.borrow().get(&text).cloned()) {
@@ -242,7 +289,11 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     }
 }
 
-#[harn_builtin(sig = "yaml_parse(text: string?) -> any", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "yaml_parse(text: string?) -> any", category = "json"
+)]
 fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) {
@@ -269,7 +320,11 @@ fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     }
 }
 
-#[harn_builtin(sig = "yaml_stringify(value: any) -> string", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "yaml_stringify(value: any) -> string", category = "json"
+)]
 fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args.first().unwrap_or(&VmValue::Nil);
     ensure_serializable_depth(value, "yaml_stringify")?;
@@ -283,7 +338,11 @@ fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         })
 }
 
-#[harn_builtin(sig = "toml_parse(text: string?) -> any", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "toml_parse(text: string?) -> any", category = "json"
+)]
 fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     match toml::from_str::<toml::Value>(&text) {
@@ -310,7 +369,11 @@ fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     }
 }
 
-#[harn_builtin(sig = "toml_stringify(value: any) -> string", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "toml_stringify(value: any) -> string", category = "json"
+)]
 fn toml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args.first().unwrap_or(&VmValue::Nil);
     let data_value = vm_value_to_data_value(value);
@@ -329,6 +392,8 @@ fn toml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "json_validate(value: any, schema: dict) -> bool",
     category = "json"
 )]
@@ -342,6 +407,8 @@ fn json_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_check(value: any, schema: any) -> any",
     category = "json"
 )]
@@ -351,6 +418,8 @@ fn schema_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_parse(value: any, schema: any) -> any",
     category = "json"
 )]
@@ -360,6 +429,8 @@ fn schema_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_report(value: any, schema: any, apply_defaults?: bool) -> dict",
     category = "json"
 )]
@@ -373,7 +444,11 @@ fn schema_report_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     ))
 }
 
-#[harn_builtin(sig = "schema_is(value: any, schema: any) -> bool", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "schema_is(value: any, schema: any) -> bool", category = "json"
+)]
 fn schema_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "schema_is")?;
     Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))
@@ -383,7 +458,11 @@ fn schema_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 // This runtime fallback accepts an already-built schema dict and returns it
 // unchanged, keeping `schema_of` useful in pipelines that pass schemas around
 // at runtime (e.g. `let s = schema_of(T); ...`).
-#[harn_builtin(sig = "schema_of(type_alias: any) -> dict", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "schema_of(type_alias: any) -> dict", category = "json"
+)]
 fn schema_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 1, "schema_of")?;
     match &args[0] {
@@ -397,13 +476,19 @@ fn schema_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     }
 }
 
-#[harn_builtin(sig = "is_type(value: any, schema: any) -> bool", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "is_type(value: any, schema: any) -> bool", category = "json"
+)]
 fn is_type_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "is_type")?;
     Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_expect(value: any, schema: any, apply_defaults?: bool) -> any",
     category = "json"
 )]
@@ -413,13 +498,19 @@ fn schema_expect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     schema::schema_expect_value(&args[0], &args[1], apply_defaults)
 }
 
-#[harn_builtin(sig = "schema_to_json_schema(schema: any) -> dict", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "schema_to_json_schema(schema: any) -> dict", category = "json"
+)]
 fn schema_to_json_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 1, "schema_to_json_schema")?;
     schema::schema_to_json_schema_value(&args[0])
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_from_json_schema(json_schema: dict) -> dict",
     category = "json"
 )]
@@ -429,6 +520,8 @@ fn schema_from_json_schema_impl(args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_to_openapi_schema(schema: any) -> dict",
     category = "json"
 )]
@@ -438,6 +531,8 @@ fn schema_to_openapi_schema_impl(args: &[VmValue], _out: &mut String) -> Result<
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_from_openapi_schema(openapi_schema: dict) -> dict",
     category = "json"
 )]
@@ -450,6 +545,8 @@ fn schema_from_openapi_schema_impl(
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_extend(base: dict, overrides: dict) -> dict",
     category = "json"
 )]
@@ -458,13 +555,19 @@ fn schema_extend_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     schema::schema_extend_value(&args[0], &args[1])
 }
 
-#[harn_builtin(sig = "schema_partial(schema: any) -> dict", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "schema_partial(schema: any) -> dict", category = "json"
+)]
 fn schema_partial_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 1, "schema_partial")?;
     schema::schema_partial_value(&args[0])
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_pick(schema: any, keys: list) -> dict",
     category = "json"
 )]
@@ -475,6 +578,8 @@ fn schema_pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "schema_omit(schema: any, keys: list) -> dict",
     category = "json"
 )]
@@ -485,6 +590,8 @@ fn schema_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "json_extract(text: string?, key?: string) -> any",
     category = "json"
 )]
@@ -524,6 +631,8 @@ fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "json_pointer(value: any, pointer: string) -> any",
     category = "json"
 )]
@@ -534,6 +643,8 @@ fn json_pointer_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "json_pointer_set(value: any, pointer: string, replacement: any) -> any",
     category = "json"
 )]
@@ -544,6 +655,8 @@ fn json_pointer_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "json_pointer_delete(value: any, pointer: string) -> any",
     category = "json"
 )]
@@ -553,7 +666,11 @@ fn json_pointer_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     json_pointer_delete(&args[0], &ptr)
 }
 
-#[harn_builtin(sig = "jq(value: any, expression: string) -> list", category = "json")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "jq(value: any, expression: string) -> list", category = "json"
+)]
 fn jq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "jq")?;
     let expr = args[1].display();
@@ -563,6 +680,8 @@ fn jq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
     sig = "jq_first(value: any, expression: string) -> any",
     category = "json"
 )]
@@ -1007,6 +1126,28 @@ fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn root_harness_cannot_be_serialized_directly_or_nested() {
+        let harness = crate::harness::Harness::null().into_vm_value();
+        let direct = reject_harness_serialization(&harness, "json_stringify")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            direct.contains("Harness is runtime authority")
+                && direct.contains("cannot be serialized"),
+            "{direct}"
+        );
+
+        let nested = VmValue::List(std::sync::Arc::new(vec![harness]));
+        let nested_error = reject_harness_serialization(&nested, "json_stringify")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            nested_error.contains("cannot be serialized"),
+            "{nested_error}"
+        );
+    }
 
     #[test]
     fn extract_from_code_fence() {

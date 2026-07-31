@@ -20,7 +20,7 @@ const opts = lane_policy(
   task,
   {provider: "anthropic", tools: my_tools},
 )
-const result = agent_loop(task, nil, opts)
+const result = agent_loop(harness, task, nil, opts)
 ```
 
 `default_lane_rows()` ports burin-code's `agent_lane_for_task` decision table:
@@ -89,7 +89,7 @@ shape that silently drops unrecognized fields. Enforcement is
 session, spread in alongside it:
 
 ```harn,ignore
-agent_loop(task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
+agent_loop(harness, task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
 ```
 
 ## Overlays: data-driven prompt nudges
@@ -105,7 +105,7 @@ alias with the old `rows`-first order.
 import { default_overlay_rows, with_overlay } from "std/agent/overlays"
 
 const opts = with_overlay({provider: "anthropic"}, default_overlay_rows(), "agent")
-const result = agent_loop(task, nil, opts)
+const result = agent_loop(harness, task, nil, opts)
 ```
 
 Rows are data (`{mode, lane?, lines, enabled?}`); a row whose `lane` matches

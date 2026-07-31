@@ -76,19 +76,19 @@ fn bootstrap_snippet(mcp_servers: &str, policy: &str) -> String {
     format!(
         r#"
 import {{ agent_mcp_bootstrap_if_needed }} from "std/agent/mcp"
-pipeline main(task) {{
+pipeline main(harness: Harness, task) {{
   const session = {{session_id: "sess-mcp-ceiling"}}
   const opts = {{
     mcp_servers: {mcp_servers},
     tools: {{_type: "tool_registry", tools: [{{name: "look"}}]}},
     policy: {policy},
   }}
-  const out = agent_mcp_bootstrap_if_needed(session, opts)
+  const out = agent_mcp_bootstrap_if_needed(harness.tools, session, opts)
   const catalog = (out?.tools?.tools ?? []).map({{ t -> to_string(t?.name ?? "") }})
   const ceiling = out?.policy?.tools ?? []
-  log("catalog=" + join(catalog, ","))
-  log("ceiling=" + join(ceiling, ","))
-  log("ceiling_type=" + type_of(out?.policy?.tools))
+  harness.stdio.log("catalog=" + join(catalog, ","))
+  harness.stdio.log("ceiling=" + join(ceiling, ","))
+  harness.stdio.log("ceiling_type=" + type_of(out?.policy?.tools))
 }}
 "#
     )

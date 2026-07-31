@@ -6,23 +6,23 @@ runs without treating transcript history as long-term knowledge.
 ```harn
 import "std/memory"
 
-memory_store("workspace/acme", "alice-profile", {
+harness.memory.store("workspace/acme", "alice-profile", {
   text: "Alice prefers Rust examples and concise plans",
 }, ["profile", "preference"])
 
-const related = memory_recall("workspace/acme", "rust preference", 3)
-const summary = memory_summarize("workspace/acme", {limit: 10})
+const related = harness.memory.recall("workspace/acme", "rust preference", 3)
+const summary = harness.memory.summarize("workspace/acme", {limit: 10})
 ```
 
 ## API
 
 | Function | Returns | Description |
 |---|---|---|
-| `memory_open(namespace, options?)` | `memory_open` | Select the recall backend (`bm25`, `vector`, or `hybrid`) for this namespace |
-| `memory_store(namespace, key, value, tags?, options?)` | `memory_record` | Append an observation |
-| `memory_recall(namespace, query, k?, options?)` | `list<memory_record>` | Recall active records ranked by the namespace backend (override per-call with `options.mode`) |
-| `memory_summarize(namespace, window?, options?)` | `memory_summary` | Build an extractive summary over recent or query-filtered records |
-| `memory_forget(namespace, predicate, options?)` | `dict` | Append a tombstone for matching records |
+| `harness.memory.open(namespace, options?)` | `memory_open` | Select the recall backend (`bm25`, `vector`, or `hybrid`) for this namespace |
+| `harness.memory.store(namespace, key, value, tags?, options?)` | `memory_record` | Append an observation |
+| `harness.memory.recall(namespace, query, k?, options?)` | `list<memory_record>` | Recall active records ranked by the namespace backend (override per-call with `options.mode`) |
+| `harness.memory.summarize(namespace, window?, options?)` | `memory_summary` | Build an extractive summary over recent or query-filtered records |
+| `harness.memory.forget(namespace, predicate, options?)` | `dict` | Append a tombstone for matching records |
 
 Typed fact helpers live in `std/agent/fact` and store `harn.fact.v1`
 envelopes on top of this same memory log. Cross-session pattern recall lives in
@@ -110,7 +110,7 @@ normal memory options such as `root` to control placement.
 
 `recall_facts(query, kind?, min_confidence?, scope?)` returns normalized facts
 augmented with `score`, `memory_record_id`, `memory_key`, `memory_namespace`,
-and `stored_at`. `invalidate_facts(predicate, scope?)` appends memory
+and `stored_at`. `invalidate_facts(harness.memory, predicate, scope?)` appends memory
 tombstones; predicates accept an exact `fact_...` id string or a dict with
 `id`, `key`, `kind`, `claim`, `query`, `tag`, `tags`, `evidence_ref`, or
 `evidence`. Evidence predicates match canonical evidence tags such as
@@ -164,13 +164,13 @@ for the design rationale and migration contract.
 
 ## Vector and hybrid backends
 
-`memory_open(namespace, options)` writes an append-only configuration event
+`harness.memory.open(namespace, options)` writes an append-only configuration event
 that selects the recall backend:
 
 ```harn
 import "std/memory"
 
-memory_open("workspace/acme", {
+harness.memory.open("workspace/acme", {
   backend: "hybrid",          // "bm25" (default), "vector", or "hybrid"
   embed_model_hint: "voyage-2",
   embed_dim: 1024,
@@ -197,8 +197,9 @@ Embeddings come from the host via the typed `memory.embed` capability:
 | `{text: string, model_hint: string}` | `{vector: list<float>, model?: string, dim?: int}` |
 
 Harn never bundles an embedding model. Hosts choose the model, handle rate
-limiting, and decide cost accounting. For tests, register the capability via
-`host_mock("memory", "embed", {result: {vector: [...], dim: N, model: "..."}})`.
+limiting, and decide cost accounting. Tests register a response on the exact
+harness with `harness.testing.respond("memory", "embed",
+{vector: [...], dim: N, model: "..."})`.
 
 Embeddings are cached on disk at
 `.harn/memory/<namespace>/vectors/<sanitized_model_hint>/<sha256(text)>.json`.

@@ -1,4 +1,6 @@
+import { sub_agent_run } from "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
+import { workflow_execute } from "std/workflow/execute"
 
 fn child_tools() {
   let tools = tool_registry()
@@ -25,7 +27,7 @@ fn child_tools() {
   return tools
 }
 
-fn workflow_tools() {
+fn workflow_tools(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -35,6 +37,7 @@ fn workflow_tools() {
       parameters: {task: {type: "string"}},
       handler: { args ->
         sub_agent_run(
+          harness,
           args.task,
           {provider: "mock", tools: child_tools(), tool_format: "native", max_iterations: 1},
         )
@@ -44,7 +47,7 @@ fn workflow_tools() {
   return tools
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   skill only_look {
     description "Investigate the codebase safely"
     when_to_use "User asks to inspect or read files"
@@ -60,13 +63,14 @@ pipeline test(task) {
           kind: "stage",
           mode: "agent",
           model_policy: {provider: "mock", tool_format: "native", max_iterations: 2},
-          tools: workflow_tools(),
+          tools: workflow_tools(harness),
         },
       },
       edges: [],
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -78,12 +82,13 @@ pipeline test(task) {
     ],
     { ->
       const result = workflow_execute(
+        harness,
         "Inspect the config file",
         flow,
         [],
         {max_steps: 2, skills: only_look, skill_match: {strategy: "metadata"}},
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const child_tool_schemas = calls[1].tools
       let seen_read = false
       let seen_write = false
@@ -97,11 +102,11 @@ pipeline test(task) {
           }
         }
       }
-      __io_println(result?.status == "completed")
-      __io_println(len(calls) == 3)
-      __io_println(contains(calls[1].system, "## Active skills"))
-      __io_println(seen_read)
-      __io_println(!seen_write)
+      harness.stdio.println(result?.status == "completed")
+      harness.stdio.println(len(calls) == 3)
+      harness.stdio.println(contains(calls[1].system, "## Active skills"))
+      harness.stdio.println(seen_read)
+      harness.stdio.println(!seen_write)
     },
   )
 }

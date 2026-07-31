@@ -1,7 +1,9 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       llm_text("<user_response>Too thin.</user_response>\n<done>##DONE##</done>"),
       llm_text(
@@ -12,17 +14,18 @@ pipeline default() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "What is 2 + 2?",
         nil,
         {provider: "mock", loop_until_done: true, max_iterations: 4, done_judge: true},
       )
-      __io_println(result.status)
-      __io_println(result.visible_text)
-      __io_println(result.llm.iterations)
-      const calls = llm_mock_calls()
-      __io_println(len(calls))
-      __io_println(!json_stringify(calls[1].messages).contains("{{"))
-      __io_println(json_stringify(calls[3].messages).contains("The concrete result is 4."))
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(result.llm.iterations)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls))
+      harness.stdio.println(!json_stringify(calls[1].messages).contains("{{"))
+      harness.stdio.println(json_stringify(calls[3].messages).contains("The concrete result is 4."))
     },
   )
 }

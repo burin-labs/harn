@@ -151,8 +151,8 @@ fn __rerank_normalize_decision(value) {
   throw "pairwise_rerank: judge must return a dict, string, bool, int, or float"
 }
 
-fn __rerank_prompt(left, right, opts) {
-  return render_prompt(
+fn __rerank_prompt(fs: HarnessFs, left, right, opts) {
+  return fs.render_prompt(
     "std/llm/prompts/pairwise_rerank_user.harn.prompt",
     {
       task: opts?.task ?? opts?.prompt ?? "",
@@ -187,7 +187,7 @@ fn __rerank_llm_options(opts) {
   }
 }
 
-fn __rerank_compare(left, right, opts) {
+fn __rerank_compare(fs: HarnessFs, llm: HarnessLlm, left, right, opts) {
   if opts?.compare != nil {
     return __rerank_normalize_decision(
       opts.compare(
@@ -197,21 +197,21 @@ fn __rerank_compare(left, right, opts) {
       ),
     )
   }
-  const result = llm_call_structured(
-    __rerank_prompt(left, right, opts),
+  const result = llm.call_structured(
+    __rerank_prompt(fs, left, right, opts),
     __rerank_schema(),
     __rerank_llm_options(opts),
   )
   return __rerank_normalize_decision(result)
 }
 
-fn __rerank_merge(left, right, opts, state) {
+fn __rerank_merge(fs: HarnessFs, llm: HarnessLlm, left, right, opts, state) {
   let out = []
   let left_idx = 0
   let right_idx = 0
   let next_state = state
   while left_idx < len(left) && right_idx < len(right) {
-    const decision = __rerank_compare(left[left_idx], right[right_idx], opts)
+    const decision = __rerank_compare(fs, llm, left[left_idx], right[right_idx], opts)
     next_state = __rerank_note_decision(next_state, left[left_idx], right[right_idx], decision)
     if decision.winner == "right" {
       out = out.appending(right[right_idx])
@@ -232,14 +232,14 @@ fn __rerank_merge(left, right, opts, state) {
   return {ranked: out, state: next_state}
 }
 
-fn __rerank_sort(records, opts, state) {
+fn __rerank_sort(harness: Harness, records, opts, state) {
   if len(records) <= 1 {
     return {ranked: records, state: state}
   }
   const mid = floor(len(records) / 2)
-  const left = __rerank_sort(records.slice(0, mid), opts, state)
-  const right = __rerank_sort(records.slice(mid, len(records)), opts, left.state)
-  return __rerank_merge(left.ranked, right.ranked, opts, right.state)
+  const left = __rerank_sort(harness, records.slice(0, mid), opts, state)
+  const right = __rerank_sort(harness, records.slice(mid, len(records)), opts, left.state)
+  return __rerank_merge(harness.fs, harness.llm, left.ranked, right.ranked, opts, right.state)
 }
 
 fn __rerank_strip_internal_score_fields(scores) {
@@ -267,13 +267,13 @@ fn __rerank_strip_internal_score_fields(scores) {
  * @effects: []
  * @errors: []
  */
-pub fn pairwise_rerank(candidates, opts = nil) -> dict {
+pub fn pairwise_rerank(harness: Harness, candidates, opts = nil) -> dict {
   require type_of(candidates) == "list", "pairwise_rerank: candidates must be a list"
   if len(candidates) == 0 {
     return {ranked: [], scores: [], comparisons: []}
   }
   const initial_state = {scores: __rerank_initial_scores(candidates), comparisons: []}
-  const sorted = __rerank_sort(__rerank_records(candidates), opts ?? {}, initial_state)
+  const sorted = __rerank_sort(harness, __rerank_records(candidates), opts ?? {}, initial_state)
   let ranked = []
   for record in sorted.ranked {
     ranked = ranked.appending(record.candidate)
@@ -291,6 +291,6 @@ pub fn pairwise_rerank(candidates, opts = nil) -> dict {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn self_certainty(text, model_opts = nil) -> float {
-  return __llm_self_certainty(text, model_opts ?? {})
+pub fn self_certainty(llm: HarnessLlm, text, model_opts = nil) -> float {
+  return llm.self_certainty(text, model_opts ?? {})
 }

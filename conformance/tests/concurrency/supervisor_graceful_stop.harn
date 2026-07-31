@@ -1,7 +1,7 @@
-pipeline default() {
-  const drained = atomic(0)
-  const ready = channel("supervisor-graceful-stop-ready", 1)
-  const sup = supervisor_start(
+pipeline default(harness: Harness) {
+  const drained = harness.runtime.atomic(0)
+  const ready = harness.runtime.channel("supervisor-graceful-stop-ready", 1)
+  const sup = harness.runtime.supervisor_start(
     {
       name: "persona",
       strategy: "one_for_one",
@@ -11,11 +11,11 @@ pipeline default() {
           kind: "persona_loop",
           restart: "never",
           task: { _ctx ->
-            send(ready, "started")
+            harness.runtime.send(ready, "started")
             while !is_cancelled() {
-              yield_now()
+              harness.runtime.yield_now()
             }
-            atomic_set(drained, 1)
+            harness.runtime.atomic_set(drained, 1)
             "drained"
           },
         },
@@ -23,15 +23,15 @@ pipeline default() {
     },
   )
   const started = deadline 2s {
-    receive(ready)
+    harness.runtime.receive(ready)
   }
-  const stopped = supervisor_stop(sup, 2s)
-  const events = supervisor_events(sup)
+  const stopped = harness.runtime.supervisor_stop(sup, 2s)
+  const events = harness.runtime.supervisor_events(sup)
   const final_event = events[len(events) - 1]
-  __io_println(started)
-  __io_println(stopped.status)
-  __io_println(stopped.children[0].status)
-  __io_println(atomic_get(drained))
-  __io_println(final_event.kind)
-  __io_println(final_event.message)
+  harness.stdio.println(started)
+  harness.stdio.println(stopped.status)
+  harness.stdio.println(stopped.children[0].status)
+  harness.stdio.println(harness.runtime.atomic_get(drained))
+  harness.stdio.println(final_event.kind)
+  harness.stdio.println(final_event.message)
 }

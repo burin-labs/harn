@@ -23,7 +23,7 @@ fn assert_throws_contains(body, fragment: string) -> nil {
   return nil
 }
 
-fn mkdirs(path: string) -> nil {
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
   let current = path.starts_with("/") ? "/" : ""
   for part in parts {
@@ -31,22 +31,23 @@ fn mkdirs(path: string) -> nil {
       continue
     }
     current = current == "" || current == "/" ? current + part : path_join(current, part)
-    if !harness.fs.exists(current) {
-      harness.fs.mkdir(current)
+    if !fs.exists(current) {
+      fs.mkdir(current)
     }
   }
   return nil
 }
 
-fn write(root: string, rel: string, text: string) -> nil {
+fn write_fixture(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(dirname(path) ?? root)
-  harness.fs.write_text(path, text)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
   return nil
 }
 
-fn workspace(root: string) -> nil {
-  write(
+fn workspace(fs: HarnessFs, root: string) -> nil {
+  write_fixture(
+    fs,
     root,
     "Cargo.toml",
     """
@@ -61,7 +62,8 @@ version = "1.2.3"
 member-a = { version = "1.2", path = "crates/member-a" }
 """,
   )
-  write(
+  write_fixture(
+    fs,
     root,
     "crates/member-a/Cargo.toml",
     """
@@ -74,7 +76,8 @@ tree-sitter-harn = { path = "../../tree-sitter-harn", version = "1.2" }
 foreign = { path = "../foreign", version = "9" }
 """,
   )
-  write(
+  write_fixture(
+    fs,
     root,
     "crates/excluded/Cargo.toml",
     """
@@ -83,7 +86,8 @@ name = "excluded"
 version = "1.2.3"
 """,
   )
-  write(
+  write_fixture(
+    fs,
     root,
     "tree-sitter-harn/Cargo.toml",
     """
@@ -92,7 +96,8 @@ name = "tree-sitter-harn"
 version = "1.2.3"
 """,
   )
-  write(
+  write_fixture(
+    fs,
     root,
     "spec/acp-registry/harn/agent.json",
     """
@@ -109,16 +114,17 @@ version = "1.2.3"
 }
 """,
   )
-  write(root, "docs/src/embedding-rust.md", "tag = \"v1.0.0\"\n")
+  write_fixture(fs, root, "docs/src/embedding-rust.md", "tag = \"v1.0.0\"\n")
   return nil
 }
 
 @test
-pipeline test_release_plan_preserves_members_and_excludes(task) {
+pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
-      workspace(root)
-      const plan = release_metadata_plan(root, "minor")
+      workspace(harness.fs, root)
+      const plan = release_metadata_plan(harness.fs, root, "minor")
       assert_eq(plan.current_version, "1.2.3")
       assert_eq(plan.next_version, "1.3.0")
       assert_eq(
@@ -131,12 +137,13 @@ pipeline test_release_plan_preserves_members_and_excludes(task) {
 }
 
 @test
-pipeline test_apply_normalizes_every_owned_release_surface(task) {
+pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
-      workspace(root)
-      apply_release_metadata(root, "1.3.0")
-      assert_eq(current_version(root), "1.3.0")
+      workspace(harness.fs, root)
+      apply_release_metadata(harness.fs, root, "1.3.0")
+      assert_eq(current_version(harness.fs, root), "1.3.0")
       const root_text = harness.fs.read_text(path_join(root, "Cargo.toml"))
       assert(root_text.contains("member-a = { version = \"=1.3.0\", path ="))
       const member_text = harness.fs.read_text(path_join(root, "crates/member-a/Cargo.toml"))
@@ -157,40 +164,56 @@ pipeline test_apply_normalizes_every_owned_release_surface(task) {
 }
 
 @test
-pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(task) {
+pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harness, task) {
   with_temp_dir(
+    harness.fs,
     { root ->
-      write(
+      write_fixture(
+        harness.fs,
         root,
         "Cargo.toml",
         "[workspace]\nmembers = [\"missing\"]\nexclude = []\n[workspace.package]\nversion = \"bad\"\n",
       )
       assert_throws_contains(
-        { -> current_version(root) },
+        { -> current_version(harness.fs, root) },
         "workspace version is not MAJOR.MINOR.PATCH",
       )
     },
   )
   with_temp_dir(
+    harness.fs,
     { root ->
-      write(
+      write_fixture(
+        harness.fs,
         root,
         "Cargo.toml",
         "[workspace]\nmembers = [\"missing\"]\nexclude = []\n[workspace.package]\nversion = \"1.2.3\"\n",
       )
       assert_throws_contains(
-        { -> workspace_package_manifests(root) },
+        { -> workspace_package_manifests(harness.fs, root) },
         "workspace.members entry matched no package manifest",
       )
     },
   )
   with_temp_dir(
+    harness.fs,
     { root ->
-      write(root, "a/Cargo.toml", "[package]\nname = \"same\"\nversion = \"1.0.0\"\n")
-      write(root, "b/Cargo.toml", "[package]\nname = \"same\"\nversion = \"1.0.0\"\n")
+      write_fixture(
+        harness.fs,
+        root,
+        "a/Cargo.toml",
+        "[package]\nname = \"same\"\nversion = \"1.0.0\"\n",
+      )
+      write_fixture(
+        harness.fs,
+        root,
+        "b/Cargo.toml",
+        "[package]\nname = \"same\"\nversion = \"1.0.0\"\n",
+      )
       assert_throws_contains(
         { ->
           package_names_for_manifests(
+            harness.fs,
             [path_join(root, "a/Cargo.toml"), path_join(root, "b/Cargo.toml")],
           )
         },
@@ -201,7 +224,7 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(task) {
 }
 
 @test
-pipeline test_versionless_unpublished_dependency_is_preserved(task) {
+pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, task) {
   assert_eq(
     rewrite_local_dependency_versions(
       "member-a = { path = \"crates/member-a\" }\n",
@@ -213,7 +236,7 @@ pipeline test_versionless_unpublished_dependency_is_preserved(task) {
 }
 
 @test
-pipeline test_changelog_top_validation(task) {
+pipeline test_changelog_top_validation(harness: Harness, task) {
   verify_changelog_top("# Changelog\n\n## v1.2.4\n\n- notes\n", "1.2.4")
   assert_throws_contains(
     { -> verify_changelog_top("# Changelog\n\n## v1.2.3\n", "1.2.4") },

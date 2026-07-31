@@ -1,3 +1,5 @@
+import { agent_loop } from "std/agent/loop"
+
 fn write_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -13,8 +15,9 @@ fn write_tools() {
   return tools
 }
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const denied = agent_loop(
+    harness,
     "Try to run shell",
     "You are helpful",
     {
@@ -25,8 +28,8 @@ pipeline main() {
       approval_policy: {auto_deny: ["shell*"]},
     },
   )
-  __io_println(denied?.tools?.rejected[0] == "shell_exec")
+  harness.stdio.println(denied?.tools?.rejected[0] == "shell_exec")
   const transcript = json_stringify(transcript_messages(denied?.transcript))
-  __io_println(transcript.contains("permission_denied"))
-  __io_println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
+  harness.stdio.println(transcript.contains("permission_denied"))
+  harness.stdio.println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
 }

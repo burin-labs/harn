@@ -185,12 +185,8 @@ pub struct ExportedFunction {
 
 /// A `.harn` worker/job entrypoint declared with `@job("name")`.
 ///
-/// A job is *not* a separate execution engine: the worker adapter lowers
-/// it into a `TriggerBindingSpec` whose handler is the function's own
-/// closure and dispatches it through `harn_vm`'s trigger
-/// [`Dispatcher`](harn_vm::Dispatcher). Retry, dead-letter, per-dispatch
-/// budget, and cancellation are therefore inherited from the dispatcher
-/// rather than re-implemented here.
+/// Jobs lower to `TriggerBindingSpec` and inherit retry, dead-letter,
+/// budget, and cancellation behavior from [`Dispatcher`](harn_vm::Dispatcher).
 ///
 /// Declared like the route/limits/budget attributes:
 ///
@@ -201,7 +197,7 @@ pub struct ExportedFunction {
 /// @retry(max: 3, backoff: "exponential")
 /// @budget(llm_cost_usd: 0.50)
 /// @scopes("scan:run")
-/// pub fn scan(event: TriggerEvent) -> dict { ... }
+/// pub fn scan(harness: Harness, event: TriggerEvent) -> dict { ... }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobSpec {
@@ -999,7 +995,7 @@ fn bare_route_marker_from_attributes(
 /// @retry(max: 3, backoff: "exponential")
 /// @schedule("0 * * * *", "UTC")   // optional cron daemon job
 /// @queue("scan-jobs")             // optional worker queue
-/// pub fn scan(event: TriggerEvent) -> dict { ... }
+/// pub fn scan(harness: Harness, event: TriggerEvent) -> dict { ... }
 /// ```
 ///
 /// The `@schedule` / `@queue` modifiers are parsed only when a `@job` is
@@ -1557,8 +1553,8 @@ pub fn handler_echo(req: dict) -> dict { return req }
         std::fs::write(
             &path,
             r"
-pipeline default(task) {
-  __io_println(task)
+pipeline default(harness: Harness, task) {
+  harness.stdio.println(task)
 }
 ",
         )
@@ -1567,7 +1563,11 @@ pipeline default(task) {
         let catalog = ExportCatalog::from_path(&path).expect("catalog");
         let default = catalog.function("default").expect("default pipeline");
         assert_eq!(default.kind, ExportedCallableKind::Pipeline);
-        assert_eq!(default.params[0].name, "task");
+        assert_eq!(default.params[0].name, "harness");
+        assert!(default
+            .params
+            .get(1)
+            .is_some_and(|param| param.name == "task"));
     }
 
     /// Build a catalog from inline source, asserting it parses cleanly.
@@ -1754,10 +1754,10 @@ pub fn guarded(req: dict) -> dict { return req }
 @job("scan", retry: { max: 3, backoff: "exponential" })
 @schedule("0 * * * *", "UTC")
 @queue("scan-jobs")
-pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict { return {ok: true} }
 
 @job
-pub fn sweep(event: TriggerEvent) -> dict { return {ok: true} }
+pub fn sweep(harness: Harness, event: TriggerEvent) -> dict { return {ok: true} }
 
 pub fn helper(req: dict) -> dict { return req }
 "#,
@@ -1808,7 +1808,7 @@ pub fn helper(req: dict) -> dict { return req }
 pub fn name_of(event: TriggerEvent) -> string { return "x" }
 
 @job(name_of)
-pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict { return {ok: true} }
 "#,
         );
         let scan = catalog.function("scan").expect("scan export");
@@ -1822,7 +1822,7 @@ pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
         let catalog = catalog_from_source(
             r#"
 @schedule("0 * * * *")
-pub fn orphan(event: TriggerEvent) -> dict { return {ok: true} }
+pub fn orphan(harness: Harness, event: TriggerEvent) -> dict { return {ok: true} }
 "#,
         );
         let orphan = catalog.function("orphan").expect("orphan export");
@@ -1836,7 +1836,7 @@ pub fn orphan(event: TriggerEvent) -> dict { return {ok: true} }
         let catalog = catalog_from_source(
             r#"
 @job("scan", retry: { max: 5, backoff: "wishful" })
-pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict { return {ok: true} }
 "#,
         );
         let scan = catalog.function("scan").expect("scan export");
@@ -1860,7 +1860,7 @@ pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
             r#"
 @job("scan")
 @retry(max: 5, patience: "high")
-pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict { return {ok: true} }
 "#,
         );
         let scan = catalog.function("scan").expect("scan export");

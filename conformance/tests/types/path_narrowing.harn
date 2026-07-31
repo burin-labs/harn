@@ -5,7 +5,7 @@
  * without a defensive `?? []` coercion — including when the guarded `if` is
  * used as an expression whose result type must stay `list`.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn clang_flags(tokens: list) -> list {
     return tokens
   }
@@ -26,8 +26,8 @@ pipeline test(task) {
     }
     return 0
   }
-  log(resolve({arguments: ["-O2", "-Wall"], command: nil}))
-  log(resolve({arguments: nil, command: "cc -g"}))
-  log(count({items: ["a", "b", "c"]}))
-  log(count({items: nil}))
+  harness.stdio.log(resolve({arguments: ["-O2", "-Wall"], command: nil}))
+  harness.stdio.log(resolve({arguments: nil, command: "cc -g"}))
+  harness.stdio.log(count({items: ["a", "b", "c"]}))
+  harness.stdio.log(count({items: nil}))
 }

@@ -192,7 +192,7 @@ pub(super) fn install_run_sandbox_scope(
     };
     let egress_policy = Some(harn_vm::egress::require_explicit_egress_policy_for_host());
     // Default-on the SSRF private-address guard for outbound HTTP. Callers can
-    // opt out with `egress_policy({block_private:"off"})` /
+    // opt out with `harness.net.egress_policy({block_private:"off"})` /
     // `HARN_EGRESS_BLOCK_PRIVATE=off`.
     let ssrf_guard = Some(harn_vm::egress::require_ssrf_guard_for_host());
 
@@ -324,6 +324,30 @@ pub(super) fn default_run_capability_policy(
             .map(|path| path.display().to_string()),
     );
 
+    let mut process_read_roots = process_read_roots
+        .iter()
+        .map(|path| normalize_run_workspace_root(path.as_path()))
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    // A sandboxed Harn script may delegate back to the exact runtime that is
+    // executing it (for example through `sh` or `/usr/bin/time`). OS sandbox
+    // policies are inherited across that wrapper process, so the runtime must
+    // be in the process-only policy rather than granted only when it is the
+    // immediate `process.run` program.
+    //
+    // Grant the file itself, never its containing directory. This preserves
+    // attenuation while making self-hosted checks independent of whether the
+    // verified binary lives in the workspace, `/usr/bin`, or a CI artifact
+    // directory such as GitHub's `$RUNNER_TEMP`.
+    if let Ok(runtime_executable) = std::env::current_exe() {
+        let runtime_executable = normalize_run_workspace_root(&runtime_executable)
+            .display()
+            .to_string();
+        if !process_read_roots.contains(&runtime_executable) {
+            process_read_roots.push(runtime_executable);
+        }
+    }
+
     harn_vm::orchestration::CapabilityPolicy {
         workspace_roots,
         read_only_roots: read_only_roots
@@ -333,11 +357,7 @@ pub(super) fn default_run_capability_policy(
             .collect(),
         process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
             presets: None,
-            read_roots: process_read_roots
-                .iter()
-                .map(|path| normalize_run_workspace_root(path.as_path()))
-                .map(|path| path.display().to_string())
-                .collect(),
+            read_roots: process_read_roots,
             write_roots: process_write_roots
                 .iter()
                 .map(|path| normalize_run_workspace_root(path.as_path()))
@@ -529,7 +549,12 @@ mod tests {
 
         assert_eq!(
             policy.process_sandbox.read_roots,
-            vec![process_read.display().to_string()]
+            vec![
+                process_read.display().to_string(),
+                normalize_run_workspace_root(&std::env::current_exe().unwrap())
+                    .display()
+                    .to_string(),
+            ]
         );
         assert_eq!(
             policy.process_sandbox.write_roots,

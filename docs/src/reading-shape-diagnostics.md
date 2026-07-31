@@ -21,13 +21,13 @@ need to dig into the source to interpret one.
 type User = {name: string, email: string, age: int}
 
 const u: User = {name: "Ada", email: "ada@x", age: 36}
-log(u.emial)
+harness.stdio.log(u.emial)
 ```
 
 ```text
 error: field `emial` does not exist on shape `{name: string, email: string, age: int}` — did you mean `email`?
    |
- 5 |   log(u.emial)
+ 5 |   harness.stdio.log(u.emial)
    = help: available fields: name, email, age
 ```
 
@@ -72,7 +72,7 @@ shape inside the `if` body, is:
 ```harn
 const data = r.data       // r.data: T | nil
 if data != nil {
-  log(data.name)    // data: T here
+  harness.stdio.log(data.name)    // data: T here
 }
 ```
 

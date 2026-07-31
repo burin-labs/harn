@@ -1098,7 +1098,7 @@ async fn streamed_tool_call_uses_one_wire_id_across_announcement_and_dispatch() 
 async fn no_session_id_means_no_streaming_events() {
     // Without an opt-in session id the transport must remain silent
     // — the dispatch-time lifecycle still owns the canonical events
-    // for raw `llm_call(...)` invocations from script context.
+    // for raw `harness.llm.call(...)` invocations from script context.
     let body = concat!(
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_x\",\"name\":\"fake\"}}\n",
             "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"k\\\":1}\"}}\n",

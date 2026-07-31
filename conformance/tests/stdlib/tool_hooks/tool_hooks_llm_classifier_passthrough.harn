@@ -9,13 +9,14 @@ import { preset_run_command } from "std/tool_hooks"
  *   2. Explicit `allow` verdict → audit + passthrough.
  *   3. Cache hit replays the prior verdict without re-querying the model.
  */
-pipeline default() {
-  pipeline_lifecycle_audit_log_take()
-  __tool_hooks_classifier_cache_clear()
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.tools.classifier_cache_clear()
   /* Scenario 1: below-threshold rewrite. The classifier says rewrite but
    * confidence (0.4) < threshold (0.8) so the wrapper falls through to
    * `inner` with the original command. */
   with_llm_script(
+    harness.llm,
     [
       llm_text(
         "{\"kind\": \"rewrite\", \"confidence\": 0.4,"
@@ -26,6 +27,7 @@ pipeline default() {
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
       const wrapper = preset_run_command(
+        harness,
         {
           llm_classifier: {
             model: "haiku",
@@ -37,25 +39,25 @@ pipeline default() {
         },
       )
       const r1 = wrapper({command: "echo hello"})
-      __io_println(r1.ok)
-      __io_println(r1.ran)
+      harness.stdio.println(r1.ok)
+      harness.stdio.println(r1.ran)
       const r2 = wrapper({command: "ls -la"})
-      __io_println(r2.ok)
-      __io_println(r2.ran)
-      const calls_before = len(llm_mock_calls())
+      harness.stdio.println(r2.ok)
+      harness.stdio.println(r2.ran)
+      const calls_before = len(harness.llm.mock_calls())
       const r3 = wrapper({command: "echo   hello"})
-      __io_println(r3.ok)
-      __io_println(r3.ran)
-      const calls_after = len(llm_mock_calls())
-      __io_println(calls_after - calls_before)
-      const log = pipeline_lifecycle_audit_log_take()
-      __io_println(len(log))
-      __io_println(log[0].payload.action)
-      __io_println(log[0].payload.cache_hit)
-      __io_println(log[1].payload.action)
-      __io_println(log[1].payload.cache_hit)
-      __io_println(log[2].payload.action)
-      __io_println(log[2].payload.cache_hit)
+      harness.stdio.println(r3.ok)
+      harness.stdio.println(r3.ran)
+      const calls_after = len(harness.llm.mock_calls())
+      harness.stdio.println(calls_after - calls_before)
+      const log = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(len(log))
+      harness.stdio.println(log[0].payload.action)
+      harness.stdio.println(log[0].payload.cache_hit)
+      harness.stdio.println(log[1].payload.action)
+      harness.stdio.println(log[1].payload.cache_hit)
+      harness.stdio.println(log[2].payload.action)
+      harness.stdio.println(log[2].payload.cache_hit)
     },
   )
 }

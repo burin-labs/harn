@@ -6,10 +6,13 @@ import { AgentModelTurnCallback } from "std/agent/chat"
  * `AgentModelTurn` contracts on the boundary instead of `dict` / `any` /
  * a duplicated local record.
  */
-pub fn with_turn_recorder(next: AgentModelTurnCallback) -> AgentModelTurnCallback {
+pub fn with_turn_recorder(
+  stdio: HarnessStdio,
+  next: AgentModelTurnCallback,
+) -> AgentModelTurnCallback {
   return { turn, state ->
     // Read a deterministic, library-owned field off the typed model turn.
-    log("recorded stop_reason=" + turn.stop_reason)
+    stdio.log("recorded stop_reason=" + turn.stop_reason)
     return next(turn, state)
   }
 }

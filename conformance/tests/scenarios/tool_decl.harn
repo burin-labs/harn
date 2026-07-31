@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Test 1: basic tool declaration
   tool greet(name: string) -> string {
     "Hello, " + name
@@ -55,5 +55,5 @@ pipeline test(task) {
   const search_handler = search_tool.handler
   const default_result = search_handler("needle")
   assert(default_result == "needle:*.py:20", "handler should still honor defaulted params")
-  log("tool_decl tests passed")
+  harness.stdio.log("tool_decl tests passed")
 }

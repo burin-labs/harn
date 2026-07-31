@@ -90,7 +90,7 @@ manifest markers for package-manager and conformance tests:
 ```rust,ignore
 let workspace = TempPackageWorkspace::new("connector-contract")?;
 workspace.write_harn_package("demo-connector")?;
-workspace.write_file("src/main.harn", "pipeline main(task) {}")?;
+workspace.write_file("src/main.harn", "pipeline main(harness: Harness) {}")?;
 ```
 
 The directory is removed when the workspace value drops.

@@ -285,15 +285,15 @@ pub fn parse_args(args: list<string>) -> any {
   return {help: false, error: nil, artifacts_dir: artifacts_dir, tag: tag, output: output}
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const parsed = parse_args(argv)
   if parsed.help {
-    __io_println(help_text())
+    harness.stdio.println(help_text())
     return 0
   }
   if parsed.error != nil {
-    __io_eprintln(USAGE)
-    __io_eprintln("${PROG}: error: ${parsed.error}")
+    harness.stdio.eprintln(USAGE)
+    harness.stdio.eprintln("${PROG}: error: ${parsed.error}")
     return 2
   }
   const artifacts_dir: string = parsed.artifacts_dir
@@ -308,23 +308,23 @@ pipeline main(task) {
     const meta = target_meta(triple)
     const filename: string = meta.filename
     const path = join_path(artifacts_dir, filename)
-    if !is_regular_file(path) {
+    if !is_regular_file(harness.fs, path) {
       missing = missing + [filename]
       continue
     }
     const bytes = harness.fs.read_bytes(path)
-    const sha = harness.crypto.sha256(bytes)
+    const sha = sha256(bytes)
     const size: int = harness.fs.stat(path).size
     assets = {...assets, [triple]: asset_record(triple, download_base, sha, size)}
   }
   if missing.count > 0 {
-    __io_eprintln(missing_message(missing))
+    harness.stdio.eprintln(missing_message(missing))
     return 1
   }
   const manifest = build_manifest(version, tag, release_url, assets)
   const out_path = posix_path_str(output)
   harness.fs.write_text(out_path, json_stringify_pretty(manifest) + "\n")
-  __io_eprintln("Wrote ${out_path} (${assets.keys().count} targets)")
+  harness.stdio.eprintln("Wrote ${out_path} (${assets.keys().count} targets)")
   return 0
 }
 
@@ -333,9 +333,9 @@ pipeline main(task) {
  * Python `Path.is_file()`. `stat` throws on a missing path, so gate on
  * `exists` first.
  */
-fn is_regular_file(path: string) -> bool {
-  if !harness.fs.exists(path) {
+fn is_regular_file(fs: HarnessFs, path: string) -> bool {
+  if !fs.exists(path) {
     return false
   }
-  return harness.fs.stat(path).is_file
+  return fs.stat(path).is_file
 }

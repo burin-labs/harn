@@ -1,7 +1,7 @@
-pipeline test(task) {
-  const result = trigger_test_harness("manifest_hot_reload_preserves_in_flight")
-  __io_println(result.ok)
-  __io_println(len(result.bindings) == 2)
-  __io_println(result.bindings[0].id == "reload.fixture")
-  __io_println(result.bindings[0].state == "terminated")
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("manifest_hot_reload_preserves_in_flight")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(len(result.bindings) == 2)
+  harness.stdio.println(result.bindings[0].id == "reload.fixture")
+  harness.stdio.println(result.bindings[0].state == "terminated")
 }

@@ -9,7 +9,7 @@ async fn flow_control_rate_limit_skips_excess_dispatches() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return event.dedupe_key
 }
 "#,
@@ -91,7 +91,7 @@ async fn flow_control_throttle_waits_for_window() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return event.dedupe_key
 }
 "#,
@@ -167,8 +167,8 @@ async fn flow_control_singleton_skips_while_inflight() {
                 r#"
 import "std/triggers"
 
-pub fn slow_handler(event: TriggerEvent) -> string {
-  sleep(50)
+pub fn slow_handler(harness: Harness, event: TriggerEvent) -> string {
+  harness.clock.sleep_ms(50)
   return event.dedupe_key
 }
 "#,
@@ -308,9 +308,9 @@ async fn monitor_wait_releases_singleton_flow_control_while_waiting() {
 import "std/triggers"
 import { wait_for } from "std/monitors"
 
-pub fn coordinated_handler(event: TriggerEvent) -> string {
+pub fn coordinated_handler(harness: Harness, event: TriggerEvent) -> string {
   if event.dedupe_key == "delivery-monitor-wait-1" {
-    let result = wait_for({
+    let result = wait_for(harness.runtime, {
       wait_id: "monitor-singleton",
       timeout: 500ms,
       poll_interval: 1h,
@@ -423,7 +423,7 @@ async fn flow_control_debounce_keeps_latest_event() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
   return event.dedupe_key
 }
 "#,
@@ -535,7 +535,7 @@ async fn flow_control_batch_coalesces_multiple_events() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> dict {
+pub fn local_fn(harness: Harness, event: TriggerEvent) -> dict {
   let batch_count = if event.batch == nil { 0 } else { len(event.batch) }
   return {dedupe_key: event.dedupe_key, batch_count: batch_count}
 }
@@ -613,8 +613,8 @@ async fn flow_control_priority_prefers_higher_ranked_waiters() {
                 r#"
 import "std/triggers"
 
-pub fn slow_handler(event: TriggerEvent) -> string {
-  sleep(30)
+pub fn slow_handler(harness: Harness, event: TriggerEvent) -> string {
+  harness.clock.sleep_ms(30)
   return event.headers.tier
 }
 "#,

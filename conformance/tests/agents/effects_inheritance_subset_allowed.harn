@@ -1,3 +1,5 @@
+import "std/agent/workers"
+
 /**
  * E5.4 (HARN-CAP-301): when a child agent's effect set is a subset of
  * the parent's, the dispatcher accepts the spawn. The parent declares
@@ -5,17 +7,18 @@
  * strict subset (workspace only) so subset ⊆ holds and the existing
  * spawn_agent path runs normally.
  */
-fn parent() {
+fn parent(agent: HarnessAgent, stdio: HarnessStdio) {
   const _worker = spawn_agent(
+    agent,
     {
       name: "subset-child",
       task: "read only",
       node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}},
     },
   )
-  __io_println("spawn ok")
+  stdio.println("spawn ok")
 }
 
-pipeline main() {
-  parent()
+pipeline main(harness: Harness) {
+  parent(harness.agent, harness.stdio)
 }

@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   interface Greetable {
     fn greet(self) -> string
   }
@@ -11,7 +11,7 @@ pipeline test(task) {
     }
   }
   fn introduce<T>(item: T) where T: Greetable {
-    log(item.greet())
+    harness.stdio.log(item.greet())
   }
   introduce(Person({name: "Alice"}))
 }

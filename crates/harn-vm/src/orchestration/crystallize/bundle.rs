@@ -64,7 +64,7 @@ impl Default for BundleGenerator {
 pub struct BundleWorkflowRef {
     /// Relative path inside the bundle directory.
     pub path: String,
-    /// Short identifier used in `pipeline NAME(...)`.
+    /// Short identifier used in `pipeline NAME(harness: Harness, ...)`.
     pub name: String,
     /// Logical package name promotion uses to register the workflow.
     pub package_name: String,

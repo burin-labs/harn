@@ -64,12 +64,12 @@ retry = { max = 1, backoff = "immediate", retention_days = 7 }
         r#"
 import "std/triggers"
 
-pub fn on_ok(event: TriggerEvent) -> dict {
+pub fn on_ok(harness: Harness, event: TriggerEvent) -> dict {
   log("ok:" + event.kind)
   return {kind: event.kind, event_id: event.id, trace_id: event.trace_id}
 }
 
-pub fn on_fail(event: TriggerEvent) -> any {
+pub fn on_fail(harness: Harness, event: TriggerEvent) -> any {
   throw "boom:" + event.kind
 }
 "#,

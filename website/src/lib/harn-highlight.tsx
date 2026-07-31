@@ -5,7 +5,7 @@ import { KEYWORD_DOCS } from "./keyword-docs"
 
 const harnLanguage: LanguageFn = (hljs) => {
   const keywords = {
-    keyword: "agent_loop break continue each else fn for if in let parallel pipeline retry return spawn while",
+    keyword: "break continue each else fn for if in let parallel pipeline retry return spawn while",
     literal: "false nil true",
     built_in: "llm_call log read_file read_text tool_select",
   }

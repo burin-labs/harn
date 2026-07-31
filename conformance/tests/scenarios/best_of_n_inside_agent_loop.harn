@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Cross-slice integration: agent_loop's llm_caller seam composes with
  * std/llm/ensemble::best_of_n. The custom caller routes the per-turn call to
@@ -8,9 +9,10 @@
 import { best_of_n } from "std/llm/ensemble"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // 3 candidate samples consumed in order by best_of_n's sequential sampler.
   with_llm_script(
+    harness.llm,
     [
       llm_text("candidate-A"),
       llm_text("candidate-B"),
@@ -20,6 +22,7 @@ pipeline default() {
     { ->
       const bon_caller = { call ->
         let result = best_of_n(
+          harness.llm,
           call.prompt,
           call.system,
           {n: 3, parallel: false, call_opts: {provider: "mock"}, judge_opts: {provider: "mock"}},
@@ -40,12 +43,13 @@ pipeline default() {
         }
       }
       const result = agent_loop(
+        harness,
         "hi",
         nil,
         {provider: "mock", llm_caller: bon_caller, max_iterations: 1},
       )
-      __io_println(result.status)
-      __io_println(result.visible_text)
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
     },
   )
 }

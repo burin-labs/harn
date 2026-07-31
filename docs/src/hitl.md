@@ -20,21 +20,21 @@ so existing scripts keep working without migration:
 
 ```harn,ignore
 // Named-argument form (recommended)
-const record = request_approval(
+const record = harness.interaction.request_approval(
   action: "deploy production",
   quorum: 2,
   reviewers: ["alice", "bob", "carol"],
 )
 
 // Positional form (kept for back-compat with the original stdlib API)
-const record = request_approval(
+const record = harness.interaction.request_approval(
   "deploy production",
   {quorum: 2, reviewers: ["alice", "bob", "carol"]},
 )
 ```
 
 The typechecker validates required arguments and rejects unknown names
-per primitive (e.g. `request_approval(bogus_arg: 1)` is a compile-time
+per primitive (e.g. `harness.interaction.request_approval(bogus_arg: 1)` is a compile-time
 error).
 
 ## VM-enforced invariants
@@ -81,16 +81,16 @@ type Choice = {
   environment: "staging" | "prod",
 }
 
-const choice: Choice = ask_user(
+const choice: Choice = harness.interaction.ask_user(
   "Where should this deploy?",
   {schema: schema_of(Choice)},
 )
 ```
 
-### `request_approval(...) -> ApprovalRecord`
+### `harness.interaction.request_approval(...) -> ApprovalRecord`
 
 ```harn,ignore
-request_approval(
+harness.interaction.request_approval(
   action: string,
   options?: ApprovalRequestOptions,
 ) -> ApprovalRecord
@@ -176,7 +176,7 @@ render and resolve existing flows.
 
 Run a closure only after `n` approvals out of `m` named approvers.
 
-- Typical destructive-operation pattern: `dual_control(2, 3, { -> ... }, ["alice", "bob", "carol"])`
+- Typical destructive-operation pattern: `harness.interaction.dual_control(2, 3, { -> ... }, ["alice", "bob", "carol"])`
 - The closure does not run until quorum is satisfied.
 - Denial raises `ApprovalDeniedError`.
 - Event log:
@@ -187,7 +187,7 @@ Run a closure only after `n` approvals out of `m` named approvers.
   - executed: `hitl.dual_control_executed`
   - timeout: `hitl.timeout`
 
-### `escalate_to(role: string, reason: string) -> EscalationHandle`
+### `harness.interaction.escalate_to(role: string, reason: string) -> EscalationHandle`
 
 Raise the current dispatch to a higher-trust role and block until the host
 accepts the escalation.
@@ -303,18 +303,18 @@ Catch denials explicitly:
 
 ```harn
 const result = try {
-  request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob"]})
+  harness.interaction.request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob"]})
 }
 if is_err(result) && unwrap_err(result).name == "ApprovalDeniedError" {
-  log("deployment denied")
+  harness.stdio.log("deployment denied")
 }
 ```
 
 Gate a destructive step behind dual control:
 
 ```harn,ignore
-const deleted = dual_control(2, 3, {
-  delete_file("prod.db")
+const deleted = harness.interaction.dual_control(2, 3, {
+  harness.fs.delete("prod.db")
   return true
 }, ["alice", "bob", "carol"])
 ```

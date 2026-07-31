@@ -1,7 +1,7 @@
 import { obs } from "std/observability"
 
-pipeline default() {
-  const o = obs()
+pipeline default(harness: Harness) {
+  const o = obs(harness.obs)
   o.reset()
   o.configure({backend: o.Backend.test()})
   const result = o.span(
@@ -14,21 +14,21 @@ pipeline default() {
     },
   )
   const emitted = o.events_take()
-  __io_println(result)
-  __io_println(len(emitted))
-  __io_println(emitted[0].payload.kind)
-  __io_println(emitted[0].payload.fields.pr_number)
-  __io_println(emitted[1].payload.kind)
-  __io_println(emitted[1].payload.fields.pr_number)
-  __io_println(emitted[2].payload.kind)
-  __io_println(emitted[2].payload.fields.span_name)
-  __io_println(emitted[2].payload.trace_id == emitted[0].payload.trace_id)
+  harness.stdio.println(result)
+  harness.stdio.println(len(emitted))
+  harness.stdio.println(emitted[0].payload.kind)
+  harness.stdio.println(emitted[0].payload.fields.pr_number)
+  harness.stdio.println(emitted[1].payload.kind)
+  harness.stdio.println(emitted[1].payload.fields.pr_number)
+  harness.stdio.println(emitted[2].payload.kind)
+  harness.stdio.println(emitted[2].payload.fields.span_name)
+  harness.stdio.println(emitted[2].payload.trace_id == emitted[0].payload.trace_id)
   o.configure({backend: o.Backend.test()})
   const span = o.start_span("imperative", {request_id: "r1"})
   o.log_in_span(span, "manual", "warn", {local: true})
   o.end_span(span)
   const manual = o.events_take()[0].payload
-  __io_println(manual.level)
-  __io_println(manual.fields.request_id)
-  __io_println(manual.fields.local)
+  harness.stdio.println(manual.level)
+  harness.stdio.println(manual.fields.request_id)
+  harness.stdio.println(manual.fields.local)
 }

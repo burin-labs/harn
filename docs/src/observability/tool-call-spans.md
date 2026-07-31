@@ -151,7 +151,7 @@ backend's API and pass it directly:
 
 ```harn,ignore
 const prom_sink = { span ->
-  http_request("POST", "http://prom.local/observe", {
+  harness.net.request("POST", "http://prom.local/observe", {
     headers: {"content-type": "application/json"},
     body: json_stringify({
       tool: span.attributes.tool_name,
@@ -160,7 +160,7 @@ const prom_sink = { span ->
     }),
   })
 }
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   tool_caller: compose_tool_callers([with_telemetry(prom_sink)]),
 })
 ```

@@ -25,10 +25,8 @@ impl crate::vm::Vm {
     ) -> Result<VmValue, VmError> {
         match method {
             "issue" => {
-                let builtin = harn_parser::harness_methods::harness_verdict_ambient("issue")
-                    .ok_or_else(|| method_unsupported(handle, method))?;
                 let raw = self
-                    .call_named_builtin(builtin, args.to_vec())
+                    .call_named_builtin("__harness_verdict_issue", args.to_vec())
                     .await
                     .map_err(tag_sandbox_denied)?;
                 Ok(Self::mint_verdict_receipt(&raw))

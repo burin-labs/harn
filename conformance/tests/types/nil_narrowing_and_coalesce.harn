@@ -9,7 +9,7 @@ fn describe(options: Opts = nil) -> string {
   return out
 }
 
-pipeline main() {
-  __io_println(describe({label: "hello"}))
-  __io_println(describe(nil))
+pipeline main(harness: Harness) {
+  harness.stdio.println(describe({label: "hello"}))
+  harness.stdio.println(describe(nil))
 }

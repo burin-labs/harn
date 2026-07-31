@@ -1,21 +1,18 @@
-// First-class HITL syntax: `dual_control` as a reserved keyword. Named
-// args (`n:`, `m:`, `action:`, `approvers:`) lower to the existing
-// dual-control builtin which still requires distinct principals to
-// reach quorum.
-import { clear_host_mocks, mock_host_response } from "std/testing"
-
+/**
+ * Dual control is explicit on the interaction capability and still requires
+ * distinct principals to reach quorum.
+ */
 fn destructive_step() -> string {
   return "deleted"
 }
 
-pipeline test(task) {
-  clear_host_mocks()
-  mock_host_response(
-    "hitl",
-    "dual_control",
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction",
+    "dual_control_response",
     [{approved: true, reviewer: "alice"}, {approved: true, reviewer: "bob"}],
   )
-  const result =
-    dual_control(n: 2, m: 3, action: destructive_step, approvers: ["alice", "bob", "carol"])
-  __io_println(result)
+  const result = harness.interaction.dual_control(2, 3, destructive_step, ["alice", "bob", "carol"])
+  harness.stdio.println(result)
 }

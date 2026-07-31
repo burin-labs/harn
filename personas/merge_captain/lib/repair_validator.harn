@@ -12,7 +12,7 @@
 //   - malformed output
 //   - unpushed commits
 //
-// A separate `harness_validate(...)` runs the post-condition check
+// A separate `harness_validate(harness, ...)` runs the post-condition check
 // against the actual local repo state. It is the only validator that does
 // I/O and is opt-in via `enabled = true`.
 import { process_run } from "std/runtime"
@@ -272,7 +272,7 @@ pub fn cwd_has_shell_metacharacters(cwd) {
  * any output, the worker left the tree dirty — fail closed. Skipped
  * when `enabled` is false (tests, dry-run sweeps).
  */
-pub fn harness_validate(bundle, output, options) {
+pub fn harness_validate(process: HarnessProcess, bundle, output, options) {
   if !(options.enabled ?? false) {
     return _err([])
   }
@@ -282,6 +282,7 @@ pub fn harness_validate(bundle, output, options) {
   }
   const result = try {
     process_run(
+      process,
       ["git", "-C", cwd, "status", "--porcelain"],
       {timeout_ms: options.timeout_ms ?? 30000},
     )

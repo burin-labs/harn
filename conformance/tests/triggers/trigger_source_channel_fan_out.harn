@@ -4,20 +4,20 @@ import "std/triggers"
  * CH-02 (#1872): two triggers subscribed to the same channel both fire
  * independently on a single emit.
  */
-fn handle_a(event) {
-  emit_channel("ch.fanout.fired", {who: "a", repo: event.provider_payload.payload.repo})
+fn handle_a(harness: Harness, event) {
+  harness.channels.append("ch.fanout.fired", {who: "a", repo: event.provider_payload.payload.repo})
 }
 
-fn handle_b(event) {
-  emit_channel("ch.fanout.fired", {who: "b", repo: event.provider_payload.payload.repo})
+fn handle_b(harness: Harness, event) {
+  harness.channels.append("ch.fanout.fired", {who: "b", repo: event.provider_payload.payload.repo})
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-fanout-a-" + unique,
       kind: "channel.emit",
@@ -35,7 +35,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const _ = trigger_register(
+  const _ = harness.runtime.trigger_register(
     {
       id: "channel-fanout-b-" + unique,
       kind: "channel.emit",
@@ -53,10 +53,10 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const _ = emit_channel("fanout.input", {repo: "harn"})
-  const fired = channel_events("ch.fanout.fired")
-  __io_println(len(fired))
+  const _ = harness.channels.append("fanout.input", {repo: "harn"})
+  const fired = harness.channels.events("ch.fanout.fired")
+  harness.stdio.println(len(fired))
   // Bindings dispatch in id-sorted order: `-a-` before `-b-`.
-  __io_println(fired[0].payload.who)
-  __io_println(fired[1].payload.who)
+  harness.stdio.println(fired[0].payload.who)
+  harness.stdio.println(fired[1].payload.who)
 }

@@ -1,11 +1,11 @@
 use crate::value::VmDictExt;
-use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::Mutex as SyncMutex;
 use rusqlite::types::{Value, ValueRef};
 use rusqlite::{params_from_iter, Connection, OpenFlags};
 use tokio::sync::Mutex;
@@ -13,9 +13,10 @@ use tokio::sync::Mutex;
 use crate::llm::vm_value_to_json;
 use crate::stdlib::macros::{
     harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_BOOL, TY_DICT, TY_LIST,
+    TY_RESOURCE,
 };
 use crate::stdlib::sandbox::{self, FsAccess};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
 const HANDLE_DB: &str = "sqlite_db";
@@ -24,12 +25,16 @@ const HANDLE_MOCK: &str = "sqlite_mock_db";
 const DEFAULT_BUSY_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_MIGRATIONS_TABLE: &str = "harn_sqlite_migrations";
 
-static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-
 struct DbRecord {
     conn: Arc<Mutex<Connection>>,
-    active_tx: Arc<Mutex<Option<String>>>,
+    active_tx: Arc<Mutex<bool>>,
+    closed: AtomicBool,
     read_only: bool,
+}
+
+struct TxRecord {
+    db: Arc<DbRecord>,
+    active: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -47,16 +52,9 @@ struct MockDb {
     calls: Vec<VmValue>,
 }
 
-thread_local! {
-    static DBS: RefCell<BTreeMap<String, Arc<DbRecord>>> = const { RefCell::new(std::collections::BTreeMap::new()) };
-    static TXS: RefCell<BTreeMap<String, Arc<DbRecord>>> = const { RefCell::new(std::collections::BTreeMap::new()) };
-    static MOCKS: RefCell<BTreeMap<String, MockDb>> = const { RefCell::new(std::collections::BTreeMap::new()) };
-}
-
 pub(crate) fn reset_sqlite_state() {
-    DBS.with(|dbs| dbs.borrow_mut().clear());
-    TXS.with(|txs| txs.borrow_mut().clear());
-    MOCKS.with(|mocks| mocks.borrow_mut().clear());
+    // SQLite state is owned by opaque VM resource values. Dropping a VM drops
+    // its databases, transactions, and mocks without clearing ambient state.
 }
 
 pub(crate) fn register_sqlite_builtins(vm: &mut Vm) {
@@ -81,7 +79,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_open", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "runtime_internal",
+    effects = [],
+    sig_expr = BuiltinSignature::variadic("sqlite_open", &[Param::new("args", TY_ANY
+)], TY_RESOURCE),
     kind = "async",
     category = "sqlite"
 )]
@@ -101,7 +102,10 @@ async fn sqlite_open_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_close", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["fs.write@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_close", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "sqlite"
 )]
@@ -109,21 +113,20 @@ async fn sqlite_close_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let id = handle_id(args.first(), HANDLE_DB, "sqlite_close")?;
-    let Some(record) = DBS.with(|dbs| dbs.borrow().get(&id).cloned()) else {
-        return Ok(VmValue::Bool(false));
-    };
-    if record.active_tx.lock().await.is_some() {
+    let record = db_handle(args.first(), "sqlite_close")?;
+    if *record.active_tx.lock().await {
         return Err(runtime_error(
             "sqlite_close: cannot close a database with an active transaction",
         ));
     }
-    let removed = DBS.with(|dbs| dbs.borrow_mut().remove(&id));
-    Ok(VmValue::Bool(removed.is_some()))
+    Ok(VmValue::Bool(!record.closed.swap(true, Ordering::SeqCst)))
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_query", &[Param::new("args", TY_ANY)], TY_LIST),
+    exposure = "capability_arg:0",
+    effects = ["fs.read@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_query", &[Param::new("args", TY_ANY
+)], TY_LIST),
     kind = "async",
     category = "sqlite"
 )]
@@ -141,7 +144,10 @@ async fn sqlite_query_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_query_one", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["fs.read@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_query_one", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "sqlite"
 )]
@@ -159,7 +165,10 @@ async fn sqlite_query_one_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_execute", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "capability_arg:0",
+    effects = ["fs.write@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_execute", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "sqlite"
 )]
@@ -176,7 +185,10 @@ async fn sqlite_execute_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_transaction", &[Param::new("args", TY_ANY)], TY_ANY),
+    exposure = "capability_arg:0",
+    effects = ["fs.write@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_transaction", &[Param::new("args", TY_ANY
+)], TY_ANY),
     kind = "async",
     category = "sqlite"
 )]
@@ -184,7 +196,7 @@ async fn sqlite_transaction_impl(
     ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    if handle_kind(args.first()).as_deref() == Some(HANDLE_MOCK) {
+    if is_resource_kind(args.first(), HANDLE_MOCK) {
         let target = args.first().expect("checked above");
         let closure = closure_arg(args.get(1), "sqlite_transaction")?;
         let mut child_vm = ctx.child_vm();
@@ -193,24 +205,27 @@ async fn sqlite_transaction_impl(
         return result;
     }
 
-    let db_id = handle_id(args.first(), HANDLE_DB, "sqlite_transaction")?;
+    let record = db_handle(args.first(), "sqlite_transaction")?;
     let closure = closure_arg(args.get(1), "sqlite_transaction")?;
-    let record = db_by_id(&db_id)?;
+    ensure_db_open(&record, "sqlite_transaction")?;
     if record.read_only {
         return Err(runtime_error(
             "sqlite_transaction: cannot start a transaction on a read-only database",
         ));
     }
 
-    let tx_id = next_id("sqlitetx");
+    let tx_record = Arc::new(TxRecord {
+        db: Arc::clone(&record),
+        active: AtomicBool::new(true),
+    });
     {
         let mut active = record.active_tx.lock().await;
-        if active.is_some() {
+        if *active {
             return Err(runtime_error(
                 "sqlite_transaction: database already has an active transaction",
             ));
         }
-        *active = Some(tx_id.clone());
+        *active = true;
     }
 
     let begin = option_string(args.get(2).and_then(VmValue::as_dict), "mode")
@@ -222,12 +237,14 @@ async fn sqlite_transaction_impl(
         return Err(error);
     }
 
-    register_tx(&tx_id, Arc::clone(&record));
-    let tx_handle = handle_value(HANDLE_TX, &tx_id, crate::value::DictMap::new());
+    let tx_handle = VmValue::resource(VmResourceHandle::from_arc(
+        HANDLE_TX,
+        Arc::clone(&tx_record),
+    ));
     let mut child_vm = ctx.child_vm();
     let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
     ctx.forward_output(&child_vm.take_output());
-    unregister_tx(&tx_id);
+    tx_record.active.store(false, Ordering::SeqCst);
 
     let finish = match result {
         Ok(value) => {
@@ -245,7 +262,10 @@ async fn sqlite_transaction_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_savepoint", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["fs.write@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_savepoint", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "sqlite"
 )]
@@ -257,7 +277,10 @@ async fn sqlite_savepoint_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_release_savepoint", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["fs.write@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_release_savepoint", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "sqlite"
 )]
@@ -269,7 +292,10 @@ async fn sqlite_release_savepoint_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_rollback_to_savepoint", &[Param::new("args", TY_ANY)], TY_BOOL),
+    exposure = "capability_arg:0",
+    effects = ["fs.write@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_rollback_to_savepoint", &[Param::new("args", TY_ANY
+)], TY_BOOL),
     kind = "async",
     category = "sqlite"
 )]
@@ -286,7 +312,10 @@ async fn sqlite_rollback_to_savepoint_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_migrate", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "capability_arg:0",
+    effects = ["fs.write@arg0.path"],
+    sig_expr = BuiltinSignature::variadic("sqlite_migrate", &[Param::new("args", TY_ANY
+)], TY_DICT),
     kind = "async",
     category = "sqlite"
 )]
@@ -298,7 +327,10 @@ async fn sqlite_migrate_impl(
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_mock_db", &[Param::new("args", TY_ANY)], TY_DICT),
+    exposure = "harness.testing.sqlite_mock_db",
+    effects = ["state.mutate@dynamic"],
+    sig_expr = BuiltinSignature::variadic("sqlite_mock_db", &[Param::new("args", TY_ANY
+)], TY_RESOURCE),
     category = "sqlite"
 )]
 fn sqlite_mock_db_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -312,32 +344,25 @@ fn sqlite_mock_db_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             ))
         }
     };
-    let id = next_id("sqlitemock");
-    MOCKS.with(|mocks| {
-        mocks.borrow_mut().insert(
-            id.clone(),
-            MockDb {
-                fixtures,
-                calls: Vec::new(),
-            },
-        );
-    });
-    Ok(handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new()))
+    Ok(VmValue::resource(VmResourceHandle::new(
+        HANDLE_MOCK,
+        SyncMutex::new(MockDb {
+            fixtures,
+            calls: Vec::new(),
+        }),
+    )))
 }
 
 #[harn_builtin(
-    sig_expr = BuiltinSignature::variadic("sqlite_mock_calls", &[Param::new("args", TY_ANY)], TY_LIST),
+    exposure = "capability_arg:0",
+    effects = ["state.read@arg0"],
+    sig_expr = BuiltinSignature::variadic("sqlite_mock_calls", &[Param::new("args", TY_ANY
+)], TY_LIST),
     category = "sqlite"
 )]
 fn sqlite_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let id = handle_id(args.first(), HANDLE_MOCK, "sqlite_mock_calls")?;
-    let calls = MOCKS.with(|mocks| {
-        mocks
-            .borrow()
-            .get(&id)
-            .map(|mock| mock.calls.clone())
-            .unwrap_or_default()
-    });
+    let mock = mock_handle(args.first(), "sqlite_mock_calls")?;
+    let calls = mock.lock().calls.clone();
     Ok(VmValue::List(Arc::new(calls)))
 }
 
@@ -397,25 +422,14 @@ fn open_db(path: &str, options: Option<&crate::value::DictMap>) -> Result<VmValu
     };
 
     configure_connection(&conn, options, read_only)?;
-    let id = next_id("sqlitedb");
-    let mut meta = crate::value::DictMap::new();
-    meta.insert(
-        crate::value::intern_key("read_only"),
-        VmValue::Bool(read_only),
-    );
-    meta.insert(crate::value::intern_key("memory"), VmValue::Bool(is_memory));
-    if let Some(path) = &stored_path {
-        meta.put_str("path", path.to_string_lossy());
-    }
-    let record = Arc::new(DbRecord {
+    let _ = stored_path;
+    let record = DbRecord {
         conn: Arc::new(Mutex::new(conn)),
-        active_tx: Arc::new(Mutex::new(None)),
+        active_tx: Arc::new(Mutex::new(false)),
+        closed: AtomicBool::new(false),
         read_only,
-    });
-    DBS.with(|dbs| {
-        dbs.borrow_mut().insert(id.clone(), record);
-    });
-    Ok(handle_value(HANDLE_DB, &id, meta))
+    };
+    Ok(VmValue::resource(VmResourceHandle::new(HANDLE_DB, record)))
 }
 
 fn configure_connection(
@@ -467,7 +481,7 @@ async fn query_rows(
     params: &[VmValue],
     builtin: &'static str,
 ) -> Result<Vec<VmValue>, VmError> {
-    if handle_kind(Some(target)).as_deref() == Some(HANDLE_MOCK) {
+    if is_resource_kind(Some(target), HANDLE_MOCK) {
         return mock_query(target, sql, params, false);
     }
     let record = record_for_target(target, builtin).await?;
@@ -500,7 +514,7 @@ async fn execute_stmt(
     params: &[VmValue],
     builtin: &'static str,
 ) -> Result<VmValue, VmError> {
-    if handle_kind(Some(target)).as_deref() == Some(HANDLE_MOCK) {
+    if is_resource_kind(Some(target), HANDLE_MOCK) {
         let rows = mock_query(target, sql, params, true)?;
         let rows_affected = rows
             .first()
@@ -529,33 +543,21 @@ async fn record_for_target(
     target: &VmValue,
     builtin: &'static str,
 ) -> Result<Arc<DbRecord>, VmError> {
-    match handle_kind(Some(target)).as_deref() {
-        Some(HANDLE_TX) => {
-            let id = handle_id(Some(target), HANDLE_TX, builtin)?;
-            let record = tx_by_id(&id)?;
-            let active = record.active_tx.lock().await;
-            if active.as_deref() != Some(id.as_str()) {
-                return Err(runtime_error(format!("{builtin}: transaction is closed")));
-            }
-            drop(active);
-            Ok(record)
+    if let Ok(tx) = tx_handle(Some(target), builtin) {
+        if !tx.active.load(Ordering::SeqCst) {
+            return Err(runtime_error(format!("{builtin}: transaction is closed")));
         }
-        Some(HANDLE_DB) => {
-            let id = handle_id(Some(target), HANDLE_DB, builtin)?;
-            let record = db_by_id(&id)?;
-            let active = record.active_tx.lock().await;
-            if active.is_some() {
-                return Err(runtime_error(format!(
-                    "{builtin}: database has an active transaction; use the transaction handle"
-                )));
-            }
-            drop(active);
-            Ok(record)
-        }
-        _ => Err(runtime_error(format!(
-            "{builtin}: expected sqlite_db or sqlite_tx handle"
-        ))),
+        ensure_db_open(&tx.db, builtin)?;
+        return Ok(Arc::clone(&tx.db));
     }
+    let record = db_handle(Some(target), builtin)?;
+    ensure_db_open(&record, builtin)?;
+    if *record.active_tx.lock().await {
+        return Err(runtime_error(format!(
+            "{builtin}: database has an active transaction; use the transaction handle"
+        )));
+    }
+    Ok(record)
 }
 
 #[derive(Clone, Copy)]
@@ -576,7 +578,7 @@ async fn savepoint_op(
     let name = required_string_arg(args, 1, builtin, "name")?;
     validate_identifier(&name, builtin, "savepoint name")?;
     let sql = render_savepoint_sql(op, &name);
-    if handle_kind(Some(target)).as_deref() == Some(HANDLE_MOCK) {
+    if is_resource_kind(Some(target), HANDLE_MOCK) {
         let _ = mock_query(target, &sql, &[], true)?;
         return Ok(VmValue::Bool(true));
     }
@@ -609,15 +611,15 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     validate_identifier(&table, "sqlite_migrate", "table")?;
     let dry_run = option_bool(opts.get("dry_run")).unwrap_or(false);
 
-    let id = handle_id(Some(target), HANDLE_DB, "sqlite_migrate")?;
-    let record = db_by_id(&id)?;
+    let record = db_handle(Some(target), "sqlite_migrate")?;
+    ensure_db_open(&record, "sqlite_migrate")?;
     if record.read_only && !dry_run {
         return Err(runtime_error(
             "sqlite_migrate: cannot apply migrations on a read-only database",
         ));
     }
     let active = record.active_tx.lock().await;
-    if active.is_some() {
+    if *active {
         return Err(runtime_error(
             "sqlite_migrate: database has an active transaction",
         ));
@@ -878,13 +880,10 @@ fn mock_query(
     params: &[VmValue],
     execute: bool,
 ) -> Result<Vec<VmValue>, VmError> {
-    let id = handle_id(Some(target), HANDLE_MOCK, "sqlite_mock")?;
+    let mock = mock_handle(Some(target), "sqlite_mock")?;
     let params_json = serde_json::Value::Array(params.iter().map(vm_value_to_json).collect());
-    MOCKS.with(|mocks| {
-        let mut mocks = mocks.borrow_mut();
-        let mock = mocks
-            .get_mut(&id)
-            .ok_or_else(|| runtime_error(format!("sqlite_mock: unknown mock database `{id}`")))?;
+    {
+        let mut mock = mock.lock();
         let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
             "sql": sql,
             "params": params_json,
@@ -910,7 +909,7 @@ fn mock_query(
         } else {
             Ok(fixture.rows.clone())
         }
-    })
+    }
 }
 
 fn execute_result_value(rows_affected: u64) -> VmValue {
@@ -931,67 +930,50 @@ async fn execute_batch_on_record(
 }
 
 async fn clear_active_tx(record: &Arc<DbRecord>) {
-    *record.active_tx.lock().await = None;
+    *record.active_tx.lock().await = false;
 }
 
-fn db_by_id(id: &str) -> Result<Arc<DbRecord>, VmError> {
-    DBS.with(|dbs| {
-        dbs.borrow()
-            .get(id)
-            .cloned()
-            .ok_or_else(|| runtime_error(format!("sqlite_open: unknown or closed database `{id}`")))
-    })
-}
-
-fn tx_by_id(id: &str) -> Result<Arc<DbRecord>, VmError> {
-    TXS.with(|txs| {
-        txs.borrow()
-            .get(id)
-            .cloned()
-            .ok_or_else(|| runtime_error(format!("sqlite_transaction: unknown transaction `{id}`")))
-    })
-}
-
-fn register_tx(id: &str, record: Arc<DbRecord>) {
-    TXS.with(|txs| {
-        txs.borrow_mut().insert(id.to_string(), record);
-    });
-}
-
-fn unregister_tx(id: &str) {
-    TXS.with(|txs| {
-        txs.borrow_mut().remove(id);
-    });
-}
-
-fn handle_value(kind: &str, id: &str, mut extra: crate::value::DictMap) -> VmValue {
-    extra.put_str("_type", kind);
-    extra.put_str("id", id);
-    VmValue::dict(extra)
-}
-
-fn handle_kind(value: Option<&VmValue>) -> Option<String> {
-    value
-        .and_then(VmValue::as_dict)
-        .and_then(|dict| dict.get("_type"))
-        .map(VmValue::display)
-}
-
-fn handle_id(value: Option<&VmValue>, expected: &str, builtin: &str) -> Result<String, VmError> {
-    let dict = value
-        .and_then(VmValue::as_dict)
-        .ok_or_else(|| runtime_error(format!("{builtin}: expected {expected} handle")))?;
-    let kind = dict.get("_type").map(VmValue::display).unwrap_or_default();
-    if kind != expected {
-        return Err(runtime_error(format!(
+fn resource_handle(
+    value: Option<&VmValue>,
+    expected: &str,
+    builtin: &str,
+) -> Result<Arc<VmResourceHandle>, VmError> {
+    match value {
+        Some(VmValue::Resource(handle)) if handle.label() == expected => Ok(Arc::clone(handle)),
+        _ => Err(runtime_error(format!(
             "{builtin}: expected {expected} handle"
-        )));
+        ))),
     }
-    let id = dict.get("id").map(VmValue::display).unwrap_or_default();
-    if id.is_empty() {
-        return Err(runtime_error(format!("{builtin}: handle is missing id")));
+}
+
+fn db_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<DbRecord>, VmError> {
+    resource_handle(value, HANDLE_DB, builtin)?
+        .downcast::<DbRecord>()
+        .ok_or_else(|| runtime_error(format!("{builtin}: invalid sqlite database authority")))
+}
+
+fn tx_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<TxRecord>, VmError> {
+    resource_handle(value, HANDLE_TX, builtin)?
+        .downcast::<TxRecord>()
+        .ok_or_else(|| runtime_error(format!("{builtin}: invalid sqlite transaction authority")))
+}
+
+fn mock_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<SyncMutex<MockDb>>, VmError> {
+    resource_handle(value, HANDLE_MOCK, builtin)?
+        .downcast::<SyncMutex<MockDb>>()
+        .ok_or_else(|| runtime_error(format!("{builtin}: invalid sqlite mock authority")))
+}
+
+fn is_resource_kind(value: Option<&VmValue>, expected: &str) -> bool {
+    matches!(value, Some(VmValue::Resource(handle)) if handle.label() == expected)
+}
+
+fn ensure_db_open(record: &DbRecord, builtin: &str) -> Result<(), VmError> {
+    if record.closed.load(Ordering::SeqCst) {
+        Err(runtime_error(format!("{builtin}: database is closed")))
+    } else {
+        Ok(())
     }
-    Ok(id)
 }
 
 fn closure_arg(
@@ -1127,10 +1109,6 @@ fn string_list(values: Vec<String>) -> VmValue {
     ))
 }
 
-fn next_id(prefix: &str) -> String {
-    format!("{prefix}-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
-}
-
 fn runtime_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(message.into())
 }
@@ -1178,6 +1156,15 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_authority_cannot_be_forged_with_a_dict() {
+        let forged = dict(&[("_type", s(HANDLE_DB)), ("id", s("sqlitedb-1"))]);
+        let error = db_handle(Some(&forged), "sqlite_query")
+            .err()
+            .expect("script-visible dictionaries must not act as database authority");
+        assert!(error.to_string().contains("expected sqlite_db handle"));
+    }
+
+    #[test]
     fn mock_db_matches_parameterized_query_and_records_calls() {
         reset_sqlite_state();
         let fixtures = parse_mock_fixtures(&[dict(&[
@@ -1189,17 +1176,13 @@ mod tests {
             ),
         ])])
         .unwrap();
-        let id = next_id("sqlitemock");
-        MOCKS.with(|mocks| {
-            mocks.borrow_mut().insert(
-                id.clone(),
-                MockDb {
-                    fixtures,
-                    calls: Vec::new(),
-                },
-            );
-        });
-        let handle = handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new());
+        let handle = VmValue::resource(VmResourceHandle::new(
+            HANDLE_MOCK,
+            SyncMutex::new(MockDb {
+                fixtures,
+                calls: Vec::new(),
+            }),
+        ));
         let rows = mock_query(
             &handle,
             "select id from events where topic = ?",
@@ -1208,7 +1191,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rows[0].display(), "{id: 1}");
-        let calls = MOCKS.with(|mocks| mocks.borrow().values().next().unwrap().calls.clone());
+        let calls = mock_handle(Some(&handle), "test")
+            .unwrap()
+            .lock()
+            .calls
+            .clone();
         assert_eq!(calls.len(), 1);
     }
 

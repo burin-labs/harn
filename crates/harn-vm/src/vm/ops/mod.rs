@@ -73,6 +73,7 @@ harn_opcode_macros::define_opcodes! {
     False { sync_void(self.execute_false()), disasm: bare("FALSE") };
 
     // === Variables ===
+    RootHarness { sync(self.execute_root_harness()), disasm: bare("ROOT_HARNESS") };
     GetVar { sync(self.execute_get_var()), disasm: const_pool_u16("GET_VAR"), flags: [reads_outer_name] };
     DefLet { sync(self.execute_def_let()), disasm: const_pool_u16("DEF_LET") };
     DefVar { sync(self.execute_def_var()), disasm: const_pool_u16("DEF_VAR") };

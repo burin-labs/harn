@@ -3,19 +3,18 @@
 //!
 //! The standalone integration tests under `tests/tools_*.rs` exercise
 //! handlers directly. This file proves the contract end-to-end: that a
-//! Harn script can call `hostlib_enable("tools:deterministic")` and then
-//! invoke each of the seven deterministic builtins through the normal
-//! script surface.
+//! Harn script can invoke each deterministic operation through an explicit
+//! nominal Harness capability receiver.
 
 use std::fs;
 
-use harn_hostlib::tools::permissions;
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Vm, VmValue};
+use harn_vm::{register_vm_stdlib, Compiler, Harness, Vm, VmValue};
 use tempfile::TempDir;
 
 fn run_harn(source: &str) -> (VmValue, String) {
+    let source = format!("fn main(harness: Harness) {{\n{source}\n}}");
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -24,7 +23,7 @@ fn run_harn(source: &str) -> (VmValue, String) {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut lexer = Lexer::new(source);
+                let mut lexer = Lexer::new(&source);
                 let tokens = lexer.tokenize().expect("tokenize");
                 let mut parser = Parser::new(tokens);
                 let program = parser.parse().expect("parse");
@@ -33,6 +32,7 @@ fn run_harn(source: &str) -> (VmValue, String) {
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
+                vm.set_harness(Harness::real());
                 let result = vm.execute(&chunk).await.expect("execute");
                 (result, vm.output().to_string())
             })
@@ -42,8 +42,6 @@ fn run_harn(source: &str) -> (VmValue, String) {
 
 #[test]
 fn end_to_end_deterministic_tools_via_harn_script() {
-    permissions::reset();
-
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     fs::write(root.join("readable.txt"), "hello\nworld\n").unwrap();
@@ -56,28 +54,24 @@ fn end_to_end_deterministic_tools_via_harn_script() {
     let root_str = root.to_string_lossy().replace('\\', "/");
     let new_file = format!("{root_str}/created.txt");
 
-    // The script:
-    // 1. Enables the deterministic tools surface.
-    // 2. Reads, lists, searches, outlines, writes, and deletes files.
-    // 3. Stores intermediate results in a dict and returns it.
+    // The script reads, lists, searches, outlines, writes, and deletes files,
+    // then returns the observable results.
     let source = format!(
         r#"
-let _enable = hostlib_enable("tools:deterministic")
 
-let listed = hostlib_tools_list_directory({{ path: "{root_str}" }})
-let read = hostlib_tools_read_file({{ path: "{root_str}/readable.txt" }})
-let searched = hostlib_tools_search({{
+let listed = harness.tools.list_directory({{ path: "{root_str}" }})
+let read = harness.tools.read_file({{ path: "{root_str}/readable.txt" }})
+let searched = harness.tools.search({{
     pattern: "fn",
     path: "{root_str}",
     glob: "*.rs",
     fixed_strings: true
 }})
-let outlined = hostlib_tools_get_file_outline({{ path: "{root_str}/a.rs" }})
-let wrote = hostlib_tools_write_file({{ path: "{new_file}", content: "ok" }})
-let deleted = hostlib_tools_delete_file({{ path: "{new_file}" }})
+let outlined = harness.tools.get_file_outline({{ path: "{root_str}/a.rs" }})
+let wrote = harness.tools.write_file({{ path: "{new_file}", content: "ok" }})
+let deleted = harness.tools.delete_file({{ path: "{new_file}" }})
 
 return {{
-    enable: _enable,
     listed_count: len(listed.entries),
     read_size: read.size,
     read_content: read.content,
@@ -115,43 +109,6 @@ return {{
 }
 
 #[test]
-fn end_to_end_gate_blocks_without_enable() {
-    permissions::reset();
-
-    let dir = TempDir::new().unwrap();
-    let root = dir.path().to_string_lossy().replace('\\', "/");
-
-    // Note: no `hostlib_enable` call. The Harn script must catch the
-    // structured `Thrown` dict and return it.
-    let source = format!(
-        r#"
-try {{
-    return hostlib_tools_list_directory({{ path: "{root}" }})
-}} catch err {{
-    return err
-}}
-"#,
-    );
-
-    let (result, _) = run_harn(&source);
-    let dict = match &result {
-        VmValue::Dict(d) => d,
-        other => panic!("expected gate error dict, got {other:?}"),
-    };
-    let kind = dict.get("kind").expect("kind present");
-    let message = dict.get("message").expect("message present");
-    assert!(matches!(kind, VmValue::String(s) if s.as_str() == "backend_error"));
-    if let VmValue::String(msg) = message {
-        assert!(
-            msg.contains("hostlib_enable"),
-            "gate error must mention hostlib_enable, got `{msg}`"
-        );
-    } else {
-        panic!("expected message string");
-    }
-}
-
-#[test]
 fn end_to_end_git_via_harn_script() {
     if std::process::Command::new("git")
         .arg("--version")
@@ -161,7 +118,6 @@ fn end_to_end_git_via_harn_script() {
         eprintln!("skipping: git not installed");
         return;
     }
-    permissions::reset();
 
     let dir = TempDir::new().unwrap();
     let repo = dir.path();
@@ -191,9 +147,8 @@ fn end_to_end_git_via_harn_script() {
 
     let source = format!(
         r#"
-let _ = hostlib_enable("tools:deterministic")
-let log = hostlib_tools_git({{ operation: "log", repo: "{repo_str}" }})
-let branch = hostlib_tools_git({{ operation: "current_branch", repo: "{repo_str}" }})
+let log = harness.tools.git({{ operation: "log", repo: "{repo_str}" }})
+let branch = harness.tools.git({{ operation: "current_branch", repo: "{repo_str}" }})
 return {{
     log_count: len(log.data),
     log_subject: log.data[0].subject,
@@ -225,7 +180,6 @@ fn end_to_end_fs_snapshot_and_auto_restore_via_harn_script() {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let session = format!("smoke-snapshot-session-{}-{}", std::process::id(), n);
     let scope = format!("smoke-tc-{n}");
-    permissions::reset();
     let _session_guard = harn_vm::agent_sessions::enter_current_session(session.clone());
     let _tool_guard = harn_vm::agent_sessions::enter_current_tool_call(scope.clone());
 
@@ -242,25 +196,24 @@ fn end_to_end_fs_snapshot_and_auto_restore_via_harn_script() {
     // `hostlib_fs_restore` to roll the workspace back to the pre-image.
     let source = format!(
         r#"
-let _enable = hostlib_enable("tools:deterministic")
-let snap = hostlib_fs_snapshot({{
+let snap = harness.fs.snapshot({{
     session_id: "{session}",
     scope_id: "{scope}",
     root: "{root_str}",
 }})
-let _wrote = hostlib_tools_write_file({{ path: "{target}", content: "clobbered" }})
-let before_restore = hostlib_tools_read_file({{ path: "{target}" }})
-let restored = hostlib_fs_restore({{
+let _wrote = harness.tools.write_file({{ path: "{target}", content: "clobbered" }})
+let before_restore = harness.tools.read_file({{ path: "{target}" }})
+let restored = harness.fs.restore({{
     session_id: "{session}",
     snapshot_id: "{scope}",
 }})
-let after_restore = hostlib_tools_read_file({{ path: "{target}" }})
-let listed = hostlib_fs_list_snapshots({{ session_id: "{session}" }})
-let _dropped = hostlib_fs_drop_snapshot({{
+let after_restore = harness.tools.read_file({{ path: "{target}" }})
+let listed = harness.fs.list_snapshots({{ session_id: "{session}" }})
+let _dropped = harness.fs.drop_snapshot({{
     session_id: "{session}",
     snapshot_id: "{scope}",
 }})
-let listed_after = hostlib_fs_list_snapshots({{ session_id: "{session}" }})
+let listed_after = harness.fs.list_snapshots({{ session_id: "{session}" }})
 
 return {{
     snapshot_id: snap.snapshot_id,
@@ -290,7 +243,6 @@ return {{
 
 #[test]
 fn end_to_end_apply_node_via_harn_script() {
-    permissions::reset();
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     let source_path = root.join("hello.rs");
@@ -304,14 +256,13 @@ fn end_to_end_apply_node_via_harn_script() {
     let path = &path_str;
     let script = format!(
         r#"
-let _enable = hostlib_enable("tools:deterministic")
-let preview = hostlib_ast_apply_node({{
+let preview = harness.ast.apply_node({{
     path: "{path}",
     query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
     replacement: "{{ format!(\"hi {{name}}!\") }}",
     dry_run: true,
 }})
-let applied = hostlib_ast_apply_node({{
+let applied = harness.ast.apply_node({{
     path: "{path}",
     query: "(function_item body: (block) @target)",
     replacement: "{{ format!(\"hi {{name}}!\") }}",
@@ -349,7 +300,6 @@ return {{
 
 #[test]
 fn end_to_end_insert_at_anchor_via_harn_script() {
-    permissions::reset();
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     let source_path = root.join("hello.rs");
@@ -363,15 +313,14 @@ fn end_to_end_insert_at_anchor_via_harn_script() {
     let path = &path_str;
     let script = format!(
         r#"
-let _enable = hostlib_enable("tools:deterministic")
-let preview = hostlib_ast_insert_at_anchor({{
+let preview = harness.ast.insert_at_anchor({{
     path: "{path}",
     query: "(function_item name: (identifier) @name (#eq? @name \"alpha\")) @anchor",
     position: "after",
     content: "fn beta() {{\n    2\n}}",
     dry_run: true,
 }})
-let applied = hostlib_ast_insert_at_anchor({{
+let applied = harness.ast.insert_at_anchor({{
     path: "{path}",
     query: "(function_item name: (identifier) @name (#eq? @name \"alpha\")) @anchor",
     position: "after",
@@ -429,7 +378,7 @@ fn end_to_end_dry_run_via_harn_script() {
     let path = &path_str;
     let script = format!(
         r#"
-let bundle = hostlib_ast_dry_run({{
+let bundle = harness.ast.dry_run({{
     plan: [
         {{
             op: "apply_node",
@@ -513,7 +462,7 @@ fn dry_run_diff_is_git_apply_check_compatible() {
     let path = &path_str;
     let script = format!(
         r#"
-let bundle = hostlib_ast_dry_run({{
+let bundle = harness.ast.dry_run({{
     plan: [
         {{
             op: "apply_node",
@@ -605,11 +554,11 @@ fn end_to_end_code_index_via_harn_script() {
 
     let source = format!(
         r#"
-let rebuild = hostlib_code_index_rebuild({{ root: "{root_str}" }})
-let stats = hostlib_code_index_stats({{}})
-let q = hostlib_code_index_query({{ needle: "ZetaToken", max_results: 10 }})
-let imps = hostlib_code_index_imports_for({{ path: "src/index.ts" }})
-let users = hostlib_code_index_importers_of({{ module: "src/util.ts" }})
+let rebuild = harness.code_index.rebuild({{ root: "{root_str}" }})
+let stats = harness.code_index.stats({{}})
+let q = harness.code_index.query({{ needle: "ZetaToken", max_results: 10 }})
+let imps = harness.code_index.imports_for({{ path: "src/index.ts" }})
+let users = harness.code_index.importers_of({{ module: "src/util.ts" }})
 return {{
     indexed: rebuild.files_indexed,
     files: stats.indexed_files,

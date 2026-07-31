@@ -1,6 +1,6 @@
 import { workflow_stage_agent_options } from "std/workflow/options"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const prepared = workflow_stage_agent_options(
     {
       mode: "agent",
@@ -20,5 +20,5 @@ pipeline test(task) {
   assert_eq(prepared.agent_loop_options.reasoning_task, "agent")
   assert_eq(prepared.llm_options.provider, "ollama")
   assert_eq(prepared.llm_options.reasoning_policy, "auto")
-  log("workflow_model_policy_reasoning passed")
+  harness.stdio.log("workflow_model_policy_reasoning passed")
 }

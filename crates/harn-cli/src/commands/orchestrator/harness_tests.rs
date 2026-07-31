@@ -69,8 +69,8 @@ fn stream_handler_fixture(marker_path: &Path) -> String {
         r#"
 import "std/triggers"
 
-pub fn on_stream(event: TriggerEvent) {{
-  write_file({marker:?}, json_stringify({{
+pub fn on_stream(harness: Harness, event: TriggerEvent) {{
+  harness.fs.write_text({marker:?}, json_stringify({{
 provider: event.provider,
 kind: event.kind,
 key: event.provider_payload.key,
@@ -209,9 +209,9 @@ timezone = "UTC"
         "digest.harn",
         &format!(
             r"
-pub pipeline run(event) {{
+pub pipeline run(harness: Harness, event: TriggerEvent) {{
   let result = {{executed: true, provider: event.provider, kind: event.kind}}
-  write_file({marker:?}, json_stringify(result))
+  harness.fs.write_text({marker:?}, json_stringify(result))
   return result
 }}
 ",

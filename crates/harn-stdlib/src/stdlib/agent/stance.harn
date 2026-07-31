@@ -1,7 +1,7 @@
 // Read-only stance: an intent-armed, least-privilege tool window with a
 // justified, consent-verified escape hatch.
 //
-// When `agent_loop({read_only_stance: {...}})` is enabled and ARMED (either
+// When `agent_loop(harness, {read_only_stance: {...}})` is enabled and ARMED (either
 // explicitly by the embedder — e.g. a host-side task-intent classifier — or
 // by the configurable `classifier` callback), the tool surface offered to
 // the model is narrowed to tools whose annotations declare them read-only,
@@ -79,9 +79,9 @@ fn __stance_policy_patch(opts, escape_tool) {
   return {policy: policy + {tools: allowed.appending(escape_tool)}}
 }
 
-fn __stance_recent_user_messages(session_id, limit = 6) {
+fn __stance_recent_user_messages(agent: HarnessAgent, session_id, limit = 6) {
   const messages = try {
-    agent_session_messages(session_id)
+    agent_session_messages(agent, session_id)
   } catch (e) {
     []
   }
@@ -111,8 +111,14 @@ fn __stance_recent_user_messages(session_id, limit = 6) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stance_default_consent_check(justification, session_id, options = nil) {
-  const recent = __stance_recent_user_messages(session_id)
+pub fn agent_stance_default_consent_check(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  justification,
+  session_id,
+  options = nil,
+) {
+  const recent = __stance_recent_user_messages(agent, session_id)
   const transcript = if len(recent) == 0 {
     "(no user messages available)"
   } else {
@@ -141,7 +147,7 @@ pub fn agent_stance_default_consent_check(justification, session_id, options = n
     temperature: 0,
   }
   const outcome = try {
-    llm_call(prompt, nil, llm_options)
+    llm.call(prompt, nil, llm_options)
   } catch (e) {
     nil
   }
@@ -161,7 +167,7 @@ fn __stance_escape_description(escape_tool) {
     + " instruction that grants consent; a justification without user consent is denied."
 }
 
-fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
+fn __stance_register_escape_tool(harness: Harness, opts, cfg, session_id, grant_flag) {
   const escape_tool = cfg?.escape_tool ?? "request_write_access"
   const consent = cfg?.consent_check
   const handler = { args ->
@@ -169,10 +175,11 @@ fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
     const verdict = if consent != nil {
       consent(justification, session_id)
     } else {
-      agent_stance_default_consent_check(justification, session_id)
+      agent_stance_default_consent_check(harness.agent, harness.llm, justification, session_id)
     }
     const granted = (verdict?.verdict ?? "deny") == "grant"
     agent_emit_event(
+      harness.agent,
       session_id,
       if granted {
         "stance_write_access_granted"
@@ -186,7 +193,7 @@ fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
       },
     )
     if granted {
-      atomic_set(grant_flag, 1)
+      harness.runtime.atomic_set(grant_flag, 1)
       {
         granted: true,
         message: "Write access re-enabled: user consent verified. Mutating tools return next turn.",
@@ -233,7 +240,7 @@ fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stance_prepare(session, message, opts) {
+pub fn agent_stance_prepare(harness: Harness, session, message, opts) {
   const cfg = __stance_config(opts)
   if !cfg?.enabled ?? false {
     return opts
@@ -260,12 +267,13 @@ pub fn agent_stance_prepare(session, message, opts) {
   // capture) flips this atomic on a verified grant; the loop's post-turn
   // hook reads it to disarm. This is the only mutation channel a tool
   // handler has back to the loop.
-  const grant_flag = atomic(0)
-  const tools = __stance_register_escape_tool(opts, cfg, session.session_id, grant_flag)
+  const grant_flag = harness.runtime.atomic(0)
+  const tools = __stance_register_escape_tool(harness, opts, cfg, session.session_id, grant_flag)
   const policy_patch = __stance_policy_patch(opts, escape_tool)
   const effective_policy = policy_patch?.policy ?? opts?.policy
   const allowed = __stance_read_only_names(tools, effective_policy, cfg?.hard_keep, escape_tool)
   agent_emit_event(
+    harness.agent,
     session.session_id,
     "stance_armed",
     {escape_tool: escape_tool, allowed_tools: allowed},
@@ -312,15 +320,15 @@ pub fn agent_stance_apply(turn_opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stance_post_turn(session, opts) {
+pub fn agent_stance_post_turn(agent: HarnessAgent, runtime: HarnessRuntime, session, opts) {
   if len(opts?._read_only_stance_tools ?? []) == 0 {
     return opts
   }
   const grant_flag = opts?._read_only_stance_grant
-  if grant_flag == nil || atomic_get(grant_flag) == 0 {
+  if grant_flag == nil || runtime.atomic_get(grant_flag) == 0 {
     return opts
   }
   const escape_tool = __stance_config(opts)?.escape_tool ?? "request_write_access"
-  agent_emit_event(session.session_id, "stance_disarmed", {escape_tool: escape_tool})
+  agent_emit_event(agent, session.session_id, "stance_disarmed", {escape_tool: escape_tool})
   return opts + {_read_only_stance_tools: nil, _read_only_stance_grant: nil}
 }

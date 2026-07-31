@@ -33,6 +33,7 @@ pub import {
   provider_tool_probe_campaign_write_scorecard,
 } from "./provider_tool_probe_campaign/execute"
 pub import {
+  ProviderToolProbePlanRequest,
   provider_tool_probe_campaign_planned_cells,
   provider_tool_probe_campaign_planned_cells_sliced_with_options,
   provider_tool_probe_campaign_planned_cells_with_options,
@@ -69,7 +70,7 @@ fn main(harness: Harness) {
   const parsed_result = provider_tool_probe_campaign_parse_args(argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const include_expensive = parsed?.include_expensive ?? false
@@ -77,12 +78,12 @@ fn main(harness: Harness) {
   const route_specs = __as_string_list(parsed?.route)
   if catalog_routes && len(route_specs) > 0 {
     harness.stdio.eprintln("--catalog-routes cannot be combined with --route")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const requested_mode = to_string(parsed?.mode ?? "both")
   if len(provider_tool_probe_campaign_modes(requested_mode)) == 0 {
     harness.stdio.eprintln("--mode must be one of: both, non-streaming, streaming")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const behaviors = provider_tool_probe_campaign_filter_behavior_modes(
     provider_tool_probe_campaign_select_behaviors(__as_string_list(parsed?.behavior)),
@@ -90,7 +91,7 @@ fn main(harness: Harness) {
   )
   if len(behaviors) == 0 {
     harness.stdio.eprintln("no provider behaviors selected")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const live = parsed?.live ?? false
   const repeat = parsed?.repeat ?? 1
@@ -101,27 +102,27 @@ fn main(harness: Harness) {
   const max_cost_usd = parsed?.max_cost_usd ?? 10.0
   if repeat <= 0 {
     harness.stdio.eprintln("--repeat must be >= 1")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if timeout_secs <= 0 {
     harness.stdio.eprintln("--timeout-secs must be >= 1")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if shard_count <= 0 {
     harness.stdio.eprintln("--shard-count must be >= 1")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if shard_index < 0 || shard_index >= shard_count {
     harness.stdio.eprintln("--shard-index must be >= 0 and < --shard-count")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if max_probes < 0 {
     harness.stdio.eprintln("--max-probes must be >= 0")
-    exit(2)
+    harness.runtime.exit(2)
   }
   if max_cost_usd <= 0.0 {
     harness.stdio.eprintln("--max-cost-usd must be > 0")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const target = __target_runtime_context(harness, parsed, live, catalog_routes)
   const harn_bin = target.harn_bin
@@ -137,51 +138,59 @@ fn main(harness: Harness) {
   }
   if len(routes) == 0 {
     harness.stdio.eprintln("no provider routes selected")
-    exit(2)
+    harness.runtime.exit(2)
   }
   const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
-  __ensure_dir(harness, ".harn-runs")
-  __ensure_dir(harness, output_dir)
+  __ensure_dir(harness.fs, ".harn-runs")
+  __ensure_dir(harness.fs, output_dir)
   const env_file_arg = trim(to_string(parsed?.env_file ?? ""))
   const env_file_path = provider_tool_probe_campaign_env_file(
     env_file_arg,
     harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_ENV_FILE", ""),
   )
-  const env_load = __load_env_file(harness, env_file_path)
+  const env_load = __load_env_file(harness.fs, env_file_path)
   const auth_env = env_load.env ?? {}
   const command_env = provider_tool_probe_campaign_command_env(providers_config)
   const env = auth_env + command_env
   const cell_plan = if live {
     __live_cells(
-      harness,
-      routes,
-      behaviors,
-      harn_bin,
-      env,
-      repeat,
-      timeout_secs,
-      output_dir,
-      shard_count,
-      shard_index,
-      max_probes,
-      max_cost_usd,
+      {
+        llm: harness.llm,
+        fs: harness.fs,
+        process: harness.process,
+        routes: routes,
+        behaviors: behaviors,
+        harn_bin: harn_bin,
+        env: env,
+        repeat: repeat,
+        timeout_secs: timeout_secs,
+        output_dir: output_dir,
+        shard_count: shard_count,
+        shard_index: shard_index,
+        max_probes: max_probes,
+        max_cost_usd: max_cost_usd,
+      },
     )
   } else {
     provider_tool_probe_campaign_planned_cells_sliced_with_options(
-      routes,
-      behaviors,
-      harn_bin,
-      repeat,
-      timeout_secs,
-      shard_count,
-      shard_index,
-      max_probes,
+      {
+        llm: harness.llm,
+        routes: routes,
+        behaviors: behaviors,
+        harn_bin: harn_bin,
+        repeat: repeat,
+        timeout_secs: timeout_secs,
+        shard_count: shard_count,
+        shard_index: shard_index,
+        max_probes: max_probes,
+      },
     )
   }
   const cells = cell_plan.cells ?? []
   const scorecard_artifacts = if live {
     provider_tool_probe_campaign_write_scorecard(
-      harness,
+      harness.fs,
+      harness.process,
       harn_bin,
       cells,
       output_dir,
@@ -225,7 +234,7 @@ fn main(harness: Harness) {
     == "stopped_unpriced"
     || report.artifacts?.scorecard_status
     != "complete") {
-    exit(1)
+    harness.runtime.exit(1)
   }
   return nil
 }

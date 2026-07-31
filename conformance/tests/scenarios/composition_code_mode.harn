@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const tools = [
     {
       name: "read_file",
@@ -15,17 +15,17 @@ pipeline main() {
     },
   ]
   const manifest = composition_binding_manifest(tools)
-  __io_println(manifest.schema_version)
-  __io_println(manifest.bindings[0].binding)
-  __io_println(manifest.bindings[0].policy.disposition)
-  const report = composition_execute(
+  harness.stdio.println(manifest.schema_version)
+  harness.stdio.println(manifest.bindings[0].binding)
+  harness.stdio.println(manifest.bindings[0].policy.disposition)
+  const report = harness.tools.composition_execute(
     "let file = read_file({path: \"README.md\"})\nreturn file.text",
     manifest,
     {run_id: "conformance-composition"},
   )
-  __io_println(report.ok)
-  __io_println(report.child_calls[0].tool_name)
-  __io_println(report.run.result)
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.child_calls[0].tool_name)
+  harness.stdio.println(report.run.result)
   const denied_manifest = composition_binding_manifest(
     [
       {
@@ -35,11 +35,11 @@ pipeline main() {
       },
     ],
   )
-  const denied = composition_execute(
-    "return write_file({path: \"x\", content: \"bad\"})",
+  const denied = harness.tools.composition_execute(
+    "return write_file(harness, {path: \"x\", content: \"bad\"})",
     denied_manifest,
     {run_id: "conformance-denied"},
   )
-  __io_println(denied.ok)
-  __io_println(denied.run.failure_category)
+  harness.stdio.println(denied.ok)
+  harness.stdio.println(denied.run.failure_category)
 }

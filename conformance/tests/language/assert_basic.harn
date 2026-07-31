@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   assert(true)
   assert(true)
   assert_eq(2 + 2, 4)
   assert_ne(1, 2)
-  log("all assertions passed")
+  harness.stdio.log("all assertions passed")
 }

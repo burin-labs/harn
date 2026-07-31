@@ -29,7 +29,7 @@ fn __queue_strategy(kind, options = nil) {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: pool_create({queue: fifo()})
+ * @example: pool_create(harness.agent, {queue: fifo()})
  */
 pub fn fifo() {
   return __queue_strategy("fifo")
@@ -42,7 +42,7 @@ pub fn fifo() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: pool_create({queue: priority()})
+ * @example: pool_create(harness.agent, {queue: priority()})
  */
 pub fn priority() {
   return __queue_strategy("priority")
@@ -54,7 +54,7 @@ pub fn priority() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: pool_create({queue: lifo()})
+ * @example: pool_create(harness.agent, {queue: lifo()})
  */
 pub fn lifo() {
   return __queue_strategy("lifo")
@@ -67,7 +67,7 @@ pub fn lifo() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: pool_create({queue: fair_round_robin("tenant_id")})
+ * @example: pool_create(harness.agent, {queue: fair_round_robin("tenant_id")})
  */
 pub fn fair_round_robin(key = "key") {
   return __queue_strategy("fair_round_robin", {key: key})
@@ -102,7 +102,7 @@ fn __backpressure(kind, options = nil) {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: pool_create({backpressure: backpressure_queue(100, "block_submitter")})
+ * @example: pool_create(harness.agent, {backpressure: backpressure_queue(100, "block_submitter")})
  */
 pub fn backpressure_queue(max_depth, on_full = "block_submitter") {
   return __backpressure("queue", {max_depth: max_depth, on_full: on_full})
@@ -115,7 +115,7 @@ pub fn backpressure_queue(max_depth, on_full = "block_submitter") {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: pool_create({backpressure: fail_fast()})
+ * @example: pool_create(harness.agent, {backpressure: fail_fast()})
  */
 pub fn fail_fast() {
   return __backpressure("fail_fast")
@@ -128,7 +128,7 @@ pub fn fail_fast() {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: pool_create({backpressure: ring_buffer(10)})
+ * @example: pool_create(harness.agent, {backpressure: ring_buffer(10)})
  */
 pub fn ring_buffer(capacity) {
   return __backpressure("ring_buffer", {capacity: capacity})
@@ -166,10 +166,10 @@ fn __pool_attach_methods(snapshot) {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: pool_create({name: "review", max_concurrent: 2})
+ * @example: pool_create(harness.agent, {name: "review", max_concurrent: 2})
  */
-pub fn pool_create(options = nil) {
-  return __pool_attach_methods(__pool_create(options))
+pub fn pool_create(agents: HarnessAgent, options = nil) {
+  return __pool_attach_methods(agents.pool_create(options))
 }
 
 /**
@@ -178,10 +178,10 @@ pub fn pool_create(options = nil) {
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
- * @example: pool_get("review")
+ * @example: pool_get(harness.agent, "review")
  */
-pub fn pool_get(name_or_id) {
-  const snapshot = __pool_get(name_or_id)
+pub fn pool_get(agents: HarnessAgent, name_or_id) {
+  const snapshot = agents.pool_get(name_or_id)
   if snapshot == nil {
     return nil
   }
@@ -195,8 +195,8 @@ pub fn pool_get(name_or_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pool_list() {
-  const snapshots = __pool_list()
+pub fn pool_list(agents: HarnessAgent) {
+  const snapshots = agents.pool_list()
   let out = []
   for snapshot in snapshots {
     out = out.appending(__pool_attach_methods(snapshot))
@@ -211,20 +211,20 @@ pub fn pool_list() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pool_wait(handle_or_handles) {
-  return __pool_wait(handle_or_handles)
+pub fn pool_wait(agents: HarnessAgent, handle_or_handles) {
+  return agents.pool_wait(handle_or_handles)
 }
 
 /**
  * pool_simulate_restart drops the in-process pool registry. Pipeline-scope
  * pools reload their persisted state from `.harn/pools/` on the next
- * `pool_create({scope: "pipeline", ...})` call. Intended for conformance
+ * `pool_create(harness.agent, {scope: "pipeline", ...})` call. Intended for conformance
  * fixtures and durability tests — production code should not need this.
  *
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pool_simulate_restart() {
-  return __pool_simulate_restart()
+pub fn pool_simulate_restart(agents: HarnessAgent) {
+  return agents.pool_simulate_restart()
 }

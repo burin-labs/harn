@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -6,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * and the dispatch path runs Rust's `regex` crate (case-insensitive,
  * no backreferences/lookaround).
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -46,6 +47,7 @@ pipeline test(task) {
   )
   // Turn 1: model runs a regex alternation.
   with_llm_script(
+    harness.llm,
     [
       {
         text: "Looking up edit/create tools via regex.",
@@ -59,6 +61,7 @@ pipeline test(task) {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Refactor the file",
         nil,
         {
@@ -97,12 +100,12 @@ pipeline test(task) {
       assert(promoted_edit, "regex `edit|create` matches `edit_file`")
       assert(promoted_create, "regex `edit|create` matches `create_file`")
       assert(!promoted_run, "regex `edit|create` must not match `run_shell`")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       const second_system = calls[1].system
       assert(contains(second_system, "edit_file"), "edit_file surfaced in turn 2")
       assert(contains(second_system, "create_file"), "create_file surfaced in turn 2")
       assert(!contains(second_system, "run_shell"), "run_shell still deferred")
-      log("tool_search_client_regex tests passed")
+      harness.stdio.log("tool_search_client_regex tests passed")
     },
   )
 }

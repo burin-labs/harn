@@ -7,9 +7,9 @@ import { device_flow } from "std/oauth/device_flow"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
-  const _ = mock_time(1700000000000)
-  const store = memory()
+pipeline test(harness: Harness, task) {
+  const _ = harness.testing.clock_set(1700000000000)
+  const store = memory(harness.auth)
   const provider = custom(
     {
       id: "mockExpired",
@@ -19,8 +19,8 @@ pipeline test(task) {
       default_scopes: ["read"],
     },
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/device",
     {
@@ -30,7 +30,7 @@ pipeline test(task) {
       headers: {"content-type": "application/json"},
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/token",
     {
@@ -42,6 +42,7 @@ pipeline test(task) {
   let threw = false
   try {
     const _ = device_flow(
+      harness,
       provider,
       {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }},
     )
@@ -53,6 +54,6 @@ pipeline test(task) {
   assert(threw, "expired_token should have thrown an error")
   const stored = store.get("mockExpired")
   assert(stored == nil, "no token persisted on expired_token error")
-  const _ = unmock_time()
-  log("oauth device flow expired ok")
+  const _ = harness.testing.clock_reset()
+  harness.stdio.log("oauth device flow expired ok")
 }

@@ -324,24 +324,24 @@ pub fn flag_value(args: list<string>, name: string) -> string? {
   return nil
 }
 
-fn git(args: list<string>) {
-  return harness.process.spawn_captured({cmd: "git", args: args})
+fn git(process: HarnessProcess, args: list<string>) {
+  return process.run({program: "git", args: args})
 }
 
 /**
  * Resolve the base ref: explicit --base, then CHANGELOG_GUARD_BASE env, then
  * merge-base with origin/main (falling back to main, then HEAD~1).
  */
-fn resolve_base(base: string?) -> string {
+fn resolve_base(env: HarnessEnv, process: HarnessProcess, base: string?) -> string {
   if base != nil && base != "" {
     return base ?? ""
   }
-  const env_base = harness.env.get("CHANGELOG_GUARD_BASE")
+  const env_base = env.get("CHANGELOG_GUARD_BASE")
   if env_base != nil && env_base != "" {
     return env_base ?? ""
   }
   for candidate in ["origin/main", "main"] {
-    const result = git(["merge-base", "HEAD", candidate])
+    const result = git(process, ["merge-base", "HEAD", candidate])
     if result.success {
       return result.stdout.trim()
     }
@@ -355,8 +355,8 @@ fn resolve_base(base: string?) -> string {
  * `git rev-parse --verify --quiet refs/tags/<tag>` succeeding, but avoids one
  * subprocess spawn per CHANGELOG version (~70 spawns on the real repo).
  */
-fn existing_tags() -> list<string> {
-  const result = git(["tag", "-l"])
+fn existing_tags(process: HarnessProcess) -> list<string> {
+  const result = git(process, ["tag", "-l"])
   if !result.success {
     return []
   }
@@ -374,41 +374,41 @@ fn existing_tags() -> list<string> {
  * Concatenate commit messages between base and HEAD, with the shallow-clone
  * fallback to the last 50 commits. Mirrors `commit_messages_since`.
  */
-fn commit_messages_since(base: string) -> string {
-  const result = git(["log", "--format=%B%x00", base + "..HEAD"])
+fn commit_messages_since(process: HarnessProcess, base: string) -> string {
+  const result = git(process, ["log", "--format=%B%x00", base + "..HEAD"])
   if result.success && result.stdout.trim() != "" {
     return result.stdout
   }
-  const fallback = git(["log", "-50", "--format=%B%x00", "HEAD"])
+  const fallback = git(process, ["log", "-50", "--format=%B%x00", "HEAD"])
   if fallback.success {
     return fallback.stdout
   }
   return ""
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   if harness.env.get("ALLOW_CHANGELOG_RETROACTIVE_EDIT") == "1" {
-    __io_println("check_changelog_no_retroactive_edits: bypassed via env var")
+    harness.stdio.println("check_changelog_no_retroactive_edits: bypassed via env var")
     return 0
   }
   const head_text = harness.fs.read_text(CHANGELOG_REL)
-  const base = resolve_base(flag_value(argv, "--base"))
-  const base_show = git(["show", base + ":" + CHANGELOG_REL])
+  const base = resolve_base(harness.env, harness.process, flag_value(argv, "--base"))
+  const base_show = git(harness.process, ["show", base + ":" + CHANGELOG_REL])
   if !base_show.success {
     // No base to compare against -- nothing to enforce.
     return 0
   }
   const base_text = base_show.stdout
-  if has_bypass_trailer(commit_messages_since(base)) {
-    __io_println(
+  if has_bypass_trailer(commit_messages_since(harness.process, base)) {
+    harness.stdio.println(
       "check_changelog_no_retroactive_edits: bypassed via Allow-Retroactive-Changelog trailer",
     )
     return 0
   }
-  const drift = compute_drift(head_text, base_text, existing_tags())
+  const drift = compute_drift(head_text, base_text, existing_tags(harness.process))
   if drift.count == 0 {
     return 0
   }
-  __io_eprintln(drift_report(base, drift))
+  harness.stdio.eprintln(drift_report(base, drift))
   return 1
 }

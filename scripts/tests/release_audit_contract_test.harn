@@ -99,7 +99,7 @@ fn receipt() {
   }
 }
 
-pipeline test_release_audit_contract_and_hosted_receipt(task) {
+pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task) {
   const cfg = release_audit_contract_parse(contract())
   assert(cfg != nil)
   const source = release_audit_source_plan(cfg, SHA)

@@ -8,17 +8,61 @@
 // still checked against the registry — this relaxes the framing, not the gate.
 import { probe, sample_registry } from "_tool_parse_probe"
 
-pipeline main() {
-  probe("gemma tool_code prefix", "tool_code: run({ command: \"ls\" })", sample_registry())
+pipeline main(harness: Harness) {
   probe(
+    harness.agent,
+    harness.stdio,
+    "gemma tool_code prefix",
+    "tool_code: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
     "qwen call colon brace marker",
     "call:run{ command: \"git status --short\" }",
     sample_registry(),
   )
-  probe("tool_call prefix", "tool_call: run({ command: \"ls\" })", sample_registry())
-  probe("tool_output prefix", "tool_output: run({ command: \"ls\" })", sample_registry())
-  probe("python prefix", "python: run({ command: \"ls\" })", sample_registry())
-  probe("javascript prefix", "javascript: run({ command: \"ls\" })", sample_registry())
-  probe("shell prefix", "shell: run({ command: \"ls\" })", sample_registry())
-  probe("bash prefix", "bash: run({ command: \"ls\" })", sample_registry())
+  probe(
+    harness.agent,
+    harness.stdio,
+    "tool_call prefix",
+    "tool_call: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "tool_output prefix",
+    "tool_output: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "python prefix",
+    "python: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "javascript prefix",
+    "javascript: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "shell prefix",
+    "shell: run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bash prefix",
+    "bash: run({ command: \"ls\" })",
+    sample_registry(),
+  )
 }

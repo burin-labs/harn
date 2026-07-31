@@ -7,8 +7,8 @@
  * Demonstrates a small data transformation pipeline with parallel fan-out
  * and a machine-readable summary report.
  */
-pipeline default(task) {
-  log("Starting data pipeline")
+pipeline default(harness: Harness, task) {
+  harness.stdio.log("Starting data pipeline")
   const raw = """
 [
   {"id": "a1", "name": "Alpha", "score": 91, "team": "red"},
@@ -27,12 +27,12 @@ pipeline default(task) {
     }
   }
   const report = {
-    run_id: uuid(),
+    run_id: harness.random.uuid(),
     generated_at: harness.clock.timestamp(),
     input_rows: rows.count,
     passed_rows: passed,
     failed_rows: rows.count - passed,
     rows: normalized,
   }
-  __io_println(json_stringify(report))
+  harness.stdio.println(json_stringify(report))
 }

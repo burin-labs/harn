@@ -203,13 +203,13 @@ actor's scope set to be no wider than its parent.
 Harn's deterministic, design-level defenses against prompt injection are a
 runtime posture, not a persisted config-file section: there is no model, paid
 API, or network call involved. The substrate is always available (`std/security`);
-you select and tune it per run through the `security_policy(...)` directive —
+you select and tune it per run through the `harness.system.security_policy(...)` directive —
 usually via the `std/security` helpers `spotlight()`, `strict()`, or
-`local_ml()`, or by passing the keys below to `security_policy({ ... })`.
+`local_ml()`, or by passing the keys below to `harness.system.security_policy({ ... })`.
 Defaults are **on** (`spotlight`), so a pipeline that never mentions security
 still gets the framing and lethal-trifecta gate.
 
-The keys accepted by `security_policy({ ... })`:
+The keys accepted by `harness.system.security_policy({ ... })`:
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |

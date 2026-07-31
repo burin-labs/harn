@@ -5,17 +5,18 @@ import { llm_text, with_llm_script } from "std/testing"
  * extracted_json: true so callers can tell the model wrapped its
  * answer in prose / fences.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
   with_llm_script(
+    harness.llm,
     [llm_text("Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone.")],
     { ->
-      const r = llm_call_structured_result("Q?", schema, {provider: "mock"})
-      __io_println(r.ok)
-      __io_println(r.data.k)
-      __io_println(r.extracted_json)
-      __io_println(r.attempts)
-      __io_println(r.repaired)
+      const r = harness.llm.call_structured_result("Q?", schema, {provider: "mock"})
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.data.k)
+      harness.stdio.println(r.extracted_json)
+      harness.stdio.println(r.attempts)
+      harness.stdio.println(r.repaired)
     },
   )
 }

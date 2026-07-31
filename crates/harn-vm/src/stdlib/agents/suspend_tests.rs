@@ -6,6 +6,8 @@ use std::path::Path;
 use std::sync::OnceLock;
 use tokio::sync::{Mutex, MutexGuard};
 
+mod harness_dispatch;
+
 /// Suspend tests mutate the process-wide `HARN_WORKER_STATE_DIR`
 /// env var. Serialize them to keep snapshot paths from one test
 /// from leaking into another's worker construction. Held across
@@ -672,8 +674,10 @@ async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
             let log = crate::event_log::install_memory_for_current_thread(128);
             let (worker_id, dir) = seed_test_worker("worker-auto-resume-dispatch");
 
+            let mut base_vm = Vm::new();
+            crate::register_vm_stdlib(&mut base_vm);
             let suspended = suspend_agent_builtin(
-                crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+                crate::vm::AsyncBuiltinCtx::for_test(base_vm),
                 vec![
                     handle_value(&worker_id),
                     VmValue::String(arcstr::ArcStr::from("waiting for review")),
@@ -724,67 +728,6 @@ async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
             assert!(
                 task.contains("approved"),
                 "resume input should carry trigger payload, got: {task}"
-            );
-            let snapshot = crate::triggers::snapshot_trigger_bindings()
-                .into_iter()
-                .find(|binding| binding.id == trigger_id)
-                .expect("auto-resume binding snapshot");
-            assert_eq!(snapshot.state, crate::triggers::TriggerState::Terminated);
-
-            teardown(&dir, &worker_id);
-            crate::triggers::clear_trigger_registry();
-            crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
-        })
-        .await;
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn auto_resume_timeout_dispatches_synthetic_resume_input() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let _guard = suspend_test_lock().await;
-            crate::triggers::clear_trigger_registry();
-            crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
-            let log = crate::event_log::install_memory_for_current_thread(128);
-            drop(log);
-            let clock = crate::triggers::test_util::clock::MockClock::at_wall_ms(0);
-            let _clock_guard = crate::triggers::test_util::clock::install_override(clock.clone());
-            let (worker_id, dir) = seed_test_worker("worker-auto-resume-timeout");
-
-            let suspended = suspend_agent_builtin(
-                crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-                vec![
-                    handle_value(&worker_id),
-                    VmValue::String(arcstr::ArcStr::from("waiting for review or timeout")),
-                    suspend_options(auto_resume_conditions_with_timeout(
-                        "review.approved",
-                        "resume_with_input",
-                    )),
-                ],
-            )
-            .await
-            .expect("suspend with auto-resume timeout");
-            let trigger_id = auto_resume_trigger_id(&suspended);
-
-            tokio::task::yield_now().await;
-            clock.advance_std(std::time::Duration::from_mins(1)).await;
-            tokio::task::yield_now().await;
-            tokio::task::yield_now().await;
-
-            let (status, task) = worker_status_and_task(&worker_id);
-            // The worker has resumed; whether it is still mid-turn
-            // ("running") or has already driven to completion depends on
-            // task scheduling, so don't pin the exact intermediate state
-            // (that was wall-clock-racy). The dispatch wiring below is the
-            // real assertion.
-            assert!(
-                matches!(status.as_str(), "running" | "completed"),
-                "timeout should have resumed the worker, got status: {status}"
-            );
-            assert!(
-                task.contains("auto_resume.timeout"),
-                "timeout resume input should name synthetic event, got: {task}"
             );
             let snapshot = crate::triggers::snapshot_trigger_bindings()
                 .into_iter()
@@ -1314,12 +1257,17 @@ async fn agent_loop_returns_suspended_checkpoint_for_current_worker() {
         },
     );
 
+    let harness = ctx
+        .child_vm()
+        .root_harness_value()
+        .expect("stdlib registration installs root Harness");
     let result = crate::stdlib::harn_entry::call_harn_export_by_name(
         &ctx,
         "std/agent/loop",
         "agent_loop",
         "agent_loop_suspend_test",
         &[
+            harness,
             VmValue::String(arcstr::ArcStr::from("continue the task")),
             VmValue::Nil,
             VmValue::dict(crate::value::DictMap::from_iter([(

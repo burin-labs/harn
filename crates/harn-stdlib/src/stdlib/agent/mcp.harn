@@ -5,12 +5,12 @@
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_mcp_bootstrap_if_needed(session, opts) {
+pub fn agent_mcp_bootstrap_if_needed(tools: HarnessTools, session, opts) {
   const specs = opts?.mcp_servers
   if specs == nil || len(specs) == 0 {
     return opts
   }
-  return __mcp_bootstrap_and_admit(session, opts, specs)
+  return __mcp_bootstrap_and_admit(tools, session, opts, specs)
 }
 
 /**
@@ -34,12 +34,12 @@ pub fn agent_mcp_bootstrap_if_needed(session, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_mcp_mount_additional(session, opts, requested_specs) {
+pub fn agent_mcp_mount_additional(tools: HarnessTools, session, opts, requested_specs) {
   const delta = __mcp_delta_specs(opts, requested_specs ?? [])
   if len(delta) == 0 {
     return opts + {_mcp_delta_bootstrap: nil}
   }
-  const mounted = __mcp_bootstrap_and_admit(session, opts, delta)
+  const mounted = __mcp_bootstrap_and_admit(tools, session, opts, delta)
   return mounted + {_mcp_delta_bootstrap: mounted?._mcp_bootstrap}
 }
 
@@ -63,8 +63,8 @@ pub fn agent_mcp_admit_bootstrap(opts, result) {
 }
 
 /** Bootstrap `specs` and admit their tools into `opts` (catalog + ceiling). */
-fn __mcp_bootstrap_and_admit(session, opts, specs) {
-  const result = __host_mcp_bootstrap(session.session_id, specs)
+fn __mcp_bootstrap_and_admit(tools: HarnessTools, session, opts, specs) {
+  const result = tools.mcp_bootstrap(session.session_id, specs)
   const prior_info = opts?._mcp_server_info ?? []
   const out = opts
     + {

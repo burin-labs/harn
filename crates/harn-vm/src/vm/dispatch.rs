@@ -135,6 +135,7 @@ impl Vm {
             });
         }
         crate::orchestration::enforce_current_policy_for_builtin(name, args)?;
+        self.record_builtin_contract_effects(name, args);
         crate::typecheck::validate_builtin_call(name, args, None)
     }
 
@@ -185,6 +186,22 @@ impl Vm {
         Arc::make_mut(&mut self.builtin_metadata)
             .insert(name.to_string(), VmBuiltinMetadata::sync(name.to_string()));
         self.refresh_builtin_id(name);
+    }
+
+    /// Register a dynamically supplied sync builtin with a complete typed
+    /// source exposure/effect contract.
+    pub fn register_builtin_with_contract<F>(
+        &mut self,
+        name: &str,
+        contract: harn_builtin_meta::BuiltinContract,
+        f: F,
+    ) where
+        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + Send + Sync + 'static,
+    {
+        self.register_builtin_with_metadata(
+            VmBuiltinMetadata::sync(name.to_string()).with_contract(contract),
+            f,
+        );
     }
 
     /// Register a sync builtin function with discoverable metadata.
@@ -239,6 +256,56 @@ impl Vm {
         }
     }
 
+    /// Project macro-declared Harness methods onto the runtime dispatch table.
+    ///
+    /// Modules may still install a specialized adapter explicitly. For the
+    /// ordinary case, however, the builtin contract is the single source of
+    /// truth: declaring `exposure = "harness.<capability>.<method>"` is enough
+    /// to make that handler callable through the typed capability and never
+    /// creates a second hand-maintained registration list.
+    pub(crate) fn project_declared_capability_methods(&mut self) {
+        use harn_builtin_meta::BuiltinExposure;
+
+        let projections = self
+            .builtin_metadata
+            .iter()
+            .filter_map(|(name, metadata)| {
+                let BuiltinExposure::HarnessMethod { capability, method } =
+                    metadata.contract().exposure
+                else {
+                    return None;
+                };
+                Some((capability, method, name.clone(), metadata.kind()))
+            })
+            .collect::<Vec<_>>();
+
+        for (capability, method, name, kind) in projections {
+            let key = (capability, method.to_string());
+            if self.capability_methods.contains_key(&key) {
+                continue;
+            }
+            let dispatch = match kind {
+                VmBuiltinKind::Sync => self
+                    .builtins
+                    .get(name.as_str())
+                    .cloned()
+                    .map(VmBuiltinDispatch::Sync),
+                VmBuiltinKind::Async => self
+                    .async_builtins
+                    .get(name.as_str())
+                    .cloned()
+                    .map(VmBuiltinDispatch::Async),
+            }
+            .unwrap_or_else(|| {
+                panic!(
+                    "declared capability method harness.{}.{method} has no runtime handler `{name}`",
+                    capability.field_name()
+                )
+            });
+            Arc::make_mut(&mut self.capability_methods).insert(key, dispatch);
+        }
+    }
+
     /// Remove a sync builtin (so an async version can take precedence).
     pub fn unregister_builtin(&mut self, name: &str) {
         Arc::make_mut(&mut self.builtins).remove(name);
@@ -271,6 +338,23 @@ impl Vm {
         self.refresh_builtin_id(name);
     }
 
+    /// Register a dynamically supplied async builtin with a complete typed
+    /// source exposure/effect contract.
+    pub fn register_async_builtin_with_contract<F, Fut>(
+        &mut self,
+        name: &str,
+        contract: harn_builtin_meta::BuiltinContract,
+        f: F,
+    ) where
+        F: Fn(crate::vm::AsyncBuiltinCtx, Vec<VmValue>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<VmValue, VmError>> + Send + 'static,
+    {
+        self.register_async_builtin_with_metadata(
+            VmBuiltinMetadata::async_builtin(name.to_string()).with_contract(contract),
+            f,
+        );
+    }
+
     /// Register an async builtin function with discoverable metadata. The
     /// handler receives the explicit [`crate::vm::AsyncBuiltinCtx`].
     pub fn register_async_builtin_with_metadata<F, Fut>(
@@ -289,6 +373,56 @@ impl Vm {
         Arc::make_mut(&mut self.builtin_metadata)
             .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Async));
         self.refresh_builtin_id(&name);
+    }
+
+    /// Install a host implementation behind a typed capability method.
+    ///
+    /// The implementation is deliberately absent from the ordinary builtin
+    /// maps, so registering it cannot create an ambient source-level name.
+    /// The parser-visible signature/effect contract must independently name
+    /// the same `(capability, method)` pair in the builtin manifest.
+    pub fn register_capability_method<F>(
+        &mut self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        f: F,
+    ) where
+        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + Send + Sync + 'static,
+    {
+        self.insert_capability_method(capability, method, VmBuiltinDispatch::Sync(Arc::new(f)));
+    }
+
+    /// Async counterpart of [`Self::register_capability_method`].
+    pub fn register_async_capability_method<F, Fut>(
+        &mut self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        f: F,
+    ) where
+        F: Fn(crate::vm::AsyncBuiltinCtx, Vec<VmValue>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<VmValue, VmError>> + Send + 'static,
+    {
+        self.insert_capability_method(
+            capability,
+            method,
+            VmBuiltinDispatch::Async(Arc::new(move |ctx, args| Box::pin(f(ctx, args)))),
+        );
+    }
+
+    fn insert_capability_method(
+        &mut self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        dispatch: VmBuiltinDispatch,
+    ) {
+        let key = (capability, method.to_string());
+        let replaced = Arc::make_mut(&mut self.capability_methods).insert(key, dispatch);
+        assert!(
+            replaced.is_none(),
+            "capability method harness.{}.{} registered twice",
+            capability.field_name(),
+            method
+        );
     }
 
     pub(crate) fn registered_builtin_id(&self, name: &str) -> Option<BuiltinId> {
@@ -475,7 +609,54 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
-        self.call_builtin_impl(name, args, None).await
+        self.call_builtin_impl(name, args, None, true).await
+    }
+
+    /// Invoke a hidden builtin that implements an already-authorized Harness
+    /// method. The nominal capability contract is the policy/effect owner;
+    /// applying the legacy builtin contract again would duplicate receipts
+    /// and, for approval-gated effects, request human approval twice.
+    pub(in crate::vm) async fn call_capability_builtin(
+        &mut self,
+        name: &str,
+        args: Vec<VmValue>,
+    ) -> Result<VmValue, VmError> {
+        self.call_builtin_impl(name, args, None, false).await
+    }
+
+    /// Invoke a synchronous hidden builtin behind an already-authorized
+    /// Harness method without constructing the recursive async dispatcher.
+    ///
+    /// Capability dispatch has already applied autonomy, policy, and receipt
+    /// handling before reaching this seam. Calling the sync handler directly
+    /// therefore preserves one contract owner and keeps deeply nested
+    /// agent/tool execution from accumulating the much larger async builtin
+    /// frame for ordinary filesystem operations.
+    pub(in crate::vm) fn call_capability_sync_builtin(
+        &mut self,
+        name: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        if self.denied_builtins.contains(name) {
+            return Err(VmError::CategorizedError {
+                message: format!("Tool '{name}' is not permitted."),
+                category: ErrorCategory::ToolRejected,
+            });
+        }
+        let builtin = self
+            .builtins
+            .get(name)
+            .cloned()
+            .ok_or_else(|| VmError::UndefinedBuiltin(name.to_string()))?;
+        let _observe = Self::observe_builtin_call(name);
+        // The Harness method contract has already applied policy and recorded
+        // its typed effects. Only validate the hidden implementation's runtime
+        // argument shape here; `validate_sync_builtin_args` would reapply the
+        // obsolete ambient-builtin policy and can reject an already-approved
+        // capability call.
+        crate::typecheck::validate_builtin_call(name, args, None)?;
+        let _interrupt = self.sync_builtin_interrupt_guard();
+        builtin(args, &mut self.output)
     }
 
     pub(crate) async fn call_builtin_id_or_name(
@@ -484,7 +665,7 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
-        self.call_builtin_impl(name, args, Some(id)).await
+        self.call_builtin_impl(name, args, Some(id), true).await
     }
 
     /// Install the thread-local [`crate::op_interrupt`] context for the
@@ -573,6 +754,7 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
         direct_id: Option<BuiltinId>,
+        enforce_contract: bool,
     ) -> Result<VmValue, VmError> {
         let _observe = Self::observe_builtin_call(name);
 
@@ -583,27 +765,25 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
-        let autonomy = if crate::autonomy::needs_async_side_effect_enforcement(name) {
-            crate::autonomy::enforce_builtin_side_effect_boxed(name, &args).await?
-        } else {
-            None
-        };
+        let autonomy =
+            if enforce_contract && crate::autonomy::needs_async_side_effect_enforcement(name) {
+                crate::autonomy::enforce_builtin_side_effect_boxed(name, &args).await?
+            } else {
+                None
+            };
         if let Some(crate::autonomy::AutonomyDecision::Skip(value)) = autonomy {
             return Ok(value);
         }
-        if !matches!(
-            autonomy,
-            Some(crate::autonomy::AutonomyDecision::AllowApproved)
-        ) {
-            crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+        if enforce_contract {
+            if !matches!(
+                autonomy,
+                Some(crate::autonomy::AutonomyDecision::AllowApproved)
+            ) {
+                crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+            }
+            self.record_builtin_contract_effects(name, &args);
         }
         crate::typecheck::validate_builtin_call(name, &args, None)?;
-
-        if let Some(result) =
-            crate::runtime_context::dispatch_runtime_context_builtin(self, name, &args)
-        {
-            return result;
-        }
 
         if let Some(id) = direct_id {
             if let Some(entry) = self.builtins_by_id.get(&id).cloned() {
@@ -620,7 +800,9 @@ impl Vm {
             self.call_builtin_entry(name, VmBuiltinDispatch::Async(async_builtin), args)
                 .await
         } else if let Some(bridge) = &self.bridge {
-            crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
+            if enforce_contract {
+                crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
+            }
             let args_json: Vec<serde_json::Value> =
                 args.iter().map(crate::llm::vm_value_to_json).collect();
             let result = bridge
@@ -645,7 +827,7 @@ impl Vm {
         }
     }
 
-    async fn call_builtin_entry(
+    pub(in crate::vm) async fn call_builtin_entry(
         &mut self,
         name: &str,
         dispatch: VmBuiltinDispatch,
@@ -719,7 +901,7 @@ fn builtin_def_metadata(
         // still surface an accurate, canonical signature.
         meta = meta.signature_owned(format!("{}", def.sig));
     }
-    meta
+    meta.with_contract(def.contract)
 }
 
 /// Derive a [`VmBuiltinArity`] from a parsed [`BuiltinSignature`]. Required

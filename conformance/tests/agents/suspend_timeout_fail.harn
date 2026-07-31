@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
 /**
@@ -10,9 +11,10 @@ import { with_llm_script } from "std/testing"
  * The timeout is fired deterministically via `mock_time` +
  * `advance_time`.
  */
-pipeline main() {
-  const _ = mock_time(1700000100000)
+pipeline main(harness: Harness) {
+  const _ = harness.testing.clock_set(1700000100000)
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -32,30 +34,31 @@ pipeline main() {
     ],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Park until the review timeout fails the worker.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
-      __io_println("status=" + suspended.status)
-      __io_println(
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println("status=" + suspended.status)
+      harness.stdio.println(
         "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
       )
-      const _ = advance_time(6 * 60 * 1000)
-      yield_now()
-      yield_now()
-      yield_now()
-      const failed = wait_agent(handle)
-      __io_println("post_timeout_status=" + failed.status)
-      __io_println("has_latest_error=" + to_string(failed?.error != nil))
-      __io_println(
+      const _ = harness.testing.clock_advance(6 * 60 * 1000)
+      harness.runtime.yield_now()
+      harness.runtime.yield_now()
+      harness.runtime.yield_now()
+      const failed = wait_agent(harness.agent, handle)
+      harness.stdio.println("post_timeout_status=" + failed.status)
+      harness.stdio.println("has_latest_error=" + to_string(failed?.error != nil))
+      harness.stdio.println(
         "error_mentions_timeout="
           + to_string(contains(failed?.error ?? "", "timeout")),
       )
       const resume_attempt = try {
-        resume_agent(handle)
+        resume_agent(harness.agent, handle)
       }
-      __io_println("resume_failed=" + to_string(is_err(resume_attempt)))
-      const _ = unmock_time()
+      harness.stdio.println("resume_failed=" + to_string(is_err(resume_attempt)))
+      const _ = harness.testing.clock_reset()
     },
   )
 }

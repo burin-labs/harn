@@ -5,31 +5,33 @@ import { llm_text, with_llm_script } from "std/testing"
  * mock: invalid (missing `verdict`). Second mock: valid. One retry
  * recovers; the caller gets the parsed data directly.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const schema = {
     type: "object",
     required: ["verdict"],
     properties: {verdict: {type: "string"}, improvement: {type: "string"}},
   }
   with_llm_script(
+    harness.llm,
     [
       llm_text("{\"improvement\": \"try again\"}"),
       llm_text("{\"verdict\": \"YES\", \"improvement\": \"\"}"),
     ],
     { ->
-      const result = llm_call_structured("Grade this", schema, {provider: "mock"})
-      __io_println(result.verdict)
-      __io_println(len(llm_mock_calls()))
+      const result = harness.llm.call_structured("Grade this", schema, {provider: "mock"})
+      harness.stdio.println(result.verdict)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("{\"improvement\": \"still broken\"}")],
     { ->
       const err = try {
-        llm_call_structured("Grade again", schema, {provider: "mock", retries: 0})
+        harness.llm.call_structured("Grade again", schema, {provider: "mock", retries: 0})
       }
-      __io_println(is_err(err))
-      __io_println(unwrap_err(err)?.category == "schema_validation")
+      harness.stdio.println(is_err(err))
+      harness.stdio.println(unwrap_err(err)?.category == "schema_validation")
     },
   )
 }

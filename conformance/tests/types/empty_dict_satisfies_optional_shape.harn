@@ -6,15 +6,15 @@
  */
 type Options = {verbose?: bool, retries?: int}
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // `{}` satisfies an all-optional shape — no required field is missing.
   const opts: Options = {}
-  __io_println(opts.verbose == nil)
+  harness.stdio.println(opts.verbose == nil)
   // A shape with only optional fields still accepts an empty literal directly.
   const cfg: {name?: string} = {}
-  __io_println(cfg.name == nil)
+  harness.stdio.println(cfg.name == nil)
   // `{}` is top, so a var initialized empty accepts a later concrete record.
   let acc = {}
   acc = {count: 1}
-  __io_println("ok")
+  harness.stdio.println("ok")
 }

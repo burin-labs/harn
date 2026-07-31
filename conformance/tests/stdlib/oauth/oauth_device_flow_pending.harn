@@ -2,15 +2,15 @@
 //
 // Mocks the token endpoint to return two authorization_pending errors
 // before the final success. Asserts that the client polls at the
-// server-supplied interval honoring mock_time (no real sleep) and that
+// server-supplied interval honoring harness.testing.clock_set(no real sleep) and that
 // each retry sends the same device_code.
 import { device_flow } from "std/oauth/device_flow"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(task) {
-  const _ = mock_time(1700000000000)
-  const store = memory()
+pipeline test(harness: Harness, task) {
+  const _ = harness.testing.clock_set(1700000000000)
+  const store = memory(harness.auth)
   const provider = custom(
     {
       id: "mockPending",
@@ -20,8 +20,8 @@ pipeline test(task) {
       default_scopes: ["read"],
     },
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/device",
     {
@@ -31,7 +31,7 @@ pipeline test(task) {
       headers: {"content-type": "application/json"},
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/token",
     {
@@ -55,6 +55,7 @@ pipeline test(task) {
     },
   )
   const token_set = device_flow(
+    harness,
     provider,
     {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }},
   )
@@ -65,7 +66,7 @@ pipeline test(task) {
   )
   const stored = store.get("mockPending")
   assert_eq(stored.access_token, "OK-PEND", "token persisted after pending retries")
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   // 1 device call + 3 token polls.
   assert_eq(len(calls), 4, "device + three token polls")
   assert(contains(calls[0].url, "/device"), "first call to device endpoint")
@@ -75,6 +76,6 @@ pipeline test(task) {
   assert(contains(calls[2].body, "device_code=DEV-PENDING"), "second poll body has device_code")
   assert(contains(calls[3].url, "/token"), "third poll to token endpoint")
   assert(contains(calls[3].body, "device_code=DEV-PENDING"), "third poll body has device_code")
-  const _ = unmock_time()
-  log("oauth device flow pending ok")
+  const _ = harness.testing.clock_reset()
+  harness.stdio.log("oauth device flow pending ok")
 }

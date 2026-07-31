@@ -1,5 +1,5 @@
 /** Test set predicate builtins (function-call syntax) */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const a = set(1, 2, 3, 4)
   const b = set(3, 4, 5, 6)
   const small = set(2, 3)
@@ -7,28 +7,28 @@ pipeline default(task) {
   const empty = set()
   // set_symmetric_difference
   const sd = set_symmetric_difference(a, b)
-  __io_println(len(sd))
-  __io_println(set_contains(sd, 1))
-  __io_println(set_contains(sd, 2))
-  __io_println(set_contains(sd, 5))
-  __io_println(set_contains(sd, 6))
-  __io_println(set_contains(sd, 3))
-  __io_println(set_contains(sd, 4))
+  harness.stdio.println(len(sd))
+  harness.stdio.println(set_contains(sd, 1))
+  harness.stdio.println(set_contains(sd, 2))
+  harness.stdio.println(set_contains(sd, 5))
+  harness.stdio.println(set_contains(sd, 6))
+  harness.stdio.println(set_contains(sd, 3))
+  harness.stdio.println(set_contains(sd, 4))
   // symmetric difference with self is empty
-  __io_println(len(set_symmetric_difference(a, a)))
+  harness.stdio.println(len(set_symmetric_difference(a, a)))
   // set_is_subset
-  __io_println(set_is_subset(small, a))
-  __io_println(set_is_subset(a, small))
-  __io_println(set_is_subset(a, a))
-  __io_println(set_is_subset(empty, a))
+  harness.stdio.println(set_is_subset(small, a))
+  harness.stdio.println(set_is_subset(a, small))
+  harness.stdio.println(set_is_subset(a, a))
+  harness.stdio.println(set_is_subset(empty, a))
   // set_is_superset
-  __io_println(set_is_superset(a, small))
-  __io_println(set_is_superset(small, a))
-  __io_println(set_is_superset(a, a))
-  __io_println(set_is_superset(a, empty))
+  harness.stdio.println(set_is_superset(a, small))
+  harness.stdio.println(set_is_superset(small, a))
+  harness.stdio.println(set_is_superset(a, a))
+  harness.stdio.println(set_is_superset(a, empty))
   // set_is_disjoint
-  __io_println(set_is_disjoint(a, disjoint))
-  __io_println(set_is_disjoint(a, b))
-  __io_println(set_is_disjoint(empty, a))
-  __io_println(set_is_disjoint(empty, empty))
+  harness.stdio.println(set_is_disjoint(a, disjoint))
+  harness.stdio.println(set_is_disjoint(a, b))
+  harness.stdio.println(set_is_disjoint(empty, a))
+  harness.stdio.println(set_is_disjoint(empty, empty))
 }

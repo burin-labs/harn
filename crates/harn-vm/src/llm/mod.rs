@@ -440,6 +440,8 @@ pub fn reset_llm_state() {
 
 /// Route an LLM request by cost and capability metadata.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__cost_route(options?: dict|nil) -> dict",
     kind = "async",
     category = "llm.host",
@@ -454,6 +456,8 @@ async fn cost_route_builtin(
 
 /// Execute one LLM call and return the normalized Harn result dict.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig_expr = harn_builtin_meta::signatures::LLM_CALL,
     kind = "async",
     category = "llm.host"
@@ -467,6 +471,8 @@ async fn llm_call_builtin(
 
 /// Execute one streaming LLM call and return the normalized Harn result dict.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "llm_stream_call(prompt: string, system?: string, options?: @LLM_CALL_OPTIONS) -> stream",
     kind = "async",
     category = "llm.host"
@@ -484,6 +490,8 @@ async fn llm_stream_call_builtin(
 /// (tool calls + usage preserved so tool dispatch is unaffected). Internal
 /// primitive — the public surface is the `on_delta:` agent-loop option.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_llm_stream_collect(prompt: string, system?: string|nil, options?: dict|nil, on_delta?: any|nil) -> dict",
     kind = "async",
     category = "llm.host",
@@ -498,6 +506,8 @@ async fn llm_stream_collect_builtin(
 
 /// Rank a tool registry for Harn-managed client-mode tool search.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_tool_search_score(query: string, registry: dict, opts?: dict|nil) -> list",
     category = "agent.host",
     runtime_only = true
@@ -539,10 +549,14 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
 /// Build a first-class routing policy handle. Pass {chain: [{provider, model}, ...],
 /// failover: {on_status?, on_timeout_ms?, on_error_kinds?, max_attempts?},
 /// latency: {race_after_ms?, target_p95_ms?}, budget: {per_call_usd?, session_usd?, on_exceed?},
-/// observe: {emit_event?}} and pipe the result through `llm_call(... routing: policy ...)`
+/// observe: {emit_event?}} and pipe the result through `harness.llm.call(... routing: policy ...)`
 /// to drive the chain with failover, latency-aware racing, and budget caps. Tape events:
 /// <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.
-#[harn_builtin(sig = "routing_policy(config: dict) -> dict", category = "llm.host")]
+#[harn_builtin(
+    exposure = "harness.llm.routing_policy",
+    effects = ["state.read@dynamic"],
+    sig = "routing_policy(config: dict) -> dict", category = "llm.host"
+)]
 fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = match args.first() {
         Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
@@ -567,6 +581,8 @@ fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// model-callable surface (current_model() / current_provider() / ...) is opt-in via
 /// `runtime_introspection_tools(registry)`; this builtin is the underlying read.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "runtime_introspection() -> dict",
     category = "llm.introspection"
 )]
@@ -619,6 +635,8 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
 
 /// Execute one LLM call and return a non-throwing safe envelope.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig_expr = harn_builtin_meta::signatures::LLM_CALL_SAFE,
     kind = "async",
     category = "llm.host"
@@ -635,6 +653,8 @@ async fn llm_call_safe_builtin(
 
 /// Call an LLM for JSON data and return parsed schema-valid data.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED,
     kind = "async",
     category = "llm.structured"
@@ -650,6 +670,8 @@ async fn llm_call_structured_builtin(
 
 /// Call an LLM for JSON data and return a non-throwing schema envelope.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_SAFE,
     kind = "async",
     category = "llm.structured"
@@ -672,6 +694,8 @@ async fn llm_call_structured_safe_builtin(
 
 /// Call an LLM for JSON data and return a diagnostic structured-output envelope.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_RESULT,
     kind = "async",
     category = "llm.structured"
@@ -685,6 +709,8 @@ async fn llm_call_structured_result_builtin(
 
 /// Recover malformed JSON text against a schema using deterministic and optional LLM repair.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig_expr = harn_builtin_meta::signatures::SCHEMA_RECOVER,
     kind = "async",
     category = "schema.recovery"
@@ -698,6 +724,8 @@ async fn schema_recover_builtin(
 
 /// Run a closure behind the provider rate limiter with retryable-error backoff.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "with_rate_limit(provider: string, callback: closure, options?: dict|nil) -> any",
     kind = "async",
     category = "llm.rate_limit"
@@ -765,6 +793,8 @@ async fn with_rate_limit_builtin(
 
 /// Execute a fill-in-the-middle LLM completion request.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig_expr = harn_builtin_meta::signatures::LLM_COMPLETION,
     kind = "async",
     category = "llm.host"
@@ -822,6 +852,8 @@ async fn llm_completion_builtin(
 
 /// Execute a channel-based streaming LLM request.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "llm_stream(prompt: string, system?: string, options?: dict) -> channel",
     kind = "async",
     category = "llm.host"
@@ -881,7 +913,10 @@ mod tests {
     #[test]
     fn llm_stack_registers_and_dispatches_through_full_stdlib() {
         mock::reset_llm_mock_state();
-        let chunk = crate::compile_source("llm_mock({text: \"ok\"})\n").expect("compile");
+        let chunk = crate::compile_source(
+            "fn main(harness: Harness) { harness.llm.mock_enqueue({text: \"ok\"}) }\n",
+        )
+        .expect("compile");
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

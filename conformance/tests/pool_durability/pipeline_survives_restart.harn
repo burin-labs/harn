@@ -4,9 +4,13 @@
 // terminal-state results are still visible.
 import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
 
-pipeline default() {
-  const dir = path_join(harness.fs.temp_dir(), "harn-pool-durability-pipeline-" + uuid())
+pipeline default(harness: Harness) {
+  const dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-pool-durability-pipeline-" + harness.random.uuid(),
+  )
   const pool = pool_create(
+    harness.agent,
     {
       name: "pipeline-demo",
       scope: "pipeline",
@@ -15,21 +19,22 @@ pipeline default() {
       dir: dir,
     },
   )
-  log(pool.scope)
-  log(pool.scope_id)
-  log(pool.durable)
+  harness.stdio.log(pool.scope)
+  harness.stdio.log(pool.scope_id)
+  harness.stdio.log(pool.durable)
   // Submit and wait so the task reaches a terminal state and the
   // durable log records it as completed.
   const h1 = pool.submit({ -> 42 }, {idempotency_key: "submit-001"})
-  const r1 = pool_wait(h1)
-  log(r1.status)
-  log(r1.result)
+  const r1 = pool_wait(harness.agent, h1)
+  harness.stdio.log(r1.status)
+  harness.stdio.log(r1.result)
   // "Kill the process": clear the in-process registry. The .harn/pools/
   // JSONL file persists.
-  pool_simulate_restart()
+  pool_simulate_restart(harness.agent)
   // Re-create the pool with the same name + pipeline_id. The store
   // re-hydrates terminal tasks and surfaces them via snapshot.
   const resumed = pool_create(
+    harness.agent,
     {
       name: "pipeline-demo",
       scope: "pipeline",
@@ -38,14 +43,14 @@ pipeline default() {
       dir: dir,
     },
   )
-  log(resumed.scope)
-  log(resumed.durable)
-  log(resumed.completed)
-  log(resumed.total)
+  harness.stdio.log(resumed.scope)
+  harness.stdio.log(resumed.durable)
+  harness.stdio.log(resumed.completed)
+  harness.stdio.log(resumed.total)
   // Idempotent re-submission of the same key returns the persisted
   // outcome (now stringified) instead of re-running the closure.
   const h2 = resumed.submit({ -> 999 }, {idempotency_key: "submit-001"})
-  const r2 = pool_wait(h2)
-  log(r2.status)
-  log(r2.result)
+  const r2 = pool_wait(harness.agent, h2)
+  harness.stdio.log(r2.status)
+  harness.stdio.log(r2.result)
 }

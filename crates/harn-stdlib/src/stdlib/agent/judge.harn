@@ -134,8 +134,8 @@ fn __judge_recovery_feedback(next_step, specific_gaps, recovery_details, fallbac
   return join(parts, "\n\n")
 }
 
-fn __judge_payload(session, opts, stop_reason, text, iteration) {
-  const messages = agent_session_messages(session.session_id)
+fn __judge_payload(agent: HarnessAgent, session, opts, stop_reason, text, iteration) {
+  const messages = agent_session_messages(agent, session.session_id)
   const tool_names = __session_tool_names(messages)
   return {
     session_id: session.session_id,
@@ -234,7 +234,7 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     required: ["verdict"],
   }
   const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
-  const user = completion_judge_user_prompt(payload)
+  const user = completion_judge_user_prompt(harness.fs, payload)
   const ran = __judge_run_checkpoint(
     harness,
     judge_cfg,
@@ -382,8 +382,9 @@ pub fn agent_done_judge_cap(judge_cfg) {
   return __done_judge_cap(judge_cfg)
 }
 
-fn __emit_judge_decision(session_id, iteration, verdict) {
+fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
   agent_emit_event(
+    agent,
     session_id,
     "judge_decision",
     {
@@ -449,7 +450,7 @@ fn __done_contract_judge_system(opts) {
  * hook. Compose it with base options:
  *
  * ```harn,ignore
- * agent_loop(task, nil, base_opts + agent_done_contract({max_invocations: 3}))
+ * agent_loop(harness, task, nil, base_opts + agent_done_contract({max_invocations: 3}))
  * ```
  *
  * @effects: []
@@ -500,12 +501,12 @@ pub fn agent_done_contract(options = {}) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0) {
-  const payload = __judge_payload(session, opts, stop_reason, text, iteration)
+pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, text, iteration = 0) {
+  const payload = __judge_payload(harness.agent, session, opts, stop_reason, text, iteration)
   let verdict = {vetoed: false}
   if opts?.verify_completion != nil {
     verdict = __judge_invoke_closure(opts.verify_completion, payload)
-    __emit_judge_decision(session.session_id, iteration, verdict)
+    __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
   }
   let completion_judge_invoked = false
   let completion_judge_cap_reached = false
@@ -523,7 +524,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
       verdict = __judge_invoke_structured(harness, opts.verify_completion_judge, opts, payload)
       verdict = verdict + {trigger: opts?._verify_completion_judge_trigger}
       completion_judge_invoked = true
-      __emit_judge_decision(session.session_id, iteration, verdict)
+      __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
     }
   }
   const done_judge_due = opts?._done_judge_due ?? true
@@ -542,7 +543,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     } else {
       verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
       verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger}
-      __emit_judge_decision(session.session_id, iteration, verdict)
+      __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
     }
   }
   let feedback_composition = nil
@@ -551,6 +552,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     && verdict.feedback != ""
     && !(opts?._defer_judge_feedback ?? false) {
     feedback_composition = agent_feedback_emit(
+      harness.agent,
       session.session_id,
       [
         {
@@ -807,19 +809,19 @@ const __COMPLETION_GATE_VETO_CLASSES = [
 ]
 
 /** Per-session vetoes charged so far (0 without a session id). */
-fn __completion_gate_vetoes_used(session_id) {
+fn __completion_gate_vetoes_used(runtime: HarnessRuntime, session_id) {
   if session_id == "" {
     return 0
   }
-  return to_int(store_get(__completion_gate_veto_key(session_id)) ?? 0) ?? 0
+  return to_int(runtime.store_get(__completion_gate_veto_key(session_id)) ?? 0) ?? 0
 }
 
 /** Per-class vetoes charged so far for one ladder rule id (0 without a session id). */
-fn __completion_gate_class_vetoes_used(session_id, reason) {
+fn __completion_gate_class_vetoes_used(runtime: HarnessRuntime, session_id, reason) {
   if session_id == "" {
     return 0
   }
-  return to_int(store_get(__completion_gate_veto_class_key(session_id, reason)) ?? 0) ?? 0
+  return to_int(runtime.store_get(__completion_gate_veto_class_key(session_id, reason)) ?? 0) ?? 0
 }
 
 /**
@@ -837,13 +839,13 @@ fn __completion_gate_class_vetoes_used(session_id, reason) {
  * @api_stability: experimental
  * @example: agent_completion_gate_veto_counts(session_id).by_class.no_source_write
  */
-pub fn agent_completion_gate_veto_counts(session_id) {
+pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id) {
   const sid = to_string(session_id ?? "")
   let by_class = {}
   for reason in __COMPLETION_GATE_VETO_CLASSES {
-    by_class = by_class + {[reason]: __completion_gate_class_vetoes_used(sid, reason)}
+    by_class = by_class + {[reason]: __completion_gate_class_vetoes_used(runtime, sid, reason)}
   }
-  return {by_class: by_class, total: __completion_gate_vetoes_used(sid)}
+  return {by_class: by_class, total: __completion_gate_vetoes_used(runtime, sid)}
 }
 
 /**
@@ -874,7 +876,7 @@ fn __completion_gate_write_counts(raw, classify_write) {
  * flag and a `facts_unavailable` verdict reason, when the host supplied no facts
  * at all (never a silent fabricated pass).
  */
-fn __completion_gate_evaluate(payload, opts, facts_available) {
+fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_available) {
   const session_id = to_string(payload?.session_id ?? "")
   const classify_write = opts?.classify_write
   const verify_command = opts?.verify_command
@@ -930,17 +932,17 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
     escalation_target: opts?.escalation_target,
   }
   const verdict = __completion_gate_ladder(derived, opts?.feedback_templates)
-  const vetoes_used = __completion_gate_vetoes_used(session_id)
+  const vetoes_used = __completion_gate_vetoes_used(runtime, session_id)
   const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
   if budgeted.charge && session_id != "" {
-    store_set(__completion_gate_veto_key(session_id), vetoes_used + 1)
+    runtime.store_set(__completion_gate_veto_key(session_id), vetoes_used + 1)
     // Per-class counter (keyed by the vetoing ladder rule id) alongside the flat
     // count, persisted in the same session-store namespace. A charged veto's
     // verdict is the un-converted ladder verdict, so `reason` is the rule id.
     const reason = to_string(verdict?.reason ?? "")
     if reason != "" {
-      const class_used = __completion_gate_class_vetoes_used(session_id, reason)
-      store_set(__completion_gate_veto_class_key(session_id, reason), class_used + 1)
+      const class_used = __completion_gate_class_vetoes_used(runtime, session_id, reason)
+      runtime.store_set(__completion_gate_veto_class_key(session_id, reason), class_used + 1)
     }
   }
   const resolved = __completion_gate_decorate_feedback(budgeted.verdict, opts?.feedback_decorator)
@@ -972,7 +974,7 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
  * judge on the existing capped seam. Compose it with base options:
  *
  * ```harn,ignore
- * agent_loop(task, system, base_opts + agent_completion_gate({
+ * agent_loop(harness, task, system, base_opts + agent_completion_gate(harness.runtime, {
  *   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
  *   verify_command: fn() { return host_run_verify() },
  * }))
@@ -982,12 +984,12 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
  * the degraded state on the returned bundle (`_completion_gate.facts_available =
  * false`) rather than fabricating a pass.
  *
- * @effects: []
+ * @effects: [store]
  * @errors: [runtime]
  * @api_stability: experimental
- * @example: agent_completion_gate({facts: host_facts, verify_command: host_verify})
+ * @example: agent_completion_gate(harness.runtime, {facts: host_facts, verify_command: host_verify})
  */
-pub fn agent_completion_gate(options: CompletionGateOptions = {}) {
+pub fn agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = {}) {
   const opts = options ?? {}
   __completion_gate_validate_options(opts)
   // `classify_write` only refines the write counts `facts` returns, so it never
@@ -995,7 +997,8 @@ pub fn agent_completion_gate(options: CompletionGateOptions = {}) {
   // rejected in __completion_gate_validate_options). Facts are available only when
   // the host wired `facts` or a `verify_command` oracle.
   const facts_available = opts.facts != nil || opts.verify_command != nil
-  const gate = fn(payload) { return __completion_gate_evaluate(payload, opts, facts_available) }
+  const gate =
+    fn(payload) { return __completion_gate_evaluate(runtime, payload, opts, facts_available) }
   let out = {
     verify_completion: gate,
     _completion_gate: {

@@ -44,7 +44,6 @@ fn registry() -> BuiltinRegistry {
 }
 
 fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
-    harn_hostlib::tools::permissions::enable_for_test();
     let registry = registry();
     let entry = registry
         .find(builtin)

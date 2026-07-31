@@ -1,5 +1,5 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const d = {name: "test", value: 42}
-  log(d.name)
-  log(d.value)
+  harness.stdio.log(d.name)
+  harness.stdio.log(d.value)
 }

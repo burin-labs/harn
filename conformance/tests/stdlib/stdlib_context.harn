@@ -1,6 +1,6 @@
 import "std/context"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const ctx = context(
     [
       section("repo", "Use Rust.", nil),
@@ -8,18 +8,23 @@ pipeline default() {
     ],
     {separator: "\n--\n"},
   )
-  const rendered = context_render(ctx)
-  __io_println(rendered)
-  const prompt = prompt_compose("Fix it", ctx, {system: "You are helpful", task_label: "Work"})
-  __io_println(prompt?.system)
-  __io_println(contains(prompt?.prompt, "[repo]"))
+  const rendered = context_render(harness.llm, ctx)
+  harness.stdio.println(rendered)
+  const prompt = prompt_compose(
+    harness.llm,
+    "Fix it",
+    ctx,
+    {system: "You are helpful", task_label: "Work"},
+  )
+  harness.stdio.println(prompt?.system)
+  harness.stdio.println(contains(prompt?.prompt, "[repo]"))
   // The prompt wraps the task in a <workflow_task> / <label> /
   // <instructions> block. Assert both pieces are present.
-  __io_println(
+  harness.stdio.println(
     contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"),
   )
-  const raw = context_render({sections: [{name: "raw", content: "Visible"}]})
-  __io_println(raw)
+  const raw = context_render(harness.llm, {sections: [{name: "raw", content: "Visible"}]})
+  harness.stdio.println(raw)
   const added = context_add(context([section("one", "1")]), section("two", "2"))
-  __io_println(len(added?.sections))
+  harness.stdio.println(len(added?.sections))
 }

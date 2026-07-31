@@ -65,6 +65,12 @@ The runtime currently accepts two handler forms:
 - Local Harn closures / function references
 - Remote URI strings with `a2a://...` or `worker://...`
 
+Local handler and predicate entrypoints receive
+`(harness: Harness, event: TriggerEvent)`. Predicates may therefore perform
+governed classification, including model calls, before dispatch. Inside either
+boundary, ordinary helpers should accept the smallest coherent capability
+interface they need rather than inheriting the root Harness.
+
 `allow_cleartext` is optional and only applies to `a2a://...` handlers. Set it
 to `true` when you intentionally want HTTP A2A discovery / dispatch, for
 example when talking to a local `harn serve` process during development.
@@ -79,7 +85,7 @@ Example:
 ```harn
 import "std/triggers"
 
-fn handle_issue(event: TriggerEvent) -> dict {
+fn handle_issue(harness: Harness, event: TriggerEvent) -> dict {
   return {kind: event.kind, provider: event.provider}
 }
 
@@ -178,7 +184,7 @@ Return streamed `observability.action_graph` records as a list of
 one trigger delivery and its downstream predicate, dispatch, retry, worker,
 A2A, and DLQ nodes.
 
-### `handler_context()`
+### `harness.runtime.handler_context()`
 
 Return the current dispatch context as `HandlerContext | nil`.
 
@@ -191,7 +197,7 @@ Inside a trigger handler, the returned record includes:
 - `autonomy_tier`
 - `trigger_event`
 
-Outside trigger dispatch, the builtin returns `nil`.
+Outside trigger dispatch, the method returns `nil`.
 
 ## Stream helpers
 
@@ -209,7 +215,7 @@ and cached classifier steps.
 ```harn
 import "std/triggers"
 
-pub fn on_quotes(event: TriggerEvent) -> dict {
+pub fn on_quotes(harness: Harness, event: TriggerEvent) -> dict {
   const forked = stream_fork([event.provider_payload.raw], ["risk", "ledger"])
   const windowed = window_by(
     [event.provider_payload.raw],
@@ -279,7 +285,7 @@ with `actor_id`, `evidence_refs`, and `autonomy_tier_at_time`.
 ```harn
 import "std/triggers"
 
-fn fail_handler(event: TriggerEvent) -> any {
+fn fail_handler(harness: Harness, event: TriggerEvent) -> any {
   throw("manual failure: " + event.kind)
 }
 
@@ -304,9 +310,9 @@ const fired = trigger_fire(handle, {provider: "github", kind: "issue.opened"})
 const dlq = trigger_inspect_dlq().filter({ entry -> entry.binding_id == handle.id })
 const replay = trigger_replay(fired.event_id)
 
-log(fired.status)                  // "dlq"
-log(len(dlq[0].retry_history))     // 1
-log(replay.replay_of_event_id)     // original event id
+harness.stdio.log(fired.status)                  // "dlq"
+harness.stdio.log(len(dlq[0].retry_history))     // 1
+harness.stdio.log(replay.replay_of_event_id)     // original event id
 ```
 
 ## Notes
@@ -320,7 +326,7 @@ log(replay.replay_of_event_id)     // original event id
   persist `triggers.events` and `triggers.dlq`. If the runtime did not already
   install one, the stdlib wrapper falls back to an in-memory log for the
   current thread.
-- Predicate replay is deterministic for `llm_call(...)`: cached predicate
+- Predicate replay is deterministic for `harness.llm.call(...)`: cached predicate
   responses are reused from the request cache plus the per-event
   `trigger.inbox` record rather than calling the live provider again.
 - Every terminal dispatch appends one `TrustRecord` to `trust.graph` plus the

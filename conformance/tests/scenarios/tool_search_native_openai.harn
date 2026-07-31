@@ -16,7 +16,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *      "does not expose native" diagnostic as other non-supporting
  *      providers.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -48,11 +48,12 @@ pipeline test(task) {
   // options parsing must inject the OpenAI meta-tool and preserve the
   // deferred flags. The mock provider won't actually call the tools —
   // we just need a response that lets the call return so we can
-  // inspect `llm_mock_calls()`.
+  // inspect `harness.llm.mock_calls()`.
   with_llm_script(
+    harness.llm,
     [llm_text("ack")],
     { ->
-      llm_call(
+      harness.llm.call(
         "do a thing",
         nil,
         {
@@ -62,7 +63,7 @@ pipeline test(task) {
           tool_search: {variant: "bm25", mode: "native"},
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
       assert(
         calls[0].api_mode == "responses",
@@ -99,7 +100,7 @@ pipeline test(task) {
       assert(saw_metrics_deferred, "query_metrics present + deferred")
       assert(saw_lookup_eager, "lookup_account present + eager")
       const pre54_err = try {
-        llm_call(
+        harness.llm.call(
           "x",
           nil,
           {
@@ -118,7 +119,7 @@ pipeline test(task) {
         pre54_err.contains("does not expose native"),
         "diagnostic mentions missing native support",
       )
-      log("tool_search_native_openai tests passed")
+      harness.stdio.log("tool_search_native_openai tests passed")
     },
   )
 }

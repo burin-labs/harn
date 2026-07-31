@@ -71,33 +71,33 @@ pub fn replace_literals(text: string, old: string, new: string) -> string {
   return text.replace(json_literal(old), json_literal(new))
 }
 
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   const parsed = parse_args()
   if parsed.error != nil {
-    __io_eprintln(parsed.error)
+    harness.stdio.eprintln(parsed.error)
     return parsed.code
   }
   const old = parsed.old
   const new = parsed.new
   if !is_semver(old) {
-    __io_eprintln("error: --from must be X.Y.Z, got ${py_repr(old)}")
+    harness.stdio.eprintln("error: --from must be X.Y.Z, got ${py_repr(old)}")
     return 1
   }
   if !is_semver(new) {
-    __io_eprintln("error: --to must be X.Y.Z, got ${py_repr(new)}")
+    harness.stdio.eprintln("error: --to must be X.Y.Z, got ${py_repr(new)}")
     return 1
   }
   if old == new {
-    __io_println("protocol fixture runtime versions already target ${new}")
+    harness.stdio.println("protocol fixture runtime versions already target ${new}")
     return 0
   }
   if !harness.fs.exists(FIXTURE_ROOT) {
-    __io_println("protocol fixture root not found: ${FIXTURE_ROOT}")
+    harness.stdio.println("protocol fixture root not found: ${FIXTURE_ROOT}")
     return 0
   }
   let changed_files = 0
   let changed_values = 0
-  for path in sorted_json_files(FIXTURE_ROOT) {
+  for path in sorted_json_files(harness.fs, FIXTURE_ROOT) {
     const text = harness.fs.read_text(path)
     const data = json_parse(text)
     const count = count_old_values(data, old)
@@ -110,14 +110,14 @@ pipeline main(task) {
     const updated_text = replace_literals(text, old, new)
     const reparsed = json_parse(updated_text)
     if count_old_values(reparsed, old) != 0 {
-      __io_eprintln("error: failed to replace all ${py_repr(old)} values in ${path}")
+      harness.stdio.eprintln("error: failed to replace all ${py_repr(old)} values in ${path}")
       return 1
     }
     harness.fs.write_text(path, updated_text)
     changed_files = changed_files + 1
     changed_values = changed_values + count
   }
-  __io_println(
+  harness.stdio.println(
     "synced protocol fixture runtime versions: ${changed_values} value(s) across ${changed_files} file(s)",
   )
   return 0
@@ -171,9 +171,9 @@ fn parse_args() -> any {
  * Recursively glob `*.json` beneath `root`, sorted, matching Python's
  * `sorted(FIXTURE_ROOT.rglob("*.json"))`.
  */
-fn sorted_json_files(root: string) -> list<string> {
+fn sorted_json_files(fs: HarnessFs, root: string) -> list<string> {
   let paths: list<string> = []
-  for path in harness.fs.glob("${root}/**/*.json") {
+  for path in fs.glob("${root}/**/*.json") {
     paths = paths + [path]
   }
   return paths.sorted()

@@ -56,9 +56,9 @@ fn __tool_registry_has(registry, name) {
   return false
 }
 
-fn __render_loaded_skill(entry, request) {
+fn __render_loaded_skill(agent: HarnessAgent, entry, request) {
   const rendered = try {
-    skill_render(entry, request?.arguments ?? request?.args ?? [])
+    agent.skill_render(entry, request?.arguments ?? request?.args ?? [])
   }
   if !is_err(rendered) {
     const body = trim(unwrap(rendered))
@@ -86,7 +86,7 @@ fn __render_loaded_skill(entry, request) {
   return trim(out)
 }
 
-fn __load_skill_for_session(session, opts, args) {
+fn __load_skill_for_session(agent: HarnessAgent, session, opts, args) {
   const request = if type_of(args) == "dict" {
     args
   } else {
@@ -98,32 +98,35 @@ fn __load_skill_for_session(session, opts, args) {
   const require_signature = (request?.require_signature ?? false)
     || (entry?.require_signature ?? false)
   if entry == nil || require_signature {
-    return load_skill(request + {session_id: session.session_id})
+    return agent.load_skill(request + {session_id: session.session_id})
   }
   if __skill_model_invocation_disabled(entry) {
     throw "skill_model_invocation_disabled: skill '" + id + "' cannot be loaded by a model"
   }
   const loaded = try {
-    load_skill(request + {session_id: session.session_id})
+    agent.load_skill(request + {session_id: session.session_id})
   }
   const body = if is_err(loaded) {
-    __render_loaded_skill(entry, request)
+    __render_loaded_skill(agent, entry, request)
   } else {
     unwrap(loaded)
   }
   if entry != nil {
-    const prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
+    const prev = __active_from_ids(
+      registry,
+      agent_session_active_skills(agent, session.session_id) ?? [],
+    )
     let next = prev
     if !contains(__skill_ids(prev), id) {
       next = next.appending(entry + {id: id, score: 1.0, trigger: "load_skill"})
-      __record_activations(session, prev, next, 0)
-      agent_session_set_active_skills(session.session_id, next)
+      __record_activations(agent, session, prev, next, 0)
+      agent_session_set_active_skills(agent, session.session_id, next)
     }
   }
   return body
 }
 
-fn __with_load_skill_tool(session, opts) {
+fn __with_load_skill_tool(agent: HarnessAgent, session, opts) {
   const existing = opts?.tools
   const registry = if type_of(existing) == "dict" {
     existing
@@ -146,7 +149,7 @@ fn __with_load_skill_tool(session, opts) {
           required: false,
         },
       },
-      handler: { args -> __load_skill_for_session(session, opts, args) },
+      handler: { args -> __load_skill_for_session(agent, session, opts, args) },
     },
   )
   return opts + {tools: next_registry}
@@ -206,9 +209,9 @@ fn __merge_active_skills(left, right) {
   return active
 }
 
-fn __latest_user_text(session) {
+fn __latest_user_text(agent: HarnessAgent, session) {
   let latest = session?.task ?? ""
-  for message in agent_session_messages(session.session_id) {
+  for message in agent_session_messages(agent, session.session_id) {
     if message?.role == "user" {
       latest = message?.content ?? latest
     }
@@ -492,9 +495,9 @@ fn __host_skill_score_candidates(context, registry, opts) {
   return unwrap(outcome)?.scored ?? []
 }
 
-fn __score_candidates(session, registry, opts, iteration) {
+fn __score_candidates(agent: HarnessAgent, session, registry, opts, iteration) {
   const context = {
-    task: __latest_user_text(session),
+    task: __latest_user_text(agent, session),
     working_files: opts?.working_files ?? [],
     iteration: iteration,
   }
@@ -527,8 +530,9 @@ fn __top_active_from_scores(registry, scored, opts) {
   return active
 }
 
-fn __record_matched(session, opts, iteration, scored) {
+fn __record_matched(agent: HarnessAgent, session, opts, iteration, scored) {
   agent_session_record_skill_event(
+    agent,
     session.session_id,
     "skill_matched",
     {
@@ -541,12 +545,13 @@ fn __record_matched(session, opts, iteration, scored) {
   )
 }
 
-fn __record_deactivations(session, prev, next, iteration) {
+fn __record_deactivations(agent: HarnessAgent, session, prev, next, iteration) {
   const next_ids = __skill_ids(next)
   for entry in prev {
     const id = __skill_id(entry)
     if id != "" && !contains(next_ids, id) {
       agent_session_record_skill_event(
+        agent,
         session.session_id,
         "skill_deactivated",
         {name: id, id: id, iteration: iteration},
@@ -555,7 +560,7 @@ fn __record_deactivations(session, prev, next, iteration) {
   }
 }
 
-fn __record_activations(session, prev, next, iteration) {
+fn __record_activations(agent: HarnessAgent, session, prev, next, iteration) {
   const prev_ids = __skill_ids(prev)
   for entry in next {
     const id = __skill_id(entry)
@@ -563,6 +568,7 @@ fn __record_activations(session, prev, next, iteration) {
       continue
     }
     agent_session_record_skill_event(
+      agent,
       session.session_id,
       "skill_activated",
       {
@@ -577,6 +583,7 @@ fn __record_activations(session, prev, next, iteration) {
     )
     if len(entry?.allowed_tools ?? []) > 0 {
       agent_session_record_skill_event(
+        agent,
         session.session_id,
         "skill_scope_tools",
         {name: id, id: id, allowed_tools: entry.allowed_tools},
@@ -679,21 +686,21 @@ fn __opts_with_active_skills(opts, registry, active, activated_this_turn = false
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_skills_match(session, opts, iteration) {
+pub fn agent_skills_match(agent: HarnessAgent, session, opts, iteration) {
   const registry = __skills_registry(opts)
   if registry == nil || len(__skills_entries(registry)) == 0 {
     return opts
   }
-  const tool_opts = __with_load_skill_tool(session, opts)
+  const tool_opts = __with_load_skill_tool(agent, session, opts)
   const stored_prev = __active_from_ids(
     registry,
-    agent_session_active_skills(session.session_id) ?? [],
+    agent_session_active_skills(agent, session.session_id) ?? [],
   )
   const profile_active = __active_from_context_profile(registry, tool_opts)
   const prev = __merge_active_skills(stored_prev, profile_active)
   if !__skills_same_ids(stored_prev, prev) {
-    __record_activations(session, stored_prev, prev, iteration)
-    agent_session_set_active_skills(session.session_id, prev)
+    __record_activations(agent, session, stored_prev, prev, iteration)
+    agent_session_set_active_skills(agent, session.session_id, prev)
   }
   if __match_strategy_manual(opts) {
     return __opts_with_active_skills(tool_opts, registry, prev)
@@ -704,16 +711,16 @@ pub fn agent_skills_match(session, opts, iteration) {
   if __match_sticky(opts) && len(prev) > 0 {
     return __opts_with_active_skills(tool_opts, registry, prev)
   }
-  const scored = __score_candidates(session, registry, tool_opts, iteration)
-  __record_matched(session, tool_opts, iteration, scored)
+  const scored = __score_candidates(agent, session, registry, tool_opts, iteration)
+  __record_matched(agent, session, tool_opts, iteration, scored)
   const active = __merge_active_skills(
     __top_active_from_scores(registry, scored, tool_opts),
     profile_active,
   )
   if !__skills_same_ids(prev, active) {
-    __record_deactivations(session, prev, active, iteration)
-    __record_activations(session, prev, active, iteration)
-    agent_session_set_active_skills(session.session_id, active)
+    __record_deactivations(agent, session, prev, active, iteration)
+    __record_activations(agent, session, prev, active, iteration)
+    agent_session_set_active_skills(agent, session.session_id, active)
   }
   const activated_this_turn = __has_new_skill(prev, active)
   return __opts_with_active_skills(tool_opts, registry, active, activated_this_turn)

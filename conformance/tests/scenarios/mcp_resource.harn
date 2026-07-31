@@ -1,6 +1,6 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Register a static resource
-  const r1 = mcp_resource(
+  const r1 = harness.tools.mcp_resource(
     {
       uri: "docs://readme",
       name: "README",
@@ -11,7 +11,7 @@ pipeline test(task) {
   )
   assert(r1 == nil, "mcp_resource should return nil")
   // Register a resource template
-  const r2 = mcp_resource_template(
+  const r2 = harness.tools.mcp_resource_template(
     {
       uri_template: "file:///{path}",
       name: "Project Files",
@@ -20,5 +20,5 @@ pipeline test(task) {
     },
   )
   assert(r2 == nil, "mcp_resource_template should return nil")
-  __io_println("mcp_resource and mcp_resource_template registered")
+  harness.stdio.println("mcp_resource and mcp_resource_template registered")
 }

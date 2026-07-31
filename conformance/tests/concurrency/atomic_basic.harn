@@ -1,5 +1,5 @@
-pipeline test(task) {
-  const counter = atomic(0)
-  log(atomic_get(counter))
-  log(type_of(counter))
+pipeline test(harness: Harness, task) {
+  const counter = harness.runtime.atomic(0)
+  harness.stdio.println(harness.runtime.atomic_get(counter))
+  harness.stdio.log(type_of(counter))
 }

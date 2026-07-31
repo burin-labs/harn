@@ -1,8 +1,9 @@
 import "std/experiments"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [llm_text("one"), llm_text("two"), llm_text("three"), llm_text("four"), llm_text("five")],
     { ->
       const custom_exp = custom(
@@ -17,37 +18,41 @@ pipeline main() {
           return {messages: rewritten, metadata: {kind: "tail_echo"}}
         },
       )
-      llm_call(
+      harness.llm.call(
         "alpha\n\nbeta\n\ngamma",
         nil,
         {provider: "mock", structural_experiment: "prompt_order_permutation(seed: 42)"},
       )
-      llm_call("hello", nil, {provider: "mock", structural_experiment: "doubled_prompt"})
-      llm_call(
+      harness.llm.call("hello", nil, {provider: "mock", structural_experiment: "doubled_prompt"})
+      harness.llm.call(
         "user prompt",
         "system prompt",
         {provider: "mock", structural_experiment: "inverted_system"},
       )
-      llm_call("final answer", nil, {provider: "mock", structural_experiment: chain_of_draft()})
-      const custom_result = llm_call(
+      harness.llm.call(
+        "final answer",
+        nil,
+        {provider: "mock", structural_experiment: chain_of_draft()},
+      )
+      const custom_result = harness.llm.call(
         "custom body",
         nil,
         {provider: "mock", structural_experiment: custom_exp},
       )
-      const calls = llm_mock_calls()
-      __io_println(calls[0].messages[0].content != "alpha\n\nbeta\n\ngamma")
-      __io_println(len(calls[1].messages) == 3)
-      __io_println(calls[1].messages[0].content == "hello")
-      __io_println(calls[1].messages[2].content == "hello")
-      __io_println(calls[2].system == "user prompt")
-      __io_println(calls[2].messages[0].content == "system prompt")
-      __io_println(contains(calls[3].messages[0].content, "<draft>"))
-      __io_println(contains(calls[4].messages[0].content, "TAIL"))
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(calls[0].messages[0].content != "alpha\n\nbeta\n\ngamma")
+      harness.stdio.println(len(calls[1].messages) == 3)
+      harness.stdio.println(calls[1].messages[0].content == "hello")
+      harness.stdio.println(calls[1].messages[2].content == "hello")
+      harness.stdio.println(calls[2].system == "user prompt")
+      harness.stdio.println(calls[2].messages[0].content == "system prompt")
+      harness.stdio.println(contains(calls[3].messages[0].content, "<draft>"))
+      harness.stdio.println(contains(calls[4].messages[0].content, "TAIL"))
       const provider_events = transcript_events_by_kind(
         custom_result.transcript,
         "provider_payload",
       )
-      __io_println(provider_events[0].metadata.structural_experiment.label == "tail_echo")
+      harness.stdio.println(provider_events[0].metadata.structural_experiment.label == "tail_echo")
     },
   )
 }

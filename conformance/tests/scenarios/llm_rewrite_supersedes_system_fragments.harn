@@ -9,7 +9,7 @@ import { default_llm_caller } from "std/llm/caller"
 import { with_prompt_rewrite } from "std/llm/handlers"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // The shape the agent loop hands a caller: a joined `system` string plus the
   // per-part `_system_fragments` list in opts.
   const call = {
@@ -23,32 +23,34 @@ pipeline test(task) {
   }
   // Rewriting `system` supersedes the decomposed fragments.
   with_llm_script(
+    harness.llm,
     [llm_text("ok")],
     { ->
       const rewriter = with_prompt_rewrite(
-        default_llm_caller(),
+        default_llm_caller(harness.agent, harness.llm),
         fn(prompt, system, opts) { return {system: "REWRITTEN PRIMARY"} },
       )
       const _ = rewriter(call)
       assert(
-        llm_mock_calls()[0].system == "REWRITTEN PRIMARY",
+        harness.llm.mock_calls()[0].system == "REWRITTEN PRIMARY",
         "system rewrite wins over fragments",
       )
     },
   )
   with_llm_script(
+    harness.llm,
     [llm_text("ok")],
     { ->
       const passthrough = with_prompt_rewrite(
-        default_llm_caller(),
+        default_llm_caller(harness.agent, harness.llm),
         fn(prompt, system, opts) { return {} },
       )
       const _ = passthrough(call)
       assert(
-        llm_mock_calls()[0].system == "ORIGINAL JOINED",
+        harness.llm.mock_calls()[0].system == "ORIGINAL JOINED",
         "fragments retained when system untouched",
       )
-      log("llm_rewrite_supersedes_system_fragments tests passed")
+      harness.stdio.log("llm_rewrite_supersedes_system_fragments tests passed")
     },
   )
 }

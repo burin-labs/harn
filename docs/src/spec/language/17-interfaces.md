@@ -59,7 +59,7 @@ the interface:
 
 ```harn,ignore
 fn show(item: Displayable) {
-  log(item.display())
+  harness.obs.log(item.display())
 }
 
 const d = Dog({name: "Rex"})
@@ -72,7 +72,7 @@ Interfaces can be used as generic constraints via `where` clauses:
 
 ```harn
 fn process<T>(item: T) where T: Displayable {
-  log(item.display())
+  harness.obs.log(item.display())
 }
 ```
 

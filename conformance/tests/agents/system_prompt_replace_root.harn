@@ -1,6 +1,7 @@
 // A replacement system prompt is an exclusive assembly root, not one more
 // contributor. Prove that at the provider boundary so no builder-local test
 // can pass while a later assembly or placement path re-adds context.
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { SystemReplacement } from "std/llm/options"
 import { llm_text, with_llm_script } from "std/testing"
@@ -24,11 +25,12 @@ fn replacement_test_tools() -> ToolRegistry {
   return tools
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // agent_loop normally contributes the positional primary, project/profile
   // fragments, loop/tool contracts, and per-tool guidance. Replace mode must
   // suppress all of them while leaving the tool surface itself available.
   with_llm_script(
+    harness.llm,
     [llm_text("done ##DONE##")],
     { ->
       const replacement: SystemReplacement = {mode: "replace", content: REPLACEMENT}
@@ -47,21 +49,22 @@ pipeline default() {
         },
         tools: replacement_test_tools(),
       }
-      const result = agent_loop("Do the task.", "POSITIONAL PRIMARY MUST NOT LEAK", opts)
-      const calls = llm_mock_calls()
+      const result = agent_loop(harness, "Do the task.", "POSITIONAL PRIMARY MUST NOT LEAK", opts)
+      const calls = harness.llm.mock_calls()
       require len(calls) > 0
       const call = calls[0]
-      __io_println(result.status == "done")
-      __io_println(call.system == REPLACEMENT)
+      harness.stdio.println(result.status == "done")
+      harness.stdio.println(call.system == REPLACEMENT)
     },
   )
   // Provider normalization historically hoists leading system/developer
   // messages into the top-level prompt on routes without an inline channel.
   // Replace mode must suppress those contributors as well.
   with_llm_script(
+    harness.llm,
     [llm_text("ok")],
     { ->
-      llm_call(
+      harness.llm.call(
         "ignored",
         "POSITIONAL PRIMARY MUST NOT LEAK",
         {
@@ -75,11 +78,11 @@ pipeline default() {
           ],
         },
       )
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       require len(calls) > 0
       const call = calls[0]
-      __io_println(call.system == REPLACEMENT)
-      __io_println(!contains(json_stringify(call.messages), "MUST NOT LEAK"))
+      harness.stdio.println(call.system == REPLACEMENT)
+      harness.stdio.println(!contains(json_stringify(call.messages), "MUST NOT LEAK"))
     },
   )
 }

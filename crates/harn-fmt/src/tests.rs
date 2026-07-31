@@ -1322,7 +1322,7 @@ fn test_multiline_string_preserves_verbatim_body() {
 
 #[test]
 fn test_prompt_section_template_string_preserves_verbatim_body() {
-    let source = "pipeline test(task) {\n  let template = \"\"\"\n{{ section \"task\" }}\nBuild {{ thing }}.\n{{ endsection }}\n{{ section \"tools\" tools=tool_list }}{{ endsection }}\n\"\"\"\n  log(render_string(template, {thing: \"it\", tool_list: []}))\n}\n";
+    let source = "pipeline test(harness: Harness, task) {\n  let template = \"\"\"\n{{ section \"task\" }}\nBuild {{ thing }}.\n{{ endsection }}\n{{ section \"tools\" tools=tool_list }}{{ endsection }}\n\"\"\"\n  harness.stdio.println(harness.fs.render_template(template, {thing: \"it\", tool_list: []}))\n}\n";
     let out = format_source(source).unwrap();
     assert_eq!(
         out, source,

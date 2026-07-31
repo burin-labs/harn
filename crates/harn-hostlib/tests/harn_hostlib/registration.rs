@@ -7,7 +7,7 @@
 //! that a routed `Unimplemented` becomes a real return value — never a
 //! removed builtin.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -19,7 +19,7 @@ use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, embed::EmbedCapability, fs::FsCapability,
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability,
     host_conditions::HostConditionsCapability, host_lease_capability::HostLeaseCapability,
-    scanner::ScannerCapability, schemas, secret_store::SecretStoreCapability, tools::permissions,
+    scanner::ScannerCapability, schemas, secret_store::SecretStoreCapability,
     tools::ToolsCapability, BuiltinRegistry, HostLeasePriorityClass, HostLeaseRequest,
     HostLeaseResourceClass, HostLeaseStore, HostlibCapability, HostlibError, HostlibRegistry,
     HOST_LEASE_ROOT_ENV,
@@ -96,6 +96,7 @@ fn execute_harn(source: &str) -> Result<VmValue, VmError> {
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
+                vm.set_harness(harn_vm::Harness::real());
                 vm.execute(&chunk).await
             })
             .await
@@ -176,10 +177,8 @@ fn ast_capability_registers_documented_methods() {
         ("hostlib_ast_search", "query"),
         ("hostlib_ast_structural_diff", "path_a"),
     ];
-    // `apply_node` / `insert_at_anchor` write edited source to disk and are
-    // gated on the deterministic-tools feature (#2548); enable it so the
-    // handlers reach their parameter validation rather than the gate.
-    permissions::enable_for_test();
+    // Direct registry tests enter beneath the public capability receiver and
+    // therefore exercise request validation without a script authority gate.
     for (name, expected_param) in expected_missing {
         let entry = registry.find(name).expect("registered");
         let err = (entry.handler)(&[]).expect_err("must reject empty args");
@@ -310,10 +309,8 @@ fn fs_capability_registers_documented_methods() {
         ("hostlib_fs_read_text", "path"),
         ("hostlib_fs_emit_safe_text_patch_result", "path"),
     ];
-    // `safe_text_patch` / `read_text` touch arbitrary host paths and are
-    // gated on the deterministic-tools feature (#2548); enable it so the
-    // handlers reach their parameter validation rather than the gate.
-    permissions::enable_for_test();
+    // Direct registry tests enter beneath the public capability receiver and
+    // therefore exercise request validation without a script authority gate.
     for (name, expected_param) in expected_missing {
         let entry = registry.find(name).expect("registered");
         let err = (entry.handler)(&[]).expect_err("must reject empty args");
@@ -324,49 +321,6 @@ fn fs_capability_registers_documented_methods() {
             }
             other => panic!("expected MissingParameter for {name}, got {other:?}"),
         }
-    }
-}
-
-/// Every hostlib builtin that reads or writes arbitrary host paths must
-/// refuse to run before `hostlib_enable("tools:deterministic")`, matching
-/// the `tools::*` file I/O gate (#2548). This guards against the asymmetry
-/// where the std/edit helpers could mutate files a sandboxed script was
-/// denied via the `tools` surface.
-#[test]
-fn fs_and_ast_edit_primitives_require_deterministic_gate() {
-    let mut registry = collect_into_registry(FsCapability);
-    AstCapability.register_builtins(&mut registry);
-    permissions::reset();
-    for name in [
-        "hostlib_fs_safe_text_patch",
-        "hostlib_fs_read_text",
-        "hostlib_ast_apply_node",
-        "hostlib_ast_insert_at_anchor",
-        "hostlib_ast_batch_apply",
-    ] {
-        let entry = registry.find(name).expect("registered");
-        let err = (entry.handler)(&[]).expect_err("gated before enable");
-        match err {
-            HostlibError::Backend { builtin, message } => {
-                assert_eq!(builtin, name);
-                assert!(
-                    message.contains("hostlib_enable"),
-                    "gating error must point users at hostlib_enable: {message}"
-                );
-            }
-            other => panic!("expected Backend gate error for {name}, got {other:?}"),
-        }
-    }
-    // Telemetry routing cannot mutate files, so it stays un-gated: an empty
-    // payload must surface parameter validation, not the feature gate.
-    let entry = registry
-        .find("hostlib_fs_emit_safe_text_patch_result")
-        .expect("registered");
-    match (entry.handler)(&[]).expect_err("must reject empty args") {
-        HostlibError::MissingParameter { builtin, .. } => {
-            assert_eq!(builtin, "hostlib_fs_emit_safe_text_patch_result");
-        }
-        other => panic!("emit result must stay un-gated, got {other:?}"),
     }
 }
 
@@ -428,8 +382,8 @@ fn tools_capability_registers_documented_methods() {
         names,
         vec![
             // Deterministic tools — implementations live in
-            // `crates/harn-hostlib/src/tools/`. Gated by
-            // `hostlib_enable("tools:deterministic")`.
+            // `crates/harn-hostlib/src/tools/`. Script authority is carried by
+            // the `HarnessTools` receiver.
             "hostlib_tools_search",
             "hostlib_tools_read_file",
             "hostlib_tools_write_file",
@@ -437,8 +391,7 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_list_directory",
             "hostlib_tools_get_file_outline",
             "hostlib_tools_git",
-            // Process tools. Also gated by
-            // `hostlib_enable("tools:deterministic")`.
+            // Process tools use the same receiver authority.
             "hostlib_tools_run_command",
             "hostlib_tools_read_command_output",
             "hostlib_tools_wait_command",
@@ -449,8 +402,6 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_cancel_handle",
             "hostlib_tools_list_handles",
             "hostlib_tools_toolchain_facts",
-            // Per-session opt-in builtin.
-            "hostlib_enable",
         ]
     );
     assert!(
@@ -459,44 +410,6 @@ fn tools_capability_registers_documented_methods() {
             .is_some(),
         "event-driven output wait must be registered as async"
     );
-
-    // All implemented tools must refuse to run before
-    // `hostlib_enable("tools:deterministic")`. We check each entry so newly
-    // wired tools cannot accidentally bypass the opt-in gate.
-    harn_hostlib::tools::permissions::reset();
-    let gated_methods = [
-        "hostlib_tools_search",
-        "hostlib_tools_read_file",
-        "hostlib_tools_write_file",
-        "hostlib_tools_delete_file",
-        "hostlib_tools_list_directory",
-        "hostlib_tools_get_file_outline",
-        "hostlib_tools_git",
-        "hostlib_tools_run_command",
-        "hostlib_tools_read_command_output",
-        "hostlib_tools_wait_command",
-        "hostlib_tools_run_test",
-        "hostlib_tools_run_build_command",
-        "hostlib_tools_inspect_test_results",
-        "hostlib_tools_manage_packages",
-        "hostlib_tools_cancel_handle",
-        "hostlib_tools_list_handles",
-        "hostlib_tools_toolchain_facts",
-    ];
-    for name in gated_methods {
-        let entry = registry.find(name).expect("registered");
-        let err = (entry.handler)(&[]).expect_err("disabled by default");
-        match err {
-            HostlibError::Backend { builtin, message } => {
-                assert_eq!(builtin, name);
-                assert!(
-                    message.contains("hostlib_enable"),
-                    "gating error must point users at hostlib_enable: {message}"
-                );
-            }
-            other => panic!("expected Backend gate error for {name}, got {other:?}"),
-        }
-    }
 }
 
 #[test]
@@ -529,39 +442,6 @@ fn secret_store_capability_registers_documented_methods() {
                 assert_eq!(param, *expected_param);
             }
             other => panic!("expected MissingParameter for {name}, got {other:?}"),
-        }
-    }
-}
-
-#[cfg(feature = "terminal-session")]
-#[test]
-fn terminal_session_capability_is_complete_and_default_off() {
-    let registry = collect_into_registry(TerminalSessionCapability::new());
-    let names: Vec<_> = registry.iter().map(|builtin| builtin.name).collect();
-    assert_eq!(
-        names,
-        vec![
-            "hostlib_terminal_session_start",
-            "hostlib_terminal_session_send_keys",
-            "hostlib_terminal_session_capture",
-            "hostlib_terminal_session_resize",
-            "hostlib_terminal_session_wait_idle",
-            "hostlib_terminal_session_end",
-        ]
-    );
-    permissions::reset();
-    for builtin in registry.iter() {
-        let error = (builtin.handler)(&[]).expect_err("terminal sessions default off");
-        match error {
-            HostlibError::Backend {
-                builtin: name,
-                message,
-            } => {
-                assert_eq!(name, builtin.name);
-                assert!(message.contains("terminal:session"));
-                assert!(message.contains("hostlib_enable"));
-            }
-            other => panic!("expected terminal feature gate, got {other:?}"),
         }
     }
 }
@@ -601,9 +481,8 @@ fn install_default_wires_every_module_into_a_vm() {
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 1 host_conditions
-    // + 4 host_lease = 85.
-    assert!(registry.builtins().len() >= 85);
+    // + 4 secret_store + 1 verdict + 1 host_conditions + 4 host_lease = 84.
+    assert!(registry.builtins().len() >= 84);
 }
 
 #[test]
@@ -655,8 +534,10 @@ import {
   with_host_lease,
 } from "std/host_lease"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const scope = with_host_lease(
+    harness.host_lease,
+    harness.clock,
     {
       host: "mac-local",
       owner: "metadata-test",
@@ -666,16 +547,17 @@ pipeline default(task) {
     },
     { handle ->
       const update = host_lease_update_metadata(
+        harness.host_lease,
         handle,
         {phase: "complete", revision: "abc123"},
       )
-      const active = host_lease_status("mac-local", "whole-machine", "discovery").active
+      const active = host_lease_status(harness.host_lease, "mac-local", "whole-machine", "discovery").active
       return {update: update, active: active}
     },
   )
   return {
     scope: scope,
-    final: host_lease_status("mac-local", "whole-machine", "discovery"),
+    final: host_lease_status(harness.host_lease, "mac-local", "whole-machine", "discovery"),
   }
 }
 "#;
@@ -722,12 +604,14 @@ fn stdlib_host_lease_scope_releases_on_completion_exception_and_cancellation() {
     let completed = r#"
 import { host_lease_status, with_host_lease } from "std/host_lease"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const scope = with_host_lease(
+    harness.host_lease,
+    harness.clock,
     {host: "mac-local", owner: "complete-test", resource_class: "rust-heavy"},
     { handle -> handle.owner },
   )
-  const state = host_lease_status("mac-local", "rust-heavy")
+  const state = host_lease_status(harness.host_lease, "mac-local", "rust-heavy")
   return {scope: scope, state: state}
 }
 "#;
@@ -757,14 +641,16 @@ pipeline default(task) {
     let failed = r#"
 import { host_lease_status, with_host_lease } from "std/host_lease"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   try {
     with_host_lease(
+      harness.host_lease,
+      harness.clock,
       {host: "mac-local", owner: "exception-test", resource_class: "rust-heavy"},
       { _handle -> throw "fixture failure" },
     )
   } catch (_error) {
-    return host_lease_status("mac-local", "rust-heavy")
+    return host_lease_status(harness.host_lease, "mac-local", "rust-heavy")
   }
 }
 "#;
@@ -774,21 +660,23 @@ pipeline default(task) {
     let cancelled = r#"
 import { host_lease_status, with_host_lease } from "std/host_lease"
 
-pipeline default(task) {
-  const ready = channel("lease-ready", 1)
-  const blocked = channel("lease-blocked", 1)
+pipeline default(harness: Harness, task) {
+  const ready = harness.runtime.channel("lease-ready", 1)
+  const blocked = harness.runtime.channel("lease-blocked", 1)
   const worker = spawn {
     with_host_lease(
+      harness.host_lease,
+      harness.clock,
       {host: "mac-local", owner: "cancel-test", resource_class: "rust-heavy"},
       { _handle ->
-        send(ready, true)
-        receive(blocked)
+        harness.runtime.send(ready, true)
+        harness.runtime.receive(blocked)
       },
     )
   }
-  receive(ready)
+  harness.runtime.receive(ready)
   cancel(worker)
-  return host_lease_status("mac-local", "rust-heavy")
+  return host_lease_status(harness.host_lease, "mac-local", "rust-heavy")
 }
 "#;
     let state = expect_dict(execute_harn(cancelled).expect("cancelled scope"));
@@ -812,6 +700,8 @@ fn parallel_named_host_lease_scopes_release_before_reacquire() {
                             format!(
                                 r#"
   const first = with_host_lease(
+    harness.host_lease,
+    harness.clock,
     {{host: "mac-local", owner: "first-{worker}", resource_class: "rust-heavy", domain: "{domain}", wait_timeout_ms: 5000}},
     {{ _ -> "first" }},
   ).status
@@ -823,6 +713,8 @@ fn parallel_named_host_lease_scopes_release_before_reacquire() {
   let first = nil
   try {{
     with_host_lease(
+      harness.host_lease,
+      harness.clock,
       {{host: "mac-local", owner: "first-{worker}", resource_class: "rust-heavy", domain: "{domain}", wait_timeout_ms: 5000}},
       {{ _ -> throw "fixture failure" }},
     )
@@ -836,9 +728,11 @@ fn parallel_named_host_lease_scopes_release_before_reacquire() {
                             r#"
 import {{ with_host_lease }} from "std/host_lease"
 
-pipeline default(task) {{
+pipeline default(harness: Harness, task) {{
 {first}
   const second = with_host_lease(
+    harness.host_lease,
+    harness.clock,
     {{host: "mac-local", owner: "second-{worker}", resource_class: "rust-heavy", domain: "{domain}"}},
     {{ _ -> "second" }},
   )
@@ -879,8 +773,8 @@ fn stdlib_host_lease_status_reads_empty_active_and_recovered_state() {
     let source = r#"
 import { host_lease_status } from "std/host_lease"
 
-pipeline default(task) {
-  return host_lease_status("mac-local", "whole-machine", "release")
+pipeline default(harness: Harness, task) {
+  return host_lease_status(harness.host_lease, "mac-local", "whole-machine", "release")
 }
 "#;
 
@@ -962,11 +856,10 @@ fn expect_dict(value: VmValue) -> harn_vm::value::DictMap {
 
 #[test]
 fn registered_hostlib_builtins_validate_request_schema_before_handler() {
-    permissions::reset();
     let result = execute_harn(
         r"
-pipeline default(task) {
-  return hostlib_tools_run_command({argv: [1]})
+pipeline default(harness: Harness, task) {
+  return harness.tools.run_command({argv: [1]})
 }
 ",
     );
@@ -992,64 +885,43 @@ pipeline default(task) {
     );
 }
 
-#[test]
-fn registered_hostlib_enable_normalizes_legacy_feature_string_before_validation() {
-    permissions::reset();
-    let result = execute_harn(
-        r#"
-pipeline default(task) {
-  return hostlib_enable("tools:deterministic")
-}
-"#,
-    )
-    .expect("hostlib_enable string form remains accepted through schema normalization");
-    let dict = result.as_dict().expect("hostlib_enable returns a dict");
-    assert_eq!(
-        dict.get("feature").map(VmValue::display),
-        Some("tools:deterministic".to_string())
-    );
-    assert!(matches!(dict.get("enabled"), Some(VmValue::Bool(true))));
-}
-
 #[cfg(all(unix, feature = "terminal-session"))]
 #[test]
 fn registered_terminal_session_round_trips_through_harn_and_schemas() {
-    permissions::reset();
     let result = execute_harn(
         r#"
-pipeline default(task) {
-  hostlib_enable("terminal:session")
-  let started = hostlib_terminal_session_start({
+pipeline default(harness: Harness, task) {
+  let started = harness.terminal.start({
     argv: ["sh", "-c", "stty -echo; printf READY; IFS= read -r line; printf GOT:%s \"$line\"; cat"],
     rows: 4,
     columns: 20
   })
-  let idle_before = hostlib_terminal_session_wait_idle({
+  let idle_before = harness.terminal.wait_idle({
     session_id: started.session_id,
     quiet_ms: 10,
     timeout_ms: 3000
   })
-  let before_send = hostlib_terminal_session_capture({session_id: started.session_id})
-  let sent = hostlib_terminal_session_send_keys({
+  let before_send = harness.terminal.capture({session_id: started.session_id})
+  let sent = harness.terminal.send_keys({
     session_id: started.session_id,
     events: [
       {type: "text", text: "hello"},
       {type: "key", key: {kind: "named", name: "enter"}}
     ]
   })
-  let idle_after = hostlib_terminal_session_wait_idle({
+  let idle_after = harness.terminal.wait_idle({
     session_id: started.session_id,
     after_revision: before_send.revision,
     quiet_ms: 10,
     timeout_ms: 3000
   })
-  let resized = hostlib_terminal_session_resize({
+  let resized = harness.terminal.resize({
     session_id: started.session_id,
     rows: 6,
     columns: 30
   })
-  let captured = hostlib_terminal_session_capture({session_id: started.session_id})
-  let ended = hostlib_terminal_session_end({
+  let captured = harness.terminal.capture({session_id: started.session_id})
+  let ended = harness.terminal.end({
     session_id: started.session_id,
     timeout_ms: 3000
   })
@@ -1114,16 +986,14 @@ pipeline default(task) {
 
 #[test]
 fn registered_safe_text_patch_validates_dollar_defs_expected_hash() {
-    permissions::reset();
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("notes.txt");
     fs::write(&file, "alpha").unwrap();
     let expected_hash = sha256_label(b"alpha");
     let source = format!(
         r#"
-pipeline default(task) {{
-  hostlib_enable("tools:deterministic")
-  return hostlib_fs_safe_text_patch({{
+pipeline default(harness: Harness, task) {{
+  return harness.fs.safe_text_patch({{
     path: "{}",
     content: "beta",
     expected_hash: "{}"
@@ -1216,6 +1086,33 @@ fn every_registered_builtin_has_request_and_response_schemas() {
             entry.method
         );
     }
+}
+
+#[test]
+fn schemas_and_typed_capability_contracts_cannot_drift() {
+    let schema_methods: BTreeSet<_> = schemas::SCHEMAS
+        .iter()
+        .filter(|(_, _, kind, _)| *kind == schemas::SchemaKind::Request)
+        .map(|(module, method, _, _)| (*module, *method))
+        .collect();
+    let contract_methods: BTreeSet<_> =
+        harn_builtin_meta::host_capabilities::HOST_CAPABILITY_GROUPS
+            .iter()
+            .filter(|group| group.capability != harn_builtin_meta::CapabilityId::Computer)
+            .flat_map(|group| {
+                let module = match group.capability {
+                    harn_builtin_meta::CapabilityId::TerminalSession => "terminal_session",
+                    harn_builtin_meta::CapabilityId::System => "host_conditions",
+                    capability => capability.field_name(),
+                };
+                group.methods.iter().map(move |method| (module, *method))
+            })
+            .collect();
+
+    assert_eq!(
+        schema_methods, contract_methods,
+        "every host schema method must have exactly one typed capability/effect contract"
+    );
 }
 
 #[test]

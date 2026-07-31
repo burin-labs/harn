@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use harn_lexer::Lexer;
 use harn_parser::const_eval::{const_eval, ConstEnv, ConstValue};
-use harn_parser::{Attribute, Node, Parser, SNode};
+use harn_parser::{Attribute, Node, Parser, SNode, TypeExpr};
 use harn_vm::VmValue;
 
 use super::{fixtures, TestCase, TestFixture};
@@ -149,8 +149,14 @@ fn inspect_test_pipeline(
         }
         None => None,
     };
-    let explicit_argument_count = params
-        .len()
+    let harness_is_host_provided = params.first().is_some_and(|param| {
+        matches!(
+            param.type_expr.as_ref(),
+            Some(TypeExpr::Named(name)) if name == "Harness"
+        )
+    });
+    let user_param_count = params.len() - usize::from(harness_is_host_provided);
+    let explicit_argument_count = user_param_count
         .checked_sub(usize::from(fixture.is_some()))
         .ok_or_else(|| {
             fixtures::at(

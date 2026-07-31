@@ -1,17 +1,17 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // `parallel settle` is the run-everything form: a failing branch does NOT
   // cancel siblings. Every branch still runs to completion and the outcome
   // records each branch's settled result.
-  const completed = atomic(0)
+  const completed = harness.runtime.atomic(0)
   const outcome = parallel settle [1, 2, 3] { item ->
     if item == 1 {
       throw "early failure"
     }
-    yield_now()
-    atomic_add(completed, 1)
+    harness.runtime.yield_now()
+    harness.runtime.atomic_add(completed, 1)
     item * 10
   }
-  log(outcome.succeeded)
-  log(outcome.failed)
-  log(atomic_get(completed))
+  harness.stdio.log(outcome.succeeded)
+  harness.stdio.log(outcome.failed)
+  harness.stdio.println(harness.runtime.atomic_get(completed))
 }

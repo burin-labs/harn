@@ -12,7 +12,7 @@ fn parse_env_assignment(token: string) {
   return {name: token, value: ""}
 }
 
-pipeline test(_task) {
+pipeline test(harness: Harness, _task) {
   const tokens = ["abc"]
   let index = 0
   while index < len(tokens) {
@@ -35,5 +35,5 @@ pipeline test(_task) {
     assert(name == "abc", "parsed binding should remain visible after non-taken break branch")
     break
   }
-  log("ok")
+  harness.stdio.log("ok")
 }

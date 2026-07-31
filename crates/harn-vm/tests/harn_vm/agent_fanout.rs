@@ -1,4 +1,4 @@
-//! Contract lock for the `agent_fanout(requests, options)` stdlib primitive
+//! Contract lock for the `agent_fanout(harness, requests, options)` stdlib primitive
 //! (crates/harn-stdlib/src/stdlib/agent/workers.harn).
 //!
 //! `agent_fanout` maps a list of independent units onto concurrent background
@@ -28,7 +28,8 @@ use std::sync::{Arc, Mutex};
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let source = format!("import {{ agent_fanout }} from \"std/agent/workers\"\n{source}");
+    let chunk = harn_vm::compile_source(&source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -65,7 +66,8 @@ fn run_with_bridge_in_parent_workspace(
     project_root: &Path,
 ) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let source = format!("import {{ agent_fanout }} from \"std/agent/workers\"\n{source}");
+    let chunk = harn_vm::compile_source(&source)?;
     let parent_cwd = parent_cwd.to_string_lossy().into_owned();
     let project_root = project_root.to_path_buf();
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -114,10 +116,18 @@ fn run_with_bridge_in_parent_workspace(
                 ));
                 harn_vm::orchestration::push_execution_policy(
                     harn_vm::orchestration::CapabilityPolicy {
-                        capabilities: BTreeMap::from([(
-                            "workspace".to_string(),
-                            vec!["read_text".to_string(), "write_text".to_string()],
-                        )]),
+                        capabilities: BTreeMap::from([
+                            (
+                                "workspace".to_string(),
+                                vec!["read_text".to_string(), "write_text".to_string()],
+                            ),
+                            (
+                                "state".to_string(),
+                                vec!["read".to_string(), "write".to_string()],
+                            ),
+                            ("worker".to_string(), vec!["dispatch".to_string()]),
+                            ("stdio".to_string(), vec!["write".to_string()]),
+                        ]),
                         side_effect_level: Some("workspace_write".to_string()),
                         ..harn_vm::orchestration::CapabilityPolicy::default()
                     },
@@ -228,11 +238,11 @@ fn base_opts(caller) {
   }
 }
 
-fn emit_rows(results) {
+fn emit_rows(stdio: HarnessStdio, results) {
   for r in results {
     const summary = to_string(r?.result?.summary ?? "")
     const err_present = to_string(r?.error != nil)
-    log(
+    stdio.log(
       "R=" + to_string(r?.index) + "|" + to_string(r?.label) + "|"
         + to_string(r?.status) + "|" + to_string(r?.ok) + "|" + summary + "|" + err_present,
     )
@@ -245,7 +255,7 @@ fn fanout_preserves_order_labels_and_isolates_children() {
     // Six requests, distinct labels + distinct markers, default max_parallel.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(task) {{
+pipeline main(harness: Harness, task) {{
   const labels = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
   let reqs = []
   let i = 0
@@ -254,9 +264,9 @@ pipeline main(task) {{
     reqs = reqs.appending({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
     i = i + 1
   }}
-  const results = agent_fanout(reqs, {{max_parallel: 8}})
-  log("COUNT=" + to_string(len(results)))
-  emit_rows(results)
+  const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
+  harness.stdio.log("COUNT=" + to_string(len(results)))
+  emit_rows(harness.stdio, results)
 }}
 "#
     );
@@ -303,7 +313,7 @@ fn fanout_isolates_a_single_child_failure() {
     // Five children; index 2 ("charlie") fails cleanly, the rest succeed.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(task) {{
+pipeline main(harness: Harness, task) {{
   const labels = ["alpha", "bravo", "charlie", "delta", "echo"]
   let reqs = []
   let i = 0
@@ -313,9 +323,9 @@ pipeline main(task) {{
     reqs = reqs.appending({{task: "do " + marker, options: base_opts(caller), label: label}})
     i = i + 1
   }}
-  const results = agent_fanout(reqs, {{max_parallel: 8}})
-  log("COUNT=" + to_string(len(results)))
-  emit_rows(results)
+  const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
+  harness.stdio.log("COUNT=" + to_string(len(results)))
+  emit_rows(harness.stdio, results)
 }}
 "#
     );
@@ -374,7 +384,7 @@ fn fanout_runs_all_waves_without_dropping_or_reordering() {
     // come back, in input order, each with its own marker.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(task) {{
+pipeline main(harness: Harness, task) {{
   const labels = ["w0", "w1", "w2", "w3", "w4"]
   let reqs = []
   let i = 0
@@ -383,9 +393,9 @@ pipeline main(task) {{
     reqs = reqs.appending({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
     i = i + 1
   }}
-  const results = agent_fanout(reqs, {{max_parallel: 2}})
-  log("COUNT=" + to_string(len(results)))
-  emit_rows(results)
+  const results = agent_fanout(harness, reqs, {{max_parallel: 2}})
+  harness.stdio.log("COUNT=" + to_string(len(results)))
+  emit_rows(harness.stdio, results)
 }}
 "#
     );
@@ -428,8 +438,7 @@ fn fanout_child_write_inherits_parent_workspace_anchor_for_scope() {
 
     let source = format!(
         r#"{PRELUDE}
-pipeline main(task) {{
-  clear_tool_hooks()
+pipeline main(harness: Harness, task) {{
   const registry = tool_registry()
   const tools = tool_define(
     registry,
@@ -438,18 +447,18 @@ pipeline main(task) {{
     {{
       parameters: {{}},
       handler: {{ _args ->
-        write_file({target_literal}, "child-ok")
+        harness.fs.write_text({target_literal}, "child-ok")
         return "wrote child-output.txt"
       }},
     }},
   )
-  const call_count = shared_cell(
+  const call_count = harness.runtime.shared_cell(
     {{scope: "task_group", key: "fanout-child-write-scope", initial: 0}},
   )
   const mock_llm = {{ _call ->
-    const snap = shared_snapshot(call_count)
+    const snap = harness.runtime.shared_snapshot(call_count)
     const n = snap.value
-    shared_cas(call_count, snap, n + 1)
+    harness.runtime.shared_cas(call_count, snap, n + 1)
     if n == 0 {{
       return {{
         ok: true,
@@ -471,7 +480,7 @@ pipeline main(task) {{
       }},
     }}
   }}
-  const results = agent_fanout(
+  const results = agent_fanout(harness,
     [
       {{
         task: "write the child output file",
@@ -491,10 +500,10 @@ pipeline main(task) {{
     ],
     {{max_parallel: 1}},
   )
-  log("COUNT=" + to_string(len(results)))
-  emit_rows(results)
+  harness.stdio.log("COUNT=" + to_string(len(results)))
+  emit_rows(harness.stdio, results)
   if results[0]?.error != nil {{
-    log("ERR=" + json_stringify(results[0]?.error))
+    harness.stdio.log("ERR=" + json_stringify(results[0]?.error))
   }}
 }}
 "#
@@ -542,7 +551,7 @@ fn fanout_isolates_a_spawn_time_throw() {
     // their own markers in input order.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(task) {{
+pipeline main(harness: Harness, task) {{
   const labels = ["alpha", "bravo", "charlie"]
   let reqs = []
   let i = 0
@@ -556,9 +565,9 @@ pipeline main(task) {{
     reqs = reqs.appending({{task: "do " + marker, options: opts, label: label}})
     i = i + 1
   }}
-  const results = agent_fanout(reqs, {{max_parallel: 8}})
-  log("COUNT=" + to_string(len(results)))
-  emit_rows(results)
+  const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
+  harness.stdio.log("COUNT=" + to_string(len(results)))
+  emit_rows(harness.stdio, results)
 }}
 "#
     );
@@ -628,7 +637,7 @@ fn fanout_spawn_throw_in_first_wave_does_not_drop_later_waves() {
     // with only index 0 marked failed.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(task) {{
+pipeline main(harness: Harness, task) {{
   const labels = ["w0", "w1", "w2", "w3"]
   let reqs = []
   let i = 0
@@ -642,9 +651,9 @@ pipeline main(task) {{
     reqs = reqs.appending({{task: "do " + marker, options: opts, label: label}})
     i = i + 1
   }}
-  const results = agent_fanout(reqs, {{max_parallel: 2}})
-  log("COUNT=" + to_string(len(results)))
-  emit_rows(results)
+  const results = agent_fanout(harness, reqs, {{max_parallel: 2}})
+  harness.stdio.log("COUNT=" + to_string(len(results)))
+  emit_rows(harness.stdio, results)
 }}
 "#
     );

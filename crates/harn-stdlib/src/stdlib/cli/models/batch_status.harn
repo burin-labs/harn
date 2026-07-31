@@ -71,7 +71,7 @@ fn __cached_status_job(job: dict, dry_run: bool) -> dict {
 }
 
 fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string) -> dict {
-  const auth = __api_key_for_job(harness, provider)
+  const auth = __api_key_for_job(harness.env, provider)
   const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
@@ -80,7 +80,7 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
   const response = __http_result(
     harness,
     "GET",
-    __join_url(__provider_base_url(harness, provider), "/batches/" + batch_id),
+    __join_url(__provider_base_url(harness.env, provider), "/batches/" + batch_id),
     {
       headers: __provider_auth_headers(
         provider,
@@ -118,7 +118,7 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
 }
 
 fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
-  const auth = __api_key_for_job(harness, "anthropic")
+  const auth = __api_key_for_job(harness.env, "anthropic")
   const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
@@ -127,7 +127,7 @@ fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
   const response = __http_result(
     harness,
     "GET",
-    __join_url(__provider_base_url(harness, "anthropic"), "/v1/messages/batches/" + batch_id),
+    __join_url(__provider_base_url(harness.env, "anthropic"), "/v1/messages/batches/" + batch_id),
     {
       headers: {"x-api-key": safe_string(auth["value"], ""), "anthropic-version": "2023-06-01"},
       timeout_ms: 120000,
@@ -170,12 +170,17 @@ fn __poll_bedrock_status(harness: Harness, job: dict) -> dict {
   )
   const response = __bedrock_http_result(
     harness,
-    "GET",
-    __join_url(__provider_base_url(harness, "bedrock"), "/model-invocation-job/" + handle),
-    region,
-    "bedrock",
-    "",
-    1048576,
+    {
+      method: "GET",
+      url: __join_url(
+        __provider_base_url(harness.env, "bedrock"),
+        "/model-invocation-job/" + handle,
+      ),
+      region: region,
+      service: "bedrock",
+      body: "",
+      max_response_bytes: 1048576,
+    },
   )
   const body = safe_dict(response["body"])
   if !safe_bool(response["ok"], false) {
@@ -206,7 +211,7 @@ fn __poll_bedrock_status(harness: Harness, job: dict) -> dict {
 }
 
 fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
-  const auth = __api_key_for_job(harness, "mistral")
+  const auth = __api_key_for_job(harness.env, "mistral")
   const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
@@ -215,7 +220,7 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
   const response = __http_result(
     harness,
     "GET",
-    __join_url(__provider_base_url(harness, "mistral"), "/batch/jobs/" + batch_id),
+    __join_url(__provider_base_url(harness.env, "mistral"), "/batch/jobs/" + batch_id),
     {
       headers: {Authorization: "Bearer " + safe_string(auth["value"], "")},
       timeout_ms: 120000,
@@ -259,8 +264,8 @@ fn __fireworks_batch_id_path(provider_batch_id: string) -> string {
 }
 
 fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
-  const auth = __api_key_for_job(harness, "fireworks")
-  const account = __fireworks_account_id(harness)
+  const auth = __api_key_for_job(harness.env, "fireworks")
+  const account = __fireworks_account_id(harness.env)
   const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
@@ -278,7 +283,7 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
     harness,
     "GET",
     __join_url(
-      __provider_base_url(harness, "fireworks"),
+      __provider_base_url(harness.env, "fireworks"),
       "/accounts/" + account_id + "/batchInferenceJobs/" + batch_id,
     ),
     {
@@ -331,7 +336,7 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
 }
 
 fn __poll_xai_status(harness: Harness, job: dict) -> dict {
-  const auth = __api_key_for_job(harness, "xai")
+  const auth = __api_key_for_job(harness.env, "xai")
   const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
@@ -340,7 +345,7 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
   const response = __http_result(
     harness,
     "GET",
-    __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id),
+    __join_url(__provider_base_url(harness.env, "xai"), "/batches/" + batch_id),
     {
       headers: {
         Authorization: "Bearer " + safe_string(auth["value"], ""),
@@ -366,7 +371,7 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
       status: __provider_batch_status(provider_status),
       provider_status: provider_status,
       status_checked: true,
-      results_url: __xai_results_url(harness, batch_id, ""),
+      results_url: __xai_results_url(harness.env, batch_id, ""),
       response_status: response["status"],
       response: body,
     },
@@ -375,7 +380,7 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
 }
 
 fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
-  const auth = __api_key_for_job(harness, "gemini")
+  const auth = __api_key_for_job(harness.env, "gemini")
   const base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
@@ -384,7 +389,7 @@ fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
   const response = __http_result(
     harness,
     "GET",
-    __join_url(__provider_base_url(harness, "gemini"), "/v1beta/" + batch_id),
+    __join_url(__provider_base_url(harness.env, "gemini"), "/v1beta/" + batch_id),
     {
       headers: {
         "x-goog-api-key": safe_string(auth["value"], ""),
@@ -507,25 +512,25 @@ fn __aggregate_status(jobs: list, errors: list, dry_run: bool) -> string {
   return "completed"
 }
 
-fn __render_status_human(harness: Harness, report: dict) {
+fn __render_status_human(stdio: HarnessStdio, report: dict) {
   if !safe_bool(report["ok"], false) {
-    harness.stdio.eprintln("Batch status failed")
+    stdio.eprintln("Batch status failed")
   } else if safe_bool(report["dry_run"], false) {
-    harness.stdio.println("Batch status dry run written: " + safe_string(report["out"], ""))
+    stdio.println("Batch status dry run written: " + safe_string(report["out"], ""))
   } else {
-    harness.stdio.println("Batch status receipt written: " + safe_string(report["out"], ""))
+    stdio.println("Batch status receipt written: " + safe_string(report["out"], ""))
   }
-  harness.stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
-  harness.stdio.println("  completed: " + safe_int_string(report["completed_count"], "0"))
-  harness.stdio.println("  running: " + safe_int_string(report["running_count"], "0"))
-  harness.stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
-  harness.stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
-  harness.stdio.println("  unknown: " + safe_int_string(report["unknown_count"], "0"))
+  stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
+  stdio.println("  completed: " + safe_int_string(report["completed_count"], "0"))
+  stdio.println("  running: " + safe_int_string(report["running_count"], "0"))
+  stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
+  stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
+  stdio.println("  unknown: " + safe_int_string(report["unknown_count"], "0"))
   if safe_string(report["receipt_sha256"], "") != "" {
-    harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+    stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
   }
-  print_list(harness, "errors", safe_list(report["errors"]))
-  print_list(harness, "warnings", safe_list(report["warnings"]))
+  print_list(stdio, "errors", safe_list(report["errors"]))
+  print_list(stdio, "warnings", safe_list(report["warnings"]))
 }
 
 fn __render_status_json(report: dict) -> string {
@@ -559,7 +564,7 @@ pub fn __run_status(harness: Harness) -> int {
   const submission_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMISSION", ""))
   const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS_OUT", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  const loaded = __batch_artifact_read(harness, submission_path, "submission_receipt")
+  const loaded = __batch_artifact_read(harness.fs, submission_path, "submission_receipt")
   let errors = loaded.errors
   const warnings = []
   if out_path == "" {
@@ -618,7 +623,7 @@ pub fn __run_status(harness: Harness) -> int {
     warnings: warnings,
   }
   if out_path != "" {
-    __mkdirp(harness, dirname(out_path) ?? ".")
+    __mkdirp(harness.fs, dirname(out_path) ?? ".")
     const receipt_text = json_stringify_pretty(receipt) + "\n"
     harness.fs.write_text(out_path, receipt_text)
     receipt = receipt + {receipt_sha256: sha256(receipt_text)}
@@ -627,7 +632,7 @@ pub fn __run_status(harness: Harness) -> int {
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(__render_status_json(report))
   } else {
-    __render_status_human(harness, report)
+    __render_status_human(harness.stdio, report)
   }
   if len(errors) == 0 {
     return 0

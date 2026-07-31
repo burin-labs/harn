@@ -1,13 +1,13 @@
 import { extract_text, pdf_bytes, pdf_capabilities, write_pdf } from "std/document"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   let capabilities = pdf_capabilities()
-  __io_println(capabilities.default_renderer)
-  __io_println(len(capabilities.renderers))
-  __io_println(capabilities.default_extractor)
-  __io_println(len(capabilities.extractors))
-  __io_println(capabilities.extractors[0].ocr)
-  __io_println(
+  harness.stdio.println(capabilities.default_renderer)
+  harness.stdio.println(len(capabilities.renderers))
+  harness.stdio.println(capabilities.default_extractor)
+  harness.stdio.println(len(capabilities.extractors))
+  harness.stdio.println(capabilities.extractors[0].ocr)
+  harness.stdio.println(
     extract_text(
       "<html><body><h1>Receipt</h1><p>Amount $5.00</p></body></html>",
       {source_format: "html"},
@@ -18,26 +18,29 @@ pipeline test(task) {
     {source_format: "markdown", title: "Receipt"},
   )
   let pdf_text = bytes_to_string(rendered)
-  __io_println(starts_with(pdf_text, "%PDF-1.4"))
-  __io_println(contains(pdf_text, "xref\n"))
-  __io_println(contains(pdf_text, "trailer\n"))
-  __io_println(contains(extract_text(rendered, {source_format: "pdf"}), "Amount $5.00"))
+  harness.stdio.println(starts_with(pdf_text, "%PDF-1.4"))
+  harness.stdio.println(contains(pdf_text, "xref\n"))
+  harness.stdio.println(contains(pdf_text, "trailer\n"))
+  harness.stdio.println(contains(extract_text(rendered, {source_format: "pdf"}), "Amount $5.00"))
   const malformed = try {
     extract_text(bytes_from_string("%PDF-1.4\nnot a document"), {source_format: "pdf"})
   }
-  __io_println(unwrap_err(malformed).kind)
+  harness.stdio.println(unwrap_err(malformed).kind)
   const blank = try {
     extract_text(pdf_bytes("", {title: ""}), {source_format: "pdf"})
   }
   const blank_failure = unwrap_err(blank)
-  __io_println(blank_failure.kind)
-  __io_println(blank_failure.ocr_candidate)
-  let path = path_join(harness.fs.temp_dir(), "harn-document-" + uuid() + ".pdf")
+  harness.stdio.println(blank_failure.kind)
+  harness.stdio.println(blank_failure.ocr_candidate)
+  let path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-document-" + harness.random.uuid() + ".pdf",
+  )
   defer {
     harness.fs.delete(path)
   }
-  let result = write_pdf(path, "Portable PDF", {title: "Portable"})
-  __io_println(result.media_type)
-  __io_println(result.bytes > 0)
-  __io_println(harness.fs.exists(path))
+  let result = write_pdf(harness.fs, path, "Portable PDF", {title: "Portable"})
+  harness.stdio.println(result.media_type)
+  harness.stdio.println(result.bytes > 0)
+  harness.stdio.println(harness.fs.exists(path))
 }

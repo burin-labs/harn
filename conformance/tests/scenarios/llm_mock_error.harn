@@ -7,36 +7,38 @@ import { with_llm_script } from "std/testing"
  * `error_category(e)` and `is_rate_limited(e)` still work (they accept
  * dict or string); scripts can dispatch directly on `e.kind`/`e.reason`.
  */
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   // llm_call is fail-fast on transient errors, so a single injected error
   // surfaces as a throw on the first attempt.
   with_llm_script(
+    harness.llm,
     [{error: {category: "rate_limit", message: "429 Too Many Requests", retry_after_ms: 2500}}],
     { ->
       try {
-        llm_call("hello", nil, {provider: "mock", model: "mock-model"})
+        harness.llm.call("hello", nil, {provider: "mock", model: "mock-model"})
       } catch (e) {
-        __io_println(error_category(e))
-        __io_println(is_rate_limited(e))
-        __io_println(e.kind)
-        __io_println(e.reason)
-        __io_println(e.category)
-        __io_println(e.retry_after_ms)
-        __io_println(e.provider)
-        __io_println(e.model)
+        harness.stdio.println(error_category(e))
+        harness.stdio.println(is_rate_limited(e))
+        harness.stdio.println(e.kind)
+        harness.stdio.println(e.reason)
+        harness.stdio.println(e.category)
+        harness.stdio.println(e.retry_after_ms)
+        harness.stdio.println(e.provider)
+        harness.stdio.println(e.model)
       }
     },
   )
   with_llm_script(
+    harness.llm,
     [{error: {category: "overloaded", message: "529 overloaded"}}],
     { ->
       try {
-        llm_call("hello again", nil, {provider: "mock"})
+        harness.llm.call("hello again", nil, {provider: "mock"})
       } catch (e2) {
-        __io_println(error_category(e2))
-        __io_println(e2.kind)
-        __io_println(e2.reason)
-        __io_println(e2.retry_after_ms == nil)
+        harness.stdio.println(error_category(e2))
+        harness.stdio.println(e2.kind)
+        harness.stdio.println(e2.reason)
+        harness.stdio.println(e2.retry_after_ms == nil)
       }
     },
   )

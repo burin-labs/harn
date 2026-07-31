@@ -8,7 +8,7 @@ confusion:
 | If you are asking… | Go to |
 |---|---|
 | Which environment variables and secrets can the script see? | [Environment policies and grants](./cli-reference.md#environment-policies-and-grants) |
-| Which hosts may the Harn runtime itself call over the network? | [Egress policy](./builtins.md#http) (`HARN_EGRESS_ALLOW`, `egress_policy(...)`) |
+| Which hosts may the Harn runtime itself call over the network? | [Egress policy](./builtins.md#http) (`HARN_EGRESS_ALLOW`, `harness.net.egress_policy(...)`) |
 | What is a capability policy, and who sets one? | [Host boundary](./host-boundary.md) |
 
 `harn run` confines a script to its own project directory before the VM
@@ -105,7 +105,7 @@ path you actually need.
 
 `--allow-process-network` is deliberately broader than Harn's egress
 allowlist, and the difference matters. `HARN_EGRESS_ALLOW` and
-`egress_policy(...)` constrain calls the Harn runtime makes itself: HTTP,
+`harness.net.egress_policy(...)` constrains calls the Harn runtime makes itself: HTTP,
 providers, connectors. The OS backends underneath a subprocess can only
 allow or deny sockets outright. They cannot enforce hostname rules on
 traffic from an arbitrary child process.
@@ -273,7 +273,7 @@ default roots, or offline caches, add process-only roots at the policy layer:
 ```harn,ignore
 const policy = {
   capabilities: {workspace: ["read_text"], process: ["exec"]},
-  workspace_roots: [project_root()],
+  workspace_roots: [harness.fs.project_root()],
   process_sandbox: {
     read_roots: [
       "/opt/acme/npm-cache",
@@ -290,6 +290,13 @@ the registry config and cache before the run, point the inherited package
 manager/proxy/CA variables at readable files, and keep network side effects
 disabled; if a tool must reach a corporate proxy, the active policy still needs
 to allow network side effects.
+
+The `harn run` boundary also grants subprocesses read/execute access to the
+exact Harn runtime executable for that invocation. This file-scoped grant lets
+scripts delegate back to the verified runtime through wrappers such as `sh` or
+`/usr/bin/time`, including when the binary came from a temporary CI artifact.
+It does not expose the runtime's containing directory and does not grant Harn
+filesystem builtins any additional authority.
 
 Direct CLI runs expose the same process-only policy without requiring a
 manifest edit:
@@ -341,7 +348,7 @@ the workload's control:
   leave the state root readable and unwritable from Harn code, which is
   what pushes stdlib features into rebuilding a cwd-relative `.harn`
   and silently ignoring the override. Scripts should ask
-  [`runtime_paths()`](builtins.md) for these paths rather than joining
+  [`harness.fs.runtime_paths()`](builtins.md) for these paths rather than joining
   `.harn` onto a directory themselves.
 
 Only directories genuinely outside the declared roots are added, and
@@ -366,22 +373,22 @@ include `sandbox_profile: "os_hardened"` in the policy literal:
 ```harn,ignore
 const policy = {
   capabilities: {workspace: ["read_text"], process: ["exec"]},
-  workspace_roots: [project_root()],
+  workspace_roots: [harness.fs.project_root()],
   sandbox_profile: "os_hardened",
 }
 ```
 
-### From a single host call
+### From one process capability call
 
 A single subprocess can be promoted (or demoted) without rewriting the
 surrounding policy by passing `sandbox_profile` on the
-`process.exec` host call. The override is scoped to that call:
+process request. The override is scoped to that call:
 
 ```harn,ignore
-host_call("process.exec", {
-  mode: "argv",
-  argv: ["./untrusted-tool", "input.json"],
-  cwd: project_root(),
+harness.process.run({
+  program: "./untrusted-tool",
+  args: ["input.json"],
+  cwd: harness.fs.project_root(),
   sandbox_profile: "os_hardened",
 })
 ```
@@ -555,9 +562,9 @@ scripts and conformance fixtures:
 
 | Builtin | Returns | Use |
 |---|---|---|
-| `sandbox_active_backend()` | `string` | name of the compiled-in backend (`linux`, `macos`, `windows`, `openbsd`, `noop`) |
-| `sandbox_backend_available()` | `bool` | whether the platform mechanism behind the backend is reachable on the running host |
-| `sandbox_active_profile()` | `string` | profile carried by the current execution policy (`worktree` under default `harn run`, `unrestricted` if no policy is active) |
+| `harness.system.sandbox_active_backend()` | `string` | name of the compiled-in backend (`linux`, `macos`, `windows`, `openbsd`, `noop`) |
+| `harness.system.sandbox_backend_available()` | `bool` | whether the platform mechanism behind the backend is reachable on the running host |
+| `harness.system.sandbox_active_profile()` | `string` | profile carried by the current execution policy (`worktree` under default `harn run`, `unrestricted` if no policy is active) |
 
 ## Replay fidelity
 
@@ -577,7 +584,7 @@ mechanism.
 - gVisor / Firecracker / Kata containers — those belong to a remote
   `SandboxBackend` impl (Fly Machines, Modal, …), not the local
   runtime; the trait lives in `harn-hostlib`'s `sandbox` module.
-- Destination-level network egress allow/deny — use `egress_policy(...)`
+- Destination-level network egress allow/deny — use `harness.net.egress_policy(...)`
   or `HARN_EGRESS_*` once a host policy allows network side effects.
 - Sandboxing for in-process work (LLM calls, deterministic Harn
   evaluation). Capability ceilings and the approval policy are the

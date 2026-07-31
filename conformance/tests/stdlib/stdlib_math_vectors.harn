@@ -1,6 +1,6 @@
 import "std/math"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   assert_eq(dot([1, 2, 3], [4, 5, 6]), 32.0)
   assert_eq(vector_norm([3, 4]), 5.0)
   const unit = vector_normalize([3, 4])
@@ -12,5 +12,5 @@ pipeline test(task) {
   assert_eq(euclidean_distance([0, 0], [3, 4]), 5.0)
   assert_eq(manhattan_distance([1, 2], [4, 6]), 7.0)
   assert_eq(chebyshev_distance([1, 2], [4, 6]), 4.0)
-  log("stdlib math vectors ok")
+  harness.stdio.log("stdlib math vectors ok")
 }

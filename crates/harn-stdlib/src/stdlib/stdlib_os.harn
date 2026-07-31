@@ -4,34 +4,34 @@ import { command_run } from "std/command"
 /**
  * Return a compact host/runtime information dict for diagnostics.
  *
- * @effects: []
+ * @effects: [host]
  * @errors: []
  */
-pub fn os_info() -> dict {
+pub fn os_info(harness: Harness) -> dict {
   return {
-    platform: platform(),
-    arch: arch(),
-    cwd: cwd(),
-    home_dir: home_dir(),
+    platform: harness.system.platform().os,
+    arch: harness.system.platform().arch,
+    cwd: harness.fs.cwd(),
+    home_dir: harness.fs.home_dir(),
     temp_dir: harness.fs.temp_dir(),
-    username: username(),
-    hostname: hostname(),
-    pid: pid(),
-    runtime_paths: runtime_paths(),
-    stdin_tty: is_stdin_tty(),
-    stdout_tty: is_stdout_tty(),
-    stderr_tty: is_stderr_tty(),
+    username: harness.system.identity().username,
+    hostname: harness.system.identity().hostname,
+    pid: harness.system.identity().pid,
+    runtime_paths: harness.fs.runtime_paths(),
+    stdin_tty: harness.term.is_tty("stdin"),
+    stdout_tty: harness.term.is_tty("stdout"),
+    stderr_tty: harness.term.is_tty("stderr"),
   }
 }
 
 /**
  * Read an environment variable as a bool, accepting common CLI spellings.
  *
- * @effects: []
+ * @effects: [env]
  * @errors: []
  */
-pub fn env_bool(name: string, fallback: bool = false) -> bool {
-  const value = harness.env.get(name)
+pub fn env_bool(env: HarnessEnv, name: string, fallback: bool = false) -> bool {
+  const value = env.get(name)
   if value == nil {
     return fallback
   }
@@ -52,11 +52,11 @@ pub fn env_bool(name: string, fallback: bool = false) -> bool {
 /**
  * Read an environment variable as an int, returning fallback on absence or parse failure.
  *
- * @effects: []
+ * @effects: [env]
  * @errors: []
  */
-pub fn env_int(name: string, fallback = nil) {
-  const value = harness.env.get(name)
+pub fn env_int(env: HarnessEnv, name: string, fallback = nil) {
+  const value = env.get(name)
   if value == nil {
     return fallback
   }
@@ -66,17 +66,22 @@ pub fn env_int(name: string, fallback = nil) {
 /**
  * Split a path/list-style environment variable, dropping empty entries.
  *
- * @effects: []
+ * @effects: [env, host]
  * @errors: []
  */
-pub fn env_list(name: string, separator = nil) -> list<string> {
-  const value = harness.env.get(name)
+pub fn env_list(
+  env: HarnessEnv,
+  system: HarnessSystem,
+  name: string,
+  separator = nil,
+) -> list<string> {
+  const value = env.get(name)
   if value == nil || value == "" {
     return []
   }
   let sep = separator
   if sep == nil {
-    sep = if platform() == "windows" {
+    sep = if system.platform().os == "windows" {
       ";"
     } else {
       ":"
@@ -95,11 +100,11 @@ pub fn env_list(name: string, separator = nil) -> list<string> {
 /**
  * Read a required environment variable or throw a clear error.
  *
- * @effects: []
+ * @effects: [env]
  * @errors: []
  */
-pub fn require_env(name: string) -> string {
-  const value = harness.env.get(name)
+pub fn require_env(env: HarnessEnv, name: string) -> string {
+  const value = env.get(name)
   if value == nil || value == "" {
     throw "required environment variable is not set: " + name
   }
@@ -112,18 +117,18 @@ pub fn require_env(name: string) -> string {
  * @effects: [process]
  * @errors: []
  */
-pub fn which(binary: string) {
+pub fn which(tools: HarnessTools, system: HarnessSystem, binary: string) {
   const executable = trim(binary ?? "")
   if executable == "" {
     return nil
   }
-  const argv = if platform() == "windows" {
+  const argv = if system.platform().os == "windows" {
     ["where", executable]
   } else {
     ["which", executable]
   }
   const result = try {
-    command_run({argv: argv}, {capture: {max_inline_bytes: 4096}})
+    command_run(tools, {argv: argv}, {capture: {max_inline_bytes: 4096}})
   }
   if !is_ok(result) {
     return nil
@@ -142,9 +147,9 @@ pub fn which(binary: string) {
 /**
  * Return whether an executable is visible on PATH.
  *
- * @effects: []
+ * @effects: [process]
  * @errors: []
  */
-pub fn command_exists(binary: string) -> bool {
-  return which(binary) != nil
+pub fn command_exists(tools: HarnessTools, system: HarnessSystem, binary: string) -> bool {
+  return which(tools, system, binary) != nil
 }

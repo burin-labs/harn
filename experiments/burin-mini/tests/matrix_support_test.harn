@@ -6,7 +6,7 @@ import {
 } from "../matrix_support.harn"
 
 @test
-pipeline test_small_json_and_word_helpers(task) {
+pipeline test_small_json_and_word_helpers(harness: Harness, task) {
   assert_eq(report_run_path({run_path: "/tmp/run.json"}), "/tmp/run.json")
   assert_eq(report_run_path([]), "")
   assert_eq(split_matrix_words(" off,auto\nhigh "), ["off", "auto", "high"])
@@ -15,7 +15,7 @@ pipeline test_small_json_and_word_helpers(task) {
 }
 
 @test
-pipeline test_together_models_filter_price_and_order(task) {
+pipeline test_together_models_filter_price_and_order(harness: Harness, task) {
   const payload = {
     data: [
       {uuid: "endpoint-gemma", id: "gemma-model", pricing: {input: "1.0", output: "1.5"}},

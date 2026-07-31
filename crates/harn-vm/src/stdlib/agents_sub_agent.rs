@@ -851,7 +851,11 @@ pub(super) async fn execute_sub_agent(
 
     let mut loop_options = spec.options.clone();
     loop_options.put_str("session_id", spec.session_id.clone());
+    let harness = ctx.child_vm().root_harness_value().ok_or_else(|| {
+        VmError::Runtime("sub_agent_run: execution has no root Harness authority".to_string())
+    })?;
     let args = vec![
+        harness,
         VmValue::String(arcstr::ArcStr::from(spec.task.clone())),
         spec.system
             .as_ref()

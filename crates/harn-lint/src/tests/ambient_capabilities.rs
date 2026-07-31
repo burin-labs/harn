@@ -113,8 +113,8 @@ fn ambient_random_call_rewrites_to_harness_random() {
     );
     let fixed = apply_fixes(source, &diags);
     assert!(
-        fixed.contains("harness.random.gen_range(0, 10)"),
-        "expected rewrite to harness.random.gen_range, got: {fixed}"
+        fixed.contains("harness.random.range(0, 10)"),
+        "expected rewrite to harness.random.range, got: {fixed}"
     );
 }
 
@@ -154,6 +154,51 @@ fn ambient_net_call_rewrites_to_harness_net() {
 }
 
 #[test]
+fn ambient_net_lint_rewrites_lifecycle_surfaces_to_harness_net() {
+    let source = r#"fn main(harness: Harness) {
+  let server = http_server({})
+  http_server_route(server, "GET", "/", { request -> http_response_text("ok") })
+  let session = http_session({})
+  http_session_request(session, "GET", "https://example.test")
+  let stream = http_stream_open("https://example.test")
+  http_stream_read(stream)
+  let sse = sse_connect("GET", "https://example.test")
+  sse_receive(sse)
+  let websocket = websocket_connect("wss://example.test")
+  websocket_receive(websocket)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "ambient-net-builtin"),
+        10,
+        "expected every effectful lifecycle call to migrate: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    for expected in [
+        "harness.net.server({})",
+        "harness.net.server_route(",
+        "harness.net.session({})",
+        "harness.net.session_request(",
+        "harness.net.stream_open(",
+        "harness.net.stream_read(",
+        "harness.net.sse_connect(",
+        "harness.net.sse_receive(",
+        "harness.net.websocket_connect(",
+        "harness.net.websocket_receive(",
+    ] {
+        assert!(
+            fixed.contains(expected),
+            "expected `{expected}` in migrated source: {fixed}"
+        );
+    }
+    assert!(
+        fixed.contains("http_response_text(\"ok\")"),
+        "pure response constructors must remain global: {fixed}"
+    );
+}
+
+#[test]
 fn ambient_capability_lint_without_harness_param_keeps_no_fix() {
     let source = "fn helper() {\n  let _ = read_file(\"x\")\n}\n";
     let diags = lint_source(source);
@@ -171,8 +216,8 @@ fn ambient_capability_lint_without_harness_param_keeps_no_fix() {
         .as_deref()
         .expect("lint must carry a suggestion");
     assert!(
-        suggestion.contains("--harness-threading thread-params")
-            && suggestion.contains("VM-level `harness`"),
-        "suggestion should describe both Harness migration modes, got: {suggestion}"
+        suggestion.contains("--safety surface-changing")
+            && suggestion.contains("explicit capability"),
+        "suggestion should describe explicit capability threading, got: {suggestion}"
     );
 }

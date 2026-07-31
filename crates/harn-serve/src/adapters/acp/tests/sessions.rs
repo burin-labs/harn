@@ -478,7 +478,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                     "method": "session/prompt",
                     "params": {
                         "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": "__io_println(\"hello from acp\")"}],
+                        "prompt": [{"type": "text", "text": "harness.stdio.println(\"hello from acp\")"}],
                     },
                 }))
                 .expect("send session/prompt");
@@ -819,8 +819,7 @@ async fn acp_session_truncate_mutates_current_session_and_notifies_client() {
     local
         .run_until(async {
             harn_vm::reset_thread_local_state();
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_channel_session().await;
+            let (request_tx, mut response_rx, server, session_id) = start_acp_code_session().await;
 
             let first = run_json_prompt(
                 &request_tx,
@@ -828,11 +827,11 @@ async fn acp_session_truncate_mutates_current_session_and_notifies_client() {
                 &session_id,
                 2,
                 r#"
-const sid = agent_session_current_id()
+const sid = harness.agent.current_id()
 guard sid != nil else { throw "missing session id" }
-agent_session_inject(sid, {role: "user", content: "alpha"})
-const snap = agent_session_snapshot(sid)
-__io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+harness.agent.session_record_assistant(sid, {text: "alpha"})
+const messages = harness.agent.session_messages(sid)
+harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
             )
             .await;
@@ -843,11 +842,11 @@ __io_println(json_stringify({len: len(snap["messages"]), messages: snap["message
                 &session_id,
                 3,
                 r#"
-const sid = agent_session_current_id()
+const sid = harness.agent.current_id()
 guard sid != nil else { throw "missing session id" }
-agent_session_inject(sid, {role: "user", content: "beta"})
-const snap = agent_session_snapshot(sid)
-__io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+harness.agent.session_record_assistant(sid, {text: "beta"})
+const messages = harness.agent.session_messages(sid)
+harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
             )
             .await;
@@ -899,10 +898,10 @@ __io_println(json_stringify({len: len(snap["messages"]), messages: snap["message
                 &session_id,
                 5,
                 r#"
-const sid = agent_session_current_id()
+const sid = harness.agent.current_id()
 guard sid != nil else { throw "missing session id" }
-const snap = agent_session_snapshot(sid)
-__io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+const messages = harness.agent.session_messages(sid)
+harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
             )
             .await;
@@ -1132,7 +1131,7 @@ async fn acp_profile_json_appends_one_line_per_prompt_turn() {
                         "method": "session/prompt",
                         "params": {
                             "sessionId": session_id.clone(),
-                            "prompt": [{"type": "text", "text": "__io_println(\"profiled\")"}],
+                            "prompt": [{"type": "text", "text": "harness.stdio.println(\"profiled\")"}],
                         },
                     }))
                     .expect("send session/prompt");
@@ -1245,7 +1244,7 @@ async fn acp_session_close_and_stop_alias_free_active_session() {
                         "method": "session/prompt",
                         "params": {
                             "sessionId": session_id,
-                            "prompt": [{"type": "text", "text": "__io_println(\"closed\")"}],
+                            "prompt": [{"type": "text", "text": "harness.stdio.println(\"closed\")"}],
                         },
                     }))
                     .expect("send session/prompt");
@@ -1275,7 +1274,7 @@ async fn acp_session_close_cancels_pending_host_bridge_call() {
                     "method": "session/prompt",
                     "params": {
                         "sessionId": session_id.clone(),
-                        "prompt": [{"type": "text", "text": "__io_println(\"after host capabilities\")"}],
+                        "prompt": [{"type": "text", "text": "harness.stdio.println(\"after host capabilities\")"}],
                     },
                 }))
                 .expect("send session/prompt");
@@ -1319,7 +1318,7 @@ async fn acp_session_close_cancels_pending_host_bridge_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn acp_file_backed_pipeline_installs_harness_global() {
+async fn acp_file_backed_pipeline_receives_explicit_harness_argument() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -1330,8 +1329,8 @@ async fn acp_file_backed_pipeline_installs_harness_global() {
                 r#"
 import { env_int } from "std/config"
 
-pipeline default(task) {
-  __io_println(env_int("HARN_ACP_HARNESS_REGRESSION_UNSET", 7))
+pipeline default(harness: Harness, task) {
+  harness.stdio.println(env_int(harness.env, "HARN_ACP_HARNESS_REGRESSION_UNSET", 7))
   harness.stdio.println("via-harness")
 }"#,
             )
@@ -1372,18 +1371,18 @@ async fn acp_file_backed_vm_baseline_keeps_prompt_turns_isolated() {
             std::fs::write(
                 &pipeline_path,
                 r#"
-pipeline default(task) {
-  const cell = shared_cell({scope: "task_group", key: "turn", initial: prompt})
-  __io_println(prompt)
-  __io_println(shared_get(cell))
-  shared_set(cell, "dirty")
-  const held = sync_gate_acquire("runner", 1)
-  const blocked = sync_gate_acquire("runner", 1, 0)
-  __io_println(blocked == nil)
-  sync_release(held)
-  const metrics = sync_metrics("gate", "runner")
-  __io_println(metrics.acquisition_count)
-  __io_println(host_has("project", "read_file"))
+pipeline default(harness: Harness, task) {
+  const cell = harness.runtime.shared_cell({scope: "task_group", key: "turn", initial: prompt})
+  harness.stdio.println(prompt)
+  harness.stdio.println(harness.runtime.shared_get(cell))
+  harness.runtime.shared_set(cell, "dirty")
+  const held = harness.runtime.sync_gate_acquire("runner", 1)
+  const blocked = harness.runtime.sync_gate_acquire("runner", 1, 0)
+  harness.stdio.println(blocked == nil)
+  harness.runtime.sync_release(held)
+  const metrics = harness.runtime.sync_metrics("gate", "runner")
+  harness.stdio.println(metrics.acquisition_count)
+  harness.stdio.println(harness.runtime.host_has("project", "read_file"))
 }"#,
             )
             .expect("write pipeline");
@@ -1455,20 +1454,20 @@ async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
             std::fs::write(
                 &pipeline_path,
                 r#"import { runtime_prompt_content } from "std/runtime"
-pipeline default(task) {
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  llm_call("", nil, {provider: "mock", messages: [{role: "user", content: runtime_prompt_content()}]})
-  const blocks = llm_mock_calls()[0].messages[0].content
-  __io_println(blocks[0].text == "Please inspect this context.")
-  __io_println(blocks[1].type == "image")
-  __io_println(blocks[1].base64 == "iVBORw0KGgo=")
-  __io_println(blocks[1].media_type == "image/png")
-  __io_println(blocks[2].type == "audio")
-  __io_println(blocks[2].base64 == "UklGRiQ=")
-  __io_println(blocks[2].media_type == "audio/wav")
-  __io_println(contains(blocks[3].text, "file:///tmp/example.txt"))
-  __io_println(contains(blocks[3].text, "hello from embedded context"))
+pipeline default(harness: Harness, task) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({text: "ok"})
+  harness.llm.call("", nil, {provider: "mock", messages: [{role: "user", content: harness.runtime.prompt_content()}]})
+  const blocks = harness.llm.mock_calls()[0].messages[0].content
+  harness.stdio.println(blocks[0].text == "Please inspect this context.")
+  harness.stdio.println(blocks[1].type == "image")
+  harness.stdio.println(blocks[1].base64 == "iVBORw0KGgo=")
+  harness.stdio.println(blocks[1].media_type == "image/png")
+  harness.stdio.println(blocks[2].type == "audio")
+  harness.stdio.println(blocks[2].base64 == "UklGRiQ=")
+  harness.stdio.println(blocks[2].media_type == "audio/wav")
+  harness.stdio.println(contains(blocks[3].text, "file:///tmp/example.txt"))
+  harness.stdio.println(contains(blocks[3].text, "hello from embedded context"))
 }"#,
             )
             .expect("write pipeline");
@@ -1561,8 +1560,8 @@ async fn acp_session_prompt_surfaces_multimodal_capability_errors() {
             std::fs::write(
                 &pipeline_path,
                 r#"import { runtime_prompt_content } from "std/runtime"
-pipeline default(task) {
-  llm_call("", nil, {provider: "mock", model: "gpt-3.5-turbo", messages: [{role: "user", content: runtime_prompt_content()}]})
+pipeline default(harness: Harness, task) {
+  harness.llm.call("", nil, {provider: "mock", model: "gpt-3.5-turbo", messages: [{role: "user", content: harness.runtime.prompt_content()}]})
 }"#,
             )
             .expect("write pipeline");

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // Verifies the per-agent autonomy budget is VM-enforced: once the
 // configured per_day quota is consumed, the next agent_loop call
 // short-circuits with `status = "approval_required"` and emits a HITL
@@ -6,8 +7,9 @@
 import "std/hitl"
 import { with_llm_script } from "std/testing"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [
       {text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"},
       {text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"},
@@ -15,10 +17,11 @@ pipeline test(task) {
     { ->
       const unique = to_string(to_int(harness.clock.timestamp())) + "-"
         + to_string(
-        harness.random.gen_range(100000, 999999),
+        harness.random.range(100000, 999999),
       )
       const key = "agent.autonomy.budget." + unique
       const first = agent_loop(
+        harness,
         "First task",
         "You are helpful",
         {
@@ -29,8 +32,9 @@ pipeline test(task) {
           autonomy_budget: {per_day: 1, key: key},
         },
       )
-      __io_println(first.status)
+      harness.stdio.println(first.status)
       const second = agent_loop(
+        harness,
         "Second task",
         "You are helpful",
         {
@@ -41,16 +45,16 @@ pipeline test(task) {
           autonomy_budget: {per_day: 1, key: key, reviewer: "oncall"},
         },
       )
-      __io_println(second.status)
-      __io_println(second.reason)
-      __io_println(second.approval_required)
-      __io_println(second.from_tier)
-      __io_println(second.requested_tier)
-      __io_println(second.reviewers[0])
-      __io_println(type_of(second.request_id) == "string" && len(second.request_id) > 0)
-      const pending = hitl_pending({}).filter({ row -> row.agent == key })
-      __io_println(len(pending) >= 1)
-      __io_println(pending[0].request_kind)
+      harness.stdio.println(second.status)
+      harness.stdio.println(second.reason)
+      harness.stdio.println(second.approval_required)
+      harness.stdio.println(second.from_tier)
+      harness.stdio.println(second.requested_tier)
+      harness.stdio.println(second.reviewers[0])
+      harness.stdio.println(type_of(second.request_id) == "string" && len(second.request_id) > 0)
+      const pending = harness.interaction.hitl_pending({}).filter({ row -> row.agent == key })
+      harness.stdio.println(len(pending) >= 1)
+      harness.stdio.println(pending[0].request_kind)
     },
   )
 }

@@ -10,7 +10,7 @@ import {
   unknown_state,
 } from "../lib/states"
 
-pipeline test_all_states_distinct(task) {
+pipeline test_all_states_distinct(harness: Harness, task) {
   const states = all_states()
   assert_eq(len(states), 12)
   assert(is_state("queued"))
@@ -18,18 +18,18 @@ pipeline test_all_states_distinct(task) {
   assert(!is_state("nope"))
 }
 
-pipeline test_terminal_states(task) {
+pipeline test_terminal_states(harness: Harness, task) {
   assert(is_terminal("merged"))
   assert(is_terminal("closed"))
   assert(!is_terminal("queued"))
   assert(!is_terminal("blocked"))
 }
 
-pipeline test_unknown_state_default(task) {
+pipeline test_unknown_state_default(harness: Harness, task) {
   assert_eq(unknown_state(), "discovered")
 }
 
-pipeline test_transitions_legality(task) {
+pipeline test_transitions_legality(harness: Harness, task) {
   // Discovered can fan out to nearly anything.
   assert(is_valid_transition("discovered", "queued"))
   assert(is_valid_transition("discovered", "draft"))
@@ -46,7 +46,7 @@ pipeline test_transitions_legality(task) {
   assert(!is_valid_transition("dirty", "queued"))
 }
 
-pipeline test_allowed_next_lists_are_subsets_of_all_states(task) {
+pipeline test_allowed_next_lists_are_subsets_of_all_states(harness: Harness, task) {
   const known = all_states()
   for s in known {
     const next = allowed_next(s)
@@ -56,7 +56,7 @@ pipeline test_allowed_next_lists_are_subsets_of_all_states(task) {
   }
 }
 
-pipeline test_actions_catalogue(task) {
+pipeline test_actions_catalogue(harness: Harness, task) {
   const actions = all_actions()
   assert(actions.contains("noop"))
   assert(actions.contains("enqueue_merge_queue"))

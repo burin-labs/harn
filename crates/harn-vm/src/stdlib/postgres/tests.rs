@@ -78,6 +78,7 @@ fn routing_record(replicas: usize, policy: ReadRoutingPolicy) -> Arc<PoolRecord>
         statement_cache_capacity: DEFAULT_STATEMENT_CACHE_CAPACITY,
         read_routing_policy: policy,
         circuit: Arc::new(CircuitBreakerState::disabled()),
+        described_oids: Arc::new(SyncMutex::new(BTreeMap::new())),
     })
 }
 
@@ -187,17 +188,13 @@ fn mock_pool_matches_parameterized_query_and_records_calls() {
         VmValue::List(items) => items,
         _ => unreachable!(),
     };
-    let id = next_id("pgmock");
-    MOCKS.with(|mocks| {
-        mocks.borrow_mut().insert(
-            id.clone(),
-            MockPool {
-                fixtures: parse_mock_fixtures(fixture_list).unwrap(),
-                calls: Vec::new(),
-            },
-        );
-    });
-    let handle = handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new());
+    let handle = VmValue::resource(VmResourceHandle::new(
+        HANDLE_MOCK,
+        SyncMutex::new(MockPool {
+            fixtures: parse_mock_fixtures(fixture_list).unwrap(),
+            calls: Vec::new(),
+        }),
+    ));
     let rows = mock_query(
         &handle,
         "select * from claims where tenant_id = $1",
@@ -209,8 +206,21 @@ fn mock_pool_matches_parameterized_query_and_records_calls() {
         VmValue::List(std::sync::Arc::new(rows)).display(),
         "[{claim_id: c1}]"
     );
-    let calls = MOCKS.with(|mocks| mocks.borrow().values().next().unwrap().calls.clone());
+    let calls = mock_handle(Some(&handle), "test")
+        .unwrap()
+        .lock()
+        .calls
+        .clone();
     assert_eq!(calls.len(), 1);
+}
+
+#[test]
+fn postgres_authority_cannot_be_forged_with_a_dict() {
+    let forged = dict(&[("_type", s(HANDLE_POOL)), ("id", s("pgpool-1"))]);
+    let error = pool_record_from_handle(&forged, "pg_query")
+        .err()
+        .expect("script-visible dictionaries must not act as pool authority");
+    assert!(error.to_string().contains("expected pg_pool handle"));
 }
 
 #[test]
@@ -221,17 +231,13 @@ fn mock_execute_returns_rows_affected() {
         ("rows_affected", VmValue::Int(3)),
     ])])
     .unwrap();
-    let id = next_id("pgmock");
-    MOCKS.with(|mocks| {
-        mocks.borrow_mut().insert(
-            id.clone(),
-            MockPool {
-                fixtures,
-                calls: Vec::new(),
-            },
-        );
-    });
-    let handle = handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new());
+    let handle = VmValue::resource(VmResourceHandle::new(
+        HANDLE_MOCK,
+        SyncMutex::new(MockPool {
+            fixtures,
+            calls: Vec::new(),
+        }),
+    ));
     let rows = mock_query(
         &handle,
         "update receipts set status = $1",
@@ -344,8 +350,9 @@ async fn open_single_conn_pool(url: &str) -> VmValue {
 /// tests can assert two handles point at the SAME (or distinct) pool via
 /// `Arc::ptr_eq`.
 fn pool_ptr(handle: &VmValue) -> Arc<PgPool> {
-    let id = handle_id(Some(handle), HANDLE_POOL, "test").expect("pool handle id");
-    pool_by_id(&id).expect("pool record")
+    pool_record_from_handle(handle, "test")
+        .map(|record| Arc::clone(&record.pool))
+        .expect("pool authority")
 }
 
 /// SECURITY/CORRECTNESS: with the shared registry installed, two `pg_pool`
@@ -414,6 +421,7 @@ fn lazy_record() -> PoolRecord {
         statement_cache_capacity: DEFAULT_STATEMENT_CACHE_CAPACITY,
         read_routing_policy: ReadRoutingPolicy::ReplicaOrPrimary,
         circuit: Arc::new(circuit::CircuitBreakerState::disabled()),
+        described_oids: Arc::new(SyncMutex::new(BTreeMap::new())),
     }
 }
 
@@ -495,7 +503,7 @@ fn harn_transaction_commits_rolls_back_and_applies_settings_when_env_url_is_set(
     let source = r#"
 import "std/postgres"
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "create temporary table if not exists harn_pg_tx_test(value int) on commit preserve rows", [])
 pg_execute(db, "truncate table harn_pg_tx_test", [])
 
@@ -507,7 +515,7 @@ const tenant = pg_transaction(
   },
   {settings: {"app.current_tenant_id": "tenant-a"}},
 )
-__io_println(tenant)
+harness.stdio.println(tenant)
 
 const rolled = try {
   pg_transaction(db, { tx ->
@@ -517,8 +525,8 @@ const rolled = try {
 } catch (e) {
   "rolled back"
 }
-__io_println(rolled)
-__io_println(pg_query_one(db, "select count(*)::int8 as count from harn_pg_tx_test", []).count)
+harness.stdio.println(rolled)
+harness.stdio.println(pg_query_one(db, "select count(*)::int8 as count from harn_pg_tx_test", []).count)
 pg_close(db)
 "#;
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -553,7 +561,7 @@ fn savepoint_rollback_preserves_outer_writes_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_sp_test", [])
 pg_execute(db, "CREATE TABLE harn_pg_sp_test (id int PRIMARY KEY, label text NOT NULL)", [])
 
@@ -569,7 +577,7 @@ pg_transaction(db, { tx ->
 
 const rows = pg_query(db, "SELECT id, label FROM harn_pg_sp_test ORDER BY id", [])
 for row in rows {
-  __io_println(to_string(row.id) + ":" + row.label)
+  harness.stdio.println(to_string(row.id) + ":" + row.label)
 }
 pg_execute(db, "DROP TABLE harn_pg_sp_test", [])
 pg_close(db)
@@ -630,24 +638,24 @@ fn migrate_applies_synthetic_dir_and_is_idempotent_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 const first = pg_migrate(db, {{dir: "{migration_dir}"}})
-__io_println(len(first.applied))
-__io_println(len(first.skipped))
+harness.stdio.println(len(first.applied))
+harness.stdio.println(len(first.skipped))
 
 const second = pg_migrate(db, {{dir: "{migration_dir}"}})
-__io_println(len(second.applied))
-__io_println(len(second.skipped))
+harness.stdio.println(len(second.applied))
+harness.stdio.println(len(second.skipped))
 
 const count = pg_query_one(db, "SELECT count(*)::int8 AS c FROM widgets", [])
-__io_println(count.c)
+harness.stdio.println(count.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -700,15 +708,15 @@ fn migrate_harn_detects_checksum_drift_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 const first = pg_migrate(db, {{dir: "{migration_dir}"}})
-__io_println(len(first.applied))
+harness.stdio.println(len(first.applied))
 pg_close(db)
 "#,
     );
@@ -728,10 +736,10 @@ pg_close(db)
         r#"
 import "std/postgres"
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 const second = pg_migrate(db, {{dir: "{migration_dir}"}})
-__io_println(len(second.applied))
+harness.stdio.println(len(second.applied))
 pg_close(db)
 "#,
     );
@@ -745,7 +753,7 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(admin)
 "#,
@@ -773,24 +781,24 @@ fn migrate_loads_harn_cloud_store_migrations_when_env_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 const result = pg_migrate(db, {{dir: "{dir}"}})
-__io_println(len(result.applied))
-__io_println(len(result.skipped))
+harness.stdio.println(len(result.applied))
+harness.stdio.println(len(result.skipped))
 
 const tables = pg_query(
   db,
   "SELECT table_name FROM information_schema.tables WHERE table_schema = $1",
   ["{schema}"],
 )
-__io_println(len(tables))
+harness.stdio.println(len(tables))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -838,7 +846,7 @@ fn transaction_settings_reject_privileged_gucs_when_env_url_is_set() {
     // `role` is rejected before any SQL runs.
     let reject_role = r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 const r = pg_transaction(db, { tx -> return 1 }, {settings: {"role": "postgres"}})
 pg_close(db)
 "#;
@@ -852,7 +860,7 @@ pg_close(db)
     reset_postgres_state();
     let reject_nil = r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 const r = pg_transaction(db, { tx -> return 1 }, {settings: {"app.current_tenant_id": nil}})
 pg_close(db)
 "#;
@@ -866,11 +874,11 @@ pg_close(db)
     reset_postgres_state();
     let allow_legit = r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 const tenant = pg_transaction(db, { tx ->
   return pg_query_one(tx, "SELECT current_setting('app.current_tenant_id', true) AS t", []).t
 }, {settings: {"app.current_tenant_id": "tenant-xyz", "app.bypass_rls": "on", "statement_timeout": "5000"}})
-__io_println(tenant)
+harness.stdio.println(tenant)
 pg_close(db)
 "#;
     let out = run_harn_source(allow_legit);
@@ -889,7 +897,7 @@ fn constraint_violation_surfaces_stable_category_when_env_url_is_set() {
     let source = format!(
         r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(db, "CREATE SCHEMA \"{schema}\"", [])
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
@@ -914,7 +922,7 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
 "#,
@@ -936,15 +944,15 @@ fn int_bind_into_int4_column_when_env_url_is_set() {
     let ok_source = format!(
         r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(db, "CREATE SCHEMA \"{schema}\"", [])
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 pg_execute(db, "CREATE TABLE narrow (a int4, b int2)", [])
 pg_execute(db, "INSERT INTO narrow (a, b) VALUES ($1, $2)", [2000000000, 30000])
 const row = pg_query_one(db, "SELECT a, b FROM narrow WHERE a = $1", [2000000000])
-__io_println(row.a)
-__io_println(row.b)
+harness.stdio.println(row.a)
+harness.stdio.println(row.b)
 pg_close(db)
 "#,
     );
@@ -960,7 +968,7 @@ pg_close(db)
     let overflow_source = format!(
         r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 pg_execute(db, "INSERT INTO narrow (a) VALUES ($1)", [5000000000])
 pg_close(db)
@@ -975,7 +983,7 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
 "#,
@@ -1027,7 +1035,7 @@ fn migrate_recycles_statement_cache_after_ddl_when_env_url_is_set() {
     let source = format!(
         r#"
 import "std/postgres"
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
@@ -1037,17 +1045,17 @@ pg_close(admin)
 // would deterministically reproduce 0A000 unless the migrate recycled it.
 // (max_connections: 1 also keeps the `SET search_path` session setting on the
 // same connection migrate/queries reuse.)
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 pg_migrate(db, {{dir: "{dir1}"}})
 // Warm + cache a plan that selects v as text on the pooled connection.
 const warm = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
-__io_println(warm.v)
+harness.stdio.println(warm.v)
 // Apply the retype DDL through pg_migrate (which recycles caches).
 pg_migrate(db, {{dir: "{dir2}"}})
 // This reuse would hit 0A000 if the cache were not recycled.
 const after = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
-__io_println(after.v)
+harness.stdio.println(after.v)
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
 "#,
@@ -1092,7 +1100,7 @@ fn concurrent_migrate_serializes_on_advisory_lock_when_env_url_is_set() {
     let setup = format!(
         r#"
 import "std/postgres"
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
@@ -1104,10 +1112,10 @@ pg_close(admin)
         format!(
             r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 const r = pg_migrate(db, {{dir: "{migration_dir}"}})
-__io_println("{label}:" + to_string(len(r.applied)))
+harness.stdio.println("{label}:" + to_string(len(r.applied)))
 pg_close(db)
 "#,
         )
@@ -1168,7 +1176,7 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
 "#,
@@ -1265,33 +1273,33 @@ fn migrate_sqlx_applies_into_sqlx_migrations_table_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 const result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(result.applied))
-__io_println(len(result.available))
-__io_println(result.table)
+harness.stdio.println(len(result.applied))
+harness.stdio.println(len(result.available))
+harness.stdio.println(result.table)
 
 const cols = pg_query(db, "SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='_sqlx_migrations' ORDER BY column_name", ["{schema}"])
-__io_println(len(cols))
+harness.stdio.println(len(cols))
 
 const rows = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
-__io_println(rows.c)
+harness.stdio.println(rows.c)
 
 const badlen = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE octet_length(checksum) <> 48", [])
-__io_println(badlen.c)
+harness.stdio.println(badlen.c)
 
 const failed = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE success = false", [])
-__io_println(failed.c)
+harness.stdio.println(failed.c)
 
 const versions = pg_query(db, "SELECT version FROM _sqlx_migrations ORDER BY version", [])
-__io_println(len(versions))
+harness.stdio.println(len(versions))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -1322,27 +1330,27 @@ fn migrate_sqlx_is_idempotent_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 const first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(first.applied))
-__io_println(len(first.skipped))
+harness.stdio.println(len(first.applied))
+harness.stdio.println(len(first.skipped))
 
 const count1 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
-__io_println(count1.c)
+harness.stdio.println(count1.c)
 
 const second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(second.applied))
-__io_println(len(second.skipped))
+harness.stdio.println(len(second.applied))
+harness.stdio.println(len(second.skipped))
 
 const count2 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
-__io_println(count2.c)
+harness.stdio.println(count2.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -1390,12 +1398,12 @@ fn migrate_sqlx_no_fork_against_preseeded_ledger_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 // Replicate exactly what `sqlx migrate run` would have written, including
@@ -1412,14 +1420,14 @@ pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, che
 const before = pg_query_one(db, "SELECT md5(string_agg(encode(checksum,'hex'), ',' ORDER BY version)) AS h FROM _sqlx_migrations", [])
 
 const result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(result.applied))
-__io_println(len(result.skipped))
+harness.stdio.println(len(result.applied))
+harness.stdio.println(len(result.skipped))
 
 const after = pg_query_one(db, "SELECT md5(string_agg(encode(checksum,'hex'), ',' ORDER BY version)) AS h FROM _sqlx_migrations", [])
-if before.h == after.h {{ __io_println("checksums-identical") }} else {{ __io_println("checksums-CHANGED") }}
+if before.h == after.h {{ harness.stdio.println("checksums-identical") }} else {{ harness.stdio.println("checksums-CHANGED") }}
 
 const count = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
-__io_println(count.c)
+harness.stdio.println(count.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -1448,22 +1456,22 @@ fn migrate_sqlx_detects_checksum_mismatch_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 const first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(first.applied))
+harness.stdio.println(len(first.applied))
 
 // Corrupt the recorded checksum for the first migration.
 pg_execute(db, "UPDATE _sqlx_migrations SET checksum = decode('deadbeef', 'hex') WHERE version = 20260419170000", [])
 
 const second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(second.applied))
+harness.stdio.println(len(second.applied))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -1489,19 +1497,19 @@ fn migrate_sqlx_detects_dirty_ledger_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 pg_execute(db, "CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL, installed_on TIMESTAMPTZ NOT NULL DEFAULT now(), success BOOLEAN NOT NULL, checksum BYTEA NOT NULL, execution_time BIGINT NOT NULL)", [])
 pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (20260419170000, 'bootstrap', FALSE, decode('deadbeef', 'hex'), -1)", [])
 
 const result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(result.applied))
+harness.stdio.println(len(result.applied))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -1536,27 +1544,27 @@ fn migrate_sqlx_applies_real_cloud_dir_and_is_idempotent_when_env_set() {
         r#"
 import "std/postgres"
 
-const admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 
 const first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(first.applied))
-__io_println(len(first.skipped))
+harness.stdio.println(len(first.applied))
+harness.stdio.println(len(first.skipped))
 
 const count1 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
-__io_println(count1.c)
+harness.stdio.println(count1.c)
 
 const badlen = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE octet_length(checksum) <> 48", [])
-__io_println(badlen.c)
+harness.stdio.println(badlen.c)
 
 const second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
-__io_println(len(second.applied))
-__io_println(len(second.skipped))
+harness.stdio.println(len(second.applied))
+harness.stdio.println(len(second.skipped))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
@@ -1594,9 +1602,9 @@ fn execute_reports_duration_ms_on_real_pool_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 const result = pg_execute(db, "SELECT pg_sleep(0.05)", [])
-__io_println(result.duration_ms)
+harness.stdio.println(result.duration_ms)
 pg_close(db)
 "#;
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1638,19 +1646,19 @@ fn v2_surface_smoke_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 2}})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 2}})
 
 // --- Pool observability --------------------------------------------------
 const stats = pg_pool_stats(db)
-__io_println(stats.circuit_state)
-__io_println(stats.max_connections)
-__io_println(stats.read_routing_policy)
-__io_println(stats.replicas)
+harness.stdio.println(stats.circuit_state)
+harness.stdio.println(stats.max_connections)
+harness.stdio.println(stats.read_routing_policy)
+harness.stdio.println(stats.replicas)
 
 const clear_result = pg_stmt_cache_clear(db)
-__io_println(clear_result.pools)
-__io_println(clear_result.connections_cleared >= 1)
-__io_println(clear_result.connections_skipped)
+harness.stdio.println(clear_result.pools)
+harness.stdio.println(clear_result.connections_cleared >= 1)
+harness.stdio.println(clear_result.connections_skipped)
 
 // --- Schema setup --------------------------------------------------------
 pg_execute(db, "CREATE SCHEMA IF NOT EXISTS \"{schema}\"", [])
@@ -1665,39 +1673,39 @@ const locked_label = pg_transaction(db, {{ tx ->
   pg_advisory_xact_lock(tx, 0x4861_726E_5632_AABB)
   return pg_query_one(tx, "SELECT 'locked' AS label", []).label
 }})
-__io_println(locked_label)
+harness.stdio.println(locked_label)
 
 // --- pg_with_advisory_lock (RAII helper, exercises run_managed_transaction) ----
 const with_label = pg_with_advisory_lock(db, "release-cut", {{ tx ->
   return pg_query_one(tx, "SELECT 'raii' AS label", []).label
 }})
-__io_println(with_label)
+harness.stdio.println(with_label)
 
 // --- Schema introspection ------------------------------------------------
 const tables = pg_introspect_tables(db, {{schema: "{schema}"}})
-__io_println(len(tables))
-__io_println(tables[0].kind)
+harness.stdio.println(len(tables))
+harness.stdio.println(tables[0].kind)
 
 const cols = pg_introspect_columns(db, "{schema}.widgets")
-__io_println(len(cols))
-__io_println(cols[0].column + ":" + cols[0].type)
-__io_println(cols[1].column + ":" + cols[1].type)
+harness.stdio.println(len(cols))
+harness.stdio.println(cols[0].column + ":" + cols[0].type)
+harness.stdio.println(cols[1].column + ":" + cols[1].type)
 
 const idx = pg_introspect_indexes(db, "{schema}.widgets")
-__io_println(len(idx))
+harness.stdio.println(len(idx))
 
 // --- Array decoding ------------------------------------------------------
 const row = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [1])
-__io_println(row.tags[0] + "," + row.tags[1])
+harness.stdio.println(row.tags[0] + "," + row.tags[1])
 
 const empty = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [2])
-__io_println(len(empty.tags))
+harness.stdio.println(len(empty.tags))
 
 // --- LISTEN/NOTIFY round-trip --------------------------------------------
 const listener = pg_listen(db, "harn_v2_test")
 pg_notify(db, "harn_v2_test", "hello")
 const notification = pg_listener_recv(listener, 5000)
-__io_println(notification.channel + ":" + notification.payload)
+harness.stdio.println(notification.channel + ":" + notification.payload)
 pg_listener_close(listener)
 
 // --- Teardown ------------------------------------------------------------
@@ -2173,8 +2181,12 @@ async fn pool_describe_probe_failure_falls_back_to_text_null_when_env_url_is_set
 
     // The fallback cached an EMPTY OID list for this SQL (probe failed), so
     // later runs reuse the text fallback with no further probing.
-    let cached = DESCRIBED_OIDS
-        .with(|c| c.borrow().get(sql).cloned())
+    let record = pool_record_from_handle(&handle, "test").expect("pool authority");
+    let cached = record
+        .described_oids
+        .lock()
+        .get(sql)
+        .cloned()
         .expect("ambiguous SQL must populate the OID cache (with an empty list)");
     assert!(
         cached.is_empty(),
@@ -2203,7 +2215,7 @@ fn tx_describe_probe_failure_keeps_tx_alive_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_tx_probe", [])
 pg_execute(db, "CREATE TABLE harn_pg_tx_probe (id int PRIMARY KEY, note text)", [])
 
@@ -2216,11 +2228,11 @@ const probed = pg_transaction(db, { tx ->
   pg_execute(tx, "INSERT INTO harn_pg_tx_probe (id, note) VALUES ($1, $2)", [1, "after-probe"])
   return to_string(r.v)
 })
-__io_println(probed)
+harness.stdio.println(probed)
 
 // The commit must have persisted the post-probe write.
 const row = pg_query_one(db, "SELECT note FROM harn_pg_tx_probe WHERE id = 1", [])
-__io_println(row.note)
+harness.stdio.println(row.note)
 pg_execute(db, "DROP TABLE harn_pg_tx_probe", [])
 pg_close(db)
 "#;
@@ -2305,7 +2317,7 @@ fn nil_in_transaction_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-const db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_tx_nil", [])
 pg_execute(db, "CREATE TABLE harn_pg_tx_nil (id int PRIMARY KEY, a int, b text)", [])
 
@@ -2316,9 +2328,9 @@ pg_transaction(db, { tx ->
 })
 
 const r1 = pg_query_one(db, "SELECT (a IS NULL) AS a_null, b FROM harn_pg_tx_nil WHERE id = 1", [])
-__io_println(to_string(r1.a_null) + ":" + r1.b)
+harness.stdio.println(to_string(r1.a_null) + ":" + r1.b)
 const r2 = pg_query_one(db, "SELECT a, (b IS NULL) AS b_null FROM harn_pg_tx_nil WHERE id = 2", [])
-__io_println(to_string(r2.a) + ":" + to_string(r2.b_null))
+harness.stdio.println(to_string(r2.a) + ":" + to_string(r2.b_null))
 pg_execute(db, "DROP TABLE harn_pg_tx_nil", [])
 pg_close(db)
 "#;
@@ -2342,7 +2354,7 @@ pg_close(db)
 
 /// Performant describe-then-bind: the server describe for a given SQL runs
 /// at most **once**. The first nil-query of a SQL populates the
-/// [`DESCRIBED_OIDS`] cache (one describe round-trip); every subsequent
+/// pool-local described-OID cache (one describe round-trip); every subsequent
 /// nil-query of the SAME SQL is a cache hit and performs **no** further
 /// describe. Asserted via the `cfg(test)` [`DESCRIBE_ROUND_TRIPS`] counter.
 #[tokio::test(flavor = "current_thread")]
@@ -2357,8 +2369,9 @@ async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
     let sql = "SELECT $1::bigint AS v";
 
     // Cache must start empty for this SQL.
+    let record = pool_record_from_handle(&handle, "test").expect("pool authority");
     assert!(
-        DESCRIBED_OIDS.with(|c| !c.borrow().contains_key(sql)),
+        !record.described_oids.lock().contains_key(sql),
         "OID cache should not contain the SQL before first use"
     );
 
@@ -2373,7 +2386,7 @@ async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
         "first nil query must perform exactly one describe round-trip"
     );
     assert!(
-        DESCRIBED_OIDS.with(|c| c.borrow().contains_key(sql)),
+        record.described_oids.lock().contains_key(sql),
         "OID cache must be populated after first nil query"
     );
 

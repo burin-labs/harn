@@ -17,9 +17,9 @@ pub(super) fn eval_source_for_code(code: &str) -> String {
     }
     let (header, body) = split_eval_header(code);
     if header.is_empty() {
-        format!("pipeline main(task) {{\n{body}\n}}")
+        format!("pipeline main(harness: Harness, task) {{\n{body}\n}}")
     } else {
-        format!("{header}\npipeline main(task) {{\n{body}\n}}")
+        format!("{header}\npipeline main(harness: Harness, task) {{\n{body}\n}}")
     }
 }
 

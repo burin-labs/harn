@@ -8,7 +8,7 @@ fn total(t: Tree) -> int {
   return sum
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const tree: Tree = {value: 1, children: [{value: 2, children: []}]}
-  __io_println(to_string(total(tree)))
+  harness.stdio.println(to_string(total(tree)))
 }

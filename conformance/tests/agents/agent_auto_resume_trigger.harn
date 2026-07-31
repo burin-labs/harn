@@ -2,8 +2,9 @@ import "std/agents"
 import { llm_text, with_llm_script } from "std/testing"
 import "std/triggers"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -23,15 +24,16 @@ pipeline main() {
     ],
     { ->
       const handle = sub_agent_run(
+        harness,
         "Park until review approval.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       const trigger_handle = suspended?.suspension?.auto_resume_trigger
-      __io_println(suspended?.status)
-      __io_println(trigger_handle?.id != nil)
-      __io_println(trigger_handle?.version != nil)
-      const fired: DispatchHandle = trigger_fire(
+      harness.stdio.println(suspended?.status)
+      harness.stdio.println(trigger_handle?.id != nil)
+      harness.stdio.println(trigger_handle?.version != nil)
+      const fired: DispatchHandle = harness.runtime.trigger_fire(
         trigger_handle,
         {
           provider: "webhook",
@@ -40,10 +42,10 @@ pipeline main() {
           headers: {x_delivery: "auto-resume-conformance"},
         },
       )
-      __io_println(fired.status)
-      const resumed = wait_agent(handle)
-      __io_println(resumed?.status)
-      __io_println(contains(resumed?.task ?? "", "approved"))
+      harness.stdio.println(fired.status)
+      const resumed = wait_agent(harness.agent, handle)
+      harness.stdio.println(resumed?.status)
+      harness.stdio.println(contains(resumed?.task ?? "", "approved"))
     },
   )
 }

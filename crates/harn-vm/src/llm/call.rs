@@ -34,7 +34,7 @@ pub(crate) struct InFlightLlmCallGuard {
 impl InFlightLlmCallGuard {
     pub(crate) fn enter(opts: &api::LlmCallOptions) -> Self {
         let call_id = format!("llm_call_{}", uuid::Uuid::now_v7());
-        let started_at_ms = crate::stdlib::clock::now_wall_ms();
+        let started_at_ms = crate::stdlib::clock::now_wall_ms_unrecorded();
         let role = opts
             .messages
             .last()
@@ -69,7 +69,7 @@ pub(crate) fn snapshot_in_flight_llm_calls() -> Vec<serde_json::Value> {
         if calls.is_empty() {
             return Vec::new();
         }
-        let now_ms = crate::stdlib::clock::now_wall_ms();
+        let now_ms = crate::stdlib::clock::now_wall_ms_unrecorded();
         calls
             .values()
             .map(|call| {
@@ -394,7 +394,7 @@ pub(super) async fn llm_call_impl(
 /// hint, so callers can pattern-match on its presence:
 ///
 /// ```harn
-/// try { llm_call(prompt, nil, opts) } catch (e) {
+/// try { harness.llm.call(prompt, nil, opts) } catch (e) {
 ///   if e.kind == "transient" && e.reason == "rate_limit" {
 ///     sleep(e.retry_after_ms ?? 1000)
 ///   }
@@ -706,7 +706,11 @@ pub(crate) async fn execute_schema_retry_loop(
     // conversation.
     let original_messages = opts.messages.clone();
     for attempt in 0..=schema_retries {
-        let call_result = agent_observe::observed_llm_call(
+        // `observed_llm_call` owns the complete transport/observability retry
+        // state machine. Keep that large future behind one pointer so the
+        // schema loop composes with Harness dispatch on ordinary 2 MiB
+        // embedder and test-worker stacks.
+        let call_result = Box::pin(agent_observe::observed_llm_call(
             &opts,
             tool_format.as_deref(),
             bridge,
@@ -719,7 +723,7 @@ pub(crate) async fn execute_schema_retry_loop(
             // loop's `run_llm_call` is the integration point that owns it.
             None,
             delta_sink.clone(),
-        )
+        ))
         .await;
 
         // A mid-stream schema abort short-circuits the provider call but

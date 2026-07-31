@@ -7,23 +7,24 @@
  */
 import { agent_preset } from "std/agent/presets"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const opts = agent_preset(
+    harness,
     "release_captain",
     {provider: "anthropic", timeout_ms: 600000, max_nudges: 5},
   )
   // Caller overrides win over the pack / captain defaults.
-  __io_println(opts.provider)
-  __io_println(opts.timeout_ms)
-  __io_println(opts.max_nudges)
+  harness.stdio.println(opts.provider)
+  harness.stdio.println(opts.timeout_ms)
+  harness.stdio.println(opts.max_nudges)
   // Pack fills non-routing rows the caller omitted. Route rows are atomic: a
   // caller-owned provider suppresses the preset model ladder instead of mixing
   // caller and pack routing policy.
-  __io_println(opts.budget.total_budget_usd == 25.0)
-  __io_println(opts?.models == nil)
+  harness.stdio.println(opts.budget.total_budget_usd == 25.0)
+  harness.stdio.println(opts?.models == nil)
   // The preset's own behavior template still applies.
-  __io_println(opts._preset_kind)
-  __io_println(opts.profile)
-  __io_println(opts.iteration_budget.max)
-  __io_println(opts?._llm_retry != nil)
+  harness.stdio.println(opts._preset_kind)
+  harness.stdio.println(opts.profile)
+  harness.stdio.println(opts.iteration_budget.max)
+  harness.stdio.println(opts?._llm_retry != nil)
 }

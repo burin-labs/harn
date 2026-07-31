@@ -181,9 +181,9 @@ fn trigger_replay_diff_reports_structured_drift() {
     let workspace_root = temp.path().to_path_buf();
     write_manifest(&workspace_root);
     let child_replay_expr = if cfg!(windows) {
-        r#"trim(exec("cmd.exe", "/D", "/C", "if defined HARN_REPLAY echo %HARN_REPLAY% & exit /B 0").stdout)"#
+        r#"trim(harness.process.exec("cmd.exe", "/D", "/C", "if defined HARN_REPLAY echo %HARN_REPLAY% & exit /B 0").stdout)"#
     } else {
-        r#"shell("printf '%s' \"$HARN_REPLAY\"").stdout"#
+        r#"harness.process.shell("printf '%s' \"$HARN_REPLAY\"").stdout"#
     };
     write_lib(
         &workspace_root,
@@ -191,10 +191,10 @@ fn trigger_replay_diff_reports_structured_drift() {
             r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) -> dict {{
+pub fn on_issue(harness: Harness, event: TriggerEvent) -> dict {{
   return {{
     event_id: event.id,
-    replay_env: env("HARN_REPLAY"),
+    replay_env: harness.env.get("HARN_REPLAY"),
     child_replay_env: {child_replay_expr},
   }}
 }}
@@ -248,14 +248,14 @@ fn trigger_replay_as_of_uses_historical_binding_version() {
     let lib_v1 = r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) -> dict {
+pub fn on_issue(harness: Harness, event: TriggerEvent) -> dict {
   return { version: "v1" }
 }
 "#;
     let lib_v2 = r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) -> dict {
+pub fn on_issue(harness: Harness, event: TriggerEvent) -> dict {
   return { version: "v2" }
 }
 "#;
@@ -318,7 +318,7 @@ fn trigger_replay_bulk_dry_run_filters_on_event_payload() {
         r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) -> dict {
+pub fn on_issue(harness: Harness, event: TriggerEvent) -> dict {
   return { ok: true }
 }
 "#,
@@ -373,7 +373,7 @@ fn trigger_cancel_reports_terminal_events_as_not_cancellable() {
         r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) -> dict {
+pub fn on_issue(harness: Harness, event: TriggerEvent) -> dict {
   return { ok: true }
 }
 "#,

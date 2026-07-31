@@ -1,28 +1,29 @@
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { pre_turn_scope_classifier } from "std/llm/scope_classifier"
 
-fn __env_bool(harness: Harness, name: string) -> bool {
-  const value = lowercase(trim(harness.env.get_or(name, "")))
+fn __env_bool(env: HarnessEnv, name: string) -> bool {
+  const value = lowercase(trim(env.get_or(name, "")))
   return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
-fn __env_int(harness: Harness, name: string) {
-  const value = trim(harness.env.get_or(name, ""))
+fn __env_int(env: HarnessEnv, name: string) {
+  const value = trim(env.get_or(name, ""))
   if value == "" {
     return nil
   }
   return to_int(value)
 }
 
-fn __env_float(harness: Harness, name: string, fallback) {
-  const value = trim(harness.env.get_or(name, ""))
+fn __env_float(env: HarnessEnv, name: string, fallback) {
+  const value = trim(env.get_or(name, ""))
   if value == "" {
     return fallback
   }
   return to_float(value) ?? fallback
 }
 
-fn __mkdirp(harness: Harness, path: string) {
+fn __mkdirp(fs: HarnessFs, path: string) {
   if trim(path) == "" {
     return
   }
@@ -42,26 +43,24 @@ fn __mkdirp(harness: Harness, path: string) {
       path_join(current, part)
     }
     try {
-      harness.fs.mkdir(current)
+      fs.mkdir(current)
     } catch (_e) {
       nil
     }
   }
 }
 
-fn __load_cases(harness: Harness, path: string, max_cases) {
+fn __load_cases(fs: HarnessFs, stdio: HarnessStdio, path: string, max_cases) {
   const raw = try {
-    harness.fs.read_text(path)
+    fs.read_text(path)
   } catch (e) {
-    harness.stdio.eprintln(
-      "error: failed to read scope-triage dataset " + path + ": " + to_string(e),
-    )
+    stdio.eprintln("error: failed to read scope-triage dataset " + path + ": " + to_string(e))
     return nil
   }
   const decoded = try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio.eprintln("error: failed to parse scope-triage dataset " + path + ": " + e.message)
+    stdio.eprintln("error: failed to parse scope-triage dataset " + path + ": " + e.message)
     return nil
   }
   let cases = if type_of(decoded) == "list" {
@@ -70,7 +69,7 @@ fn __load_cases(harness: Harness, path: string, max_cases) {
     decoded?.cases ?? []
   }
   if type_of(cases) != "list" {
-    harness.stdio.eprintln("error: scope-triage dataset must be a list or {cases: list}")
+    stdio.eprintln("error: scope-triage dataset must be a list or {cases: list}")
     return nil
   }
   if max_cases != nil && max_cases >= 0 && len(cases) > max_cases {
@@ -185,13 +184,15 @@ fn __verdict_event(events) {
   return verdicts[0]
 }
 
-fn __run_case(case, classifier) {
-  const session = "scope-triage-eval-" + to_string(case?.id ?? uuid())
+fn __run_case(harness: Harness, case, classifier) {
+  const session = "scope-triage-eval-" + to_string(case?.id ?? harness.random.uuid())
   const captured = agent_capture_events(
+    harness.agent,
     session,
     fn() {
-      agent_session_open(session, {workspace_anchor: __scope_eval_anchor()})
+      harness.agent.open(session, {workspace_anchor: __scope_eval_anchor()})
       return agent_loop(
+        harness,
         to_string(case?.prompt ?? case?.message ?? ""),
         nil,
         {
@@ -389,23 +390,29 @@ fn main(harness: Harness) -> int {
   )
   const output_dir = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_OUTPUT", "")
   const resolved_output = if trim(output_dir) == "" {
-    path_join(runtime_paths().run_root, "scope-triage", "latest")
+    path_join(harness.fs.runtime_paths().run_root, "scope-triage", "latest")
   } else {
     output_dir
   }
-  const json_mode = __env_bool(harness, "HARN_EVAL_SCOPE_TRIAGE_JSON")
-  const live = __env_bool(harness, "HARN_EVAL_SCOPE_TRIAGE_LIVE")
+  const json_mode = __env_bool(harness.env, "HARN_EVAL_SCOPE_TRIAGE_JSON")
+  const live = __env_bool(harness.env, "HARN_EVAL_SCOPE_TRIAGE_LIVE")
   const model = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_MODEL", "ollama:qwen3:1.7b")
-  const threshold = __env_float(harness, "HARN_EVAL_SCOPE_TRIAGE_THRESHOLD", 0.65)
-  const max_cases = __env_int(harness, "HARN_EVAL_SCOPE_TRIAGE_MAX_CASES")
-  const cases = __load_cases(harness, dataset_path, max_cases)
+  const threshold = __env_float(harness.env, "HARN_EVAL_SCOPE_TRIAGE_THRESHOLD", 0.65)
+  const max_cases = __env_int(harness.env, "HARN_EVAL_SCOPE_TRIAGE_MAX_CASES")
+  const cases = __load_cases(harness.fs, harness.stdio, dataset_path, max_cases)
   if cases == nil {
     return 1
   }
   const classifier = if live {
-    pre_turn_scope_classifier({enabled: true, model: model, confidence_threshold: threshold})
+    pre_turn_scope_classifier(
+      harness.agent,
+      harness.llm,
+      {enabled: true, model: model, confidence_threshold: threshold},
+    )
   } else {
     pre_turn_scope_classifier(
+      harness.agent,
+      harness.llm,
       {
         enabled: true,
         confidence_threshold: threshold,
@@ -415,10 +422,10 @@ fn main(harness: Harness) -> int {
   }
   let reports = []
   for case in cases {
-    reports = reports.appending(__run_case(case, classifier))
+    reports = reports.appending(__run_case(harness, case, classifier))
   }
   const report = __summarize(dataset_path, resolved_output, live, model, threshold, cases, reports)
-  __mkdirp(harness, resolved_output)
+  __mkdirp(harness.fs, resolved_output)
   harness.fs.write_text(path_join(resolved_output, "summary.json"), json_stringify_pretty(report))
   harness.fs.write_text(path_join(resolved_output, "per_case.jsonl"), __jsonl(reports))
   harness.fs.write_text(path_join(resolved_output, "summary.md"), __markdown(report))
@@ -431,9 +438,9 @@ fn main(harness: Harness) -> int {
       + path_join(resolved_output, "summary.md"),
   )
   if json_mode {
-    __io_println(json_stringify_pretty(report))
+    harness.stdio.println(json_stringify_pretty(report))
   } else {
-    __io_println(
+    harness.stdio.println(
       "scope-triage eval: "
         + to_string(report.correct_cases)
         + "/"

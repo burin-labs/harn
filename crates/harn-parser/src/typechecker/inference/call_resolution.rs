@@ -29,7 +29,6 @@ impl TypeChecker {
             || imported.contains(name)
             || scope.is_generic_type_param(name)
             || name.starts_with("__")
-            || name.starts_with("hostlib_")
             || matches!(name, "Ok" | "Err" | "Some" | "None");
         if resolvable {
             return;

@@ -1,7 +1,7 @@
 import "std/triggers"
 
-pipeline test(task) {
-  const providers: list<ProviderCatalogEntry> = list_providers()
+pipeline test(harness: Harness, task) {
+  const providers: list<ProviderCatalogEntry> = list_providers(harness.llm)
   const builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
   assert(len(builtin) == 9, "expected nine builtin trigger providers")
   const stream_providers = providers.filter(
@@ -95,5 +95,5 @@ pipeline test(task) {
       package_provider + " must be registered by its package",
     )
   }
-  log("trigger_provider_catalog tests passed")
+  harness.stdio.log("trigger_provider_catalog tests passed")
 }

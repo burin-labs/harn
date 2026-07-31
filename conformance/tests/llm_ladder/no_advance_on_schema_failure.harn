@@ -8,14 +8,15 @@ import { with_llm_script } from "std/testing"
  * both served by the cheap rung. The frontier rung is never touched, so the
  * routing trace from the winning pass shows a single cheap attempt.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [
       {text: "not json at all", model: "mock", provider: "mock"},
       {text: "{\"answer\": \"forty-two\"}", model: "mock", provider: "mock"},
     ],
     { ->
-      const result = llm_call(
+      const result = harness.llm.call(
         "q",
         nil,
         {
@@ -32,10 +33,10 @@ pipeline test(task) {
         },
       )
       const attempts = result.routing.attempts
-      __io_println(len(attempts))
-      __io_println(attempts[0].label)
-      __io_println(attempts[0].status)
-      __io_println(result.routing.selected)
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].label)
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(result.routing.selected)
     },
   )
 }

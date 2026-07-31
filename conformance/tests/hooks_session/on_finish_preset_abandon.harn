@@ -11,23 +11,23 @@
  */
 import { on_finish_abandon } from "std/lifecycle"
 
-pipeline default() {
-  clear_session_hooks()
-  register_session_hook(
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
     "pre_finish",
-    { event ->
-      __io_println("pre_finish saw " + to_string(event.return_value))
+    { _hook_harness, event ->
+      harness.stdio.println("pre_finish saw " + to_string(event.return_value))
       return nil
     },
   )
-  register_session_hook(
+  harness.agent.register_session_hook(
     "post_finish",
-    { event ->
-      __io_println("post_finish saw " + to_string(event.return_value))
+    { _hook_harness, event ->
+      harness.stdio.println("post_finish saw " + to_string(event.return_value))
       return nil
     },
   )
-  pipeline_on_finish(on_finish_abandon)
-  __io_println("body done")
+  harness.agent.pipeline_on_finish(on_finish_abandon)
+  harness.stdio.println("body done")
   return 42
 }

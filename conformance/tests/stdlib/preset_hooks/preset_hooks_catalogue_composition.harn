@@ -7,7 +7,7 @@
  * first, so deny-tier rules out-rank rewrites and the agent sees the
  * blocking explanation before any rewrite suggestion.
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   /* Three catalogues with deliberately overlapping coverage on
    * `git push --force`:
    *   - "low" catalogue: warning-severity rewrite rule, priority 1.
@@ -45,24 +45,31 @@ pipeline default() {
   const deny_cat = catalogue({id: "team/deny", stack: "git", rules: [deny_rule]})
   /* Register intentionally out-of-order so the priority-sort is the
    * subject under test (not the registration order). */
-  const reg = tool_hooks_register(
-    tool_hooks_register(tool_hooks_register(tool_hooks_registry(), low_cat), deny_cat),
+  const reg = harness.tools.hooks_register(
+    harness.tools.hooks_register(
+      harness.tools.hooks_register(harness.tools.hooks_registry(), low_cat),
+      deny_cat,
+    ),
     mid_cat,
   )
-  const matches = tool_hooks_match(reg, "git push origin main --force", {stacks: ["git"]})
+  const matches = harness.tools.hooks_match(reg, "git push origin main --force", {stacks: ["git"]})
   /* All three rules matched. */
-  __io_println(len(matches))
+  harness.stdio.println(len(matches))
   /* Highest priority wins the first slot regardless of insertion order. */
-  __io_println(matches[0].rule_id)
-  __io_println(matches[0].catalogue_id)
-  __io_println(matches[0].severity)
-  __io_println(matches[1].rule_id)
-  __io_println(matches[2].rule_id)
+  harness.stdio.println(matches[0].rule_id)
+  harness.stdio.println(matches[0].catalogue_id)
+  harness.stdio.println(matches[0].severity)
+  harness.stdio.println(matches[1].rule_id)
+  harness.stdio.println(matches[2].rule_id)
   /* Removing the deny catalogue collapses to the rewrite rules and the
    * mid (priority 5) rule wins over the low (priority 1) one. */
-  const pruned = tool_hooks_unregister(reg, "team/deny")
-  const pruned_matches = tool_hooks_match(pruned, "git push origin main --force", {stacks: ["git"]})
-  __io_println(len(pruned_matches))
-  __io_println(pruned_matches[0].rule_id)
-  __io_println(pruned_matches[1].rule_id)
+  const pruned = harness.tools.hooks_unregister(reg, "team/deny")
+  const pruned_matches = harness.tools.hooks_match(
+    pruned,
+    "git push origin main --force",
+    {stacks: ["git"]},
+  )
+  harness.stdio.println(len(pruned_matches))
+  harness.stdio.println(pruned_matches[0].rule_id)
+  harness.stdio.println(pruned_matches[1].rule_id)
 }

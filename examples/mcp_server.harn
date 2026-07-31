@@ -16,8 +16,8 @@
  *   }
  * }
  */
-pipeline main(task) {
-  mcp_server_metadata(
+pipeline main(harness: Harness, task) {
+  harness.tools.mcp_server_metadata(
     {
       name: "harn-demo",
       instructions: "Use this server's tools, resources, and prompts for Harn MCP demonstrations.",
@@ -57,9 +57,9 @@ pipeline main(task) {
       },
     },
   )
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
   // ---- Static Resources ----
-  mcp_resource(
+  harness.tools.mcp_resource(
     {
       uri: "docs://readme",
       name: "README",
@@ -69,7 +69,7 @@ pipeline main(task) {
     },
   )
   // ---- Resource Templates ----
-  mcp_resource_template(
+  harness.tools.mcp_resource_template(
     {
       uri_template: "config://{key}",
       name: "Configuration Values",
@@ -87,7 +87,7 @@ pipeline main(task) {
     },
   )
   // ---- Prompts ----
-  mcp_prompt(
+  harness.tools.mcp_prompt(
     {
       name: "code_review",
       description: "Review code for quality and suggest improvements",

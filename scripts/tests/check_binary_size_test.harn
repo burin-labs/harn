@@ -22,7 +22,7 @@ type ReleaseWorkflow = {
   },
 }
 
-fn release_workflow() -> ReleaseWorkflow {
+fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
   const step_schema = schema_object(
     {
       name: schema_field(schema_string(), false),
@@ -71,7 +71,7 @@ fn release_workflow() -> ReleaseWorkflow {
     },
   )
   const path = "../../.github/workflows/build-release-binaries.yml"
-  return unwrap(get_typed_result(yaml_parse(harness.fs.read_text(path)), schema))
+  return unwrap(get_typed_result(yaml_parse(fs.read_text(path)), schema))
 }
 
 fn release_workflow_step(steps: list<ReleaseWorkflowStep>, name: string) -> ReleaseWorkflowStep {
@@ -89,7 +89,7 @@ fn defaults() {
 
 // --- parse_args -------------------------------------------------------------
 @test
-pipeline test_parse_args_defaults(task) {
+pipeline test_parse_args_defaults(harness: Harness, task) {
   const res = parse_args([], defaults())
   assert_eq(res.ok, true)
   assert_eq(res.opts.build_release, true)
@@ -99,7 +99,7 @@ pipeline test_parse_args_defaults(task) {
 }
 
 @test
-pipeline test_parse_args_flags(task) {
+pipeline test_parse_args_flags(harness: Harness, task) {
   const res = parse_args(
     ["--no-build", "--target", "x86_64-unknown-linux-gnu", "--skip-bloat", "--budget-mb", "50"],
     defaults(),
@@ -112,14 +112,14 @@ pipeline test_parse_args_flags(task) {
 }
 
 @test
-pipeline test_parse_args_bin_and_report_dir(task) {
+pipeline test_parse_args_bin_and_report_dir(harness: Harness, task) {
   const res = parse_args(["--bin", "/x/harn", "--report-dir", "out"], defaults())
   assert_eq(res.opts.harn_bin, "/x/harn")
   assert_eq(res.opts.report_dir, "out")
 }
 
 @test
-pipeline test_parse_args_missing_value(task) {
+pipeline test_parse_args_missing_value(harness: Harness, task) {
   const res = parse_args(["--target"], defaults())
   assert_eq(res.ok, false)
   assert_eq(res.message, "error: --target requires a value")
@@ -127,13 +127,13 @@ pipeline test_parse_args_missing_value(task) {
 }
 
 @test
-pipeline test_parse_args_missing_path_noun(task) {
+pipeline test_parse_args_missing_path_noun(harness: Harness, task) {
   assert_eq(parse_args(["--bin"], defaults()).message, "error: --bin requires a path")
   assert_eq(parse_args(["--report-dir"], defaults()).message, "error: --report-dir requires a path")
 }
 
 @test
-pipeline test_parse_args_unknown_flag_shows_usage(task) {
+pipeline test_parse_args_unknown_flag_shows_usage(harness: Harness, task) {
   const res = parse_args(["--wat"], defaults())
   assert_eq(res.ok, false)
   assert_eq(res.message, "error: unknown argument: --wat")
@@ -141,44 +141,44 @@ pipeline test_parse_args_unknown_flag_shows_usage(task) {
 }
 
 @test
-pipeline test_parse_args_help(task) {
+pipeline test_parse_args_help(harness: Harness, task) {
   assert_eq(parse_args(["-h"], defaults()).opts.help, true)
   assert_eq(parse_args(["--help"], defaults()).opts.help, true)
 }
 
 // --- parse_budget_mb / budget_bytes_of --------------------------------------
 @test
-pipeline test_budget_parse_valid(task) {
+pipeline test_budget_parse_valid(harness: Harness, task) {
   assert_eq(default_binary_size_budget_mb(), "216.00")
   assert_eq(parse_budget_mb(default_binary_size_budget_mb()), 216.0)
   assert_eq(parse_budget_mb("1.2"), 1.2)
 }
 
 @test
-pipeline test_budget_parse_invalid(task) {
+pipeline test_budget_parse_invalid(harness: Harness, task) {
   assert_eq(parse_budget_mb("0"), nil)
   assert_eq(parse_budget_mb("-5"), nil)
   assert_eq(parse_budget_mb("abc"), nil)
 }
 
 @test
-pipeline test_budget_bytes_rounding(task) {
+pipeline test_budget_bytes_rounding(harness: Harness, task) {
   assert_eq(budget_bytes_of(192.0), 201326592)
   // awk printf "%.0f", 1.2 * 1024 * 1024 == 1258291
   assert_eq(budget_bytes_of(1.2), 1258291)
 }
 
 @test
-pipeline test_workflow_budget_matches_helper_default(task) {
-  assert_eq(release_workflow().env.BINARY_SIZE_BUDGET_MB, default_binary_size_budget_mb())
+pipeline test_workflow_budget_matches_helper_default(harness: Harness, task) {
+  assert_eq(release_workflow(harness.fs).env.BINARY_SIZE_BUDGET_MB, default_binary_size_budget_mb())
 }
 
 @test
-pipeline test_workflow_preserves_bloat_after_failed_budget_gate(task) {
+pipeline test_workflow_preserves_bloat_after_failed_budget_gate(harness: Harness, task) {
   const diagnostic_mode =
     "matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))"
   const diagnostics = "always() && " + diagnostic_mode
-  const steps = release_workflow().jobs.build.steps
+  const steps = release_workflow(harness.fs).jobs.build.steps
   const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
   assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, diagnostic_mode)
   assert_eq(bloat.if, diagnostics)
@@ -195,9 +195,9 @@ pipeline test_workflow_preserves_bloat_after_failed_budget_gate(task) {
 }
 
 @test
-pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(task) {
+pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(harness: Harness, task) {
   const resolve = release_workflow_step(
-    release_workflow().jobs.setup.steps,
+    release_workflow(harness.fs).jobs.setup.steps,
     "Resolve release context",
   )
   assert(
@@ -207,8 +207,11 @@ pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(task) {
 }
 
 @test
-pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targets(task) {
-  const workflow = release_workflow()
+pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targets(
+  harness: Harness,
+  task,
+) {
+  const workflow = release_workflow(harness.fs)
   const checkout = workflow.jobs.prepare_cli_aot.steps[0]
   const generator = release_workflow_step(
     workflow.jobs.prepare_cli_aot.steps,
@@ -236,7 +239,7 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
 
 // --- format_mib -------------------------------------------------------------
 @test
-pipeline test_format_mib_two_decimals(task) {
+pipeline test_format_mib_two_decimals(harness: Harness, task) {
   assert_eq(format_mib(1536000), "1.46")
   assert_eq(format_mib(2097152), "2.00")
   assert_eq(format_mib(1258291), "1.20")
@@ -245,12 +248,12 @@ pipeline test_format_mib_two_decimals(task) {
 
 // --- default_bin_path -------------------------------------------------------
 @test
-pipeline test_default_bin_path_host(task) {
+pipeline test_default_bin_path_host(harness: Harness, task) {
   assert_eq(default_bin_path("/r/target", ""), "/r/target/release/harn")
 }
 
 @test
-pipeline test_default_bin_path_target_triple(task) {
+pipeline test_default_bin_path_target_triple(harness: Harness, task) {
   assert_eq(
     default_bin_path("/r/target", "x86_64-unknown-linux-gnu"),
     "/r/target/x86_64-unknown-linux-gnu/release/harn",
@@ -258,7 +261,7 @@ pipeline test_default_bin_path_target_triple(task) {
 }
 
 @test
-pipeline test_default_bin_path_windows_exe(task) {
+pipeline test_default_bin_path_windows_exe(harness: Harness, task) {
   assert_eq(
     default_bin_path("/r/target", "x86_64-pc-windows-msvc"),
     "/r/target/x86_64-pc-windows-msvc/release/harn.exe",
@@ -267,7 +270,7 @@ pipeline test_default_bin_path_windows_exe(task) {
 
 // --- report_lines -----------------------------------------------------------
 @test
-pipeline test_report_lines_shape(task) {
+pipeline test_report_lines_shape(harness: Harness, task) {
   const lines = report_lines("/r/target/release/harn", "", 1536000, 1258291)
   assert_eq(
     lines,
@@ -285,7 +288,7 @@ pipeline test_report_lines_shape(task) {
 }
 
 @test
-pipeline test_report_lines_named_target(task) {
+pipeline test_report_lines_named_target(harness: Harness, task) {
   const lines = report_lines("/b", "aarch64-apple-darwin", 10, 20)
   assert_eq(lines[3], "target: aarch64-apple-darwin")
 }

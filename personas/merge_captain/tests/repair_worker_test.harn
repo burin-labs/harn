@@ -78,13 +78,15 @@ fn _human_required_policy() {
   }
 }
 
-pipeline test_dry_run_skips_executor(task) {
+pipeline test_dry_run_skips_executor(harness: Harness, task) {
   let calls = 0
   const executor = { _b, _o ->
     calls = calls + 1
     {ok: true, output: _ok_output(), raw: "should_not_run"}
   }
   const run = invoke(
+    harness.clock,
+    harness.process,
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
@@ -99,8 +101,10 @@ pipeline test_dry_run_skips_executor(task) {
   assert_eq(calls, 0)
 }
 
-pipeline test_blocked_when_human_approval_required(task) {
+pipeline test_blocked_when_human_approval_required(harness: Harness, task) {
   const run = invoke(
+    harness.clock,
+    harness.process,
     {
       bundle: _ci_bundle(),
       policy: _human_required_policy(),
@@ -116,8 +120,10 @@ pipeline test_blocked_when_human_approval_required(task) {
   assert_eq(run.output, nil)
 }
 
-pipeline test_completed_run_attaches_output(task) {
+pipeline test_completed_run_attaches_output(harness: Harness, task) {
   const run = invoke(
+    harness.clock,
+    harness.process,
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
@@ -134,16 +140,17 @@ pipeline test_completed_run_attaches_output(task) {
   assert_eq(run.agent_loop.iterations, 1)
 }
 
-pipeline test_default_executor_repairs_validator_failures(task) {
-  llm_mock_clear()
-  llm_mock(
+pipeline test_default_executor_repairs_validator_failures(harness: Harness, task) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue(
     {
       text:
         "{\"diagnosis\":\"maybe\",\"files_changed\":[{\"path\":\"src/foo.rs\",\"action\":\"modified\"}],\"tests_run\":[],\"commits_created\":[{\"sha\":\"abc\",\"subject\":\"fix\"}],\"push_result\":{\"pushed\":true,\"ref\":\"feat\",\"sha\":\"abc\",\"force_with_lease\":true},\"residual_risk\":\"unknown\"}",
     },
   )
-  llm_mock({text: json_stringify(_ok_output())})
+  harness.llm.mock_enqueue({text: json_stringify(_ok_output())})
   const result = default_executor(
+    harness,
     _ci_bundle(),
     {provider: "mock", validator_retries: 1, repair: {enabled: false}},
   )
@@ -153,8 +160,10 @@ pipeline test_default_executor_repairs_validator_failures(task) {
   assert(result.typed_checkpoint.validator_failures[0].contains("missing tests"))
 }
 
-pipeline test_schema_invalid_when_executor_fails(task) {
+pipeline test_schema_invalid_when_executor_fails(harness: Harness, task) {
   const run = invoke(
+    harness.clock,
+    harness.process,
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
@@ -169,9 +178,11 @@ pipeline test_schema_invalid_when_executor_fails(task) {
   assert_eq(run.raw_text, "garbage")
 }
 
-pipeline test_validators_failed_when_output_violates_contract(task) {
+pipeline test_validators_failed_when_output_violates_contract(harness: Harness, task) {
   const bad_output = _ok_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
   const run = invoke(
+    harness.clock,
+    harness.process,
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
@@ -186,7 +197,7 @@ pipeline test_validators_failed_when_output_violates_contract(task) {
   assert_eq(run.output.diagnosis, "fixed")
 }
 
-pipeline test_bundle_invalid_short_circuits(task) {
+pipeline test_bundle_invalid_short_circuits(harness: Harness, task) {
   const bad_bundle = build(
     {
       kind: "ci_failure",
@@ -196,6 +207,8 @@ pipeline test_bundle_invalid_short_circuits(task) {
     },
   )
   const run = invoke(
+    harness.clock,
+    harness.process,
     {
       bundle: bad_bundle,
       policy: _autopilot_policy(),
@@ -207,7 +220,7 @@ pipeline test_bundle_invalid_short_circuits(task) {
   assert(run.validation_errors[0].contains("repo"))
 }
 
-pipeline test_invoke_for_ci_failure_builds_correct_bundle(task) {
+pipeline test_invoke_for_ci_failure_builds_correct_bundle(harness: Harness, task) {
   const observation = {
     repo: "x/y",
     number: 7,
@@ -218,6 +231,8 @@ pipeline test_invoke_for_ci_failure_builds_correct_bundle(task) {
   }
   const policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
   const run = invoke_for_ci_failure(
+    harness.clock,
+    harness,
     {
       observation: observation,
       policy: policy,
@@ -238,7 +253,7 @@ pipeline test_invoke_for_ci_failure_builds_correct_bundle(task) {
   assert_eq(b.push_target.branch, "feat")
 }
 
-pipeline test_invoke_for_merge_conflict_marks_force_push(task) {
+pipeline test_invoke_for_merge_conflict_marks_force_push(harness: Harness, task) {
   const observation = {
     repo: "x/y",
     number: 8,
@@ -249,6 +264,8 @@ pipeline test_invoke_for_merge_conflict_marks_force_push(task) {
   }
   const policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
   const run = invoke_for_merge_conflict(
+    harness.clock,
+    harness,
     {
       observation: observation,
       policy: policy,
@@ -266,7 +283,7 @@ pipeline test_invoke_for_merge_conflict_marks_force_push(task) {
   assert(b.approval_required_for.contains("force_push"))
 }
 
-pipeline test_invoke_for_release_audit_builds_bundle(task) {
+pipeline test_invoke_for_release_audit_builds_bundle(harness: Harness, task) {
   const release_facts = {
     tag: "v0.7.54",
     commits_in_range: [{sha: "abc", subject: "feat: foo", author: "x"}],
@@ -274,6 +291,8 @@ pipeline test_invoke_for_release_audit_builds_bundle(task) {
     changelog_excerpt: "## Unreleased",
   }
   const run = invoke_for_release_audit(
+    harness.clock,
+    harness,
     {
       repo: "burin-labs/harn",
       head_ref: "main",
@@ -292,8 +311,10 @@ pipeline test_invoke_for_release_audit_builds_bundle(task) {
   assert_eq(b.push_target.force_with_lease, false)
 }
 
-pipeline test_run_record_is_versioned(task) {
+pipeline test_run_record_is_versioned(harness: Harness, task) {
   const run = invoke(
+    harness.clock,
+    harness.process,
     {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),

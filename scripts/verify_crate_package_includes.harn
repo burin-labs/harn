@@ -61,11 +61,11 @@ fn within_root(path: string, root: string) -> bool {
   return normalized == normalized_root || normalized.starts_with(normalized_root + "/")
 }
 
-pub fn packaged_include_errors(root: string, crate: string) -> list<string> {
+pub fn packaged_include_errors(fs: HarnessFs, root: string, crate: string) -> list<string> {
   const package_root = path_normalize(root)
   let errors: list<string> = []
-  for source in harness.fs.glob("**/*.rs", package_root).sorted() {
-    const text = harness.fs.read_text(source)
+  for source in fs.glob("**/*.rs", package_root).sorted() {
+    const text = fs.read_text(source)
     const source_rel = rel_path(source, package_root)
     for include_path in rust_include_paths(text) {
       const relative = include_path.path
@@ -75,7 +75,7 @@ pub fn packaged_include_errors(root: string, crate: string) -> list<string> {
         continue
       }
       const target = path_normalize(path_join(dirname(source) ?? package_root, relative))
-      if !harness.fs.exists(target) {
+      if !fs.exists(target) {
         errors = errors + [location + ": missing include target " + relative]
         continue
       }
@@ -109,16 +109,16 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const package_dir = to_string(parsed?.package_dir ?? "")
   const crate = to_string(parsed?.crate ?? "")
   if package_dir == "" || crate == "" {
     harness.stdio.eprintln("error: --package-dir and --crate are required")
-    exit(2)
+    harness.runtime.exit(2)
   }
-  const errors = packaged_include_errors(package_dir, crate)
+  const errors = packaged_include_errors(harness.fs, package_dir, crate)
   if errors.count > 0 {
     harness.stdio.eprintln(
       "error: packaged " + crate + " has invalid include_str!/include_bytes! paths:",
@@ -126,7 +126,7 @@ fn main(harness: Harness) {
     for error in errors {
       harness.stdio.eprintln("  - " + error)
     }
-    exit(1)
+    harness.runtime.exit(1)
   }
   return nil
 }

@@ -14,7 +14,7 @@ use super::harness::*;
 #[test]
 fn test_inline_cache_warms_property_sites() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 const list = [1, 2, 3]
 const text = ""
 const p = pair("left", "right")
@@ -25,10 +25,10 @@ while i < 3 {
   if text.empty {
     total = total + 1
   }
-  log(p.second)
+  harness.stdio.log(p.second)
   i = i + 1
 }
-log(total)
+harness.stdio.log(total)
 }"#,
     );
 
@@ -71,7 +71,7 @@ log(total)
 #[test]
 fn test_inline_cache_warms_dict_and_struct_property_sites() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r"pipeline t(task) {
+        r"pipeline t(harness: Harness, task) {
 struct Point {
   x: int
   y: int
@@ -84,7 +84,7 @@ while i < 3 {
   total = total + record.hot + point.y
   i = i + 1
 }
-log(total)
+harness.stdio.log(total)
 }",
     );
 
@@ -114,9 +114,9 @@ log(total)
 #[test]
 fn test_inline_cache_replaces_polymorphic_property_site() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 for value in [[1, 2], "ab"] {
-  log(value.count)
+  harness.stdio.log(value.count)
 }
 }"#,
     );
@@ -137,7 +137,7 @@ for value in [[1, 2], "ab"] {
 #[test]
 fn test_inline_cache_warms_method_sites() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r#"pipeline t(task) {
+        r#"pipeline t(harness: Harness, task) {
 const list = [1, 2, 3]
 const text = "abc"
 const dict = {a: 1, b: 2}
@@ -157,7 +157,7 @@ while i < 3 {
   if values.contains(2) { total = total + 1 }
   i = i + 1
 }
-log(total)
+harness.stdio.log(total)
 }"#,
     );
 
@@ -240,7 +240,7 @@ fn test_inline_cache_warms_harness_property_and_method_sites() {
 #[test]
 fn test_adaptive_inline_cache_specializes_generic_integer_add_site() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r"pipeline t(task) {
+        r"pipeline t(harness: Harness, task) {
 fn erase(x) {
   return x
 }
@@ -250,7 +250,7 @@ while i < erase(8) {
   total = total + i
   i = i + erase(1)
 }
-log(total)
+harness.stdio.log(total)
 }",
     );
 
@@ -274,7 +274,7 @@ log(total)
 #[test]
 fn test_adaptive_inline_cache_deoptimizes_mixed_binary_shapes() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r"pipeline t(task) {
+        r"pipeline t(harness: Harness, task) {
 fn erase(x) {
   return x
 }
@@ -283,7 +283,7 @@ let acc = erase(0)
 for value in values {
   acc = acc + value
 }
-log(acc)
+harness.stdio.log(acc)
 }",
     );
 
@@ -307,7 +307,7 @@ log(acc)
 #[test]
 fn test_adaptive_inline_cache_specializes_named_closure_call_site() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r"pipeline t(task) {
+        r"pipeline t(harness: Harness, task) {
 fn inc(x) {
   return x + 1
 }
@@ -317,7 +317,7 @@ while i < 8 {
   total = total + inc(i)
   i = i + 1
 }
-log(total)
+harness.stdio.log(total)
 }",
     );
 
@@ -336,7 +336,7 @@ log(total)
 #[test]
 fn test_adaptive_inline_cache_deoptimizes_rebound_closure_call_site() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r"pipeline t(task) {
+        r"pipeline t(harness: Harness, task) {
 fn inc(x) {
   return x + 1
 }
@@ -353,7 +353,7 @@ while i < 5 {
   total = total + op(10)
   i = i + 1
 }
-log(total)
+harness.stdio.log(total)
 }",
     );
 
@@ -372,12 +372,12 @@ log(total)
 #[test]
 fn test_inline_cache_warms_spread_method_site() {
     let (entries, out, _) = run_harn_with_inline_cache_entries(
-        r"pipeline t(task) {
+        r"pipeline t(harness: Harness, task) {
 const list = [1, 2, 3]
 const args = []
 let i = 0
 while i < 3 {
-  log(list.count(...args))
+  harness.stdio.log(list.count(...args))
   i = i + 1
 }
 }",

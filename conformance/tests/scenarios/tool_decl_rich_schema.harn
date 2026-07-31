@@ -1,4 +1,4 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   tool create_user(
     user: {name: string, age?: int},
     tags: list<string>,
@@ -7,11 +7,11 @@ pipeline test(task) {
     return {ok: user.name != "" && prefs["missing"] == nil, names: tags}
   }
   const tool_def = tool_find(create_user, "create_user")
-  __io_println(tool_def.parameters.user.type)
-  __io_println(tool_def.parameters.user.properties.name.type)
-  __io_println(tool_def.parameters.user.required[0])
-  __io_println(tool_def.parameters.tags.items.type)
-  __io_println(tool_def.parameters.prefs.additionalProperties.type)
-  __io_println(tool_def.outputSchema.properties.ok.type)
-  __io_println(tool_def.outputSchema.properties.names.items.type)
+  harness.stdio.println(tool_def.parameters.user.type)
+  harness.stdio.println(tool_def.parameters.user.properties.name.type)
+  harness.stdio.println(tool_def.parameters.user.required[0])
+  harness.stdio.println(tool_def.parameters.tags.items.type)
+  harness.stdio.println(tool_def.parameters.prefs.additionalProperties.type)
+  harness.stdio.println(tool_def.outputSchema.properties.ok.type)
+  harness.stdio.println(tool_def.outputSchema.properties.names.items.type)
 }

@@ -1,16 +1,16 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   const fallback = nil
     ?? "fallback"
-  __io_println(fallback)
+  harness.stdio.println(fallback)
   const same = true
-  __io_println(same)
+  harness.stdio.println(same)
   const different = 1
     != 2
-  __io_println(different)
+  harness.stdio.println(different)
   const smaller = 1
     < 2
-  __io_println(smaller)
+  harness.stdio.println(smaller)
   const larger_or_equal = 2
     >= 2
-  __io_println(larger_or_equal)
+  harness.stdio.println(larger_or_equal)
 }

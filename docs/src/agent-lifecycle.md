@@ -47,7 +47,7 @@ The suspend/resume primitive ships as three builtin layers:
 1. **Script-level** — `suspend_agent`, `resume_agent`, `agent_stop`,
    `parse_resume_conditions`, `agent_await_resumption` from `std/agent/workers`. Operators and parent
    pipelines call these directly.
-2. **Model-facing tools** — `agent_loop(...)` automatically exposes
+2. **Model-facing tools** — `agent_loop(harness, ...)` automatically exposes
    `agent_await_resumption` as a callable tool to the model so an agent can
    self-park. Pass `subagents: true` to also expose `subagent_pause`,
    `subagent_resume`, and `subagent_stop`.
@@ -93,7 +93,7 @@ works as a trigger source works as a resume condition.
 
 ## Self-park mid-loop
 
-When `agent_loop(...)` exposes `agent_await_resumption` as a model tool,
+When `agent_loop(harness, ...)` exposes `agent_await_resumption` as a model tool,
 the model can park itself between turns. The loop intercepts the call
 *before* normal tool dispatch, validates conditions, persists a snapshot,
 and returns a structured result to the parent (or the direct caller, for
@@ -102,7 +102,7 @@ top-level loops):
 ```harn,ignore
 import { agent_await_resumption } from "std/agent/workers"
 
-const result = agent_loop("Wait for the maintainer's review.", nil, {
+const result = agent_loop(harness, "Wait for the maintainer's review.", nil, {
   provider: "openai",
   model: "gpt-5",
   tool_format: "native",
@@ -111,10 +111,10 @@ const result = agent_loop("Wait for the maintainer's review.", nil, {
 
 // The model decided to park; `result.status == "suspended"`.
 if result.status == "suspended" {
-  log(result.reason)                      // model-supplied
-  log(result.initiator)                   // "self"
-  log(result.conditions?.timeout?.duration_minutes)
-  log(result.handle.snapshot_path)        // persisted snapshot
+  harness.stdio.log(result.reason)                      // model-supplied
+  harness.stdio.log(result.initiator)                   // "self"
+  harness.stdio.log(result.conditions?.timeout?.duration_minutes)
+  harness.stdio.log(result.handle.snapshot_path)        // persisted snapshot
 }
 ```
 
@@ -136,7 +136,7 @@ session.
 ## Parent-driven pause, resume, and stop
 
 For multi-agent setups, the parent loop owns pause/resume of its children.
-Pass `subagents: true` (or `subagent_tools: true`) to `agent_loop(...)` to
+Pass `subagents: true` (or `subagent_tools: true`) to `agent_loop(harness, ...)` to
 expose `subagent_pause`, `subagent_resume`, and `subagent_stop` as
 model-callable tools:
 
@@ -145,7 +145,7 @@ import { agent_lifecycle_tools } from "std/agent/workers"
 
 const parent_registry = agent_lifecycle_tools(tool_registry(), {subagents: true})
 
-agent_loop("Coordinate the review.", nil, {
+agent_loop(harness, "Coordinate the review.", nil, {
   tools: parent_registry,
   subagents: true,
   provider: "openai",
@@ -173,8 +173,8 @@ const snapshot = suspend_agent(handle, "operator pulled context")
 // ... do other work ...
 const resumed = resume_agent(handle, "Pick up where you left off.")
 const final = wait_agent(handle)
-log(final.status)         // "done"
-log(final.has_transcript) // true — transcript continuity preserved
+harness.stdio.log(final.status)         // "done"
+harness.stdio.log(final.has_transcript) // true — transcript continuity preserved
 ```
 
 `subagent_pause` and `subagent_resume` emit `tool_call_audit` telemetry
@@ -328,7 +328,7 @@ prior reasoning.
 
 ## Top-level loops and `--resume`
 
-A root `agent_loop(...)` — one called from a pipeline or `harn run`
+A root `agent_loop(harness, ...)` — one called from a pipeline or `harn run`
 script, not as a child of another agent — uses the same suspend path. On
 self-park the runtime persists a snapshot under `.harn/workers/worker_*.json`
 and returns `status: "suspended"` to the caller. The CLI can cold-restore
@@ -368,7 +368,7 @@ for share-safe inspection rather than direct continuation.
 
 ## Daemon idle is a degenerate case
 
-`agent_loop(..., {daemon: true})` and the
+`agent_loop(harness, ..., {daemon: true})` and the
 [daemon stdlib wrappers](./stdlib/daemon.md) build on the same primitive.
 When a daemon idles waiting for a trigger event or a wake-interval tick,
 the stdlib records an `agent_await_resumption` request internally and

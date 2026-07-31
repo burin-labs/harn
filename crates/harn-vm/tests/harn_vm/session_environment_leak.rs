@@ -21,7 +21,7 @@ fn harness_env_uses_the_same_isolated_environment() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
     let out = support::logged_isolated(&format!(
         r#"fn main(harness: Harness) {{
-  log(harness.env.get("{SECRET}") == nil ? "CLOSED" : "LEAKED")
+  harness.stdio.log(harness.env.get("{SECRET}") == nil ? "CLOSED" : "LEAKED")
 }}"#,
     ))
     .expect("harness.env result");
@@ -34,8 +34,10 @@ fn harness_env_uses_the_same_isolated_environment() {
 fn exec_does_not_leak_the_secret() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
     let out = support::logged_isolated(&format!(
-        r#"const r = exec({}, "{}")
-log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
+        r#"fn main(harness: Harness) {{
+  const r = harness.process.exec({}, "{}")
+  harness.stdio.log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)
+}}"#,
         support::harn_quote(&support::process_helper()),
         SECRET,
     ))
@@ -44,39 +46,54 @@ log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
 }
 
 #[test]
-fn exec_opts_does_not_leak_the_secret() {
+fn process_run_with_options_does_not_leak_the_secret() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
     let out = support::logged_isolated(&format!(
-        r#"const r = exec_opts([{}, "{}"], {{}})
-log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
+        r#"fn main(harness: Harness) {{
+  const r = harness.process.run({{program: {}, args: ["{}"], env: {{}}}})
+  harness.stdio.log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)
+}}"#,
         support::harn_quote(&support::process_helper()),
         SECRET,
     ))
-    .expect("exec_opts result");
-    assert_eq!(out, vec!["CLOSED".to_string()], "exec_opts leaked");
+    .expect("process.run options result");
+    assert_eq!(
+        out,
+        vec!["CLOSED".to_string()],
+        "process.run options leaked"
+    );
 }
 
 #[test]
-fn spawn_captured_does_not_leak_the_secret() {
+fn harness_process_run_does_not_leak_the_secret() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
     let out = support::logged_isolated(&format!(
-        r#"const r = spawn_captured({{ cmd: {}, args: ["{}"] }})
-log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
+        r#"fn main(harness: Harness) {{
+  const r = harness.process.run({{ program: {}, args: ["{}"] }})
+  harness.stdio.log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)
+}}"#,
         support::harn_quote(&support::process_helper()),
         SECRET,
     ))
-    .expect("spawn_captured result");
-    assert_eq!(out, vec!["CLOSED".to_string()], "spawn_captured leaked");
+    .expect("harness.process.run result");
+    assert_eq!(
+        out,
+        vec!["CLOSED".to_string()],
+        "harness.process.run leaked"
+    );
 }
 
-/// `process.exec` is the host op behind the agent's own shell tool — the
-/// highest-value seam of all, since that is where model-authored commands run.
+/// The variadic `HarnessProcess.exec` adapter uses the same governed process
+/// funnel as structured `run`; pin both public shapes against environment
+/// leakage.
 #[test]
-fn host_process_exec_does_not_leak_the_secret() {
+fn harness_process_exec_does_not_leak_the_secret() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
     let out = support::logged_isolated(&format!(
-        r#"const r = host_call("process.exec", {{ mode: "argv", argv: [{}, "{}"] }})
-log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
+        r#"fn main(harness: Harness) {{
+  const r = harness.process.exec({}, "{}")
+  harness.stdio.log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)
+}}"#,
         support::harn_quote(&support::process_helper()),
         SECRET,
     ))

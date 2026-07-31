@@ -1,4 +1,6 @@
-pipeline main() {
+import { workflow_execute } from "std/workflow/execute"
+
+pipeline main(harness: Harness) {
   const flow = workflow_graph(
     {
       name: "trigger_predicate_observability",
@@ -38,6 +40,7 @@ pipeline main() {
     signature_status: {state: "unsigned"},
   }
   const result = workflow_execute(
+    harness,
     "Handle a scheduled review",
     flow,
     [artifact({kind: "plan", text: "go inspect the repo"})],
@@ -47,7 +50,7 @@ pipeline main() {
       trigger_event: trigger,
     },
   )
-  const loaded = run_record_load(result?.path)
+  const loaded = harness.fs.run_record_load(result?.path)
   const nodes = loaded?.observability?.action_graph_nodes ?? []
   const edges = loaded?.observability?.action_graph_edges ?? []
   let trigger_trace = nil
@@ -70,8 +73,8 @@ pipeline main() {
       saw_predicate_gate = true
     }
   }
-  __io_println(trigger_trace == "trace_conformance")
-  __io_println(predicate_trace == "trace_conformance")
-  __io_println(saw_trigger_dispatch)
-  __io_println(saw_predicate_gate)
+  harness.stdio.println(trigger_trace == "trace_conformance")
+  harness.stdio.println(predicate_trace == "trace_conformance")
+  harness.stdio.println(saw_trigger_dispatch)
+  harness.stdio.println(saw_predicate_gate)
 }

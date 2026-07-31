@@ -1,72 +1,73 @@
 import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 
-fn fixture(harness: Harness, name) {
-  const root = project_root() ?? cwd()
+fn fixture(fs: HarnessFs, name) {
+  const root = fs.workspace_root()
   return json_parse(
-    harness.fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
+    fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
   )
 }
 
-pipeline default() {
-  const local = fixture(harness, "local_job_stream")
+pipeline default(harness: Harness) {
+  const local = fixture(harness.fs, "local_job_stream")
   let events = []
   for item in local.events {
     events = events.appending(dashboard_job_event(item.kind, item))
   }
-  const cloud_event = dashboard_job_event("run.started", fixture(harness, "cloud_managed_run"))
+  const cloud_event = dashboard_job_event("run.started", fixture(harness.fs, "cloud_managed_run"))
   const approval_requested = events.find({ event -> event.kind == "approval.requested" })
   const dlq_created = events.find({ event -> event.kind == "dlq.created" })
   const receipt_available = events.find({ event -> event.kind == "receipt.available" })
   const replay_available = events.find({ event -> event.kind == "replay_fixture.available" })
-  __io_println(events[0].schema)
-  __io_println(events[0].source_clock.kind)
-  __io_println(cloud_event.source.environment + ":" + cloud_event.source_clock.kind)
-  __io_println(approval_requested.status)
-  __io_println(approval_requested.approval.request_id)
-  __io_println(
+  harness.stdio.println(events[0].schema)
+  harness.stdio.println(events[0].source_clock.kind)
+  harness.stdio.println(cloud_event.source.environment + ":" + cloud_event.source_clock.kind)
+  harness.stdio.println(approval_requested.status)
+  harness.stdio.println(approval_requested.approval.request_id)
+  harness.stdio.println(
     approval_requested.action_intents.find({ intent -> intent.kind == "review_approval" })
       .requires_approval,
   )
-  __io_println(dlq_created.status)
-  __io_println(dlq_created.dlq.error_class)
-  __io_println(
+  harness.stdio.println(dlq_created.status)
+  harness.stdio.println(dlq_created.dlq.error_class)
+  harness.stdio.println(
     dlq_created.action_intents.find({ intent -> intent.kind == "replay_dlq" }).requires_approval,
   )
-  __io_println(receipt_available.receipt_refs[0].url)
-  __io_println(replay_available.replay_refs[0].id)
+  harness.stdio.println(receipt_available.receipt_refs[0].url)
+  harness.stdio.println(replay_available.replay_refs[0].id)
   const view = dashboard_jobs_view(
+    harness.obs,
     events.appending(cloud_event),
     {generated_at: "fixture", emit: true, topic: "dashboard.jobs.test"},
   )
-  __io_println(view.schema)
-  __io_println(len(view.jobs))
+  harness.stdio.println(view.schema)
+  harness.stdio.println(len(view.jobs))
   const digest = view.jobs.find({ job -> job.job_id == "daily-digest" })
   const stale = view.jobs.find({ job -> job.job_id == "stale-pr-nudger" })
   const cloud = view.jobs.find({ job -> job.job_id == "cloud-triage-feed" })
-  __io_println(digest.status)
-  __io_println(digest.queue_depth == 0)
-  __io_println(digest.last_result.cards)
-  __io_println(digest.approval.status)
-  __io_println(len(digest.receipt_refs))
-  __io_println(stale.status)
-  __io_println(stale.dlq.dlq_id)
-  __io_println(len(stale.replay_refs))
-  __io_println(
+  harness.stdio.println(digest.status)
+  harness.stdio.println(digest.queue_depth == 0)
+  harness.stdio.println(digest.last_result.cards)
+  harness.stdio.println(digest.approval.status)
+  harness.stdio.println(len(digest.receipt_refs))
+  harness.stdio.println(stale.status)
+  harness.stdio.println(stale.dlq.dlq_id)
+  harness.stdio.println(len(stale.replay_refs))
+  harness.stdio.println(
     stale.action_intents.find({ intent -> intent.kind == "replay_dlq" }).requires_approval,
   )
-  __io_println(
+  harness.stdio.println(
     !stale.action_intents.find({ intent -> intent.kind == "open_replay_fixture" })
       .requires_approval,
   )
-  __io_println(cloud.status)
-  __io_println(len(view.receipts))
-  const stream = event_log.subscribe(
+  harness.stdio.println(cloud.status)
+  harness.stdio.println(len(view.receipts))
+  const stream = harness.obs.event_log_subscribe(
     {topic: "dashboard.jobs.test", from_cursor: view.receipts[0].event_log_id - 1},
   )
   const logged = stream.next().value
-  __io_println(logged.kind)
-  __io_println(logged.payload.job_id)
-  __io_println(logged.headers.schema)
+  harness.stdio.println(logged.kind)
+  harness.stdio.println(logged.payload.job_id)
+  harness.stdio.println(logged.headers.schema)
   const clock_object = dashboard_job_event(
     "run.started",
     {
@@ -75,7 +76,7 @@ pipeline default() {
       source_clock: {kind: "remote-clock", timestamp: "2026-05-11T14:00:01Z"},
     },
   )
-  __io_println(clock_object.source_clock.kind + ":" + clock_object.source_clock.timestamp)
+  harness.stdio.println(clock_object.source_clock.kind + ":" + clock_object.source_clock.timestamp)
   const redacted = dashboard_job_event(
     "run.started",
     {
@@ -86,11 +87,11 @@ pipeline default() {
     },
     {raw_payload_retained: false},
   )
-  __io_println(len(redacted.raw_payload.keys()) == 0)
+  harness.stdio.println(len(redacted.raw_payload.keys()) == 0)
   const missing_timestamp = try {
     dashboard_job_event("run.started", {job_id: "missing-timestamp", run_id: "run-missing"})
   }
-  __io_println(is_err(missing_timestamp))
+  harness.stdio.println(is_err(missing_timestamp))
   const ungated_action = try {
     dashboard_job_event(
       "dlq.created",
@@ -113,7 +114,7 @@ pipeline default() {
       },
     )
   }
-  __io_println(is_err(ungated_action))
+  harness.stdio.println(is_err(ungated_action))
   const missing_action_target = try {
     dashboard_job_event(
       "run.started",
@@ -129,7 +130,7 @@ pipeline default() {
       },
     )
   }
-  __io_println(is_err(missing_action_target))
+  harness.stdio.println(is_err(missing_action_target))
   const missing_receipt = try {
     dashboard_job_event(
       "receipt.available",
@@ -140,5 +141,5 @@ pipeline default() {
       },
     )
   }
-  __io_println(is_err(missing_receipt))
+  harness.stdio.println(is_err(missing_receipt))
 }

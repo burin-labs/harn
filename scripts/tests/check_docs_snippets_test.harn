@@ -4,7 +4,7 @@ import "../check_docs_snippets.harn"
 
 // --- extract_blocks ---------------------------------------------------------
 @test
-pipeline test_extract_basic_block(task) {
+pipeline test_extract_basic_block(harness: Harness, task) {
   const md = "intro\n```harn\nlet x = 1\nlog(x)\n```\noutro\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -15,7 +15,7 @@ pipeline test_extract_basic_block(task) {
 }
 
 @test
-pipeline test_extract_ignore_block_skipped(task) {
+pipeline test_extract_ignore_block_skipped(harness: Harness, task) {
   const md = "```harn,ignore\npartial fragment\n```\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -24,7 +24,7 @@ pipeline test_extract_ignore_block_skipped(task) {
 }
 
 @test
-pipeline test_extract_idx_counts_all_harn_fences(task) {
+pipeline test_extract_idx_counts_all_harn_fences(harness: Harness, task) {
   // The block index counts harn fences (checked AND ignored), matching the
   // awk `idx++` on both fence kinds.
   const md = "```harn,ignore\na\n```\n\n```harn\nb\n```\n"
@@ -37,7 +37,7 @@ pipeline test_extract_idx_counts_all_harn_fences(task) {
 }
 
 @test
-pipeline test_extract_check_block_opts_into_full_check(task) {
+pipeline test_extract_check_block_opts_into_full_check(harness: Harness, task) {
   const md = "```harn,check\npipeline default() { return 1 }\n```\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -48,7 +48,7 @@ pipeline test_extract_check_block_opts_into_full_check(task) {
 }
 
 @test
-pipeline test_extract_other_fences_ignored(task) {
+pipeline test_extract_other_fences_ignored(harness: Harness, task) {
   const md = "```bash\necho hi\n```\n```harn\nx\n```\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -57,14 +57,14 @@ pipeline test_extract_other_fences_ignored(task) {
 }
 
 @test
-pipeline test_extract_info_string_must_be_exact(task) {
+pipeline test_extract_info_string_must_be_exact(harness: Harness, task) {
   // ```harn extra or trailing spaces do not open a checked block.
   assert_eq(extract_blocks("```harn foo\nx\n```\n"), [])
   assert_eq(extract_blocks("```harn \nx\n```\n"), [])
 }
 
 @test
-pipeline test_extract_unclosed_at_eof(task) {
+pipeline test_extract_unclosed_at_eof(harness: Harness, task) {
   const events = extract_blocks("pre\n```harn\nbody\n")
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "unclosed")
@@ -72,7 +72,7 @@ pipeline test_extract_unclosed_at_eof(task) {
 }
 
 @test
-pipeline test_extract_reopened_fence_reports_previous(task) {
+pipeline test_extract_reopened_fence_reports_previous(harness: Harness, task) {
   // A new ```harn fence while one is open reports the earlier open line
   // and starts a fresh block.
   const events = extract_blocks("```harn\na\n```harn\nb\n```\n")
@@ -86,12 +86,12 @@ pipeline test_extract_reopened_fence_reports_previous(task) {
 }
 
 @test
-pipeline test_extract_empty_input(task) {
+pipeline test_extract_empty_input(harness: Harness, task) {
   assert_eq(extract_blocks(""), [])
 }
 
 @test
-pipeline test_extract_indented_block_is_checked(task) {
+pipeline test_extract_indented_block_is_checked(harness: Harness, task) {
   // A fence nested under a list item is a real example and gets checked.
   // Before this was handled, such blocks were silently invisible to the
   // gate — a `harn parse` failure shipped in docs/src/diagnostics.md
@@ -106,7 +106,7 @@ pipeline test_extract_indented_block_is_checked(task) {
 }
 
 @test
-pipeline test_extract_indented_block_keeps_relative_indent(task) {
+pipeline test_extract_indented_block_keeps_relative_indent(harness: Harness, task) {
   // Only the fence's own indent is removed; nesting inside the snippet
   // survives, so the extracted source is byte-identical to the example.
   const md = "  ```harn\n  fn f() -> int {\n    return 1\n  }\n  ```\n"
@@ -116,13 +116,13 @@ pipeline test_extract_indented_block_keeps_relative_indent(task) {
 }
 
 @test
-pipeline test_extract_indented_ignore_and_check_tags(task) {
+pipeline test_extract_indented_ignore_and_check_tags(harness: Harness, task) {
   assert_eq(extract_blocks("  ```harn,ignore\n  frag\n  ```\n")[0].kind, "skip")
   assert_eq(extract_blocks("  ```harn,check\n  x\n  ```\n")[0].mode, "check")
 }
 
 @test
-pipeline test_extract_indented_blank_line_in_body(task) {
+pipeline test_extract_indented_blank_line_in_body(harness: Harness, task) {
   // A blank line carries no indent to strip and must not underflow.
   const events = extract_blocks("  ```harn\n  const a = 1\n\n  const b = 2\n  ```\n")
   assert_eq(events[0].content, "const a = 1\n\nconst b = 2\n")
@@ -130,7 +130,7 @@ pipeline test_extract_indented_blank_line_in_body(task) {
 
 // --- harn-prompt fences -----------------------------------------------------
 @test
-pipeline test_extract_prompt_block(task) {
+pipeline test_extract_prompt_block(harness: Harness, task) {
   const md = "```harn-prompt\n{{ if x }}a{{ end }}\n```\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -140,14 +140,14 @@ pipeline test_extract_prompt_block(task) {
 }
 
 @test
-pipeline test_extract_prompt_ignore_block_skipped(task) {
+pipeline test_extract_prompt_ignore_block_skipped(harness: Harness, task) {
   const events = extract_blocks("```harn-prompt,ignore\n{{ fragment\n```\n")
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "skip")
 }
 
 @test
-pipeline test_extract_prompt_and_harn_share_one_index(task) {
+pipeline test_extract_prompt_and_harn_share_one_index(harness: Harness, task) {
   // Temp-file names are keyed on idx, so both languages advance the same
   // counter and cannot collide within a file.
   const events = extract_blocks("```harn\nx\n```\n\n```harn-prompt\n{{ y }}\n```\n")
@@ -159,14 +159,14 @@ pipeline test_extract_prompt_and_harn_share_one_index(task) {
 }
 
 @test
-pipeline test_extract_prompt_info_string_must_be_exact(task) {
+pipeline test_extract_prompt_info_string_must_be_exact(harness: Harness, task) {
   assert_eq(extract_blocks("```harn-prompt extra\nx\n```\n"), [])
   assert_eq(extract_blocks("```text\n{{ x }}\n```\n"), [])
 }
 
 // --- longer fences ----------------------------------------------------------
 @test
-pipeline test_extract_longer_fence_keeps_inner_backticks(task) {
+pipeline test_extract_longer_fence_keeps_inner_backticks(harness: Harness, task) {
   // A template that shows fenced output is itself fenced with four
   // backticks; the inner ``` lines are body, not the close.
   const md = "````harn-prompt\n{{ for s in xs }}\n```\n{{ s }}\n```\n{{ end }}\n````\n"
@@ -178,7 +178,7 @@ pipeline test_extract_longer_fence_keeps_inner_backticks(task) {
 }
 
 @test
-pipeline test_extract_three_tick_block_still_closes_on_longer_fence(task) {
+pipeline test_extract_three_tick_block_still_closes_on_longer_fence(harness: Harness, task) {
   // A ``` block closes on any fence at least as long, preserving the
   // behaviour that predates variable-length fences.
   const events = extract_blocks("```harn\nx\n````\n")
@@ -189,7 +189,7 @@ pipeline test_extract_three_tick_block_still_closes_on_longer_fence(task) {
 
 // --- fence + mode tables ----------------------------------------------------
 @test
-pipeline test_backtick_run_len(task) {
+pipeline test_backtick_run_len(harness: Harness, task) {
   assert_eq(backtick_run_len("```harn"), 3)
   assert_eq(backtick_run_len("````"), 4)
   assert_eq(backtick_run_len("no ticks"), 0)
@@ -197,7 +197,7 @@ pipeline test_backtick_run_len(task) {
 }
 
 @test
-pipeline test_fence_mode_and_ownership(task) {
+pipeline test_fence_mode_and_ownership(harness: Harness, task) {
   assert_eq(fence_mode("harn"), "parse")
   assert_eq(fence_mode("harn,check"), "check")
   assert_eq(fence_mode("harn-prompt"), "prompt")
@@ -211,7 +211,7 @@ pipeline test_fence_mode_and_ownership(task) {
 }
 
 @test
-pipeline test_mode_extension_and_argv(task) {
+pipeline test_mode_extension_and_argv(harness: Harness, task) {
   // A prompt block must reach `harn lint` as a .harn.prompt file: the
   // extension is what routes it to the template parser rather than the
   // Harn parser.
@@ -227,7 +227,7 @@ pipeline test_mode_extension_and_argv(task) {
 
 // --- leading_ws_len / strip_indent ------------------------------------------
 @test
-pipeline test_leading_ws_len(task) {
+pipeline test_leading_ws_len(harness: Harness, task) {
   assert_eq(leading_ws_len("no indent"), 0)
   assert_eq(leading_ws_len("  two"), 2)
   assert_eq(leading_ws_len("\ttab"), 1)
@@ -236,7 +236,7 @@ pipeline test_leading_ws_len(task) {
 }
 
 @test
-pipeline test_strip_indent(task) {
+pipeline test_strip_indent(harness: Harness, task) {
   assert_eq(strip_indent("  body", 2), "body")
   assert_eq(strip_indent("    nested", 2), "  nested")
   // Never strips past the whitespace a line actually has.
@@ -246,7 +246,7 @@ pipeline test_strip_indent(task) {
 
 // --- md_base_name -----------------------------------------------------------
 @test
-pipeline test_md_base_name(task) {
+pipeline test_md_base_name(harness: Harness, task) {
   assert_eq(md_base_name("docs/src/dev/testing.md"), "testing")
   assert_eq(md_base_name("plain.md"), "plain")
   assert_eq(md_base_name("docs/src/noext"), "noext")
@@ -254,13 +254,13 @@ pipeline test_md_base_name(task) {
 
 // --- indent_output ----------------------------------------------------------
 @test
-pipeline test_indent_output(task) {
+pipeline test_indent_output(harness: Harness, task) {
   assert_eq(indent_output("a\nb\n"), ["      | a", "      | b"])
   assert_eq(indent_output(""), [])
 }
 
 // --- rel_path ---------------------------------------------------------------
 @test
-pipeline test_rel_path(task) {
+pipeline test_rel_path(harness: Harness, task) {
   assert_eq(rel_path("/r/./docs/src/a.md"), "docs/src/a.md")
 }

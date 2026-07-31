@@ -52,6 +52,15 @@ pub struct CrossCuttingBehaviour {
 /// the dispatch.
 pub const HOST_CALL_CROSS_CUTTING: &[CrossCuttingBehaviour] = &[
     CrossCuttingBehaviour {
+        callee: "dispatch_host",
+        owner: SemanticsOwner::Runtime,
+        acp_observes: true,
+        tracked_by: None,
+        rationale: "Explicit Harness fixtures are runtime-owned deterministic authority. ACP \
+                    keeps canonical dispatch, so a fixture bound to the current VM intercepts \
+                    the host operation before any embedder bridge is consulted.",
+    },
+    CrossCuttingBehaviour {
         callee: "dispatch_mock_host_call",
         owner: SemanticsOwner::Runtime,
         acp_observes: true,
@@ -144,6 +153,13 @@ pub const NON_BEHAVIOURAL_CALLS: &[&str] = &[
     "HOST_CALL_BRIDGE.with",
     "b.borrow",
     "clone",
+    // The capability-first fixture lookup follows the current VM's explicit
+    // root Harness and does not change host-call ownership or routing.
+    "ctx.child_vm",
+    "vm.harness",
+    "and_then",
+    "inner",
+    "fixtures",
 ];
 
 /// Extract the body of `dispatch_host_operation_with_ctx` from the source.

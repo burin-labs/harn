@@ -14,12 +14,7 @@ import {
   with_temp_dir,
 } from "std/testing"
 
-fn capture_llm() {
-  const r = llm_call("ask", nil, {provider: "mock"})
-  return {text: r.text, count: llm_call_count()}
-}
-
-pipeline test_testing_toolkit(task) {
+pipeline test_testing_toolkit(harness: Harness, task) {
   // === LLM turn builders produce the shapes `llm_mock` accepts ===
   assert_eq(llm_text("hi"), {text: "hi"})
   assert_eq(llm_done(), {text: "##DONE##"})
@@ -41,12 +36,19 @@ pipeline test_testing_toolkit(task) {
   assert_eq(multi.tool_calls[0], {id: "a_0", name: "a", arguments: {x: 1}})
   assert_eq(multi.tool_calls[1], {id: "bb", name: "b", arguments: {}})
   // === with_llm_script drives a scoped, ordered mock script ===
-  llm_mock_clear()
-  const scripted = with_llm_script([llm_text("scoped")], capture_llm)
+  harness.llm.mock_clear()
+  const scripted = with_llm_script(
+    harness.llm,
+    [llm_text("scoped")],
+    fn() {
+      const r = harness.llm.call("ask", nil, {provider: "mock"})
+      return {text: r.text, count: llm_call_count(harness.llm)}
+    },
+  )
   assert_eq(scripted.text, "scoped")
   assert_eq(scripted.count, 1)
   // Scope restored after the body.
-  assert_eq(llm_call_count(), 0)
+  assert_eq(llm_call_count(harness.llm), 0)
   // === assert_throws returns the thrown error ===
   const err = assert_throws(
     { ->
@@ -101,6 +103,7 @@ pipeline test_testing_toolkit(task) {
   // captured variable.
   // === with_temp_dir: workspace exists in body, removed after ===
   const temp_result = with_temp_dir(
+    harness.fs,
     { dir ->
       assert(harness.fs.exists(dir))
       harness.fs.write_text(dir + "/x.txt", "1")
@@ -113,6 +116,7 @@ pipeline test_testing_toolkit(task) {
   assert_eq(harness.fs.exists(temp_result.dir), false)
   // === with_fs: seeds files (incl. nested + JSON), reads back, cleans up ===
   const fs_result = with_fs(
+    harness.fs,
     {"in.txt": "hello", "nested/deep/cfg.json": {a: 1}},
     { dir ->
       assert_eq(harness.fs.read_text(dir + "/in.txt"), "hello")
@@ -125,6 +129,7 @@ pipeline test_testing_toolkit(task) {
   // Throw the dir itself so we can assert it was removed after the throw.
   const leaked_dir = try {
     with_temp_dir(
+      harness.fs,
       { dir ->
         throw dir
       },
@@ -136,29 +141,31 @@ pipeline test_testing_toolkit(task) {
   assert(contains(leaked_dir, "harn-test-"))
   assert_eq(harness.fs.exists(leaked_dir), false)
   // === with_scenario: fs + scripted llm in one declarative block ===
-  llm_mock_clear()
+  harness.llm.mock_clear()
   const scenario_out = with_scenario(
+    harness,
     {llm: [llm_text("answer")], fs: {"seed.txt": "ok"}},
     { s ->
       let seed = harness.fs.read_text(s.dir + "/seed.txt")
-      let reply = llm_call("go", nil, {provider: "mock"})
+      let reply = harness.llm.call("go", nil, {provider: "mock"})
       {dir: s.dir, seed: seed, reply: reply.text}
     },
   )
   assert_eq(scenario_out.seed, "ok")
   assert_eq(scenario_out.reply, "answer")
   assert_eq(harness.fs.exists(scenario_out.dir), false)
-  assert_eq(llm_call_count(), 0)
+  assert_eq(llm_call_count(harness.llm), 0)
   // with_scenario without fs/temp_dir passes a nil dir but still mocks.
-  llm_mock_clear()
+  harness.llm.mock_clear()
   const no_fs = with_scenario(
+    harness,
     {llm: [llm_text("plain")]},
     { s ->
-      let reply = llm_call("x", nil, {provider: "mock"})
+      let reply = harness.llm.call("x", nil, {provider: "mock"})
       {dir: s.dir, reply: reply.text}
     },
   )
   assert_eq(no_fs.dir, nil)
   assert_eq(no_fs.reply, "plain")
-  __io_println("ok")
+  harness.stdio.println("ok")
 }

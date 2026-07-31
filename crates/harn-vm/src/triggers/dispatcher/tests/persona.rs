@@ -76,7 +76,7 @@ async fn persona_dispatch_invokes_entry_workflow_before_completing_run() {
                 r#"
 import "std/triggers"
 
-pub pipeline run(event) {
+pub pipeline run(harness: Harness, event) {
   return {executed: true, kind: event.kind, cost_usd: 0.125, tokens: 42}
 }
 "#,
@@ -150,8 +150,8 @@ async fn persona_callable_autonomy_ceiling_survives_higher_dispatch_tier() {
                 r#"
 import "std/triggers"
 
-pub pipeline run(_event) {
-  return handler_context()
+pub pipeline run(harness: Harness, _event) {
+  return harness.runtime.handler_context()
 }
 "#,
             )
@@ -192,8 +192,8 @@ async fn persona_dispatch_enforces_explicit_deny_all_capability_policy() {
                 r#"
 import "std/triggers"
 
-pub pipeline run(_event) {
-  return llm_call("this call must never reach a provider", nil, {provider: "mock"})
+pub pipeline run(harness: Harness, _event) {
+  return harness.llm.call("this call must never reach a provider", nil, {provider: "mock"})
 }
 "#,
             )
@@ -223,7 +223,9 @@ pub pipeline run(_event) {
             assert_eq!(outcomes[0].attempt_count, 1);
             assert!(
                 outcomes[0].error.as_deref().is_some_and(|error| {
-                    error.contains("tool_rejected") && error.contains("llm.call ceiling")
+                    error.contains("tool_rejected")
+                        && error.contains("harness.llm.call exceeds the active effect ceiling")
+                        && error.contains("llm:mock:write")
                 }),
                 "{:?}",
                 outcomes[0].error
@@ -245,7 +247,7 @@ async fn persona_dispatch_failure_records_failed_run_and_releases_lease() {
                 r#"
 import "std/triggers"
 
-pub pipeline run(_event) {
+pub pipeline run(harness: Harness, _event) {
   throw "persona failed"
 }
 "#,
@@ -324,9 +326,9 @@ async fn persona_dispatch_cancellation_records_one_failed_terminal() {
                 r#"
 import "std/triggers"
 
-pub pipeline run(_event) {
+pub pipeline run(harness: Harness, _event) {
   while !is_cancelled() {
-    sleep(1)
+    harness.clock.sleep_ms(1)
   }
   return "cancelled"
 }

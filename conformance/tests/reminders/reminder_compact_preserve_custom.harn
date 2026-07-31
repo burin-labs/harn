@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const base = transcript_from_messages(
     [
       {role: "user", content: "one"},
@@ -7,15 +7,15 @@ pipeline main() {
       {role: "assistant", content: "four"},
     ],
   )
-  const durable = transcript.inject_reminder(
+  const durable = harness.agent.transcript_inject_reminder(
     base,
     {body: "durable", dedupe_key: "durable", ttl_turns: 2, preserve_on_compact: true},
   ).transcript
-  const mixed = transcript.inject_reminder(
+  const mixed = harness.agent.transcript_inject_reminder(
     durable,
     {body: "compactable", dedupe_key: "compactable", ttl_turns: 2, preserve_on_compact: false},
   ).transcript
-  const compacted = transcript_compact(
+  const compacted = harness.agent.compact_transcript(
     mixed,
     {
       strategy: "custom",
@@ -29,7 +29,7 @@ pipeline main() {
     },
   )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
-  __io_println(transcript_summary(compacted)?.contains("2 reminders compactable"))
-  __io_println(len(reminders))
-  __io_println(reminders[0].reminder.body)
+  harness.stdio.println(transcript_summary(compacted)?.contains("2 reminders compactable"))
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
 }

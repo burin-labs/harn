@@ -294,7 +294,6 @@ impl TypeScope {
         scope.define_var("argv", None);
         for (name, ty) in [
             ("e", TypeExpr::Named("float".into())),
-            ("harness", TypeExpr::Named("Harness".into())),
             ("pi", TypeExpr::Named("float".into())),
         ] {
             scope.define_var(name, Some(ty));

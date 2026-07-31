@@ -1,4 +1,4 @@
-pipeline main() {
+pipeline main(harness: Harness) {
   const tools = [
     {
       name: "read_file",
@@ -21,16 +21,16 @@ pipeline main() {
       {error: "unknown binding " + name}
     }
   }
-  const report = composition_execute(
+  const report = harness.tools.composition_execute(
     "let readme = read_file({path: \"README.md\"})\nlet hits = search({query: readme.content})\nreturn {readme_content: readme.content, hits_query: hits.query, hits_count: hits.count}",
     manifest,
     {run_id: "conformance-dispatcher", dispatcher: dispatch},
   )
-  __io_println(report.ok)
-  __io_println(report.child_calls.count)
-  __io_println(report.child_calls[0].tool_name)
-  __io_println(report.child_calls[1].tool_name)
-  __io_println(report.run.result.readme_content)
-  __io_println(report.run.result.hits_query)
-  __io_println(report.run.result.hits_count)
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.child_calls.count)
+  harness.stdio.println(report.child_calls[0].tool_name)
+  harness.stdio.println(report.child_calls[1].tool_name)
+  harness.stdio.println(report.run.result.readme_content)
+  harness.stdio.println(report.run.result.hits_query)
+  harness.stdio.println(report.run.result.hits_count)
 }

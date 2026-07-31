@@ -456,14 +456,14 @@ pub fn has_long_flag(args: list<string>) -> bool {
  * else the workspace target dir's debug build (building it quietly when
  * missing) — the same ladder as the bash original.
  */
-fn resolve_harn_bin() -> string {
+fn resolve_harn_bin(harness: Harness) -> string {
   const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin
   }
   let target_dir = ""
-  const meta = harness.process.spawn_captured(
-    {cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
+  const meta = harness.process.run(
+    {program: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
   )
   if meta.success {
     const parsed = try {
@@ -481,29 +481,27 @@ fn resolve_harn_bin() -> string {
   }
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
-    __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process.spawn_captured(
-      {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
-    )
+    harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
+    const build = harness.process.run({program: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
-      __io_eprint(build.stderr)
+      harness.stdio.eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
     }
   }
   return bin
 }
 
-fn fetch_help(harn_bin: string, path: list<string>) -> string {
-  const res = harness.process.spawn_captured({cmd: harn_bin, args: path + ["--help"]})
+fn fetch_help(process: HarnessProcess, harn_bin: string, path: list<string>) -> string {
+  const res = process.run({program: harn_bin, args: path + ["--help"]})
   if res.exit_code == 0 {
     return res.stdout + res.stderr
   }
   return ""
 }
 
-pipeline main(task) {
-  const harn_bin = resolve_harn_bin()
-  const fetch = { path: list<string> -> fetch_help(harn_bin, path) }
+pipeline main(harness: Harness, task) {
+  const harn_bin = resolve_harn_bin(harness)
+  const fetch = { path: list<string> -> fetch_help(harness.process, harn_bin, path) }
   let md_files: list<string> = []
   for g in harness.fs.glob(DOCS_GLOB) {
     md_files = md_files + [rel_path(g)]
@@ -558,9 +556,9 @@ pipeline main(task) {
     }
   }
   for err in parse_errors {
-    __io_println("FAIL: ${err.file}:${err.line_no}")
-    __io_println("      could not parse shell command containing harn")
-    __io_println("      command: ${err.command}")
+    harness.stdio.println("FAIL: ${err.file}:${err.line_no}")
+    harness.stdio.println("      could not parse shell command containing harn")
+    harness.stdio.println("      command: ${err.command}")
   }
   for failure in failures {
     const help_target = if failure.path.count > 0 {
@@ -568,19 +566,19 @@ pipeline main(task) {
     } else {
       "harn"
     }
-    __io_println("FAIL: ${failure.file}:${failure.line_no}")
-    __io_println("      command: ${failure.command}")
-    __io_println("      checked: ${help_target} --help")
-    __io_println("      missing long flag(s): ${failure.missing.join(", ")}")
+    harness.stdio.println("FAIL: ${failure.file}:${failure.line_no}")
+    harness.stdio.println("      command: ${failure.command}")
+    harness.stdio.println("      checked: ${help_target} --help")
+    harness.stdio.println("      missing long flag(s): ${failure.missing.join(", ")}")
   }
   const total_failures = parse_errors.count + failures.count
-  __io_println("")
-  __io_println(
+  harness.stdio.println("")
+  harness.stdio.println(
     "docs CLI flags: ${checked} flag-bearing harn invocation(s) checked, ${skipped} skipped, ${total_failures} failed",
   )
   if total_failures > 0 {
-    __io_println("")
-    __io_println(
+    harness.stdio.println("")
+    harness.stdio.println(
       "hint: fix the docs or add inline `# ${ALLOW_STALE}` for intentional stale examples.",
     )
     return 1

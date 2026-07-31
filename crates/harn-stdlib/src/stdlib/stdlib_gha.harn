@@ -88,8 +88,8 @@ pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptio
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn gha_notice(message: string, options: GhaAnnotationOptions = {}) {
-  __io_write_stdout(gha_annotation("notice", message, options) + "\n")
+pub fn gha_notice(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+  stdio.println(gha_annotation("notice", message, options))
 }
 
 /**
@@ -98,8 +98,8 @@ pub fn gha_notice(message: string, options: GhaAnnotationOptions = {}) {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn gha_warning(message: string, options: GhaAnnotationOptions = {}) {
-  __io_write_stdout(gha_annotation("warning", message, options) + "\n")
+pub fn gha_warning(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+  stdio.println(gha_annotation("warning", message, options))
 }
 
 /**
@@ -108,8 +108,8 @@ pub fn gha_warning(message: string, options: GhaAnnotationOptions = {}) {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn gha_error(message: string, options: GhaAnnotationOptions = {}) {
-  __io_write_stdout(gha_annotation("error", message, options) + "\n")
+pub fn gha_error(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+  stdio.println(gha_annotation("error", message, options))
 }
 
 /**
@@ -118,8 +118,13 @@ pub fn gha_error(message: string, options: GhaAnnotationOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn gha_env_block(name: string, value, delimiter: string? = nil) -> string {
-  const delim = delimiter ?? ("harn_" + uuid_v7())
+pub fn gha_env_block(
+  random: HarnessRandom,
+  name: string,
+  value,
+  delimiter: string? = nil,
+) -> string {
+  const delim = delimiter ?? ("harn_" + random.uuid_v7())
   return name + "<<" + delim + "\n" + to_string(value ?? "") + "\n" + delim + "\n"
 }
 
@@ -129,12 +134,12 @@ pub fn gha_env_block(name: string, value, delimiter: string? = nil) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
+pub fn gha_write_output(harness: Harness, name: string, value, path: string? = nil) -> bool {
   const target = __gha_file_path(path, harness.env.get("GITHUB_OUTPUT"))
   if target == nil {
     return false
   }
-  harness.fs.append(target, gha_env_block(name, value))
+  harness.fs.append(target, gha_env_block(harness.random, name, value))
   return true
 }
 
@@ -144,12 +149,12 @@ pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
+pub fn gha_write_env(harness: Harness, name: string, value, path: string? = nil) -> bool {
   const target = __gha_file_path(path, harness.env.get("GITHUB_ENV"))
   if target == nil {
     return false
   }
-  harness.fs.append(target, gha_env_block(name, value))
+  harness.fs.append(target, gha_env_block(harness.random, name, value))
   return true
 }
 
@@ -159,14 +164,19 @@ pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn gha_append_summary(markdown: string, path: string? = nil) -> bool {
-  const target = __gha_file_path(path, harness.env.get("GITHUB_STEP_SUMMARY"))
+pub fn gha_append_summary(
+  env: HarnessEnv,
+  fs: HarnessFs,
+  markdown: string,
+  path: string? = nil,
+) -> bool {
+  const target = __gha_file_path(path, env.get("GITHUB_STEP_SUMMARY"))
   if target == nil {
     return false
   }
-  harness.fs.append(target, markdown ?? "")
+  fs.append(target, markdown ?? "")
   if !ends_with(markdown ?? "", "\n") {
-    harness.fs.append(target, "\n")
+    fs.append(target, "\n")
   }
   return true
 }

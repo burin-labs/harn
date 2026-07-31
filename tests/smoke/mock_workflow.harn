@@ -6,11 +6,11 @@
  * minimal: one canned response, one assertion, one deterministic
  * println so smoke output can be byte-compared on every platform.
  */
-pipeline default() {
-  llm_mock({text: "smoke"})
-  const result = llm_call("smoke probe", nil, {provider: "mock"})
+pipeline default(harness: Harness) {
+  harness.llm.mock_enqueue({text: "smoke"})
+  const result = harness.llm.call("smoke probe", nil, {provider: "mock"})
   if result.text != "smoke" {
     throw "mock workflow smoke failed: expected text=smoke, got ${result.text}"
   }
-  __io_println("mock workflow ok")
+  harness.stdio.println("mock workflow ok")
 }

@@ -1,15 +1,15 @@
-pipeline test(task) {
-  log("hello world".replace("world", "harn"))
-  log("a,b,c".split(","))
-  log("  hello  ".trim())
-  log("hello".starts_with("hel"))
-  log("hello".starts_with("xyz"))
-  log("hello".ends_with("lo"))
-  log("hello".ends_with("xy"))
-  log("hello".substring(1, 3))
+pipeline test(harness: Harness, task) {
+  harness.stdio.log("hello world".replace("world", "harn"))
+  harness.stdio.log("a,b,c".split(","))
+  harness.stdio.log("  hello  ".trim())
+  harness.stdio.log("hello".starts_with("hel"))
+  harness.stdio.log("hello".starts_with("xyz"))
+  harness.stdio.log("hello".ends_with("lo"))
+  harness.stdio.log("hello".ends_with("xy"))
+  harness.stdio.log("hello".substring(1, 3))
   // Negative / out-of-range indices clamp to [0, len]; end < start yields "".
-  log("[" + "hello world".substring(0, -1) + "]")
-  log("[" + "hello world".substring(-3, 5) + "]")
-  log("[" + "hello world".substring(2, -3) + "]")
-  log("[" + "hello world".substring(0, 100) + "]")
+  harness.stdio.log("[" + "hello world".substring(0, -1) + "]")
+  harness.stdio.log("[" + "hello world".substring(-3, 5) + "]")
+  harness.stdio.log("[" + "hello world".substring(2, -3) + "]")
+  harness.stdio.log("[" + "hello world".substring(0, 100) + "]")
 }

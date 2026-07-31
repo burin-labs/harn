@@ -153,7 +153,12 @@ impl Vm {
         }
 
         let final_value = if let Some(closure) = on_finish {
-            let harness_value = crate::harness::Harness::real().into_vm_value();
+            let harness_value = self.root_harness_value().ok_or_else(|| {
+                VmError::Runtime(
+                    "pipeline finish callback requires Harness, but no root Harness is installed"
+                        .to_string(),
+                )
+            })?;
             self.call_closure_pub(&closure, &[harness_value, value])
                 .await?
         } else {
@@ -198,11 +203,19 @@ impl Vm {
         if invocations.is_empty() {
             return Ok(());
         }
+        let harness = self.root_harness_value().ok_or_else(|| {
+            VmError::Runtime(
+                "pipeline lifecycle hook requires Harness, but no root Harness is installed"
+                    .to_string(),
+            )
+        })?;
         let mut current_payload = payload.clone();
         for invocation in invocations {
             let arg = crate::stdlib::json_to_vm_value(&current_payload);
             let closure = invocation.resolve(self).await?;
-            let raw = self.call_closure_pub(&closure, &[arg]).await?;
+            let raw = self
+                .call_closure_pub(&closure, &[harness.clone(), arg])
+                .await?;
             let (action, effects) = crate::orchestration::collect_hook_effects_and_action(
                 event,
                 raw,
@@ -951,7 +964,7 @@ mod tests {
                 let baseline_dir = tempfile::tempdir().unwrap();
                 let imported_dir = tempfile::tempdir().unwrap();
                 let poisoned_dir = tempfile::tempdir().unwrap();
-                let quick = compile_harn("pipeline default() { return 42 }");
+                let quick = compile_harn("pipeline default(harness: Harness) { return 42 }");
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 crate::tracing::set_tracing_enabled(true);
@@ -1060,13 +1073,13 @@ mod tests {
                     &imported_path,
                     r#"
 @persona(name: "cancel_persona", stages: [{name: "cancel_step", allowed_tools: ["cancel_tool"]}])
-pub fn cancellation_entry() {
-  return cancelled_step()
+pub fn cancellation_entry(agent: HarnessAgent) {
+  return cancelled_step(agent)
 }
 
 @step(name: "cancel_step", model: "cancel-model")
-fn cancelled_step() {
-  pipeline_on_finish({ _h, value -> value })
+fn cancelled_step(agent: HarnessAgent) {
+  agent.pipeline_on_finish({ _h, value -> value })
   const child = spawn {
     child_started()
     wait_for_child_release()
@@ -1090,7 +1103,7 @@ fn cancelled_step() {
                 let outer_callback = helper_exports.remove("outer_callback").unwrap();
                 let slow = compile_harn(&format!(
                     "import {{ cancellation_entry }} from \"{}\"\n\
-                     pipeline default() {{ return cancellation_entry() }}",
+                     pipeline default(harness: Harness) {{ return cancellation_entry(harness.agent) }}",
                     imported_path.display()
                 ));
 
@@ -1218,7 +1231,7 @@ fn cancelled_step() {
                     Ok(VmValue::Nil)
                 });
                 let vm_b_chunk =
-                    compile_harn("pipeline default() { observe_baseline(); return 42 }");
+                    compile_harn("pipeline default(harness: Harness) { observe_baseline(); return 42 }");
                 assert!(matches!(
                     vm_b.execute(&vm_b_chunk).await.unwrap(),
                     VmValue::Int(42)
@@ -1244,8 +1257,8 @@ fn cancelled_step() {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let infinite = compile_harn("pipeline default() { while true {} }");
-                let quick = compile_harn("pipeline default() { return 42 }");
+                let infinite = compile_harn("pipeline default(harness: Harness) { while true {} }");
+                let quick = compile_harn("pipeline default(harness: Harness) { return 42 }");
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
 
@@ -1270,7 +1283,7 @@ fn cancelled_step() {
             .run_until(async {
                 let chunk = compile_harn(
                     r"
-pipeline default() {
+pipeline default(harness: Harness) {
   let total = 0
   for i in 0 to 10000 {
     total = total + i

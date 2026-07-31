@@ -586,7 +586,7 @@ impl Vm {
         // Avoids the script-mode compile path that trails a Pop+Nil
         // sequence after every expression statement, which would
         // clobber the result before we could capture it.
-        let wrapped = format!("pipeline default() {{\n  return ({trimmed})\n}}\n");
+        let wrapped = format!("pipeline default(harness: Harness) {{\n  return ({trimmed})\n}}\n");
         let program = harn_parser::check_source_strict(&wrapped)
             .map_err(|e| VmError::Runtime(format!("evaluate: parse error: {e}")))?;
         let mut chunk = crate::compiler::Compiler::new()

@@ -5,8 +5,8 @@
 //! threads tenant + scopes into the dispatch (so `@scopes` admission and
 //! `harness.tenant.id()` agree with the embedder), a scope shortfall is
 //! refused with the canonical `forbidden` envelope, a `Deny` response
-//! passes through verbatim, and the opaque embedder context is visible
-//! to a [`harn_vm::HostCallBridge`] for the duration of the dispatch.
+//! passes through verbatim, and scripts receive request identity only
+//! through the nominal `HarnessAuth` capability.
 //!
 //! All cases drive the router through `tower::ServiceExt::oneshot`,
 //! mirroring `tests/site_hosting.rs`.
@@ -20,17 +20,16 @@ use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use harn_serve::{
-    current_auth_context, DispatchCore, DispatchCoreConfig, DispatchError, NoReplayCache,
-    RouteSpec, SiteAuth, SiteAuthContext, SiteAuthOutcome, SiteServer, SiteServerConfig,
-    VmConfigurator,
+    DispatchCore, DispatchCoreConfig, NoReplayCache, RouteSpec, SiteAuth, SiteAuthContext,
+    SiteAuthOutcome, SiteServer, SiteServerConfig, VmConfigurator,
 };
-use harn_vm::{HostCallBridge, TenantId, Vm, VmValue};
+use harn_vm::TenantId;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
 /// One script backs every case: a public route, a `@scopes`-guarded
 /// route that also reports the bound tenant, and a route that asks the
-/// embedder's host-call bridge for the ambient auth context.
+/// typed authentication handle for the request identity.
 const SITE_SCRIPT: &str = r#"
 import { require_policy } from "std/harness/policy"
 
@@ -46,8 +45,15 @@ pub fn scoped_route(harness: Harness, req: dict) -> dict {
 }
 
 @route("GET", "/ctx")
-pub fn ctx_route(req: dict) -> dict {
-  return http_ok({ "ctx": host_call("embedder.auth_context", {}) })
+pub fn ctx_route(harness: Harness, req: dict) -> dict {
+  return http_ok({
+    "ctx": {
+      "authenticated": harness.auth.is_authenticated(),
+      "subject": harness.auth.try_subject(),
+      "kind": harness.auth.kind(),
+      "scopes": harness.auth.scopes(),
+    }
+  })
 }
 
 @scopes("base:read", "PUT personas:write")
@@ -79,8 +85,8 @@ pub fn operator_action(req: dict) -> dict {
 @scopes("resources:write")
 @policy(kinds: "tenant", matches: "tenant owner")
 @route("POST", "/tenants/{tenant}/resources")
-pub fn resource_policy_route(req: dict) -> dict {
-  let denial = require_policy({
+pub fn resource_policy_route(harness: Harness, req: dict) -> dict {
+  let denial = require_policy(harness.auth, harness.tenant, {
     kinds: ["tenant"],
     scopes: ["resources:write"],
     matches: [
@@ -108,8 +114,8 @@ pub fn resource_policy_route(req: dict) -> dict {
 
 @policy(methods: "doc.read doc.write")
 @route("POST", "/rpc")
-pub fn rpc_policy_route(req: dict) -> dict {
-  let denial = require_policy({
+pub fn rpc_policy_route(harness: Harness, req: dict) -> dict {
+  let denial = require_policy(harness.auth, harness.tenant, {
     method_path: "body.method",
     methods: {
       "doc.read": {
@@ -198,43 +204,11 @@ impl SiteAuth for HeaderAuth {
         SiteAuthOutcome::Allow(SiteAuthContext {
             tenant_id: None,
             scopes: ["personas:read".to_string()].into(),
+            subject: Some(route.path.clone()),
+            kind: Some(route.method.clone()),
             context: Some(json!({ "route": route.path, "method": route.method })),
             ..Default::default()
         })
-    }
-}
-
-/// Host-call bridge that hands the ambient embedder auth context back
-/// to the `.harn` handler as a JSON string (or `"absent"`).
-struct ContextEchoBridge;
-
-impl HostCallBridge for ContextEchoBridge {
-    fn dispatch<'a>(
-        &'a self,
-        capability: &'a str,
-        operation: &'a str,
-        _params: &'a harn_vm::value::DictMap,
-    ) -> harn_vm::HostCallDispatchFuture<'a> {
-        if capability != "embedder" || operation != "auth_context" {
-            return harn_vm::host_call_ready(Ok(None));
-        }
-        let rendered = current_auth_context()
-            .map(|context| context.to_string())
-            .unwrap_or_else(|| "absent".to_string());
-        harn_vm::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from(
-            rendered.as_str(),
-        )))))
-    }
-}
-
-/// `VmConfigurator` that installs [`ContextEchoBridge`] on the dispatch
-/// thread, the way an embedder wires its host-call bridge in.
-struct BridgeConfigurator;
-
-impl VmConfigurator for BridgeConfigurator {
-    fn configure(&self, _vm: &mut Vm) -> Result<(), DispatchError> {
-        harn_vm::set_host_call_bridge(Arc::new(ContextEchoBridge));
-        Ok(())
     }
 }
 
@@ -387,39 +361,40 @@ async fn public_route_admits_tenantless_scopeless_allow() {
     assert_eq!(body["ok"], true);
 }
 
-/// The opaque embedder context rides the dispatch onto the VM thread,
-/// where the embedder's host-call bridge recovers it via
-/// `current_auth_context()` while serving a handler's `host_call`.
+/// Opaque embedder context is not projected into source code. Scripts receive
+/// only the explicit, typed authentication capability.
 #[tokio::test]
-async fn auth_context_is_visible_to_the_host_call_bridge() {
+async fn opaque_auth_context_is_not_exposed_to_source() {
     let hook = Arc::new(AllowAuth {
         tenant: None,
         scopes: &[],
         context: Some(json!({ "key_id": "k_123", "session": "s_9" })),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), Some(Arc::new(BridgeConfigurator)));
+    let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(get(router, "/ctx").await).await;
     assert_eq!(status, StatusCode::OK);
-    let echoed: Value =
-        serde_json::from_str(body["ctx"].as_str().expect("bridge echoes a string")).unwrap();
-    assert_eq!(echoed, json!({ "key_id": "k_123", "session": "s_9" }));
+    assert_eq!(body["ctx"]["authenticated"], true);
+    assert_eq!(body["ctx"]["subject"], Value::Null);
+    assert_eq!(body["ctx"]["scopes"], json!([]));
 }
 
-/// Without an `Allow`-supplied context the bridge sees no ambient
-/// value: nothing leaks across requests on the shared dispatch thread.
+/// Without an opaque context, the same typed authentication projection is
+/// stable and no request-local data leaks across dispatches.
 #[tokio::test]
-async fn absent_auth_context_is_absent_at_the_bridge() {
+async fn absent_opaque_context_keeps_typed_auth_stable() {
     let hook = Arc::new(AllowAuth {
         tenant: None,
         scopes: &[],
         context: None,
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), Some(Arc::new(BridgeConfigurator)));
+    let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(get(router, "/ctx").await).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["ctx"], "absent");
+    assert_eq!(body["ctx"]["authenticated"], true);
+    assert_eq!(body["ctx"]["subject"], Value::Null);
+    assert_eq!(body["ctx"]["scopes"], json!([]));
 }
 
 /// The hook authenticates off the request head and sees the matched
@@ -427,10 +402,7 @@ async fn absent_auth_context_is_absent_at_the_bridge() {
 /// to the hook round-trips through the context into the bridge.
 #[tokio::test]
 async fn hook_sees_request_head_and_matched_route() {
-    let (_dir, router) = site_router(
-        Some(Arc::new(HeaderAuth)),
-        Some(Arc::new(BridgeConfigurator)),
-    );
+    let (_dir, router) = site_router(Some(Arc::new(HeaderAuth)), None);
 
     let denied = get(router.clone(), "/ctx").await;
     let (status, body) = read_json(denied).await;
@@ -449,9 +421,9 @@ async fn hook_sees_request_head_and_matched_route() {
         .unwrap();
     let (status, body) = read_json(allowed).await;
     assert_eq!(status, StatusCode::OK);
-    let echoed: Value =
-        serde_json::from_str(body["ctx"].as_str().expect("bridge echoes a string")).unwrap();
-    assert_eq!(echoed, json!({ "route": "/ctx", "method": "GET" }));
+    assert_eq!(body["ctx"]["subject"], "/ctx");
+    assert_eq!(body["ctx"]["kind"], "GET");
+    assert_eq!(body["ctx"]["scopes"], json!(["personas:read"]));
 }
 
 /// Per-method `@scopes`: `/per_method` declares the baseline `base:read`

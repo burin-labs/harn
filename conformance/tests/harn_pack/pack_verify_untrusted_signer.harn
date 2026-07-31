@@ -1,19 +1,25 @@
 import "../_common"
 
-pipeline default() {
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+pipeline default(harness: Harness) {
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn_pack_untrusted_signer_" + uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_pack_untrusted_signer_" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
-  harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"signed\")\n")
+  harness.fs.write_text(
+    path_join(root, "hello.harn"),
+    "fn main(harness: Harness) { harness.stdio.println(\"signed\") }\n",
+  )
   harness.fs.write_text(
     path_join(root, "release-key.pem"),
     "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n",
   )
-  const pack = exec_at(
+  const pack = harness.process.exec_at(
     root,
     harn_bin,
     "pack",
@@ -24,8 +30,8 @@ pipeline default() {
     "--out",
     path_join(root, "hello.harnpack"),
   )
-  __io_println(pack.success)
-  const permissive = exec_at(
+  harness.stdio.println(pack.success)
+  const permissive = harness.process.exec_at(
     root,
     harn_bin,
     "pack",
@@ -37,8 +43,8 @@ pipeline default() {
   const signer = permissive_data.data.key_id
   const signers = path_join(root, "signers")
   harness.fs.mkdir(signers)
-  __io_println(
-    exec_at(
+  harness.stdio.println(
+    harness.process.exec_at(
       root,
       "openssl",
       "pkey",
@@ -53,7 +59,7 @@ pipeline default() {
     path_join(root, "trust-policy.json"),
     json_stringify({signer_registry_url: signers, trusted_signers: ["not-the-real-signer"]}),
   )
-  const verify = exec_at(
+  const verify = harness.process.exec_at(
     root,
     harn_bin,
     "pack",
@@ -64,8 +70,8 @@ pipeline default() {
     path_join(root, "trust-policy.json"),
     "--json",
   )
-  __io_println(verify.success)
+  harness.stdio.println(verify.success)
   const verify_data = json_parse(verify.stdout)
-  __io_println(verify_data.ok)
-  __io_println(verify_data.error.code)
+  harness.stdio.println(verify_data.ok)
+  harness.stdio.println(verify_data.error.code)
 }

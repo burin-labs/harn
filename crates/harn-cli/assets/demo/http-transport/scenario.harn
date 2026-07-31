@@ -38,20 +38,20 @@ fn fake_request() {
   }
 }
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   const req = fake_request()
   // 1. Content negotiation against a simulated `Accept` header.
   const chosen = http_choose(
     req.headers.Accept,
     ["application/xml", "application/json", "text/plain"],
   )
-  __io_println("chose: ${chosen}")
+  harness.stdio.println("chose: ${chosen}")
   // 2. Compute a strong ETag from the serialized payload. The codec's
   //    router-side ETag middleware mirrors this for the auto path;
   //    handlers can also drive the value themselves (e.g. from a row
   //    mtime).
   const etag = http_etag(json_stringify(payload()))
-  __io_println("etag: ${etag}")
+  harness.stdio.println("etag: ${etag}")
   // 3. Build the conditional-GET reply for the matching case.
   const not_modified = http_not_modified(etag, {"Cache-Control": "max-age=60"})
   // 4. Construct the WS-upgrade envelope. With both client + server
@@ -74,7 +74,7 @@ fn main(_harness: Harness) {
     page_link_count: len(page.headers.Link),
     page_first_link: page.headers.Link[0],
   }
-  __io_println("=== http-transport receipt ===")
-  __io_println(json_stringify(receipt))
+  harness.stdio.println("=== http-transport receipt ===")
+  harness.stdio.println(json_stringify(receipt))
   return receipt
 }

@@ -3,7 +3,7 @@
 Harn's `agent_loop` and `llm_call` historically exposed only a flat
 options dict for retry / fallback / shadow / budget behavior. v0.8
 opens an explicit **caller seam**: `agent_loop` accepts an
-`llm_caller:` closure that owns the single `llm_call(...)` invocation,
+`llm_caller:` closure that owns the single `harness.llm.call(...)` invocation,
 and the `std/llm/*` modules ship composable middleware for retry,
 fallback, shadowing, prompt rewriting, logging, budgeting, caching,
 circuit breaking, ensembles (best-of-N, self-consistency, debate),
@@ -123,7 +123,7 @@ non-empty.
 | `with_circuit_breaker(next, opts?)` | `(caller, dict?) -> caller` | Thin wrapper over `std/async` circuit primitives. Defaults derive the circuit name from provider/model; pass `opts.name` to share one circuit across calls. Throws the standardized `circuit_open` error when open. |
 | `with_repair(next, opts?)` | `(caller, dict?) -> caller` | One-shot repair pass on `schema_validation` failures. Appends a corrective nudge (deterministic by default; override via `opts.strategy: string \| closure`) and re-asks `next` once with `max_tokens: 600` and `temperature: 0.0`. Tags the second envelope `repair_attempted: true`. Other statuses pass through unchanged. |
 | `with_coerce(next, opts?)` | `(caller, dict?) -> caller` | Normalize successful envelopes for downstream consumers. Recursively lowercases keys on `value.data` (`opts.lower_keys`, default true) so callers can read fields case-insensitively without per-site `dict_get_ci` dances. Optional `opts.on_text_json: true` parses JSON-shaped `value.text` into `value.data`. Failure envelopes pass through. |
-| `with_timeout(next, opts)` | `(caller, dict\|int) -> caller` | Soft, clock-aware deadline. Forwards `opts.ms` (or `opts.seconds`) to `call.opts.timeout_ms` so providers can cancel mid-flight, then post-checks elapsed time via `now_ms()`. Successes that overran convert to `{ok: false, status: "timeout", error: {timeout_ms, elapsed_ms}}`; slow failures relabel to `timeout` (set `opts.relabel_failures: false` to keep the original status). Honors the unified clock — mockable in tests. |
+| `with_timeout(next, opts)` | `(caller, dict\|int) -> caller` | Soft, clock-aware deadline. Forwards `opts.ms` (or `opts.seconds`) to `call.opts.timeout_ms` so providers can cancel mid-flight, then post-checks elapsed time via `harness.clock.now_ms()`. Successes that overran convert to `{ok: false, status: "timeout", error: {timeout_ms, elapsed_ms}}`; slow failures relabel to `timeout` (set `opts.relabel_failures: false` to keep the original status). Honors the unified clock — mockable in tests. |
 | `with_routing(opts)` | `(dict) -> caller` | Pre-call routing: pick a caller before the request goes out. Required `opts.default`; optional `opts.routes: list of {when: closure(call) -> bool, caller, name?}`. First matching route wins; emits `llm_routing_decision` so receipts can audit cheap-vs-frontier escalation per call. Differs from `with_fallback`, which is post-failure. |
 | `compose(wrappers)` | `(list<fn(caller) -> caller>) -> fn(caller) -> caller` | Right-to-left application: `compose([a, b, c])(base) == a(b(c(base)))`. Equivalently, the leftmost wrapper is the outermost. |
 
@@ -138,7 +138,7 @@ const caller = compose([
   with_retry({max_attempts: 4, backoff: "exponential"}),
 ])(default_llm_caller())
 
-const result = agent_loop(task, system, {
+const result = agent_loop(harness, task, system, {
   loop_until_done: true,
   llm_caller: caller,
 })
@@ -161,7 +161,7 @@ const route = agent_model_options({
   defaults: {provider: "anthropic", model: "claude-sonnet-5", reasoning_task: "agent"},
 })
 const caller = compose([with_retry({max_attempts: 3}), with_logging({})])(default_llm_caller())
-const result = agent_loop(task, system, route.options + {loop_until_done: true, llm_caller: caller})
+const result = agent_loop(harness, task, system, route.options + {loop_until_done: true, llm_caller: caller})
 ```
 
 `agent_model_options(config?)` resolves explicit options first, then role
@@ -219,7 +219,7 @@ const persona_caller = compose([
   with_budget({max_total_tokens: 250000, max_calls: 200}),
 ])(router)
 
-agent_loop(task, system, {
+agent_loop(harness, task, system, {
   loop_until_done: true,
   llm_caller: persona_caller,
 })
@@ -235,7 +235,7 @@ records consumed by a cloud platform's ops console.
 The handler composition above is the right tool when each route needs
 arbitrary closure-based custom logic. For the much more common
 "failover chain plus per-call budget" case, build a `routing_policy`
-once and pass it to `llm_call(... routing: policy ...)` directly:
+once and pass it to `harness.llm.call(... routing: policy ...)` directly:
 
 ```harn,ignore
 const policy = routing_policy({
@@ -259,7 +259,7 @@ const policy = routing_policy({
   ],
 })
 
-const result = llm_call("Summarize this PR.", nil, {routing: policy})
+const result = harness.llm.call("Summarize this PR.", nil, {routing: policy})
 ```
 
 `escalate_on` makes frontier escalation **conditional on a
@@ -312,7 +312,7 @@ const envelope = caller({
   opts: {provider: "auto", model: "claude-sonnet-5"},
   turn: {iteration: 0, session_id: "", attempt: 1},
 })
-if envelope.ok { log(envelope.value.text) }
+if envelope.ok { harness.stdio.log(envelope.value.text) }
 ```
 
 `std/async.retry_with_backoff` is **not** the same surface — it
@@ -345,8 +345,8 @@ const result = best_of_n(
   "You are a poet.",
   {n: 5, sampler_opts: {temperature: 1.0}},
 )
-log(result.best.text)
-log(result.reasoning)
+harness.stdio.log(result.best.text)
+harness.stdio.log(result.reasoning)
 ```
 
 ### Composition with `agent_loop`
@@ -361,7 +361,7 @@ const ensemble_caller = { call ->
   return {ok: true, value: {text: r.best.text}}
 }
 
-agent_loop(task, system, {llm_caller: ensemble_caller})
+agent_loop(harness, task, system, {llm_caller: ensemble_caller})
 ```
 
 Ensemble functions emit `ensemble_cost` events with estimated
@@ -397,8 +397,8 @@ const r = refine_prompt({
   target_size: "small",
   keep: ["MUST cite section numbers"],
 })
-log(r.refined)
-log(r.diff_summary)
+harness.stdio.log(r.refined)
+harness.stdio.log(r.diff_summary)
 ```
 
 The session cache is best-effort: pass `opts.session = {...}` and
@@ -412,7 +412,7 @@ refinements.
 | Function | Signature | Description |
 |---|---|---|
 | `estimate_text_tokens(text, model)` | `(string, string) -> int` | Heuristic: English `len/4`, code-like `len/3.5`, CJK-heavy `len*1.0`. The `model` arg is reserved for a future Rust tokenizer builtin. Note: not named `estimate_tokens` to avoid collision with the workflow builtin of the same name. |
-| `context_window_for(model)` | `(string) -> int` | Looks up `llm_model_info(model).catalog.context_window`. Falls back to `8192`. |
+| `context_window_for(model)` | `(string) -> int` | Looks up `harness.llm.model_info(model).catalog.context_window`. Falls back to `8192`. |
 | `recommend_max_output_tokens(opts)` | `(dict) -> int` | `ctx − used − ceil(ctx*headroom)`, then task-clamped. Required: `opts.prompt`, `opts.model`. Optional: `system`, `headroom` (0.10), `task_kind` (`"chat"`/`"agent"`/`"plan"`/`"code"`/`"json"`/`"summarize"`), `summary_ratio` (0.30). Floor `64`. |
 | `budget_summary(opts)` | `(dict) -> dict` | Debug helper returning all intermediate values plus an `assumptions` list. |
 | `fits_in_context(text, model, headroom?)` | `(string, string, float?) -> bool` | Quick boolean check after reserving `headroom` of the window. Default `headroom: 0.10`. |
@@ -454,7 +454,7 @@ Layering (low → high):
 | Function | Signature | Description |
 |---|---|---|
 | `pack_for(opts)` | `(dict) -> dict` | Requires `model`; accepts the canonical `llm_call` surface. `reasoning_policy`, `reasoning_scale`, and `reasoning_task` control provider-neutral calibration. Direct `thinking` or `effort` pins the low-level setting and bypasses policy lowering. |
-| `llm_apply_reasoning_policy(opts)` | `(dict) -> dict` | Applies Harn's provider-aware `reasoning_policy` to an option dict. Used by `agent_loop`; direct callers can use it before `llm_call` when they want the same calibration. Explicit `thinking` and `effort` win. |
+| `harness.llm.apply_reasoning_policy(opts)` | `(dict) -> dict` | Applies Harn's provider-aware `reasoning_policy` to an option dict. Used by `agent_loop`; direct callers can use it before `llm_call` when they want the same calibration. Explicit `thinking` and `effort` win. |
 | `pack_chat(model, opts?)` | `(string, dict?) -> dict` | Convenience wrapper for `reasoning_task: "chat"`. |
 | `pack_agent(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "agent"`. |
 | `pack_refine(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "refine"`. |
@@ -483,7 +483,7 @@ const opts = pack_agent("claude-sonnet-5", {
   reasoning_policy: "high",
   reasoning_scale: "large",
 })
-agent_loop(task, system, opts + {loop_until_done: true})
+agent_loop(harness, task, system, opts + {loop_until_done: true})
 ```
 
 ---

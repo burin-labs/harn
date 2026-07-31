@@ -223,7 +223,7 @@ diagnostic_codes! {
     UnknownDeclaration, "HARN-NAM-010", Nam, "declaration reference cannot be resolved";
     InvalidAttributeTarget, "HARN-NAM-011", Nam, "attribute is attached to an unsupported declaration";
     InvalidAttributeArgument, "HARN-NAM-012", Nam, "attribute argument is invalid";
-    InvalidMainSignature, "HARN-NAM-101", Nam, "`main` entrypoint must take a single `harness: Harness` parameter";
+    InvalidMainSignature, "HARN-NAM-101", Nam, "`fn main` must take an explicit `harness: Harness` parameter";
     CapabilityPayloadInvalid, "HARN-CAP-001", Cap, "capability payload is invalid";
     HitlMissingApprovalPolicy, "HARN-CAP-002", Cap, "human approval construct is missing policy";
     HitlInvalidApprovalArgument, "HARN-CAP-003", Cap, "human approval argument is invalid";
@@ -358,6 +358,8 @@ diagnostic_codes! {
     LintDiscardedPureResult, "HARN-LNT-066", Lnt, "the result of a pure collection method is discarded, so the call has no effect on the receiver";
     LintMissingPublicApiType, "HARN-LNT-067", Lnt, "public callable parameter or return is missing an explicit type";
     LintTemplateUnknownFilter, "HARN-LNT-068", Lnt, "prompt template names a filter the engine does not implement";
+    LintBroadHarnessParameter, "HARN-LNT-069", Lnt, "helper accepts root Harness but uses only narrow capability handles";
+    LintHomogeneousPositionalApi, "HARN-LNT-070", Lnt, "public API has too many same-typed positional parameters";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";

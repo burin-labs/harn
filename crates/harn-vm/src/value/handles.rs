@@ -1,9 +1,69 @@
+use std::any::Any;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 
 use super::{VmError, VmValue};
+
+/// An unforgeable, host-owned capability value.
+///
+/// Harn code can retain, clone, and pass this value, but cannot construct one
+/// or inspect its payload. Builtins recover the concrete state with
+/// [`Self::downcast`], making the Rust payload type—not a script-visible
+/// `{kind, id}` dictionary or process-global registry—the authority check.
+#[derive(Clone)]
+pub struct VmResourceHandle {
+    label: Arc<str>,
+    payload: Arc<dyn Any + Send + Sync>,
+}
+
+impl VmResourceHandle {
+    pub fn new<T>(label: impl Into<Arc<str>>, payload: T) -> Self
+    where
+        T: Any + Send + Sync,
+    {
+        Self {
+            label: label.into(),
+            payload: Arc::new(payload),
+        }
+    }
+
+    pub fn from_arc<T>(label: impl Into<Arc<str>>, payload: Arc<T>) -> Self
+    where
+        T: Any + Send + Sync,
+    {
+        Self {
+            label: label.into(),
+            payload,
+        }
+    }
+
+    /// Stable diagnostic label. This identifies the resource class, not the
+    /// underlying authority or any host registry key.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn downcast<T>(&self) -> Option<Arc<T>>
+    where
+        T: Any + Send + Sync,
+    {
+        Arc::clone(&self.payload).downcast::<T>().ok()
+    }
+
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.payload, &other.payload)
+    }
+}
+
+impl std::fmt::Debug for VmResourceHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VmResourceHandle")
+            .field("label", &self.label)
+            .finish_non_exhaustive()
+    }
+}
 
 type VmResourceRelease = Box<dyn FnOnce() -> Result<VmValue, String> + Send + 'static>;
 

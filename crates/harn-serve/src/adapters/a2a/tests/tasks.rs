@@ -88,8 +88,8 @@ async fn send_message_threads_actor_chain_into_task_and_session() {
     std::fs::write(
         &script,
         r#"
-pub fn actor_chain(task: string) -> string {
-  let chain = agent_session_actor_chain()
+pub fn actor_chain(harness: Harness, task: string) -> string {
+  let chain = harness.agent.actor_chain()
   return chain.sub + "|" + chain.act.sub + "|" + chain.act.act.sub
 }
 "#,
@@ -299,7 +299,7 @@ async fn send_message_surfaces_handoff_metadata() {
         r#"
 import "std/agents"
 
-pub fn triage(task: string) -> dict {
+pub fn triage(harness: Harness, task: string) -> dict {
   let review = handoff({
     source_persona: "merge_captain",
     target_persona_or_human: {
@@ -320,6 +320,7 @@ pub fn triage(task: string) -> dict {
     confidence: 0.74
   })
   return workflow_result_run(
+    harness.obs,
     task,
     "triage",
     {visible_text: "handoff ready"},
@@ -437,8 +438,8 @@ async fn streaming_agent_progress_emits_status_update_before_completion() {
         r#"
 import { agent_progress } from "std/agent/progress"
 
-pub fn triage(task: string) -> string {
-  agent_progress({
+pub fn triage(harness: Harness, task: string) -> string {
+  agent_progress(harness.agent, {
     message: "Agent is checking progress.",
     entries: [
       {content: "Inspect code.", status: "completed", priority: "high"},
@@ -548,9 +549,9 @@ async fn streaming_agent_progress_survives_global_session_sink_clear() {
         r#"
 import { agent_progress } from "std/agent/progress"
 
-pub fn triage(task: string) -> string {
+pub fn triage(harness: Harness, task: string) -> string {
   __test_clear_current_session_sinks()
-  agent_progress({message: "Still streaming after registry cleanup."})
+  agent_progress(harness.agent, {message: "Still streaming after registry cleanup."})
   return task
 }
 "#,

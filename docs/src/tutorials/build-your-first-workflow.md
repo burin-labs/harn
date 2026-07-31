@@ -27,12 +27,12 @@ That's the only prerequisite. The `mock` provider ships in the binary.
 The smallest useful thing is a single request. Save this as `fix.harn`:
 
 ```harn
-const answer = llm_call(
+const answer = harness.llm.call(
   "The test test_add expects add(2, 2) == 4 but got 5. What's the likely bug?",
   "You are a careful Rust engineer.",
   {provider: "mock"},
 )
-log(answer.text)
+harness.stdio.log(answer.text)
 ```
 
 Run it:
@@ -58,14 +58,14 @@ it's done. You give it a task, a system prompt, and a set of tools. It owns the
 loop, the budget, and deciding when "done" means done.
 
 ```harn
-const result = agent_loop(
+const result = agent_loop(harness,
   "Fix the failing test test_add in src/math.rs, then run the test to confirm.",
   "You are a senior engineer. Make the smallest change that turns the test green.",
   {provider: "mock", loop_until_done: true},
 )
-log(result.status)          // "done", "stuck", "budget_exhausted", ...
-log(result.text)            // the agent's final output
-log(result.llm.iterations)  // how many model round-trips it took
+harness.stdio.log(result.status)          // "done", "stuck", "budget_exhausted", ...
+harness.stdio.log(result.text)            // the agent's final output
+harness.stdio.log(result.llm.iterations)  // how many model round-trips it took
 ```
 
 `loop_until_done: true` tells the loop to keep going until the model signals
@@ -81,7 +81,7 @@ the ready-made `write_file` / `edit_file` / `run` set; the shape is:
 ```harn,ignore
 import { agent_edit_tools } from "std/agent/host_tools"
 
-const result = agent_loop(task, system, {
+const result = agent_loop(harness, task, system, {
   provider: "ollama",
   model: "qwen3-coder",
   tools: agent_edit_tools(),
@@ -114,8 +114,8 @@ const graph = workflow_stages({
 })
 
 const run = workflow_execute("Fix the failing test test_add.", graph)
-log(run.status)
-log(run.path)
+harness.stdio.log(run.status)
+harness.stdio.log(run.path)
 ```
 
 The `act` stage is an agent, like Step 2. The `check` stage runs a real command
@@ -157,7 +157,7 @@ const graph = workflow_stages({
 })
 
 const run = workflow_execute("Fix the failing test test_add.", graph)
-log(run.status)
+harness.stdio.log(run.status)
 ```
 
 Now the stage tries up to three times. After a failed attempt, the next prompt

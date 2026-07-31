@@ -210,7 +210,7 @@ pub fn pii_detect(text, options = nil) -> list {
  * `pii_restore` the model's response:
  *
  *     const r = pii_redact(user_text)
- *     const answer = llm_call(r.clean, nil, {})
+ *     const answer = harness.llm.call(r.clean, nil, {})
  *     const final = pii_restore(answer.text, r.restore)
  *
  * `options.entities` restricts redaction to a subset of `pii_types()`.

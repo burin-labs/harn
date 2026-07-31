@@ -1,7 +1,8 @@
+import { agent_loop } from "std/agent/loop"
 import "std/plan"
-import { clear_host_mocks, llm_text, mock_host_response, with_llm_script } from "std/testing"
+import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const tools = plan_tools()
   require tool_find(tools, "emit_plan") != nil, "emit_plan should be registered"
   require tool_find(tools, "update_plan") != nil, "update_plan should be registered"
@@ -21,12 +22,17 @@ pipeline main() {
   require len(artifact.steps) == 2, "plan steps should normalize"
   require artifact.steps[0]?.status == "completed", "step status should normalize"
   require len(plan_acp_entries(artifact)) == 2, "ACP entries should derive from steps"
-  clear_host_mocks()
-  mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
-  const approved = request_plan_approval(artifact, {reviewers: ["lead"]})
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    {approved: true, reviewer: "lead", reason: "ready"},
+  )
+  const approved = request_plan_approval(harness.interaction, artifact, {reviewers: ["lead"]})
   require approved.approval.state == "approved", "plan approval should use HITL"
   require approved.approval.reviewers?.[0] == "lead", "reviewer should round-trip"
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -48,6 +54,7 @@ pipeline main() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Plan a parser change",
         nil,
         {provider: "mock", tools: tools, max_iterations: 2, session_id: "plan-conformance"},
@@ -67,7 +74,7 @@ pipeline main() {
         }
       }
       require saw_plan, "agent loop should persist an emitted plan event"
-      log("plan primitives tests passed")
+      harness.stdio.log("plan primitives tests passed")
     },
   )
 }

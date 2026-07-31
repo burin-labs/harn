@@ -8,21 +8,21 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  */
 import { if_unsettled } from "std/lifecycle/combinators"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const cb = { harness, return_value ->
     harness.emit_audit("ran", {})
     return "handled"
   }
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const guarded = if_unsettled(cb)
       const initial = guarded(harness, return_value)
-      const initial_audits = lifecycle_audit_log_take()
+      const initial_audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("initial=" + to_string(initial))
       harness.stdio.println("initial_audit_count=" + to_string(len(initial_audits)))
       harness.handoff_to("staging-pipeline", {note: "if_unsettled test"})
       const triggered = guarded(harness, return_value)
-      const triggered_audits = lifecycle_audit_log_take()
+      const triggered_audits = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("triggered=" + triggered)
       harness.stdio.println("triggered_audit_kind=" + triggered_audits[0].kind)
       return return_value

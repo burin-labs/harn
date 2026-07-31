@@ -10,10 +10,11 @@ import { preset_run_command } from "std/tool_hooks"
  * synthetic catalogue id, and a `tool_hook_classifier_verdict` lifecycle
  * audit entry records the verdict + scope.
  */
-pipeline default() {
-  pipeline_lifecycle_audit_log_take()
-  __tool_hooks_classifier_cache_clear()
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.tools.classifier_cache_clear()
   with_llm_script(
+    harness.llm,
     [
       llm_text(
         "{\"kind\": \"rewrite\", \"confidence\": 0.92,"
@@ -24,28 +25,29 @@ pipeline default() {
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
       const wrapper = preset_run_command(
+        harness,
         {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8}, inner: inner},
       )
       const result = wrapper({command: "npm run lint"})
-      __io_println(result.action)
-      __io_println(result.rule_id)
-      __io_println(result.catalogue_id)
-      __io_println(result.severity)
-      __io_println(result.explanation)
-      __io_println(result.original_command)
-      __io_println(result.command)
-      __io_println(result.result.ok)
-      __io_println(result.result.ran)
-      const calls = llm_mock_calls()
-      __io_println(len(calls))
-      __io_println(contains(to_string(calls[0].system), "shell-command safety reviewer"))
-      const log = pipeline_lifecycle_audit_log_take()
-      __io_println(len(log))
-      __io_println(log[0].kind)
-      __io_println(log[0].payload.kind)
-      __io_println(log[0].payload.action)
-      __io_println(log[1].kind)
-      __io_println(log[2].kind)
+      harness.stdio.println(result.action)
+      harness.stdio.println(result.rule_id)
+      harness.stdio.println(result.catalogue_id)
+      harness.stdio.println(result.severity)
+      harness.stdio.println(result.explanation)
+      harness.stdio.println(result.original_command)
+      harness.stdio.println(result.command)
+      harness.stdio.println(result.result.ok)
+      harness.stdio.println(result.result.ran)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls))
+      harness.stdio.println(contains(to_string(calls[0].system), "shell-command safety reviewer"))
+      const log = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(len(log))
+      harness.stdio.println(log[0].kind)
+      harness.stdio.println(log[0].payload.kind)
+      harness.stdio.println(log[0].payload.action)
+      harness.stdio.println(log[1].kind)
+      harness.stdio.println(log[2].kind)
     },
   )
 }

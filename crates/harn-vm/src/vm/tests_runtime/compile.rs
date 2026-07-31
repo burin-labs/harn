@@ -22,8 +22,8 @@ fn compile_named_pipeline_ignores_unbound_params() {
         local
             .run_until(async {
                 let source = r#"
-pipeline selected(task) {
-  log("ok")
+pipeline selected(harness: Harness, task) {
+  harness.stdio.log("ok")
 }
 "#;
                 let mut lexer = Lexer::new(source);
@@ -52,7 +52,7 @@ fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
     rt.block_on(async {
         tokio::task::LocalSet::new()
             .run_until(async {
-                let source = "pipeline selected(value: int) { return value + 1 }";
+                let source = "pipeline selected(harness: Harness, value: int) { return value + 1 }";
                 let program = parse(source);
                 let entry = Compiler::new()
                     .compile_named_pipeline_entry(&program, "selected", None)
@@ -60,6 +60,7 @@ fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 assert!(matches!(
                     vm.execute_callable_entry_with_timeout(
                         &entry,
@@ -72,6 +73,7 @@ fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
 
                 let mut wrong_type = Vm::new();
                 register_vm_stdlib(&mut wrong_type);
+                wrong_type.set_harness(crate::Harness::real());
                 let error = wrong_type
                     .execute_callable_entry_with_timeout(
                         &entry,
@@ -104,7 +106,7 @@ fn fixture() -> {calls: int} {
   fixture_calls = fixture_calls + 1
   return {calls: fixture_calls}
 }
-pipeline selected(fx: {calls: int}, value: int) {
+pipeline selected(harness: Harness, fx: {calls: int}, value: int) {
   return fx.calls * 40 + value
 }
 ";
@@ -115,6 +117,7 @@ pipeline selected(fx: {calls: int}, value: int) {
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 assert!(matches!(
                     vm.execute_callable_entry_with_timeout(
                         &entry,
@@ -124,6 +127,47 @@ pipeline selected(fx: {calls: int}, value: int) {
                     .await,
                     Ok(VmValue::Int(42))
                 ));
+            })
+            .await;
+    });
+}
+
+#[test]
+fn callable_entry_injects_root_harness_before_fixture_and_explicit_args() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let source = r#"
+fn fixture() -> {label: string} {
+  return {label: "fixture"}
+}
+pipeline selected(harness: Harness, fx: {label: string}, value: int) {
+  return fx.label + ":" + to_string(value)
+}
+"#;
+                let program = parse(source);
+                let entry = Compiler::new()
+                    .compile_named_pipeline_entry(&program, "selected", Some("fixture"))
+                    .unwrap();
+
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
+                assert_eq!(
+                    vm.execute_callable_entry_with_timeout(
+                        &entry,
+                        &[VmValue::Int(42)],
+                        std::time::Duration::from_secs(1),
+                    )
+                    .await
+                    .unwrap()
+                    .as_str_cow(),
+                    "fixture:42"
+                );
             })
             .await;
     });
@@ -149,9 +193,9 @@ fn uses_later_alias() {
 
 type UserShape = {name: string}
 
-pipeline t(task) {
-  log(accepts_schema(UserShape))
-  log(uses_later_alias())
+pipeline t(harness: Harness, task) {
+  harness.stdio.log(accepts_schema(UserShape))
+  harness.stdio.log(uses_later_alias())
 }
 "#,
     );
@@ -161,7 +205,7 @@ pipeline t(task) {
 
 #[test]
 fn test_disassembly() {
-    let mut lexer = Lexer::new("pipeline t(task) { log(2 + 3) }");
+    let mut lexer = Lexer::new("pipeline t(harness: Harness, task) { harness.stdio.log(2 + 3) }");
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
@@ -171,5 +215,5 @@ fn test_disassembly() {
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("CONSTANT"));
     assert!(disasm.contains("ADD"));
-    assert!(disasm.contains("CALL_BUILTIN"));
+    assert!(disasm.contains("METHOD_CALL"));
 }

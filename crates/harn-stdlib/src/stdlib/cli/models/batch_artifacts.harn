@@ -102,16 +102,16 @@ fn __batch_artifact_contract(kind: BatchArtifactKind) -> BatchArtifactContract {
  * @effects: [fs.read]
  * @errors: [runtime]
  */
-pub fn __batch_request_rows_read(harness: Harness, requests_path: string) -> BatchRequestRowsRead {
+pub fn __batch_request_rows_read(fs: HarnessFs, requests_path: string) -> BatchRequestRowsRead {
   let rows: list<BatchRequestSourceRow> = []
   let errors: list<string> = []
   if requests_path == "" {
     return {rows: rows, source_sha256: "", errors: ["--requests is required"]}
   }
-  if !harness.fs.exists(requests_path) {
+  if !fs.exists(requests_path) {
     return {rows: rows, source_sha256: "", errors: ["request JSONL not found: " + requests_path]}
   }
-  const source = harness.fs.read_text(requests_path)
+  const source = fs.read_text(requests_path)
   let line_no = 0
   for line in source.split("\n") {
     line_no = line_no + 1
@@ -142,7 +142,7 @@ pub fn __batch_request_rows_read(harness: Harness, requests_path: string) -> Bat
  * @errors: [runtime]
  */
 pub fn __batch_artifact_read(
-  harness: Harness,
+  fs: HarnessFs,
   path: string,
   kind: BatchArtifactKind,
 ) -> BatchArtifactRead {
@@ -151,10 +151,10 @@ pub fn __batch_artifact_read(
   if path == "" {
     return {artifact: {}, source_sha256: "", errors: [contract.required_error]}
   }
-  if !harness.fs.exists(path) {
+  if !fs.exists(path) {
     return {artifact: {}, source_sha256: "", errors: [contract.missing_prefix + path]}
   }
-  const source = harness.fs.read_text(path)
+  const source = fs.read_text(path)
   const parsed = try {
     json_parse(source)
   } catch (failure) {

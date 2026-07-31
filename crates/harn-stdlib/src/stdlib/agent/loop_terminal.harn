@@ -8,7 +8,7 @@ import "std/agent/loop_turn_scope"
  * receive an explicit `action` instead of smuggling `continue`/`break` across
  * a module boundary.
  */
-pub fn __agent_loop_terminal_boundary(session, state) -> dict {
+pub fn __agent_loop_terminal_boundary(harness: Harness, session, state) -> dict {
   let opts = state.opts
   let final_status = state.final_status
   let stop_reason = state.stop_reason
@@ -57,6 +57,7 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
       "zero_write_terminal_verify"
     }
     const terminal_verdict = agent_verify_or_continue(
+      harness,
       session,
       opts
         + {
@@ -79,6 +80,7 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
       final_status = "done"
       stop_reason = reserve_kind
       agent_emit_event(
+        harness.agent,
         session.session_id,
         "reserved_terminal_verify",
         {kind: reserve_kind, phase: "verify_passed", iteration: state.iteration},
@@ -99,6 +101,7 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
       verify_completion_judge_vetoes = verify_completion_judge_vetoes + 1
     }
     agent_emit_event(
+      harness.agent,
       session.session_id,
       "reserved_terminal_verify",
       {
@@ -111,6 +114,7 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
     if terminal_verify_reserve_remaining > 0 && verify_attempts < state.max_verify_attempts {
       terminal_verify_reserve_remaining = terminal_verify_reserve_remaining - 1
       agent_emit_event(
+        harness.agent,
         session.session_id,
         "reserved_terminal_verify",
         {
@@ -146,6 +150,7 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
     == 0
     && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
     const terminal_outcome = agent_compute_terminal_callback(
+      harness.agent,
       session,
       opts,
       {
@@ -171,6 +176,7 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
         current_max,
       )
       agent_emit_event(
+        harness.agent,
         session.session_id,
         "loop_control_decision",
         {

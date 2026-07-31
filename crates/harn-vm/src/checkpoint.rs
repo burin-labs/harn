@@ -216,6 +216,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
+    exposure = "harness.runtime.checkpoint",
+    effects = ["state.write@arg0"],
     sig = "checkpoint(key: string, value: any) -> nil",
     category = "checkpoint",
     doc = "Persist a checkpoint key/value pair to durable storage immediately."
@@ -223,7 +225,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 fn checkpoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     let value = args.get(1).unwrap_or(&VmValue::Nil);
-    let json_val = vm_to_json(value);
+    let json_val = vm_to_json(value)?;
     with_state("checkpoint", |state| {
         state.set(key, json_val).map_err(VmError::Runtime)
     })?;
@@ -231,6 +233,8 @@ fn checkpoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.checkpoint_get",
+    effects = ["state.read@arg0"],
     sig = "checkpoint_get(key: string) -> any",
     category = "checkpoint",
     doc = "Read a persisted checkpoint value, or nil if the key is absent."
@@ -241,6 +245,8 @@ fn checkpoint_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.checkpoint_clear",
+    effects = ["state.mutate@const=checkpoints"],
     sig = "checkpoint_clear() -> nil",
     category = "checkpoint",
     doc = "Clear every checkpoint for the active pipeline."
@@ -253,6 +259,8 @@ fn checkpoint_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.checkpoint_list",
+    effects = ["state.read@const=checkpoints"],
     sig = "checkpoint_list() -> list",
     category = "checkpoint",
     doc = "Return every checkpoint key for the active pipeline."
@@ -269,6 +277,8 @@ fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.checkpoint_exists",
+    effects = ["state.read@arg0"],
     sig = "checkpoint_exists(key: string) -> bool",
     category = "checkpoint",
     doc = "Return true when the checkpoint key is present (even when its value is nil)."
@@ -281,6 +291,8 @@ fn checkpoint_exists_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.checkpoint_delete",
+    effects = ["state.mutate@arg0"],
     sig = "checkpoint_delete(key: string) -> nil",
     category = "checkpoint",
     doc = "Remove a single key from the checkpoint store."

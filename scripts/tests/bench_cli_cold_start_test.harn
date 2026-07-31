@@ -1,7 +1,7 @@
 import "../bench_cli_cold_start.harn"
 
 @test
-pipeline test_load_budgets_defaults_and_command_override(task) {
+pipeline test_load_budgets_defaults_and_command_override(harness: Harness, task) {
   const budgets = load_budgets_text(
     """
 [defaults]
@@ -22,12 +22,12 @@ regression_x = 1.1
 }
 
 @test
-pipeline test_load_baseline_blank_is_empty(task) {
+pipeline test_load_baseline_blank_is_empty(harness: Harness, task) {
   assert_eq(load_baseline_text(" \n"), {})
 }
 
 @test
-pipeline test_most_recent_baseline_skips_current_sha(task) {
+pipeline test_most_recent_baseline_skips_current_sha(harness: Harness, task) {
   const payload = {
     current: {captured_at: "2026-01-03T00:00:00Z", commands: {version: {cold_ms: 1.0}}},
     old: {captured_at: "2026-01-01T00:00:00Z", commands: {version: {cold_ms: 10.0}}},
@@ -39,20 +39,21 @@ pipeline test_most_recent_baseline_skips_current_sha(task) {
 }
 
 @test
-pipeline test_most_recent_baseline_missing(task) {
+pipeline test_most_recent_baseline_missing(harness: Harness, task) {
   const found = most_recent_baseline_for({}, "version", "sha")
   assert_eq(found.sha, nil)
   assert_eq(found.cold_ms, nil)
 }
 
 @test
-pipeline test_build_invocation_expands_trace_paths(task) {
-  const dir = harness.fs.temp_dir() + "/harn-cold-start-test-" + uuid_v7()
+pipeline test_build_invocation_expands_trace_paths(harness: Harness, task) {
+  const dir = harness.fs.workspace_temp_dir() + "/harn-cold-start-test-" + harness.random.uuid_v7()
   harness.fs.mkdir(dir)
   defer {
     harness.fs.delete(dir)
   }
   const args = build_invocation(
+    harness.fs,
     ["trace", "import", "{trace_input}", "--out", "{trace_output}"],
     dir,
   )
@@ -62,7 +63,7 @@ pipeline test_build_invocation_expands_trace_paths(task) {
 }
 
 @test
-pipeline test_select_commands_filter(task) {
+pipeline test_select_commands_filter(harness: Harness, task) {
   const selected = select_commands("version")
   assert_eq(selected.ok, true)
   assert_eq(selected.commands.count, 1)
@@ -73,7 +74,7 @@ pipeline test_select_commands_filter(task) {
 }
 
 @test
-pipeline test_failure_reasons_cover_budget_and_baseline(task) {
+pipeline test_failure_reasons_cover_budget_and_baseline(harness: Harness, task) {
   const reasons = failure_reasons(
     151.0,
     {cold_ms: 100.0, regression_x: 1.25},
@@ -85,22 +86,24 @@ pipeline test_failure_reasons_cover_budget_and_baseline(task) {
 }
 
 @test
-pipeline test_merge_baseline_append_only_without_update(task) {
+pipeline test_merge_baseline_append_only_without_update(harness: Harness, task) {
   const merged = merge_baseline(
     {
-      sha: {
-        host: "old-host",
-        harn_version: "old-version",
-        captured_at: "old",
-        commands: {version: {cold_ms: 10.0}},
+      payload: {
+        sha: {
+          host: "old-host",
+          harn_version: "old-version",
+          captured_at: "old",
+          commands: {version: {cold_ms: 10.0}},
+        },
       },
+      sha: "sha",
+      measurements: {version: {cold_ms: 20.0}, "try --help": {cold_ms: 30.0}},
+      update_baseline: false,
+      host: "host",
+      version: "version",
+      captured_at: "now",
     },
-    "sha",
-    {version: {cold_ms: 20.0}, "try --help": {cold_ms: 30.0}},
-    false,
-    "host",
-    "version",
-    "now",
   )
   assert_eq(merged.sha.host, "old-host")
   assert_eq(merged.sha.harn_version, "old-version")
@@ -110,21 +113,23 @@ pipeline test_merge_baseline_append_only_without_update(task) {
 }
 
 @test
-pipeline test_merge_baseline_update_overwrites_current_slot(task) {
+pipeline test_merge_baseline_update_overwrites_current_slot(harness: Harness, task) {
   const merged = merge_baseline(
-    {sha: {commands: {version: {cold_ms: 10.0}}}},
-    "sha",
-    {version: {cold_ms: 20.0}},
-    true,
-    "host",
-    "version",
-    "now",
+    {
+      payload: {sha: {commands: {version: {cold_ms: 10.0}}}},
+      sha: "sha",
+      measurements: {version: {cold_ms: 20.0}},
+      update_baseline: true,
+      host: "host",
+      version: "version",
+      captured_at: "now",
+    },
   )
   assert_eq(merged.sha.commands.version.cold_ms, 20.0)
 }
 
 @test
-pipeline test_parse_positive_int(task) {
+pipeline test_parse_positive_int(harness: Harness, task) {
   assert_eq(parse_positive_int("N", "3").value, 3)
   assert_eq(parse_positive_int("N", "0").ok, false)
   assert_eq(parse_positive_int("N", "wat").error, "N must be an integer, got 'wat'")

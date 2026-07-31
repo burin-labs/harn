@@ -1,6 +1,6 @@
 import "std/math"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const pdf0 = normal_pdf(0)
   assert(pdf0 > 0.3989)
   assert(pdf0 < 0.399)
@@ -17,5 +17,5 @@ pipeline test(task) {
   assert(roundtrip < 0.9501)
   const shifted = normal_quantile(0.5, 10, 2)
   assert(abs(shifted - 10) < 0.000001)
-  log("stdlib math normal ok")
+  harness.stdio.log("stdlib math normal ok")
 }

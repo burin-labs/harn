@@ -667,7 +667,7 @@ fn namespace_import_binds_alias_dict_not_flattened_members() {
         // Call through the namespace object.
         let chunk_source = r#"
 import * as lib from "./lib"
-pipeline default() {
+pipeline default(harness: Harness) {
   return lib.greet("world")
 }
 "#;

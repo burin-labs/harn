@@ -14,7 +14,7 @@ const feed = triage_start_my_day(
 )
 
 for event in feed.events {
-  log(event.summary)
+  harness.stdio.log(event.summary)
 }
 ```
 

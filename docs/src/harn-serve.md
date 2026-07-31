@@ -240,8 +240,8 @@ import { require_policy } from "std/harness/policy"
 @scopes("resources:write")
 @policy(kinds: "tenant", matches: "tenant owner")
 @route("POST", "/tenants/{tenant}/resources")
-pub fn update_resource(req: dict) -> dict {
-  const denial = require_policy({
+pub fn update_resource(harness: Harness, req: dict) -> dict {
+  const denial = require_policy(harness.auth, harness.tenant, {
     kinds: ["tenant"],
     scopes: ["resources:write"],
     matches: [
@@ -283,8 +283,8 @@ import { require_policy } from "std/harness/policy"
 
 @policy(methods: "doc.read doc.write")
 @route("POST", "/rpc")
-pub fn rpc(req: dict) -> dict {
-  const denial = require_policy({
+pub fn rpc(harness: Harness, req: dict) -> dict {
+  const denial = require_policy(harness.auth, harness.tenant, {
     method_path: "body.method",
     methods: {
       "doc.read": {scopes: ["doc:read"]},

@@ -14,8 +14,8 @@ pub fn triage_issue_payload(raw, trace_id, replay_of_event_id) -> dict {
 }
 
 /** Return deterministic issue triage output for local and A2A dispatch demos. */
-pub fn triage_issue(event: TriggerEvent) -> dict {
+pub fn triage_issue(harness: Harness, event: TriggerEvent) -> dict {
   const raw = event.provider_payload.raw ?? {}
-  const context = handler_context()
+  const context = harness.runtime.handler_context()
   return triage_issue_payload(raw, context?.trace_id ?? event.trace_id, context?.replay_of_event_id)
 }

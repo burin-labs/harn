@@ -17,9 +17,9 @@ async fn lazy_hook_module_state_survives_repeated_child_invocations() {
             r"
 let counter = 0
 
-pub fn handle(_payload: dict) -> nil {{
+pub fn handle(harness: Harness, _payload: dict) -> nil {{
   counter = counter + 1
-  write_file({marker_literal}, to_string(counter))
+  harness.fs.write_text({marker_literal}, to_string(counter))
   return nil
 }}
 "
@@ -75,13 +75,13 @@ async fn lazy_hook_handler_resolves_transitive_sibling_across_repeated_fires() {
         &delegates_path,
         format!(
             r"
-pub fn delegate_effect(n: int) -> int {{
-  write_file({marker_literal}, to_string(n))
+pub fn delegate_effect(fs: HarnessFs, n: int) -> int {{
+  fs.write_text({marker_literal}, to_string(n))
   return n
 }}
 
-pub fn delegate_entry(n: int) -> int {{
-  return delegate_effect(n)
+pub fn delegate_entry(fs: HarnessFs, n: int) -> int {{
+  return delegate_effect(fs, n)
 }}
 "
         ),
@@ -93,8 +93,8 @@ pub fn delegate_entry(n: int) -> int {{
         r#"
 import { delegate_entry } from "./delegates"
 
-pub fn handle(_payload: dict) -> nil {
-  delegate_entry(7)
+pub fn handle(harness: Harness, _payload: dict) -> nil {
+  delegate_entry(harness.fs, 7)
   return nil
 }
 "#,

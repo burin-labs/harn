@@ -7,8 +7,8 @@
  * @effects: [agent]
  * @errors: []
  */
-pub fn agent_state_init(root, options) {
-  return __agent_state_init(root, options)
+pub fn agent_state_init(agent: HarnessAgent, root: string, options: dict? = nil) -> resource {
+  return agent.state_init(root, options)
 }
 
 /**
@@ -17,8 +17,13 @@ pub fn agent_state_init(root, options) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn agent_state_resume(root, session_id, options) {
-  return __agent_state_resume(root, session_id, options)
+pub fn agent_state_resume(
+  agent: HarnessAgent,
+  root: string,
+  session_id: string,
+  options: dict? = nil,
+) -> resource {
+  return agent.state_resume(root, session_id, options)
 }
 
 /**
@@ -27,8 +32,13 @@ pub fn agent_state_resume(root, session_id, options) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn agent_state_write(handle, key, content) {
-  return __agent_state_write(handle, key, content)
+pub fn agent_state_write(
+  agent: HarnessAgent,
+  handle: resource,
+  key: string,
+  content: string,
+) -> nil {
+  return agent.state_write(handle, key, content)
 }
 
 /**
@@ -37,8 +47,8 @@ pub fn agent_state_write(handle, key, content) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn agent_state_read(handle, key) {
-  return __agent_state_read(handle, key)
+pub fn agent_state_read(agent: HarnessAgent, handle: resource, key: string) -> string? {
+  return agent.state_read(handle, key)
 }
 
 /**
@@ -47,8 +57,8 @@ pub fn agent_state_read(handle, key) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn agent_state_list(handle) {
-  return __agent_state_list(handle)
+pub fn agent_state_list(agent: HarnessAgent, handle: resource) -> list<string> {
+  return agent.state_list(handle)
 }
 
 /**
@@ -57,8 +67,8 @@ pub fn agent_state_list(handle) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn agent_state_delete(handle, key) {
-  return __agent_state_delete(handle, key)
+pub fn agent_state_delete(agent: HarnessAgent, handle: resource, key: string) -> nil {
+  return agent.state_delete(handle, key)
 }
 
 /**
@@ -67,8 +77,8 @@ pub fn agent_state_delete(handle, key) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn agent_state_handoff(handle, summary) {
-  return __agent_state_handoff(handle, summary)
+pub fn agent_state_handoff(agent: HarnessAgent, handle: resource, summary: dict) -> nil {
+  return agent.state_handoff(handle, summary)
 }
 
 /**

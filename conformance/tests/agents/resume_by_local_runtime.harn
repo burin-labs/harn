@@ -11,9 +11,9 @@ import { lifecycle_audit_log_take } from "std/lifecycle"
  *
  * Tracking: harn#1864 (S-14).
  */
-pipeline default() {
+pipeline default(harness: Harness) {
   const RB = ResumeBy()
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const with_conditions = RB.local_runtime(
         harness,
@@ -23,7 +23,7 @@ pipeline default() {
           conditions: {trigger: {kind: "review.approved", provider: "github"}},
         },
       )
-      const audits_with = lifecycle_audit_log_take()
+      const audits_with = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("with_handled=" + to_string(with_conditions.handled))
       harness.stdio.println("with_mechanism=" + with_conditions.mechanism)
       harness.stdio.println("with_audit_kind=" + audits_with[0].kind)
@@ -34,7 +34,7 @@ pipeline default() {
         harness,
         {handle: "worker://triage/no-cond", reason: "no conditions"},
       )
-      const audits_without = lifecycle_audit_log_take()
+      const audits_without = lifecycle_audit_log_take(harness.obs)
       harness.stdio.println("without_handled=" + to_string(without_conditions.handled))
       harness.stdio.println("without_reason=" + without_conditions.reason)
       harness.stdio.println("without_audit_kind=" + audits_without[0].kind)

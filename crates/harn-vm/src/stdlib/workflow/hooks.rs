@@ -11,6 +11,8 @@ pub(super) type PostHookFn =
 
 /// Register low-level pre/post tool hooks for workflow execution.
 #[harn_builtin(
+    exposure = "harness.tools.register_hook",
+    effects = ["state.mutate@const=workflow-tool-hooks"],
     sig = "register_tool_hook(config?: dict|nil) -> nil",
     category = "workflow.host"
 )]
@@ -111,7 +113,11 @@ pub(super) fn register_tool_hook_builtin(
 }
 
 /// Clear registered low-level workflow tool hooks.
-#[harn_builtin(sig = "clear_tool_hooks() -> nil", category = "workflow.host")]
+#[harn_builtin(
+    exposure = "harness.tools.clear_hooks",
+    effects = ["state.mutate@const=workflow-tool-hooks"],
+    sig = "clear_tool_hooks() -> nil", category = "workflow.host"
+)]
 pub(super) fn clear_tool_hooks_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -172,6 +178,8 @@ pub(super) fn required_hook_closure(
 
 /// Register a persona lifecycle hook for matching persona names.
 #[harn_builtin(
+    exposure = "harness.agent.register_persona_hook",
+    effects = ["state.mutate@const=persona-hooks"],
     sig = "register_persona_hook(persona_pattern: string, event: string, handler: closure) -> nil",
     category = "workflow.host"
 )]
@@ -195,6 +203,8 @@ pub(super) fn register_persona_hook_builtin(
 
 /// Register a persona step lifecycle hook for one named step.
 #[harn_builtin(
+    exposure = "harness.agent.register_step_hook",
+    effects = ["state.mutate@const=step-hooks"],
     sig = "register_step_hook(persona_pattern: string, step_name: string, event: string, handler: closure) -> nil",
     category = "workflow.host"
 )]
@@ -227,7 +237,11 @@ pub(super) fn register_step_hook_builtin(
 }
 
 /// Clear registered persona and step lifecycle hooks.
-#[harn_builtin(sig = "clear_persona_hooks() -> nil", category = "workflow.host")]
+#[harn_builtin(
+    exposure = "harness.agent.clear_persona_hooks",
+    effects = ["state.mutate@const=persona-hooks"],
+    sig = "clear_persona_hooks() -> nil", category = "workflow.host"
+)]
 pub(super) fn clear_persona_hooks_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -237,7 +251,13 @@ pub(super) fn clear_persona_hooks_builtin(
 }
 
 /// Register a session-level lifecycle hook.
+///
+/// Runtime invocation uses the entrypoint ABI `(Harness, event)`. The root
+/// handle belongs at this orchestration boundary; callback helpers should
+/// attenuate it to the narrowest coherent nominal handle they require.
 #[harn_builtin(
+    exposure = "harness.agent.register_session_hook",
+    effects = ["state.mutate@const=session-hooks"],
     sig = "register_session_hook(event: string, pattern_or_handler: string|closure, handler?: closure) -> nil",
     category = "workflow.host"
 )]
@@ -269,7 +289,11 @@ pub(super) fn register_session_hook_builtin(
 }
 
 /// Clear registered session-level lifecycle hooks.
-#[harn_builtin(sig = "clear_session_hooks() -> nil", category = "workflow.host")]
+#[harn_builtin(
+    exposure = "harness.agent.clear_session_hooks",
+    effects = ["state.mutate@const=session-hooks"],
+    sig = "clear_session_hooks() -> nil", category = "workflow.host"
+)]
 pub(super) fn clear_session_hooks_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -286,6 +310,8 @@ pub(super) fn clear_session_hooks_builtin(
 /// delivered, inbox_delivered, dispatch_skipped}`.
 /// Register a hook covering one or more agent-loop checkpoint seams.
 #[harn_builtin(
+    exposure = "harness.agent.register_checkpoint_hook",
+    effects = ["state.mutate@const=checkpoint-hooks"],
     sig = "register_checkpoint_hook(kinds: string|list|nil, handler: closure) -> nil",
     category = "workflow.host"
 )]
@@ -435,6 +461,8 @@ fn reminder_provider_event_list(
 
 /// Register a system-reminder provider closure for agent lifecycle events.
 #[harn_builtin(
+    exposure = "harness.agent.register_reminder_provider",
+    effects = ["state.mutate@const=reminder-providers"],
     sig = "register_reminder_provider(config: dict) -> nil",
     category = "workflow.host"
 )]
@@ -489,7 +517,11 @@ pub(super) fn register_reminder_provider_builtin(
 }
 
 /// Clear registered user-defined system-reminder providers.
-#[harn_builtin(sig = "clear_reminder_providers() -> nil", category = "workflow.host")]
+#[harn_builtin(
+    exposure = "harness.agent.clear_reminder_providers",
+    effects = ["state.mutate@const=reminder-providers"],
+    sig = "clear_reminder_providers() -> nil", category = "workflow.host"
+)]
 pub(super) fn clear_reminder_providers_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -504,6 +536,8 @@ pub(super) fn clear_reminder_providers_builtin(
 /// value when the lifecycle runs.
 /// Register a callback invoked after the pipeline's declared steps complete.
 #[harn_builtin(
+    exposure = "harness.agent.pipeline_on_finish",
+    effects = ["state.mutate@const=pipeline-hooks"],
     sig = "pipeline_on_finish(callback: closure) -> nil",
     category = "workflow.host"
 )]
@@ -522,6 +556,8 @@ pub(super) fn pipeline_on_finish_builtin(
 /// drain/abandon/handoff_to recorded without depending on Rust internals.
 /// Return and clear every entry recorded via harness.emit_audit during this pipeline run.
 #[harn_builtin(
+    exposure = "harness.obs.pipeline_lifecycle_audit_log_take",
+    effects = ["observability.mutate@const=pipeline-lifecycle"],
     sig = "pipeline_lifecycle_audit_log_take() -> list",
     category = "workflow.host"
 )]
@@ -538,6 +574,8 @@ pub(super) fn pipeline_lifecycle_audit_log_take_builtin(
 /// presets that want to peek without disturbing the replay log.
 /// Return every entry recorded via harness.emit_audit without clearing the log.
 #[harn_builtin(
+    exposure = "harness.obs.pipeline_lifecycle_audit_log_snapshot",
+    effects = ["observability.read@const=pipeline-lifecycle"],
     sig = "pipeline_lifecycle_audit_log_snapshot() -> list",
     category = "workflow.host"
 )]
@@ -558,6 +596,8 @@ pub(super) fn pipeline_lifecycle_audit_log_snapshot_builtin(
 /// true.
 /// Return true while the settlement-agent drain loop is running on this thread.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_settlement_agent_active() -> bool",
     category = "workflow.host",
     runtime_only = true
@@ -579,6 +619,8 @@ pub(super) fn settlement_agent_active_builtin(
 ///   { control: "allow" | "block" | "decision", reason?, decision? }
 /// Fire a session-level lifecycle hook and return its control flow.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_fire_session_hook(event: string, payload?: dict|nil) -> dict",
     kind = "async",
     category = "workflow.host",
@@ -653,6 +695,8 @@ pub(super) async fn fire_session_hook_builtin(
 /// closure handlers for the next async-builtin boundary.
 /// Queue a `FileEdited` notification; hooks fire on the next agent-loop boundary.
 #[harn_builtin(
+    exposure = "harness.agent.notify_file_edited",
+    effects = ["host.write@arg0", "observability.write@arg0"],
     sig = "notify_file_edited(path: string, metadata?: dict|nil) -> nil",
     category = "workflow.host"
 )]
@@ -678,6 +722,8 @@ pub(super) fn notify_file_edited_builtin(
 /// transcript or pass them to follow-up tools.
 /// Drain the FileEdited queue, fire matching hooks, return the drained paths.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__host_drain_file_edits(session_id?: string|nil) -> list",
     kind = "async",
     category = "workflow.host",

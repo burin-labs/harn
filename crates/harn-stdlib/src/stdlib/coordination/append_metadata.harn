@@ -49,10 +49,15 @@ pub fn message_from_event(event) -> dict {
   return filter_nil(message + {ts: ts, seq: seq, created_at: message?.created_at ?? ts})
 }
 
-pub fn read_messages(channel_name: string, channel_options: dict, options = nil) -> list {
+pub fn read_messages(
+  channels: HarnessChannels,
+  channel_name: string,
+  channel_options: dict,
+  options = nil,
+) -> list {
   const opts = dict(options)
   const since = since_timestamp(opts)
-  const events = channel_events(channel_name, channel_options)
+  const events = channels.events(channel_name, channel_options)
   const limit = if opts?.limit == nil {
     nil
   } else {

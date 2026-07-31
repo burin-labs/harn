@@ -1,7 +1,7 @@
 // Run: harn test personas/review_captain/tests/risk_test.harn
 import { classify_risky_paths, infer_missing_tests } from "../lib/risk"
 
-pipeline test_classify_with_suffix_wildcard(task) {
+pipeline test_classify_with_suffix_wildcard(harness: Harness, task) {
   const result = classify_risky_paths(
     ["scripts/release.sh", "Package.swift", "Sources/foo.swift"],
     ["scripts/release*", "Package.swift"],
@@ -13,19 +13,19 @@ pipeline test_classify_with_suffix_wildcard(task) {
   assert_eq(result.misses[0], "Sources/foo.swift")
 }
 
-pipeline test_classify_with_extension_wildcard(task) {
+pipeline test_classify_with_extension_wildcard(harness: Harness, task) {
   const result = classify_risky_paths(["a.toml", "b.swift", "c.toml"], ["*.toml"])
   assert_eq(len(result.hits), 2)
   assert_eq(len(result.misses), 1)
 }
 
-pipeline test_classify_nil_inputs(task) {
+pipeline test_classify_nil_inputs(harness: Harness, task) {
   const result = classify_risky_paths(nil, nil)
   assert_eq(len(result.hits), 0)
   assert_eq(len(result.misses), 0)
 }
 
-pipeline test_missing_tests_when_no_tests(task) {
+pipeline test_missing_tests_when_no_tests(harness: Harness, task) {
   const missing = infer_missing_tests(
     ["Sources/Foo.swift", "Sources/Bar.swift"],
     ["Tests/", "_test.swift"],
@@ -33,7 +33,7 @@ pipeline test_missing_tests_when_no_tests(task) {
   assert_eq(len(missing), 2)
 }
 
-pipeline test_missing_tests_when_tests_present(task) {
+pipeline test_missing_tests_when_tests_present(harness: Harness, task) {
   const missing = infer_missing_tests(
     ["Sources/Foo.swift", "Tests/FooTests.swift"],
     ["Tests/", "_test.swift"],

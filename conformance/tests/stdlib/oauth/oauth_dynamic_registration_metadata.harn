@@ -14,7 +14,7 @@ import {
 } from "std/oauth/dynamic_registration"
 import { custom } from "std/oauth/providers"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const metadata = client_metadata(
     {
       redirect_uris: ["https://app.example/callback"],
@@ -110,5 +110,5 @@ pipeline test(task) {
   assert_eq(response.content_type, "application/json", "json content type")
   assert_eq(response.headers["cache-control"], "no-store", "no-store cache control")
   assert(contains(response.body, "redirect_uris"), "body carries metadata")
-  log("oauth dynamic registration metadata ok")
+  harness.stdio.log("oauth dynamic registration metadata ok")
 }

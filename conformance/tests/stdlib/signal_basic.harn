@@ -1,12 +1,12 @@
 import "std/signal"
 
-pipeline default() {
-  const first = on_interrupt({ -> __io_println("a") }, {once: false})
-  const second = on_interrupt({ -> __io_println("b") }, {once: false})
+pipeline default(harness: Harness) {
+  const first = on_interrupt({ -> harness.stdio.println("a") }, {once: false})
+  const second = on_interrupt({ -> harness.stdio.println("b") }, {once: false})
   __signal_raise("SIGINT")
   off_interrupt(second)
   __signal_raise("SIGINT")
-  __io_println(interrupted())
+  harness.stdio.println(interrupted())
   off_interrupt(first)
   const raised = try {
     __signal_raise("SIGINT")
@@ -14,7 +14,7 @@ pipeline default() {
   } catch (e) {
     "interrupted"
   }
-  __io_println(raised)
+  harness.stdio.println(raised)
   on_interrupt(
     { ->
       let spin = 0
@@ -30,5 +30,5 @@ pipeline default() {
   } catch (e) {
     e
   }
-  __io_println(timed_out)
+  harness.stdio.println(timed_out)
 }

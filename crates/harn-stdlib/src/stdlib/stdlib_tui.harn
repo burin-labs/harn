@@ -3,7 +3,7 @@
 // Two complementary surfaces:
 //   * `page` / `terminal_width` / `rule` / `clear` for rendering long
 //     artifacts and chrome.
-//   * `select_from(items, opts?)` for harness-style pickers. Auto-
+//   * `select_from(harness, items, opts?)` for harness-style pickers. Auto-
 //     detects `fzf` and `gum choose` at runtime and falls back to a
 //     numbered `read_line` menu when neither is available, so callers
 //     stop branching on which binary happens to be installed. The
@@ -52,8 +52,8 @@ pub fn page(opts: PageOptions) -> PageResult {
  * @effects: []
  * @errors: []
  */
-pub fn terminal_width(default_width = 80) -> int {
-  return __tui_terminal_width(default_width)
+pub fn terminal_width(term: HarnessTerm, default_width = 80) -> int {
+  return term.terminal_width(default_width)
 }
 
 /**
@@ -62,13 +62,13 @@ pub fn terminal_width(default_width = 80) -> int {
  * @effects: []
  * @errors: []
  */
-pub fn rule(char = "─", width = nil) -> string {
+pub fn rule(term: HarnessTerm, char = "─", width = nil) -> string {
   const mark = if type_of(char) == "string" && len(char) > 0 {
     substring(char, 0, 1)
   } else {
     "─"
   }
-  const resolved_width = width ?? terminal_width()
+  const resolved_width = width ?? terminal_width(term)
   if resolved_width <= 0 {
     return ""
   }
@@ -81,8 +81,8 @@ pub fn rule(char = "─", width = nil) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn clear() {
-  __tui_clear()
+pub fn clear(term: HarnessTerm) {
+  term.clear()
 }
 
 const __TUI_CANCEL_TOKENS = ["q", "quit", "/quit", "exit", "/exit", "/cancel"]
@@ -156,9 +156,9 @@ fn __tui_error(opts, message: string) -> dict {
   return {ok: false, value: opts?.cancel_value, status: "error", error: message}
 }
 
-fn __tui_probe(binary: string) -> bool {
+fn __tui_probe(tools: HarnessTools, binary: string) -> bool {
   const probed = try {
-    command_run({argv: [binary, "--version"]}, {capture: {max_inline_bytes: 256}})
+    command_run(tools, {argv: [binary, "--version"]}, {capture: {max_inline_bytes: 256}})
   }
   if !is_ok(probed) {
     return false
@@ -167,20 +167,20 @@ fn __tui_probe(binary: string) -> bool {
   return result?.exit_code == 0
 }
 
-fn __tui_pick_backend(prefer: string) -> string {
+fn __tui_pick_backend(term: HarnessTerm, tools: HarnessTools, prefer: string) -> string {
   if prefer == "fzf" || prefer == "gum" || prefer == "none" {
     return prefer
   }
   // "auto": only consider external pickers when stdout is a real
   // terminal — they draw their UI over /dev/tty and can't render into
   // captured pipes. Tests can force a backend via `prefer_external`.
-  if !is_stdout_tty() {
+  if !term.is_tty("stdout") {
     return "numbered"
   }
-  if __tui_probe("fzf") {
+  if __tui_probe(tools, "fzf") {
     return "fzf"
   }
-  if __tui_probe("gum") {
+  if __tui_probe(tools, "gum") {
     return "gum"
   }
   return "numbered"
@@ -222,11 +222,11 @@ fn __tui_parse_multi(line: string, len_items: int) -> any {
   return selected
 }
 
-fn __tui_print_menu(items, labels: list<string>, opts) {
+fn __tui_print_menu(stdio: HarnessStdio, items, labels: list<string>, opts) {
   const prompt = opts?.prompt ?? "Select"
   const header = opts?.header
   if header != nil && trim(__tui_to_string(header)) != "" {
-    __io_write_stdout(__tui_to_string(header) + "\n")
+    stdio.println(__tui_to_string(header))
   }
   let idx = 0
   for label in labels {
@@ -236,7 +236,7 @@ fn __tui_print_menu(items, labels: list<string>, opts) {
     } else {
       "  "
     }
-    __io_write_stdout(to_string(human) + ")" + marker + label + "\n")
+    stdio.println(to_string(human) + ")" + marker + label)
     idx = idx + 1
   }
   const multi = opts?.multi ?? false
@@ -245,12 +245,12 @@ fn __tui_print_menu(items, labels: list<string>, opts) {
   } else {
     " (1-" + to_string(len(items)) + "; q to exit)"
   }
-  __io_write_stdout(__tui_to_string(prompt) + hint + "> ")
+  stdio.print(__tui_to_string(prompt) + hint + "> ")
 }
 
-fn __tui_numbered_pick(items, labels, opts) -> dict {
-  __tui_print_menu(items, labels, opts)
-  const line_result = __io_read_line({})
+fn __tui_numbered_pick(stdio: HarnessStdio, items, labels, opts) -> dict {
+  __tui_print_menu(stdio, items, labels, opts)
+  const line_result = stdio.read_line({})
   if !line_result.ok {
     return __tui_eof(opts)
   }
@@ -306,7 +306,7 @@ fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
   if preview_fn == nil || !__tui_is_callable(preview_fn) {
     return {dir: nil, args: []}
   }
-  const dir = harness.fs.temp_dir() + "/harn-tui-" + uuid_v7()
+  const dir = harness.fs.workspace_temp_dir() + "/harn-tui-" + harness.random.uuid_v7()
   harness.fs.mkdir(dir)
   let idx = 0
   for item in items {
@@ -318,7 +318,7 @@ fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
   }
   // fzf evaluates `--preview` through the host shell — `cmd.exe` on
   // Windows, `sh` elsewhere — so the read command has to match.
-  const reader = if platform() == "windows" {
+  const reader = if harness.system.platform().os == "windows" {
     "type"
   } else {
     "cat"
@@ -326,12 +326,12 @@ fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
   return {dir: dir, args: ["--preview", reader + " " + dir + "/{1}.txt"]}
 }
 
-fn __tui_preview_cleanup(harness: Harness, dir) {
+fn __tui_preview_cleanup(fs: HarnessFs, dir) {
   if dir == nil {
     return
   }
   const _ = try {
-    harness.fs.delete(dir)
+    fs.delete(dir)
   }
 }
 
@@ -369,7 +369,7 @@ fn __tui_fzf_decode(items, body: string, multi: bool, opts) -> dict {
   return __tui_result(true, chosen, "selected")
 }
 
-fn __tui_fzf_pick(items, labels, opts) -> dict {
+fn __tui_fzf_pick(harness: Harness, items, labels, opts) -> dict {
   const stdin = __tui_join_stdin(labels)
   const prompt = __tui_to_string(opts?.prompt ?? "Select> ")
   const header = opts?.header
@@ -390,8 +390,12 @@ fn __tui_fzf_pick(items, labels, opts) -> dict {
   }
   const preview = __tui_preview_setup(harness, items, opts?.preview)
   argv = argv + preview.args
-  const result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
-  __tui_preview_cleanup(harness, preview.dir)
+  const result = command_run(
+    harness.tools,
+    {argv: argv},
+    {stdin: stdin, capture: {max_inline_bytes: 1048576}},
+  )
+  __tui_preview_cleanup(harness.fs, preview.dir)
   if result.exit_code == 130 {
     return __tui_cancelled(opts)
   }
@@ -405,14 +409,18 @@ fn __tui_fzf_pick(items, labels, opts) -> dict {
   return __tui_fzf_decode(items, body, multi, opts)
 }
 
-fn __tui_gum_pick(items, labels, opts) -> dict {
+fn __tui_gum_pick(tools: HarnessTools, items, labels, opts) -> dict {
   const stdin = join(labels, "\n") + "\n"
   const header = __tui_to_string(opts?.header ?? opts?.prompt ?? "Select")
   let argv = ["gum", "choose", "--header", header]
   if opts?.multi ?? false {
     argv = argv + ["--no-limit"]
   }
-  const result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
+  const result = command_run(
+    tools,
+    {argv: argv},
+    {stdin: stdin, capture: {max_inline_bytes: 1048576}},
+  )
   if !result.success {
     return __tui_cancelled(opts)
   }
@@ -471,7 +479,7 @@ fn __tui_gum_pick(items, labels, opts) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn select_from(items: list, opts: SelectFromOptions = {}) -> dict {
+pub fn select_from(harness: Harness, items: list, opts: SelectFromOptions = {}) -> dict {
   const options = opts ?? {}
   if type_of(items) != "list" || len(items) == 0 {
     return __tui_error(options, "select_from: items must be a non-empty list")
@@ -497,13 +505,13 @@ pub fn select_from(items: list, opts: SelectFromOptions = {}) -> dict {
   const backend = if prefer == "none" {
     "numbered"
   } else {
-    __tui_pick_backend(prefer)
+    __tui_pick_backend(harness.term, harness.tools, prefer)
   }
   if backend == "fzf" {
-    return __tui_fzf_pick(items, labels, options)
+    return __tui_fzf_pick(harness, items, labels, options)
   }
   if backend == "gum" {
-    return __tui_gum_pick(items, labels, options)
+    return __tui_gum_pick(harness.tools, items, labels, options)
   }
-  return __tui_numbered_pick(items, labels, options)
+  return __tui_numbered_pick(harness.stdio, items, labels, options)
 }

@@ -3,8 +3,9 @@
 import { best_of_n } from "std/llm/ensemble"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [
       llm_text("candidate-A"),
       llm_text("candidate-B"),
@@ -16,6 +17,7 @@ pipeline default() {
     ],
     { ->
       const result = best_of_n(
+        harness.llm,
         "rate these",
         "",
         {
@@ -27,11 +29,11 @@ pipeline default() {
           judge_opts: {provider: "mock"},
         },
       )
-      __io_println(result.ok)
-      __io_println(result.best.index)
-      __io_println(result.best.text)
-      __io_println(result.judge)
-      __io_println(result.reasoning)
+      harness.stdio.println(result.ok)
+      harness.stdio.println(result.best.index)
+      harness.stdio.println(result.best.text)
+      harness.stdio.println(result.judge)
+      harness.stdio.println(result.reasoning)
     },
   )
 }

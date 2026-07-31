@@ -9,7 +9,7 @@ const META: dict = {name: "harn", version: 1}
 
 const NAME: string = META["name"]
 
-pipeline main() {
-  log(THIRD)
-  log(NAME)
+pipeline main(harness: Harness) {
+  harness.stdio.log(THIRD)
+  harness.stdio.log(NAME)
 }

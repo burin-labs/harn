@@ -172,8 +172,9 @@ package gate. Local development should use the installed CLI and this package's
 
 The connector contract fixtures include a Harn Cloud managed-ingress delivery
 with `metadata.secret_ids.signing_secret = "linear.webhook.secret"`. Harn Cloud
-maps that alias when the connector calls `secret_get("linear/signing_secret")`,
-so tests cover managed ingress without live provider credentials.
+maps that alias when the connector calls
+`harness.secrets.read("linear/signing_secret")`, so tests cover managed ingress
+without live provider credentials.
 
 ## License
 

@@ -81,10 +81,14 @@ pub const ABORT_ABANDONED_CODE: string = "branch_abandoned"
  * @effects: []
  * @errors: []
  */
-pub fn abort_token(options: AbortTokenOptions? = nil) -> AbortToken {
-  const key = options?.key ?? ("abort:" + uuid())
+pub fn abort_token(
+  random: HarnessRandom,
+  runtime: HarnessRuntime,
+  options: AbortTokenOptions? = nil,
+) -> AbortToken {
+  const key = options?.key ?? ("abort:" + random.uuid())
   const scope = options?.scope ?? "task_group"
-  return {cell: shared_cell({scope: scope, key: key})}
+  return {cell: runtime.shared_cell({scope: scope, key: key})}
 }
 
 /**
@@ -93,8 +97,8 @@ pub fn abort_token(options: AbortTokenOptions? = nil) -> AbortToken {
  * @effects: []
  * @errors: []
  */
-pub fn abort_reason(token: AbortToken) -> AbortReason? {
-  const reason: AbortReason? = shared_get(token.cell)
+pub fn abort_reason(runtime: HarnessRuntime, token: AbortToken) -> AbortReason? {
+  const reason: AbortReason? = runtime.shared_get(token.cell)
   return reason
 }
 
@@ -105,8 +109,8 @@ pub fn abort_reason(token: AbortToken) -> AbortReason? {
  * @effects: []
  * @errors: []
  */
-pub fn abort_requested(token: AbortToken) -> bool {
-  return abort_reason(token) != nil
+pub fn abort_requested(runtime: HarnessRuntime, token: AbortToken) -> bool {
+  return abort_reason(runtime, token) != nil
 }
 
 /**
@@ -118,8 +122,8 @@ pub fn abort_requested(token: AbortToken) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn request_abort(token: AbortToken, reason: AbortReason) -> bool {
-  return shared_cas(token.cell, nil, reason)
+pub fn request_abort(runtime: HarnessRuntime, token: AbortToken, reason: AbortReason) -> bool {
+  return runtime.shared_cas(token.cell, nil, reason)
 }
 
 // Cancellation and internal engine errors are not branch outcomes; they must
@@ -145,6 +149,7 @@ fn __abort_threshold(options: SettleAbortOptions?) -> int? {
 }
 
 fn __abort_note_failure(
+  runtime: HarnessRuntime,
   err,
   index: int,
   token: AbortToken,
@@ -164,16 +169,23 @@ fn __abort_note_failure(
   if reason == nil {
     return nil
   }
-  const total = atomic_add(counter, 1) + 1
+  const total = runtime.atomic_add(counter, 1) + 1
   if total >= threshold {
-    let _ = request_abort(token, reason)
+    let _ = request_abort(runtime, token, reason)
   }
   return nil
 }
 
-fn __abort_branch(entry, body, token: AbortToken, counter, options: SettleAbortOptions?) -> dict {
+fn __abort_branch(
+  runtime: HarnessRuntime,
+  entry,
+  body,
+  token: AbortToken,
+  counter,
+  options: SettleAbortOptions?,
+) -> dict {
   const index = entry.index
-  const stop = abort_reason(token)
+  const stop = abort_reason(runtime, token)
   if stop != nil {
     return {
       index: index,
@@ -193,7 +205,7 @@ fn __abort_branch(entry, body, token: AbortToken, counter, options: SettleAbortO
     if __abort_must_propagate(thrown) {
       throw thrown
     }
-    __abort_note_failure(thrown, index, token, counter, options)
+    __abort_note_failure(runtime, thrown, index, token, counter, options)
     return {index: index, state: "failed", value: nil, error: thrown}
   }
   // A branch that *returns* `Result.Err` has reached a failing verdict without
@@ -203,7 +215,7 @@ fn __abort_branch(entry, body, token: AbortToken, counter, options: SettleAbortO
   const value = unwrap(raw)
   if is_err(value) {
     const returned = unwrap_err(value)
-    __abort_note_failure(returned, index, token, counter, options)
+    __abort_note_failure(runtime, returned, index, token, counter, options)
     return {index: index, state: "failed", value: nil, error: returned}
   }
   if is_ok(value) {
@@ -232,12 +244,14 @@ fn __abort_branch(entry, body, token: AbortToken, counter, options: SettleAbortO
  * @errors: []
  */
 pub fn settle_with_abort(
+  random: HarnessRandom,
+  runtime: HarnessRuntime,
   items: list,
   body,
   options: SettleAbortOptions? = nil,
 ) -> AbortSettleOutcome {
-  const token = options?.token ?? abort_token()
-  const counter = atomic(0)
+  const token = options?.token ?? abort_token(random, runtime)
+  const counter = runtime.atomic(0)
   let indexed = []
   for (position, item) in iter(items).enumerate() {
     indexed = indexed.appending({index: position, item: item})
@@ -245,7 +259,7 @@ pub fn settle_with_abort(
   const settled = parallel settle indexed with {
     max_concurrent: options?.max_concurrent ?? 0,
   } { entry ->
-    __abort_branch(entry, body, token, counter, options)
+    __abort_branch(runtime, entry, body, token, counter, options)
   }
   let results = []
   let succeeded = 0
@@ -278,7 +292,7 @@ pub fn settle_with_abort(
     }
     index = index + 1
   }
-  const reason = abort_reason(token)
+  const reason = abort_reason(runtime, token)
   return {
     results: results,
     succeeded: succeeded,

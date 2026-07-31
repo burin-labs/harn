@@ -118,11 +118,11 @@ selected without `--shadow-from`, but its sibling `SKILL.md` artifact remains in
 shadow/replay comparison.
 
 ```harn
-pipeline version_bump(repo_path, version, branch_name, release_target) {
+pipeline version_bump(harness: Harness, repo_path, version, branch_name, release_target) {
   const review_warnings = []
   // Step 1: tool_call git.checkout_branch
   // side_effect: git_ref release-branch
-  log("crystallized step 1: git.checkout_branch")
+  harness.stdio.log("crystallized step 1: git.checkout_branch")
   return {status: "shadow_ready", review_warnings: review_warnings}
 }
 ```
@@ -491,7 +491,7 @@ calling `harn crystallize`:
 ```harn
 import { composition_crystallization_input } from "std/composition"
 
-pipeline capture(report) {
+pipeline capture(harness: Harness, report) {
   return composition_crystallization_input(report, {id: "composition-trace"})
 }
 ```
@@ -532,7 +532,7 @@ bump, and a normal PR against the persona package.
 ```harn
 import { persona_crystallization_bundle } from "std/personas/prelude"
 
-pipeline propose_persona_step(repair_runs) {
+pipeline propose_persona_step(harness: Harness, repair_runs) {
   return persona_crystallization_bundle(
     repair_runs,
     {

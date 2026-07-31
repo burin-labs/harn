@@ -1,7 +1,7 @@
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   fn double(x) {
     return x * 2
   }
   const result = 5 |> double
-  log(result)
+  harness.stdio.log(result)
 }

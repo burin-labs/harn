@@ -74,6 +74,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[harn_builtin(
+    exposure = "harness.agent.session_store_append",
+    effects = ["fs.write@dynamic", "state.write@arg0"],
     sig = "__session_store_append(session_id: string, payload: any, options?: dict) -> dict",
     kind = "async",
     category = "session_store"
@@ -128,6 +130,8 @@ async fn session_store_append_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.session_store_events",
+    effects = ["fs.read@dynamic", "state.read@arg0"],
     sig = "__session_store_events(session_id: string, options?: dict) -> list",
     kind = "async",
     category = "session_store"
@@ -167,6 +171,8 @@ async fn session_store_events_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.session_store_verify",
+    effects = ["fs.read@dynamic", "state.read@arg0"],
     sig = "__session_store_verify(session_id: string, options?: dict) -> dict",
     kind = "async",
     category = "session_store"
@@ -217,6 +223,8 @@ async fn session_store_verify_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.session_store_path",
+    effects = ["fs.read@dynamic"],
     sig = "__session_store_path(session_id: string, options?: dict) -> string",
     kind = "async",
     category = "session_store"
@@ -250,6 +258,8 @@ async fn session_store_path_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.session_store_database_path",
+    effects = ["fs.read@dynamic"],
     sig = "__session_store_database_path(options?: dict) -> string",
     kind = "async",
     category = "session_store"

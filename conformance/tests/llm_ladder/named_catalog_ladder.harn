@@ -6,8 +6,9 @@ import { with_llm_script } from "std/testing"
  * escalates to the next rung, which serves the answer. The policy label
  * comes from the catalog declaration.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [
       {
         error: {category: "rate_limit", message: "HTTP 429", retry_after_ms: 10},
@@ -17,13 +18,13 @@ pipeline test(task) {
       {text: "escalated answer", model: "mid", provider: "anthropic"},
     ],
     { ->
-      const result = llm_call("hi", nil, {ladder: "frugal"})
-      __io_println(result.text)
-      __io_println(result.routing.policy)
+      const result = harness.llm.call("hi", nil, {ladder: "frugal"})
+      harness.stdio.println(result.text)
+      harness.stdio.println(result.routing.policy)
       const attempts = result.routing.attempts
-      __io_println(len(attempts))
-      __io_println(attempts[0].status)
-      __io_println(attempts[1].status)
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(attempts[1].status)
     },
   )
 }

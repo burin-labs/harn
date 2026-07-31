@@ -97,6 +97,7 @@ conformance fixtures.
 
 - Harn source is supported: pass `--lang harn`, set `language = "harn"`, or let
   `.harn` paths resolve from their extension.
-- `rules_apply` is a gated deterministic tool: call
-  `hostlib_enable("tools:deterministic")` before it (even for a dry run).
+- `rules_apply` is a gated deterministic tool: pass `harness.rules` as its
+  first argument, including for dry runs. The nominal handle is the authority;
+  there is no ambient enable step.
 - Format every rule run / fixture with both `cargo fmt` and `harn fmt`.

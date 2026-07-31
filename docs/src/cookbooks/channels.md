@@ -22,8 +22,8 @@ dependent repos subscribe to the release's
 import { trigger_register } from "std/triggers"
 
 // --- harn-pr-agent ---
-pipeline pr_agent_on_merge(pr) {
-  emit_channel("pr.merged", {
+pipeline pr_agent_on_merge(harness: Harness, pr) {
+  harness.channels.append("pr.merged", {
     repo: "burin-labs/harn",
     number: pr.number,
     sha: pr.merge_commit_sha,
@@ -32,21 +32,21 @@ pipeline pr_agent_on_merge(pr) {
 }
 
 // --- release agent ---
-pipeline release_agent_setup() {
+pipeline release_agent_setup(harness: Harness) {
   trigger_register({
     id: "release-after-3-merges",
     kind: "channel.emit",
     provider: "channel",
     match: {events: ["channel:pr.merged"]},
-    when: { event -> event.provider_payload.payload.target_branch == "main" },
+    when: { _harness, event -> event.provider_payload.payload.target_branch == "main" },
     batch: {count: 3, window: "2h", key: "repo", expire_action: "fire_partial"},
-    handler: { event ->
+    handler: { harness, event ->
       const merged = event.batch
       const repo = merged[0].provider_payload.payload.repo
       const shas = merged
         |> map({ e -> e.provider_payload.payload.sha })
       const release = cut_release(repo, shas)
-      emit_channel("harn-release.shipped", {
+      harness.channels.append("harn-release.shipped", {
         repo: repo,
         version: release.version,
         merged_prs: len(merged),
@@ -56,13 +56,13 @@ pipeline release_agent_setup() {
 }
 
 // --- merge captains in dependent repos ---
-pipeline merge_captain_setup() {
+pipeline merge_captain_setup(harness: Harness) {
   trigger_register({
     id: "rebase-on-harn-release",
     kind: "channel.emit",
     provider: "channel",
     match: {events: ["channel:harn-release.shipped"]},
-    handler: { event ->
+    handler: { harness, event ->
       const release = event.provider_payload.payload
       rebase_queued_prs_against(release.version)
     },
@@ -93,13 +93,13 @@ when the counter hits 30.
 ```harn,ignore
 import { trigger_register, ReminderInject } from "std/triggers"
 
-pipeline reflection_agent(task) {
+pipeline reflection_agent(harness: Harness, task) {
   // 1. Emit a channel event from a tool hook so we don't have to
   //    instrument every tool definition by hand.
   register_tool_hook({
     pattern: "*",
     post: { ctx ->
-      emit_channel("tool_call.completed", {
+      harness.channels.append("tool_call.completed", {
         tool: ctx.tool_name,
         session: ctx.session_id,
       })
@@ -125,7 +125,7 @@ pipeline reflection_agent(task) {
   })
 
   // 3. Run the loop. The reflection nudge arrives transparently.
-  agent_loop(task, "You are a careful engineering agent. Reflect when nudged.")
+  agent_loop(harness, task, "You are a careful engineering agent. Reflect when nudged.")
 }
 ```
 
@@ -150,10 +150,10 @@ declarative cycle rather than a hand-rolled coordination dance.
 import { trigger_register, ReminderInject } from "std/triggers"
 
 // --- planner ---
-pipeline planner_loop(task) {
-  const session = agent_session_open("planner")
-  const draft = llm_call(task, "Write a one-page plan.", {session_id: session})
-  emit_channel("plan.draft", {
+pipeline planner_loop(harness: Harness, task) {
+  const session = harness.agent.open("planner")
+  const draft = harness.llm.call(task, "Write a one-page plan.", {session_id: session})
+  harness.channels.append("plan.draft", {
     plan: draft,
     revision: 1,
     session_id: session,
@@ -165,7 +165,7 @@ pipeline planner_loop(task) {
     kind: "channel.emit",
     provider: "channel",
     match: {events: ["channel:plan.feedback"]},
-    when: { event -> event.provider_payload.payload.target_session == session },
+    when: { _harness, event -> event.provider_payload.payload.target_session == session },
     handler: ReminderInject({
       target: session,
       body: "Reviewer feedback: {{ event.provider_payload.payload.critique }}",
@@ -174,23 +174,23 @@ pipeline planner_loop(task) {
     }),
   })
 
-  agent_loop(task, "Revise the plan when reminders arrive. Re-emit plan.draft when revision is complete.", {session_id: session})
+  agent_loop(harness, task, "Revise the plan when reminders arrive. Re-emit plan.draft when revision is complete.", {session_id: session})
 }
 
 // --- reviewers ---
-pipeline reviewer_setup() {
+pipeline reviewer_setup(harness: Harness) {
   trigger_register({
     id: "reviewer-on-draft",
     kind: "channel.emit",
     provider: "channel",
     match: {events: ["channel:plan.draft"]},
-    handler: { event ->
+    handler: { harness, event ->
       const draft = event.provider_payload.payload
-      const critique = llm_call(
+      const critique = harness.llm.call(
         "Critique this plan in 3 bullets:\n" + draft.plan,
         "You are a careful reviewer.",
       )
-      emit_channel("plan.feedback", {
+      harness.channels.append("plan.feedback", {
         target_session: draft.session_id,
         critique: critique,
         revision: draft.revision,
@@ -223,11 +223,11 @@ import { trigger_register } from "std/triggers"
 import { register_step_hook } from "std/hooks"
 
 // --- producers: any pipeline registering this hook gets free instrumentation ---
-pipeline producer_setup() {
+pipeline producer_setup(harness: Harness) {
   register_step_hook({
     pattern: "*",
     post: { ctx ->
-      emit_channel("pipeline.step.completed", {
+      harness.channels.append("pipeline.step.completed", {
         pipeline: ctx.pipeline_name,
         step: ctx.step_name,
         duration_ms: ctx.duration_ms,
@@ -239,7 +239,7 @@ pipeline producer_setup() {
 }
 
 // --- dashboard: one subscriber, scoped to the whole tenant ---
-pipeline dashboard_setup() {
+pipeline dashboard_setup(harness: Harness) {
   trigger_register({
     id: "dashboard-on-step",
     kind: "channel.emit",
@@ -247,7 +247,7 @@ pipeline dashboard_setup() {
     // Bare channel names default to tenant scope, so this catches
     // emits from any pipeline running for this tenant.
     match: {events: ["channel:pipeline.step.completed"]},
-    handler: { event ->
+    handler: { harness, event ->
       const row = event.provider_payload.payload
       dashboard_upsert(row.pipeline, row.step, {
         last_run_at: event.occurred_at,
@@ -259,7 +259,7 @@ pipeline dashboard_setup() {
 }
 ```
 
-Why tenant scope: a bare `emit_channel("pipeline.step.completed",
+Why tenant scope: a bare `harness.channels.append("pipeline.step.completed",
 ...)` resolves to `tenant:<current>:pipeline.step.completed`. The
 dashboard subscribes to the same name without prefix and automatically
 receives emits from every pipeline running for that tenant. Cross-
@@ -282,7 +282,7 @@ import { trigger_register } from "std/triggers"
 import { pipeline_on_finish } from "std/lifecycle"
 
 // --- pipeline A: live ingest ---
-pipeline ingest_pipeline(events) {
+pipeline ingest_pipeline(harness: Harness, events) {
   const deferred = []
   for event in events {
     const result = try_process_now(event)
@@ -294,25 +294,25 @@ pipeline ingest_pipeline(events) {
   // On clean drain, hand the deferred bucket off to pipeline B.
   pipeline_on_finish({ ctx ->
     if ctx.status == "completed" && len(deferred) > 0 {
-      emit_channel("pipeline.drained", {
+      harness.channels.append("pipeline.drained", {
         source_pipeline: "ingest",
         deferred_count: len(deferred),
         deferred_payload: deferred,
-        drained_at: timestamp(),
+        drained_at: harness.clock.timestamp(),
       })
     }
   })
 }
 
 // --- pipeline B: nightly settlement ---
-pipeline settlement_setup() {
+pipeline settlement_setup(harness: Harness) {
   trigger_register({
     id: "settlement-on-drain",
     kind: "channel.emit",
     provider: "channel",
     match: {events: ["channel:pipeline.drained"]},
-    when: { event -> event.provider_payload.payload.source_pipeline == "ingest" },
-    handler: { event ->
+    when: { _harness, event -> event.provider_payload.payload.source_pipeline == "ingest" },
+    handler: { harness, event ->
       const bucket = event.provider_payload.payload.deferred_payload
       for deferred in bucket {
         settle(deferred)

@@ -1153,14 +1153,18 @@ handler = "handlers::{handler_name}"
                 r#"
 import "std/triggers"
 
-pub fn {handler_name}(event: TriggerEvent) -> string {{
+pub fn {handler_name}(_harness: Harness, event: TriggerEvent) -> string {{
   return event.kind
 }}
 "#
             ),
         )
         .expect("write lib");
-        fs::write(root.join("main.harn"), "pipeline main() {}\n").expect("write main");
+        fs::write(
+            root.join("main.harn"),
+            "pipeline main(_harness: Harness) {}\n",
+        )
+        .expect("write main");
     }
 
     async fn install_workspace_manifest(root: &Path) {

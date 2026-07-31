@@ -11,15 +11,18 @@ fn factory_for(tag) {
   return { _event -> return { -> tag } }
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const pool_name = "spawn-to-pool-extractor-demo-" + unique
-  const _ = pool_create({name: pool_name, max_concurrent: 1, queue: fair_round_robin("key")})
+  const _ = pool_create(
+    harness.agent,
+    {name: pool_name, max_concurrent: 1, queue: fair_round_robin("key")},
+  )
   const trigger_id = "trigger-spawn-to-pool-extract-" + unique
-  const handle: TriggerHandle = trigger_register(
+  const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
@@ -43,7 +46,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  const fired = trigger_fire(
+  const fired = harness.runtime.trigger_fire(
     handle,
     {
       provider: "webhook",
@@ -55,21 +58,21 @@ pipeline test(task) {
   // The dispatcher surfaces the extracted priority + key in the dispatch
   // result so observers (audit, action graph) can correlate the pool task
   // back to the originating event without re-parsing the payload.
-  __io_println(fired.status == "dispatched")
-  __io_println(fired.result?.pool == pool_name)
-  __io_println(fired.result?.priority == 7)
-  __io_println(fired.result?.key == "acme")
+  harness.stdio.println(fired.status == "dispatched")
+  harness.stdio.println(fired.result?.pool == pool_name)
+  harness.stdio.println(fired.result?.priority == 7)
+  harness.stdio.println(fired.result?.key == "acme")
   // Missing paths fall back to defaults (priority 0, no key) rather than
   // failing the dispatch.
-  const fallback = trigger_fire(
+  const fallback = harness.runtime.trigger_fire(
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-fallback-" + unique}},
   )
-  __io_println(fallback.status == "dispatched")
-  __io_println(fallback.result?.priority == 0)
-  __io_println(fallback.result?.key == nil)
-  const results = pool_wait([fired.result, fallback.result])
-  __io_println(len(results) == 2)
-  __io_println(results[0].result == "seed")
-  __io_println(results[1].result == "seed")
+  harness.stdio.println(fallback.status == "dispatched")
+  harness.stdio.println(fallback.result?.priority == 0)
+  harness.stdio.println(fallback.result?.key == nil)
+  const results = pool_wait(harness.agent, [fired.result, fallback.result])
+  harness.stdio.println(len(results) == 2)
+  harness.stdio.println(results[0].result == "seed")
+  harness.stdio.println(results[1].result == "seed")
 }

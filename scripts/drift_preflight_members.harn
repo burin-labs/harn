@@ -47,7 +47,7 @@ fn main(harness: Harness) {
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
     harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
+    harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
   const tier = trim(parsed?.tier ?? "")
@@ -55,7 +55,7 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(
       "usage: harn run scripts/drift_preflight_members.harn -- --tier source|binary",
     )
-    exit(2)
+    harness.runtime.exit(2)
   }
   const registry = toml_parse(harness.fs.read_text(REGISTRY))
   const dispatch = registry?.preflight?.dispatch ?? {}
@@ -64,7 +64,7 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(
       "error: no `${tier}`-tier drift checks in ${REGISTRY} [preflight.dispatch]",
     )
-    exit(1)
+    harness.runtime.exit(1)
   }
   harness.stdio.println(join(members, " "))
   return nil

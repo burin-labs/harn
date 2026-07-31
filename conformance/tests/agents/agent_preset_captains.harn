@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Captain presets — verify that each of the four captain shapes
  * (merge_captain, review_captain, oncall_captain, release_captain)
@@ -9,56 +10,57 @@
 import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn preset_agent(kind, prompt, options = nil) {
-  const opts = agent_preset(kind, options)
-  return agent_loop(prompt, opts?.system, opts)
+fn preset_agent(harness: Harness, kind, prompt, options = nil) {
+  const opts = agent_preset(harness, kind, options)
+  return agent_loop(harness, prompt, opts?.system, opts)
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // (1) merge_captain — long adaptive budget; tool_using profile;
   // captain max-nudges of 3.
-  const merge = agent_preset("merge_captain")
-  __io_println(merge.profile)
-  __io_println(merge.iteration_budget.mode)
-  __io_println(merge.iteration_budget.initial)
-  __io_println(merge.iteration_budget.max)
-  __io_println(merge.iteration_budget.extend_by)
-  __io_println(merge.max_nudges)
-  __io_println(merge._preset_kind)
-  __io_println(merge.turn_policy.allow_done_sentinel)
+  const merge = agent_preset(harness, "merge_captain")
+  harness.stdio.println(merge.profile)
+  harness.stdio.println(merge.iteration_budget.mode)
+  harness.stdio.println(merge.iteration_budget.initial)
+  harness.stdio.println(merge.iteration_budget.max)
+  harness.stdio.println(merge.iteration_budget.extend_by)
+  harness.stdio.println(merge.max_nudges)
+  harness.stdio.println(merge._preset_kind)
+  harness.stdio.println(merge.turn_policy.allow_done_sentinel)
   // No layers wired without sinks/consent — tool_caller stays unset
   // because the default consent is auto-approve-reads / deny-writes,
   // which IS a layer.
-  __io_println(merge?.tool_caller != nil)
+  harness.stdio.println(merge?.tool_caller != nil)
   // (2) review_captain — tool-using profile, medium adaptive budget.
-  const review = agent_preset("review_captain")
-  __io_println(review.profile)
-  __io_println(review.iteration_budget.mode)
-  __io_println(review.iteration_budget.initial)
-  __io_println(review.iteration_budget.max)
-  __io_println(review._preset_kind)
+  const review = agent_preset(harness, "review_captain")
+  harness.stdio.println(review.profile)
+  harness.stdio.println(review.iteration_budget.mode)
+  harness.stdio.println(review.iteration_budget.initial)
+  harness.stdio.println(review.iteration_budget.max)
+  harness.stdio.println(review._preset_kind)
   // No tool middleware default for review_captain.
-  __io_println(review?.tool_caller == nil)
+  harness.stdio.println(review?.tool_caller == nil)
   // (3) oncall_captain — tool_using profile + default rate-limit
   // (max_calls=50) layer wired automatically.
-  const oncall = agent_preset("oncall_captain")
-  __io_println(oncall.profile)
-  __io_println(oncall.iteration_budget.initial)
-  __io_println(oncall.iteration_budget.max)
-  __io_println(oncall?.tool_caller != nil)
+  const oncall = agent_preset(harness, "oncall_captain")
+  harness.stdio.println(oncall.profile)
+  harness.stdio.println(oncall.iteration_budget.initial)
+  harness.stdio.println(oncall.iteration_budget.max)
+  harness.stdio.println(oncall?.tool_caller != nil)
   // (4) release_captain — long adaptive budget. Dry-run is opt-in.
-  const release = agent_preset("release_captain")
-  __io_println(release.iteration_budget.initial)
-  __io_println(release.iteration_budget.max)
-  __io_println(release?.tool_caller == nil)
+  const release = agent_preset(harness, "release_captain")
+  harness.stdio.println(release.iteration_budget.initial)
+  harness.stdio.println(release.iteration_budget.max)
+  harness.stdio.println(release?.tool_caller == nil)
   // (5) Caller-supplied audit/telemetry sinks compose into the stack.
   const audit_sink = { _record -> nil }
   const telemetry_sink = { _span -> nil }
   const merge_with_sinks = agent_preset(
+    harness,
     "merge_captain",
     {audit_sink: audit_sink, telemetry: telemetry_sink},
   )
-  __io_println(merge_with_sinks?.tool_caller != nil)
+  harness.stdio.println(merge_with_sinks?.tool_caller != nil)
   // (6) Caller-supplied cheap-default + frontier escalation builds
   // the with_routing-backed llm_caller.
   const cheap = { _call ->
@@ -75,17 +77,19 @@ pipeline default() {
   }
   const escalate = { _call -> false }
   const routed = agent_preset(
+    harness,
     "release_captain",
     {cheap_caller: cheap, frontier_caller: frontier, escalate_predicate: escalate},
   )
-  __io_println(routed?.llm_caller != nil)
+  harness.stdio.println(routed?.llm_caller != nil)
   // (7) Caller-supplied tool_caller wins outright over preset-built layers.
   const custom_caller = { call, next -> next(call) }
   const overridden = agent_preset(
+    harness,
     "merge_captain",
     {tool_caller: custom_caller, audit_sink: audit_sink},
   )
-  __io_println(overridden.tool_caller == custom_caller)
+  harness.stdio.println(overridden.tool_caller == custom_caller)
   // (8) merge_captain default consent ALLOWS read-annotated tools and
   // BLOCKS unannotated/write tools. Drive a real agent_loop through
   // both paths to confirm short-circuit behavior.
@@ -111,6 +115,7 @@ pipeline default() {
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {
         tool_calls: [
@@ -123,16 +128,18 @@ pipeline default() {
     ],
     { ->
       const merge_run = preset_agent(
+        harness,
         "merge_captain",
         "Try one read and one write.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3},
       )
-      __io_println(merge_run.status)
-      __io_println(contains(merge_run.tools.successful, "lookup"))
-      __io_println(!contains(merge_run.tools.successful, "delete"))
+      harness.stdio.println(merge_run.status)
+      harness.stdio.println(contains(merge_run.tools.successful, "lookup"))
+      harness.stdio.println(!contains(merge_run.tools.successful, "delete"))
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "rl1", name: "lookup", arguments: {q: "1"}}]},
       {tool_calls: [{id: "rl2", name: "lookup", arguments: {q: "2"}}]},
@@ -141,6 +148,7 @@ pipeline default() {
     ],
     { ->
       const oncall_capped = preset_agent(
+        harness,
         "oncall_captain",
         "Hammer the same tool.",
         {
@@ -151,16 +159,18 @@ pipeline default() {
           rate_limit: {max_calls: 1},
         },
       )
-      __io_println(len(oncall_capped.tools.successful))
+      harness.stdio.println(len(oncall_capped.tools.successful))
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "dr1", name: "delete", arguments: {path: "/tmp/preview"}}]},
       llm_text("<user_response>Dry run preview.</user_response>"),
     ],
     { ->
       const release_dry = preset_agent(
+        harness,
         "release_captain",
         "Preview the action.",
         {
@@ -171,31 +181,35 @@ pipeline default() {
           dry_run: true,
         },
       )
-      __io_println(release_dry.status)
-      __io_println(contains(release_dry.tools.successful, "delete"))
+      harness.stdio.println(release_dry.status)
+      harness.stdio.println(contains(release_dry.tools.successful, "delete"))
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "rv1", name: "lookup", arguments: {q: "review"}}]},
       llm_text("<user_response>Looks good.</user_response>"),
     ],
     { ->
       const review_run = preset_agent(
+        harness,
         "review_captain",
         "Review this PR.",
         {provider: "mock", tools: registry, tool_format: "native"},
       )
-      __io_println(review_run.status)
+      harness.stdio.println(review_run.status)
     },
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "ow1", name: "delete", arguments: {path: "/tmp/yes"}}]},
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
       const merge_no_consent = preset_agent(
+        harness,
         "merge_captain",
         "Delete with consent disabled.",
         {
@@ -206,8 +220,8 @@ pipeline default() {
           consent: false,
         },
       )
-      __io_println(merge_no_consent.status)
-      __io_println(contains(merge_no_consent.tools.successful, "delete"))
+      harness.stdio.println(merge_no_consent.status)
+      harness.stdio.println(contains(merge_no_consent.tools.successful, "delete"))
     },
   )
 }

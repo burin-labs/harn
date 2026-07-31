@@ -1,6 +1,7 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline default() {
+pipeline default(harness: Harness) {
   let registry = tool_registry()
   registry = tool_define(
     registry,
@@ -15,6 +16,7 @@ pipeline default() {
     {parameters: {path: {type: "string"}}, handler: { args -> "original result " + args.path }},
   )
   with_llm_script(
+    harness.llm,
     [
       {tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
       {tool_calls: [{id: "read_1", name: "read_note", arguments: {path: "notes.txt"}}]},
@@ -22,6 +24,7 @@ pipeline default() {
     ],
     { ->
       const result = agent_loop(
+        harness,
         "Exercise manifest hooks",
         nil,
         {
@@ -33,7 +36,7 @@ pipeline default() {
         },
       )
       assert(result?.status == "done", "loop completes")
-      const calls = llm_mock_calls()
+      const calls = harness.llm.mock_calls()
       assert(len(calls) == 3, "three model turns happened")
       let saw_deny = false
       for message in calls[1].messages {
@@ -51,7 +54,7 @@ pipeline default() {
         }
       }
       assert(saw_post_hook, "post-tool hook rewrote the successful result")
-      log("manifest_hooks_runtime tests passed")
+      harness.stdio.log("manifest_hooks_runtime tests passed")
     },
   )
 }

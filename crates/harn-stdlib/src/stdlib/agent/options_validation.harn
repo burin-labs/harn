@@ -77,7 +77,7 @@ pub fn __context_profile_disabled(opts) {
   return type_of(value) == "bool" && !value
 }
 
-pub fn __with_project_context_profile(opts) {
+pub fn __with_project_context_profile(project: HarnessProject, opts) {
   if __has_key(opts, "context_profile") || __has_key(opts, "project_context_profile")
     || __context_profile_disabled(
     opts,
@@ -85,7 +85,7 @@ pub fn __with_project_context_profile(opts) {
     return opts
   }
   const resolved = try {
-    project_context_profile(__context_profile_root(opts), __context_profile_options(opts))
+    project_context_profile(project, __context_profile_root(opts), __context_profile_options(opts))
   }
   if is_err(resolved) {
     return opts + {_context_profile_error: to_string(unwrap_err(resolved))}

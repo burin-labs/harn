@@ -6,27 +6,28 @@ import { with_llm_script } from "std/testing"
  * tightened prompt. The second attempt is clean and gets returned.
  * Both attempts must show up on the routing trace.
  */
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   with_llm_script(
+    harness.llm,
     [
       {text: "use unwrap() here", model: "mock", provider: "mock"},
       {text: "use match instead", model: "mock", provider: "mock"},
     ],
     { ->
-      const policy = routing_policy(
+      const policy = harness.llm.routing_policy(
         {
           chain: [{provider: "mock", model: "mock", label: "cheap"}],
           escalate_on: [{kind: "lint", forbidden_patterns: ["unwrap"], on_fail: "refine"}],
           label: "verifier-refine",
         },
       )
-      const result = llm_call("question", nil, {routing: policy})
-      __io_println(result.text)
+      const result = harness.llm.call("question", nil, {routing: policy})
+      harness.stdio.println(result.text)
       const attempts = result.routing.attempts
-      __io_println(len(attempts))
-      __io_println(attempts[0].verifier_outcome)
-      __io_println(attempts[1].verifier_outcome)
-      __io_println(result.routing.selected)
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].verifier_outcome)
+      harness.stdio.println(attempts[1].verifier_outcome)
+      harness.stdio.println(result.routing.selected)
     },
   )
 }

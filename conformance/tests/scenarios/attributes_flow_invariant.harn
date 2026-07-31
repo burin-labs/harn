@@ -18,9 +18,9 @@ fn naming_style(_slice) -> bool {
 }
 
 @test
-pipeline test_flow_attributes_smoke(task) {
+pipeline test_flow_attributes_smoke(harness: Harness, task) {
   // Both predicates remain ordinary callable functions.
   assert(no_secrets_in_diff(nil), "deterministic predicate callable")
   assert(naming_style(nil), "semantic predicate callable")
-  log("attributes_flow_invariant ok")
+  harness.stdio.log("attributes_flow_invariant ok")
 }

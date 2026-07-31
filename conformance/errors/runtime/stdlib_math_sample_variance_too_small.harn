@@ -1,5 +1,5 @@
 import "std/math"
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   variance([1], true)
 }

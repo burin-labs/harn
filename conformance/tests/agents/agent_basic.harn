@@ -1,3 +1,5 @@
+import { agent, agent_config, agent_name } from "std/agent/workers"
+
 fn agent_tools() {
   let tools = tool_registry()
   tools = tool_define(
@@ -26,7 +28,7 @@ fn agent_tools() {
   return tools
 }
 
-pipeline test(task) {
+pipeline test(harness: Harness, task) {
   // Test agent() and agent_config() builtins.
   const classifier = agent(
     "classifier",
@@ -60,5 +62,5 @@ pipeline test(task) {
   assert(cfg.options.reasoning_policy == "auto", "should have reasoning_policy in options")
   assert(cfg.options.reasoning_scale == "large", "should have reasoning_scale in options")
   assert(cfg.options.reasoning_task == "code", "should have reasoning_task in options")
-  log("agent tests passed")
+  harness.stdio.log("agent tests passed")
 }

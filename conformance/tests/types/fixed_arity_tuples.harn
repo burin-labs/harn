@@ -10,17 +10,17 @@ fn sum_values(values: list<int>) -> int {
   return total
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   const row = tuple("jobs", 3)
-  __io_println(row[0])
-  __io_println(row[-1])
+  harness.stdio.println(row[0])
+  harness.stdio.println(row[-1])
   const contextual: tuple<string, int> = ["workers", 4]
-  __io_println(label(contextual))
-  __io_println(label(["retries", 2]))
+  harness.stdio.println(label(contextual))
+  harness.stdio.println(label(["retries", 2]))
   const [name, count] = row
-  __io_println("${name}:${count}")
+  harness.stdio.println("${name}:${count}")
   const numbers = tuple(1, 2, 3)
-  __io_println(sum_values(numbers))
+  harness.stdio.println(sum_values(numbers))
   const expanded = tuple(...numbers)
-  __io_println(sum_values(expanded))
+  harness.stdio.println(sum_values(expanded))
 }

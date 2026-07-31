@@ -17,6 +17,7 @@ import { agent_capture_events } from "std/agent/events"
 //   D. no host-fact callbacks -> graceful judge-only degradation, surfaced via the
 //      bundle's `_completion_gate.facts_available` flag (never a silent pass).
 import { agent_completion_gate } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn events_of(events, kind) {
@@ -37,17 +38,20 @@ fn done_turns(n) {
   return turns
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // --- A. cosmetic-only writes are vetoed, then released by the veto budget ---
   with_llm_script(
+    harness.llm,
     done_turns(6),
     { ->
-      const session = "cg-cosmetic-" + uuid()
+      const session = "cg-cosmetic-" + harness.random.uuid()
       const calls_key = "cg-calls-" + session
-      store_set(calls_key, 0)
+      harness.runtime.store_set(calls_key, 0)
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "Implement the feature.",
           nil,
           {
@@ -58,9 +62,13 @@ pipeline default() {
             session_id: session,
           }
             + agent_completion_gate(
+            harness.runtime,
             {
               facts: fn(ctx) {
-                store_set(calls_key, (store_get(calls_key) ?? 0) + 1)
+                harness.runtime.store_set(
+                  calls_key,
+                  (harness.runtime.store_get(calls_key) ?? 0) + 1,
+                )
                 return {source_write_count: 0, cosmetic_write_count: 1, requires_write: true}
               },
             },
@@ -68,22 +76,25 @@ pipeline default() {
         ) },
       )
       const decisions = events_of(captured.events, "judge_decision")
-      __io_println("A.status=" + captured.result.status)
-      __io_println("A.gate_calls=" + to_string(store_get(calls_key)))
-      __io_println("A.sources=" + event_field_values(decisions, "source"))
-      __io_println("A.reasons=" + event_field_values(decisions, "reason"))
-      __io_println("A.confirms=" + event_field_values(decisions, "confirm"))
+      harness.stdio.println("A.status=" + captured.result.status)
+      harness.stdio.println("A.gate_calls=" + to_string(harness.runtime.store_get(calls_key)))
+      harness.stdio.println("A.sources=" + event_field_values(decisions, "source"))
+      harness.stdio.println("A.reasons=" + event_field_values(decisions, "reason"))
+      harness.stdio.println("A.confirms=" + event_field_values(decisions, "confirm"))
     },
   )
   // --- B. source write + green verifier: honored immediately; payload shape seen ---
   with_llm_script(
+    harness.llm,
     done_turns(2),
     { ->
-      const session = "cg-green-" + uuid()
+      const session = "cg-green-" + harness.random.uuid()
       const probe = "cg-probe-" + session
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "Implement the feature.",
           nil,
           {
@@ -94,11 +105,15 @@ pipeline default() {
             session_id: session,
           }
             + agent_completion_gate(
+            harness.runtime,
             {
               facts: fn(ctx) {
-                store_set(probe + ".session_matches", ctx.session_id == session)
-                store_set(probe + ".has_task", ctx.task != "")
-                store_set(probe + ".messages_is_list", type_of(ctx.messages) == "list")
+                harness.runtime.store_set(probe + ".session_matches", ctx.session_id == session)
+                harness.runtime.store_set(probe + ".has_task", ctx.task != "")
+                harness.runtime.store_set(
+                  probe + ".messages_is_list",
+                  type_of(ctx.messages) == "list",
+                )
                 return {source_write_count: 1, verify: {ok: true}}
               },
             },
@@ -106,23 +121,32 @@ pipeline default() {
         ) },
       )
       const decisions = events_of(captured.events, "judge_decision")
-      __io_println("B.status=" + captured.result.status)
-      __io_println("B.session_matches=" + to_string(store_get(probe + ".session_matches")))
-      __io_println("B.has_task=" + to_string(store_get(probe + ".has_task")))
-      __io_println("B.messages_is_list=" + to_string(store_get(probe + ".messages_is_list")))
-      __io_println("B.sources=" + event_field_values(decisions, "source"))
-      __io_println("B.reasons=" + event_field_values(decisions, "reason"))
-      __io_println("B.confirms=" + event_field_values(decisions, "confirm"))
+      harness.stdio.println("B.status=" + captured.result.status)
+      harness.stdio.println(
+        "B.session_matches=" + to_string(harness.runtime.store_get(probe + ".session_matches")),
+      )
+      harness.stdio.println(
+        "B.has_task=" + to_string(harness.runtime.store_get(probe + ".has_task")),
+      )
+      harness.stdio.println(
+        "B.messages_is_list=" + to_string(harness.runtime.store_get(probe + ".messages_is_list")),
+      )
+      harness.stdio.println("B.sources=" + event_field_values(decisions, "source"))
+      harness.stdio.println("B.reasons=" + event_field_values(decisions, "reason"))
+      harness.stdio.println("B.confirms=" + event_field_values(decisions, "confirm"))
     },
   )
   // --- C. source write + red verifier: strict veto the budget never converts ---
   with_llm_script(
+    harness.llm,
     done_turns(4),
     { ->
-      const session = "cg-red-" + uuid()
+      const session = "cg-red-" + harness.random.uuid()
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "Implement the feature.",
           nil,
           {
@@ -133,6 +157,7 @@ pipeline default() {
             session_id: session,
           }
             + agent_completion_gate(
+            harness.runtime,
             {
               max_vetoes: 1,
               facts:
@@ -141,26 +166,29 @@ pipeline default() {
           ),
         ) },
       )
-      __io_println("C.status=" + captured.result.status)
-      __io_println("C.is_done=" + to_string(captured.result.status == "done"))
-      __io_println(
+      harness.stdio.println("C.status=" + captured.result.status)
+      harness.stdio.println("C.is_done=" + to_string(captured.result.status == "done"))
+      harness.stdio.println(
         "C.sources=" + event_field_values(events_of(captured.events, "judge_decision"), "source"),
       )
-      __io_println(
+      harness.stdio.println(
         "C.reasons=" + event_field_values(events_of(captured.events, "judge_decision"), "reason"),
       )
     },
   )
   // --- D. no host facts: judge-only degradation, surfaced (never a silent pass) ---
-  const bundle = agent_completion_gate({})
-  __io_println("D.facts_available=" + to_string(bundle._completion_gate.facts_available))
+  const bundle = agent_completion_gate(harness.runtime, {})
+  harness.stdio.println("D.facts_available=" + to_string(bundle._completion_gate.facts_available))
   with_llm_script(
+    harness.llm,
     done_turns(2),
     { ->
-      const session = "cg-degraded-" + uuid()
+      const session = "cg-degraded-" + harness.random.uuid()
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "Answer the question.",
           nil,
           {
@@ -173,27 +201,30 @@ pipeline default() {
             + bundle,
         ) },
       )
-      __io_println("D.status=" + captured.result.status)
-      __io_println(
+      harness.stdio.println("D.status=" + captured.result.status)
+      harness.stdio.println(
         "D.sources=" + event_field_values(events_of(captured.events, "judge_decision"), "source"),
       )
-      __io_println(
+      harness.stdio.println(
         "D.reasons=" + event_field_values(events_of(captured.events, "judge_decision"), "reason"),
       )
-      __io_println(
+      harness.stdio.println(
         "D.confirms=" + event_field_values(events_of(captured.events, "judge_decision"), "confirm"),
       )
     },
   )
   // --- E. streak escalation + decorator are live and reach structured events ---
   with_llm_script(
+    harness.llm,
     done_turns(1),
     { ->
-      const session = "cg-escalation-" + uuid()
+      const session = "cg-escalation-" + harness.random.uuid()
       const decorated_key = "cg-decorated-" + session
       const captured = agent_capture_events(
+        harness.agent,
         session,
         fn() { return agent_loop(
+          harness,
           "Repair the failing verifier.",
           nil,
           {
@@ -204,6 +235,7 @@ pipeline default() {
             session_id: session,
           }
             + agent_completion_gate(
+            harness.runtime,
             {
               escalation_target: "frontier",
               facts: fn(_ctx) { return {
@@ -213,7 +245,10 @@ pipeline default() {
                 verify: {findings: "boom", ok: false},
               } },
               feedback_decorator: fn(reason, feedback, verdict) {
-                store_set(decorated_key, reason + ":" + to_string(verdict?.escalation_target ?? ""))
+                harness.runtime.store_set(
+                  decorated_key,
+                  reason + ":" + to_string(verdict?.escalation_target ?? ""),
+                )
                 return feedback + " Use language-specific repair guidance."
               },
             },
@@ -221,14 +256,16 @@ pipeline default() {
         ) },
       )
       const decisions = events_of(captured.events, "judge_decision")
-      __io_println("E.status=" + captured.result.status)
-      __io_println("E.decorator=" + to_string(store_get(decorated_key)))
-      __io_println("E.reasons=" + event_field_values(decisions, "reason"))
-      __io_println(
+      harness.stdio.println("E.status=" + captured.result.status)
+      harness.stdio.println("E.decorator=" + to_string(harness.runtime.store_get(decorated_key)))
+      harness.stdio.println("E.reasons=" + event_field_values(decisions, "reason"))
+      harness.stdio.println(
         "E.escalation_recommended="
           + event_field_values(decisions, "escalation_recommended"),
       )
-      __io_println("E.escalation_target=" + event_field_values(decisions, "escalation_target"))
+      harness.stdio.println(
+        "E.escalation_target=" + event_field_values(decisions, "escalation_target"),
+      )
     },
   )
 }

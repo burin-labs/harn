@@ -20,7 +20,7 @@
 // never a replacement for it (see docs/eval/meter-stick.md).
 //
 // REUSE. This is a thin veneer over the established conformance seam:
-//   * `agent_capture_events(session, fn() { agent_loop(...) })` — drive + capture
+//   * `agent_capture_events(harness.agent, session, fn() { agent_loop(harness, ...) })` — drive + capture
 //     typed AgentEvents (the `agent_loop_budget_rails.harn` pattern);
 //   * a scripted `llm_caller` closure — manufacture the trigger;
 //   * `first_contract_event` / `count_contract_events` below — observe the effect.
@@ -90,10 +90,10 @@ pub fn count_contract_events(events, event_type: string) -> int {
  *
  * @effects: []
  * @errors: []
- * @example: contract_effect("trips_on_failure", breaker != nil)
+ * @example: contract_effect(harness, "trips_on_failure", breaker != nil)
  */
-pub fn contract_effect(name: string, ok: bool) -> bool {
-  __io_println(name + "=" + to_string(ok))
+pub fn contract_effect(stdio: HarnessStdio, name: string, ok: bool) -> bool {
+  stdio.println(name + "=" + to_string(ok))
   return ok
 }
 
@@ -104,9 +104,9 @@ pub fn contract_effect(name: string, ok: bool) -> bool {
  *
  * @effects: []
  * @errors: []
- * @example: contract_negative("no_premature_stop", breaker_count > 0)
+ * @example: contract_negative(harness, "no_premature_stop", breaker_count > 0)
  */
-pub fn contract_negative(name: string, fired: bool) -> bool {
-  __io_println(name + "=" + to_string(!fired))
+pub fn contract_negative(stdio: HarnessStdio, name: string, fired: bool) -> bool {
+  stdio.println(name + "=" + to_string(!fired))
   return !fired
 }

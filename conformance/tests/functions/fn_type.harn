@@ -1,8 +1,8 @@
-pipeline default() {
+pipeline default(harness: Harness) {
   fn apply(f: fn(int) -> int, x: int) -> int {
     return f(x)
   }
   const double: fn(int) -> int = { x -> x * 2 }
-  __io_println(apply(double, 5))
-  __io_println(apply({ x -> x + 10 }, 3))
+  harness.stdio.println(apply(double, 5))
+  harness.stdio.println(apply({ x -> x + 10 }, 3))
 }

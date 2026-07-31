@@ -1,3 +1,5 @@
-pipeline test(task) {
-  agent_turn("do work", {provider: "mock", persistent: true})
+import { agent_turn } from "std/agent/turn"
+
+pipeline test(harness: Harness, task) {
+  agent_turn(harness, "do work", {provider: "mock", persistent: true})
 }

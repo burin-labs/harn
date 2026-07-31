@@ -14,6 +14,7 @@
 //! injectable clock should accept `Arc<dyn harn_clock::Clock>` directly.
 
 use std::cell::RefCell;
+use std::future::Future;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration as StdDuration, Instant};
 
@@ -23,6 +24,14 @@ use time::OffsetDateTime;
 
 thread_local! {
     static MOCK_CLOCK_STACK: RefCell<Vec<Arc<MockClock>>> = const { RefCell::new(Vec::new()) };
+}
+
+tokio::task_local! {
+    /// Clock inherited from the exact capability receiver currently being
+    /// dispatched. Unlike the legacy thread-local mock stack, this scope is
+    /// async-task-safe and cannot bleed between concurrently evaluated
+    /// Harness values.
+    static CAPABILITY_CLOCK: Arc<dyn Clock>;
 }
 
 fn process_start() -> &'static Instant {
@@ -132,6 +141,19 @@ impl MockClock {
     pub async fn advance_ticks(&self, ticks: u32, tick: StdDuration) {
         self.inner.advance_ticks(ticks, tick);
     }
+
+    /// Return a clock view for deterministic top-level testbench execution.
+    ///
+    /// Ordinary `MockClock` sleeps remain awaitable so cron, debounce, and
+    /// other concurrent schedulers can control when deadlines fire. The CLI
+    /// testbench instead needs a sequential script sleep to advance virtual
+    /// time immediately. Keeping that behavior in an explicit adapter avoids
+    /// changing the scheduling contract for every consumer of `MockClock`.
+    pub fn auto_advancing(self: &Arc<Self>) -> Arc<dyn Clock> {
+        Arc::new(AutoAdvanceClock {
+            inner: Arc::clone(self),
+        })
+    }
 }
 
 #[async_trait]
@@ -153,6 +175,33 @@ impl Clock for MockClock {
     }
 }
 
+#[derive(Debug)]
+struct AutoAdvanceClock {
+    inner: Arc<MockClock>,
+}
+
+#[async_trait]
+impl Clock for AutoAdvanceClock {
+    fn now_utc(&self) -> OffsetDateTime {
+        self.inner.now_utc()
+    }
+
+    fn monotonic_ms(&self) -> i64 {
+        self.inner.monotonic_ms()
+    }
+
+    async fn sleep(&self, duration: StdDuration) {
+        self.inner.advance_std_sync(duration);
+    }
+
+    async fn sleep_until_utc(&self, deadline: OffsetDateTime) {
+        let now = self.inner.now_utc();
+        if deadline > now {
+            self.inner.inner.advance_time(deadline - now);
+        }
+    }
+}
+
 pub fn install_override(clock: Arc<MockClock>) -> ClockOverrideGuard {
     MOCK_CLOCK_STACK.with(|slot| {
         slot.borrow_mut().push(clock);
@@ -162,6 +211,28 @@ pub fn install_override(clock: Arc<MockClock>) -> ClockOverrideGuard {
 
 pub fn active_mock_clock() -> Option<Arc<MockClock>> {
     MOCK_CLOCK_STACK.with(|slot| slot.borrow().last().cloned())
+}
+
+/// Run a capability method with the clock owned by its exact Harness value.
+///
+/// Capability implementations are intentionally plain builtin functions. This
+/// scoped context lets those deep implementations observe receiver-owned time
+/// without adding an ambient process override or threading a hidden argument
+/// through every public signature.
+pub(crate) async fn scope_capability_clock<F>(clock: Arc<dyn Clock>, future: F) -> F::Output
+where
+    F: Future,
+{
+    CAPABILITY_CLOCK.scope(clock, future).await
+}
+
+/// Clock selected by the current capability receiver, falling back to the
+/// legacy explicit mock stack when code is executing outside method dispatch.
+pub fn active_clock() -> Option<Arc<dyn Clock>> {
+    CAPABILITY_CLOCK
+        .try_with(Arc::clone)
+        .ok()
+        .or_else(|| active_mock_clock().map(|clock| clock as Arc<dyn Clock>))
 }
 
 pub fn is_mocked() -> bool {
@@ -178,7 +249,7 @@ pub fn clear_overrides() {
 }
 
 pub fn now_utc() -> OffsetDateTime {
-    active_mock_clock()
+    active_clock()
         .map(|clock| clock.now_utc())
         .unwrap_or_else(OffsetDateTime::now_utc)
 }
@@ -188,8 +259,8 @@ pub fn now_ms() -> i64 {
 }
 
 pub fn instant_now() -> ClockInstant {
-    active_mock_clock()
-        .map(|clock| clock.monotonic_now())
+    active_clock()
+        .map(|clock| ClockInstant(StdDuration::from_millis(clock.monotonic_ms().max(0) as u64)))
         .unwrap_or_else(|| ClockInstant(process_start().elapsed()))
 }
 
@@ -217,9 +288,46 @@ pub async fn sleep(duration: StdDuration) {
     if duration.is_zero() {
         return;
     }
-    if let Some(mock) = active_mock_clock() {
-        mock.sleep(duration).await;
+    if let Some(clock) = active_clock() {
+        clock.sleep(duration).await;
         return;
     }
     tokio::time::sleep(duration).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Harness;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn capability_clock_scope_isolated_by_exact_harness_and_task() {
+        let origin_a = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let origin_b = OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
+        let (harness_a, _) = Harness::with_paused_clock(origin_a);
+        let (harness_b, _) = Harness::with_paused_clock(origin_b);
+        let clock_a = Arc::clone(harness_a.clock().clock());
+        let clock_b = Arc::clone(harness_b.clock().clock());
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+
+        let task_a = {
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(scope_capability_clock(clock_a, async move {
+                barrier.wait().await;
+                tokio::task::yield_now().await;
+                now_ms()
+            }))
+        };
+        let task_b = {
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(scope_capability_clock(clock_b, async move {
+                barrier.wait().await;
+                tokio::task::yield_now().await;
+                now_ms()
+            }))
+        };
+
+        assert_eq!(task_a.await.unwrap(), 1_700_000_000_000);
+        assert_eq!(task_b.await.unwrap(), 1_800_000_000_000);
+    }
 }

@@ -2,6 +2,5 @@ fn main(harness: Harness) {
   try {
     harness.env.get("TOKEN")
   } catch (e) {
-    __io_println("caught")
   }
 }

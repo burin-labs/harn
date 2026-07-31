@@ -106,19 +106,19 @@ async fn trigger_replay_falls_back_after_binding_version_gc() {
         r#"
 import "std/triggers"
 
-pub fn on_tick_v1(event: TriggerEvent) -> dict {
+pub fn on_tick_v1(harness: Harness, event: TriggerEvent) -> dict {
   return {version: "v1", kind: event.kind}
 }
 
-pub fn on_tick_v2(event: TriggerEvent) -> dict {
+pub fn on_tick_v2(harness: Harness, event: TriggerEvent) -> dict {
   return {version: "v2", kind: event.kind}
 }
 
-pub fn on_tick_v3(event: TriggerEvent) -> dict {
+pub fn on_tick_v3(harness: Harness, event: TriggerEvent) -> dict {
   return {version: "v3", kind: event.kind}
 }
 
-pub fn on_tick_v4(event: TriggerEvent) -> dict {
+pub fn on_tick_v4(harness: Harness, event: TriggerEvent) -> dict {
   return {version: "v4", kind: event.kind}
 }
 "#,

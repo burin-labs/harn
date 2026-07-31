@@ -288,10 +288,10 @@ fn sum(...nums) {
 }
 sum(1, 2, 3)  // 6
 
-fn log(level, ...parts) {
-  log("[${level}] ${join(parts, " ")}")
+fn format_log(level, ...parts) {
+  return "[${level}] ${join(parts, " ")}"
 }
-log("INFO", "server", "started")  // [INFO] server started
+format_log("INFO", "server", "started")  // "[INFO] server started"
 ```
 
 ```text

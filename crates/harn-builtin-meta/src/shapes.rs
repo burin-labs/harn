@@ -42,6 +42,34 @@ const TY_STRING_OR_LIST: Ty = Ty::Union(&[TY_STRING, TY_LIST]);
 const TY_TOOL_REGISTRY_OR_LIST: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
 
 // ---------------------------------------------------------------------------
+// Runtime synchronization records
+// ---------------------------------------------------------------------------
+
+const WAITPOINT_STATUS: Ty = Ty::Union(&[
+    Ty::LitString("open"),
+    Ty::LitString("completed"),
+    Ty::LitString("cancelled"),
+]);
+
+/// Durable waitpoint record returned by the runtime capability.
+///
+/// Keep this structural projection aligned with `std/waitpoint::Waitpoint`.
+/// The builtin contract cannot depend on an importing module's nominal type
+/// identity, so both surfaces meet at this shared closed shape.
+pub const WAITPOINT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("id", TY_STRING),
+    ShapeFieldDescriptor::new("status", WAITPOINT_STATUS),
+    ShapeFieldDescriptor::new("created_at", TY_STRING),
+    ShapeFieldDescriptor::new("completed_at", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("cancelled_at", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("completed_by", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("cancelled_by", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("value", TY_ANY),
+    ShapeFieldDescriptor::new("reason", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("metadata", TY_DICT_OR_NIL),
+]);
+
+// ---------------------------------------------------------------------------
 // Agent option bags
 // ---------------------------------------------------------------------------
 
@@ -328,7 +356,7 @@ pub const TRANSCRIPT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("archived_messages", TY_INT),
 ]);
 
-/// `agent_session_snapshot(id)` returns the transcript plus session lineage
+/// `harness.agent.snapshot(id)` returns the transcript plus session lineage
 /// and prompt/tool metadata.
 pub const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("_type", Ty::LitString("transcript")),

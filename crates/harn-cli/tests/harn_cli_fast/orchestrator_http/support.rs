@@ -121,8 +121,8 @@ pub(super) fn handler_module() -> &'static str {
     r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) {
-  log(event.kind)
+pub fn on_issue(harness: Harness, event: TriggerEvent) {
+  harness.stdio.log(event.kind)
 }
 "#
 }
@@ -132,8 +132,8 @@ pub(super) fn github_marker_handler_module(marker_path: &Path) -> String {
         r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) {{
-  write_file({marker:?}, event.kind)
+pub fn on_issue(harness: Harness, event: TriggerEvent) {{
+  harness.fs.write_text({marker:?}, event.kind)
 }}
 "#,
         marker = marker_path.display().to_string()
@@ -260,8 +260,8 @@ pub(super) fn slack_handler_module(marker_path: &Path) -> String {
         r#"
 import "std/triggers"
 
-pub fn on_slack(event: TriggerEvent) {{
-  write_file({marker:?}, event.kind)
+pub fn on_slack(harness: Harness, event: TriggerEvent) {{
+  harness.fs.write_text({marker:?}, event.kind)
 }}
 "#,
         marker = marker_path.display().to_string()
@@ -273,8 +273,8 @@ pub(super) fn notion_handler_module(marker_path: &Path) -> String {
         r#"
 import "std/triggers"
 
-pub fn on_notion(event: TriggerEvent) {{
-  write_file({marker:?}, event.kind)
+pub fn on_notion(harness: Harness, event: TriggerEvent) {{
+  harness.fs.write_text({marker:?}, event.kind)
 }}
 "#,
         marker = marker_path.display().to_string()
@@ -286,11 +286,11 @@ pub(super) fn echo_handler_module(marker_path: &Path) -> String {
         r#"
 import "std/triggers"
 
-pub fn on_echo(event: TriggerEvent) {{
-  const ping = connector_call("echo", "ping", {{
+pub fn on_echo(harness: Harness, event: TriggerEvent) {{
+  const ping = harness.net.connector_call("echo", "ping", {{
     message: event.provider_payload.raw.body.message,
   }})
-  write_file({marker:?}, json_stringify({{
+  harness.fs.write_text({marker:?}, json_stringify({{
     kind: event.kind,
     token: event.provider_payload.raw.token,
     binding_id: event.provider_payload.raw.binding_id,
@@ -308,8 +308,8 @@ pub(super) fn stream_handler_module(marker_path: &Path) -> String {
         r#"
 import "std/triggers"
 
-pub fn on_stream(event: TriggerEvent) {{
-  write_file({marker:?}, json_stringify({{
+pub fn on_stream(harness: Harness, event: TriggerEvent) {{
+  harness.fs.write_text({marker:?}, json_stringify({{
     provider: event.provider,
     kind: event.kind,
     key: event.provider_payload.key,
@@ -344,29 +344,29 @@ pub fn payload_schema() {
   }
 }
 
-pub fn init(_ctx) {
-  event_log_emit("connectors.echo.lifecycle", "init", {phase: "init"})
+pub fn init(harness: Harness, _ctx) {
+  harness.obs.event_log_emit("connectors.echo.lifecycle", "init", {phase: "init"})
 }
 
-pub fn activate(bindings) {
+pub fn activate(harness: Harness, bindings) {
   active_bindings = bindings
-  metrics_inc("echo_activate_bindings", len(bindings))
-  event_log_emit("connectors.echo.lifecycle", "activate", {
+  harness.obs.metrics_inc("echo_activate_bindings", len(bindings))
+  harness.obs.event_log_emit("connectors.echo.lifecycle", "activate", {
     binding_count: len(bindings),
   })
 }
 
-pub fn shutdown() {
-  event_log_emit("connectors.echo.lifecycle", "shutdown", {
+pub fn shutdown(harness: Harness) {
+  harness.obs.event_log_emit("connectors.echo.lifecycle", "shutdown", {
     binding_count: len(active_bindings),
   })
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
-  const token = secret_get("echo/api-token")
-  metrics_inc("echo_normalize_calls")
-  event_log_emit("connectors.echo.lifecycle", "normalize", {
+  const token = harness.secrets.read("echo/api-token")
+  harness.obs.metrics_inc("echo_normalize_calls")
+  harness.obs.event_log_emit("connectors.echo.lifecycle", "normalize", {
     binding_id: raw.binding_id,
     message: body.message,
   })
@@ -385,15 +385,15 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, args) {
+pub fn call(harness: Harness, method, args) {
   if method == "ping" {
-    metrics_inc("echo_client_calls")
-    event_log_emit("connectors.echo.calls", "ping", {
+    harness.obs.metrics_inc("echo_client_calls")
+    harness.obs.event_log_emit("connectors.echo.calls", "ping", {
       message: args.message,
     })
     return {
       message: args.message,
-      token: secret_get("echo/api-token"),
+      token: harness.secrets.read("echo/api-token"),
     }
   }
 
@@ -416,17 +416,17 @@ pub fn payload_schema() {
   return "GitHubEventPayload"
 }
 
-pub fn init(_ctx) {
-  event_log_emit("connectors.github.override", "init", {provider: "github"})
+pub fn init(harness: Harness, _ctx) {
+  harness.obs.event_log_emit("connectors.github.override", "init", {provider: "github"})
 }
 
-pub fn activate(bindings) {
-  metrics_inc("github_override_activate_bindings", len(bindings))
+pub fn activate(harness: Harness, bindings) {
+  harness.obs.metrics_inc("github_override_activate_bindings", len(bindings))
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body = raw.body_json ?? json_parse(raw.body_text)
-  event_log_emit("connectors.github.override", "normalize", {
+  harness.obs.event_log_emit("connectors.github.override", "normalize", {
     id: body.id,
     action: body.action,
   })
@@ -441,7 +441,7 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }
 "#
@@ -461,11 +461,11 @@ pub fn payload_schema() {
   return "SlackEventPayload"
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const decoded = base64_decode(raw.body_base64)
   const timestamp = raw.headers["X-Slack-Request-Timestamp"] ?? raw.headers["x-slack-request-timestamp"] ?? ""
   const signature = raw.headers["X-Slack-Signature"] ?? raw.headers["x-slack-signature"] ?? ""
-  const secret = secret_get("slack/signing-secret")
+  const secret = harness.secrets.read("slack/signing-secret")
   const expected = "v0=" + hmac_sha256(secret, "v0:" + timestamp + ":" + decoded)
   if !constant_time_eq(signature, expected) {
     return {
@@ -507,7 +507,7 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }
 "#
@@ -527,7 +527,7 @@ pub fn payload_schema() {
   return "NotionEventPayload"
 }
 
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const decoded = base64_decode(raw.body_base64)
   const body = raw.body_json ?? json_parse(decoded)
   if (body.verification_token ?? "") != "" {
@@ -543,7 +543,7 @@ pub fn normalize_inbound(raw) {
     }
   }
 
-  const secret = secret_get("notion/verification-token")
+  const secret = harness.secrets.read("notion/verification-token")
   const signature = raw.headers["X-Notion-Signature"] ?? raw.headers["x-notion-signature"] ?? ""
   const expected = "sha256=" + hmac_sha256(secret, decoded)
   if !constant_time_eq(signature, expected) {
@@ -567,7 +567,7 @@ pub fn normalize_inbound(raw) {
   }
 }
 
-pub fn call(method, _args) {
+pub fn call(_harness: Harness, method, _args) {
   throw "method_not_found:" + method
 }
 "#
@@ -602,8 +602,8 @@ pub(super) fn a2a_handler_module() -> &'static str {
     r#"
 import "std/triggers"
 
-pub fn on_task(event: TriggerEvent) {
-  log(event.kind)
+pub fn on_task(harness: Harness, event: TriggerEvent) {
+  harness.stdio.log(event.kind)
 }
 "#
 }

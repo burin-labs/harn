@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 68 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 70 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -122,7 +122,7 @@ Name resolution failed: the identifier, field, or attribute referenced does not 
 | [`HARN-NAM-010`](#harn-nam-010) | declaration reference cannot be resolved | `bindings/rename-to-closest` | `scope-local` |
 | [`HARN-NAM-011`](#harn-nam-011) | attribute is attached to an unsupported declaration | — | — |
 | [`HARN-NAM-012`](#harn-nam-012) | attribute argument is invalid | — | — |
-| [`HARN-NAM-101`](#harn-nam-101) | `main` entrypoint must take a single `harness: Harness` parameter | `bindings/thread-harness-needs-param` | `surface-changing` |
+| [`HARN-NAM-101`](#harn-nam-101) | `fn main` must take an explicit `harness: Harness` parameter | `bindings/thread-harness-needs-param` | `surface-changing` |
 
 ## CAP — Capabilities
 
@@ -142,7 +142,7 @@ A host capability call (file I/O, network, HITL approval, tool host, etc.) faile
 
 ## LLM — LLM calls
 
-An `llm_call(...)` invocation violates the schema Harn enforces. Schema-validated, provider-portable LLM calls are a load-bearing Harn contract; drift in the options table is rejected at check time.
+A `harness.llm.call(...)` invocation violates the schema Harn enforces. Schema-validated, provider-portable LLM calls are a load-bearing Harn contract; drift in the options table is rejected at check time.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -321,6 +321,8 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-066`](#harn-lnt-066) | the result of a pure collection method is discarded, so the call has no effect on the receiver | — | — |
 | [`HARN-LNT-067`](#harn-lnt-067) | public callable parameter or return is missing an explicit type | — | — |
 | [`HARN-LNT-068`](#harn-lnt-068) | prompt template names a filter the engine does not implement | — | — |
+| [`HARN-LNT-069`](#harn-lnt-069) | helper accepts root Harness but uses only narrow capability handles | — | — |
+| [`HARN-LNT-070`](#harn-lnt-070) | public API has too many same-typed positional parameters | — | — |
 
 ## FMT — Formatter
 
@@ -973,7 +975,7 @@ attribute argument is invalid
 
 **Category:** `NAM` (Naming and resolution) &nbsp;·&nbsp; **API stability:** `stable`
 
-`main` entrypoint must take a single `harness: Harness` parameter
+`fn main` must take an explicit `harness: Harness` parameter
 
 - **Repair:** `bindings/thread-harness-needs-param` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Add a `harness: Harness` parameter where the stdio capability handle is required and update local callers
@@ -995,7 +997,7 @@ mismatched signature.
 The `Harness` value gives the script typed access to its capability sub-handles
 via field access (`harness.stdio`, `harness.term`, `harness.clock`,
 `harness.fs`, `harness.env`, `harness.random`, `harness.net`,
-`harness.process`, `harness.crypto`, `harness.system`, `harness.llm`).
+`harness.process`, `harness.channels`, `harness.system`, `harness.llm`).
 Threading the handle through `main` replaces ambient stdio, terminal, clock,
 filesystem, environment, randomness, network, process, crypto, system, and LLM
 catalog globals.
@@ -2120,9 +2122,11 @@ turn-boundary mutation point.
 Example fix:
 
 ```harn
-register_session_hook("post_turn", { _event ->
-  return {reminder: {body: "Review worker progress before continuing."}}
-})
+fn main(harness: Harness) {
+  harness.agent.register_session_hook("post_turn", { _hook_harness, _event ->
+    return {reminder: {body: "Review worker progress before continuing."}}
+  })
+}
 ```
 
 ### `HARN-SUS-001`
@@ -2298,7 +2302,7 @@ Common causes:
 
 - A pipeline that used to depend on wall-clock time or another
   non-deterministic input now produces a different resume payload on
-  replay. Capture the payload itself (or use `mock_time(...)`) so the
+  replay. Capture the payload itself (or use `harness.testing.clock_set(...)`) so the
   replayed runtime can reproduce the original value.
 - The journal entry was edited after the original run completed. The
   signed timestamp on the receipt detects this — verify the receipt's
@@ -3122,20 +3126,16 @@ the pre-`Harness` runtime. Time access now routes through the
 `harness.clock.*` sub-handle so capability requirements appear in the type
 system instead of being hidden in the stdlib surface.
 
-This is a lint, not a hard error. The legacy builtins still compile while
-the migration is in flight, but every new call site should use the
-`harness.clock.*` method that matches it (`now_ms` → `harness.clock.now_ms`,
-`sleep_ms` → `harness.clock.sleep_ms`, etc.).
+The legacy effectful globals are removed. This lint supplies an actionable
+migration repair before the checker reports the removed symbol.
 
 #### How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient clock calls to the VM-level `harness` binding with
-  `bindings/use-enclosing-harness-global`, preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with the narrow nominal handle it actually uses.
 
 ### `HARN-LNT-053`
 
@@ -3163,14 +3163,11 @@ code should use `harness.stdio.print`, `harness.stdio.println`,
 
 #### How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient stdio calls to an existing local Harness binding or to
-  the VM-level `harness` binding with `bindings/use-enclosing-harness-global`,
-  preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with `HarnessStdio`.
 
 ### `HARN-LNT-054`
 
@@ -3193,20 +3190,16 @@ Filesystem access now routes through the `harness.fs.*` sub-handle so
 capability requirements appear in the type system instead of being
 hidden in the stdlib surface.
 
-This is a lint, not a hard error. The legacy builtins still compile
-while the migration is in flight, but every new call site should use the
-`harness.fs.*` method that matches it (`read_file` →
-`harness.fs.read_text`, `write_file` → `harness.fs.write_text`, etc.).
+The legacy effectful globals are removed. This lint supplies an actionable
+migration repair before the checker reports the removed symbol.
 
 #### How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient filesystem calls to the VM-level `harness` binding
-  with `bindings/use-enclosing-harness-global`, preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with `HarnessFs`.
 
 ### `HARN-LNT-055`
 
@@ -3225,19 +3218,16 @@ Environment access now routes through the `harness.env.*` sub-handle so
 capability requirements appear in the type system instead of being
 hidden in the stdlib surface.
 
-This is a lint, not a hard error. The legacy builtins still compile
-while the migration is in flight, but every new call site should use
-`harness.env.get(name)` / `harness.env.get_or(name, default)`.
+The legacy effectful globals are removed. This lint supplies an actionable
+migration repair before the checker reports the removed symbol.
 
 #### How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient env calls to the VM-level `harness` binding with
-  `bindings/use-enclosing-harness-global`, preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with `HarnessEnv`.
 
 ### `HARN-LNT-056`
 
@@ -3256,22 +3246,18 @@ The lint fires on calls to the ambient `random`, `random_int`,
 through the `harness.random.*` sub-handle so capability requirements
 appear in the type system instead of being hidden in the stdlib surface.
 
-This is a lint, not a hard error. The legacy builtins still compile
-while the migration is in flight, but every new call site should use
-the matching `harness.random.*` method (`random` →
-`harness.random.gen_f64`, `random_int` → `harness.random.gen_range`,
-etc.). Seeded streams via an explicit `Rng` handle remain available
+The legacy effectful globals are removed. Use the matching
+`harness.random.*` method (`random` → `harness.random.f64`, `random_int` →
+`harness.random.range`, etc.). Seeded streams via an explicit `Rng` handle remain available
 through the `Rng.*` surface for tests that need deterministic output.
 
 #### How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient random calls to the VM-level `harness` binding with
-  `bindings/use-enclosing-harness-global`, preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with `HarnessRandom`.
 
 ### `HARN-LNT-057`
 
@@ -3285,28 +3271,24 @@ ambient net builtin replaced by `harness.net.*`
 
 #### What it means
 
-The lint fires on calls to the ambient `http_get`, `http_post`,
-`http_put`, `http_patch`, `http_delete`, `http_request`, and
-`http_download` builtins. Outbound HTTP now routes through the
-`harness.net.*` sub-handle so capability requirements appear in the
-type system instead of being hidden in the stdlib surface.
+The lint recognizes removed ambient network calls and supplies a migration
+repair. Requests, downloads, streams, sessions, SSE, WebSockets, and servers
+all route through the `HarnessNet` interface so capability requirements appear
+in the type system instead of being hidden in a global surface. Pure response
+constructors and event encoders remain ordinary globals.
 
-This is a lint, not a hard error. The legacy builtins still compile
-while the migration is in flight, but every new call site should use
-the matching `harness.net.*` method (`http_get` → `harness.net.get`,
-`http_post` → `harness.net.post`, etc.). Streaming, server-mode, and
-session builtins keep their ambient names today and will migrate in a
-follow-up ticket.
+The legacy effectful globals are not a compatibility surface: ordinary source
+must use the corresponding `harness.net.*` method. The lint exists so old
+source gets an actionable repair before the checker reports the removed
+symbol.
 
 #### How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. By default the
-  fixer rewrites ambient network calls to the VM-level `harness` binding with
-  `bindings/use-enclosing-harness-global`, preserving helper signatures.
-- If you explicitly want source-level parameter threading, run
-  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
-  `harn fix --plan --json` reports which signatures would change and whether
-  cross-module callers must be updated.
+- Run `harn fix --apply --safety surface-changing` over the file. Calls inside
+  an existing Harness boundary are rewritten in place; otherwise the fixer
+  threads an explicit Harness parameter through local callers.
+- Run lint again. `capability-attenuation` suggests replacing an unnecessarily
+  broad helper parameter with `HarnessNet`.
 
 ### `HARN-LNT-058`
 
@@ -3734,6 +3716,46 @@ machine-applicable suggestion, so `harn lint --fix` can repair `uppr` to
 ```harn-prompt
 Hello {{ name | upper }}
 ```
+
+### `HARN-LNT-069`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+helper accepts root Harness but uses only narrow capability handles
+
+An ordinary function accepts root `Harness`, but every observed use selects
+only one or two direct capability sub-handles. Root authority is appropriate
+at entry and orchestration boundaries; reusable helpers should advertise the
+smallest coherent capability interface they need.
+
+#### How to fix
+
+Replace the root parameter with the nominal `Harness*` types named by the
+diagnostic, and pass `harness.fs`, `harness.net`, or the corresponding
+sub-handle at each call site.
+
+Keep root `Harness` when the function genuinely coordinates several
+capabilities or forwards authority. The lint suppresses itself when authority
+escapes or the local syntax cannot prove that narrowing is safe.
+
+### `HARN-LNT-070`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+public API has too many same-typed positional parameters
+
+A public function has four or more positional parameters with the same type.
+At call sites, swapping those values still type-checks and the argument order
+does not explain each value's role.
+
+#### How to fix
+
+Replace the homogeneous group with one named closed-record parameter. Build
+that record with explicit field names at call sites and destructure it inside
+the function.
+
+This is informational API guidance, not a blanket arity limit. Private helpers,
+heterogeneous signatures, defaults, and rest parameters are not reported.
 
 ### `HARN-FMT-001`
 
@@ -4216,8 +4238,8 @@ mediate I/O or non-determinism.
 
 ```harn,ignore
 // Rejected:
-const X = read_file("/etc/passwd")
-const Y = env("HOME")
+const X = harness.fs.read_text("/etc/passwd")
+const Y = harness.env.get("HOME")
 const Z = spawn { ... }
 const W = harness.clock.now()
 ```

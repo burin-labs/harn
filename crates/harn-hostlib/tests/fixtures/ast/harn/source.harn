@@ -27,7 +27,7 @@ fn normalize(task) {
   return {id: task.id, title: task.title}
 }
 
-pipeline review(task) {
+pipeline review(harness: Harness, task) {
   const _ = normalize(task)
   return task?.title ?? "untitled"
 }

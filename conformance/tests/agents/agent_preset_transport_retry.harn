@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * agent_preset uses the shared agent-loop default transport retry normalizer.
  * Direct agent_loop calls use the same default retry at the
@@ -6,32 +7,34 @@
 import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn preset_agent(kind, prompt, options = nil) {
-  const opts = agent_preset(kind, options)
-  return agent_loop(prompt, opts?.system, opts)
+fn preset_agent(harness: Harness, kind, prompt, options = nil) {
+  const opts = agent_preset(harness, kind, options)
+  return agent_loop(harness, prompt, opts?.system, opts)
 }
 
-pipeline default() {
+pipeline default(harness: Harness) {
   // Default retry: transient failure is retried, second attempt succeeds.
   with_llm_script(
+    harness.llm,
     [{error: {category: "rate_limit", message: "429 transient"}}, llm_text("Recovered. ##DONE##")],
     { ->
-      const ok = preset_agent("summary", "finish", {provider: "mock", retry: {base_ms: 1}})
-      __io_println(ok.status)
-      __io_println(ok.text)
-      __io_println(len(llm_mock_calls()))
+      const ok = preset_agent(harness, "summary", "finish", {provider: "mock", retry: {base_ms: 1}})
+      harness.stdio.println(ok.status)
+      harness.stdio.println(ok.text)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
   // retry: false opts out — the loop stays fail-fast on the transient error.
   with_llm_script(
+    harness.llm,
     [
       {error: {category: "rate_limit", message: "429 transient"}},
       llm_text("unreachable without a composed retry handler."),
     ],
     { ->
-      const ff = preset_agent("summary", "finish", {provider: "mock", retry: false})
-      __io_println(ff.status)
-      __io_println(len(llm_mock_calls()))
+      const ff = preset_agent(harness, "summary", "finish", {provider: "mock", retry: false})
+      harness.stdio.println(ff.status)
+      harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
 }

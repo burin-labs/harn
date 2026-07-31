@@ -1,4 +1,4 @@
 #!/usr/bin/env harn
-pipeline test(task) {
-  log("ran with shebang")
+pipeline test(harness: Harness, task) {
+  harness.stdio.log("ran with shebang")
 }

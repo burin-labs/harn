@@ -5,32 +5,32 @@
  * `pipeline_id` values are isolated — the resolver namespaces by id, so a
  * sibling reader on pipeline P2 cannot see emits made on P1.
  */
-pipeline default() {
-  const _ = emit_channel(
+pipeline default(harness: Harness) {
+  const _ = harness.channels.append(
     "stage.done",
     {stage: "build"},
     {scope: "pipeline", pipeline_id: "pipe-A", id: "pA-1"},
   )
-  const _ = emit_channel(
+  const _ = harness.channels.append(
     "stage.done",
     {stage: "test"},
     {scope: "pipeline", pipeline_id: "pipe-A", id: "pA-2"},
   )
-  const _ = emit_channel(
+  const _ = harness.channels.append(
     "stage.done",
     {stage: "build"},
     {scope: "pipeline", pipeline_id: "pipe-B", id: "pB-1"},
   )
-  const pipe_a = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-A"})
-  const pipe_b = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-B"})
-  const pipe_c = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-C"})
-  __io_println(len(pipe_a))
-  __io_println(pipe_a[0].payload.stage)
-  __io_println(pipe_a[1].payload.stage)
-  __io_println(pipe_a[0].scope)
-  __io_println(pipe_a[0].scope_id)
-  __io_println(len(pipe_b))
-  __io_println(pipe_b[0].payload.stage)
+  const pipe_a = harness.channels.events("stage.done", {scope: "pipeline", pipeline_id: "pipe-A"})
+  const pipe_b = harness.channels.events("stage.done", {scope: "pipeline", pipeline_id: "pipe-B"})
+  const pipe_c = harness.channels.events("stage.done", {scope: "pipeline", pipeline_id: "pipe-C"})
+  harness.stdio.println(len(pipe_a))
+  harness.stdio.println(pipe_a[0].payload.stage)
+  harness.stdio.println(pipe_a[1].payload.stage)
+  harness.stdio.println(pipe_a[0].scope)
+  harness.stdio.println(pipe_a[0].scope_id)
+  harness.stdio.println(len(pipe_b))
+  harness.stdio.println(pipe_b[0].payload.stage)
   // Pipeline C never emitted — its sibling view is empty.
-  __io_println(len(pipe_c))
+  harness.stdio.println(len(pipe_c))
 }
