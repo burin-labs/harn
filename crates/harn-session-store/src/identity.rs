@@ -124,9 +124,46 @@ impl EventIdentity {
 pub(crate) fn normalize_identity_headers(
     headers: &mut BTreeMap<String, String>,
 ) -> Result<EventIdentity, EventIdentityError> {
+    normalize_identity_headers_with_change(headers).map(|(identity, _changed)| identity)
+}
+
+/// Normalize reserved identity headers and report whether their stored bytes
+/// changed. Read-side projections use this to preserve the defense-in-depth
+/// normalization contract without cloning every event header map first.
+pub(crate) fn normalize_identity_headers_with_change(
+    headers: &mut BTreeMap<String, String>,
+) -> Result<(EventIdentity, bool), EventIdentityError> {
     let identity = EventIdentity::from_headers(headers)?;
-    identity.apply_to_headers(headers)?;
-    Ok(identity)
+    let changed = EventIdentityField::ALL
+        .into_iter()
+        .any(|field| headers.get(field.header_name()).map(String::as_str) != identity.get(field));
+    if changed {
+        identity.apply_to_headers(headers)?;
+    }
+    Ok((identity, changed))
+}
+
+/// Validate and normalize reserved identity headers without materializing an
+/// [`EventIdentity`]. Read paths without a redaction hook only need the
+/// normalized stored projection, so keeping the common already-normalized
+/// case allocation-free avoids rebuilding producer identity for every event.
+pub(crate) fn normalize_identity_headers_in_place(
+    headers: &mut BTreeMap<String, String>,
+) -> Result<bool, EventIdentityError> {
+    let mut changed = false;
+    for field in EventIdentityField::ALL {
+        let Some(value) = headers.get(field.header_name()) else {
+            continue;
+        };
+        let normalized = value.trim();
+        validate_normalized_value(field, normalized)?;
+        let replacement = (normalized.len() != value.len()).then(|| normalized.to_string());
+        if let Some(replacement) = replacement {
+            headers.insert(field.header_name().to_string(), replacement);
+            changed = true;
+        }
+    }
+    Ok(changed)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -165,6 +202,14 @@ impl std::error::Error for EventIdentityError {}
 
 fn normalize_value(field: EventIdentityField, value: String) -> Result<String, EventIdentityError> {
     let normalized = value.trim();
+    validate_normalized_value(field, normalized)?;
+    Ok(normalized.to_string())
+}
+
+fn validate_normalized_value(
+    field: EventIdentityField,
+    normalized: &str,
+) -> Result<(), EventIdentityError> {
     if normalized.is_empty() {
         return Err(EventIdentityError::Invalid {
             field,
@@ -177,7 +222,7 @@ fn normalize_value(field: EventIdentityField, value: String) -> Result<String, E
             reason: "value must not contain control characters",
         });
     }
-    Ok(normalized.to_string())
+    Ok(())
 }
 
 #[cfg(test)]
@@ -210,5 +255,18 @@ mod tests {
         let error = identity.apply_to_headers(&mut headers).unwrap_err();
 
         assert!(matches!(error, EventIdentityError::Conflict { .. }));
+    }
+
+    #[test]
+    fn in_place_normalization_does_not_rewrite_valid_headers() {
+        let mut headers = BTreeMap::from([
+            ("run_id".to_string(), "run-1".to_string()),
+            ("turn_id".to_string(), " turn-1 ".to_string()),
+        ]);
+
+        assert!(normalize_identity_headers_in_place(&mut headers).unwrap());
+        assert_eq!(headers["run_id"], "run-1");
+        assert_eq!(headers["turn_id"], "turn-1");
+        assert!(!normalize_identity_headers_in_place(&mut headers).unwrap());
     }
 }

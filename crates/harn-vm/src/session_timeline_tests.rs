@@ -113,6 +113,19 @@ async fn persisted_transcript_projects_stable_tool_revision_and_identity_links()
         .iter()
         .any(|link| link.kind == "turn" && link.target_id.as_deref() == Some("turn-1")));
     assert_eq!(
+        snapshot.nodes[0]
+            .links
+            .iter()
+            .map(|link| (link.kind.as_str(), link.target_id.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("run", Some("run-1")),
+            ("turn", Some("turn-1")),
+            ("source_event", Some("source-2")),
+            ("tool_call", Some("tool-1")),
+        ]
+    );
+    assert_eq!(
         snapshot
             .cursor
             .topics

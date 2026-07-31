@@ -156,6 +156,17 @@ threads-required = "num-cpus"
 filter = 'package(harn-session-store) and test(sqlite_10k_event_fts_query_completes_under_500ms)'
 threads-required = "num-cpus"
 
+# Timeline projection has the same absolute 10,000-event wall-clock contract.
+# Reserve the runner so SQLite decoding and semantic node construction are not
+# timed while unrelated workspace tests consume the available CPU.
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(persisted_10k_event_tool_timeline_opens_under_500ms)'
+threads-required = "num-cpus"
+
+[[profile.ci.overrides]]
+filter = 'package(harn-vm) and test(persisted_10k_event_tool_timeline_opens_under_500ms)'
+threads-required = "num-cpus"
+
 # Bound aggregate parallelism for tests that spawn host processes. The group
 # includes harn-cli integration tests plus the harn-vm process, sandbox, and
 # installed-toolchain seams below. Keeping those projections on one budget is
