@@ -472,6 +472,12 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "param": {"type": "string", "minLength": 1},
                     "value": {"type": "string", "minLength": 1},
+                    "response_values": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "minItems": 1,
+                        "uniqueItems": true
+                    },
                     "beta_header": {"type": "string", "minLength": 1}
                 },
                 "additionalProperties": false

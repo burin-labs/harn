@@ -311,6 +311,7 @@ export interface HarnLocalMemory {
 export interface HarnModelServingTierRequest {
   param: string
   value: string
+  response_values?: string[]
   beta_header?: string
 }
 
@@ -1011,11 +1012,13 @@ public struct HarnModelDeprecation: Codable, Sendable, Equatable {
 public struct HarnModelServingTierRequest: Codable, Sendable, Equatable {
     public let param: String
     public let value: String
+    public let responseValues: [String]?
     public let betaHeader: String?
 
     enum CodingKeys: String, CodingKey {
         case param
         case value
+        case responseValues = "response_values"
         case betaHeader = "beta_header"
     }
 }

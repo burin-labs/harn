@@ -27,6 +27,8 @@ mod model_generation_tests;
 #[cfg(test)]
 mod overlay_audit_tests;
 #[cfg(test)]
+mod pricing_tests;
+#[cfg(test)]
 mod provider_endpoint_tests;
 #[cfg(test)]
 mod tests;

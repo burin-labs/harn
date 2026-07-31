@@ -2,7 +2,7 @@
 //!
 //! The catalog (`[llm.models.<id>].serving_tiers`) is the single source of
 //! truth for provider request knobs such as Anthropic `speed = "fast"`,
-//! OpenAI/Gemini `service_tier = "priority"`, and discounted best-effort
+//! OpenAI `service_tier = "fast"`, Gemini `service_tier = "priority"`, and discounted best-effort
 //! tiers such as Gemini Flex. Batch APIs are intentionally separate async
 //! capabilities; this module only handles per-request synchronous tiers.
 //!
@@ -113,7 +113,17 @@ pub(crate) fn served_fast(model: &str, obj: &serde_json::Value) -> bool {
         return false;
     };
     let matches = |scope: &serde_json::Value| {
-        scope.get(&request.param).and_then(|v| v.as_str()) == Some(request.value.as_str())
+        let Some(value) = scope.get(&request.param).and_then(|v| v.as_str()) else {
+            return false;
+        };
+        if request.response_values.is_empty() {
+            value == request.value
+        } else {
+            request
+                .response_values
+                .iter()
+                .any(|expected| expected == value)
+        }
     };
     matches(obj) || obj.get("usage").map(matches).unwrap_or(false)
 }
@@ -193,6 +203,12 @@ mod tests {
         let mut openai = serde_json::json!({"model": "gpt-5.5"});
         apply_fast_request_knob(&mut openai, "gpt-5.5", true);
         assert_eq!(openai["service_tier"], serde_json::json!("fast"));
+
+        for model in ["gpt-5.6-terra", "gpt-5.6-luna"] {
+            let mut body = serde_json::json!({"model": model});
+            apply_fast_request_knob(&mut body, model, true);
+            assert_eq!(body["service_tier"], serde_json::json!("fast"));
+        }
     }
 
     #[test]
@@ -226,6 +242,12 @@ mod tests {
         // OpenAI echoes `service_tier` at the top level.
         let openai = serde_json::json!({"service_tier": "fast", "usage": {"completion_tokens": 5}});
         assert!(served_fast("gpt-5.5", &openai));
+
+        // OpenAI renamed Priority processing to Fast mode, but GPT-5.6 and
+        // earlier responses still echo the old value for billing.
+        let openai_priority_echo =
+            serde_json::json!({"service_tier": "priority", "usage": {"completion_tokens": 5}});
+        assert!(served_fast("gpt-5.6-terra", &openai_priority_echo));
 
         // A downgrade echoes a different value.
         let downgraded = serde_json::json!({"service_tier": "default"});

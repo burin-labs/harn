@@ -1789,24 +1789,7 @@
             "unsuitable_workloads": [
               "batch"
             ],
-            "note": "Codex fast mode rides the same service_tier request surface as OpenAI priority processing. Not offered for long-context, fine-tuned models, or embeddings."
-          },
-          {
-            "id": "priority",
-            "mode": "synchronous",
-            "economics": "premium",
-            "request_param": "service_tier",
-            "request_value": "priority",
-            "discount_percent": null,
-            "cost_multiplier": 2.5,
-            "status": "ga",
-            "latency": "lower and more consistent latency for user-facing traffic",
-            "reliability": "shares standard rate limits and can be downgraded during ramp or congestion",
-            "suitable_workloads": [],
-            "unsuitable_workloads": [
-              "batch"
-            ],
-            "note": "Response service_tier is the authoritative billing signal when provider-side downgrade occurs."
+            "note": "OpenAI renamed Priority processing to Fast mode on 2026-07-30. GPT-5.5 responses echo service_tier=priority even when requests use service_tier=fast. Not offered for long-context, fine-tuned models, or embeddings."
           },
           {
             "id": "flex",
@@ -1816,7 +1799,7 @@
             "request_value": "flex",
             "discount_percent": 50,
             "cost_multiplier": null,
-            "status": "research_preview",
+            "status": "beta",
             "latency": "slower and variable synchronous latency",
             "reliability": "best-effort availability; provider can return resource unavailable",
             "suitable_workloads": [

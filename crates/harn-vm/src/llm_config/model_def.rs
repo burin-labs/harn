@@ -556,6 +556,12 @@ pub struct ServingTierRequestDef {
     pub param: String,
     /// Value to send on `param` (for example `fast`, `flex`, or `priority`).
     pub value: String,
+    /// Values the provider may echo for this tier in its response. Defaults
+    /// to the request value when omitted. This keeps request vocabulary and
+    /// billing/liveness recognition separate when providers rename a tier but
+    /// retain an older response value during migration.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_values: Vec<String>,
     /// Provider beta/feature header required to use the tier, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub beta_header: Option<String>,
@@ -607,7 +613,8 @@ pub struct ServingTierDef {
     /// Discount percentage relative to default synchronous rates, when public.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discount_percent: Option<u32>,
-    /// Lifecycle of the tier: "ga" | "research_preview" | "deprecated".
+    /// Lifecycle of the tier: "ga" | "beta" | "research_preview" |
+    /// "deprecated".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     /// Absolute per-MTok rates charged while the tier is active. Prefer this
