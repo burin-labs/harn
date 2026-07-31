@@ -336,6 +336,14 @@ pub(crate) async fn apply_structural_experiment(
         }
     };
     opts.messages = messages;
+    if system != current_system {
+        opts.context_manifest.record_system_transform(
+            format!("structural_experiment:{}", config.name),
+            format!("structural_experiment:{}", config.name),
+            "structural experiment replaced the system channel",
+            system.as_deref(),
+        );
+    }
     opts.system = system;
     let applied = AppliedStructuralExperiment {
         label: config.label.clone(),

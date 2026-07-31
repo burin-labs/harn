@@ -1231,7 +1231,7 @@ streams, and agent-loop dispatch; unknown and removed keys are errors.
 | Concern | Canonical options |
 |---|---|
 | Route | `provider`, `model`, `model_role`, `model_tier`, `api_mode`, `route_policy`, `fallback_chain`, `routing`, `equivalent_failover`, `models`, `ladder` |
-| Conversation | `system`, `messages`, `session_id`, `mock_scope`, `context_profile`, `capabilities`, `prefill`, `previous_response_id` |
+| Conversation | `system`, `messages`, `session_id`, `call_role`, `mock_scope`, `context_profile`, `capabilities`, `prefill`, `previous_response_id` |
 | Generation | `max_tokens`, `temperature`, `top_p`, `top_k`, `logprobs`, `top_logprobs`, `stop`, `stop_at_tool_call`, `seed`, `frequency_penalty`, `presence_penalty` |
 | Output | `output`, `schema_retries`, `schema_retry_nudge`, `retries`, `schema_recover`, `repair` |
 | Reasoning | `thinking`, `effort`, `reasoning_policy`, `reasoning_scale`, `reasoning_task`, `interleaved_thinking`, `anthropic_beta_features` |

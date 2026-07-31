@@ -15,6 +15,7 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &TESTING_CALL_BODY_IMPL_DEF,
+    &TESTING_WITH_NESTED_EXECUTION_BUDGET_IMPL_DEF,
     &ASSERT_IMPL_DEF,
     &ASSERT_EQ_IMPL_DEF,
     &ASSERT_NE_IMPL_DEF,
@@ -28,6 +29,14 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &ERROR_IS_IMPL_DEF,
     &ERROR_IS_TRANSIENT_IMPL_DEF,
 ];
+
+struct ExecutionPolicyPopGuard;
+
+impl Drop for ExecutionPolicyPopGuard {
+    fn drop(&mut self) {
+        crate::orchestration::pop_execution_policy();
+    }
+}
 
 #[harn_builtin(
     sig = "__testing_call_body(body: any) -> any",
@@ -69,6 +78,57 @@ async fn testing_call_body_impl(
     let result = vm.call_callable_owned(&body, call_args).await;
     ctx.forward_output(&vm.take_output());
     result
+}
+
+/// Test-only recursion allowance for mocked delegated-agent fixtures.
+///
+/// The active mock scope is a hard boundary: without it this helper refuses
+/// to broaden the nested-execution allowance. Every other field of the
+/// current capability policy is preserved.
+#[harn_builtin(
+    sig = "__testing_with_nested_execution_budget(depth: int, body: any) -> any",
+    kind = "async",
+    category = "testing"
+)]
+async fn testing_with_nested_execution_budget_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    if !crate::llm::mock::builtin_llm_mock_active() {
+        return Err(fail(
+            "with_nested_execution_budget requires an active with_llm_mocks/with_llm_script scope"
+                .to_string(),
+        ));
+    }
+    let depth = match args.first() {
+        Some(VmValue::Int(depth)) if *depth >= 1 => *depth as usize,
+        Some(value) => {
+            return Err(fail(format!(
+                "with_nested_execution_budget: depth must be a positive int, got {}",
+                value.display()
+            )))
+        }
+        None => {
+            return Err(fail(
+                "with_nested_execution_budget: depth is required".to_string(),
+            ))
+        }
+    };
+    if depth > crate::runtime_limits::RuntimeLimits::DEFAULT.max_nested_execution_depth {
+        return Err(fail(format!(
+            "with_nested_execution_budget: depth {depth} exceeds the runtime maximum {}",
+            crate::runtime_limits::RuntimeLimits::DEFAULT.max_nested_execution_depth
+        )));
+    }
+    let body = args
+        .get(1)
+        .cloned()
+        .ok_or_else(|| fail("with_nested_execution_budget: body is required".to_string()))?;
+    let mut policy = crate::orchestration::current_execution_policy().unwrap_or_default();
+    policy.recursion_limit = Some(depth);
+    crate::orchestration::push_execution_policy(policy);
+    let _guard = ExecutionPolicyPopGuard;
+    testing_call_body_impl(ctx, vec![body]).await
 }
 
 /// A message argument that stringifies to nil's own JSON encoding, to nil's

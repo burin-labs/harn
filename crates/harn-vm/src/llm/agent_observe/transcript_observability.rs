@@ -296,6 +296,25 @@ pub(super) fn emit_system_prompt_if_changed(system: Option<&str>) {
     }));
 }
 
+pub(super) fn emit_context_manifest_if_changed(
+    manifest: &crate::llm::prompt::ContextAssemblyManifest,
+) {
+    let value = manifest.as_json();
+    let current = hash_json(&value);
+    let content_hash = served_context_receipts::stable_redacted_json_hash(&value);
+    if !context_manifest_changed(current) {
+        return;
+    }
+    append_llm_transcript_entry(&serde_json::json!({
+        "type": "context_manifest",
+        "timestamp": chrono_now(),
+        "span_id": crate::tracing::current_span_id(),
+        "hash": current,
+        "content_hash": content_hash,
+        "manifest": value,
+    }));
+}
+
 pub(super) fn emit_tool_schemas_if_changed(schemas: &[crate::llm::tools::ToolSchema]) {
     let value = serde_json::to_value(schemas).unwrap_or(serde_json::Value::Null);
     let current = hash_json(&value);
@@ -319,8 +338,16 @@ pub(super) fn dump_llm_request(
     call_id: &str,
     tool_format: &str,
     opts: &super::api::LlmCallOptions,
-) {
+) -> Result<(), VmError> {
+    opts.context_manifest
+        .validate(opts.system.as_deref())
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "context assembly manifest validation failed before provider call: {error}"
+            ))
+        })?;
     emit_system_prompt_if_changed(opts.system.as_deref());
+    emit_context_manifest_if_changed(&opts.context_manifest);
     let tool_schemas =
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
     emit_tool_schemas_if_changed(&tool_schemas);
@@ -365,6 +392,8 @@ pub(super) fn dump_llm_request(
         "timestamp": chrono_now(),
         "model": opts.model,
         "provider": opts.provider,
+        "call_role": opts.context_manifest.call_role(),
+        "actor_chain": opts.context_manifest.actor_chain(),
         "max_tokens": opts.max_tokens,
         "temperature": opts.temperature,
         "thinking": match &opts.thinking {
@@ -404,12 +433,14 @@ pub(super) fn dump_llm_request(
     if verbose_llm_transcript_enabled() {
         request_event["request_snapshot"] = serde_json::json!({
             "system": opts.system,
+            "context_manifest": opts.context_manifest.as_json(),
             "messages": opts.messages,
             "tool_schemas": tool_schemas,
             "native_tools": opts.native_tools,
         });
     }
     append_llm_transcript_entry(&request_event);
+    Ok(())
 }
 
 pub(super) fn emit_context_token_breakdown_checkpoint(

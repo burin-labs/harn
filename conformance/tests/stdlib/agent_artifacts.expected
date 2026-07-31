@@ -9,19 +9,21 @@ version_mismatch
 schema_invalid
 malformed
 missing
-4
+5
 3
 true:system_prompt
 1
 true
+true:context_manifest
+agent.main
 false:future_event
 true
-malformed:5
-schema_invalid:6
-version_mismatch:7:99
+malformed:6
+schema_invalid:7
+version_mismatch:8:99
 true
 2
-4
+5
 you are helpful
 p:m
 native

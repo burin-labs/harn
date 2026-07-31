@@ -248,6 +248,7 @@ pub type AgentLoopOptions = {
   history?: list,
   prefill?: string,
   session_id?: string,
+  call_role?: string,
   rate_limit_consumer_id?: string,
   mock_scope?: string,
   context_profile?: dict,

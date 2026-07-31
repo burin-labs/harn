@@ -409,6 +409,10 @@ pub(crate) struct LlmCallOptions {
     /// The assembly root selected at the script boundary. Replacement roots
     /// stay exclusive through provider-bound normalization.
     pub(crate) system_prompt_root: crate::llm::prompt::PromptRoot,
+    /// Typed bill of materials for the assembled system prompt. This travels
+    /// with the request and is validated immediately before transcript
+    /// retention/provider dispatch.
+    pub(crate) context_manifest: crate::llm::prompt::ContextAssemblyManifest,
     /// Optional short summary string prepended to the system prompt.
     /// Populated by auto-compaction at mid-loop boundaries; callers
     /// typically leave this `None`.
@@ -556,6 +560,7 @@ impl Default for LlmCallOptions {
             messages: Vec::new(),
             system: None,
             system_prompt_root: crate::llm::prompt::PromptRoot::default(),
+            context_manifest: crate::llm::prompt::ContextAssemblyManifest::default(),
             transcript_summary: None,
             max_tokens: 0,
             temperature: None,

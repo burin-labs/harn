@@ -238,6 +238,7 @@ pub fn pre_turn_scope_classifier(opts = nil) {
       max_tokens: cfg?.max_tokens ?? 256,
       temperature: cfg?.temperature ?? 0.0,
       session_id: payload?.session_id ?? "",
+      mock_scope: cfg?.mock_scope ?? "agent.scope_classifier",
     }
     if cfg?.provider != nil {
       llm_opts = llm_opts + {provider: cfg.provider}

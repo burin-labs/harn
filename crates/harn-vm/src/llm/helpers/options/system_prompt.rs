@@ -137,6 +137,38 @@ fn replacement_system_prompt(
     }
 }
 
+fn context_call_role(options: Option<&crate::value::DictMap>) -> Result<String, VmError> {
+    let parse = |key: &str| -> Result<Option<String>, VmError> {
+        let Some(value) = options.and_then(|options| options.get(key)) else {
+            return Ok(None);
+        };
+        match value {
+            VmValue::Nil => Ok(None),
+            VmValue::String(role) if !role.trim().is_empty() => Ok(Some(role.trim().to_string())),
+            VmValue::String(_) => Err(system_prompt_error(format!(
+                "{key}: expected a non-empty string"
+            ))),
+            other => Err(system_prompt_error(format!(
+                "{key}: expected a string, got {}",
+                other.type_name()
+            ))),
+        }
+    };
+    let declared_role = parse("call_role")?;
+    let fixture_scope = parse("mock_scope")?;
+    if let (Some(role), Some(scope)) = (&declared_role, &fixture_scope) {
+        if role != scope {
+            return Err(system_prompt_error(format!(
+                "call_role `{role}` disagrees with mock_scope `{scope}`; \
+                 both name the same semantic call purpose and must match"
+            )));
+        }
+    }
+    Ok(declared_role
+        .or(fixture_scope)
+        .unwrap_or_else(|| "unattributed".to_string()))
+}
+
 /// Render one fragment dict into its block. An optional `title` becomes a
 /// `## <title>` heading above the trimmed content.
 pub(super) fn render_system_fragment(content: &str, part: &crate::value::DictMap) -> String {
@@ -278,8 +310,12 @@ pub(crate) fn assemble_system_prompt(
 ) -> Result<crate::llm::prompt::AssembledPrompt, VmError> {
     use crate::llm::prompt::{assemble, FragmentBucket, PromptFragment};
 
+    let call_role = context_call_role(options)?;
     if let Some(replacement) = replacement_system_prompt(options)? {
-        return Ok(crate::llm::prompt::replace(replacement));
+        let mut assembled = crate::llm::prompt::replace(replacement);
+        assembled.set_call_role(call_role);
+        assembled.set_actor_chain(current_actor_chain_json());
+        return Ok(assembled);
     }
 
     let mut fragments: Vec<PromptFragment> = Vec::new();
@@ -341,7 +377,14 @@ pub(crate) fn assemble_system_prompt(
     let _ = rendered_reminders;
 
     let ctx = assemble_ctx(options);
-    Ok(assemble(&fragments, &ctx))
+    let mut assembled = assemble(&fragments, &ctx);
+    assembled.set_call_role(call_role);
+    assembled.set_actor_chain(current_actor_chain_json());
+    Ok(assembled)
+}
+
+fn current_actor_chain_json() -> Option<serde_json::Value> {
+    crate::agent_sessions::current_actor_chain().and_then(|chain| serde_json::to_value(chain).ok())
 }
 
 /// Names of the tools active for this call, read from the `tools` option
