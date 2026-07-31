@@ -14621,7 +14621,11 @@
           "economics": "premium",
           "request": {
             "param": "service_tier",
-            "value": "fast"
+            "value": "fast",
+            "response_values": [
+              "fast",
+              "priority"
+            ]
           },
           "otps_speedup": 1.5,
           "cost_multiplier": 2.5,
@@ -14637,25 +14641,7 @@
           "unsuitable_workloads": [
             "batch"
           ],
-          "note": "Codex fast mode rides the same service_tier request surface as OpenAI priority processing. Not offered for long-context, fine-tuned models, or embeddings."
-        },
-        {
-          "id": "priority",
-          "label": "Priority processing",
-          "mode": "synchronous",
-          "economics": "premium",
-          "request": {
-            "param": "service_tier",
-            "value": "priority"
-          },
-          "cost_multiplier": 2.5,
-          "status": "ga",
-          "latency": "lower and more consistent latency for user-facing traffic",
-          "reliability": "shares standard rate limits and can be downgraded during ramp or congestion",
-          "unsuitable_workloads": [
-            "batch"
-          ],
-          "note": "Response service_tier is the authoritative billing signal when provider-side downgrade occurs."
+          "note": "OpenAI renamed Priority processing to Fast mode on 2026-07-30. GPT-5.5 responses echo service_tier=priority even when requests use service_tier=fast. Not offered for long-context, fine-tuned models, or embeddings."
         },
         {
           "id": "flex",
@@ -14667,7 +14653,7 @@
             "value": "flex"
           },
           "discount_percent": 50,
-          "status": "research_preview",
+          "status": "beta",
           "latency": "slower and variable synchronous latency",
           "reliability": "best-effort availability; provider can return resource unavailable",
           "suitable_workloads": [
@@ -14876,10 +14862,10 @@
         ]
       },
       "pricing": {
-        "input_per_mtok": 1.0,
-        "output_per_mtok": 6.0,
-        "cache_read_per_mtok": 0.1,
-        "cache_write_per_mtok": 1.25,
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.02,
+        "cache_write_per_mtok": 0.25,
         "input_token_bands": [
           {
             "minimum_input_tokens": 272001,
@@ -14926,27 +14912,32 @@
       ],
       "serving_tiers": [
         {
-          "id": "priority",
-          "label": "Priority processing",
+          "id": "fast",
+          "label": "Fast mode",
           "mode": "synchronous",
           "economics": "premium",
           "request": {
             "param": "service_tier",
-            "value": "priority"
+            "value": "fast",
+            "response_values": [
+              "fast",
+              "priority"
+            ]
           },
           "cost_multiplier": 2.0,
           "status": "ga",
           "pricing": {
-            "input_per_mtok": 2.0,
-            "output_per_mtok": 12.0,
-            "cache_read_per_mtok": 0.2,
-            "cache_write_per_mtok": 2.5
+            "input_per_mtok": 0.4,
+            "output_per_mtok": 2.4,
+            "cache_read_per_mtok": 0.04,
+            "cache_write_per_mtok": 0.5
           },
-          "latency": "lower and more consistent latency for user-facing traffic",
-          "reliability": "provider may downgrade unavailable priority capacity",
+          "latency": "faster output with more consistent latency for user-facing traffic",
+          "reliability": "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default",
           "unsuitable_workloads": [
             "batch"
-          ]
+          ],
+          "note": "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served."
         },
         {
           "id": "flex",
@@ -14958,12 +14949,12 @@
             "value": "flex"
           },
           "discount_percent": 50,
-          "status": "ga",
+          "status": "beta",
           "pricing": {
-            "input_per_mtok": 0.5,
-            "output_per_mtok": 3.0,
-            "cache_read_per_mtok": 0.05,
-            "cache_write_per_mtok": 0.625
+            "input_per_mtok": 0.1,
+            "output_per_mtok": 0.6,
+            "cache_read_per_mtok": 0.01,
+            "cache_write_per_mtok": 0.125
           },
           "latency": "slower and variable synchronous latency",
           "reliability": "best-effort availability; provider can return resource unavailable",
@@ -15107,14 +15098,19 @@
       ],
       "serving_tiers": [
         {
-          "id": "priority",
-          "label": "Priority processing",
+          "id": "fast",
+          "label": "Fast mode",
           "mode": "synchronous",
           "economics": "premium",
           "request": {
             "param": "service_tier",
-            "value": "priority"
+            "value": "fast",
+            "response_values": [
+              "fast",
+              "priority"
+            ]
           },
+          "otps_speedup": 2.5,
           "cost_multiplier": 2.0,
           "status": "ga",
           "pricing": {
@@ -15123,11 +15119,12 @@
             "cache_read_per_mtok": 1.0,
             "cache_write_per_mtok": 12.5
           },
-          "latency": "lower and more consistent latency for user-facing traffic",
-          "reliability": "provider may downgrade unavailable priority capacity",
+          "latency": "up to 2.5x faster output with more consistent latency for user-facing traffic",
+          "reliability": "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default",
           "unsuitable_workloads": [
             "batch"
-          ]
+          ],
+          "note": "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served."
         },
         {
           "id": "flex",
@@ -15139,7 +15136,7 @@
             "value": "flex"
           },
           "discount_percent": 50,
-          "status": "ga",
+          "status": "beta",
           "pricing": {
             "input_per_mtok": 2.5,
             "output_per_mtok": 15.0,
@@ -15239,10 +15236,10 @@
         ]
       },
       "pricing": {
-        "input_per_mtok": 2.5,
-        "output_per_mtok": 15.0,
-        "cache_read_per_mtok": 0.25,
-        "cache_write_per_mtok": 3.125,
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 12.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": 2.5,
         "input_token_bands": [
           {
             "minimum_input_tokens": 272001,
@@ -15287,27 +15284,32 @@
       ],
       "serving_tiers": [
         {
-          "id": "priority",
-          "label": "Priority processing",
+          "id": "fast",
+          "label": "Fast mode",
           "mode": "synchronous",
           "economics": "premium",
           "request": {
             "param": "service_tier",
-            "value": "priority"
+            "value": "fast",
+            "response_values": [
+              "fast",
+              "priority"
+            ]
           },
           "cost_multiplier": 2.0,
           "status": "ga",
           "pricing": {
-            "input_per_mtok": 5.0,
-            "output_per_mtok": 30.0,
-            "cache_read_per_mtok": 0.5,
-            "cache_write_per_mtok": 6.25
+            "input_per_mtok": 4.0,
+            "output_per_mtok": 24.0,
+            "cache_read_per_mtok": 0.4,
+            "cache_write_per_mtok": 5.0
           },
-          "latency": "lower and more consistent latency for user-facing traffic",
-          "reliability": "provider may downgrade unavailable priority capacity",
+          "latency": "faster output with more consistent latency for user-facing traffic",
+          "reliability": "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default",
           "unsuitable_workloads": [
             "batch"
-          ]
+          ],
+          "note": "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served."
         },
         {
           "id": "flex",
@@ -15319,12 +15321,12 @@
             "value": "flex"
           },
           "discount_percent": 50,
-          "status": "ga",
+          "status": "beta",
           "pricing": {
-            "input_per_mtok": 1.25,
-            "output_per_mtok": 7.5,
-            "cache_read_per_mtok": 0.125,
-            "cache_write_per_mtok": 1.5625
+            "input_per_mtok": 1.0,
+            "output_per_mtok": 6.0,
+            "cache_read_per_mtok": 0.1,
+            "cache_write_per_mtok": 1.25
           },
           "latency": "slower and variable synchronous latency",
           "reliability": "best-effort availability; provider can return resource unavailable",
@@ -18409,10 +18411,10 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 1.0,
-        "output_per_mtok": 6.0,
-        "cache_read_per_mtok": 0.1,
-        "cache_write_per_mtok": 1.25
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.02,
+        "cache_write_per_mtok": 0.25
       },
       "deprecation": {
         "status": "active"
@@ -18497,10 +18499,10 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 1.0,
-        "output_per_mtok": 6.0,
-        "cache_read_per_mtok": 0.1,
-        "cache_write_per_mtok": 1.25
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.02,
+        "cache_write_per_mtok": 0.25
       },
       "deprecation": {
         "status": "active"
@@ -18757,10 +18759,10 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 2.5,
-        "output_per_mtok": 15.0,
-        "cache_read_per_mtok": 0.25,
-        "cache_write_per_mtok": 3.125
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 12.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": 2.5
       },
       "deprecation": {
         "status": "active"
@@ -18843,10 +18845,10 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 2.5,
-        "output_per_mtok": 15.0,
-        "cache_read_per_mtok": 0.25,
-        "cache_write_per_mtok": 3.125
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 12.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": 2.5
       },
       "deprecation": {
         "status": "active"

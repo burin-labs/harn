@@ -197,9 +197,9 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 validate_pricing(model, pricing, &mut result);
             }
             if let Some(status) = tier.status.as_deref() {
-                if !matches!(status, "ga" | "research_preview" | "deprecated") {
+                if !matches!(status, "ga" | "beta" | "research_preview" | "deprecated") {
                     result.warnings.push(format!(
-                        "model {} serving_tiers[{}].status {:?} is not one of ga|research_preview|deprecated",
+                        "model {} serving_tiers[{}].status {:?} is not one of ga|beta|research_preview|deprecated",
                         model.id, tier.id, status
                     ));
                 }

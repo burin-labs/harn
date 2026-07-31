@@ -282,6 +282,7 @@ export interface HarnLocalMemory {
 export interface HarnModelServingTierRequest {
   param: string
   value: string
+  response_values?: string[]
   beta_header?: string
 }
 

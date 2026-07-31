@@ -39,6 +39,8 @@ mod display_name_tests;
 mod local_runtime;
 #[cfg(test)]
 mod local_runtime_tests;
+#[cfg(test)]
+mod pricing_tests;
 mod remote;
 mod schema;
 #[cfg(test)]
