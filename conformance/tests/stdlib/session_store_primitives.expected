@@ -9,5 +9,9 @@ m1
 one-v2
 true
 4
+1
+burin.agent_context.memories.project
+fts
+true
 hello
 true

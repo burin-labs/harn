@@ -13,6 +13,57 @@ pub struct HostCapabilityGroup {
     pub effects: &'static [EffectSpec],
 }
 
+/// Resolve a hostlib schema name to its typed `Harness` capability method.
+///
+/// Most schema modules project directly to a same-named capability. Session
+/// persistence is deliberately owned by `HarnessAgent`, so its compact
+/// `session.*` hostlib schema is exposed as `harness.agent.session_*`.
+pub fn capability_binding_for_schema(
+    module: &'static str,
+    method: &'static str,
+) -> Option<(CapabilityId, &'static str)> {
+    let capability = match module {
+        "ast" => CapabilityId::Ast,
+        "code_index" => CapabilityId::CodeIndex,
+        "computer" => CapabilityId::Computer,
+        "embed" => CapabilityId::Embed,
+        "fs" => CapabilityId::Fs,
+        "fs_watch" => CapabilityId::FsWatch,
+        "host_conditions" => CapabilityId::System,
+        "host_lease" => CapabilityId::HostLease,
+        "lint" => CapabilityId::Lint,
+        "rules" => CapabilityId::Rules,
+        "scanner" => CapabilityId::Scanner,
+        "secret_store" => CapabilityId::SecretStore,
+        "session" => CapabilityId::Agent,
+        "terminal_session" => CapabilityId::TerminalSession,
+        "tools" => CapabilityId::Tools,
+        "verdict" => CapabilityId::Verdict,
+        _ => return None,
+    };
+    let capability_method = if module == "session" {
+        match method {
+            "open" => "session_open",
+            "update" => "session_update",
+            "append" => "session_append",
+            "close" => "session_close",
+            "get" => "session_get",
+            "list" => "session_list",
+            "fork" => "session_fork",
+            "search_fts" => "session_search_fts",
+            "search_semantic" => "session_search_semantic",
+            "search_hybrid" => "session_search_hybrid",
+            _ => return None,
+        }
+    } else {
+        method
+    };
+    HOST_CAPABILITY_GROUPS
+        .iter()
+        .any(|group| group.capability == capability && group.methods.contains(&capability_method))
+        .then_some((capability, capability_method))
+}
+
 const DYNAMIC: &[ResourceSelector] = &[ResourceSelector::Dynamic];
 const FS_READ: &[EffectSpec] = &[EffectSpec::new(EffectKind::Fs, EffectAccess::Read, DYNAMIC)];
 const FS_WRITE: &[EffectSpec] = &[EffectSpec::new(
@@ -70,6 +121,14 @@ const HOST_MUTATE: &[EffectSpec] = &[EffectSpec::new(
     EffectAccess::Mutate,
     DYNAMIC,
 )];
+const SESSION_READ: &[EffectSpec] = &[
+    EffectSpec::new(EffectKind::Fs, EffectAccess::Read, DYNAMIC),
+    EffectSpec::new(EffectKind::State, EffectAccess::Read, DYNAMIC),
+];
+const SESSION_MUTATE: &[EffectSpec] = &[
+    EffectSpec::new(EffectKind::Fs, EffectAccess::Write, DYNAMIC),
+    EffectSpec::new(EffectKind::State, EffectAccess::Mutate, DYNAMIC),
+];
 
 pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
     HostCapabilityGroup {
@@ -158,6 +217,28 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
         capability: CapabilityId::Embed,
         methods: &["info", "similarity", "top_k", "vector"],
         effects: &[],
+    },
+    HostCapabilityGroup {
+        capability: CapabilityId::Agent,
+        methods: &[
+            "session_get",
+            "session_list",
+            "session_search_fts",
+            "session_search_hybrid",
+            "session_search_semantic",
+        ],
+        effects: SESSION_READ,
+    },
+    HostCapabilityGroup {
+        capability: CapabilityId::Agent,
+        methods: &[
+            "session_append",
+            "session_close",
+            "session_fork",
+            "session_open",
+            "session_update",
+        ],
+        effects: SESSION_MUTATE,
     },
     HostCapabilityGroup {
         capability: CapabilityId::Fs,

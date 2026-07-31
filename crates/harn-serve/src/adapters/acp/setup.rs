@@ -39,6 +39,37 @@ impl AcpServer {
                 return;
             }
         };
+        if let Some(project_root) = query
+            .session_id
+            .as_deref()
+            .and_then(|session_id| self.sessions.get(session_id))
+            .map(|session| session.project_root.clone())
+        {
+            match harn_vm::session_timeline::query_persisted_session_timeline(
+                &project_root,
+                query.clone(),
+            )
+            .await
+            {
+                Ok(Some(snapshot)) => {
+                    self.send_response(
+                        id,
+                        serde_json::to_value(snapshot)
+                            .expect("persisted session timeline snapshot serializes"),
+                    );
+                    return;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.send_error(
+                        id,
+                        -32000,
+                        &format!("persisted session timeline query: {error}"),
+                    );
+                    return;
+                }
+            }
+        }
         let log = harn_vm::event_log::active_event_log();
         match harn_vm::session_timeline::query_session_timeline(log.as_deref(), None, query).await {
             Ok(snapshot) => self.send_response(

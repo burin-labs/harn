@@ -3639,6 +3639,7 @@ dependencies = [
  "harn-flock",
  "harn-lexer",
  "harn-parser",
+ "harn-session-store",
  "harn-terminal",
  "harn-vm",
  "hex",

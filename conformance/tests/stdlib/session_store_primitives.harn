@@ -47,6 +47,16 @@ pipeline default(harness: Harness) {
   const report = session_store_verify(harness.agent, sid, {root: root})
   harness.stdio.println(report.ok)
   harness.stdio.println(report.count)
+  // Search crosses the public Harn facade and reports the actual fallback.
+  const search = session_store_search(
+    harness.agent,
+    "one v2",
+    {root: root, session_id: sid, mode: "hybrid"},
+  )
+  harness.stdio.println(len(search.hits))
+  harness.stdio.println(unwrap(search.hits[0]).session_id)
+  harness.stdio.println(search.effective_mode)
+  harness.stdio.println(search.semantic_floor)
   // Value stream projection (replace / clear fold).
   const vsid = "example.value.stream"
   session_store_append(harness.agent, vsid, {operation: "replace", value: "hello"}, {root: root})

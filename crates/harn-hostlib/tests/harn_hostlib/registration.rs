@@ -20,9 +20,9 @@ use harn_hostlib::{
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability,
     host_conditions::HostConditionsCapability, host_lease_capability::HostLeaseCapability,
     scanner::ScannerCapability, schemas, secret_store::SecretStoreCapability,
-    tools::ToolsCapability, BuiltinRegistry, HostLeasePriorityClass, HostLeaseRequest,
-    HostLeaseResourceClass, HostLeaseStore, HostlibCapability, HostlibError, HostlibRegistry,
-    HOST_LEASE_ROOT_ENV,
+    session::SessionCapability, tools::ToolsCapability, BuiltinRegistry, HostLeasePriorityClass,
+    HostLeaseRequest, HostLeaseResourceClass, HostLeaseStore, HostlibCapability, HostlibError,
+    HostlibRegistry, HOST_LEASE_ROOT_ENV,
 };
 use harn_lexer::Lexer;
 use harn_parser::Parser;
@@ -462,6 +462,7 @@ fn install_default_wires_every_module_into_a_vm() {
         "code_index",
         "scanner",
         "embed",
+        "session",
         "fs",
         "fs",
         "fs_watch",
@@ -483,6 +484,37 @@ fn install_default_wires_every_module_into_a_vm() {
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
     // + 4 secret_store + 1 verdict + 1 host_conditions + 4 host_lease = 84.
     assert!(registry.builtins().len() >= 84);
+}
+
+#[test]
+fn registered_session_capability_round_trips_through_typed_harness_agent() {
+    let result = execute_harn(
+        r#"
+pipeline default(harness: Harness, task) {
+  const root = harness.fs.workspace_temp_dir()
+  const opened = harness.agent.session_open({
+    root: root,
+    id: "typed-session",
+    title: "Typed session"
+  })
+  const fetched = harness.agent.session_get({
+    root: root,
+    session_id: opened.id
+  })
+  return {id: fetched.session.id, event_count: len(fetched.events)}
+}
+"#,
+    )
+    .expect("typed session capability");
+    let result = expect_dict(result);
+    assert_eq!(
+        result.get("id").map(VmValue::display).as_deref(),
+        Some("typed-session")
+    );
+    assert_eq!(
+        result.get("event_count").map(VmValue::display).as_deref(),
+        Some("0")
+    );
 }
 
 #[test]
@@ -1048,6 +1080,7 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(CodeIndexCapability::new())
         .with(ScannerCapability)
         .with(EmbedCapability::default())
+        .with(SessionCapability::default())
         .with(FsCapability)
         .with(FsSnapshotCapability)
         .with(FsWatchCapability)
@@ -1093,19 +1126,22 @@ fn schemas_and_typed_capability_contracts_cannot_drift() {
     let schema_methods: BTreeSet<_> = schemas::SCHEMAS
         .iter()
         .filter(|(_, _, kind, _)| *kind == schemas::SchemaKind::Request)
-        .map(|(module, method, _, _)| (*module, *method))
+        .map(|(module, method, _, _)| {
+            harn_builtin_meta::host_capabilities::capability_binding_for_schema(module, method)
+                .unwrap_or_else(|| {
+                    panic!("schema {module}.{method} has no typed capability binding")
+                })
+        })
         .collect();
     let contract_methods: BTreeSet<_> =
         harn_builtin_meta::host_capabilities::HOST_CAPABILITY_GROUPS
             .iter()
             .filter(|group| group.capability != harn_builtin_meta::CapabilityId::Computer)
             .flat_map(|group| {
-                let module = match group.capability {
-                    harn_builtin_meta::CapabilityId::TerminalSession => "terminal_session",
-                    harn_builtin_meta::CapabilityId::System => "host_conditions",
-                    capability => capability.field_name(),
-                };
-                group.methods.iter().map(move |method| (module, *method))
+                group
+                    .methods
+                    .iter()
+                    .map(move |method| (group.capability, *method))
             })
             .collect();
 

@@ -47,6 +47,7 @@ mod sandbox_npm_offline_install;
 mod scanner_e2e;
 mod secret_store;
 mod secret_store_os_native;
+mod session;
 mod smoke_harn_script;
 mod tools_file_io;
 mod tools_git;

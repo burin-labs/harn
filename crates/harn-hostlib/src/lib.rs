@@ -48,6 +48,7 @@ pub mod sandbox;
 pub mod scanner;
 pub mod schemas;
 pub mod secret_store;
+pub mod session;
 #[cfg(feature = "terminal-session")]
 pub mod terminal_session;
 pub mod tools;
@@ -85,6 +86,8 @@ pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, Register
 /// [`HostlibRegistry`] directly.
 pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
     let mut registry = HostlibRegistry::new();
+    let embed = embed::EmbedCapability::default();
+    let session = session::SessionCapability::with_embedder(embed.embedder().clone());
     // The code-intelligence capabilities (`ast` + `code_index`) are only
     // compiled when the `ast` feature is on. Lean clients that omit it get
     // the deterministic tool surface without tree-sitter or any grammar.
@@ -97,7 +100,8 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
     }
     registry = registry
         .with(scanner::ScannerCapability)
-        .with(embed::EmbedCapability::default())
+        .with(embed)
+        .with(session)
         .with(fs::FsCapability)
         .with(fs_snapshot::FsSnapshotCapability)
         .with(fs_watch::FsWatchCapability)

@@ -77,9 +77,7 @@ pub use types::{
     ACP_PROMPT_ERROR_DATA_SCHEMA,
 };
 
-#[cfg(feature = "hostlib")]
-use std::collections::HashSet;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};

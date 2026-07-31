@@ -14,26 +14,12 @@ use harn_vm::{Vm, VmError, VmValue};
 
 use crate::error::HostlibError;
 
-fn capability_for_module(module: &str) -> harn_builtin_meta::CapabilityId {
-    use harn_builtin_meta::CapabilityId;
-    match module {
-        "ast" => CapabilityId::Ast,
-        "code_index" => CapabilityId::CodeIndex,
-        "computer" => CapabilityId::Computer,
-        "embed" => CapabilityId::Embed,
-        "fs" => CapabilityId::Fs,
-        "fs_watch" => CapabilityId::FsWatch,
-        "host_lease" => CapabilityId::HostLease,
-        "host_conditions" => CapabilityId::System,
-        "scanner" => CapabilityId::Scanner,
-        "secret_store" => CapabilityId::SecretStore,
-        "terminal_session" => CapabilityId::TerminalSession,
-        "tools" => CapabilityId::Tools,
-        "verdict" => CapabilityId::Verdict,
-        "rules" => CapabilityId::Rules,
-        "lint" => CapabilityId::Lint,
-        unknown => panic!("hostlib module `{unknown}` has no typed capability id"),
-    }
+fn capability_binding(
+    module: &'static str,
+    method: &'static str,
+) -> (harn_builtin_meta::CapabilityId, &'static str) {
+    harn_builtin_meta::host_capabilities::capability_binding_for_schema(module, method)
+        .unwrap_or_else(|| panic!("hostlib schema `{module}.{method}` has no typed capability"))
 }
 
 /// Sync builtin handler signature. Mirrors the closure type accepted by
@@ -260,7 +246,7 @@ impl HostlibRegistry {
         for builtin in self.builtins.iter().cloned() {
             let module = builtin.module;
             let method = builtin.method;
-            let capability = capability_for_module(module);
+            let (capability, capability_method) = capability_binding(module, method);
             harn_vm::stdlib::host::register_callable_host_operation(
                 module,
                 method,
@@ -268,80 +254,83 @@ impl HostlibRegistry {
             );
             let handler = builtin.handler.clone();
             if self.builtins.uses_command_policy(builtin.name) {
-                vm.register_async_capability_method(capability, method, move |ctx, args| {
-                    let handler = handler.clone();
-                    async move {
-                        let request = crate::schemas::validate_request_args(
-                            builtin.name,
-                            module,
-                            method,
-                            &args,
-                        )
-                        .map_err(VmError::from)?;
-                        let params = request.as_dict().ok_or_else(|| {
-                            VmError::Runtime(format!(
-                                "{}: validated request must be a dict",
-                                builtin.name
-                            ))
-                        })?;
-                        let caller = serde_json::json!({
-                            "surface": "hostlib",
-                            "builtin": builtin.name,
-                            "module": module,
-                            "method": method,
-                            "session_id": harn_vm::current_agent_session_id(),
-                        });
-                        match harn_vm::orchestration::run_command_policy_preflight_with_ctx(
-                            Some(&ctx),
-                            params,
-                            caller,
-                        )
-                        .await?
-                        {
-                            harn_vm::orchestration::CommandPolicyPreflight::Blocked {
-                                status,
-                                message,
-                                context,
-                                decisions,
-                            } => {
-                                let response = harn_vm::orchestration::blocked_command_response(
-                                    params, status, &message, context, decisions,
-                                );
-                                crate::schemas::validate_response(
-                                    builtin.name,
-                                    module,
-                                    method,
-                                    crate::tools::policy_blocked_run_command_response(response),
-                                )
-                                .map_err(VmError::from)
-                            }
-                            harn_vm::orchestration::CommandPolicyPreflight::Proceed {
+                vm.register_async_capability_method(
+                    capability,
+                    capability_method,
+                    move |ctx, args| {
+                        let handler = handler.clone();
+                        async move {
+                            let request = crate::schemas::validate_request_args(
+                                builtin.name,
+                                module,
+                                method,
+                                &args,
+                            )
+                            .map_err(VmError::from)?;
+                            let params = request.as_dict().ok_or_else(|| {
+                                VmError::Runtime(format!(
+                                    "{}: validated request must be a dict",
+                                    builtin.name
+                                ))
+                            })?;
+                            let caller = serde_json::json!({
+                                "surface": "hostlib",
+                                "builtin": builtin.name,
+                                "module": module,
+                                "method": method,
+                                "session_id": harn_vm::current_agent_session_id(),
+                            });
+                            match harn_vm::orchestration::run_command_policy_preflight_with_ctx(
+                                Some(&ctx),
                                 params,
-                                context,
-                                decisions,
-                            } => {
-                                // Hooks may rewrite command fields. Revalidate
-                                // the rewritten request at the owning schema
-                                // boundary before the hostlib parser sees it.
-                                let rewritten = VmValue::dict(params.clone());
-                                let validated = crate::schemas::validate_request_args(
-                                    builtin.name,
-                                    module,
-                                    method,
-                                    &[rewritten],
-                                )
-                                .map_err(VmError::from)?;
-                                let result = handler(&[validated]).map_err(VmError::from)?;
-                                if crate::tools::run_command_request_is_background(&params) {
-                                    return crate::schemas::validate_response(
+                                caller,
+                            )
+                            .await?
+                            {
+                                harn_vm::orchestration::CommandPolicyPreflight::Blocked {
+                                    status,
+                                    message,
+                                    context,
+                                    decisions,
+                                } => {
+                                    let response = harn_vm::orchestration::blocked_command_response(
+                                        params, status, &message, context, decisions,
+                                    );
+                                    crate::schemas::validate_response(
                                         builtin.name,
                                         module,
                                         method,
-                                        result,
+                                        crate::tools::policy_blocked_run_command_response(response),
                                     )
-                                    .map_err(VmError::from);
+                                    .map_err(VmError::from)
                                 }
-                                let result =
+                                harn_vm::orchestration::CommandPolicyPreflight::Proceed {
+                                    params,
+                                    context,
+                                    decisions,
+                                } => {
+                                    // Hooks may rewrite command fields. Revalidate
+                                    // the rewritten request at the owning schema
+                                    // boundary before the hostlib parser sees it.
+                                    let rewritten = VmValue::dict(params.clone());
+                                    let validated = crate::schemas::validate_request_args(
+                                        builtin.name,
+                                        module,
+                                        method,
+                                        &[rewritten],
+                                    )
+                                    .map_err(VmError::from)?;
+                                    let result = handler(&[validated]).map_err(VmError::from)?;
+                                    if crate::tools::run_command_request_is_background(&params) {
+                                        return crate::schemas::validate_response(
+                                            builtin.name,
+                                            module,
+                                            method,
+                                            result,
+                                        )
+                                        .map_err(VmError::from);
+                                    }
+                                    let result =
                                     harn_vm::orchestration::run_command_policy_postflight_with_ctx(
                                         Some(&ctx),
                                         &params,
@@ -350,21 +339,22 @@ impl HostlibRegistry {
                                         decisions,
                                     )
                                     .await?;
-                                crate::schemas::validate_response(
-                                    builtin.name,
-                                    module,
-                                    method,
-                                    result,
-                                )
-                                .map_err(VmError::from)
+                                    crate::schemas::validate_response(
+                                        builtin.name,
+                                        module,
+                                        method,
+                                        result,
+                                    )
+                                    .map_err(VmError::from)
+                                }
                             }
                         }
-                    }
-                });
+                    },
+                );
             } else {
                 vm.register_capability_method(
                     capability,
-                    method,
+                    capability_method,
                     move |args, _out| -> Result<VmValue, VmError> {
                         let request = crate::schemas::validate_request_args(
                             builtin.name,
@@ -382,24 +372,32 @@ impl HostlibRegistry {
         for builtin in self.builtins.async_builtins.iter().cloned() {
             let module = builtin.module;
             let method = builtin.method;
-            let capability = capability_for_module(module);
+            let (capability, capability_method) = capability_binding(module, method);
             harn_vm::stdlib::host::register_callable_host_operation(
                 module,
                 method,
                 "Hostlib schema-backed operation registered at runtime.",
             );
             let handler = builtin.handler.clone();
-            vm.register_async_capability_method(capability, method, move |_ctx, args| {
-                let handler = handler.clone();
-                async move {
-                    let request =
-                        crate::schemas::validate_request_args(builtin.name, module, method, &args)
-                            .map_err(VmError::from)?;
-                    let result = handler(vec![request]).await.map_err(VmError::from)?;
-                    crate::schemas::validate_response(builtin.name, module, method, result)
-                        .map_err(VmError::from)
-                }
-            });
+            vm.register_async_capability_method(
+                capability,
+                capability_method,
+                move |_ctx, args| {
+                    let handler = handler.clone();
+                    async move {
+                        let request = crate::schemas::validate_request_args(
+                            builtin.name,
+                            module,
+                            method,
+                            &args,
+                        )
+                        .map_err(VmError::from)?;
+                        let result = handler(vec![request]).await.map_err(VmError::from)?;
+                        crate::schemas::validate_response(builtin.name, module, method, result)
+                            .map_err(VmError::from)
+                    }
+                },
+            );
         }
     }
 

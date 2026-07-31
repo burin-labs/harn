@@ -1,7 +1,8 @@
 //! Shared, dependency-free tokenization for the default embedders.
 //!
-//! Both the lexical and static backends need the *same* notion of "words"
-//! so a query and a corpus entry are projected into the same space. We
+//! The static backend uses the same notion of "words" as the canonical
+//! lexical floor in `harn-session-store`, so a query and a corpus entry are
+//! projected into the same space. We
 //! deliberately keep this tiny and identifier-aware (camelCase / snake_case
 //! splitting) because the primary inputs are code-ish: symbol names, task
 //! descriptions, skill/canon snippets. This mirrors
@@ -12,8 +13,8 @@
 /// camelCase / snake_case / kebab-case identifier boundaries.
 ///
 /// `"getUserByID get_user_by_id"` -> `["get","user","by","id","get","user","by","id"]`.
-/// Single-character tokens are kept (e.g. the `i` in a loop) because they
-/// can still carry char-ngram signal, but pure punctuation is dropped.
+/// Single-character tokens are kept (e.g. the `i` in a loop), but pure
+/// punctuation is dropped.
 pub fn word_tokens(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut current = String::new();
@@ -45,46 +46,6 @@ pub fn word_tokens(text: &str) -> Vec<String> {
     out
 }
 
-/// Character n-grams over the *normalized* (lowercased, whitespace-collapsed)
-/// text, padded with a boundary marker so prefixes/suffixes are captured.
-///
-/// Char-ngrams give robustness to typos, plurals, and shared roots
-/// (`subscription` ~ `subscriptions` ~ `subscribe`) that pure word tokens
-/// miss — the lexical backend mixes both signals.
-pub fn char_ngrams(text: &str, n: usize) -> Vec<String> {
-    let normalized: String = {
-        let mut s = String::with_capacity(text.len() + 2);
-        s.push(' ');
-        let mut last_space = true;
-        for ch in text.chars() {
-            if ch.is_whitespace() {
-                if !last_space {
-                    s.push(' ');
-                    last_space = true;
-                }
-            } else {
-                for lc in ch.to_lowercase() {
-                    s.push(lc);
-                }
-                last_space = false;
-            }
-        }
-        if !last_space {
-            s.push(' ');
-        }
-        s
-    };
-    let chars: Vec<char> = normalized.chars().collect();
-    if chars.len() < n || n == 0 {
-        return Vec::new();
-    }
-    let mut out = Vec::with_capacity(chars.len().saturating_sub(n) + 1);
-    for window in chars.windows(n) {
-        out.push(window.iter().collect());
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,19 +64,5 @@ mod tests {
             word_tokens("rate-limit middleware (retry)"),
             vec!["rate", "limit", "middleware", "retry"]
         );
-    }
-
-    #[test]
-    fn char_ngrams_capture_boundaries() {
-        let grams = char_ngrams("cat", 3);
-        // " ca", "cat", "at " over " cat "
-        assert!(grams.contains(&" ca".to_string()));
-        assert!(grams.contains(&"cat".to_string()));
-        assert!(grams.contains(&"at ".to_string()));
-    }
-
-    #[test]
-    fn char_ngrams_short_input_empty() {
-        assert!(char_ngrams("a", 4).is_empty());
     }
 }

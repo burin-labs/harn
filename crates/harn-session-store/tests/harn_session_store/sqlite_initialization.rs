@@ -81,7 +81,7 @@ fn sqlite_first_open_is_serialized_across_processes() {
         (journal_mode.as_str(), schema_version, session_ids),
         (
             "wal",
-            2,
+            4,
             vec!["first-open-a".to_string(), "first-open-b".to_string()]
         )
     );

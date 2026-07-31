@@ -118,6 +118,7 @@ harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.47" }
 # the full CLI re-enable `pg.*` through its own direct harn-vm edge (Cargo
 # unifies the feature across the build graph).
 harn-flock = { path = "../harn-flock", version = "=0.10.47" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.47" }
 harn-vm = { path = "../harn-vm", version = "=0.10.47", default-features = false }
 harn-terminal = { path = "../harn-terminal", version = "=0.10.47", optional = true }
 async-trait = "0.1"

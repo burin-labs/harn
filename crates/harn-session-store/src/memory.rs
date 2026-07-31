@@ -14,6 +14,10 @@ use super::memory_helpers::{meta_for_create, validate_open};
 use super::redaction::{
     prepare_append_event, prepare_stored_events_for_persistence, redact_stored_events,
 };
+use super::search::{
+    combined_score, lexical_score, ranks, redacted_search_document, snippet, SearchHit, SearchMode,
+    SearchQuery, SearchResponse,
+};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
     verify_session_chain,
@@ -190,6 +194,49 @@ impl SessionStore for MemorySessionStore {
             .get(session_id)
             .map(|record| record.meta.clone())
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))
+    }
+
+    async fn update(
+        &self,
+        session_id: &str,
+        request: crate::UpdateSession,
+    ) -> StoreResult<SessionMeta> {
+        let mut guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        if let Some(value) = request.title {
+            record.meta.title = Some(value);
+        }
+        if let Some(value) = request.cwd {
+            record.meta.cwd = Some(value);
+        }
+        if let Some(value) = request.model {
+            record.meta.model = Some(value);
+        }
+        if let Some(value) = request.parent_session_id {
+            record.meta.parent_session_id = Some(value);
+        }
+        if let Some(value) = request.session_type {
+            record.meta.session_type = Some(value);
+        }
+        if let Some(value) = request.project_scope {
+            record.meta.project_scope = Some(value);
+        }
+        if let Some(value) = request.usage_input {
+            record.meta.usage_input = value;
+        }
+        if let Some(value) = request.usage_output {
+            record.meta.usage_output = value;
+        }
+        if let Some(value) = request.usage_cost_usd_micros {
+            record.meta.usage_cost_usd_micros = value;
+        }
+        let (updated_at_ms, updated_at) = crate::event::now_ms_and_rfc3339();
+        record.meta.updated_at_ms = updated_at_ms;
+        record.meta.updated_at = updated_at;
+        Ok(record.meta.clone())
     }
 
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>> {
@@ -490,6 +537,112 @@ impl SessionStore for MemorySessionStore {
             receipt_verifier.as_ref(),
         ))
     }
+
+    async fn search(&self, query: SearchQuery) -> StoreResult<SearchResponse> {
+        query.validate().map_err(StoreError::InvalidInput)?;
+        let embedder = self.hooks.embedder.clone();
+        let mut candidates = {
+            let guard = lock(&self.inner);
+            let mut candidates = Vec::new();
+            for record in guard.sessions.values() {
+                if !matches_search_filter(&record.meta, &query.filter) {
+                    continue;
+                }
+                for event in &record.events {
+                    candidates.push((record.meta.clone(), event.clone()));
+                }
+            }
+            candidates
+        };
+        let mut events = candidates
+            .iter()
+            .map(|(_, event)| event.clone())
+            .collect::<Vec<_>>();
+        redact_stored_events(&self.hooks, &mut events)?;
+        for ((_, candidate), redacted) in candidates.iter_mut().zip(events) {
+            *candidate = redacted;
+        }
+
+        let documents = candidates
+            .iter()
+            .map(|(meta, event)| {
+                redacted_search_document(self.hooks.redaction.as_ref(), meta, event)
+            })
+            .collect::<Vec<_>>();
+        let fts_scores = documents
+            .iter()
+            .map(|document| lexical_score(&query.query, document))
+            .collect::<Vec<_>>();
+        let semantic_available = embedder.is_semantic();
+        let semantic_scores = if semantic_available {
+            let query_vector = embedder.embed(&query.query);
+            embedder
+                .embed_batch(&documents)
+                .iter()
+                .map(|vector| super::search::cosine(&query_vector, vector).max(0.0))
+                .collect::<Vec<_>>()
+        } else {
+            vec![0.0; documents.len()]
+        };
+
+        let fts_ranks = ranks(&fts_scores);
+        let semantic_ranks = ranks(&semantic_scores);
+        let effective_mode = if semantic_available {
+            query.mode
+        } else {
+            SearchMode::Fts
+        };
+        let mut hits = candidates
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, (_, event))| {
+                let fts_rank = fts_ranks.get(&index).copied();
+                let semantic_rank = semantic_ranks.get(&index).copied();
+                let fts_score = (fts_scores[index] > 0.0).then_some(fts_scores[index]);
+                let semantic_score =
+                    (semantic_scores[index] > 0.0).then_some(semantic_scores[index]);
+                let included = match effective_mode {
+                    SearchMode::Fts => fts_rank.is_some(),
+                    SearchMode::Semantic => semantic_rank.is_some(),
+                    SearchMode::Hybrid => fts_rank.is_some() || semantic_rank.is_some(),
+                };
+                included.then(|| SearchHit {
+                    session_id: event.session_id.clone(),
+                    event_id: event.event_id,
+                    kind: event.kind.clone(),
+                    score: combined_score(
+                        effective_mode,
+                        fts_rank,
+                        semantic_rank,
+                        fts_score,
+                        semantic_score,
+                    ),
+                    fts_score,
+                    semantic_score,
+                    snippet: snippet(&documents[index], &query.query, 240),
+                    event,
+                })
+            })
+            .collect::<Vec<_>>();
+        hits.sort_by(|left, right| {
+            right
+                .score
+                .total_cmp(&left.score)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+                .then_with(|| left.event_id.cmp(&right.event_id))
+        });
+        hits.truncate(query.limit());
+        let semantic_floor = !semantic_available;
+        Ok(SearchResponse {
+            requested_mode: query.mode,
+            effective_mode,
+            embedding_backend: embedder.name().to_string(),
+            semantic_floor,
+            fallback_reason: semantic_floor
+                .then(|| "semantic model unavailable; FTS-only fallback active".into()),
+            hits,
+        })
+    }
 }
 
 fn validate_parent(record: &SessionRecord, event: &AppendEvent) -> StoreResult<()> {
@@ -530,6 +683,21 @@ fn match_filter(meta: &SessionMeta, filter: &ListFilter) -> bool {
             return false;
         }
     }
+    if let Some(parent_session_id) = filter.parent_session_id.as_ref() {
+        if meta.parent_session_id.as_ref() != Some(parent_session_id) {
+            return false;
+        }
+    }
+    if let Some(session_type) = filter.session_type {
+        if meta.session_type != Some(session_type) {
+            return false;
+        }
+    }
+    if let Some(project_scope) = filter.project_scope.as_ref() {
+        if meta.project_scope.as_ref() != Some(project_scope) {
+            return false;
+        }
+    }
     if let Some(after) = filter.created_after_ms {
         if meta.created_at_ms < after {
             return false;
@@ -537,6 +705,31 @@ fn match_filter(meta: &SessionMeta, filter: &ListFilter) -> bool {
     }
     if let Some(before) = filter.created_before_ms {
         if meta.created_at_ms > before {
+            return false;
+        }
+    }
+    true
+}
+
+fn matches_search_filter(meta: &SessionMeta, filter: &super::search::SearchFilter) -> bool {
+    if matches!(
+        meta.status,
+        SessionStatus::SoftDeleted | SessionStatus::HardDeleted
+    ) {
+        return false;
+    }
+    if let Some(tenant_id) = filter.tenant_id.as_ref() {
+        if meta.tenant_id.as_ref() != Some(tenant_id) {
+            return false;
+        }
+    }
+    if let Some(project_scope) = filter.project_scope.as_ref() {
+        if meta.project_scope.as_ref() != Some(project_scope) {
+            return false;
+        }
+    }
+    if let Some(session_id) = filter.session_id.as_ref() {
+        if &meta.id != session_id {
             return false;
         }
     }

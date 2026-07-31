@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
-    ReadRange, SessionEventKind, SessionImporter, SessionStore, SqliteSessionStore, StoreError,
-    StoreHooks, StoredEvent, VerifyReport, MAX_READ_BATCH,
+    ReadRange, SearchFilter, SearchMode, SearchQuery, SessionEventKind, SessionImporter,
+    SessionStore, SessionType, SqliteSessionStore, StoreError, StoreHooks, StoredEvent,
+    VerifyReport, MAX_READ_BATCH,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -69,6 +70,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &SESSION_STORE_APPEND_IMPL_DEF,
     &SESSION_STORE_EVENTS_IMPL_DEF,
     &SESSION_STORE_VERIFY_IMPL_DEF,
+    &SESSION_STORE_SEARCH_IMPL_DEF,
     &SESSION_STORE_PATH_IMPL_DEF,
     &SESSION_STORE_DATABASE_PATH_IMPL_DEF,
 ];
@@ -223,6 +225,64 @@ async fn session_store_verify_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.session_store_search",
+    effects = ["fs.read@dynamic", "state.read@dynamic"],
+    sig = "__session_store_search(query: string, options?: dict) -> dict",
+    kind = "async",
+    category = "session_store"
+)]
+async fn session_store_search_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let query = required_string_arg(
+        &args,
+        0,
+        "__session_store_search",
+        "query",
+        ErrorKind::Runtime,
+    )?;
+    let options = optional_dict_arg(
+        &args,
+        1,
+        "__session_store_search",
+        "options",
+        ErrorKind::Runtime,
+    )?;
+    let mode = match option_string(options, "mode")?.as_deref() {
+        None | Some("hybrid") => SearchMode::Hybrid,
+        Some("fts") => SearchMode::Fts,
+        Some("semantic") => SearchMode::Semantic,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.mode must be fts, semantic, or hybrid; got '{other}'"
+            )));
+        }
+    };
+    let limit = option_positive_usize(options, "limit")?;
+    let store = open_store(&store_state_dir(options)?)?;
+    let response = store
+        .search(SearchQuery {
+            query,
+            mode,
+            filter: SearchFilter {
+                tenant_id: option_string(options, "tenant_id")?,
+                project_scope: option_string(options, "project_scope")?,
+                session_id: option_string(options, "session_id")?,
+            },
+            limit,
+        })
+        .await
+        .map_err(store_error)?;
+    let value = serde_json::to_value(response).map_err(|error| {
+        VmError::Runtime(format!(
+            "session_store: failed to encode search response: {error}"
+        ))
+    })?;
+    Ok(json_to_vm_value(&value))
+}
+
+#[harn_builtin(
     exposure = "harness.agent.session_store_path",
     effects = ["fs.read@dynamic"],
     sig = "__session_store_path(session_id: string, options?: dict) -> string",
@@ -294,12 +354,52 @@ fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
     state_dir.as_path().join(STORE_DB_FILE)
 }
 
+pub(crate) fn open_existing_canonical_store(
+    root: &Path,
+) -> Result<Option<SqliteSessionStore>, VmError> {
+    let state_dir = SessionStoreDir::under_root(root);
+    if !store_path(&state_dir).is_file() {
+        return Ok(None);
+    }
+    open_store(&state_dir).map(Some)
+}
+
 async fn ensure_session(
     store: &SqliteSessionStore,
     state_dir: &SessionStoreDir,
     session_id: &str,
     create_if_missing: bool,
     tenant_id: Option<String>,
+) -> Result<bool, VmError> {
+    let project_scope = state_dir
+        .as_path()
+        .parent()
+        .map(|path| path.to_string_lossy().into_owned());
+    ensure_session_with_create(
+        store,
+        state_dir,
+        session_id,
+        create_if_missing,
+        tenant_id.clone(),
+        CreateSession {
+            id: Some(session_id.to_string()),
+            tenant_id,
+            cwd: project_scope.clone(),
+            session_type: Some(SessionType::User),
+            project_scope,
+            ..CreateSession::default()
+        },
+    )
+    .await
+}
+
+async fn ensure_session_with_create(
+    store: &SqliteSessionStore,
+    state_dir: &SessionStoreDir,
+    session_id: &str,
+    create_if_missing: bool,
+    tenant_id: Option<String>,
+    create: CreateSession,
 ) -> Result<bool, VmError> {
     validate_session_id(session_id)?;
     let legacy_path = legacy_session_path(state_dir, session_id)?;
@@ -328,14 +428,7 @@ async fn ensure_session(
             if !create_if_missing {
                 return Ok(false);
             }
-            match store
-                .create(CreateSession {
-                    id: Some(session_id.to_string()),
-                    tenant_id: tenant_id.clone(),
-                    ..CreateSession::default()
-                })
-                .await
-            {
+            match store.create(create).await {
                 Ok(_) => {}
                 Err(StoreError::AlreadyExists(_)) => {}
                 Err(error) => return Err(store_error(error)),
@@ -354,9 +447,30 @@ async fn ensure_session(
 pub(crate) async fn open_canonical_agent_session(
     state_dir: &SessionStoreDir,
     session_id: &str,
+    parent_session_id: Option<String>,
+    session_type: SessionType,
 ) -> Result<SqliteSessionStore, VmError> {
     let store = open_store(state_dir)?;
-    ensure_session(&store, state_dir, session_id, true, None).await?;
+    let project_scope = state_dir
+        .as_path()
+        .parent()
+        .map(|path| path.to_string_lossy().into_owned());
+    ensure_session_with_create(
+        &store,
+        state_dir,
+        session_id,
+        true,
+        None,
+        CreateSession {
+            id: Some(session_id.to_string()),
+            parent_session_id,
+            cwd: project_scope.clone(),
+            session_type: Some(session_type),
+            project_scope,
+            ..CreateSession::default()
+        },
+    )
+    .await?;
     Ok(store)
 }
 
@@ -632,6 +746,21 @@ fn option_string(options: Option<&DictMap>, key: &str) -> Result<Option<String>,
         Some(VmValue::String(value)) => Ok(Some(value.to_string())),
         Some(_) => Err(VmError::Runtime(format!(
             "session_store: options.{key} must be a string"
+        ))),
+    }
+}
+
+fn option_positive_usize(options: Option<&DictMap>, key: &str) -> Result<Option<usize>, VmError> {
+    match options.and_then(|options| options.get(key)) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Int(value)) if *value > 0 => usize::try_from(*value)
+            .map(Some)
+            .map_err(|_| VmError::Runtime(format!("session_store: options.{key} is too large"))),
+        Some(VmValue::Int(_)) => Err(VmError::Runtime(format!(
+            "session_store: options.{key} must be positive"
+        ))),
+        Some(_) => Err(VmError::Runtime(format!(
+            "session_store: options.{key} must be an integer"
         ))),
     }
 }

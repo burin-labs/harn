@@ -20,13 +20,53 @@ impl AcpServer {
         }
     }
 
-    pub(super) fn handle_session_list(&self, id: &serde_json::Value, params: &serde_json::Value) {
-        let sessions: Vec<serde_json::Value> = self
+    pub(super) async fn handle_session_list(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let mut sessions: Vec<serde_json::Value> = self
             .sessions
             .iter()
             .filter(|(sid, session)| self.session_matches_list_filters(sid, session, params))
             .filter_map(|(sid, _)| self.session_item_json(sid, "live", None))
             .collect();
+        let mut roots = self
+            .sessions
+            .values()
+            .map(|session| session.project_root.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        if let Some(cwd) = session_cwd_filter(params) {
+            roots.insert(session_project_root_for_cwd(std::path::Path::new(cwd)));
+        }
+        let live_ids = self.sessions.keys().cloned().collect::<HashSet<_>>();
+        if live_state_filter_matches("persisted", session_live_state_filter(params).as_deref()) {
+            for root in roots {
+                let persisted =
+                    match harn_vm::session_timeline::list_persisted_sessions(&root, 500).await {
+                        Ok(persisted) => persisted,
+                        Err(error) => {
+                            self.send_error(
+                                id,
+                                -32000,
+                                &format!("session/list canonical store: {error}"),
+                            );
+                            return;
+                        }
+                    };
+                for session in persisted {
+                    if live_ids.contains(&session.id) {
+                        continue;
+                    }
+                    if let Some(cwd) = session_cwd_filter(params) {
+                        if session.cwd.as_deref() != Some(cwd) {
+                            continue;
+                        }
+                    }
+                    sessions.push(persisted_session_item(session));
+                }
+            }
+        }
         self.send_response(id, serde_json::json!({"sessions": sessions}));
     }
 
@@ -500,6 +540,47 @@ impl AcpServer {
             Err(error) => self.send_error(id, -32000, &error),
         }
     }
+}
+
+fn persisted_session_item(session: harn_session_store::SessionMeta) -> serde_json::Value {
+    let mut item = serde_json::json!({
+        "sessionId": session.id,
+        "liveState": "persisted",
+        "activePrompt": false,
+        "attachableRoles": [],
+        "createdAt": session.created_at,
+        "updatedAt": session.updated_at,
+        "eventCount": session.event_count,
+        "usage": {
+            "inputTokens": session.usage_input,
+            "outputTokens": session.usage_output,
+            "costUsdMicros": session.usage_cost_usd_micros,
+        },
+        "_meta": {
+            "harn": {
+                "liveState": "persisted",
+                "activePrompt": false,
+                "eventCount": session.event_count,
+                "sessionType": session.session_type,
+                "parentSessionId": session.parent_session_id,
+                "projectScope": session.project_scope,
+            }
+        }
+    });
+    for (key, value) in [
+        ("title", session.title.map(serde_json::Value::String)),
+        ("cwd", session.cwd.map(serde_json::Value::String)),
+        ("model", session.model.map(serde_json::Value::String)),
+        (
+            "lastEventId",
+            session.last_event_id.map(serde_json::Value::from),
+        ),
+    ] {
+        if let Some(value) = value {
+            item[key] = value;
+        }
+    }
+    item
 }
 
 /// JSON-RPC notification method that streams per-server bulk-auth progress

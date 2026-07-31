@@ -2,6 +2,9 @@ use super::*;
 use crate::event_log::{FileEventLog, MemoryEventLog};
 use crate::orchestration::{save_run_record, RunRecord};
 use futures::StreamExt;
+use harn_session_store::{
+    AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
+};
 use serde_json::json;
 
 fn span(span_id: u64, parent_id: Option<u64>, metadata: serde_json::Value) -> RunTraceSpanRecord {
@@ -22,6 +25,75 @@ fn span(span_id: u64, parent_id: Option<u64>, metadata: serde_json::Value) -> Ru
         links: Vec::new(),
         cost_usd: None,
     }
+}
+
+#[tokio::test]
+async fn persisted_transcript_projects_stable_tool_revision_and_identity_links() {
+    let temp = tempfile::tempdir().expect("project root");
+    std::fs::create_dir(temp.path().join(".harn")).expect("state dir");
+    let store = SqliteSessionStore::open(temp.path().join(".harn/session-store.sqlite"))
+        .expect("canonical store");
+    store
+        .create(CreateSession {
+            id: Some("session-1".to_string()),
+            project_scope: Some(temp.path().to_string_lossy().into_owned()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create session");
+    let mut call = AppendEvent::new(
+        SessionEventKind::ToolCall,
+        json!({"transcript_event": {"text": "Read source"}}),
+    );
+    call.headers = BTreeMap::from([
+        ("run_id".to_string(), "run-1".to_string()),
+        ("turn_id".to_string(), "turn-1".to_string()),
+        ("source_event_id".to_string(), "source-1".to_string()),
+        ("tool_call_id".to_string(), "tool-1".to_string()),
+    ]);
+    store.append("session-1", call).await.expect("append call");
+    let mut result = AppendEvent::new(
+        SessionEventKind::ToolResult,
+        json!({"transcript_event": {"text": "Read source", "metadata": {"is_error": false}}}),
+    );
+    result.headers = BTreeMap::from([
+        ("run_id".to_string(), "run-1".to_string()),
+        ("turn_id".to_string(), "turn-1".to_string()),
+        ("source_event_id".to_string(), "source-2".to_string()),
+        ("tool_call_id".to_string(), "tool-1".to_string()),
+    ]);
+    store
+        .append("session-1", result)
+        .await
+        .expect("append result");
+
+    let snapshot = query_persisted_session_timeline(
+        temp.path(),
+        SessionTimelineQuery::for_session("session-1"),
+    )
+    .await
+    .expect("query timeline")
+    .expect("persisted session");
+
+    assert_eq!(snapshot.nodes.len(), 1);
+    assert_eq!(
+        snapshot.nodes[0].id,
+        "session:session-1:run:run-1:turn:turn-1:tool:tool-1"
+    );
+    assert_eq!(snapshot.nodes[0].status, "completed");
+    assert_eq!(snapshot.nodes[0].attributes["revision"], json!(2));
+    assert!(snapshot.nodes[0]
+        .links
+        .iter()
+        .any(|link| link.kind == "turn" && link.target_id.as_deref() == Some("turn-1")));
+    assert_eq!(
+        snapshot
+            .cursor
+            .topics
+            .get("session-store:session-1")
+            .copied(),
+        Some(2)
+    );
 }
 
 #[test]

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/search_hybrid.response.json",
+  "title": "session.search_hybrid response",
+  "type": "object",
+  "required": ["requested_mode", "effective_mode", "embedding_backend", "semantic_floor", "hits"],
+  "additionalProperties": true
+}

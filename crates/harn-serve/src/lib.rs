@@ -122,8 +122,9 @@ pub use permissions::{
 pub use replay::{InMemoryReplayCache, NoReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 pub use sessions::{
     sessions_router, AppendEvent, ArchiveSink, CreateSession, EventId, EventPage, ForkResult,
-    ListFilter, MemorySessionStore, ReadRange, RetentionPolicy, SessionEventKind, SessionId,
-    SessionMeta, SessionSigner, SessionStatus, SessionStore, SharedArchiveSink, SharedSessionStore,
+    ListFilter, MemorySessionStore, ReadRange, RetentionPolicy, SearchFilter, SearchHit,
+    SearchMode, SearchQuery, SearchResponse, SessionEventKind, SessionId, SessionMeta,
+    SessionSigner, SessionStatus, SessionStore, SessionType, SharedArchiveSink, SharedSessionStore,
     Snapshot, SnapshotId, SqliteSessionStore, StoreError, StoreHooks, StoreResult, StoredEvent,
     SweepReport, Tombstone, TruncateResult, VerifyFailure, VerifyReport,
 };
