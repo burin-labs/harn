@@ -1,33 +1,34 @@
 pub(super) use crate::llm::content_hash::{stable_redacted_json_hash, stable_redacted_string_hash};
 
 pub(super) fn served_context_receipt(
-    opts: &super::super::api::LlmCallOptions,
+    payload: &super::super::api::LlmRequestPayload,
+    manifest: &crate::llm::prompt::ContextAssemblyManifest,
     tool_schemas: &[crate::llm::tools::ToolSchema],
 ) -> serde_json::Value {
-    let system_prompt = opts.system.as_deref().unwrap_or("");
-    let messages = serde_json::Value::Array(opts.messages.clone());
+    let system_prompt = payload.system.as_deref().unwrap_or("");
+    let messages = serde_json::Value::Array(payload.messages.clone());
     let tool_schemas_value = serde_json::to_value(tool_schemas).unwrap_or(serde_json::Value::Null);
-    let native_tools = opts
+    let native_tools = payload
         .native_tools
         .as_ref()
         .map(|tools| serde_json::Value::Array(tools.clone()))
         .unwrap_or(serde_json::Value::Null);
-    let manifest = opts.context_manifest.as_json();
+    let manifest_value = manifest.as_json();
 
     serde_json::json!({
         "schema": "harn.llm.served_context.v1",
         "redaction": "current_policy",
-        "call_role": opts.context_manifest.call_role(),
-        "actor_chain": opts.context_manifest.actor_chain(),
-        "manifest_content_hash": stable_redacted_json_hash(&manifest),
+        "call_role": manifest.call_role(),
+        "actor_chain": manifest.actor_chain(),
+        "manifest_content_hash": stable_redacted_json_hash(&manifest_value),
         "system_prompt_content_hash": stable_redacted_string_hash(system_prompt),
         "system_prompt_bytes": system_prompt.len(),
         "messages_content_hash": stable_redacted_json_hash(&messages),
-        "message_count": opts.messages.len(),
+        "message_count": payload.messages.len(),
         "tool_schemas_content_hash": stable_redacted_json_hash(&tool_schemas_value),
         "tool_schema_count": tool_schemas.len(),
         "native_tools_content_hash": stable_redacted_json_hash(&native_tools),
-        "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
+        "native_tool_count": payload.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
     })
 }
 
@@ -407,6 +408,97 @@ mod tests {
             !dir.join("llm_transcript.jsonl").exists(),
             "validation must happen before retaining a provider request"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn served_context_certifies_qwen_thinking_disable_egress_bytes() {
+        let _guard = crate::llm::env_guard();
+        let dir = temp_transcript_dir("harn-qwen-egress-served-context");
+        let dir_string = dir.to_string_lossy().to_string();
+        super::super::push_llm_transcript_dir(&dir_string);
+
+        let mut opts = crate::llm::api::options::base_opts("ollama");
+        opts.model = "qwen3.5:30b".to_string();
+        opts.system = Some("you are an agent.".to_string());
+        opts.thinking = crate::llm::api::ThinkingConfig::Disabled;
+        opts.context_manifest = crate::llm::prompt::ContextAssemblyManifest::internal(
+            "test:system",
+            "test",
+            "llm_call",
+            opts.system.as_deref(),
+        );
+        let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+        assert_eq!(
+            payload.system.as_deref(),
+            Some("/no_think\nyou are an agent."),
+            "the fixture must reach the capability-owned egress transform",
+        );
+
+        let observed_payload = super::super::dump_llm_request(0, "call-qwen-egress", "text", &opts)
+            .expect("valid context manifest");
+        super::super::pop_llm_transcript_dir();
+        assert_eq!(
+            observed_payload.system, payload.system,
+            "transport must receive the payload whose bytes were observed",
+        );
+
+        let events = read_transcript_events(&dir);
+        let manifest = &events
+            .iter()
+            .find(|event| event["type"] == "context_manifest")
+            .expect("context_manifest event")["manifest"];
+        let request = events
+            .iter()
+            .find(|event| event["type"] == "provider_call_request")
+            .expect("provider_call_request event");
+        let served_context = &request["served_context"];
+        let served_system = payload.system.as_deref().unwrap_or("");
+        assert_eq!(
+            manifest["boundary"],
+            serde_json::json!("llm_request_payload_egress")
+        );
+        assert_eq!(manifest["root"], serde_json::json!("transformed"));
+        assert_eq!(
+            manifest["whole_prompt_digest"],
+            served_context["system_prompt_content_hash"]
+        );
+        assert_eq!(
+            manifest["system_prompt_bytes"],
+            served_context["system_prompt_bytes"]
+        );
+        assert_eq!(
+            manifest["segments"]
+                .as_array()
+                .expect("manifest segments")
+                .iter()
+                .find(|segment| segment["included"] == serde_json::json!(true))
+                .expect("included egress segment")["id"],
+            serde_json::json!("egress:system")
+        );
+        assert_eq!(
+            manifest["egress_delta"]["input_system_prompt_bytes"],
+            serde_json::json!(17)
+        );
+        assert_eq!(
+            manifest["egress_delta"]["output_system_prompt_bytes"],
+            serde_json::json!(27)
+        );
+        assert_eq!(
+            manifest["egress_delta"]["bytes_added"],
+            serde_json::json!(10)
+        );
+        assert_eq!(
+            served_context["system_prompt_bytes"],
+            serde_json::json!(served_system.len()),
+            "receipt bytes must describe the post-conversion payload",
+        );
+        assert_eq!(
+            served_context["system_prompt_content_hash"],
+            serde_json::json!(stable_redacted_string_hash(served_system)),
+            "receipt digest must describe the post-conversion payload",
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
