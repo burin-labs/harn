@@ -614,9 +614,7 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
     Ok(())
 }
 
-/// Enforce one typed Harness method from the same contract that powers static
-/// analysis and runtime receipts. This is the authoritative source-facing
-/// policy boundary; implementation builtin names are deliberately absent.
+/// Enforce a typed Harness method at the authoritative source policy boundary.
 pub fn enforce_current_policy_for_capability(
     capability: harn_builtin_meta::CapabilityId,
     method: &str,

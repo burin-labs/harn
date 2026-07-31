@@ -1,6 +1,7 @@
 // A provider-call receipt must resolve to a retained, typed system-prompt bill
 // of materials from the same real agent transcript. The explain projection and
 // journal projection come from the same assembly value.
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { read_jsonl } from "std/jsonl"
 import { SystemReplacement } from "std/llm/options"
@@ -8,16 +9,19 @@ import { llm_text, with_llm_script } from "std/testing"
 
 const REPLACEMENT = "Only the manifest sentinel reaches the system channel."
 
-pipeline main() {
+pipeline main(harness: Harness) {
   with_llm_script(
+    harness.llm,
     [llm_text("done ##DONE##")],
     { ->
       const transcript_dir = path_join(
         harness.fs.temp_dir(),
-        "harn-context-assembly-manifest-" + uuid(),
+        "harn-context-assembly-manifest-" + harness.random.uuid(),
       )
       const replacement: SystemReplacement = {mode: "replace", content: REPLACEMENT}
-      const explained = prompt_explain({system: replacement, call_role: "model.router"})
+      const explained = harness.agent.prompt_explain(
+        {system: replacement, call_role: "model.router"},
+      )
       const opts: AgentLoopOptions = {
         provider: "mock",
         model: "mock",
@@ -28,8 +32,12 @@ pipeline main() {
         max_iterations: 1,
         llm_transcript_dir: transcript_dir,
       }
-      const result = agent_loop("Complete the task.", "must not leak", opts)
-      const records = read_jsonl(path_join(transcript_dir, "llm_transcript.jsonl"), {strict: true})
+      const result = agent_loop(harness, "Complete the task.", "must not leak", opts)
+      const records = read_jsonl(
+        harness.fs,
+        path_join(transcript_dir, "llm_transcript.jsonl"),
+        {strict: true},
+      )
       const manifests = records.filter({ record -> record.type == "context_manifest" })
       const requests = records.filter({ record -> record.type == "provider_call_request" })
       require len(manifests) == 1
@@ -37,27 +45,29 @@ pipeline main() {
       const event = manifests[0]
       const manifest = event.manifest
       const request = requests[0]
-      __io_println(result.status == "done")
-      __io_println(request.call_role == "model.router")
-      __io_println(request.served_context.call_role == request.call_role)
-      __io_println(request.served_context.manifest_content_hash == event.content_hash)
-      __io_println(manifest.schema == "harn.llm.context_manifest.v1")
-      __io_println(manifest.scope == "system_prompt")
-      __io_println(manifest.boundary == "observed_llm_call_pre_egress")
-      __io_println(manifest.messages == "served_context_digest_only")
-      __io_println(manifest.root == "replacement")
-      __io_println(len(manifest.segments) == 1)
-      __io_println(manifest.segments[0].id == "replacement")
-      __io_println(manifest.segments[0].producer == "caller")
-      __io_println(manifest.segments[0].included)
-      __io_println(manifest.segments[0].bytes == len(REPLACEMENT))
-      __io_println(manifest.segments[0].digest == explained.fragments[0].digest)
-      __io_println(manifest.whole_prompt_digest == explained.whole_prompt_digest)
-      __io_println(manifest.system_prompt_bytes == explained.system_prompt_bytes)
-      __io_println(
+      harness.stdio.println(result.status == "done")
+      harness.stdio.println(request.call_role == "model.router")
+      harness.stdio.println(request.served_context.call_role == request.call_role)
+      harness.stdio.println(request.served_context.manifest_content_hash == event.content_hash)
+      harness.stdio.println(manifest.schema == "harn.llm.context_manifest.v1")
+      harness.stdio.println(manifest.scope == "system_prompt")
+      harness.stdio.println(manifest.boundary == "observed_llm_call_pre_egress")
+      harness.stdio.println(manifest.messages == "served_context_digest_only")
+      harness.stdio.println(manifest.root == "replacement")
+      harness.stdio.println(len(manifest.segments) == 1)
+      harness.stdio.println(manifest.segments[0].id == "replacement")
+      harness.stdio.println(manifest.segments[0].producer == "caller")
+      harness.stdio.println(manifest.segments[0].included)
+      harness.stdio.println(manifest.segments[0].bytes == len(REPLACEMENT))
+      harness.stdio.println(manifest.segments[0].digest == explained.fragments[0].digest)
+      harness.stdio.println(manifest.whole_prompt_digest == explained.whole_prompt_digest)
+      harness.stdio.println(manifest.system_prompt_bytes == explained.system_prompt_bytes)
+      harness.stdio.println(
         manifest.whole_prompt_digest == request.served_context.system_prompt_content_hash,
       )
-      __io_println(manifest.system_prompt_bytes == request.served_context.system_prompt_bytes)
+      harness.stdio.println(
+        manifest.system_prompt_bytes == request.served_context.system_prompt_bytes,
+      )
       harness.fs.delete(transcript_dir)
     },
   )

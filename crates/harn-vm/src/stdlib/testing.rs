@@ -88,6 +88,8 @@ async fn testing_call_body_impl(
 /// to broaden the nested-execution allowance. Every other field of the
 /// current capability policy is preserved.
 #[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
     sig = "__testing_with_nested_execution_budget(depth: int, body: any) -> any",
     kind = "async",
     category = "testing"
