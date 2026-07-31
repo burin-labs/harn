@@ -23,6 +23,7 @@ pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
     next_approval_policy_repeat_count, next_approval_unavailable_class_repeat_count, ApprovalShape,
     PolicyAction, PolicyEvaluation, PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
+    ToolApprovalRequest,
 };
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
@@ -875,6 +876,12 @@ pub enum ToolApprovalDecision {
 }
 
 impl ToolApprovalPolicy {
+    /// Evaluate a raw host request through the same normalization, guards,
+    /// precedence, and audit receipt used by VM tool dispatch.
+    pub fn evaluate_request(&self, request: &ToolApprovalRequest) -> PolicyEvaluation {
+        approval_rules::evaluate_tool_approval_request(self, request)
+    }
+
     pub fn evaluate_detailed(&self, tool_name: &str, args: &serde_json::Value) -> PolicyEvaluation {
         approval_rules::evaluate_tool_approval_policy(self, tool_name, args, None)
     }

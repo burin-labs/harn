@@ -28,6 +28,9 @@
 //!   the VM enforces and (with the `hostlib` feature) the
 //!   [`SandboxSpec`](harn_hostlib::sandbox::SandboxSpec) a sandbox
 //!   backend provisions from.
+//! - [`ToolApprovalPolicy`] and [`ToolApprovalRequest`] — the fine-grained
+//!   tool-decision engine shared with VM dispatch, including canonical
+//!   normalization, default guards, precedence, and audit receipts.
 
 pub mod audit;
 pub mod enforcement;
@@ -39,6 +42,10 @@ pub mod store;
 pub use audit::{AuditEntry, AuditFilter, AuditOutcome};
 #[cfg(feature = "hostlib")]
 pub use enforcement::sandbox;
+pub use harn_vm::orchestration::{
+    ApprovalShape, PolicyAction, PolicyEvaluation, PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
+    ToolApprovalPolicy, ToolApprovalRequest,
+};
 pub use policy::{LlmPolicy, PermissionPolicy, PolicyVersion, RedactionPolicy};
 pub use request::{ActionClass, DecisionScope, PermissionDecision, PermissionRequest, Risk};
 pub use rules::{RememberRule, RuleId};
