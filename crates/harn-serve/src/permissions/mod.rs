@@ -35,6 +35,7 @@ pub mod policy;
 pub mod request;
 pub mod rules;
 pub mod store;
+pub mod tool_policy;
 
 pub use audit::{AuditEntry, AuditFilter, AuditOutcome};
 #[cfg(feature = "hostlib")]
@@ -43,3 +44,8 @@ pub use policy::{LlmPolicy, PermissionPolicy, PolicyVersion, RedactionPolicy};
 pub use request::{ActionClass, DecisionScope, PermissionDecision, PermissionRequest, Risk};
 pub use rules::{RememberRule, RuleId};
 pub use store::{InMemoryConfig, InMemoryPermissionStore, PermissionStore, RememberSpec};
+pub use tool_policy::{
+    evaluate_tool_permission_policy, ToolPermissionEffect, ToolPermissionEvaluation,
+    ToolPermissionMatchers, ToolPermissionPatterns, ToolPermissionRequest, ToolPermissionRule,
+    TOOL_PERMISSION_EVALUATOR_ID,
+};

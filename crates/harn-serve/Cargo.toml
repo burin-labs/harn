@@ -17,6 +17,7 @@ bytes = "1"
 futures = "0.3"
 globset = "0.4"
 harn-clock = { path = "../harn-clock", version = "=0.10.45" }
+harn-glob = { path = "../harn-glob", version = "=0.10.45", default-features = false }
 harn-modules = { path = "../harn-modules", version = "=0.10.45" }
 harn-parser = { path = "../harn-parser", version = "=0.10.45" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.45" }
