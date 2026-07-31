@@ -993,10 +993,11 @@ jobs:
       needs.changes.outputs.rust == 'true'
       && needs.rust-check-inputs.result == 'success'
     runs-on: ubuntu-latest
-    # The pinned tree-sitter parser regeneration is CPU-bound and runs beside
-    # conformance. Keep enough headroom for slower hosted cores without
-    # weakening the gate.
-    timeout-minutes: 20
+    # Hang backstop, not a performance budget. On hosted four-core runners the
+    # complete conformance/audit fanout has reached the old 20m ceiling while
+    # healthy work was still progressing. Keep roughly 2x headroom; the
+    # per-test performance ratchet still owns performance regressions.
+    timeout-minutes: 40
     permissions:
       actions: read
       contents: read
@@ -1039,9 +1040,6 @@ jobs:
           ./scripts/tree-sitter-cli.sh build
       - name: Run Harn conformance and audit
         id: release-audit-harn
-        env:
-          AUDIT_GATES_CONCURRENCY: "4"
-          HARN_CONFORMANCE_SHARDS: "4"
         run: ./scripts/audit_gates.sh
       - name: Summarize rolling merge-group wall time
         if: github.event_name == 'merge_group' && steps.release-audit-harn.outcome == 'success'
@@ -1068,10 +1066,10 @@ jobs:
         && 'ubuntu-latest'
         || 'blacksmith-4vcpu-ubuntu-2404' }}
     # Hang backstop, not a performance budget. The post-warm integration sweep
-    # reached the old 15m ceiling on a healthy Blacksmith runner while its
-    # assertions were still progressing; keep roughly 2x headroom, matching
-    # the workspace-test lane's noisy-neighbor policy.
-    timeout-minutes: 30
+    # plus structural checks reached the old 30m ceiling on a healthy hosted
+    # runner while assertions were still progressing. Keep 1.5x headroom;
+    # dedicated performance gates still own regression budgets.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
