@@ -1,0 +1,3 @@
+pub fn render_deep_alias(who) {
+  return render_prompt("@partials/greeting.harn.prompt", {who: who})
+}
