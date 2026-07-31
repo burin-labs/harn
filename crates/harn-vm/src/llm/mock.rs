@@ -206,6 +206,7 @@ pub const KNOWN_MOCK_SCOPES: &[&str] = &[
     "agent.main",
     "agent.input_guardrail",
     "agent.scope_classifier",
+    "compaction",
     "completion.judge",
     "step.judge",
 ];

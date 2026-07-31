@@ -6,7 +6,7 @@ pub(crate) async fn vm_stream_llm(
     tx: &tokio::sync::mpsc::Sender<VmValue>,
 ) -> Result<(), VmError> {
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let call = super::api::vm_call_llm_full_streaming_single_route(opts, delta_tx);
+    let call = super::api::vm_call_llm_full_streaming(opts, delta_tx);
     tokio::pin!(call);
     loop {
         tokio::select! {

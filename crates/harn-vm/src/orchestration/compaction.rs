@@ -1,11 +1,8 @@
 //! Auto-compaction — transcript size management strategies.
 
-use crate::value::VmDictExt;
-
-use serde::{Deserialize, Serialize};
-
 use crate::llm::{vm_call_llm_full, vm_value_to_json};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmDictExt, VmError, VmValue};
+use serde::{Deserialize, Serialize};
 
 mod tool_output;
 use crate::vm::AsyncBuiltinCtx;
@@ -886,6 +883,9 @@ async fn llm_compaction_summary(
         "role": "user",
         "content": prompt,
     })];
+    let manifest = &mut compact_opts.context_manifest;
+    manifest.record_system_transform("compaction", "stdlib:compaction", "removed system", None);
+    compact_opts.set_call_role("compaction");
     let result = vm_call_llm_full(&compact_opts).await?;
     let summary = result.text.trim();
     if summary.is_empty() {

@@ -1,0 +1,91 @@
+// Auto-compaction is itself a provider call and must be retained on the same
+// observed request/manifest spine as the agent turns around it.
+import { agent_loop } from "std/agent/loop"
+import { AgentLoopOptions } from "std/agent/options"
+import { read_jsonl } from "std/jsonl"
+import { llm_done, llm_text, with_llm_script } from "std/testing"
+
+fn evidence_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return deterministic evidence",
+    {
+      handler: { _args -> "evidence" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {}}]},
+      llm_text("retained goal and latest evidence"),
+      llm_done(),
+    ],
+    { ->
+      const transcript_dir = path_join(
+        harness.fs.temp_dir(),
+        "harn-compaction-context-manifest-" + harness.random.uuid(),
+      )
+      const options: AgentLoopOptions = {
+        provider: "mock",
+        model: "mock",
+        tools: evidence_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 2,
+        auto_compact: true,
+        compact_threshold: 1,
+        compact_keep_last: 1,
+        compact_strategy: "llm",
+        llm_transcript_dir: transcript_dir,
+      }
+      const result = agent_loop(
+        harness,
+        "Inspect the evidence and finish.",
+        "Keep the task grounded.",
+        options,
+      )
+      const calls = harness.llm.mock_calls()
+      const compaction_calls = calls.filter({ call -> call.mock_scope == "compaction" })
+      const records = read_jsonl(
+        harness.fs,
+        path_join(transcript_dir, "llm_transcript.jsonl"),
+        {strict: true},
+      )
+      const requests = records.filter({ record -> record.type == "provider_call_request" })
+      const compaction_requests = requests.filter({ record -> record.call_role == "compaction" })
+      const manifests = records.filter(
+        { record ->
+          record.type == "context_manifest" && record.manifest?.call_role == "compaction"
+        },
+      )
+      require result.status == "done"
+      require len(transcript_events_by_kind(result.transcript, "compaction")) > 0
+      require len(compaction_calls) == 1
+      require len(requests) == len(calls)
+      require len(compaction_requests) == 1
+      require len(manifests) == 1
+      const request = compaction_requests[0]
+      const manifest = manifests[0]
+      require request.served_context.manifest_content_hash == manifest.content_hash
+      require request.served_context.system_prompt_bytes == 0
+      require request.message_count == 1
+      require manifest.manifest.root == "transformed"
+      require manifest.manifest.system_prompt_bytes == 0
+      require compaction_calls[0].system == nil
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(request.call_role)
+      harness.fs.delete(transcript_dir)
+    },
+  )
+}

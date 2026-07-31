@@ -638,6 +638,14 @@ fn catalog_stream_timeout_secs(model: &str) -> Option<u64> {
 }
 
 impl LlmCallOptions {
+    /// Assign the semantic purpose once for both transcript attribution and
+    /// scoped mock selection.
+    pub(crate) fn set_call_role(&mut self, call_role: impl Into<String>) {
+        let call_role = call_role.into();
+        self.context_manifest.set_call_role(call_role.clone());
+        self.mock_scope = Some(call_role);
+    }
+
     pub(crate) fn resolve_timeout(&self) -> u64 {
         resolve_timeout(self.timeout, &self.model)
     }
