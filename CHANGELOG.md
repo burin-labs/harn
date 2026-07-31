@@ -9,6 +9,20 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.47
+
+### Added
+
+- LLM transcripts now retain a typed, hash-joined system-prompt assembly manifest
+  for every provider call, including per-segment provenance, whole-prompt receipts,
+  and the semantic call purpose plus delegated-worker actor chain.
+
+### Changed
+
+- Refresh GPT-5.6 Terra and Luna pricing across direct OpenAI and OpenRouter
+  catalog routes, and model OpenAI's renamed Fast mode with exact response-tier
+  recognition so cost accounting survives the `priority` echo.
+
 ## v0.10.46
 
 ### Added
