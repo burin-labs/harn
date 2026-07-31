@@ -68,7 +68,8 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
 fn try_emit_partial_tool_args(
     session_id: Option<&str>,
     tool_call_id: &str,
-    tool_name: &str,
+    raw_tool_name: &str,
+    announced_tool_name: &str,
     accumulated: &str,
     coalescer: &mut DeltaCoalescer,
     now: Instant,
@@ -79,15 +80,23 @@ fn try_emit_partial_tool_args(
     if !coalescer.should_emit(now) {
         return;
     }
-    let PartialToolArgs { value, raw_partial } = project_partial(accumulated);
+    let PartialToolArgs {
+        mut value,
+        raw_partial,
+    } = project_partial(accumulated);
     if value.is_none() && raw_partial.is_none() {
         return;
     }
-    let event_tool_name = canonical_stream_event_tool_name(tool_name);
+    if crate::llm::tools::is_generic_wrapper_name(raw_tool_name) {
+        if let Some(raw_input) = value.take() {
+            let (_, normalized_input) = canonical_stream_event_tool_call(raw_tool_name, raw_input);
+            value = Some(normalized_input);
+        }
+    }
     let event = AgentEvent::ToolCallUpdate {
         session_id: session_id.to_string(),
         tool_call_id: tool_call_id.to_string(),
-        tool_name: event_tool_name,
+        tool_name: announced_tool_name.to_string(),
         status: ToolCallStatus::Pending,
         raw_output: None,
         error: None,
@@ -107,14 +116,65 @@ fn try_emit_partial_tool_args(
     crate::llm::agent_runtime::emit_agent_event_sync(&event);
 }
 
-fn canonical_stream_event_tool_name(tool_name: &str) -> String {
+fn canonical_stream_event_tool_call(
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> (String, serde_json::Value) {
     let tool_name = match crate::llm::tools::parse_text_tool_call_from_native_name(tool_name) {
-        crate::llm::tools::NativeToolNameTextCall::Parsed { name, .. }
-        | crate::llm::tools::NativeToolNameTextCall::Malformed { name, .. } => name,
+        crate::llm::tools::NativeToolNameTextCall::Parsed {
+            name,
+            arguments: embedded_arguments,
+        } => return crate::llm::tools::normalize_tool_call_shape(&name, embedded_arguments),
+        crate::llm::tools::NativeToolNameTextCall::Malformed { name, .. } => name,
         crate::llm::tools::NativeToolNameTextCall::NotCall => tool_name.to_string(),
     };
-    let (name, _) = crate::llm::tools::normalize_tool_call_shape(&tool_name, serde_json::json!({}));
-    name
+    crate::llm::tools::normalize_tool_call_shape(&tool_name, arguments)
+}
+
+fn resolved_stream_event_tool_call(
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Option<(String, serde_json::Value)> {
+    let (name, arguments) = canonical_stream_event_tool_call(tool_name, arguments);
+    if name.trim().is_empty() || crate::llm::tools::is_generic_wrapper_name(&name) {
+        return None;
+    }
+    Some((name, arguments))
+}
+
+fn emit_stream_tool_call_start(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    raw_input: serde_json::Value,
+) {
+    let tool_kind = crate::orchestration::current_tool_annotations(tool_name)
+        .map(|annotations| annotations.kind);
+    crate::llm::agent_runtime::emit_agent_event_sync(&AgentEvent::ToolCall {
+        session_id: session_id.to_string(),
+        tool_call_id: tool_call_id.to_string(),
+        tool_name: tool_name.to_string(),
+        kind: tool_kind,
+        status: ToolCallStatus::Pending,
+        raw_input,
+        audit: crate::orchestration::current_mutation_session(),
+        parsing: None,
+    });
+}
+
+fn try_announce_stream_tool_call(
+    session_id: Option<&str>,
+    tool_call_id: &str,
+    raw_tool_name: &str,
+    raw_input: serde_json::Value,
+    closeout: &mut StreamToolCallCloseout,
+) -> Option<String> {
+    let (tool_name, raw_input) = resolved_stream_event_tool_call(raw_tool_name, raw_input)?;
+    if let Some(session_id) = session_id {
+        emit_stream_tool_call_start(session_id, tool_call_id, &tool_name, raw_input);
+        closeout.announce(tool_call_id, &tool_name);
+    }
+    Some(tool_name)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -499,6 +559,10 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         /// lifecycle, so clients can correlate streaming progress with
         /// the eventual outcome.
         tool_call_id: String,
+        /// Concrete canonical name already published for this lifecycle.
+        /// Generic provider wrappers stay unannounced until their streamed
+        /// arguments reveal the real tool.
+        announced_tool_name: Option<String>,
         /// Coalescing gate so a tool that arrives in 30 small deltas
         /// emits ~6 `ToolCallUpdate` events instead of 30.
         coalescer: DeltaCoalescer,
@@ -541,7 +605,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         name: String,
         args: String,
         tool_call_id: String,
-        announced: bool,
+        announced_tool_name: Option<String>,
         coalescer: DeltaCoalescer,
     }
     let mut oai_tool_map: std::collections::HashMap<u64, OaiToolStream> =
@@ -611,35 +675,19 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             let name = block["name"].as_str().unwrap_or("").to_string();
                             anth_tool_block_index += 1;
                             let tool_call_id = streaming_tool_call_id(&id, anth_tool_block_index);
-                            // Streaming announcement: emit before any
-                            // arg deltas so ACP clients can render
-                            // "calling search_web…" with zero latency.
-                            if let Some(sid) = session_id {
-                                let event_tool_name = canonical_stream_event_tool_name(&name);
-                                let tool_kind = crate::orchestration::current_tool_annotations(
-                                    &event_tool_name,
-                                )
-                                .map(|a| a.kind);
-                                crate::llm::agent_runtime::emit_agent_event_sync(
-                                    &AgentEvent::ToolCall {
-                                        session_id: sid.to_string(),
-                                        tool_call_id: tool_call_id.clone(),
-                                        tool_name: event_tool_name.clone(),
-                                        kind: tool_kind,
-                                        status: ToolCallStatus::Pending,
-                                        raw_input: serde_json::Value::Object(Default::default()),
-                                        audit: crate::orchestration::current_mutation_session(),
-
-                                        parsing: None,
-                                    },
-                                );
-                                stream_tool_closeout.announce(&tool_call_id, &event_tool_name);
-                            }
+                            let announced_tool_name = try_announce_stream_tool_call(
+                                session_id,
+                                &tool_call_id,
+                                &name,
+                                serde_json::Value::Object(Default::default()),
+                                &mut stream_tool_closeout,
+                            );
                             current_tool = Some(ToolBlock {
                                 name,
                                 input_json: String::new(),
                                 provider_id: id,
                                 tool_call_id,
+                                announced_tool_name,
                                 coalescer: DeltaCoalescer::new(),
                             });
                         }
@@ -698,14 +746,29 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                                 if let Some(j) = delta["partial_json"].as_str() {
                                     tool.input_json.push_str(j);
                                 }
-                                try_emit_partial_tool_args(
-                                    session_id,
-                                    &tool.tool_call_id,
-                                    &tool.name,
-                                    &tool.input_json,
-                                    &mut tool.coalescer,
-                                    Instant::now(),
-                                );
+                                if tool.announced_tool_name.is_none() {
+                                    let partial = project_partial(&tool.input_json);
+                                    if let Some(raw_input) = partial.value {
+                                        tool.announced_tool_name = try_announce_stream_tool_call(
+                                            session_id,
+                                            &tool.tool_call_id,
+                                            &tool.name,
+                                            raw_input,
+                                            &mut stream_tool_closeout,
+                                        );
+                                    }
+                                }
+                                if let Some(event_tool_name) = tool.announced_tool_name.as_deref() {
+                                    try_emit_partial_tool_args(
+                                        session_id,
+                                        &tool.tool_call_id,
+                                        &tool.name,
+                                        event_tool_name,
+                                        &tool.input_json,
+                                        &mut tool.coalescer,
+                                        Instant::now(),
+                                    );
+                                }
                             } else if let Some(ref mut server_tool) = current_server_tool {
                                 if let Some(j) = delta["partial_json"].as_str() {
                                     server_tool.input_json.push_str(j);
@@ -869,7 +932,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             name,
                             args: String::new(),
                             tool_call_id,
-                            announced: false,
+                            announced_tool_name: None,
                             coalescer: DeltaCoalescer::new(),
                         }
                     });
@@ -886,7 +949,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                                 // the fallback yet. Once announced, the
                                 // published id stays canonical for both
                                 // the remaining updates and dispatch.
-                                if !entry.announced {
+                                if entry.announced_tool_name.is_none() {
                                     entry.tool_call_id =
                                         streaming_tool_call_id(&entry.id, stream_index);
                                 }
@@ -900,43 +963,31 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             }
                         }
                     }
-                    // Announce the tool call as soon as we have a name —
-                    // before any arg deltas, so clients render "calling
-                    // X…" immediately. If only arguments arrive first
-                    // (rare; some self-hosted vLLM builds), we hold off
-                    // and announce on the first real partial-args emit
-                    // below.
-                    if !entry.announced && !entry.name.is_empty() {
-                        if let Some(sid) = session_id {
-                            let event_tool_name = canonical_stream_event_tool_name(&entry.name);
-                            let tool_kind =
-                                crate::orchestration::current_tool_annotations(&event_tool_name)
-                                    .map(|a| a.kind);
-                            crate::llm::agent_runtime::emit_agent_event_sync(
-                                &AgentEvent::ToolCall {
-                                    session_id: sid.to_string(),
-                                    tool_call_id: entry.tool_call_id.clone(),
-                                    tool_name: event_tool_name.clone(),
-                                    kind: tool_kind,
-                                    status: ToolCallStatus::Pending,
-                                    raw_input: serde_json::Value::Object(Default::default()),
-                                    audit: crate::orchestration::current_mutation_session(),
-
-                                    parsing: None,
-                                },
-                            );
-                            stream_tool_closeout.announce(&entry.tool_call_id, &event_tool_name);
-                            entry.announced = true;
-                        }
-                    }
                     if let Some(args) = tc["function"]["arguments"].as_str() {
                         entry.args.push_str(args);
                     }
-                    if entry.announced {
+                    // Real names announce immediately. Generic provider
+                    // wrappers wait until streamed arguments reveal the
+                    // canonical inner tool, so no lifecycle starts under a
+                    // `tool_call`/`tool` placeholder name.
+                    if entry.announced_tool_name.is_none() && !entry.name.is_empty() {
+                        let raw_input = project_partial(&entry.args)
+                            .value
+                            .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+                        entry.announced_tool_name = try_announce_stream_tool_call(
+                            session_id,
+                            &entry.tool_call_id,
+                            &entry.name,
+                            raw_input,
+                            &mut stream_tool_closeout,
+                        );
+                    }
+                    if let Some(event_tool_name) = entry.announced_tool_name.as_deref() {
                         try_emit_partial_tool_args(
                             session_id,
                             &entry.tool_call_id,
                             &entry.name,
+                            event_tool_name,
                             &entry.args,
                             &mut entry.coalescer,
                             Instant::now(),
