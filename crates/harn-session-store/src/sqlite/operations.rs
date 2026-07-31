@@ -615,8 +615,20 @@ impl SessionStore for SqliteSessionStore {
         };
 
         let literal_query = fts_literal_query(&query.query);
+        if effective_mode == SearchMode::Fts && literal_query.is_empty() {
+            let semantic_floor = !semantic_available;
+            return Ok(SearchResponse {
+                requested_mode: query.mode,
+                effective_mode,
+                embedding_backend: embedder.name().to_string(),
+                semantic_floor,
+                fallback_reason: (semantic_floor && query.mode != SearchMode::Fts)
+                    .then(|| "semantic model unavailable; FTS-only fallback active".into()),
+                hits: Vec::new(),
+            });
+        }
         let mut fts_scores = BTreeMap::new();
-        if !literal_query.is_empty() {
+        if effective_mode == SearchMode::Hybrid && !literal_query.is_empty() {
             let mut sql = String::from(
                 "SELECT f.session_id, CAST(f.event_id AS INTEGER),
                         -bm25(session_events_fts)
@@ -648,36 +660,55 @@ impl SessionStore for SqliteSessionStore {
             }
         }
 
-        let mut sql = String::from(
-            "SELECT e.session_id, e.event_id, e.tenant_id, e.parent_event_id,
-                    e.actor, e.kind, e.custom_kind, e.payload_json, e.tags_json,
-                    e.headers_json, e.ts_ms, e.ts, e.record_hash, e.prev_hash,
-                    e.signature_json, s.title, s.cwd, s.model, s.project_scope,
-                    v.backend, v.dim, v.embedding
-             FROM session_events e
-             INNER JOIN sessions s ON s.id = e.session_id
-             LEFT JOIN session_event_vectors v
-               ON v.session_id = e.session_id AND v.event_id = e.event_id
-             WHERE s.status NOT IN ('soft_deleted', 'hard_deleted')",
-        );
-        let mut args: Vec<(&'static str, rusqlite::types::Value)> = Vec::new();
+        let fts_only = effective_mode == SearchMode::Fts;
+        let mut sql = if fts_only {
+            String::from(
+                "SELECT e.session_id, e.event_id, e.tenant_id, e.parent_event_id,
+                        e.actor, e.kind, e.custom_kind, e.payload_json, e.tags_json,
+                        e.headers_json, e.ts_ms, e.ts, e.record_hash, e.prev_hash,
+                        e.signature_json, s.title, s.cwd, s.model, s.project_scope,
+                        NULL, NULL, NULL, -bm25(session_events_fts)
+                 FROM session_events_fts
+                 INNER JOIN session_events e
+                   ON e.session_id = session_events_fts.session_id
+                  AND e.event_id = CAST(session_events_fts.event_id AS INTEGER)
+                 INNER JOIN sessions s ON s.id = e.session_id
+                 WHERE session_events_fts MATCH :candidate_match
+                   AND s.status NOT IN ('soft_deleted', 'hard_deleted')",
+            )
+        } else {
+            String::from(
+                "SELECT e.session_id, e.event_id, e.tenant_id, e.parent_event_id,
+                        e.actor, e.kind, e.custom_kind, e.payload_json, e.tags_json,
+                        e.headers_json, e.ts_ms, e.ts, e.record_hash, e.prev_hash,
+                        e.signature_json, s.title, s.cwd, s.model, s.project_scope,
+                        v.backend, v.dim, v.embedding, NULL
+                 FROM session_events e
+                 INNER JOIN sessions s ON s.id = e.session_id
+                 LEFT JOIN session_event_vectors v
+                   ON v.session_id = e.session_id AND v.event_id = e.event_id
+                 WHERE s.status NOT IN ('soft_deleted', 'hard_deleted')",
+            )
+        };
+        let mut args: Vec<(&'static str, rusqlite::types::Value)> = if fts_only {
+            vec![(":candidate_match", literal_query.into())]
+        } else {
+            Vec::new()
+        };
         append_search_scope(&mut sql, &mut args, &query);
-        if effective_mode == SearchMode::Fts {
-            if literal_query.is_empty() {
-                sql.push_str(" AND 1 = 0");
-            } else {
-                sql.push_str(
-                    " AND EXISTS (
-                        SELECT 1 FROM session_events_fts matched
-                        WHERE matched.session_id = e.session_id
-                          AND matched.event_id = e.event_id
-                          AND session_events_fts MATCH :candidate_match
-                    )",
-                );
-                args.push((":candidate_match", literal_query.into()));
-            }
+        if fts_only {
+            sql.push_str(
+                " ORDER BY bm25(session_events_fts) ASC,
+                           e.session_id ASC, e.event_id ASC
+                  LIMIT :candidate_limit",
+            );
+            args.push((
+                ":candidate_limit",
+                i64::try_from(query.limit()).unwrap_or(i64::MAX).into(),
+            ));
+        } else {
+            sql.push_str(" ORDER BY e.session_id ASC, e.event_id ASC");
         }
-        sql.push_str(" ORDER BY e.session_id ASC, e.event_id ASC");
         let named_args: Vec<(&str, &dyn rusqlite::ToSql)> = args
             .iter()
             .map(|(name, value)| (*name, value as &dyn rusqlite::ToSql))
@@ -694,6 +725,7 @@ impl SessionStore for SqliteSessionStore {
                     row.get::<_, Option<String>>(19)?,
                     row.get::<_, Option<i64>>(20)?,
                     row.get::<_, Option<Vec<u8>>>(21)?,
+                    row.get::<_, Option<f64>>(22)?.map(|score| score as f32),
                 ))
             })
             .map_err(map_sql)?;
@@ -727,11 +759,15 @@ impl SessionStore for SqliteSessionStore {
             .collect::<Vec<_>>();
         let aligned_fts_scores = candidates
             .iter()
-            .map(|(event, ..)| {
-                fts_scores
-                    .get(&(event.session_id.clone(), event.event_id))
-                    .copied()
-                    .unwrap_or_default()
+            .map(|(event, _, _, _, _, _, _, _, direct_fts_score)| {
+                direct_fts_score
+                    .map(|score| score.max(f32::MIN_POSITIVE))
+                    .unwrap_or_else(|| {
+                        fts_scores
+                            .get(&(event.session_id.clone(), event.event_id))
+                            .copied()
+                            .unwrap_or_default()
+                    })
             })
             .collect::<Vec<_>>();
         let semantic_scores = if semantic_available {
@@ -739,7 +775,7 @@ impl SessionStore for SqliteSessionStore {
             candidates
                 .iter()
                 .enumerate()
-                .map(|(index, (_, _, _, _, _, backend, dim, blob))| {
+                .map(|(index, (_, _, _, _, _, backend, dim, blob, _))| {
                     let stored = backend
                         .as_deref()
                         .filter(|backend| *backend == embedder.name())

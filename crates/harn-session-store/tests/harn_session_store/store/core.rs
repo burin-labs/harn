@@ -213,6 +213,19 @@ async fn canonical_search_is_scoped_redacted_and_reports_fts_fallback() {
             .await
             .expect("search secret");
         assert!(secret_search.hits.is_empty());
+        let punctuation_search = store
+            .search(SearchQuery {
+                query: "...".into(),
+                mode: SearchMode::Fts,
+                filter: SearchFilter {
+                    project_scope: Some("project-alpha".into()),
+                    ..SearchFilter::default()
+                },
+                limit: None,
+            })
+            .await
+            .expect("search punctuation-only query");
+        assert!(punctuation_search.hits.is_empty());
 
         let outside_scope = store
             .search(SearchQuery {
