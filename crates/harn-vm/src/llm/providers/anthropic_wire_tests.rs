@@ -1,6 +1,105 @@
 use super::AnthropicProvider;
 use crate::llm::api::{LlmCallOptions, LlmRequestPayload};
 
+/// Producer-only session facts must survive recording but never leak into the
+/// provider request. This also retains the byte-perfect screenshot regression
+/// across record -> transcript -> provider egress.
+#[test]
+fn live_computer_screenshot_reaches_anthropic_body_without_producer_data() {
+    use base64::Engine;
+
+    let bytes: Vec<u8> = (0..300_000u32)
+        .map(|i| (i.wrapping_mul(2654435761) >> 16) as u8)
+        .collect();
+    let src_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    crate::llm::agent_session_host::reset_agent_session_host_state();
+    let session_id = crate::agent_sessions::open_or_create(Some("cu-live-diag".to_string()));
+    crate::llm::agent_session_host::seed_host_session_provider_model(
+        &session_id,
+        "anthropic",
+        "claude-opus-4-8",
+    );
+    crate::agent_sessions::inject_message(
+        &session_id,
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "role": "user", "content": "take a screenshot"
+        })),
+    )
+    .expect("user message");
+    crate::agent_sessions::inject_message(
+        &session_id,
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use",
+                "id": "tc1",
+                "name": "computer",
+                "input": {"action": "screenshot"}
+            }],
+        })),
+    )
+    .expect("assistant tool call");
+    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+        "tool_name": "computer",
+        "tool_call_id": "tc1",
+        "ok": true,
+        "observation": "Captured screenshot 1024x768.",
+        "data": {"producer_only_status": "succeeded"},
+        "result": {
+            "ok": true,
+            "text": "Captured screenshot 1024x768.",
+            "screenshot": {
+                "base64": src_b64,
+                "media_type": "image/png",
+                "width": 1024,
+                "height": 768,
+                "scale_factor": 2.0,
+            },
+        },
+    }]));
+    crate::llm::agent_session_host::record_tool_results_for_test(&session_id, dispatch);
+
+    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+    let message_vms: Vec<crate::value::VmValue> =
+        match transcript.as_dict().and_then(|dict| dict.get("messages")) {
+            Some(crate::value::VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => Vec::new(),
+        };
+    let messages = crate::llm::helpers::vm_messages_to_json(&message_vms).expect("messages json");
+    let opts = LlmCallOptions {
+        provider: "anthropic".to_string(),
+        model: "claude-opus-4-8".to_string(),
+        messages,
+        ..Default::default()
+    };
+    let body = AnthropicProvider::build_request_body(&LlmRequestPayload::from(&opts));
+    assert!(!body.to_string().contains("producer_only_status"));
+
+    fn find_image_data(value: &serde_json::Value) -> Option<String> {
+        match value {
+            serde_json::Value::Object(map) => {
+                if map.get("type").and_then(|kind| kind.as_str()) == Some("image") {
+                    return map
+                        .get("source")
+                        .and_then(|source| source.get("data"))
+                        .and_then(|data| data.as_str())
+                        .map(str::to_string);
+                }
+                map.values().find_map(find_image_data)
+            }
+            serde_json::Value::Array(items) => items.iter().find_map(find_image_data),
+            _ => None,
+        }
+    }
+
+    let out_b64 = find_image_data(&body).expect("Anthropic image block");
+    let out_bytes = base64::engine::general_purpose::STANDARD
+        .decode(out_b64)
+        .expect("valid base64");
+    assert_eq!(out_bytes, bytes);
+}
+
 #[test]
 fn mid_conversation_system_section_reaches_exact_anthropic_wire_json() {
     let opts = LlmCallOptions {

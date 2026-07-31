@@ -1071,6 +1071,7 @@ pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &[
 
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_AUDIT: &str = "audit";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_CHANGEDPATHS: &str = "changedPaths";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_DATA: &str = "data";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_DURATIONMS: &str = "durationMs";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERROR: &str = "error";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERRORCATEGORY: &str = "errorCategory";
@@ -1084,6 +1085,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_RAWINPUTPARTIAL: &str = "rawInputP
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "audit",
     "changedPaths",
+    "data",
     "durationMs",
     "error",
     "errorCategory",

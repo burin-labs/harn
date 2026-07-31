@@ -64,6 +64,8 @@ mod plan_document;
 
 use plan_document::{next_plan_document_event, plan_artifact_from_result};
 
+#[cfg(test)]
+pub(crate) use tool_result_messages::record_tool_results_for_test;
 use tool_result_messages::{
     assistant_tool_use_blocks, paired_tool_result_ids, screenshots_from_tool_result,
     synthesize_orphan_tool_results, tool_result_message_for_provider,
@@ -1440,17 +1442,6 @@ fn record_write_provenance(
     }
 }
 
-/// Test seam: invoke the real `record_tool_results` builtin logic against a
-/// session with a `dispatch` payload, so a repro can drive the production record
-/// path without a live agent loop.
-#[cfg(test)]
-pub(crate) fn record_tool_results_for_test(session_id: &str, dispatch: VmValue) {
-    let args = [VmValue::string(session_id), dispatch];
-    let mut out = String::new();
-    host_agent_session_record_tool_results_builtin(&args, &mut out)
-        .expect("record_tool_results builtin succeeds");
-}
-
 /// Append per-tool observation messages from a dispatch result.
 #[harn_builtin(
     sig = "__host_agent_session_record_tool_results(session_id: string, dispatch: dict) -> nil",
@@ -1691,6 +1682,7 @@ fn host_agent_session_record_tool_results_builtin(
                 &tool_call_id,
                 &observation,
                 &screenshots,
+                dict_get(result, "data").filter(|value| !matches!(value, VmValue::Nil)),
             ),
         )
         .map_err(VmError::Runtime)?;

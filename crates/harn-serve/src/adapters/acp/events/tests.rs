@@ -23,6 +23,7 @@ use super::{AcpAgentEventSink, AcpOutput};
 mod plan_document;
 mod registration_fixtures;
 mod subagent_stop;
+mod tool_data;
 
 use plan_document::fixture_plan_document_event;
 
@@ -121,6 +122,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             error_category: None,
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
+            data: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
             raw_input: None,
@@ -1420,6 +1422,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             error_category: None,
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
+            data: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
 
@@ -1594,6 +1597,7 @@ async fn tool_call_update_serializes_error_category_in_camel_case() {
         error_category: Some(ToolCallErrorCategory::SchemaValidation),
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
 
@@ -1631,6 +1635,7 @@ async fn tool_call_update_omits_error_category_when_none() {
         error_category: None,
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
 
@@ -1661,6 +1666,7 @@ async fn tool_call_update_serializes_mutation_status_under_harn_meta() {
         error_category: None,
         mutation_status: ToolMutationStatus::NotApplied,
         changed_paths: None,
+        data: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,
@@ -1672,40 +1678,6 @@ async fn tool_call_update_serializes_mutation_status_under_harn_meta() {
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
     assert_eq!(update_harn_meta(&payload)["mutationStatus"], "not_applied");
     assert!(payload["params"]["update"].get("mutationStatus").is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_call_update_serializes_changed_paths_under_harn_meta() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    sink.handle_event(&AgentEvent::ToolCallUpdate {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-8".to_string(),
-        tool_name: "edit".to_string(),
-        status: ToolCallStatus::Completed,
-        raw_output: Some(serde_json::json!({"ok": true})),
-        error: None,
-        duration_ms: None,
-        execution_duration_ms: None,
-        error_category: None,
-        mutation_status: ToolMutationStatus::Applied,
-        changed_paths: Some(vec!["src/lib.rs".to_string(), "tests/lib.rs".to_string()]),
-        executor: Some(ToolExecutor::HostBridge),
-        parsing: None,
-        raw_input: None,
-        raw_input_partial: None,
-        audit: None,
-    });
-
-    let line = rx.recv().await.expect("acp tool_call_update");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    let harn_meta = update_harn_meta(&payload);
-    assert_eq!(harn_meta["mutationStatus"], "applied");
-    assert_eq!(
-        harn_meta["changedPaths"],
-        serde_json::json!(["src/lib.rs", "tests/lib.rs"])
-    );
-    assert!(payload["params"]["update"].get("changedPaths").is_none());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1744,6 +1716,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         error_category: Some(ToolCallErrorCategory::ParseAborted),
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: Some(false),
 
@@ -1817,6 +1790,7 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
             error_category: None,
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
+            data: None,
             executor: Some(executor),
             parsing: None,
 
@@ -1848,6 +1822,7 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
         error_category: None,
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
 
@@ -1882,6 +1857,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         error_category: None,
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         raw_input: Some(serde_json::json!({"q": "hello"})),
         raw_input_partial: None,
@@ -1909,6 +1885,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         error_category: None,
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1937,6 +1914,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         error_category: None,
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -2043,6 +2021,7 @@ async fn tool_call_update_includes_audit_when_mutation_session_is_active() {
         error_category: None,
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,
@@ -2083,6 +2062,7 @@ async fn tool_call_update_omits_audit_but_keeps_typed_mutation_status() {
         error_category: None,
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
+        data: None,
         executor: None,
         parsing: None,
         raw_input: None,

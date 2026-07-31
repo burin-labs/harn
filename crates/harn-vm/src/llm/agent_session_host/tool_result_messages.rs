@@ -15,6 +15,15 @@
 use super::{dict_get, list_items, vm_to_json};
 use crate::value::{VmDictExt, VmValue};
 
+/// Test seam over the real record builtin, allowing provider egress regressions
+/// to exercise dispatch-result ingestion without a live model turn.
+#[cfg(test)]
+pub(crate) fn record_tool_results_for_test(session_id: &str, dispatch: VmValue) {
+    let args = [VmValue::string(session_id), dispatch];
+    super::host_agent_session_record_tool_results_builtin(&args, &mut String::new())
+        .expect("record_tool_results builtin succeeds");
+}
+
 pub(super) fn tool_result_message_for_provider(
     provider: &str,
     model: &str,
@@ -23,6 +32,7 @@ pub(super) fn tool_result_message_for_provider(
     tool_call_id: &str,
     observation: &str,
     screenshots: &[VmValue],
+    data: Option<&VmValue>,
 ) -> VmValue {
     let mut msg = crate::value::DictMap::new();
     // A text-channel tool_format (`text` or `json`) carries tool results back
@@ -75,6 +85,12 @@ pub(super) fn tool_result_message_for_provider(
         content.push(VmValue::dict(text_block));
         content.extend(screenshots.iter().cloned());
         msg.put("content", VmValue::List(std::sync::Arc::new(content)));
+    }
+    // Keep declared producer facts in the session transcript for hosts and
+    // replay consumers. Provider adapters project only their canonical message
+    // fields, so this storage-only field never leaks into provider requests.
+    if let Some(data) = data {
+        msg.put("data", data.clone());
     }
     VmValue::dict(msg)
 }
@@ -279,6 +295,7 @@ pub(super) fn synthesize_orphan_tool_results(
             // A synthesized orphan-repair result is plain feedback text — never
             // an image.
             &[],
+            None,
         ));
     }
     out

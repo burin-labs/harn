@@ -568,6 +568,7 @@ type ACPContentBlock struct {
 type HarnToolLifecycleMeta struct {
 	Audit               json.RawMessage `json:"audit,omitempty"`
 	ChangedPaths        []string        `json:"changedPaths,omitempty"`
+	Data                json.RawMessage `json:"data,omitempty"`
 	DurationMs          *float64        `json:"durationMs,omitempty"`
 	Error               *string         `json:"error,omitempty"`
 	ErrorCategory       *string         `json:"errorCategory,omitempty"`

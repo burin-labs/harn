@@ -13,6 +13,8 @@ use super::{
 
 #[path = "agent_session_host_mock_dispatch_tests.rs"]
 mod mock_dispatch;
+#[path = "agent_session_host_record_tool_data_tests.rs"]
+mod record_tool_data;
 
 /// Execution policy that annotates the file-provenance test vocabulary so
 /// `current_tool_annotations` resolves `kind` / side effects the way the live
@@ -594,6 +596,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "call_001",
         "ok",
         &[],
+        None,
     ));
     assert_eq!(local["role"], "tool");
     assert_eq!(local["name"], "release_run");
@@ -607,6 +610,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "call_002",
         "ok",
         &[],
+        None,
     ));
     assert_eq!(anthropic["role"], "tool_result");
     assert_eq!(anthropic["tool_use_id"], "call_002");
@@ -619,6 +623,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "call_003",
         "ok",
         &[],
+        None,
     ));
     assert_eq!(bedrock_claude["role"], "tool_result");
     assert_eq!(bedrock_claude["tool_use_id"], "call_003");
@@ -631,6 +636,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "call_004",
         "ok",
         &[],
+        None,
     ));
     assert_eq!(gemini["role"], "tool");
     assert_eq!(gemini["name"], "release_run");
@@ -644,6 +650,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "call_005",
         "ok",
         &[],
+        None,
     ));
     assert_eq!(text_mode["role"], "user");
     assert!(text_mode.get("tool_call_id").is_none());
@@ -682,6 +689,7 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
         "call_shot",
         "Captured screenshot 1024x768.",
         &screenshots,
+        None,
     ));
     assert_eq!(anthropic["role"], "tool_result");
     let content = anthropic["content"].as_array().expect("block list");
@@ -722,6 +730,7 @@ fn multi_screenshot_tool_result_delivers_every_frame() {
         "call_multi",
         "Captured two frames.",
         &screenshots,
+        None,
     ));
     let content = anthropic["content"].as_array().expect("block list");
     assert_eq!(content.len(), 3, "text + two images");
@@ -925,129 +934,6 @@ fn escalation_orphan_repaired_via_production_path_openai_shape() {
     assert_eq!(last["name"], "read");
     assert_eq!(last["tool_call_id"], "call_9");
     assert_eq!(last["content"], "nudge");
-}
-
-/// The DISPATCHED escalation path (`record_tool_results`) had the SAME latent
-/// text-lock bug as the orphan-repair path: it recorded a dispatched result
-/// using the session-locked `tool_format`, which stays `"text"` on a
-/// text-primary run even after escalating to a native model. So a native
-/// escalated tool call that WAS dispatched got its result recorded as a bare
-/// `role:"user"` message — leaving the assistant's native `tool_use` block
-/// orphaned and re-triggering the Anthropic 400 on the SUCCESSFUL-dispatch path.
-///
-/// This exercises the real `record_tool_results` builtin against a text-locked
-/// session whose trailing assistant turn carries a native anthropic `tool_use`
-/// block, and asserts the recorded result rides the native `tool_result` role.
-#[test]
-fn dispatched_escalation_result_records_native_role_on_text_locked_session() {
-    reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("record-native-under-text-lock".to_string()));
-    crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
-    seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
-
-    crate::agent_sessions::inject_message(
-        &session_id,
-        crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "read main"})),
-    )
-    .expect("user turn injects");
-    // Escalated native assistant turn carrying a real anthropic tool_use block.
-    let llm_result = crate::stdlib::json_to_vm_value(&json!({
-        "provider": "anthropic",
-        "model": "claude-sonnet-4-5",
-        "text": "",
-        "_agent_tool_format": "native",
-        "native_tool_calls": [{"id": "tc_0", "name": "read", "arguments": {"path": "main.rs"}}],
-    }));
-    crate::agent_sessions::inject_message(
-        &session_id,
-        assistant_message_from_llm_result(&llm_result),
-    )
-    .expect("assistant turn injects");
-
-    // Dispatch result for the native call, shaped as agent_dispatch_tool_batch
-    // returns it (a flat list with tool_use_id).
-    let dispatch = crate::stdlib::json_to_vm_value(&json!([{
-        "tool_name": "read",
-        "tool_use_id": "tc_0",
-        "ok": true,
-        "observation": "file contents",
-    }]));
-    super::record_tool_results_for_test(&session_id, dispatch);
-
-    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
-    let messages = list_items(
-        &dict_get(&transcript, "messages")
-            .cloned()
-            .unwrap_or(crate::value::VmValue::Nil),
-    );
-    let last = vm_to_json(messages.last().expect("a recorded result message"));
-    assert_eq!(
-        last["role"], "tool_result",
-        "a dispatched native escalation result must ride the native tool_result role, \
-         not role:\"user\" (the session text-lock must NOT leak into the record path)"
-    );
-    assert_eq!(last["tool_use_id"], "tc_0");
-
-    let messages_json: Vec<serde_json::Value> = messages.iter().map(vm_to_json).collect();
-    assert!(
-        orphaned_tool_use_ids(&messages_json).is_empty(),
-        "the dispatched native tool_use must be paired -> provider-valid"
-    );
-}
-
-/// REGRESSION GUARD for the record path: a homogeneous text-channel run keeps
-/// its calls inline in `content`, so the trailing assistant turn carries NO
-/// structured block. `record_tool_results` must keep recording results on the
-/// text-channel `role:"user"` echo — the native-format override must NOT fire.
-#[test]
-fn dispatched_text_channel_result_stays_user_echo() {
-    reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("record-text-homogeneous".to_string()));
-    crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
-    seed_host_session_provider_model(&session_id, "moonshot", "moonshot/kimi-k2.7-code-highspeed");
-
-    crate::agent_sessions::inject_message(
-        &session_id,
-        crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "read main"})),
-    )
-    .expect("user turn injects");
-    // Text-channel assistant turn: the call is inline in `content`, no structured
-    // block persists.
-    let llm_result = crate::stdlib::json_to_vm_value(&json!({
-        "provider": "moonshot",
-        "model": "moonshot/kimi-k2.7-code-highspeed",
-        "text": "read({ path: \"main.rs\" })",
-        "_agent_tool_format": "text",
-        "native_tool_calls": [],
-        "tool_calls": [{"id": "tc_0", "name": "read", "arguments": {"path": "main.rs"}}],
-    }));
-    crate::agent_sessions::inject_message(
-        &session_id,
-        assistant_message_from_llm_result(&llm_result),
-    )
-    .expect("assistant turn injects");
-
-    let dispatch = crate::stdlib::json_to_vm_value(&json!([{
-        "tool_name": "read",
-        "tool_call_id": "tc_0",
-        "ok": true,
-        "observation": "file contents",
-    }]));
-    super::record_tool_results_for_test(&session_id, dispatch);
-
-    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
-    let messages = list_items(
-        &dict_get(&transcript, "messages")
-            .cloned()
-            .unwrap_or(crate::value::VmValue::Nil),
-    );
-    let last = vm_to_json(messages.last().expect("a recorded result message"));
-    assert_eq!(
-        last["role"], "user",
-        "homogeneous text-channel results must stay on the user echo (no native override)"
-    );
 }
 
 /// The repair covers the OpenAI-compatible wire shape too (top-level

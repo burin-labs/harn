@@ -128,6 +128,7 @@ public enum HarnProtocolConstants {
     public static let toolLifecycleExtensionFields: [String] = [
         "audit",
         "changedPaths",
+        "data",
         "durationMs",
         "error",
         "errorCategory",
@@ -1152,6 +1153,7 @@ public enum HarnACPToolExecutor: Codable, Sendable, Equatable {
 public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var audit: HarnACPValue?
     public var changedPaths: [String]?
+    public var data: HarnACPValue?
     public var durationMs: Double?
     public var error: String?
     public var errorCategory: HarnToolCallErrorCategory?

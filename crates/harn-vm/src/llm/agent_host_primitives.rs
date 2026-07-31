@@ -13,6 +13,7 @@ use super::{
 
 mod denial_results;
 mod dispatch_policy;
+pub(super) mod event_capture;
 mod host_permission;
 mod side_effect_ceiling;
 mod structured_tool_result;
@@ -30,108 +31,6 @@ use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
     permission_context_for,
 };
-
-#[derive(Clone)]
-struct CapturingAgentEventSink {
-    session_id: String,
-    events: Arc<std::sync::Mutex<Vec<crate::agent_events::AgentEvent>>>,
-}
-
-impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
-    fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
-        if event.session_id() != self.session_id {
-            return;
-        }
-        // Fixture records and queue checkpoints are harness audit telemetry,
-        // not application checkpoints. Keep them on the external event
-        // stream without changing the stable `agent_capture_events` contract
-        // that captures events a Harn program emitted for its own workflow.
-        let harness_mock_telemetry = match event {
-            crate::agent_events::AgentEvent::TypedCheckpoint { checkpoint, .. } => {
-                matches!(
-                    checkpoint.get("kind").and_then(serde_json::Value::as_str),
-                    Some("llm_mock_fixture_consumption") | Some("llm_mock_queue")
-                )
-            }
-            _ => false,
-        };
-        if harness_mock_telemetry {
-            return;
-        }
-        if let Ok(mut events) = self.events.lock() {
-            events.push(event.clone());
-        }
-    }
-}
-
-/// Capture agent events emitted while executing a Harn closure.
-#[harn_builtin(
-    sig = "__host_agent_capture_events(session_id: string, body: closure) -> dict",
-    kind = "async",
-    category = "agent.host",
-    runtime_only = true
-)]
-async fn host_agent_capture_events_impl(
-    ctx: crate::vm::AsyncBuiltinCtx,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let session_id = match args.first() {
-        Some(VmValue::String(text)) if !text.is_empty() => text.to_string(),
-        Some(VmValue::String(_)) => {
-            return Err(VmError::Runtime(
-                "__host_agent_capture_events(session_id, body): session_id must be non-empty"
-                    .to_string(),
-            ))
-        }
-        Some(other) => {
-            let type_name = other.type_name();
-            return Err(VmError::Runtime(format!(
-                "__host_agent_capture_events(session_id, body): session_id must be a string; got {type_name}"
-            )));
-        }
-        None => {
-            return Err(VmError::Runtime(
-                "__host_agent_capture_events(session_id, body): missing session_id".to_string(),
-            ))
-        }
-    };
-    let body = match args.get(1) {
-        Some(VmValue::Closure(closure)) => closure.clone(),
-        _ => {
-            return Err(VmError::Runtime(
-                "__host_agent_capture_events(session_id, body): body must be a closure".to_string(),
-            ))
-        }
-    };
-
-    let captured_events = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let sink: Arc<dyn crate::agent_events::AgentEventSink> = Arc::new(CapturingAgentEventSink {
-        session_id,
-        events: captured_events.clone(),
-    });
-    let _guard = agent_runtime::LoopSinkGuard::install(Some(sink));
-    let mut child_vm = ctx.child_vm();
-    let result = child_vm.call_closure_pub(&body, &[]).await;
-    let output = child_vm.take_output();
-    ctx.forward_output(&output);
-    let result = result?;
-    let events = captured_events
-        .lock()
-        .map(|events| {
-            events
-                .iter()
-                .map(|event| serde_json::to_value(event).unwrap_or(serde_json::Value::Null))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let mut envelope = crate::value::DictMap::new();
-    envelope.insert(crate::value::intern_key("result"), result);
-    envelope.insert(
-        crate::value::intern_key("events"),
-        json_to_vm_value(&serde_json::Value::Array(events)),
-    );
-    Ok(VmValue::dict(envelope))
-}
 
 fn agent_primitive_tools_arg(
     args: &[VmValue],
@@ -1644,6 +1543,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         Ok(raw_result) => {
             let mutation_status = structured_tool_result::mutation_status(&raw_result);
             let changed_paths = structured_tool_result::changed_paths(&raw_result);
+            let data = structured_tool_result::data(&raw_result);
             // Render from a base64-elided copy so a screenshot (or any image)
             // result does not swamp the transcript text — the full image payload
             // still travels to the model as an image content block via the
@@ -1737,6 +1637,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 "error_category": error_category,
                 "mutation_status": mutation_status,
                 "changed_paths": changed_paths,
+                "data": data,
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,

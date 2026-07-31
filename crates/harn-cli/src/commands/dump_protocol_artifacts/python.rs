@@ -529,6 +529,7 @@ class ACPContentBlock(_HarnDataclass):
 class HarnToolLifecycleMeta(_HarnDataclass):
     audit: Optional[JsonValue] = None
     changedPaths: Optional[List[str]] = None
+    data: Optional[JsonValue] = None
     durationMs: Optional[float] = None
     error: Optional[str] = None
     errorCategory: Optional[str] = None

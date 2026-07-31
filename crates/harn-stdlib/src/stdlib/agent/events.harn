@@ -76,6 +76,7 @@ pub fn agent_tool_lifecycle_event_schema() {
           type: schema_literal("tool_call_update"),
           mutation_status: schema_enum(["applied", "not_applied", "unknown"]),
           changed_paths: schema_field(schema_list(schema_string()), false),
+          data: schema_field(schema_any(), false),
         },
         {additional_properties: schema_any()},
       ),
