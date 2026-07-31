@@ -843,7 +843,7 @@ export function isNotification(msg: ACPMessage): msg is ACPNotification {
 "#,
     );
     out.push_str(
-        r#"
+        r"
 export interface HarnSessionTimelineCursor {
   topics: Record<string, number>
 }
@@ -904,7 +904,7 @@ export interface HarnSessionTimelineUpdate {
   cursor: HarnSessionTimelineCursor
   node: HarnSessionTimelineNode
 }
-"#,
+",
     );
     out
 }

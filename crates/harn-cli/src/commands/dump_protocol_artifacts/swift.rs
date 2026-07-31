@@ -1326,7 +1326,7 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
     );
 
     out.push_str(
-        r#"public struct HarnSessionTimelineCursor: Codable, Sendable, Equatable {
+        r"public struct HarnSessionTimelineCursor: Codable, Sendable, Equatable {
     public var topics: [String: UInt64]
 }
 
@@ -1386,7 +1386,7 @@ public struct HarnSessionTimelineUpdate: Codable, Sendable, Equatable {
     public var cursor: HarnSessionTimelineCursor
     public var node: HarnSessionTimelineNode
 }
-"#,
+",
     );
 
     out
