@@ -53,12 +53,15 @@ fn test_macos_process_sandbox_surfaces_denial_as_typed_result() {
             .as_deref(),
         Some("false")
     );
+    let stderr = result
+        .get("stderr")
+        .map(crate::VmValue::display)
+        .unwrap_or_default();
     assert!(
-        result
-            .get("stderr")
-            .map(crate::VmValue::display)
-            .is_some_and(|stderr| stderr.contains("operation not permitted")),
-        "sandbox denial must be observable in the process receipt"
+        stderr
+            .to_ascii_lowercase()
+            .contains("operation not permitted"),
+        "sandbox denial must be observable in the process receipt; stderr={stderr:?}"
     );
     assert!(!outside_file.exists());
 }
