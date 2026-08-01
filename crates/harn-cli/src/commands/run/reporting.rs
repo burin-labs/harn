@@ -4,6 +4,7 @@
 //! their wire shapes and sinks so the runner itself stays focused on lifecycle.
 
 use std::fs;
+#[cfg(unix)]
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
