@@ -930,21 +930,14 @@ mod tests {
     #[test]
     fn no_config_code_mode_installs_no_ssrf_guard() {
         // The default (no-config) path must not change egress behavior at all:
-        // the SSRF private-address guard is NOT installed, so the agent's
-        // egress (including loopback to a local model server) is unchanged.
-        assert_eq!(
-            harn_vm::egress::current_ssrf_client_settings(),
-            (false, false),
-            "precondition: no guard active outside a turn"
+        // the SSRF private-address guard is NOT installed. Assert ownership
+        // directly so a legitimate ambient HARN_EGRESS_* policy cannot change
+        // this unit test's premise.
+        let guard = ModePolicyGuard::enter("code", &AcpSandboxConfig::default());
+        assert!(
+            guard._ssrf_guard.is_none(),
+            "no-config code mode must not install an SSRF guard scope"
         );
-        {
-            let _guard = ModePolicyGuard::enter("code", &AcpSandboxConfig::default());
-            assert_eq!(
-                harn_vm::egress::current_ssrf_client_settings(),
-                (false, false),
-                "no-config code mode must leave egress unguarded (public + private allowed)"
-            );
-        }
     }
 
     #[test]
@@ -954,30 +947,22 @@ mod tests {
         // stay reachable (the guard only blocks
         // private/loopback/link-local/metadata addresses). `read_only_roots`
         // alone (Burin's ambient bundled-pipeline roots) must NOT arm this.
-        assert_eq!(
-            harn_vm::egress::current_ssrf_client_settings(),
-            (false, false)
-        );
-        {
-            let sandbox =
-                AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
-                    presets: Some(vec![
-                        harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
-                    ]),
-                    read_roots: Vec::new(),
-                    write_roots: Vec::new(),
-                });
-            let _guard = ModePolicyGuard::enter("code", &sandbox);
-            assert!(
-                harn_vm::egress::current_ssrf_client_settings().0,
-                "configured code mode must arm the SSRF private-address guard"
-            );
-        }
-        // The guard is released when the turn's ModePolicyGuard drops.
-        assert_eq!(
-            harn_vm::egress::current_ssrf_client_settings(),
-            (false, false),
-            "SSRF guard must release on turn end"
+        // Harn VM owns the scope's effective-policy and drop semantics; this
+        // adapter test proves that configured ACP mode retains such a scope.
+        // Inspecting effective settings here would inherit the parent process's
+        // documented HARN_EGRESS_* overrides and make the test non-hermetic.
+        let sandbox =
+            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![
+                    harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+                ]),
+                read_roots: Vec::new(),
+                write_roots: Vec::new(),
+            });
+        let guard = ModePolicyGuard::enter("code", &sandbox);
+        assert!(
+            guard._ssrf_guard.is_some(),
+            "configured code mode must retain an SSRF guard scope"
         );
     }
 }
