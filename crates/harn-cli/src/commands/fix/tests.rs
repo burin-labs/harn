@@ -274,7 +274,7 @@ fn plan_threads_explicit_harness_for_stdio_repairs() {
         .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
         .expect("ambient stdio repair should be present");
 
-    assert_eq!(repair.repair.id, "bindings/thread-harness");
+    assert_eq!(repair.repair.id, "bindings/thread-harness-whole-program");
     assert_eq!(repair.repair.safety, "scope-local");
     assert_eq!(repair.impact.classification, "local-signature-threading");
     assert!(!repair.impact.signature_changes.is_empty());
@@ -284,14 +284,12 @@ fn plan_threads_explicit_harness_for_stdio_repairs() {
         .map(|edit| edit.replacement.as_str())
         .collect::<Vec<_>>();
     assert!(
-        replacements.contains(&"harness.stdio.println"),
+        replacements.contains(&"harness.println"),
         "expected direct call rewrite in edits: {replacements:?}"
     );
     assert!(
-        replacements
-            .iter()
-            .any(|replacement| replacement.contains("harness: Harness")),
-        "repair should thread an explicit root Harness: {replacements:?}"
+        replacements.contains(&"harness: HarnessStdio"),
+        "{replacements:?}"
     );
 }
 
@@ -315,7 +313,7 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
         .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
         .expect("ambient stdio repair should be present");
 
-    assert_eq!(repair.repair.id, "bindings/thread-harness-needs-param");
+    assert_eq!(repair.repair.id, "bindings/thread-harness-whole-program");
     assert_eq!(repair.repair.safety, "surface-changing");
     assert_eq!(repair.impact.classification, "public-signature-change");
 }
@@ -587,11 +585,10 @@ fn plan_json_reports_cross_module_public_signature_impact() {
         .repairs
         .iter()
         .position(|repair| {
-            repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
-                && repair
-                    .edits
-                    .iter()
-                    .any(|edit| edit.replacement == "harness: Harness, ")
+            repair
+                .edits
+                .iter()
+                .any(|edit| edit.replacement == "harness: HarnessFs, ")
         })
         .expect("public fs repair should be present");
     let repair = &plan.repairs[repair_index];
@@ -643,22 +640,22 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
     assert!(
         result.applied.iter().any(|repair| {
             repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
-                && repair.repair_id == "bindings/thread-harness-needs-param"
+                && repair.repair_id == "bindings/thread-harness-whole-program"
         }),
         "{result:#?}"
     );
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains("fn helper(harness: Harness)"),
+        updated.contains("fn helper(harness: HarnessStdio)"),
         "expected helper to gain a harness parameter: {updated}"
     );
     assert!(
-        updated.contains("helper(harness)"),
+        updated.contains("helper(harness.stdio)"),
         "expected main to thread harness into helper: {updated}"
     );
     assert!(
-        updated.contains("harness.stdio.println(\"hi\")"),
+        updated.contains("harness.println(\"hi\")"),
         "expected ambient stdio call to migrate: {updated}"
     );
 }
@@ -670,35 +667,46 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
             "clock_apply.harn",
             Code::LintAmbientClockBuiltin,
             "const value = now_ms()",
-            "harness.clock.now_ms()",
+            "HarnessClock",
+            "harness.clock",
+            "harness.now_ms()",
         ),
         (
             "fs_apply.harn",
             Code::LintAmbientFsBuiltin,
             "const value = read_file(\"notes.txt\")",
-            "harness.fs.read_text(\"notes.txt\")",
+            "HarnessFs",
+            "harness.fs",
+            "harness.read_text(\"notes.txt\")",
         ),
         (
             "env_apply.harn",
             Code::LintAmbientEnvBuiltin,
             "const value = env_or(\"MODE\", \"dev\")",
-            "harness.env.get_or(\"MODE\", \"dev\")",
+            "HarnessEnv",
+            "harness.env",
+            "harness.get_or(\"MODE\", \"dev\")",
         ),
         (
             "random_apply.harn",
             Code::LintAmbientRandomBuiltin,
             "const value = random_int(0, 10)",
-            "harness.random.range(0, 10)",
+            "HarnessRandom",
+            "harness.random",
+            "harness.range(0, 10)",
         ),
         (
             "net_apply.harn",
             Code::LintAmbientNetBuiltin,
             "const value = http_get(\"https://example.test\")",
-            "harness.net.get(\"https://example.test\")",
+            "HarnessNet",
+            "harness.net",
+            "harness.get(\"https://example.test\")",
         ),
     ];
 
-    for (filename, code, ambient_line, migrated_call) in cases {
+    for (filename, code, ambient_line, capability_type, projected_argument, migrated_call) in cases
+    {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join(filename);
         fs::write(
@@ -728,11 +736,11 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
 
         let updated = fs::read_to_string(&script).unwrap();
         assert!(
-            updated.contains("fn helper(harness: Harness)"),
+            updated.contains(&format!("fn helper(harness: {capability_type})")),
             "{filename}: expected helper to gain a harness parameter: {updated}"
         );
         assert!(
-            updated.contains("helper(harness)"),
+            updated.contains(&format!("helper({projected_argument})")),
             "{filename}: expected main to thread harness into helper: {updated}"
         );
         assert!(
@@ -754,17 +762,10 @@ fn apply_scope_local_rewrites_ambient_calls_inside_pipeline() {
 
     let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
     assert!(
-        result.applied.iter().any(|repair| {
-            repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
-                && repair.repair_id == "bindings/thread-harness"
-        }),
-        "{result:#?}"
-    );
-    assert!(
-        result.applied.iter().any(|repair| {
-            repair.diagnostic_code == Code::LintAmbientEnvBuiltin.to_string()
-                && repair.repair_id == "bindings/thread-harness-env"
-        }),
+        result
+            .applied
+            .iter()
+            .any(|repair| { repair.repair_id == "bindings/thread-harness-whole-program" }),
         "{result:#?}"
     );
 
@@ -801,7 +802,7 @@ fn apply_threads_missing_harness_into_pipeline_boundary() {
     assert!(
         result.applied.iter().any(|repair| {
             repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
-                && repair.repair_id == "bindings/thread-harness-needs-param"
+                && repair.repair_id == "bindings/thread-harness-whole-program"
         }),
         "{result:#?}"
     );
@@ -845,10 +846,13 @@ fn apply_threads_registry_owned_harness_method_through_helper() {
     );
 
     let updated = fs::read_to_string(&script).unwrap();
-    assert!(updated.contains("fn caps(harness: Harness)"), "{updated}");
-    assert!(updated.contains("caps(harness)"), "{updated}");
     assert!(
-        updated.contains("harness.llm.provider_capabilities(\"anthropic\", \"claude-opus-4-7\")"),
+        updated.contains("fn caps(harness: HarnessLlm)"),
+        "{updated}"
+    );
+    assert!(updated.contains("caps(harness.llm)"), "{updated}");
+    assert!(
+        updated.contains("harness.provider_capabilities(\"anthropic\", \"claude-opus-4-7\")"),
         "{updated}"
     );
 }
@@ -875,22 +879,22 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
     assert!(
         result.applied.iter().any(|repair| {
             repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
-                && repair.repair_id == "bindings/thread-harness-needs-param"
+                && repair.repair_id == "bindings/thread-harness-whole-program"
         }),
         "{result:#?}"
     );
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains("fn helper(harness: Harness)"),
+        updated.contains("fn helper(harness: HarnessStdio)"),
         "expected helper to gain a harness parameter: {updated}"
     );
     assert!(
-        updated.contains("helper(harness)"),
+        updated.contains("helper(harness.stdio)"),
         "expected pipeline to pass its harness argument into helper: {updated}"
     );
     assert!(
-        updated.contains("harness.stdio.println(\"hi\")"),
+        updated.contains("harness.println(\"hi\")"),
         "expected ambient stdio call to migrate: {updated}"
     );
 }
@@ -977,14 +981,14 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
     assert!(
         result.applied.iter().any(|repair| {
             repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
-                && repair.repair_id == "bindings/thread-harness-needs-param"
+                && repair.repair_id == "bindings/thread-harness-whole-program"
         }),
         "{result:#?}"
     );
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains("pub fn load(harness: Harness, path: string)"),
+        updated.contains("pub fn load(harness: HarnessFs, path: string)"),
         "non-stdlib public API should gain an explicit harness parameter: {updated}"
     );
     assert!(
@@ -992,15 +996,15 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
         "public caller should thread its explicit harness parameter: {updated}"
     );
     assert!(
-        updated.contains("fn load_inner(harness: Harness, path: string)"),
+        updated.contains("fn load_inner(harness: HarnessFs, path: string)"),
         "private helper should receive an explicit harness: {updated}"
     );
     assert!(
-        updated.contains("return harness.fs.read_text(path)"),
+        updated.contains("return harness.read_text(path)"),
         "private helper should migrate ambient fs call: {updated}"
     );
     assert!(
-        updated.contains("load(harness, \"notes.txt\")"),
+        updated.contains("load(harness.fs, \"notes.txt\")"),
         "pipeline caller should pass the runtime harness into the public API: {updated}"
     );
 }
@@ -1027,7 +1031,7 @@ fn apply_threads_ambient_capability_from_default_parameter() {
     assert!(
         result.applied.iter().any(|repair| {
             repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
-                && repair.repair_id == "bindings/thread-harness-needs-param"
+                && repair.repair_id == "bindings/thread-harness-whole-program"
         }),
         "{result:#?}"
     );
@@ -1035,12 +1039,12 @@ fn apply_threads_ambient_capability_from_default_parameter() {
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
         updated.contains(
-            "pub fn resolve(harness: Harness, path: string, base: string = harness.fs.cwd())"
+            "pub fn resolve(harness: HarnessFs, path: string, base: string = harness.cwd())"
         ),
         "{updated}"
     );
     assert!(
-        updated.contains("resolve(harness, \"notes.txt\")"),
+        updated.contains("resolve(harness.fs, \"notes.txt\")"),
         "{updated}"
     );
 }
@@ -1074,10 +1078,13 @@ fn apply_rewrites_positional_metadata_builtin_to_typed_request() {
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains("harness.project.metadata_get({dir: dir, namespace: \"classification\"})"),
+        updated.contains("harness.metadata_get({dir: dir, namespace: \"classification\"})"),
         "{updated}"
     );
-    assert!(updated.contains("read_fact(harness, \"src\")"), "{updated}");
+    assert!(
+        updated.contains("read_fact(harness.project, \"src\")"),
+        "{updated}"
+    );
 }
 
 #[test]
@@ -1145,7 +1152,10 @@ fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
         "{updated}"
     );
     assert!(updated.contains("harness.fs.home_dir()"), "{updated}");
-    assert!(updated.contains("describe(harness)"), "{updated}");
+    assert!(
+        updated.contains("describe({fs: harness.fs, system: harness.system})"),
+        "{updated}"
+    );
 }
 
 #[test]
@@ -1204,24 +1214,25 @@ fn apply_dedupes_shared_stdio_threading_edits() {
     assert!(
         result.applied.iter().any(|repair| {
             repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
-                && repair.repair_id == "bindings/thread-harness-needs-param"
+                && repair.repair_id == "bindings/thread-harness-whole-program"
         }),
         "{result:#?}"
     );
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains("fn middle(harness: Harness)"),
+        updated.contains("fn middle(harness: HarnessStdio)"),
         "expected middle to receive exactly one harness parameter: {updated}"
     );
     assert!(
-        !updated.contains("fn middle(harness: Harness, harness: Harness"),
+        !updated.contains("fn middle(harness: HarnessStdio, harness: HarnessStdio"),
         "shared threading edits should not duplicate params: {updated}"
     );
     assert!(
         updated.contains("leaf_a(harness)") && updated.contains("leaf_b(harness)"),
         "expected both leaf calls to receive harness: {updated}"
     );
+    assert!(updated.contains("middle(harness.stdio)"), "{updated}");
 }
 
 #[test]
@@ -1247,11 +1258,11 @@ fn plan_uses_underscore_harness_when_harness_name_is_taken() {
         .map(|edit| edit.replacement.as_str())
         .collect::<Vec<_>>();
     assert!(
-        replacements.contains(&"_harness: Harness, "),
+        replacements.contains(&"_harness: HarnessStdio, "),
         "expected inserted capability parameter to avoid duplicate `harness`: {replacements:?}"
     );
     assert!(
-        replacements.contains(&"_harness.stdio.println"),
+        replacements.contains(&"_harness.println"),
         "expected call rewrite to use the inserted capability parameter: {replacements:?}"
     );
 }

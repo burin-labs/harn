@@ -150,6 +150,19 @@ pub(super) fn plan(
     {
         return Ok(Vec::new());
     }
+    let crosses_module_boundary = edges.iter().any(|edge| {
+        changed[edge.callee] && callables[edge.caller].file_idx != callables[edge.callee].file_idx
+    });
+    let surface_changing = crosses_module_boundary
+        || callables.iter().enumerate().any(|(idx, callable)| {
+            changed[idx]
+                && (callable.info.is_exported || (callable.boundary && callable.carrier.is_none()))
+        });
+    let repair_safety = if surface_changing {
+        RepairSafety::SurfaceChanging
+    } else {
+        RepairSafety::ScopeLocal
+    };
 
     let mut edits_by_file: BTreeMap<usize, Vec<FixEdit>> = BTreeMap::new();
     for (idx, callable) in callables.iter().enumerate() {
@@ -253,6 +266,16 @@ pub(super) fn plan(
                 is_entrypoint: callable.boundary,
             })
             .collect::<Vec<_>>();
+        let changes_public_signature = signatures.iter().any(|change| change.is_exported);
+        let classification = if changes_public_signature {
+            "public-signature-change"
+        } else if crosses_module_boundary {
+            "whole-program-capability-change"
+        } else if signatures.is_empty() {
+            "scope-local"
+        } else {
+            "local-signature-threading"
+        };
         planned.push(RepairCandidate {
             file: path,
             source: "whole-program",
@@ -267,15 +290,15 @@ pub(super) fn plan(
                 ),
                 summary: "Update capability signatures and all reachable call sites together"
                     .to_string(),
-                safety: RepairSafety::SurfaceChanging,
+                safety: repair_safety,
             },
             impact: RepairImpactWire {
-                classification: "whole-program-capability-change".to_string(),
+                classification: classification.to_string(),
                 strategy: Some("whole-program-fixpoint".to_string()),
                 signature_changes: signatures,
-                requires_cross_module_caller_updates: true,
+                requires_cross_module_caller_updates: crosses_module_boundary,
                 notes: vec![
-                    "requirements were propagated across resolved module imports before edits"
+                    "requirements were propagated across resolved module imports; cross-module callers must be updated in the same apply pass"
                         .to_string(),
                 ],
             },

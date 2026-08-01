@@ -420,10 +420,44 @@ fn build_plan_with_options(
         }
     }
 
+    let skipped_paths = skipped_files
+        .iter()
+        .map(|skipped| {
+            std::fs::canonicalize(&skipped.path)
+                .unwrap_or_else(|_| Path::new(&skipped.path).to_path_buf())
+        })
+        .collect::<BTreeSet<_>>();
+    let valid_files = files
+        .iter()
+        .filter(|file| {
+            !skipped_paths
+                .contains(&std::fs::canonicalize(file).unwrap_or_else(|_| (*file).clone()))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     let whole_program_repairs =
-        whole_program_capabilities::plan(&files, &module_graph, &candidates)?;
+        whole_program_capabilities::plan(&valid_files, &module_graph, &candidates)?;
     if !whole_program_repairs.is_empty() {
-        candidates.retain(|candidate| !is_capability_migration_repair(&candidate.repair));
+        let whole_program_files = whole_program_repairs
+            .iter()
+            .map(|repair| {
+                std::fs::canonicalize(&repair.file)
+                    .unwrap_or_else(|_| Path::new(&repair.file).to_path_buf())
+            })
+            .collect::<BTreeSet<_>>();
+        candidates.retain(|candidate| {
+            if is_whole_program_superseded_repair(&candidate.repair) {
+                return false;
+            }
+            // A binding that looked unused before the program plan may be the
+            // carrier used by its emitted call rewrites. Defer that cleanup to
+            // the next plan instead of renaming the binding in the same pass.
+            candidate.repair.id.as_str() != "bindings/rename-unused"
+                || !whole_program_files.contains(
+                    &std::fs::canonicalize(&candidate.file)
+                        .unwrap_or_else(|_| Path::new(&candidate.file).to_path_buf()),
+                )
+        });
         candidates.extend(whole_program_repairs);
     }
 
@@ -699,6 +733,17 @@ fn is_capability_migration_repair(repair: &Repair) -> bool {
                 | "bindings/attenuate-harness"
                 | "bindings/attenuate-capability-argument"
                 | "bindings/attenuate-capability-bundle-argument"
+        )
+}
+
+fn is_whole_program_superseded_repair(repair: &Repair) -> bool {
+    let id = repair.id.as_str();
+    id.starts_with("bindings/thread-harness")
+        || matches!(
+            id,
+            "bindings/thread-missing-harness"
+                | "bindings/thread-root-argument"
+                | "bindings/prepend-capability-argument"
         )
 }
 
