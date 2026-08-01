@@ -472,13 +472,18 @@ impl TypeChecker {
 
     fn check_call_signature_arguments(
         &mut self,
-        sig: CallCheckSignature<'_>,
+        mut sig: CallCheckSignature<'_>,
         type_args: &[TypeExpr],
         args: &[SNode],
         has_spread: bool,
         scope: &mut TypeScope,
         span: Span,
     ) {
+        let omitted_capabilities = self.legacy_omitted_capability_count(&sig, args, scope);
+        if omitted_capabilities > 0 {
+            sig.params.drain(..omitted_capabilities);
+            sig.required_params = sig.required_params.saturating_sub(omitted_capabilities);
+        }
         let target_label = sig.kind.label();
         if !type_args.is_empty() {
             if sig.type_param_names.is_empty() {
@@ -681,6 +686,55 @@ impl TypeChecker {
                 }
             }
         }
+    }
+
+    fn legacy_omitted_capability_count(
+        &self,
+        sig: &CallCheckSignature<'_>,
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> usize {
+        if !self.legacy_ambient_capabilities {
+            return 0;
+        }
+        let capability_count = sig
+            .params
+            .iter()
+            .take_while(|param| match param.ty.as_deref() {
+                Some(TypeExpr::Named(name)) => {
+                    name == "Harness"
+                        || harn_builtin_meta::CapabilityId::from_type_name(name).is_some()
+                }
+                _ => false,
+            })
+            .count();
+        if capability_count == 0 {
+            return 0;
+        }
+
+        let remaining_total = sig.params.len().saturating_sub(capability_count);
+        let remaining_required = sig.required_params.saturating_sub(capability_count);
+        if !Self::call_signature_arity_ok(
+            sig.kind,
+            args.len(),
+            remaining_required,
+            remaining_total,
+            sig.has_rest,
+        ) {
+            return 0;
+        }
+
+        let Some(first_arg) = args.first() else {
+            return capability_count;
+        };
+        let expected = sig.params[0]
+            .ty
+            .as_deref()
+            .expect("capability prefix requires a typed first parameter");
+        self.infer_type(first_arg, scope)
+            .is_none_or(|actual| !self.types_compatible(expected, &actual, scope))
+            .then_some(capability_count)
+            .unwrap_or(0)
     }
     pub(in crate::typechecker) fn check_value_call(
         &mut self,

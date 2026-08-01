@@ -552,6 +552,17 @@ fn runtime_builtin_name_is_not_source_callable_without_a_binding() {
 }
 
 #[test]
+fn runtime_builtin_name_is_callable_only_with_the_legacy_bridge() {
+    harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+    let options = CompilerOptions::optimized().with_legacy_ambient_capabilities();
+    let chunk = compile_source_with_options(
+        "pipeline default() { const _ = llm_provider_status(); return read_lines_page_result(\"data\") }",
+        options,
+    );
+    assert!(!chunk.code.is_empty());
+}
+
+#[test]
 fn legacy_signature_without_manifest_fails_closed() {
     harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
     let error = try_compile("pipeline default(harness: Harness) { secret_get(\"key\") }")

@@ -1205,8 +1205,9 @@ impl super::super::Vm {
                 "invalid call argument stack range".to_string(),
             ));
         }
-        let supplied_args_len = self.stack.len() - args_start;
-        let args = &self.stack[args_start..];
+        let original_args = CallArgs::Slice(&self.stack[args_start..]);
+        let legacy_args = self.legacy_ambient_call_args(&closure, &original_args)?;
+        let args = legacy_args.as_deref().unwrap_or(&self.stack[args_start..]);
         if let Err(error) = crate::typecheck::validate_user_call(&closure.func, args, None) {
             self.stack.truncate(stack_truncate_to);
             return Err(error);
@@ -1244,12 +1245,8 @@ impl super::super::Vm {
         };
         self.env = call_env;
         let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
-        Self::bind_param_slots(
-            &mut local_slots,
-            &closure.func,
-            &self.stack[args_start..],
-            false,
-        );
+        Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
+        let callee_argc = closure.func.callee_arg_count(args.len());
         let initial_local_slots = if debugger {
             Some(local_slots.clone())
         } else {
@@ -1265,7 +1262,6 @@ impl super::super::Vm {
         self.stack.truncate(stack_base);
         let chunk = Arc::clone(&closure.func.chunk);
         let inline_cache_set = self.inline_cache_set_index_for_chunk(&chunk);
-        let callee_argc = closure.func.callee_arg_count(supplied_args_len);
         self.frames.push(CallFrame {
             chunk,
             inline_cache_set,

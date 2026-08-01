@@ -144,6 +144,43 @@ pipeline t(task) {
 }
 
 #[test]
+fn legacy_imported_call_implicitly_supplies_only_the_leading_capability() {
+    let imported = parse_program(
+        r#"
+pub fn render(env: HarnessEnv, fs: HarnessFs, path: string, vars: dict = {}) -> string {
+  return path
+}
+"#,
+    );
+    let program = parse_program(
+        r#"
+pipeline caller(task) {
+  return render("prompt.md", {name: "Burin"})
+}
+"#,
+    );
+
+    let strict = TypeChecker::new()
+        .with_imported_callable_decls(imported.clone())
+        .check(&program);
+    assert!(
+        strict.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("expected HarnessEnv, found string")),
+        "strict checking must reject the shifted legacy call: {strict:?}"
+    );
+
+    let compatibility = TypeChecker::new()
+        .with_legacy_ambient_capabilities()
+        .with_imported_callable_decls(imported)
+        .check(&program);
+    assert!(
+        compatibility.is_empty(),
+        "compatibility checking must align arguments after the capability: {compatibility:?}"
+    );
+}
+
+#[test]
 fn imported_pipeline_signatures_check_arguments() {
     let imported = parse_program(
         r"

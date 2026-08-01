@@ -32,8 +32,8 @@ mod types;
 
 pub use lookup::{
     builtin_return_type, capability_method_entry, is_builtin, is_untyped_boundary_source,
-    iter_builtin_metadata, iter_builtin_names, lookup, lookup_capability_method,
-    static_signature_names,
+    iter_builtin_metadata, iter_builtin_names, legacy_capability_method_entry, lookup,
+    lookup_capability_method, static_signature_names,
 };
 pub use types::{
     ty_to_type_expr, BuiltinMetadata, BuiltinSignature, BuiltinSignatureExt, Param,

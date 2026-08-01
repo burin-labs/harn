@@ -806,6 +806,9 @@ fn compiler_options_tag(options: CompilerOptions) -> u8 {
     if options.optimizations_enabled() {
         tag |= 0b0000_0001;
     }
+    if options.legacy_ambient_capabilities() {
+        tag |= 0b0000_0010;
+    }
     tag
 }
 

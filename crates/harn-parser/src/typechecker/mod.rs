@@ -123,6 +123,10 @@ pub struct TypeChecker {
     hints: Vec<InlayHintInfo>,
     /// When true, flag unvalidated boundary-API values used in field access.
     strict_types: bool,
+    /// Explicit process-bound compatibility mode for pre-Harness callers.
+    /// Snapshotted when the checker is created so one check cannot change
+    /// semantics midway through an import graph.
+    legacy_ambient_capabilities: bool,
     /// Lexical depth of enclosing function-like bodies (fn/tool/pipeline/closure).
     /// `try*` requires `fn_depth > 0` so the rethrow has a body to live in.
     fn_depth: usize,
@@ -329,6 +333,7 @@ impl TypeChecker {
             source: None,
             hints: Vec::new(),
             strict_types: false,
+            legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
             fn_depth: 0,
             stream_fn_depth: 0,
             stream_emit_types: Vec::new(),
@@ -352,6 +357,7 @@ impl TypeChecker {
             source: None,
             hints: Vec::new(),
             strict_types: strict,
+            legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
             fn_depth: 0,
             stream_fn_depth: 0,
             stream_emit_types: Vec::new(),
@@ -378,6 +384,12 @@ impl TypeChecker {
     /// — see `harn_modules::ModuleGraph::imported_names_for_file`.
     pub fn with_imported_names(mut self, imported: HashSet<String>) -> Self {
         self.imported_names = Some(imported);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_legacy_ambient_capabilities(mut self) -> Self {
+        self.legacy_ambient_capabilities = true;
         self
     }
 

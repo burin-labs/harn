@@ -1967,6 +1967,11 @@ impl<'a> Linter<'a> {
             if self.builtin_functions.contains(name) {
                 continue;
             }
+            if harn_parser::legacy_ambient_capabilities_enabled()
+                && harn_parser::is_known_builtin(name)
+            {
+                continue;
+            }
             if self.step_functions.contains(name) {
                 continue;
             }
@@ -2016,6 +2021,11 @@ impl<'a> Linter<'a> {
         }
         for (name, span) in &self.function_calls {
             if self.known_functions.contains(name) {
+                continue;
+            }
+            if harn_parser::legacy_ambient_capabilities_enabled()
+                && harn_parser::is_known_builtin(name)
+            {
                 continue;
             }
             if all_vars.contains(name) {

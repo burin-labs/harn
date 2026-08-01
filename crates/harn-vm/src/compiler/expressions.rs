@@ -153,8 +153,13 @@ impl Compiler {
             self.emit_get_binding(name);
             return self.compile_value_call(args);
         }
+        let runtime_name = if self.options.legacy_ambient_capabilities() {
+            harn_parser::legacy_builtin_alias_target(name).unwrap_or(name)
+        } else {
+            name
+        };
         if !self.source_callable_names.contains(name) {
-            let contract = harn_builtin_registry::builtin_entry(name);
+            let contract = harn_builtin_registry::builtin_entry(runtime_name);
             let callable = contract.is_some_and(|entry| {
                 matches!(
                     entry.contract.exposure,
@@ -164,6 +169,12 @@ impl Compiler {
                     entry.contract.exposure,
                     harn_builtin_meta::BuiltinExposure::PrivilegedWire
                 ) && self.options.privileged_wire_authority())
+                    || (matches!(
+                        entry.contract.exposure,
+                        harn_builtin_meta::BuiltinExposure::HarnessMethod { .. }
+                            | harn_builtin_meta::BuiltinExposure::PrivilegedWire
+                            | harn_builtin_meta::BuiltinExposure::RuntimeInternal
+                    ) && self.options.legacy_ambient_capabilities())
             });
             if contract.is_some() && !callable {
                 return Err(CompileError {
@@ -176,6 +187,10 @@ impl Compiler {
             if contract.is_none()
                 && harn_parser::builtin_signatures::is_builtin(name)
                 && !harn_parser::builtin_signatures::is_language_intrinsic(name)
+                && !(self.options.legacy_ambient_capabilities()
+                    && (harn_parser::is_registered_legacy_hostlib_name(name)
+                        || harn_parser::builtin_signatures::legacy_capability_method_entry(name)
+                            .is_some()))
             {
                 return Err(CompileError {
                     message: format!(
@@ -220,12 +235,12 @@ impl Compiler {
         }
 
         if self.compile_spread_call_args(args)? {
-            self.emit_named_call_spread(name);
+            self.emit_named_call_spread(runtime_name);
         } else {
             for arg in args {
                 self.compile_node(arg)?;
             }
-            self.emit_named_call(name, args.len());
+            self.emit_named_call(runtime_name, args.len());
         }
         Ok(())
     }

@@ -281,6 +281,7 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         "HARN_BUDGET_USD" => EnvironmentValueShape::NonNegativeNumber,
         "HARN_OTEL_SAMPLE_RATIO" => EnvironmentValueShape::UnitInterval,
         "HARN_BYTECODE_CACHE"
+        | harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV
         | "HARN_LLM_STREAM"
         | "HARN_REPLAY_ENABLED"
         | "HARN_REQUIRE_SIGNED_SKILLS"

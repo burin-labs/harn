@@ -330,6 +330,37 @@ impl Vm {
         }
     }
 
+    /// Restore unqualified capability-method calls for an explicitly opted-in
+    /// legacy process. Only uniquely owned method names are projected; a name
+    /// shared by two capabilities remains unavailable.
+    pub(crate) fn project_legacy_capability_globals(&mut self) {
+        if self.global("harness").is_none() {
+            return;
+        }
+        let mut projections =
+            std::collections::BTreeMap::<String, Option<VmBuiltinDispatch>>::new();
+        for ((_capability, method), dispatch) in self.capability_methods.iter() {
+            projections
+                .entry(method.clone())
+                .and_modify(|entry| *entry = None)
+                .or_insert_with(|| Some(dispatch.clone()));
+        }
+        for (method, dispatch) in projections {
+            if self.builtins.contains_key(&method) || self.async_builtins.contains_key(&method) {
+                continue;
+            }
+            match dispatch {
+                Some(VmBuiltinDispatch::Sync(handler)) => {
+                    self.register_builtin(&method, move |args, output| handler(args, output));
+                }
+                Some(VmBuiltinDispatch::Async(handler)) => {
+                    self.register_async_builtin(&method, move |ctx, args| handler(ctx, args));
+                }
+                None => {}
+            }
+        }
+    }
+
     /// Remove a sync builtin (so an async version can take precedence).
     pub fn unregister_builtin(&mut self, name: &str) {
         Arc::make_mut(&mut self.builtins).remove(name);
