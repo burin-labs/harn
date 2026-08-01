@@ -9,6 +9,58 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.48
+
+### Breaking
+
+- Effects now flow exclusively through typed `Harness` capabilities while imports
+  remain pure. Entrypoints receive root `Harness`; helpers can accept nominal
+  sub-handles, capability contracts drive checking/policy/receipts/tooling, test
+  fixtures are scoped to one harness, and ambient effect globals are removed.
+  Harness authority is non-serializable and non-persistable. New API-design lints
+  recommend capability attenuation and named closed records for ambiguous public
+  positional signatures.
+
+### Added
+
+- Session transcripts now have one durable, redacted search and timeline contract
+  across Harn stdlib, host builtins, HTTP, and ACP, including scoped
+  full-text/semantic/hybrid search and delegated-session lineage.
+
+### Changed
+
+- **Runtime feedback and structural reminders now share one typed context
+  envelope (burin-code#3916).** Directives declare contract, corrective, or
+  advisory authority, use one fixed trailing slot and register across provider
+  routes, deduplicate through one priority-aware projection, and keep internal
+  feedback identities out of model-visible text.
+- Raise the Linux release-binary size ratchet to 218 MiB for the measured
+  217.33 MiB v0.10.48 candidate.
+
+### Fixed
+
+- Served-context receipts and context manifests now certify the post-egress
+  `LlmRequestPayload` system and message bytes, including capability-derived
+  thinking directives and route-specific system placement.
+- Logical LLM entry points now journal every physical provider attempt, including
+  compaction, rerank, workflow, completion-fallback, and streaming calls.
+  Compaction records its transformed no-system-prompt manifest under the
+  `compaction` call role instead of carrying the parent call's stale manifest.
+- Delay streamed generic-wrapper tool announcements until the concrete inner
+  tool name is known, preventing durable `tool_call` placeholder lifecycles.
+- Native hosts' raw tool arguments now feed the canonical approval matcher
+  context, so generic path, command, URL, method, MCP, and environment fields
+  select the same policy rules as VM-declared tools.
+- macOS release certification now recognizes the platform's capitalized sandbox
+  denial message while continuing to require the denial in the typed process
+  receipt.
+- ### Fixed
+
+  - Isolate Nextest runtime state per test attempt so concurrent agent tests no
+  longer contend on or persist transcripts into a checkout-wide session store.
+- Fix release smoke coverage after the typed harness cutover by passing command
+  capabilities through the default adapters and importing the agent loop explicitly.
+
 ## v0.10.47
 
 ### Added
