@@ -24,7 +24,6 @@ pipeline test_testing_toolkit(harness: Harness, task) {
     { -> harness.runtime.pipeline_input() },
   )
   assert_eq(fixture_result.fixture, "minimal")
-
   // === LLM turn builders produce the shapes `llm_mock` accepts ===
   assert_eq(llm_text("hi"), {text: "hi"})
   assert_eq(llm_done(), {text: "##DONE##"})
