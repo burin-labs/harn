@@ -85,19 +85,6 @@ pub(crate) fn is_capability_driver_fixture(
 }
 
 impl CapabilityFixtureState {
-    pub(crate) fn has_response(
-        &self,
-        capability: harn_builtin_meta::CapabilityId,
-        method: &str,
-    ) -> bool {
-        self.inner
-            .lock()
-            .expect("capability fixtures poisoned")
-            .current
-            .responses
-            .contains_key(&(capability.field_name().to_string(), method.to_string()))
-    }
-
     pub(crate) fn clear(&self) {
         let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
         scopes.current = CapabilityFixtureInner {

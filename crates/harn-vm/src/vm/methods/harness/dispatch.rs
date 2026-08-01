@@ -42,8 +42,14 @@ impl crate::vm::Vm {
                 .is_some();
             let host_method =
                 harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method);
-            let fixture_configured = handle.inner().fixtures().has_response(capability, method);
-            if !declared && !host_method && !fixture_configured {
+            if !declared && !host_method {
+                if capability != harn_builtin_meta::CapabilityId::Testing {
+                    if let Some(response) =
+                        handle.inner().fixtures().dispatch(capability, method, args)
+                    {
+                        return response;
+                    }
+                }
                 return Err(method_unsupported(handle, method));
             }
         }
