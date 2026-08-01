@@ -9,6 +9,72 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.49
+
+### Added
+
+- Session-store list queries can now request created- or updated-time ordering in either direction, with stable cursor pagination.
+- Session titles can now be pinned to a person's choice, so generated titles no
+  longer overwrite one the user set. `UpdateSession` writes that omit
+  `title_pinned` are treated as derived and yield to a pinned title, making
+  existing auto-titling callers safe without change.
+- Expose canonical persisted session timelines over the session-store HTTP API,
+  including stable tool lifecycle identity, timing, input, output, and error state.
+- Generate the semantic timeline contract for Rust, Swift, TypeScript, Python,
+  and Go clients so consumers do not maintain raw event reducers.
+
+### Changed
+
+- The release harness can now materialize the exact versioned candidate before
+  certification, enabling independent platform, audit, and binary-size proofs to
+  run against one immutable commit instead of serially certifying the pre-bump
+  source.
+
+### Fixed
+
+- Avoid capability-attenuation warnings on connector runtime exports whose ABI
+  requires a root `Harness`; ordinary connector helpers remain subject to
+  narrow-handle guidance.
+- **Diagnostics and `harn fix` capability migrations now preserve absolute
+  source offsets inside interpolated expressions (#5850).** Re-lexed
+  interpolation holes retain their file byte base, and
+  `bindings/prepend-capability-argument` defensively resolves its insertion
+  point from the diagnostic's file-level coordinates. Repeated migration
+  passes can no longer splice a capability argument into an earlier import.
+- Republish the docs site whenever any file it actually serves changes. The
+  deploy gate restated the site's input set by hand and missed
+  `spec/provider-catalog/provider-catalog.json`, `install.sh`, and
+  `install.ps1`, so refreshing the provider catalog left
+  `harnlang.com/provider-catalog/provider-catalog.json` — the CLI's default
+  catalog refresh URL — stale until an unrelated docs commit happened to
+  redeploy. The build script now declares its own inputs and the gate reads
+  them, so the two cannot drift.
+- **Sandboxed npm offline proof owns its mutable caches (#5857).** The npm
+  integration fixture now pins fixture-local caches for both package creation
+  and the sandboxed install, so runner-global npm configuration and cache
+  ownership cannot make the fully offline proof flaky.
+- **Capability migrations now converge safely in one apply invocation
+  (#5863).** `harn fix --apply --capability-migrations-only` follows transitive
+  Harness repairs to a bounded fixpoint, and capability insertion uses the
+  owning call AST so parenthesized first arguments keep their expression
+  shape.
+- Cut the required audit-script tail by narrowing the stale-language-spec dispatch
+  regression to its registered source-preflight member instead of rerunning every
+  unrelated source audit.
+- Typed Harness and builtin calls now resolve contracts through indexed manifest
+  projections instead of allocating and scanning the full registry on every
+  runtime call. Effect metadata travels with numeric dispatch entries, and typed
+  methods avoid owned dispatch keys. The syntax-sensitive repository guard also
+  narrows files and lines before regex evaluation, including when restricted
+  runtimes cannot use its git fast path, instead of interpreting every line with
+  a quadratic length loop. Together these changes restore fast audit scripts and
+  the proven four-way CI topology.
+- Honor typed annotations from dynamically assembled tool registries when enforcing side-effect ceilings, so
+  approval-oriented ACP modes request permission before effectful host tools run.
+- Allow downstream embedders to opt into a mechanically linted legacy
+  ambient-capability bridge while they migrate to typed `Harness`
+  parameters. Strict typed capability enforcement remains the default.
+
 ## v0.10.48
 
 ### Breaking
