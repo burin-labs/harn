@@ -124,6 +124,13 @@ pub fn harness_migration_for_builtin(name: &str) -> Option<HarnessBuiltinMigrati
         "llm_budget_remaining" => {
             return Some(forward(CapabilityId::Llm, "budget_remaining"));
         }
+        "http_mock" => return Some(forward(CapabilityId::Testing, "http_mock")),
+        "http_mock_clear" => return Some(forward(CapabilityId::Testing, "http_mock_clear")),
+        "http_mock_calls" => return Some(forward(CapabilityId::Testing, "http_mock_calls")),
+        // Declaring an egress allowlist is how a sandboxed script goes from
+        // fail-closed to a named set of hosts, so the recipe has to survive the
+        // move onto the handle even though the method is not a plain builtin.
+        "egress_policy" => return Some(forward(CapabilityId::Net, "egress_policy")),
         "transport_mock_clear" => {
             return Some(forward(CapabilityId::Testing, "transport_mock_clear"));
         }
@@ -385,6 +392,40 @@ mod registered_capability_migration_tests {
         );
         // A global that still resolves has not moved anywhere.
         assert_eq!(harness_migration_for_builtin("len"), None);
+    }
+
+    /// Test doubles are the first thing a downstream package hits when it
+    /// upgrades, and they are hand-written natives rather than registered
+    /// builtins, so nothing derives their recipes. Name the whole family here
+    /// so a partially-covered set fails instead of stranding every consumer's
+    /// test suite on `HARN-NAM-002`.
+    #[test]
+    fn the_whole_mock_family_says_where_it_went() {
+        let forward = |capability, method| {
+            Some(HarnessBuiltinMigration {
+                capability,
+                method,
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        };
+        for name in ["http_mock", "http_mock_clear", "http_mock_calls"] {
+            assert_eq!(
+                harness_migration_for_builtin(name),
+                forward(CapabilityId::Testing, name),
+                "{name} left no way back to its handle"
+            );
+        }
+        for name in ["transport_mock_clear", "transport_mock_calls"] {
+            assert_eq!(
+                harness_migration_for_builtin(name),
+                forward(CapabilityId::Testing, name),
+                "{name} left no way back to its handle"
+            );
+        }
+        assert_eq!(
+            harness_migration_for_builtin("egress_policy"),
+            forward(CapabilityId::Net, "egress_policy")
+        );
     }
 
     /// Whether the linter can tell a caller where this global went.
