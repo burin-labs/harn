@@ -122,12 +122,21 @@ impl crate::vm::Vm {
                 }
             }
         }
-        // A mock harness owns every effect it represents. Declared capability
-        // implementations must not run for real just because the method now has
-        // a typed Harness exposure, so the real dispatch paths below stay shut
-        // while `call_mock_harness_method` serves the canned response.
-        let serves_canned_response = matches!(handle.inner().mode(), HarnessMode::Mock(_))
-            && !matches!(handle.kind(), HarnessKind::Runtime | HarnessKind::Testing);
+        // A mock harness owns the effects it was given a response for. Exposing
+        // one of those as a typed Harness method also registers a capability
+        // implementation, and that implementation would otherwise run for real
+        // ahead of the mock dispatch further down. Close the registry-backed
+        // paths only for a method the mock was actually given an answer for: a
+        // mock installed to capture stdio still needs an unanswered method like
+        // `harness.llm.provider_capabilities` to reach its real handler.
+        let serves_canned_response = !matches!(
+            handle.kind(),
+            HarnessKind::Runtime | HarnessKind::Testing
+        ) && matches!(handle.inner().mode(), HarnessMode::Mock(state)
+            if handle
+                .kind()
+                .capability_id()
+                .is_some_and(|capability| state.has_capability_response(capability, method)));
         if !serves_canned_response {
             if let Some(capability) = handle.kind().capability_id() {
                 if let Some(dispatch) = self
@@ -200,7 +209,9 @@ impl crate::vm::Vm {
                 }
             }
         }
-        if serves_canned_response {
+        if matches!(handle.inner().mode(), HarnessMode::Mock(_))
+            && !matches!(handle.kind(), HarnessKind::Runtime | HarnessKind::Testing)
+        {
             return self.call_mock_harness_method(handle, method, args).await;
         }
         if let Some(capability) = handle.kind().capability_id() {
