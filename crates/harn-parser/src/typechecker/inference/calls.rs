@@ -731,10 +731,14 @@ impl TypeChecker {
             .ty
             .as_deref()
             .expect("capability prefix requires a typed first parameter");
-        self.infer_type(first_arg, scope)
+        if self
+            .infer_type(first_arg, scope)
             .is_none_or(|actual| !self.types_compatible(expected, &actual, scope))
-            .then_some(capability_count)
-            .unwrap_or(0)
+        {
+            capability_count
+        } else {
+            0
+        }
     }
     pub(in crate::typechecker) fn check_value_call(
         &mut self,
