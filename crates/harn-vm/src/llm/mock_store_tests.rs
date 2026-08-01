@@ -36,12 +36,12 @@ fn scopes_are_isolated_and_default_remains_the_legacy_fallback() {
 
 #[test]
 fn shared_absorber_works_with_strict_scopes_without_consuming_default() {
-    let mut queue = queue(
-        r#"{"schemaVersion":1,"strictScopes":true}
-{"id":"main","scope":"agent.main","consume":"once","text":"MAIN"}
-{"id":"shared","scope":"shared","consume":"sticky","match":"*","text":"SHARED"}
-{"id":"default","scope":"default","consume":"once","text":"DEFAULT"}"#,
-    );
+    let mut queue = fixture(&[
+        r#"{"schemaVersion":1,"strictScopes":true}"#,
+        r#"{"id":"main","scope":"agent.main","consume":"once","text":"MAIN"}"#,
+        r#"{"id":"shared","scope":"shared","consume":"sticky","match":"*","text":"SHARED"}"#,
+        r#"{"id":"default","scope":"default","consume":"once","text":"DEFAULT"}"#,
+    ]);
 
     let judge = queue
         .match_request("completion.judge", "verify")
