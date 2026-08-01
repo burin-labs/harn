@@ -1702,20 +1702,19 @@ spawning. The consent closure receives the command context enriched with
 `consent.reason` and `consent.risk_labels` (the deterministic classification) and
 may call `request_approval` / `ask_user` to block on a human.
 
-Above the approval/consent tier sits a **never-approvable command floor**: the
-deterministic scanner emits a distinct `catastrophic` risk label for irreversible
-destruction (fork bomb; `git reset --hard`; `git clean -fd`; `git push --force` /
-`-f` / `--force-with-lease`; `rm -rf` escaping the workspace root or wiping it in
-place; `dd of=…`; `mkfs`; `chmod -R 000`; `truncate -s 0` of a source file; and
-`>`/`>>` redirection onto a source file), detected through adversarial quoting,
-chained-command splitting, `bash -c` recursion, and the `sudo`/`env`/`nice`/
-`nohup`/`time`/`timeout`/`command`/`builtin` wrapper family. A `catastrophic`
-command is **always hard-denied** (a `status: "blocked"` envelope, no child
-spawned) regardless of policy configuration, and is **never routed to the consent
-gate** — it cannot be approved. A policy may additionally promote other scanner
-labels to this same never-approvable tier with `deny_labels: ["destructive",
-"network_exfil", …]` (distinct from `require_approval`, whose labels stay
-consent-eligible).
+The never-approvable command floor runs before consent. It blocks fork bombs;
+`git reset --hard`, `git clean -fd`, and force-pushes; recursive deletion of the
+project or paths outside it; `dd of=…`; filesystem formatting;
+`chmod -R 000`; and shell redirection or `truncate -s 0` against files tracked
+by the enclosing Git worktree. New and untracked generated files remain
+writable. Blocked commands return `status: "blocked"` without starting a child
+process.
+
+The scanner follows quoted and chained commands, including commands nested
+under `bash -c` and common wrappers such as `sudo`, `env`, and `timeout`.
+Configuration cannot approve a command rejected by this floor. Add other risk
+labels to the same tier with `deny_labels`; use `require_approval` for labels a
+user may approve.
 
 ## Async and timing
 
