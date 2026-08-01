@@ -32,6 +32,7 @@ pub mod autonomy;
 pub(crate) mod aws_sigv4;
 pub mod boundary;
 pub mod bridge;
+pub use bridge::inject_leading_authority;
 mod builtin_id;
 pub mod builtin_profile;
 pub mod bytecode_cache;

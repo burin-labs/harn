@@ -1,5 +1,5 @@
 //! `.harn`-authored custom lint rules — the ESLint-plugin equivalent, but in
-//! Harn. Effectful rules declare `lint(harness: Harness, source)`; pure rules
+//! Harn. Effectful rules declare `lint(rules: HarnessRules, source)`; pure rules
 //! may retain `lint(source)`.
 //!
 //! A project drops a `*.lint.harn` module into a `[rules] ruleDirs` directory.
@@ -12,12 +12,12 @@
 //!
 //! ```harn
 //! // rules/no-foo.lint.harn
-//! pub fn lint(harness: Harness, source) {
+//! pub fn lint(rules: HarnessRules, source) {
 //!   // Inspect `source` (the raw text of the file being linted) and return
 //!   // findings. The structural rule engine is available read-only, so a rule
 //!   // can delegate to `rules_diagnostics` and return its diagnostics envelope
 //!   // directly:
-//!   return rules_diagnostics(harness.rules, {rule: rule_src, source: source, language: "harn"})
+//!   return rules_diagnostics(rules, {rule: rule_src, source: source, language: "harn"})
 //! }
 //! ```
 //!
@@ -50,7 +50,7 @@ mod imp {
 
     use harn_lexer::Span;
     use harn_lint::{LintDiagnostic, LintSeverity};
-    use harn_parser::{DiagnosticCode, TypeExpr};
+    use harn_parser::DiagnosticCode;
     use harn_vm::{VmClosure, VmValue};
 
     /// Suffix that marks a `.harn` module as an imperative lint rule.
@@ -60,15 +60,8 @@ mod imp {
     /// the rule id (the file stem minus `.lint`) so findings and load errors are
     /// attributable.
     enum LoadedRule {
-        Ok {
-            id: String,
-            lint: Arc<VmClosure>,
-            expects_harness: bool,
-        },
-        Failed {
-            id: String,
-            error: String,
-        },
+        Ok { id: String, lint: Arc<VmClosure> },
+        Failed { id: String, error: String },
     }
 
     /// Collect `*.lint.harn` files declared by `file`'s nearest manifest's
@@ -112,7 +105,6 @@ mod imp {
         let mut vm = harn_vm::Vm::new();
         harn_vm::register_vm_stdlib(&mut vm);
         harn_rules_hostlib::install(&mut vm);
-        vm.set_harness(harn_vm::Harness::real());
         vm
     }
 
@@ -282,18 +274,11 @@ mod imp {
             {
                 Ok(exports) => {
                     if let Some(lint) = exports.get("lint") {
-                        let expects_harness = lint.func.params.first().is_some_and(|param| {
-                            matches!(
-                                param.type_expr.as_ref(),
-                                Some(TypeExpr::Named(kind)) if kind == "Harness"
-                            )
-                        });
                         loaded_rules.insert(
                             path.clone(),
                             LoadedRule::Ok {
                                 id,
                                 lint: lint.clone(),
-                                expects_harness,
                             },
                         );
                     }
@@ -329,20 +314,21 @@ mod imp {
                     LoadedRule::Failed { id, error } => {
                         diagnostics.push(rule_error_diagnostic(id, error));
                     }
-                    LoadedRule::Ok {
-                        id,
-                        lint,
-                        expects_harness,
-                    } => {
+                    LoadedRule::Ok { id, lint } => {
                         let arg = VmValue::String(arcstr::ArcStr::from(source.as_str()));
-                        let mut args = Vec::with_capacity(2);
-                        if *expects_harness {
-                            args.push(
-                                vm.root_harness_value()
-                                    .expect("script-rule sandbox installs a root Harness"),
-                            );
-                        }
-                        args.push(arg);
+                        let args = harn_vm::inject_leading_authority(
+                            &vm,
+                            lint,
+                            &[arg],
+                            "script lint export `lint`",
+                        );
+                        let args = match args {
+                            Ok(args) => args,
+                            Err(error) => {
+                                diagnostics.push(rule_error_diagnostic(id, &error.to_string()));
+                                continue;
+                            }
+                        };
                         match vm.call_closure_pub(lint, &args).await {
                             Ok(value) => map_return(id, &value, &mut diagnostics),
                             Err(error) => {
