@@ -39,7 +39,9 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
     errors = errors + ["refresh success sentinel must be unique per run attempt"]
   }
   const command = to_string(run?.run ?? "")
+  const migration = "harn fix --apply --safety surface-changing --capability-migrations-only ."
   for required in [
+    migration,
     "eval \"$HARN_BUMP_REFRESH_COMMAND\"",
     "> \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",
@@ -49,6 +51,9 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
     if !command.contains(required) {
       errors = errors + ["orchestration must fail closed across runtime version skew: " + required]
     }
+  }
+  if command.index_of(migration) >= command.index_of("eval \"$HARN_BUMP_REFRESH_COMMAND\"") {
+    errors = errors + ["target capability migrations must precede the caller refresh"]
   }
   if text.contains("HARN_BUMP_REFRESH: $" + "{{ inputs.refresh-command }}") {
     errors = errors + ["refresh-command must not bypass the fail-closed sentinel wrapper"]
