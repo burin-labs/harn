@@ -3,7 +3,8 @@ use crate::event_log::{FileEventLog, MemoryEventLog};
 use crate::orchestration::{save_run_record, RunRecord};
 use futures::StreamExt;
 use harn_session_store::{
-    AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
+    AppendEvent, CreateSession, ImportSession, SessionEventKind, SessionImporter, SessionStore,
+    SqliteSessionStore,
 };
 use serde_json::json;
 
@@ -43,7 +44,15 @@ async fn persisted_transcript_projects_stable_tool_revision_and_identity_links()
         .expect("create session");
     let mut call = AppendEvent::new(
         SessionEventKind::ToolCall,
-        json!({"transcript_event": {"text": "Read source"}}),
+        json!({
+            "transcript_event": {
+                "text": "Read source",
+                "metadata": {
+                    "tool_name": "read_file",
+                    "input": {"path": "src/lib.rs"}
+                }
+            }
+        }),
     );
     call.headers = BTreeMap::from([
         ("run_id".to_string(), "run-1".to_string()),
@@ -54,7 +63,15 @@ async fn persisted_transcript_projects_stable_tool_revision_and_identity_links()
     store.append("session-1", call).await.expect("append call");
     let mut result = AppendEvent::new(
         SessionEventKind::ToolResult,
-        json!({"transcript_event": {"text": "Read source", "metadata": {"is_error": false}}}),
+        json!({
+            "transcript_event": {
+                "text": "source contents",
+                "metadata": {
+                    "is_error": false,
+                    "output": {"bytes": 42}
+                }
+            }
+        }),
     );
     result.headers = BTreeMap::from([
         ("run_id".to_string(), "run-1".to_string()),
@@ -81,11 +98,33 @@ async fn persisted_transcript_projects_stable_tool_revision_and_identity_links()
         "session:session-1:run:run-1:turn:turn-1:tool:tool-1"
     );
     assert_eq!(snapshot.nodes[0].status, "completed");
+    assert_eq!(snapshot.nodes[0].name, "read_file");
+    assert_eq!(
+        snapshot.nodes[0].attributes["input"],
+        json!({"path": "src/lib.rs"})
+    );
+    assert_eq!(snapshot.nodes[0].attributes["output"], json!({"bytes": 42}));
+    assert_eq!(snapshot.nodes[0].attributes["isError"], json!(false));
+    assert!(snapshot.nodes[0].start_ms.is_some());
+    assert!(snapshot.nodes[0].duration_ms.is_some());
     assert_eq!(snapshot.nodes[0].attributes["revision"], json!(2));
     assert!(snapshot.nodes[0]
         .links
         .iter()
         .any(|link| link.kind == "turn" && link.target_id.as_deref() == Some("turn-1")));
+    assert_eq!(
+        snapshot.nodes[0]
+            .links
+            .iter()
+            .map(|link| (link.kind.as_str(), link.target_id.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("run", Some("run-1")),
+            ("turn", Some("turn-1")),
+            ("source_event", Some("source-2")),
+            ("tool_call", Some("tool-1")),
+        ]
+    );
     assert_eq!(
         snapshot
             .cursor
@@ -93,6 +132,110 @@ async fn persisted_transcript_projects_stable_tool_revision_and_identity_links()
             .get("session-store:session-1")
             .copied(),
         Some(2)
+    );
+}
+
+#[tokio::test]
+async fn persisted_timeline_distinguishes_an_empty_session_from_a_missing_one() {
+    let store = SqliteSessionStore::open_in_memory().expect("canonical store");
+    let missing =
+        query_session_store_timeline(&store, SessionTimelineQuery::for_session("missing-session"))
+            .await
+            .expect("query missing session");
+    assert!(missing.is_none());
+
+    store
+        .create(CreateSession {
+            id: Some("empty-session".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create empty session");
+    let empty =
+        query_session_store_timeline(&store, SessionTimelineQuery::for_session("empty-session"))
+            .await
+            .expect("query empty session")
+            .expect("empty session exists");
+    assert!(empty.nodes.is_empty());
+}
+
+#[tokio::test]
+async fn persisted_10k_event_tool_timeline_opens_under_500ms() {
+    let temp = tempfile::tempdir().expect("project root");
+    let store = SqliteSessionStore::open(temp.path().join("session-store.sqlite"))
+        .expect("canonical store");
+    let mut events = Vec::with_capacity(10_000);
+    for index in 0..5_000 {
+        let tool_call_id = format!("tool-{index}");
+        let mut call = AppendEvent::new(
+            SessionEventKind::ToolCall,
+            json!({"transcript_event": {"metadata": {"tool_name": "read_file"}}}),
+        );
+        call.headers
+            .insert("tool_call_id".to_string(), tool_call_id.clone());
+        call.headers
+            .insert("run_id".to_string(), "perf-run".to_string());
+        call.headers
+            .insert("turn_id".to_string(), "perf-turn".to_string());
+        let mut result = AppendEvent::new(
+            SessionEventKind::ToolResult,
+            json!({"transcript_event": {"metadata": {"is_error": false}}}),
+        );
+        result
+            .headers
+            .insert("tool_call_id".to_string(), tool_call_id);
+        result
+            .headers
+            .insert("run_id".to_string(), "perf-run".to_string());
+        result
+            .headers
+            .insert("turn_id".to_string(), "perf-turn".to_string());
+        events.extend([call, result]);
+    }
+    store
+        .import(ImportSession {
+            source_id: "timeline-perf-corpus".to_string(),
+            source_digest: "sha256:timeline-perf-corpus".to_string(),
+            session: CreateSession {
+                id: Some("timeline-perf-session".to_string()),
+                project_scope: Some(temp.path().to_string_lossy().into_owned()),
+                ..CreateSession::default()
+            },
+            events,
+        })
+        .await
+        .expect("import timeline corpus");
+
+    let started = std::time::Instant::now();
+    let snapshot = query_session_store_timeline(
+        &store,
+        SessionTimelineQuery {
+            limit: Some(10_000),
+            ..SessionTimelineQuery::for_session("timeline-perf-session")
+        },
+    )
+    .await
+    .expect("project timeline")
+    .expect("session exists");
+    let elapsed = started.elapsed();
+    eprintln!("10k-event tool timeline elapsed: {elapsed:?}");
+
+    assert_eq!(snapshot.nodes.len(), 5_000);
+    assert!(snapshot.nodes[0].id.ends_with(":tool:tool-0"));
+    assert!(snapshot.nodes[4_999].id.ends_with(":tool:tool-4999"));
+    let timing_covered = snapshot
+        .nodes
+        .iter()
+        .filter(|node| node.start_ms.is_some() && node.duration_ms.is_some())
+        .count();
+    assert!(
+        timing_covered * 100 >= snapshot.nodes.len() * 99,
+        "completed-tool timing coverage was {timing_covered}/{}",
+        snapshot.nodes.len()
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "10k-event timeline took {elapsed:?}"
     );
 }
 

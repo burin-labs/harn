@@ -4,7 +4,8 @@
 //! spans and event-log topics into one stable, redacted shape that clients can
 //! query or subscribe to without learning Harn's storage internals.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -109,7 +110,7 @@ pub struct SessionTimelineNode {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub children: Vec<String>,
     pub category: String,
     pub kind: String,
@@ -125,11 +126,11 @@ pub struct SessionTimelineNode {
     pub start_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    #[serde(default)]
     pub attributes: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub references: Vec<SessionTimelineReference>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub links: Vec<SessionTimelineLink>,
     pub order: u64,
 }
@@ -188,6 +189,7 @@ impl From<LogError> for SessionTimelineError {
 #[derive(Clone)]
 struct TimelineDraft {
     sort_ms: i128,
+    sequence: u64,
     node: SessionTimelineNode,
 }
 
@@ -240,26 +242,34 @@ pub async fn query_persisted_session_timeline(
     project_root: &Path,
     query: SessionTimelineQuery,
 ) -> Result<Option<SessionTimelineSnapshot>, SessionTimelineError> {
-    let Some(session_id) = query.session_id.as_deref() else {
-        return Ok(None);
-    };
     let Some(store) = crate::stdlib::session_store::open_existing_canonical_store(project_root)
         .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))?
     else {
         return Ok(None);
     };
-    match store.describe(session_id).await {
-        Ok(_) => {}
-        Err(harn_session_store::StoreError::NotFound(_)) => return Ok(None),
-        Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
-    }
+    query_session_store_timeline(&store, query).await
+}
+
+/// Project one [`SessionStore`] through Harn's canonical semantic timeline.
+///
+/// Transport adapters use this seam so HTTP, ACP, and embedded callers receive
+/// identical node identity, grouping, status, references, links, and redaction
+/// without learning how stored event envelopes map to product chronology.
+pub async fn query_session_store_timeline(
+    store: &dyn SessionStore,
+    query: SessionTimelineQuery,
+) -> Result<Option<SessionTimelineSnapshot>, SessionTimelineError> {
+    let Some(session_id) = query.session_id.as_deref() else {
+        return Ok(None);
+    };
 
     let topic = canonical_session_topic(session_id);
     let mut from = query.from_cursor.topics.get(&topic).copied();
     let mut builder = TimelineBuilder::new(query.clone());
+    let mut saw_event = false;
     loop {
         let remaining = query.limit().saturating_sub(builder.nodes.len()).max(1);
-        let page = store
+        let page = match store
             .read(
                 session_id,
                 ReadRange {
@@ -269,7 +279,12 @@ pub async fn query_persisted_session_timeline(
                 },
             )
             .await
-            .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))?;
+        {
+            Ok(page) => page,
+            Err(harn_session_store::StoreError::NotFound(_)) => return Ok(None),
+            Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
+        };
+        saw_event |= !page.events.is_empty();
         for event in page.events {
             builder.add_stored_event(&topic, event);
         }
@@ -278,7 +293,14 @@ pub async fn query_persisted_session_timeline(
         }
         from = page.next_cursor;
     }
-    Ok(Some(builder.finish()))
+    if !saw_event {
+        match store.describe(session_id).await {
+            Ok(_) => {}
+            Err(harn_session_store::StoreError::NotFound(_)) => return Ok(None),
+            Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
+        }
+    }
+    Ok(Some(builder.finish_in_source_order()))
 }
 
 /// List canonical sessions for one project without exposing SQLite layout or
@@ -342,15 +364,54 @@ struct TimelineBuilder {
     query: SessionTimelineQuery,
     cursor: SessionTimelineCursor,
     nodes: Vec<TimelineDraft>,
+    tool_positions: HashMap<u64, usize>,
+    collided_tool_positions: HashMap<String, usize>,
 }
 
 impl TimelineBuilder {
     fn new(query: SessionTimelineQuery) -> Self {
+        let capacity = query.limit().min(10_000);
         Self {
             cursor: query.from_cursor.clone(),
             query,
-            nodes: Vec::new(),
+            nodes: Vec::with_capacity(capacity),
+            tool_positions: HashMap::with_capacity(capacity / 2),
+            collided_tool_positions: HashMap::new(),
         }
+    }
+
+    fn push(&mut self, draft: TimelineDraft) {
+        self.nodes.push(draft);
+    }
+
+    fn register_tool_position(&mut self, hash: u64, index: usize) {
+        const COLLISION: usize = usize::MAX;
+        match self.tool_positions.get(&hash).copied() {
+            None => {
+                self.tool_positions.insert(hash, index);
+            }
+            Some(COLLISION) => {
+                self.collided_tool_positions
+                    .insert(self.nodes[index].node.id.clone(), index);
+            }
+            Some(existing) => {
+                self.tool_positions.insert(hash, COLLISION);
+                self.collided_tool_positions
+                    .insert(self.nodes[existing].node.id.clone(), existing);
+                self.collided_tool_positions
+                    .insert(self.nodes[index].node.id.clone(), index);
+            }
+        }
+    }
+
+    fn stored_tool_position(&self, hash: u64, event: &StoredEvent) -> Option<usize> {
+        const COLLISION: usize = usize::MAX;
+        let index = self.tool_positions.get(&hash).copied()?;
+        if index == COLLISION {
+            let id = stored_tool_node_id(event)?;
+            return self.collided_tool_positions.get(&id).copied();
+        }
+        stored_tool_node_matches(&self.nodes[index].node, event).then_some(index)
     }
 
     fn add_run_spans(&mut self, run: &RunRecord, policy: &RedactionPolicy) {
@@ -359,8 +420,9 @@ impl TimelineBuilder {
                 continue;
             }
             let node = span_node(span, policy);
-            self.nodes.push(TimelineDraft {
+            self.push(TimelineDraft {
                 sort_ms: i128::from(span.start_ms),
+                sequence: span.span_id,
                 node,
             });
         }
@@ -368,18 +430,36 @@ impl TimelineBuilder {
 
     fn add_stored_event(&mut self, topic: &str, event: StoredEvent) {
         self.cursor.bump(topic, event.event_id);
-        let node = stored_event_node(&event);
-        let sort_ms = i128::from(event.ts_ms);
-        if matches!(
-            &event.kind,
-            SessionEventKind::ToolCall | SessionEventKind::ToolResult
-        ) {
-            if let Some(existing) = self.nodes.iter_mut().find(|draft| draft.node.id == node.id) {
-                existing.node = node;
-                return;
+        let is_tool_result = matches!(&event.kind, SessionEventKind::ToolResult);
+        let tool_hash = stored_tool_node_hash(&event);
+        let sequence = event.event_id;
+        let event_ts_ms = event.ts_ms;
+        let sort_ms = i128::from(event_ts_ms);
+        if let Some(index) = tool_hash.and_then(|hash| self.stored_tool_position(hash, &event)) {
+            if is_tool_result {
+                merge_stored_tool_result(&mut self.nodes[index].node, event);
+            } else {
+                let mut node = stored_event_node(event);
+                merge_missing_attributes(&mut node.attributes, &self.nodes[index].node.attributes);
+                self.nodes[index].node = node;
             }
+            return;
         }
-        self.nodes.push(TimelineDraft { sort_ms, node });
+        let mut node = stored_event_node(event);
+        if is_tool_result {
+            node.duration_ms = node.start_ms.and_then(|start| {
+                nonnegative_u64(event_ts_ms).map(|end| end.saturating_sub(start))
+            });
+        }
+        let index = self.nodes.len();
+        self.push(TimelineDraft {
+            sort_ms,
+            sequence,
+            node,
+        });
+        if let Some(hash) = tool_hash {
+            self.register_tool_position(hash, index);
+        }
     }
 
     async fn add_event_log(
@@ -404,7 +484,11 @@ impl TimelineBuilder {
                             .map(i128::from)
                             .or_else(|| node.start_ms.map(i128::from))
                             .unwrap_or(i128::from(event_id));
-                        self.nodes.push(TimelineDraft { sort_ms, node });
+                        self.push(TimelineDraft {
+                            sort_ms,
+                            sequence: event_id,
+                            node,
+                        });
                     }
                 }
                 if batch_len < READ_BATCH_SIZE || self.nodes.len() >= self.query.limit() {
@@ -415,29 +499,46 @@ impl TimelineBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> SessionTimelineSnapshot {
-        self.nodes.sort_by(|left, right| {
-            left.sort_ms
-                .cmp(&right.sort_ms)
-                .then_with(|| left.node.id.cmp(&right.node.id))
-        });
+    fn finish(self) -> SessionTimelineSnapshot {
+        self.finish_with_ordering(true)
+    }
+
+    fn finish_in_source_order(self) -> SessionTimelineSnapshot {
+        self.finish_with_ordering(false)
+    }
+
+    fn finish_with_ordering(mut self, sort: bool) -> SessionTimelineSnapshot {
+        if sort {
+            self.nodes.sort_by(|left, right| {
+                left.sort_ms
+                    .cmp(&right.sort_ms)
+                    .then_with(|| left.sequence.cmp(&right.sequence))
+                    .then_with(|| left.node.id.cmp(&right.node.id))
+            });
+        }
         self.nodes.truncate(self.query.limit());
 
-        let visible_ids: BTreeSet<String> = self
+        let mut children_by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        if self
             .nodes
             .iter()
-            .map(|draft| draft.node.id.clone())
-            .collect();
-        let mut children_by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for draft in &self.nodes {
-            let Some(parent_id) = draft.node.parent_id.as_ref() else {
-                continue;
-            };
-            if visible_ids.contains(parent_id) {
-                children_by_parent
-                    .entry(parent_id.clone())
-                    .or_default()
-                    .push(draft.node.id.clone());
+            .any(|draft| draft.node.parent_id.is_some())
+        {
+            let visible_ids: HashSet<&str> = self
+                .nodes
+                .iter()
+                .map(|draft| draft.node.id.as_str())
+                .collect();
+            for draft in &self.nodes {
+                let Some(parent_id) = draft.node.parent_id.as_ref() else {
+                    continue;
+                };
+                if visible_ids.contains(parent_id.as_str()) {
+                    children_by_parent
+                        .entry(parent_id.clone())
+                        .or_default()
+                        .push(draft.node.id.clone());
+                }
             }
         }
 
@@ -467,12 +568,168 @@ fn canonical_session_topic(session_id: &str) -> String {
     format!("session-store:{session_id}")
 }
 
-fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
-    let source_event_id = event.headers.get("source_event_id").cloned();
-    let message_id = event.headers.get("message_id").cloned();
-    let tool_call_id = event.headers.get("tool_call_id").cloned();
-    let run_id = event.headers.get("run_id").cloned();
-    let turn_id = event.headers.get("turn_id").cloned();
+fn stored_tool_node_id(event: &StoredEvent) -> Option<String> {
+    if !matches!(
+        &event.kind,
+        SessionEventKind::ToolCall | SessionEventKind::ToolResult
+    ) {
+        return None;
+    }
+    let tool_call_id = event.headers.get("tool_call_id")?;
+    let run_id = event.headers.get("run_id")?;
+    let turn_id = event.headers.get("turn_id")?;
+    Some(format!(
+        "session:{}:run:{run_id}:turn:{turn_id}:tool:{tool_call_id}",
+        event.session_id
+    ))
+}
+
+fn stored_tool_node_hash(event: &StoredEvent) -> Option<u64> {
+    if !matches!(
+        &event.kind,
+        SessionEventKind::ToolCall | SessionEventKind::ToolResult
+    ) {
+        return None;
+    }
+    let mut hasher = DefaultHasher::new();
+    event.session_id.hash(&mut hasher);
+    event.headers.get("run_id")?.hash(&mut hasher);
+    event.headers.get("turn_id")?.hash(&mut hasher);
+    event.headers.get("tool_call_id")?.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+fn stored_tool_node_matches(node: &SessionTimelineNode, event: &StoredEvent) -> bool {
+    let reference_session = node
+        .references
+        .iter()
+        .find(|reference| reference.kind == "session_event")
+        .and_then(|reference| reference.id.as_deref());
+    let link_target = |kind: &str| {
+        node.links
+            .iter()
+            .find(|link| link.kind == kind)
+            .and_then(|link| link.target_id.as_deref())
+    };
+    reference_session == Some(event.session_id.as_str())
+        && link_target("run") == event.headers.get("run_id").map(String::as_str)
+        && link_target("turn") == event.headers.get("turn_id").map(String::as_str)
+        && link_target("tool_call") == event.headers.get("tool_call_id").map(String::as_str)
+}
+
+fn merge_stored_tool_result(existing: &mut SessionTimelineNode, mut event: StoredEvent) {
+    debug_assert!(matches!(&event.kind, SessionEventKind::ToolResult));
+    let source_event_id = event.headers.remove("source_event_id");
+    let message_id = event.headers.remove("message_id");
+    let tool_name = semantic_string(
+        &event.payload,
+        &[
+            "/transcript_event/metadata/tool_name",
+            "/raw_message/name",
+            "/raw_message/tool_calls/0/name",
+        ],
+    );
+    let role = semantic_string(
+        &event.payload,
+        &["/transcript_event/role", "/raw_message/role"],
+    );
+    let output = semantic_value(
+        &event.payload,
+        &[
+            "/transcript_event/metadata/output",
+            "/raw_message/content",
+            "/transcript_event/text",
+        ],
+    );
+    let is_error = event
+        .payload
+        .pointer("/transcript_event/metadata/is_error")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let end_ms = nonnegative_u64(event.ts_ms);
+    let mut attributes = event.payload;
+    if let serde_json::Value::Object(attributes) = &mut attributes {
+        attributes.insert("revision".to_string(), event.event_id.into());
+        attributes.insert(
+            "recordHash".to_string(),
+            std::mem::take(&mut event.record_hash).into(),
+        );
+        if let Some(role) = role {
+            attributes.insert("role".to_string(), role.into());
+        }
+        if let Some(output) = output {
+            attributes.insert("output".to_string(), output);
+        }
+        attributes.insert("isError".to_string(), is_error.into());
+    }
+    let previous_attributes = std::mem::take(&mut existing.attributes);
+    merge_missing_attributes_owned(&mut attributes, previous_attributes);
+
+    if let Some(tool_name) = tool_name {
+        existing.name = tool_name;
+    }
+    let start_ms = existing
+        .start_ms
+        .or_else(|| existing.occurred_at_ms.and_then(nonnegative_u64));
+    existing.kind.clear();
+    existing.kind.push_str(event.kind.discriminator());
+    existing.status.clear();
+    existing
+        .status
+        .push_str(if is_error { "failed" } else { "completed" });
+    existing.occurred_at_ms = Some(event.ts_ms);
+    existing.start_ms = start_ms;
+    existing.duration_ms = start_ms
+        .zip(end_ms)
+        .map(|(start, end)| end.saturating_sub(start));
+    existing.attributes = attributes;
+    if let Some(reference) = existing
+        .references
+        .iter_mut()
+        .find(|reference| reference.kind == "session_event")
+    {
+        reference.event_id = Some(event.event_id);
+    }
+    let mut previous_links = std::mem::take(&mut existing.links);
+    let mut links = Vec::with_capacity(previous_links.len().max(5));
+    for kind in ["run", "turn"] {
+        if let Some(link) = take_timeline_link(&mut previous_links, kind) {
+            links.push(link);
+        }
+    }
+    links.extend(
+        [("source_event", source_event_id), ("message", message_id)]
+            .into_iter()
+            .filter_map(|(kind, target_id)| {
+                target_id.map(|target_id| SessionTimelineLink {
+                    kind: kind.to_string(),
+                    target_id: Some(target_id),
+                    trace_id: None,
+                    span_id: None,
+                    event_id: None,
+                })
+            }),
+    );
+    if let Some(link) = take_timeline_link(&mut previous_links, "tool_call") {
+        links.push(link);
+    }
+    existing.links = links;
+}
+
+fn take_timeline_link(
+    links: &mut Vec<SessionTimelineLink>,
+    kind: &str,
+) -> Option<SessionTimelineLink> {
+    let index = links.iter().position(|link| link.kind == kind)?;
+    Some(links.remove(index))
+}
+
+fn stored_event_node(mut event: StoredEvent) -> SessionTimelineNode {
+    let source_event_id = event.headers.remove("source_event_id");
+    let message_id = event.headers.remove("message_id");
+    let tool_call_id = event.headers.remove("tool_call_id");
+    let run_id = event.headers.remove("run_id");
+    let turn_id = event.headers.remove("turn_id");
     let id = tool_call_id
         .as_ref()
         .zip(run_id.as_ref())
@@ -507,7 +764,7 @@ fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
     .to_string();
     let status = match &event.kind {
         SessionEventKind::ToolCall => "running",
-        SessionEventKind::ToolResult => tool_result_status(event),
+        SessionEventKind::ToolResult => tool_result_status(&event),
         SessionEventKind::Custom { custom_type } if custom_type == "agent_run_terminal" => event
             .payload
             .pointer("/transcript_event/metadata/final_status")
@@ -516,20 +773,31 @@ fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
         _ => "completed",
     }
     .to_string();
-    let name = event
-        .payload
-        .pointer("/transcript_event/text")
-        .and_then(serde_json::Value::as_str)
-        .filter(|text| !text.trim().is_empty())
-        .or_else(|| {
-            event
-                .payload
-                .pointer("/raw_message/content")
-                .and_then(serde_json::Value::as_str)
-                .filter(|text| !text.trim().is_empty())
-        })
-        .unwrap_or_else(|| event.kind.discriminator())
-        .to_string();
+    let tool_name = || {
+        semantic_string(
+            &event.payload,
+            &[
+                "/transcript_event/metadata/tool_name",
+                "/raw_message/name",
+                "/raw_message/tool_calls/0/name",
+            ],
+        )
+    };
+    let visible_text = || {
+        semantic_string(
+            &event.payload,
+            &["/transcript_event/text", "/raw_message/content"],
+        )
+    };
+    let name = match &event.kind {
+        SessionEventKind::ToolCall => tool_name().or_else(visible_text),
+        // Result text is output, not the tool's product label. The
+        // discriminator sentinel makes the revision merge retain the call
+        // node's name when this envelope omits tool_name.
+        SessionEventKind::ToolResult => tool_name(),
+        _ => visible_text(),
+    }
+    .unwrap_or_else(|| event.kind.discriminator().to_string());
     let links = [
         ("run", run_id),
         ("turn", turn_id),
@@ -548,12 +816,57 @@ fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
         })
     })
     .collect();
-    let mut attributes = event.payload.clone();
+    let role = semantic_string(
+        &event.payload,
+        &["/transcript_event/role", "/raw_message/role"],
+    );
+    let semantic_attribute = match &event.kind {
+        SessionEventKind::ToolCall => semantic_value(
+            &event.payload,
+            &[
+                "/transcript_event/metadata/input",
+                "/raw_message/input",
+                "/raw_message/tool_calls/0/arguments",
+            ],
+        )
+        .map(|value| ("input", value)),
+        SessionEventKind::ToolResult => semantic_value(
+            &event.payload,
+            &[
+                "/transcript_event/metadata/output",
+                "/raw_message/content",
+                "/transcript_event/text",
+            ],
+        )
+        .map(|value| ("output", value)),
+        _ => None,
+    };
+    let is_error = matches!(&event.kind, SessionEventKind::ToolResult).then(|| {
+        event
+            .payload
+            .pointer("/transcript_event/metadata/is_error")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    });
+    let mut attributes = event.payload;
     if let serde_json::Value::Object(attributes) = &mut attributes {
         attributes.insert("sessionId".to_string(), event.session_id.clone().into());
         attributes.insert("revision".to_string(), event.event_id.into());
-        attributes.insert("recordHash".to_string(), event.record_hash.clone().into());
+        attributes.insert("recordHash".to_string(), event.record_hash.into());
+        if let Some(role) = role {
+            attributes.insert("role".to_string(), role.into());
+        }
+        if let Some((key, value)) = semantic_attribute {
+            attributes.insert(key.to_string(), value);
+        }
+        if let Some(is_error) = is_error {
+            attributes.insert("isError".to_string(), is_error.into());
+        }
     }
+    let start_ms = matches!(&event.kind, SessionEventKind::ToolCall)
+        .then(|| nonnegative_u64(event.ts_ms))
+        .flatten();
+    let session_topic = canonical_session_topic(&event.session_id);
     SessionTimelineNode {
         id,
         parent_id: None,
@@ -565,17 +878,61 @@ fn stored_event_node(event: &StoredEvent) -> SessionTimelineNode {
         trace_id: None,
         span_id: None,
         occurred_at_ms: Some(event.ts_ms),
-        start_ms: None,
+        start_ms,
         duration_ms: None,
         attributes,
         references: vec![SessionTimelineReference {
             kind: "session_event".to_string(),
-            id: Some(event.session_id.clone()),
-            topic: Some(canonical_session_topic(&event.session_id)),
+            id: Some(event.session_id),
+            topic: Some(session_topic),
             event_id: Some(event.event_id),
         }],
         links,
         order: 0,
+    }
+}
+
+fn semantic_string(payload: &serde_json::Value, pointers: &[&str]) -> Option<String> {
+    pointers.iter().find_map(|pointer| {
+        payload
+            .pointer(pointer)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn semantic_value(payload: &serde_json::Value, pointers: &[&str]) -> Option<serde_json::Value> {
+    pointers
+        .iter()
+        .find_map(|pointer| payload.pointer(pointer))
+        .cloned()
+}
+
+fn nonnegative_u64(value: i64) -> Option<u64> {
+    u64::try_from(value).ok()
+}
+
+fn merge_missing_attributes(current: &mut serde_json::Value, previous: &serde_json::Value) {
+    let (serde_json::Value::Object(current), serde_json::Value::Object(previous)) =
+        (current, previous)
+    else {
+        return;
+    };
+    for (key, value) in previous {
+        current.entry(key.clone()).or_insert_with(|| value.clone());
+    }
+}
+
+fn merge_missing_attributes_owned(current: &mut serde_json::Value, previous: serde_json::Value) {
+    let (serde_json::Value::Object(current), serde_json::Value::Object(previous)) =
+        (current, previous)
+    else {
+        return;
+    };
+    for (key, value) in previous {
+        current.entry(key).or_insert(value);
     }
 }
 

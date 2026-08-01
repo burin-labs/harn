@@ -283,6 +283,73 @@ type JSONValue = json.RawMessage
 // JSONObject mirrors `Record<string, JsonValue>`.
 type JSONObject = map[string]json.RawMessage
 
+// HarnSessionTimelineCursor advances independently over each projected topic.
+type HarnSessionTimelineCursor struct {
+	Topics map[string]uint64 `json:"topics"`
+}
+
+// HarnSessionTimelineQuery filters and paginates the canonical semantic timeline.
+type HarnSessionTimelineQuery struct {
+	SessionID  *string                   `json:"sessionId,omitempty"`
+	RunID      *string                   `json:"runId,omitempty"`
+	RunPath    *string                   `json:"runPath,omitempty"`
+	ProjectID  *string                   `json:"projectId,omitempty"`
+	FromCursor HarnSessionTimelineCursor `json:"fromCursor"`
+	Limit      *uint64                   `json:"limit,omitempty"`
+}
+
+// HarnSessionTimelineReference binds a semantic node to stable source evidence.
+type HarnSessionTimelineReference struct {
+	Kind    string  `json:"kind"`
+	ID      *string `json:"id,omitempty"`
+	Topic   *string `json:"topic,omitempty"`
+	EventID *uint64 `json:"eventId,omitempty"`
+}
+
+// HarnSessionTimelineLink carries causal or identity relationships.
+type HarnSessionTimelineLink struct {
+	Kind     string  `json:"kind"`
+	TargetID *string `json:"targetId,omitempty"`
+	TraceID  *string `json:"traceId,omitempty"`
+	SpanID   *string `json:"spanId,omitempty"`
+	EventID  *string `json:"eventId,omitempty"`
+}
+
+// HarnSessionTimelineNode is Harn's semantic chronology row; Kind remains open.
+type HarnSessionTimelineNode struct {
+	ID           string                         `json:"id"`
+	ParentID     *string                        `json:"parentId,omitempty"`
+	Children     []string                       `json:"children"`
+	Category     string                         `json:"category"`
+	Kind         string                         `json:"kind"`
+	Name         string                         `json:"name"`
+	Status       string                         `json:"status"`
+	TraceID      *string                        `json:"traceId,omitempty"`
+	SpanID       *string                        `json:"spanId,omitempty"`
+	OccurredAtMs *int64                         `json:"occurredAtMs,omitempty"`
+	StartMs      *uint64                        `json:"startMs,omitempty"`
+	DurationMs   *uint64                        `json:"durationMs,omitempty"`
+	Attributes   JSONValue                      `json:"attributes,omitempty"`
+	References   []HarnSessionTimelineReference `json:"references"`
+	Links        []HarnSessionTimelineLink      `json:"links"`
+	Order        uint64                         `json:"order"`
+}
+
+// HarnSessionTimelineSnapshot is a point-in-time semantic timeline query result.
+type HarnSessionTimelineSnapshot struct {
+	SchemaVersion uint32                    `json:"schemaVersion"`
+	Query         HarnSessionTimelineQuery  `json:"query"`
+	Cursor        HarnSessionTimelineCursor `json:"cursor"`
+	Nodes         []HarnSessionTimelineNode `json:"nodes"`
+}
+
+// HarnSessionTimelineUpdate revises one semantic node for subscribers.
+type HarnSessionTimelineUpdate struct {
+	SchemaVersion uint32                    `json:"schemaVersion"`
+	Cursor        HarnSessionTimelineCursor `json:"cursor"`
+	Node          HarnSessionTimelineNode   `json:"node"`
+}
+
 // HarnPlanAuthor identifies the author of a plan revision or comment.
 type HarnPlanAuthor struct {
 	ID          string  `json:"id"`

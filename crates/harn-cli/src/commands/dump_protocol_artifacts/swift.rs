@@ -11,6 +11,10 @@ use super::constants::*;
 use super::support::*;
 use super::values::*;
 
+mod session_timeline;
+
+use session_timeline::append_session_timeline_types;
+
 #[cfg(test)]
 pub(super) fn generate_swift() -> String {
     generate_swift_for_version(env!("CARGO_PKG_VERSION"))
@@ -1324,6 +1328,8 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
 }
 "#,
     );
+
+    append_session_timeline_types(&mut out);
 
     out
 }

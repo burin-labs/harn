@@ -244,6 +244,67 @@ JsonValue = Union[None, bool, int, float, str, List[Any], Dict[str, Any]]
 JsonObject = Dict[str, JsonValue]
 JsonRpcId = Union[int, str, None]
 
+@dataclass
+class HarnSessionTimelineCursor:
+    topics: Dict[str, int] = field(default_factory=dict)
+
+@dataclass
+class HarnSessionTimelineQuery:
+    sessionId: Optional[str] = None
+    runId: Optional[str] = None
+    runPath: Optional[str] = None
+    projectId: Optional[str] = None
+    fromCursor: HarnSessionTimelineCursor = field(default_factory=HarnSessionTimelineCursor)
+    limit: Optional[int] = None
+
+@dataclass
+class HarnSessionTimelineReference:
+    kind: str
+    id: Optional[str] = None
+    topic: Optional[str] = None
+    eventId: Optional[int] = None
+
+@dataclass
+class HarnSessionTimelineLink:
+    kind: str
+    targetId: Optional[str] = None
+    traceId: Optional[str] = None
+    spanId: Optional[str] = None
+    eventId: Optional[str] = None
+
+@dataclass
+class HarnSessionTimelineNode:
+    """Harn-owned semantic chronology row with a forward-compatible kind."""
+    id: str
+    category: str
+    kind: str
+    name: str
+    status: str
+    order: int
+    parentId: Optional[str] = None
+    children: List[str] = field(default_factory=list)
+    traceId: Optional[str] = None
+    spanId: Optional[str] = None
+    occurredAtMs: Optional[int] = None
+    startMs: Optional[int] = None
+    durationMs: Optional[int] = None
+    attributes: JsonValue = None
+    references: List[HarnSessionTimelineReference] = field(default_factory=list)
+    links: List[HarnSessionTimelineLink] = field(default_factory=list)
+
+@dataclass
+class HarnSessionTimelineSnapshot:
+    schemaVersion: int
+    query: HarnSessionTimelineQuery
+    cursor: HarnSessionTimelineCursor
+    nodes: List[HarnSessionTimelineNode]
+
+@dataclass
+class HarnSessionTimelineUpdate:
+    schemaVersion: int
+    cursor: HarnSessionTimelineCursor
+    node: HarnSessionTimelineNode
+
 
 _T = TypeVar("_T", bound="_HarnDataclass")
 
@@ -873,6 +934,13 @@ pub(super) fn python_public_names() -> Vec<String> {
         "JsonValue",
         "JsonObject",
         "JsonRpcId",
+        "HarnSessionTimelineCursor",
+        "HarnSessionTimelineQuery",
+        "HarnSessionTimelineReference",
+        "HarnSessionTimelineLink",
+        "HarnSessionTimelineNode",
+        "HarnSessionTimelineSnapshot",
+        "HarnSessionTimelineUpdate",
         "is_request",
         "is_response",
         "is_notification",

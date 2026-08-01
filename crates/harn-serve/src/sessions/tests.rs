@@ -80,6 +80,30 @@ async fn http_router_round_trips_events() {
         .clone()
         .oneshot(
             Request::builder()
+                .uri(format!("/sessions/{}/timeline", meta.id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(wire["nodes"][0]["children"], json!([]));
+    assert_eq!(wire["nodes"][0]["links"], json!([]));
+    assert!(wire["nodes"][0].get("attributes").is_some());
+    let timeline: harn_vm::session_timeline::SessionTimelineSnapshot =
+        serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(timeline.query.session_id.as_deref(), Some(meta.id.as_str()));
+    assert_eq!(timeline.nodes.len(), 1);
+    assert_eq!(timeline.nodes[0].category, "message");
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
                 .method("GET")
                 .uri(format!("/sessions/{}/events", meta.id))
                 .body(Body::empty())

@@ -6,7 +6,10 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::event::{AppendEvent, StoredEvent};
-use crate::identity::{normalize_identity_headers, EventIdentity, EventIdentityError};
+use crate::identity::{
+    normalize_identity_headers, normalize_identity_headers_in_place,
+    normalize_identity_headers_with_change, EventIdentity, EventIdentityError,
+};
 use crate::store::{StoreError, StoreHooks, StoreResult};
 
 /// Minimal object-safe contract implemented by a host's redaction policy.
@@ -34,7 +37,7 @@ pub(crate) fn prepare_stored_events_for_persistence(
     events: &mut [StoredEvent],
 ) -> StoreResult<()> {
     for event in events {
-        let identity = normalize_stored_identity(event)?;
+        let (identity, _changed) = normalize_stored_identity(event)?;
         apply_event_redaction(hooks, &mut event.payload, &mut event.headers, &identity).map_err(
             |error| {
                 StoreError::Backend(format!(
@@ -52,9 +55,16 @@ pub(crate) fn redact_stored_events(
     events: &mut [StoredEvent],
 ) -> StoreResult<()> {
     for event in events {
+        if hooks.redaction.is_none() {
+            let changed = normalize_stored_identity_in_place(event)?;
+            if changed {
+                event.mark_redacted_projection();
+            }
+            continue;
+        }
         let original_payload = event.payload.clone();
         let original_headers = event.headers.clone();
-        let identity = normalize_stored_identity(event)?;
+        let (identity, _identity_changed) = normalize_stored_identity(event)?;
         apply_event_redaction(hooks, &mut event.payload, &mut event.headers, &identity).map_err(
             |error| {
                 StoreError::Backend(format!(
@@ -70,12 +80,33 @@ pub(crate) fn redact_stored_events(
     Ok(())
 }
 
-fn normalize_stored_identity(event: &mut StoredEvent) -> StoreResult<EventIdentity> {
+fn normalize_stored_identity_in_place(event: &mut StoredEvent) -> StoreResult<bool> {
+    let mut changed = false;
     loop {
-        match normalize_identity_headers(&mut event.headers) {
-            Ok(identity) => return Ok(identity),
+        match normalize_identity_headers_in_place(&mut event.headers) {
+            Ok(normalized) => return Ok(changed || normalized),
             Err(EventIdentityError::Invalid { field, .. }) => {
                 relocate_historical_identity_header(&mut event.headers, field);
+                changed = true;
+            }
+            Err(error) => {
+                return Err(StoreError::Backend(format!(
+                    "stored event {} has invalid producer identity: {error}",
+                    event.event_id
+                )))
+            }
+        }
+    }
+}
+
+fn normalize_stored_identity(event: &mut StoredEvent) -> StoreResult<(EventIdentity, bool)> {
+    let mut changed = false;
+    loop {
+        match normalize_identity_headers_with_change(&mut event.headers) {
+            Ok((identity, normalized)) => return Ok((identity, changed || normalized)),
+            Err(EventIdentityError::Invalid { field, .. }) => {
+                relocate_historical_identity_header(&mut event.headers, field);
+                changed = true;
             }
             Err(error) => {
                 return Err(StoreError::Backend(format!(
@@ -158,5 +189,19 @@ mod tests {
         assert_eq!(event.headers["turn_id"], "turn-1");
         assert!(!event.headers.contains_key("run_id"));
         assert!(event.is_redacted_projection());
+    }
+
+    #[test]
+    fn valid_identity_headers_remain_an_unmodified_read_projection() {
+        let mut events = vec![stored_event(BTreeMap::from([
+            ("run_id".to_string(), "run-1".to_string()),
+            ("turn_id".to_string(), "turn-1".to_string()),
+        ]))];
+
+        redact_stored_events(&StoreHooks::default(), &mut events).unwrap();
+
+        assert_eq!(events[0].headers["run_id"], "run-1");
+        assert_eq!(events[0].headers["turn_id"], "turn-1");
+        assert!(!events[0].is_redacted_projection());
     }
 }
