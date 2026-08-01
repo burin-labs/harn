@@ -13,13 +13,15 @@ pub(super) fn enforce_dispatch_policies(
     policy_machinery_active: bool,
     tool_name: &str,
     tool_args: &serde_json::Value,
+    dispatch_annotations: Option<&crate::tool_annotations::ToolAnnotations>,
     side_effect_grant: Option<&crate::orchestration::SideEffectCeilingGrant>,
 ) -> Result<(), crate::orchestration::PolicyDenial> {
     if !policy_machinery_active {
         return Ok(());
     }
-    crate::orchestration::enforce_current_policy_for_tool_with_side_effect_grant(
+    crate::orchestration::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant(
         tool_name,
+        dispatch_annotations,
         side_effect_grant,
     )?;
     crate::orchestration::enforce_tool_arg_constraints(
