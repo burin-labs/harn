@@ -308,6 +308,7 @@ fn missing_capability_argument_repair_uses_typed_root_field() {
     let span = harn_lexer::Span::with_offsets(12, 16, 1, 13);
     let (_, edits, _) = synthesize_missing_capability_argument_repair(
         source,
+        &[],
         span,
         "argument 1 `fs`: expected HarnessFs, found string",
     )
@@ -327,6 +328,7 @@ fn missing_capability_argument_repair_uses_source_coordinates_over_stale_offsets
 
     let (_, edits, _) = synthesize_missing_capability_argument_repair(
         source,
+        &harn_parser::parse_source(source).expect("source parses"),
         stale_span,
         "argument 1 `fs`: expected HarnessFs, found string",
     )
@@ -376,6 +378,7 @@ fn missing_capability_argument_repair_uses_source_coordinates_over_stale_offsets
     let still_stale = harn_lexer::Span::with_offsets(9, 9, line, column);
     let (_, second_edits, _) = synthesize_missing_capability_argument_repair(
         &applied,
+        &harn_parser::parse_source(&applied).expect("first apply parses"),
         still_stale,
         "argument 1 `fs`: expected HarnessFs, found string",
     )
@@ -396,6 +399,37 @@ fn missing_capability_argument_repair_uses_source_coordinates_over_stale_offsets
         "second stale-offset pass must not corrupt the import: {second_applied}"
     );
     harn_parser::parse_source(&second_applied).expect("repeated apply must remain parse-safe");
+}
+
+#[test]
+fn missing_capability_argument_repair_preserves_parenthesized_first_argument() {
+    let source = "pipeline test(harness: Harness, params: dict) {\n  host_search_request((params ?? {}) + {path: \"root\"})\n}\n";
+    let program = harn_parser::parse_source(source).expect("source parses");
+    let diagnostic_offset = source.find("params ??").expect("first argument");
+    let prefix = &source[..diagnostic_offset];
+    let line = prefix.chars().filter(|ch| *ch == '\n').count() + 1;
+    let line_start = prefix.rfind('\n').map_or(0, |offset| offset + 1);
+    let column = source[line_start..diagnostic_offset].chars().count() + 1;
+    let stale_span = harn_lexer::Span::with_offsets(0, 0, line, column);
+
+    let (_, edits, _) = synthesize_missing_capability_argument_repair(
+        source,
+        &program,
+        stale_span,
+        "argument 1 `harness`: expected Harness, found dict",
+    )
+    .expect("capability migration repair");
+
+    let mut applied = source.to_string();
+    applied.replace_range(
+        edits[0].span.start..edits[0].span.end,
+        &edits[0].replacement,
+    );
+    assert!(
+        applied.contains("host_search_request(harness, (params ?? {}) + {path: \"root\"})"),
+        "capability must be inserted at the call boundary: {applied}"
+    );
+    harn_parser::parse_source(&applied).expect("repair must remain parse-safe");
 }
 
 #[test]
@@ -430,6 +464,55 @@ fn capability_only_plan_excludes_unrelated_repairs() {
         .repairs
         .iter()
         .all(|repair| { repair.repair.id.starts_with("bindings/thread-harness") }));
+}
+
+#[test]
+fn capability_apply_converges_transitive_repairs_in_one_invocation() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("capability_fixpoint.harn");
+    fs::write(
+        &script,
+        "fn needs_harness(harness: Harness, value: string) {\n  value\n}\n\nfn wrapper(value: string) {\n  needs_harness(value)\n}\n\npipeline run() {\n  wrapper(\"session\")\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    assert!(result.applied.len() >= 2, "{result:#?}");
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("fn wrapper(harness: Harness, value: string)"),
+        "expected transitive signature repair: {updated}"
+    );
+    assert!(
+        updated.contains("needs_harness(harness, value)"),
+        "expected explicit capability argument: {updated}"
+    );
+    assert!(
+        updated.contains("wrapper(harness, \"session\")"),
+        "expected caller threading in the same invocation: {updated}"
+    );
+    assert!(
+        updated.contains("pipeline run(harness: Harness)"),
+        "expected the pipeline entrypoint to declare its Harness grant: {updated}"
+    );
+    let plan = build_plan_with_options(
+        &script,
+        None,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(plan.repairs.is_empty(), "{plan:#?}");
 }
 
 #[test]
