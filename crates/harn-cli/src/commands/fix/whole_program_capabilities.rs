@@ -4,7 +4,7 @@
 //! diagnostics into one program-wide edit graph so a narrowed signature and
 //! every reachable caller move in the same apply pass.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use harn_builtin_meta::CapabilityId;
@@ -488,13 +488,31 @@ fn resolve_edges(
 }
 
 fn propagate_requirements(edges: &[ProgramEdge], requirements: &mut [BTreeSet<CapabilityId>]) {
-    loop {
-        let before = requirements.to_vec();
-        for edge in edges {
-            requirements[edge.caller].extend(before[edge.callee].iter().copied());
-        }
-        if *requirements == before {
-            break;
+    let mut callers_by_callee = vec![BTreeSet::new(); requirements.len()];
+    for edge in edges {
+        callers_by_callee[edge.callee].insert(edge.caller);
+    }
+
+    let mut queued = requirements
+        .iter()
+        .map(|requirement| !requirement.is_empty())
+        .collect::<Vec<_>>();
+    let mut pending = queued
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, queued)| queued.then_some(idx))
+        .collect::<VecDeque<_>>();
+
+    while let Some(callee) = pending.pop_front() {
+        queued[callee] = false;
+        let propagated = requirements[callee].clone();
+        for &caller in &callers_by_callee[callee] {
+            let before = requirements[caller].len();
+            requirements[caller].extend(propagated.iter().copied());
+            if requirements[caller].len() > before && !queued[caller] {
+                queued[caller] = true;
+                pending.push_back(caller);
+            }
         }
     }
 }
