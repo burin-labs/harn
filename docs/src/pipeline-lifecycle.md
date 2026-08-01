@@ -106,7 +106,7 @@ fn load_manifest(fs: HarnessFs, path: string) -> string {
 
 fn refresh_index(io: {fs: HarnessFs, tools: HarnessTools}, path: string) {
   let source = io.fs.read_text(path)
-  io.tools.invoke("index", {source})
+  io.tools.invoke("index", {source: source})
 }
 
 fn main(harness: Harness) {

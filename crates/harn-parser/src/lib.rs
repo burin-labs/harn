@@ -34,8 +34,9 @@ pub use builtin_signatures::install_builtin_manifest;
 /// completed the typed `Harness` capability migration.
 ///
 /// The bridge is intentionally opt-in and keeps the strict source surface as
-/// the default. Callers must set the value to exactly `1`; merely defining the
-/// variable is not sufficient.
+/// the default. Defining the variable is not enough: it must be set to one of
+/// `1`, `true`, `yes`, or `on`, so an empty or `0` value leaves strict
+/// enforcement in place.
 pub const HARN_LEGACY_AMBIENT_CAPABILITIES_ENV: &str = "HARN_LEGACY_AMBIENT_CAPABILITIES";
 
 pub fn legacy_ambient_capabilities_enabled() -> bool {
