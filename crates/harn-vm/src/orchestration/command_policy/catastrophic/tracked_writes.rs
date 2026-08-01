@@ -124,40 +124,24 @@ fn redirect_target(chars: &[char], mut cursor: usize) -> (String, usize) {
 fn is_protected_project_file(
     target: &str,
     active_cwd: Option<&Path>,
-    workspace_roots: &[String],
+    _workspace_roots: &[String],
 ) -> bool {
+    if target.contains(['$', '*', '?', '[', ']', '{', '}', '~']) {
+        // This floor is never approvable, so unresolved shell expansion must
+        // not turn a possible tracked path into a hard denial. Literal targets
+        // still use Git state below; the sandbox and approval layer own dynamic
+        // targets after the shell resolves them.
+        return false;
+    }
     let Some(cwd) = active_cwd else {
         return true;
     };
-    if target.contains(['$', '*', '?', '[', ']', '{', '}', '~']) {
-        // Without the shell's expansion result, block only when the active
-        // repository is inside a writable execution root. A local sandbox may
-        // be physically nested below the host checkout while its policy grants
-        // access only to the isolated session root; that enclosing repository
-        // is not command-owned state. A mounted repository is represented by a
-        // workspace root and remains protected.
-        return workspace_contains_git_root(cwd, workspace_roots);
-    }
     let target = resolved_target(cwd, target);
     match git_tracks_file(cwd, &target) {
         Some(tracked) => tracked,
         None if target.is_absolute() && !target.starts_with(cwd) => false,
         None => target.symlink_metadata().is_ok(),
     }
-}
-
-fn workspace_contains_git_root(cwd: &Path, workspace_roots: &[String]) -> bool {
-    let Some(repository_root) = git_root(cwd) else {
-        return false;
-    };
-    if workspace_roots.is_empty() {
-        return true;
-    }
-    workspace_roots.iter().any(|root| {
-        Path::new(root)
-            .canonicalize()
-            .is_ok_and(|root| repository_root.starts_with(root))
-    })
 }
 
 fn resolved_target(cwd: &Path, target: &str) -> PathBuf {
@@ -277,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_shell_expansions_are_blocked_only_in_a_git_project() {
+    fn unresolved_shell_expansions_are_not_hard_denied() {
         let temp = tempfile::tempdir().unwrap();
         let cwd = temp.path();
 
@@ -287,36 +271,18 @@ mod tests {
             &[],
         )
         .is_none());
+        assert!(redirect_over_tracked_reason("printf x > $OUTPUT", None, &[]).is_none());
 
         init_git(cwd);
         assert!(
-            redirect_over_tracked_reason("printf x > $PWD/result.txt", Some(cwd), &[]).is_some()
+            redirect_over_tracked_reason("printf x > $PWD/result.txt", Some(cwd), &[],).is_none()
         );
-    }
-
-    #[test]
-    fn unresolved_expansions_respect_writable_workspace_boundaries() {
-        let temp = tempfile::tempdir().unwrap();
-        let repository = temp.path();
-        init_git(repository);
-        let sandbox = repository.join("harn-sandbox-session");
-        std::fs::create_dir(&sandbox).unwrap();
-
-        let sandbox_roots = [sandbox.display().to_string()];
         assert!(redirect_over_tracked_reason(
-            "printf x > $OUTPUT/result.txt",
-            Some(&sandbox),
-            &sandbox_roots,
+            "printf x > \"$workspace/harn.toml\"",
+            Some(cwd),
+            &[cwd.display().to_string()],
         )
         .is_none());
-
-        let repository_roots = [repository.display().to_string()];
-        assert!(redirect_over_tracked_reason(
-            "printf x > $OUTPUT/result.txt",
-            Some(&sandbox),
-            &repository_roots,
-        )
-        .is_some());
     }
 
     #[test]
