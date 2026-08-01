@@ -37,7 +37,7 @@ dedupe_ttl_seconds }`). Config keys:
 |---|:---:|---|---|
 | `id` | no | generated `intake_<uuid>` | Pin the intake id; needed for dedupe to survive process restart. |
 | `path` | no | none | HTTP path scope. When set, `webhook_intake_feed` rejects deliveries on a different path. |
-| `secret` | yes | — | HMAC key. Accepts a string or a `bytes` value (e.g. from `secret_get`). |
+| `secret` | yes | — | HMAC key. Accepts a string or a `bytes` value (e.g. from `harness.secrets.read`). |
 | `signature_header` | yes | — | Header name carrying the signature, e.g. `"x-hub-signature-256"`. |
 | `signature_prefix` | no | `"<algorithm>="` (e.g. `"sha256="`) | Prefix to strip before decoding. Pass `""` to opt out. |
 | `signature_encoding` | no | `"hex"` | `"hex"` or `"base64"`. |

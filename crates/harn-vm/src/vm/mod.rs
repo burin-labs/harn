@@ -8,6 +8,7 @@ mod dispatch;
 mod execution;
 mod format;
 mod interrupts;
+mod introspection;
 pub mod iter;
 mod methods;
 mod module_phase_timing;
