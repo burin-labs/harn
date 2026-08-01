@@ -146,11 +146,11 @@ pipeline t(task) {
 #[test]
 fn legacy_imported_call_implicitly_supplies_only_the_leading_capability() {
     let imported = parse_program(
-        r#"
+        r"
 pub fn render(env: HarnessEnv, fs: HarnessFs, path: string, vars: dict = {}) -> string {
   return path
 }
-"#,
+",
     );
     let program = parse_program(
         r#"

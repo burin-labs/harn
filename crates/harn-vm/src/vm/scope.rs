@@ -4,6 +4,8 @@ use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 
 use super::{CallArgs, CallFrame, LocalSlot, Vm};
 
+type PreparedClosureLocals = (Vec<LocalSlot>, Option<Vec<LocalSlot>>, Option<Vec<VmValue>>);
+
 impl Vm {
     /// Build the call-time env for a closure invocation.
     ///
@@ -119,7 +121,7 @@ impl Vm {
         &self,
         closure: &VmClosure,
         args: &[VmValue],
-    ) -> Result<(Vec<LocalSlot>, Option<Vec<LocalSlot>>, Option<Vec<VmValue>>), VmError> {
+    ) -> Result<PreparedClosureLocals, VmError> {
         self.prepare_closure_local_slots_args(closure, &CallArgs::Slice(args))
     }
 
@@ -127,7 +129,7 @@ impl Vm {
         &self,
         closure: &VmClosure,
         args: &CallArgs<'_>,
-    ) -> Result<(Vec<LocalSlot>, Option<Vec<LocalSlot>>, Option<Vec<VmValue>>), VmError> {
+    ) -> Result<PreparedClosureLocals, VmError> {
         let legacy_args = self.legacy_ambient_call_args(closure, args)?;
         let adapted_args = legacy_args.as_deref().map(CallArgs::Slice);
         let effective_args = adapted_args.as_ref().unwrap_or(args);
