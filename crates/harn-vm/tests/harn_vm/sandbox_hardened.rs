@@ -145,6 +145,30 @@ fn active_backend_name_matches_target_os() {
     assert_eq!(process_sandbox::active_backend_name(), expected);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_sandbox_grants_only_the_childs_proc_self_maps_runtime_file() {
+    let workspace = tempfile::tempdir().unwrap();
+    let _guard = PolicyGuard::push(SandboxProfile::Worktree, workspace.path());
+    let helper = crate::support::process_helper();
+    let args = vec!["--proc-self-maps".to_string()];
+    let mut command =
+        process_sandbox::std_command_for(&helper, &args).expect("prepare sandboxed process helper");
+    command.current_dir(workspace.path());
+
+    let output = command.output().expect("run sandboxed process helper");
+    assert!(
+        output.status.success(),
+        "sandboxed runtime probe failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "maps-readable|environ-denied"
+    );
+}
+
 #[test]
 fn sandbox_profile_string_round_trips() {
     for profile in [

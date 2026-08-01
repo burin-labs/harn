@@ -338,6 +338,7 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
     }
+    install_current_process_maps_rule(profile)?;
     unsafe {
         if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
             return Err(io::Error::last_os_error());
@@ -348,6 +349,60 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Permit the process to read its own memory map without exposing procfs.
+///
+/// Swift's Linux runtime reads `/proc/self/maps` while initializing
+/// `CommandLine.arguments`. When Landlock denies that file, every Swift
+/// process observes an empty argument vector even though the kernel supplied
+/// `argc`/`argv`; `swift` and `swiftc` then trap before doing useful work.
+///
+/// `/proc/self` is a dynamic symlink, so a file descriptor opened while the
+/// policy is prepared belongs to the parent process and cannot authorize the
+/// eventual child. Open and register the single file in `pre_exec`, after the
+/// fork but before Landlock restricts the child. The raw syscalls are
+/// async-signal-safe and the rule grants only READ_FILE on this process's maps
+/// inode. In particular, it does not expose `/proc/self/environ` or any sibling
+/// process under `/proc`.
+fn install_current_process_maps_rule(profile: &LandlockProfile) -> io::Result<()> {
+    const PROC_SELF_MAPS: &[u8] = b"/proc/self/maps\0";
+
+    let fd = unsafe {
+        libc::open(
+            PROC_SELF_MAPS.as_ptr().cast(),
+            libc::O_PATH | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::NotFound {
+            return Ok(());
+        }
+        return Err(error);
+    }
+
+    let path_beneath = LandlockPathBeneathAttr {
+        allowed_access: LANDLOCK_ACCESS_FS_READ_FILE & profile.handled_access_fs,
+        parent_fd: fd,
+    };
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_landlock_add_rule,
+            profile.ruleset_fd,
+            LANDLOCK_RULE_PATH_BENEATH,
+            &raw const path_beneath,
+            0,
+        )
+    };
+    let error = (result < 0).then(io::Error::last_os_error);
+    unsafe {
+        libc::close(fd);
+    }
+    match error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 /// Compile the syscall allowlist into a BPF program.

@@ -32,6 +32,20 @@ fn main() {
                 .unwrap_or_default();
             thread::sleep(Duration::from_millis(millis));
         }
+        #[cfg(target_os = "linux")]
+        Some("--proc-self-maps") => {
+            let maps =
+                std::fs::read_to_string("/proc/self/maps").expect("read this process's memory map");
+            assert!(
+                !maps.is_empty(),
+                "this process's memory map must not be empty"
+            );
+            assert!(
+                std::fs::read("/proc/self/environ").is_err(),
+                "the narrow maps grant must not expose this process's environment"
+            );
+            write_stdout("maps-readable|environ-denied");
+        }
         Some(name) => {
             write_stdout(env::var(name).unwrap_or_default());
         }
