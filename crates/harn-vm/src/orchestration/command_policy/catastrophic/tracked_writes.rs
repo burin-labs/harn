@@ -120,11 +120,12 @@ fn is_protected_project_file(target: &str, active_cwd: Option<&Path>) -> bool {
     let Some(cwd) = active_cwd else {
         return true;
     };
-    if is_sandbox_output_target(target) {
-        return false;
-    }
     if target.contains(['$', '*', '?', '[', ']', '{', '}', '~']) {
-        return true;
+        // Without the shell's expansion result, an in-project dynamic path
+        // cannot be proven safe. A non-Git execution root (including the
+        // isolated local-sandbox session) has no tracked project state for
+        // this classifier to protect.
+        return git_root(cwd).is_some();
     }
     let target = resolved_target(cwd, target);
     match git_tracks_file(cwd, &target) {
@@ -132,12 +133,6 @@ fn is_protected_project_file(target: &str, active_cwd: Option<&Path>) -> bool {
         None if target.is_absolute() && !target.starts_with(cwd) => false,
         None => target.symlink_metadata().is_ok(),
     }
-}
-
-fn is_sandbox_output_target(target: &str) -> bool {
-    ["$HARN_OUTPUTS_DIR/", "${HARN_OUTPUTS_DIR}/"]
-        .iter()
-        .any(|prefix| target.starts_with(prefix))
 }
 
 fn resolved_target(cwd: &Path, target: &str) -> PathBuf {
@@ -150,16 +145,7 @@ fn resolved_target(cwd: &Path, target: &str) -> PathBuf {
 }
 
 fn git_tracks_file(cwd: &Path, target: &Path) -> Option<bool> {
-    let root_output = git_command(cwd)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
-    if !root_output.status.success() {
-        return None;
-    }
-    let root = PathBuf::from(String::from_utf8(root_output.stdout).ok()?.trim())
-        .canonicalize()
-        .ok()?;
+    let root = git_root(cwd)?;
     let absolute_target = if target.is_absolute() {
         target.to_path_buf()
     } else {
@@ -175,6 +161,19 @@ fn git_tracks_file(cwd: &Path, target: &Path) -> Option<bool> {
         .output()
         .ok()?;
     Some(output.status.success())
+}
+
+fn git_root(cwd: &Path) -> Option<PathBuf> {
+    let root_output = git_command(cwd)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    if !root_output.status.success() {
+        return None;
+    }
+    PathBuf::from(String::from_utf8(root_output.stdout).ok()?.trim())
+        .canonicalize()
+        .ok()
 }
 
 fn canonical_target(target: &Path) -> Option<PathBuf> {
@@ -253,16 +252,17 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_output_mount_is_writable_without_weakening_unknown_expansions() {
+    fn unresolved_shell_expansions_are_blocked_only_in_a_git_project() {
         let temp = tempfile::tempdir().unwrap();
         let cwd = temp.path();
-        init_git(cwd);
 
         assert!(redirect_over_tracked_reason(
             "printf x > \"$HARN_OUTPUTS_DIR/result.txt\"",
             Some(cwd),
         )
         .is_none());
+
+        init_git(cwd);
         assert!(redirect_over_tracked_reason("printf x > $PWD/result.txt", Some(cwd)).is_some());
     }
 
