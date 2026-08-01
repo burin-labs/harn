@@ -353,11 +353,11 @@ fn review_branch(task) {}
 }
 
 #[test]
-fn test_flow_predicate_mode_attributes_warn_off_callable_declarations() {
+fn test_flow_predicate_mode_attributes_warn_off_function_declarations() {
     let diagnostics = diagnostics_with_code(
         r"
 @deterministic
-struct Invalid { value: int }
+pipeline invalid(task) {}
 ",
         Code::InvalidAttributeTarget,
         DiagnosticSeverity::Warning,

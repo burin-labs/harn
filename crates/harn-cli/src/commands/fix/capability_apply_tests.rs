@@ -380,9 +380,9 @@ fn capability_apply_threads_ast_into_a_predicate_entrypoint() {
 }
 
 #[test]
-fn capability_apply_narrows_a_flow_pipeline_to_the_injected_ast_contract() {
+fn capability_apply_does_not_classify_a_bare_invariant_pipeline_as_flow() {
     let (result, updated) = apply_single(
-        "import { ast_search } from \"std/ast\"\n\n@invariant\n@deterministic\n@archivist(evidence: [\"https://example.com/a\", \"https://example.org/b\"], confidence: 0.9, source_date: \"2026-08-01\")\npipeline inspect(slice, _ctx, _repo) {\n  ast_search({source: slice, query: \"(_) @node\", language: \"zig\"})\n}\n",
+        "import { ast_search } from \"std/ast\"\n\n@invariant\npipeline inspect(slice, _ctx, _repo) {\n  ast_search({source: slice, query: \"(_) @node\", language: \"zig\"})\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -390,11 +390,11 @@ fn capability_apply_narrows_a_flow_pipeline_to_the_injected_ast_contract() {
     );
     assert_eq!(
         callable_params(&updated, "inspect")[0],
-        param("harness", "HarnessAst")
+        param("harness", "Harness")
     );
     assert_eq!(
         call_argument_paths(&updated, "ast_search")[0][0],
-        Some("harness".to_string())
+        Some("harness.ast".to_string())
     );
 }
 

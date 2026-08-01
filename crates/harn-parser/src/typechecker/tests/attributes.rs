@@ -134,56 +134,18 @@ fn inspect(
 }
 
 #[test]
-fn flow_invariant_checks_tool_and_pipeline_signatures() {
-    let source = r#"
+fn flow_invariant_boundary_matches_runtime_discovery_kind() {
+    let source = r"
 @invariant
-@deterministic
-@archivist(evidence: ["https://example.com/a", "https://example.org/b"], confidence: 0.9, source_date: "2026-08-01")
 tool inspect_tool(fs: HarnessFs, slice, _ctx, _repo) -> bool { return true }
 
 @invariant
-@deterministic
-@archivist(evidence: ["https://example.com/a", "https://example.org/b"], confidence: 0.9, source_date: "2026-08-01")
 pipeline inspect_pipeline(network: HarnessNet, slice, _ctx, _repo) {}
-"#;
+";
     let diagnostics = diagnostics_with_code(
         source,
         Code::FlowInvariantAttributeInvalid,
         DiagnosticSeverity::Error,
     );
-    let contracts = diagnostics
-        .iter()
-        .map(|diagnostic| match diagnostic.details.as_ref() {
-            Some(DiagnosticDetails::FlowCapabilityBoundary {
-                parameter,
-                capabilities,
-                allowed,
-            }) => (parameter.clone(), capabilities.clone(), allowed.clone()),
-            details => panic!("expected typed Flow capability detail, got {details:?}"),
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        contracts,
-        [
-            (
-                "fs".to_string(),
-                vec!["HarnessFs".to_string()],
-                vec!["HarnessAst".to_string()],
-            ),
-            (
-                "network".to_string(),
-                vec!["HarnessNet".to_string()],
-                vec!["HarnessAst".to_string()],
-            ),
-        ]
-    );
-    assert!(
-        diagnostics_with_code(
-            source,
-            Code::InvalidAttributeTarget,
-            DiagnosticSeverity::Warning,
-        )
-        .is_empty(),
-        "Flow companion attributes must share the callable target contract"
-    );
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
 }

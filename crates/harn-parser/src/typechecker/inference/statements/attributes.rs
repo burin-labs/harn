@@ -120,16 +120,11 @@ impl TypeChecker {
             if matches!(
                 attr.name.as_str(),
                 "deterministic" | "semantic" | "archivist" | "retroactive"
-            ) && !matches!(
-                inner.node,
-                Node::FnDecl { .. } | Node::ToolDecl { .. } | Node::Pipeline { .. }
-            ) {
+            ) && !matches!(inner.node, Node::FnDecl { .. })
+            {
                 self.warning_at(
                     Code::InvalidAttributeTarget,
-                    format!(
-                        "`@{}` only applies to function, tool, or pipeline declarations",
-                        attr.name
-                    ),
+                    format!("`@{}` only applies to function declarations", attr.name),
                     attr.span,
                 );
             }
@@ -152,9 +147,8 @@ impl TypeChecker {
         // bare `@invariant` (no arguments) is present — that's the Flow
         // predicate marker. Handler-IR-style `@invariant("name", ...)` keeps
         // its existing semantics validated by `harn_ir`.
-        let flow_invariant = attributes
-            .iter()
-            .find(|a| a.name == "invariant" && a.args.is_empty());
+        let flow_invariant = crate::flow_predicate_attribute(attributes)
+            .filter(|_| crate::is_flow_predicate_declaration(attributes, inner));
         let deterministic = attributes.iter().find(|a| a.name == "deterministic");
         let semantic = attributes.iter().find(|a| a.name == "semantic");
         let archivist = attributes.iter().find(|a| a.name == "archivist");
@@ -217,11 +211,8 @@ impl TypeChecker {
     }
 
     fn validate_flow_capability_boundary(&mut self, inner: &SNode) {
-        let params = match &inner.node {
-            Node::FnDecl { params, .. }
-            | Node::ToolDecl { params, .. }
-            | Node::Pipeline { params, .. } => params,
-            _ => return,
+        let Node::FnDecl { params, .. } = &inner.node else {
+            return;
         };
         let requests_ast = crate::is_flow_ast_injection_request(
             params
