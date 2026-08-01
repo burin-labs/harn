@@ -35,10 +35,10 @@ use super::signing::{
     verify_session_chain,
 };
 use super::store::{
-    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
-    SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, SessionType, Snapshot,
-    SnapshotId, StoreContention, StoreError, StoreHooks, StoreResult, TruncateResult,
-    UpdateSession, VerifyReport, MAX_READ_BATCH,
+    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ListOrder,
+    ListSortKey, ReadRange, SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore,
+    SessionType, Snapshot, SnapshotId, StoreContention, StoreError, StoreHooks, StoreResult,
+    TruncateResult, UpdateSession, VerifyReport, MAX_READ_BATCH,
 };
 
 const SCHEMA_VERSION: i64 = 4;

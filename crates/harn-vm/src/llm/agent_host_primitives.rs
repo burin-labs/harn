@@ -21,7 +21,7 @@ mod tool_catalog;
 use denial_results::{
     agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value, DenialEvidence,
 };
-use dispatch_policy::{enforce_dispatch_policies, tool_denial_from_policy};
+use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
     emit_permission_event, emit_permission_event_with_policy, request_host_permission,
     HostPermissionOutcome, HostPermissionRequest,
@@ -881,15 +881,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
     } else {
         None
     };
+    let dispatch_policy =
+        DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
     let mut approval_status = None;
-    if let Err(policy_denial) = enforce_dispatch_policies(
-        policy_machinery_active,
-        &tool_name,
-        &tool_args,
-        dispatch_annotations.as_ref(),
-        None,
-    ) {
+    if let Err(policy_denial) = dispatch_policy.enforce(&tool_name, &tool_args, None) {
         if let Some(violation) = policy_denial.side_effect_ceiling {
             // A side-effect ceiling is the one static policy refusal that can
             // offer an explicit, dispatch-local ACP approval. The grant below
@@ -913,13 +909,9 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             "side-effect approval missing its policy violation".to_string(),
                         ));
                     };
-                    if let Err(recheck_denial) = enforce_dispatch_policies(
-                        policy_machinery_active,
-                        &tool_name,
-                        &tool_args,
-                        dispatch_annotations.as_ref(),
-                        Some(&grant),
-                    ) {
+                    if let Err(recheck_denial) =
+                        dispatch_policy.enforce(&tool_name, &tool_args, Some(&grant))
+                    {
                         let denial = tool_denial_from_policy(recheck_denial, &tool_name);
                         return Ok(deny_tool_call_value(
                             Some(&ctx),

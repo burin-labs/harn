@@ -221,6 +221,29 @@ pub struct ListFilter {
     pub limit: Option<usize>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Timestamp used to order and paginate matching sessions.
+    #[serde(default)]
+    pub sort_by: ListSortKey,
+    /// Direction for `sort_by`. Session ids remain ascending as the stable
+    /// tie-breaker in both directions.
+    #[serde(default)]
+    pub order: ListOrder,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListSortKey {
+    #[default]
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListOrder {
+    #[default]
+    Ascending,
+    Descending,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
