@@ -34,9 +34,20 @@ impl Linter<'_> {
         if harness_stdio_replacement(name).is_some() {
             return;
         }
-        let Some(replacement) = renamed_stdlib_symbol(name) else {
+        let Some(replacement) =
+            renamed_stdlib_symbol(name).or_else(|| harn_parser::legacy_builtin_alias_target(name))
+        else {
             return;
         };
+        // An import of the old spelling is the case this rule exists for, so
+        // only a definition in this file takes the name back.
+        if self
+            .fn_declarations
+            .iter()
+            .any(|declaration| declaration.name == name)
+        {
+            return;
+        }
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintRenamedStdlibSymbol,
             rule: "renamed-stdlib-symbol".into(),

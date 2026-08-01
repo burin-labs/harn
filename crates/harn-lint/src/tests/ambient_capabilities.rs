@@ -353,6 +353,35 @@ fn forward_declared_callable_is_not_an_ambient_harness_method() {
 }
 
 #[test]
+fn removed_alias_spelling_is_rewritten_to_the_name_that_replaced_it() {
+    let source =
+        "fn main(harness: Harness) {\n  const slug = regex_replace_all(\"[^a-z]+\", \"_\", \"a b\")\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "renamed-stdlib-symbol"),
+        1,
+        "an exact behavior-preserving rename should carry its own repair: {diags:?}"
+    );
+
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("regex_replace(\"[^a-z]+\""),
+        "the alias should be rewritten in place: {fixed}"
+    );
+}
+
+#[test]
+fn locally_defined_name_keeps_its_own_meaning_over_a_rename() {
+    let source = "fn regex_replace_all(pattern, replacement, text) {\n  return text\n}\nfn main(harness: Harness) {\n  const slug = regex_replace_all(\"a\", \"b\", \"c\")\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "renamed-stdlib-symbol"),
+        0,
+        "a source callable shadows the removed spelling: {diags:?}"
+    );
+}
+
+#[test]
 fn wildcard_imported_callable_is_not_an_ambient_harness_method() {
     let source = "import \"std/runtime\"\nfn main(harness: Harness) {\n  runtime_prompt_content(harness.runtime)\n}\n";
     let diags = lint_source(source);
