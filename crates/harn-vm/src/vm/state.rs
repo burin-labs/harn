@@ -358,6 +358,10 @@ pub(crate) enum VmBuiltinDispatch {
 pub(crate) struct VmBuiltinEntry {
     pub(crate) name: Arc<str>,
     pub(crate) dispatch: VmBuiltinDispatch,
+    /// Static effect specs for source-visible capability/privileged builtins.
+    /// Keeping this beside the numeric dispatch entry makes pure direct calls
+    /// pay one `Option` branch instead of consulting the manifest by name.
+    pub(crate) recorded_effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
 }
 
 /// The Harn bytecode virtual machine.
@@ -371,7 +375,7 @@ pub struct Vm {
     /// they implement. Unlike ordinary builtins these names never enter the
     /// source namespace: they are reachable only through a `Harness*` value.
     pub(crate) capability_methods:
-        Arc<BTreeMap<(harn_builtin_meta::CapabilityId, String), VmBuiltinDispatch>>,
+        Arc<BTreeMap<harn_builtin_meta::CapabilityId, BTreeMap<String, VmBuiltinDispatch>>>,
     pub(crate) builtin_metadata: Arc<BTreeMap<String, VmBuiltinMetadata>>,
     /// Numeric side index for builtins. Name-keyed maps remain authoritative;
     /// this index is the hot path for direct builtin bytecode and callback refs.
@@ -553,7 +557,8 @@ pub struct Vm {
 pub struct VmBaseline {
     builtins: Arc<BTreeMap<String, VmBuiltinFn>>,
     async_builtins: Arc<BTreeMap<String, VmAsyncBuiltinFn>>,
-    capability_methods: Arc<BTreeMap<(harn_builtin_meta::CapabilityId, String), VmBuiltinDispatch>>,
+    capability_methods:
+        Arc<BTreeMap<harn_builtin_meta::CapabilityId, BTreeMap<String, VmBuiltinDispatch>>>,
     builtin_metadata: Arc<BTreeMap<String, VmBuiltinMetadata>>,
     builtins_by_id: Arc<HashMap<BuiltinId, VmBuiltinEntry>>,
     builtin_id_collisions: Arc<HashSet<BuiltinId>>,
@@ -972,15 +977,8 @@ impl Vm {
         method: &str,
         args: &[VmValue],
     ) {
-        let Some(entry) = crate::stdlib::all_builtin_manifest().iter().find(|entry| {
-            matches!(
-                entry.contract.exposure,
-                harn_builtin_meta::BuiltinExposure::HarnessMethod {
-                    capability: candidate,
-                    method: candidate_method,
-                } if candidate == capability && candidate_method == method
-            )
-        }) else {
+        let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method)
+        else {
             return;
         };
         let effects =
@@ -992,21 +990,18 @@ impl Vm {
     }
 
     pub(crate) fn record_builtin_contract_effects(&self, name: &str, args: &[VmValue]) {
-        let Some(entry) = crate::stdlib::all_builtin_manifest()
-            .iter()
-            .find(|entry| entry.name == name)
-        else {
+        let Some(entry) = crate::stdlib::recorded_effect_builtin_manifest_entry(name) else {
             return;
         };
-        if !matches!(
-            entry.contract.exposure,
-            harn_builtin_meta::BuiltinExposure::CapabilityFunction { .. }
-                | harn_builtin_meta::BuiltinExposure::PrivilegedWire
-        ) {
-            return;
-        }
-        let effects =
-            crate::orchestration::runtime_effects_from_contract(entry.contract.effects, args);
+        self.record_builtin_effect_specs(entry.contract.effects, args);
+    }
+
+    pub(crate) fn record_builtin_effect_specs(
+        &self,
+        specs: &'static [harn_builtin_meta::EffectSpec],
+        args: &[VmValue],
+    ) {
+        let effects = crate::orchestration::runtime_effects_from_contract(specs, args);
         self.executed_effects
             .lock()
             .expect("executed effect recorder poisoned")

@@ -380,10 +380,7 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
-    if let Some(entry) = crate::stdlib::all_builtin_manifest()
-        .iter()
-        .find(|entry| entry.name == name)
-    {
+    if let Some(entry) = crate::stdlib::builtin_manifest_entry(name) {
         if let harn_builtin_meta::BuiltinExposure::CapabilityFunction { authority_argument } =
             entry.contract.exposure
         {
@@ -626,16 +623,7 @@ pub fn enforce_current_policy_for_capability(
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
-    let entry = crate::stdlib::all_builtin_manifest().iter().find(|entry| {
-        matches!(
-            entry.contract.exposure,
-            harn_builtin_meta::BuiltinExposure::HarnessMethod {
-                capability: candidate,
-                method: candidate_method,
-            } if candidate == capability && candidate_method == method
-        )
-    });
-    let Some(entry) = entry else {
+    let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
         return reject_policy(format!(
             "undeclared Harness capability method `harness.{}.{method}`",
             capability.field_name()

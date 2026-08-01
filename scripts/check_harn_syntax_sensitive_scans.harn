@@ -141,6 +141,12 @@ pub fn line_has_let_only_harn_binding_regex(line: string) -> bool {
 }
 
 pub fn line_has_stale_var_tool_registry_example(line: string) -> bool {
+  // This guard runs across every line in the candidate corpus. Avoid compiling
+  // and executing the structural regex for the overwhelming majority of lines
+  // that cannot possibly match it.
+  if !line.contains("tool_registry") || !line.contains("var") {
+    return false
+  }
   return len(
     regex_captures(r"(^|[^A-Za-z0-9_])var\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*tool_registry\s*\(", line),
   )
@@ -171,13 +177,25 @@ pub fn line_has_retired_long_running_option(path: string, line: string) -> bool 
   return bare || quoted_key || parser_key || documented_key
 }
 
+pub fn text_has_syntax_sensitive_candidate(text: string) -> bool {
+  return text.contains("let\\\\s")
+    || text.contains("tool_registry")
+    || text.contains("long_running")
+}
+
 pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
   let findings = []
-  const lines = text.split("\n")
-  let index = 0
-  while index < len(lines) {
-    const line = lines[index]
-    const line_no = index + 1
+  // Each detector below has one mandatory literal. Let the native regex engine
+  // select those lines in one linear pass instead of interpreting every line
+  // in Harn. `regex_captures` reports the 1-based match line, preserving exact
+  // diagnostics while keeping repository scans proportional to actual hits.
+  // Split the binding token so this guard does not diagnose its own pattern.
+  const binding_pattern = r"let\\\\" + "s"
+  const candidate_pattern = r"(?m)^.*(?:" + binding_pattern + r"|tool_registry|long_running).*$"
+  const candidate_lines = regex_captures(candidate_pattern, text)
+  for candidate in candidate_lines {
+    const line = candidate.match
+    const line_no = candidate.line
     if line_has_let_only_harn_binding_regex(line) {
       findings = findings.appending(
         line_finding(
@@ -208,7 +226,6 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
         ),
       )
     }
-    index = index + 1
   }
   return findings
 }
@@ -232,6 +249,13 @@ pub fn check_harn_syntax_sensitive_scans(
   for rel in candidates {
     const path = path_join(resolved_root, rel)
     const text = fs.read_text(path)
+    // The filesystem fallback intentionally enumerates every supported source
+    // file when process-backed git discovery is unavailable (for example in a
+    // restricted portable runtime). Preserve the same literal narrowing as the
+    // git fast path before invoking any regex-backed detector.
+    if !text_has_syntax_sensitive_candidate(text) {
+      continue
+    }
     for finding in harn_syntax_sensitive_scan_text(rel, text) {
       findings = findings.appending(finding)
     }

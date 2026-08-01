@@ -87,15 +87,8 @@ pub fn connector_export_denied_harness_method_reason(
     method: &str,
 ) -> Option<String> {
     let policy = default_connector_export_policy(export)?;
-    let entry = crate::stdlib::all_builtin_manifest().iter().find(|entry| {
-        matches!(
-            entry.contract.exposure,
-            harn_builtin_meta::BuiltinExposure::HarnessMethod {
-                capability,
-                method: candidate_method,
-            } if capability.field_name() == capability_field && candidate_method == method
-        )
-    })?;
+    let capability = harn_builtin_meta::CapabilityId::from_field_name(capability_field)?;
+    let entry = crate::stdlib::capability_method_manifest_entry(capability, method)?;
     let denied = crate::orchestration::runtime_effects_from_contract(entry.contract.effects, &[])
         .into_iter()
         .find(|effect| !crate::orchestration::effect_allowed_by_ceiling(effect, &policy))?;

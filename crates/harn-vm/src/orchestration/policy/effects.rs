@@ -179,21 +179,9 @@ fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<EffectRecord> {
             .and_then(|path| path.split_once('.'))
             .and_then(|(field, method)| {
                 let capability = harn_builtin_meta::CapabilityId::from_field_name(field)?;
-                crate::stdlib::all_builtin_manifest().iter().find(|entry| {
-                    matches!(
-                        entry.contract.exposure,
-                        harn_builtin_meta::BuiltinExposure::HarnessMethod {
-                            capability: candidate,
-                            method: candidate_method,
-                        } if candidate == capability && candidate_method == method
-                    )
-                })
+                crate::stdlib::capability_method_manifest_entry(capability, method)
             })
-            .or_else(|| {
-                crate::stdlib::all_builtin_manifest()
-                    .iter()
-                    .find(|entry| entry.name == call.name)
-            });
+            .or_else(|| crate::stdlib::builtin_manifest_entry(&call.name));
         if let Some(entry) = contract {
             return effect_specs_to_records(entry.contract.effects, &call.literal_args);
         }
@@ -729,15 +717,7 @@ fn harness_method_effects(node: &SNode, bindings: &CapabilityBindings) -> Vec<Ef
     let Some(capability) = capability else {
         return Vec::new();
     };
-    let Some(entry) = crate::stdlib::all_builtin_manifest().iter().find(|entry| {
-        matches!(
-            entry.contract.exposure,
-            harn_builtin_meta::BuiltinExposure::HarnessMethod {
-                capability: candidate,
-                method: candidate_method,
-            } if candidate == capability && candidate_method == method
-        )
-    }) else {
+    let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
         return Vec::new();
     };
     let literal_args = args.iter().map(harn_ir::literal_value).collect::<Vec<_>>();
@@ -1246,9 +1226,7 @@ fn main(harness: Harness) {
 
     #[test]
     fn runtime_llm_contract_combines_provider_and_model_resources() {
-        let entry = crate::stdlib::all_builtin_manifest()
-            .iter()
-            .find(|entry| entry.name == "__cap_llm_call")
+        let entry = crate::stdlib::builtin_manifest_entry("__cap_llm_call")
             .expect("LLM capability manifest entry");
         let options = VmValue::dict(crate::value::DictMap::from_iter([
             ("provider", VmValue::String("anthropic".into())),

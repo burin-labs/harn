@@ -25,6 +25,11 @@ struct BuiltinObservation<'a> {
     _timer: Option<crate::builtin_profile::BuiltinTimer<'a>>,
 }
 
+struct ResolvedSyncBuiltin {
+    handler: VmBuiltinFn,
+    recorded_effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
+}
+
 impl Vm {
     fn builtin_span_kind(name: &str) -> Option<crate::tracing::SpanKind> {
         match name {
@@ -79,7 +84,7 @@ impl Vm {
         &self,
         direct_id: Option<BuiltinId>,
         name: &str,
-    ) -> Option<Result<VmBuiltinFn, VmError>> {
+    ) -> Option<Result<ResolvedSyncBuiltin, VmError>> {
         if crate::autonomy::needs_async_side_effect_enforcement(name)
             || Self::is_runtime_context_builtin(name)
         {
@@ -90,15 +95,16 @@ impl Vm {
             self.builtins_by_id
                 .get(&id)
                 .filter(|entry| entry.name.as_ref() == name)
-                .map(|entry| entry.dispatch.clone())
+                .map(|entry| (entry.dispatch.clone(), entry.recorded_effects))
         } else {
             None
         }
         .or_else(|| {
-            self.builtins
-                .get(name)
-                .cloned()
-                .map(VmBuiltinDispatch::Sync)
+            self.builtins.get(name).cloned().map(|builtin| {
+                let recorded_effects = crate::stdlib::recorded_effect_builtin_manifest_entry(name)
+                    .map(|entry| entry.contract.effects);
+                (VmBuiltinDispatch::Sync(builtin), recorded_effects)
+            })
         });
 
         let Some(dispatch) = dispatch else {
@@ -122,12 +128,20 @@ impl Vm {
         };
 
         match dispatch {
-            VmBuiltinDispatch::Sync(builtin) => Some(Ok(builtin)),
-            VmBuiltinDispatch::Async(_) => None,
+            (VmBuiltinDispatch::Sync(builtin), recorded_effects) => Some(Ok(ResolvedSyncBuiltin {
+                handler: builtin,
+                recorded_effects,
+            })),
+            (VmBuiltinDispatch::Async(_), _) => None,
         }
     }
 
-    fn validate_sync_builtin_args(&self, name: &str, args: &[VmValue]) -> Result<(), VmError> {
+    fn validate_sync_builtin_args(
+        &self,
+        name: &str,
+        args: &[VmValue],
+        recorded_effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
+    ) -> Result<(), VmError> {
         if self.denied_builtins.contains(name) {
             return Err(VmError::CategorizedError {
                 message: format!("Tool '{name}' is not permitted."),
@@ -135,7 +149,9 @@ impl Vm {
             });
         }
         crate::orchestration::enforce_current_policy_for_builtin(name, args)?;
-        self.record_builtin_contract_effects(name, args);
+        if let Some(specs) = recorded_effects {
+            self.record_builtin_effect_specs(specs, args);
+        }
         crate::typecheck::validate_builtin_call(name, args, None)
     }
 
@@ -156,6 +172,8 @@ impl Vm {
             VmBuiltinEntry {
                 name: std::sync::Arc::from(name),
                 dispatch,
+                recorded_effects: crate::stdlib::recorded_effect_builtin_manifest_entry(name)
+                    .map(|entry| entry.contract.effects),
             },
         );
     }
@@ -280,8 +298,11 @@ impl Vm {
             .collect::<Vec<_>>();
 
         for (capability, method, name, kind) in projections {
-            let key = (capability, method.to_string());
-            if self.capability_methods.contains_key(&key) {
+            if self
+                .capability_methods
+                .get(&capability)
+                .is_some_and(|methods| methods.contains_key(method))
+            {
                 continue;
             }
             let dispatch = match kind {
@@ -302,7 +323,10 @@ impl Vm {
                     capability.field_name()
                 )
             });
-            Arc::make_mut(&mut self.capability_methods).insert(key, dispatch);
+            Arc::make_mut(&mut self.capability_methods)
+                .entry(capability)
+                .or_default()
+                .insert(method.to_string(), dispatch);
         }
     }
 
@@ -415,8 +439,10 @@ impl Vm {
         method: &str,
         dispatch: VmBuiltinDispatch,
     ) {
-        let key = (capability, method.to_string());
-        let replaced = Arc::make_mut(&mut self.capability_methods).insert(key, dispatch);
+        let replaced = Arc::make_mut(&mut self.capability_methods)
+            .entry(capability)
+            .or_default()
+            .insert(method.to_string(), dispatch);
         assert!(
             replaced.is_none(),
             "capability method harness.{}.{} registered twice",
@@ -705,17 +731,19 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             }));
         }
-        let builtin = match self.resolve_sync_builtin_id_or_name(direct_id, name)? {
-            Ok(builtin) => builtin,
+        let resolved = match self.resolve_sync_builtin_id_or_name(direct_id, name)? {
+            Ok(resolved) => resolved,
             Err(error) => return Some(Err(error)),
         };
         let _observe = Self::observe_builtin_call(name);
-        if let Err(error) = args.with_slice(|slice| self.validate_sync_builtin_args(name, slice)) {
+        if let Err(error) = args.with_slice(|slice| {
+            self.validate_sync_builtin_args(name, slice, resolved.recorded_effects)
+        }) {
             return Some(Err(error));
         }
 
         let _interrupt = self.sync_builtin_interrupt_guard();
-        Some(args.with_slice(|slice| builtin(slice, &mut self.output)))
+        Some(args.with_slice(|slice| (resolved.handler)(slice, &mut self.output)))
     }
 
     pub(crate) fn try_call_sync_builtin_id_or_name_from_stack_args(
@@ -730,8 +758,8 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             }));
         }
-        let builtin = match self.resolve_sync_builtin_id_or_name(direct_id, name)? {
-            Ok(builtin) => builtin,
+        let resolved = match self.resolve_sync_builtin_id_or_name(direct_id, name)? {
+            Ok(resolved) => resolved,
             Err(error) => return Some(Err(error)),
         };
         if args_start > self.stack.len() {
@@ -741,12 +769,19 @@ impl Vm {
         }
 
         let _observe = Self::observe_builtin_call(name);
-        if let Err(error) = self.validate_sync_builtin_args(name, &self.stack[args_start..]) {
+        if let Err(error) = self.validate_sync_builtin_args(
+            name,
+            &self.stack[args_start..],
+            resolved.recorded_effects,
+        ) {
             return Some(Err(error));
         }
 
         let _interrupt = self.sync_builtin_interrupt_guard();
-        Some(builtin(&self.stack[args_start..], &mut self.output))
+        Some((resolved.handler)(
+            &self.stack[args_start..],
+            &mut self.output,
+        ))
     }
 
     async fn call_builtin_impl(

@@ -507,6 +507,111 @@ pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::Built
     .as_slice()
 }
 
+/// Indexed view of the authoritative builtin manifest.
+///
+/// Runtime dispatch reaches this boundary for every typed Harness call. Keep
+/// lookup policy here with the manifest owner instead of making each consumer
+/// linearly rescan the full registry. The nested capability map also accepts a
+/// borrowed `&str`, so a method call does not allocate an owned lookup key.
+struct BuiltinManifestIndex {
+    by_name: std::collections::HashMap<
+        &'static str,
+        &'static harn_builtin_registry::BuiltinManifestEntry,
+    >,
+    by_capability: std::collections::HashMap<
+        harn_builtin_meta::CapabilityId,
+        std::collections::HashMap<
+            &'static str,
+            &'static harn_builtin_registry::BuiltinManifestEntry,
+        >,
+    >,
+    recorded_effects_by_name: std::collections::HashMap<
+        &'static str,
+        &'static harn_builtin_registry::BuiltinManifestEntry,
+    >,
+}
+
+fn builtin_manifest_index() -> &'static BuiltinManifestIndex {
+    use harn_builtin_meta::BuiltinExposure;
+    use std::sync::OnceLock;
+
+    static INDEX: OnceLock<BuiltinManifestIndex> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut by_name = std::collections::HashMap::new();
+        let mut by_capability: std::collections::HashMap<
+            harn_builtin_meta::CapabilityId,
+            std::collections::HashMap<
+                &'static str,
+                &'static harn_builtin_registry::BuiltinManifestEntry,
+            >,
+        > = std::collections::HashMap::new();
+        let mut recorded_effects_by_name = std::collections::HashMap::new();
+        for entry in all_builtin_manifest() {
+            assert!(
+                by_name.insert(entry.name, *entry).is_none(),
+                "duplicate builtin manifest name `{}`",
+                entry.name
+            );
+            if let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure {
+                assert!(
+                    by_capability
+                        .entry(capability)
+                        .or_default()
+                        .insert(method, *entry)
+                        .is_none(),
+                    "duplicate Harness method manifest entry `harness.{}.{method}`",
+                    capability.field_name()
+                );
+            }
+            if matches!(
+                entry.contract.exposure,
+                BuiltinExposure::CapabilityFunction { .. } | BuiltinExposure::PrivilegedWire
+            ) && !entry.contract.effects.is_empty()
+            {
+                recorded_effects_by_name.insert(entry.name, *entry);
+            }
+        }
+        BuiltinManifestIndex {
+            by_name,
+            by_capability,
+            recorded_effects_by_name,
+        }
+    })
+}
+
+/// Resolve a source/runtime builtin contract without rescanning the manifest.
+pub fn builtin_manifest_entry(
+    name: &str,
+) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
+    builtin_manifest_index().by_name.get(name).copied()
+}
+
+/// Resolve the contract for one typed Harness method without allocation.
+pub fn capability_method_manifest_entry(
+    capability: harn_builtin_meta::CapabilityId,
+    method: &str,
+) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
+    builtin_manifest_index()
+        .by_capability
+        .get(&capability)
+        .and_then(|methods| methods.get(method))
+        .copied()
+}
+
+/// Resolve only builtin contracts that can emit runtime effect receipts.
+///
+/// Pure builtins dominate VM call volume. Keeping them out of this projection
+/// makes their receipt check one negative hash lookup instead of a full
+/// manifest lookup plus exposure classification on every call.
+pub fn recorded_effect_builtin_manifest_entry(
+    name: &str,
+) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
+    builtin_manifest_index()
+        .recorded_effects_by_name
+        .get(name)
+        .copied()
+}
+
 /// Register every `#[harn_builtin]`-emitted def on the given VM. Drivers
 /// that build the full stdlib via `register_vm_stdlib` get this for free —
 /// each module's `register_*_builtins` walks its `MODULE_BUILTINS` slice.
@@ -688,5 +793,51 @@ fn main(harness: Harness) {
             offenders.is_empty(),
             "runtime callables without typed source contracts bypass the Harness gate: {offenders:?}"
         );
+    }
+
+    #[test]
+    fn builtin_manifest_indexes_preserve_the_authoritative_contracts() {
+        use harn_builtin_meta::BuiltinExposure;
+
+        let mut capability_entries = 0;
+        for entry in all_builtin_manifest() {
+            assert!(
+                std::ptr::eq(
+                    builtin_manifest_entry(entry.name).expect("indexed builtin entry"),
+                    *entry,
+                ),
+                "name index projected a different contract for `{}`",
+                entry.name
+            );
+            let should_record = matches!(
+                entry.contract.exposure,
+                BuiltinExposure::CapabilityFunction { .. } | BuiltinExposure::PrivilegedWire
+            ) && !entry.contract.effects.is_empty();
+            assert_eq!(
+                recorded_effect_builtin_manifest_entry(entry.name).is_some(),
+                should_record,
+                "recorded-effect index drifted for `{}`",
+                entry.name
+            );
+            if let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure {
+                capability_entries += 1;
+                assert!(
+                    std::ptr::eq(
+                        capability_method_manifest_entry(capability, method)
+                            .expect("indexed Harness method entry"),
+                        *entry,
+                    ),
+                    "capability index projected a different contract for `harness.{}.{method}`",
+                    capability.field_name()
+                );
+            }
+        }
+        assert!(capability_entries > 0, "no Harness contracts were indexed");
+        assert!(builtin_manifest_entry("__definitely_missing_builtin").is_none());
+        assert!(capability_method_manifest_entry(
+            harn_builtin_meta::CapabilityId::Fs,
+            "__definitely_missing_method",
+        )
+        .is_none());
     }
 }
