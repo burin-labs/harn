@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use crate::agent_events::DenialGate;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 
+use super::super::tool_enforcement::enforce_current_policy_for_tool_with_side_effect_grant;
 use super::super::{
     enforce_current_policy_for_builtin, enforce_current_policy_for_capability,
     enforce_current_policy_for_tool,
-    enforce_current_policy_for_tool_with_annotations_and_side_effect_grant,
-    enforce_current_policy_for_tool_with_side_effect_grant, pop_execution_policy,
+    enforce_current_policy_for_tool_with_annotations_and_side_effect_grant, pop_execution_policy,
     push_execution_policy, CapabilityPolicy,
 };
 
