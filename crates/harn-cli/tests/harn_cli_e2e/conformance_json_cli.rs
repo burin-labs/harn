@@ -50,13 +50,13 @@ fn conformance_json_reports_pass_and_expected_xfail() {
     write_fixture(
         temp.path(),
         "pass.harn",
-        "pipeline test(task) {\n  log(\"pass\")\n}\n",
+        "pipeline test(harness: Harness, task) {\n  harness.stdio.log(\"pass\")\n}\n",
         "[harn] pass\n",
     );
     write_fixture(
         temp.path(),
         "xfail_expected.harn",
-        "// @xfail: tracked in #999\npipeline test(task) {\n  log(\"actual\")\n}\n",
+        "// @xfail: tracked in #999\npipeline test(harness: Harness, task) {\n  harness.stdio.log(\"actual\")\n}\n",
         "[harn] expected\n",
     );
 
@@ -97,13 +97,13 @@ fn conformance_json_fails_on_failures_and_unexpected_xfail_passes() {
     write_fixture(
         temp.path(),
         "fail.harn",
-        "pipeline test(task) {\n  log(\"actual\")\n}\n",
+        "pipeline test(harness: Harness, task) {\n  harness.stdio.log(\"actual\")\n}\n",
         "[harn] expected\n",
     );
     write_fixture(
         temp.path(),
         "xfail_unexpected_pass.harn",
-        "// @xfail: tracked in #999\npipeline test(task) {\n  log(\"fixed\")\n}\n",
+        "// @xfail: tracked in #999\npipeline test(harness: Harness, task) {\n  harness.stdio.log(\"fixed\")\n}\n",
         "[harn] fixed\n",
     );
 
@@ -132,7 +132,7 @@ fn conformance_json_ignores_fixture_parent_runtime_state() {
     write_fixture(
         temp.path(),
         "metadata/isolated.harn",
-        "pipeline test(task) {\n  assert_eq(metadata_get(\".\", \"classification\"), nil)\n  const stale = metadata_stale(\".\")\n  assert_eq(stale.any_stale, false)\n  const paths = runtime_paths()\n  assert_eq(paths.state_root.ends_with(\".harn\"), true)\n  assert_eq(paths.worktree_root.ends_with(\".harn/worktrees\"), true)\n  log(\"isolated\")\n}\n",
+        "pipeline test(harness: Harness, task) {\n  assert_eq(harness.project.metadata_get({dir: \".\", namespace: \"classification\"}), nil)\n  const stale = harness.project.metadata_stale({dir: \".\"})\n  assert_eq(stale.any_stale, false)\n  const paths = harness.fs.runtime_paths()\n  assert_eq(paths.state_root.ends_with(\".harn\"), true)\n  assert_eq(paths.worktree_root.ends_with(\".harn/worktrees\"), true)\n  harness.stdio.log(\"isolated\")\n}\n",
         "[harn] isolated\n",
     );
     let stale_state = temp

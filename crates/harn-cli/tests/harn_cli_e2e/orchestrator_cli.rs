@@ -41,8 +41,8 @@ fn gated_task_handler_module(release_path: &Path) -> String {
 import "std/triggers"
 
 pub fn on_task(harness: Harness, event: TriggerEvent) -> string {{
-  while !file_exists({release:?}) {{
-    sleep(1ms)
+  while !harness.fs.exists({release:?}) {{
+    harness.clock.sleep_ms(1ms)
   }}
   return event.kind
 }}
@@ -804,7 +804,7 @@ secrets = { signing_secret = "github/webhook-secret" }
 import "std/triggers"
 
 pub fn on_event(harness: Harness, event: TriggerEvent) {
-  log(event.kind)
+  harness.stdio.log(event.kind)
 }
 "#,
     );

@@ -19,7 +19,11 @@ fn eval_supports_stdlib_import() {
     let temp = TempDir::new().unwrap();
     let out = harn_e2e_command()
         .current_dir(temp.path())
-        .args(["run", "-e", "import \"std/triggers\"\n__io_println(\"ok\")"])
+        .args([
+            "run",
+            "-e",
+            "import \"std/triggers\"\nharness.stdio.println(\"ok\")",
+        ])
         .output()
         .unwrap();
     assert_eq!(
@@ -48,7 +52,11 @@ fn eval_supports_relative_import_against_cwd() {
 
     let out = harn_e2e_command()
         .current_dir(temp.path())
-        .args(["run", "-e", "import \"./lib\"\n__io_println(answer())"])
+        .args([
+            "run",
+            "-e",
+            "import \"./lib\"\nharness.stdio.println(answer())",
+        ])
         .output()
         .unwrap();
     assert_eq!(
@@ -71,7 +79,7 @@ fn eval_pure_expression_still_works() {
     let temp = TempDir::new().unwrap();
     let out = harn_e2e_command()
         .current_dir(temp.path())
-        .args(["run", "-e", "__io_println(1 + 2)"])
+        .args(["run", "-e", "harness.stdio.println(1 + 2)"])
         .output()
         .unwrap();
     assert_eq!(

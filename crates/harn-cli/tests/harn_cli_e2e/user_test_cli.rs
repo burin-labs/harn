@@ -18,7 +18,7 @@ fn std_testing_temp_dir_works_in_the_default_run_sandbox() {
         r#"
 import { with_temp_dir } from "std/testing"
 
-pipeline main() {
+pipeline main(harness: Harness) {
   const result = with_temp_dir(
     { dir ->
       harness.fs.write_text(dir + "/value.txt", "sandboxed")
@@ -27,7 +27,7 @@ pipeline main() {
   )
   assert_eq(result.value, "sandboxed")
   assert_eq(harness.fs.exists(result.dir), false)
-  __io_println("sandbox-temp-ok")
+  harness.stdio.println("sandbox-temp-ok")
 }
 "#,
     )

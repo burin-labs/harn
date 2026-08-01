@@ -627,7 +627,7 @@ fn __connector_files(project_name: string, harn_range: string, harn_version: str
     + "}\n"
     + "\n"
     + "/** Convert one inbound request into Harn trigger events. */\n"
-    + "pub fn normalize_inbound(raw) -> dict {\n"
+    + "pub fn normalize_inbound(_harness: Harness, raw) -> dict {\n"
     + "  const body = raw.body_json ?? json_parse(raw.body_text)\n"
     + "  return {\n"
     + "    type: \"event\",\n"
@@ -698,7 +698,7 @@ fn __connector_files(project_name: string, harn_range: string, harn_version: str
     + "Convert one inbound request into Harn trigger events.\n"
     + "\n"
     + "```harn\n"
-    + "pub fn normalize_inbound(raw) -> dict\n"
+    + "pub fn normalize_inbound(harness: Harness, raw) -> dict\n"
     + "```\n"
   return [
     ["harn.toml", __connector_manifest(project_name, harn_range)],

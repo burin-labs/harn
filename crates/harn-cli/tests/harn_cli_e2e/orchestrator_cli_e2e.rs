@@ -86,7 +86,7 @@ secrets = {{ signing_secret = "github/webhook-secret" }}
 import "std/triggers"
 
 pub fn on_issue(harness: Harness, event: TriggerEvent) {
-  log(event.kind)
+  harness.stdio.log(event.kind)
 }
 "#,
     );

@@ -286,7 +286,10 @@ fn run_edit_dry_run(plan: JsonValue, plan_path: &Path) -> Result<JsonValue, Stri
     let plan_literal = serde_json::to_string(&plan)
         .map_err(|error| format!("failed to serialize counterfactual plan: {error}"))?;
     let driver = format!(
-        "import {{ edit_dry_run }} from \"std/edit\"\nreturn edit_dry_run({{plan: {plan_literal}}})\n"
+        "import {{ edit_dry_run }} from \"std/edit\"\n\
+         pipeline main(harness: Harness) {{\n\
+           return edit_dry_run(harness.ast, {{plan: {plan_literal}}})\n\
+         }}\n"
     );
 
     let dir = plan_path

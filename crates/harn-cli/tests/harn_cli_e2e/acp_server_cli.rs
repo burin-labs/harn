@@ -35,14 +35,14 @@ fn write_fixture(temp: &TempDir) {
         temp.path(),
         "acp_fixture.harn",
         r#"
-pub pipeline main() {
-  const sid = agent_session_current_id()
+pub pipeline main(harness: Harness) {
+  const sid = harness.agent.current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
   if prompt != "snapshot" {
-    agent_session_inject(sid, {role: "user", content: prompt})
+    harness.agent.inject(sid, {role: "user", content: prompt})
   }
-  const snap = agent_session_snapshot(sid)
-  __io_println(
+  const snap = harness.agent.snapshot(sid)
+  harness.stdio.println(
     json_stringify({
       session_id: sid,
       len: len(snap["messages"]),
@@ -354,11 +354,11 @@ fn acp_session_set_config_option_model_pins_for_next_prompt() {
         temp.path(),
         "pin_fixture.harn",
         r#"
-pub pipeline main() {
-  const sid = agent_session_current_id()
+pub pipeline main(harness: Harness) {
+  const sid = harness.agent.current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
-  const snap = agent_session_snapshot(sid)
-  __io_println(
+  const snap = harness.agent.snapshot(sid)
+  harness.stdio.println(
     json_stringify({
       session_id: sid,
       pinned_model: snap["pinned_model"],

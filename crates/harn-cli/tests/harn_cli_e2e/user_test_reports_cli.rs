@@ -10,7 +10,8 @@ use serde_json::Value;
 use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
 
-const PASS_PIPELINE: &str = "pipeline test_pass(task) {\n  log(\"ok\")\n}\n";
+const PASS_PIPELINE: &str =
+    "pipeline test_pass(harness: Harness, task) {\n  harness.stdio.log(\"ok\")\n}\n";
 const FAIL_PIPELINE: &str = "pipeline test_fail(task) {\n  assert_eq(1, 2)\n}\n";
 
 fn write_fixture(root: &std::path::Path, relative: &str, source: &str) {

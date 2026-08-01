@@ -65,7 +65,7 @@ retry = { max = 1, backoff = "immediate", retention_days = 7 }
 import "std/triggers"
 
 pub fn on_ok(harness: Harness, event: TriggerEvent) -> dict {
-  log("ok:" + event.kind)
+  harness.stdio.log("ok:" + event.kind)
   return {kind: event.kind, event_id: event.id, trace_id: event.trace_id}
 }
 

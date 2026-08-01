@@ -52,9 +52,9 @@ const TODO_RULE: &str = r#"pub fn lint(source) -> list {
 
 const DELEGATING_RULE: &str = r#"import { rules_diagnostics } from "std/rules"
 
-pub fn lint(source) {
+pub fn lint(harness: Harness, source) {
   const rule = "id = \"no-greet-call\"\nlanguage = \"harn\"\nmessage = \"greet calls are banned\"\nseverity = \"error\"\n[rule]\npattern = \"greet()\"\n"
-  return rules_diagnostics({language: "harn", path: "current.harn", rule: rule, source: source})
+  return rules_diagnostics(harness.rules, {language: "harn", path: "current.harn", rule: rule, source: source})
 }
 "#;
 

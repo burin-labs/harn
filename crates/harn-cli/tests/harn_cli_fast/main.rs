@@ -32,5 +32,6 @@ mod orchestrator_http;
 mod pack_cli;
 mod persona_cli;
 mod profile;
+mod scaffold_typed_harness;
 mod test_bench_cli;
 mod trigger_replay_cli;

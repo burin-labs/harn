@@ -169,13 +169,13 @@ fn __render_main_harn(package_name: string) -> string {
   return "import { agent_dispatch_tool_call } from \"std/agent/primitives\"\n"
     + "import { tools } from \"lib/tools\"\n"
     + "\n"
-    + "pipeline default() {\n"
+    + "pipeline default(harness: Harness) {\n"
     + "  const registry = tools()\n"
     + "  let text = \"hello\"\n"
     + "  if len(argv) > 0 {\n"
     + "    text = argv[0]\n"
     + "  }\n"
-    + "  const result = agent_dispatch_tool_call(harness, {name: "
+    + "  const result = agent_dispatch_tool_call(harness.tools, {name: "
     + tool_name
     + ", arguments: {text: text}}, registry)\n"
     + "  if !result.ok {\n"
@@ -192,14 +192,14 @@ fn __render_test_harn(package_name: string, ident: string) -> string {
     + "\n"
     + "pipeline test_"
     + ident
-    + "_tool(task) {\n"
+    + "_tool(harness: Harness, task) {\n"
     + "  const registry = tools()\n"
-    + "  const ok = agent_dispatch_tool_call(harness, {name: "
+    + "  const ok = agent_dispatch_tool_call(harness.tools, {name: "
     + tool_name
     + ", arguments: {text: \"hello\"}}, registry)\n"
     + "  assert(ok.ok, ok.error?.message ?? \"tool call should pass\")\n"
     + "  assert_eq(ok.rendered_result, \"hello\")\n"
-    + "  const bad = agent_dispatch_tool_call(harness, {name: "
+    + "  const bad = agent_dispatch_tool_call(harness.tools, {name: "
     + tool_name
     + ", arguments: {}}, registry)\n"
     + "  assert(!bad.ok, \"schema validation should reject missing text\")\n"

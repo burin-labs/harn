@@ -61,7 +61,7 @@ fn route_decorated_uncalled_fn_does_not_underflow() {
 @route("GET", "/hello")
 pub fn hello(req: dict) -> dict { return { status: 200 } }
 
-fn main(harness: Harness) { __io_println("ok") }
+fn main(harness: Harness) { harness.stdio.println("ok") }
 "#,
         "ok",
     );
@@ -75,7 +75,7 @@ fn deprecated_decorated_pub_fn_does_not_underflow() {
 @deprecated
 pub fn f(x: int) -> int { return x + 1 }
 
-fn main(harness: Harness) { __io_println("ok") }
+fn main(harness: Harness) { harness.stdio.println("ok") }
 "#,
         "ok",
     );
@@ -89,7 +89,7 @@ fn deprecated_decorated_non_pub_fn_does_not_underflow() {
 @deprecated
 fn f(x: int) -> int { return x + 1 }
 
-fn main(harness: Harness) { __io_println("ok") }
+fn main(harness: Harness) { harness.stdio.println("ok") }
 "#,
         "ok",
     );
@@ -106,7 +106,7 @@ pub fn hello(req: dict) -> dict { return { status: 200 } }
 fn main(harness: Harness) {
     const resp = hello({})
     if resp.status == 200 {
-        __io_println("ok")
+        harness.stdio.println("ok")
     }
 }
 "#,
