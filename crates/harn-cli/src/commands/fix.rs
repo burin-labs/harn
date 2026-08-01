@@ -699,7 +699,7 @@ fn collect_file_candidates(
             if diag.code != Code::ArgumentTypeMismatch {
                 return None;
             }
-            synthesize_missing_capability_argument_repair(diag.span?, &diag.message)
+            synthesize_missing_capability_argument_repair(&source, diag.span?, &diag.message)
         });
         let (repair, edits, impact) = if let Some(repair) = synthesized {
             repair
@@ -976,6 +976,7 @@ fn synthesize_ambient_capability_repair(
 }
 
 fn synthesize_missing_capability_argument_repair(
+    source: &str,
     span: Span,
     message: &str,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
@@ -992,6 +993,7 @@ fn synthesize_missing_capability_argument_repair(
         let capability = harn_builtin_meta::CapabilityId::from_type_name(expected)?;
         format!("harness.{}", capability.field_name())
     };
+    let insertion = harn_lexer::byte_offset_for_position(source, span.line, span.column)?;
     Some((
         Repair {
             id: harn_parser::RepairId::from_owned(
@@ -1003,10 +1005,7 @@ fn synthesize_missing_capability_argument_repair(
             safety: RepairSafety::SurfaceChanging,
         },
         vec![FixEdit {
-            span: Span {
-                end: span.start,
-                ..span
-            },
+            span: Span::with_offsets(insertion, insertion, span.line, span.column),
             replacement: format!("{argument}, "),
         }],
         RepairImpactWire::local_ambient("prepend-capability-argument"),

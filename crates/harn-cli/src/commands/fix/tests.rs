@@ -304,8 +304,10 @@ fn callable_param_insert_handles_dict_defaults_before_body() {
 
 #[test]
 fn missing_capability_argument_repair_uses_typed_root_field() {
+    let source = "pipeline main(harness: Harness) {}\n";
     let span = harn_lexer::Span::with_offsets(12, 16, 1, 13);
     let (_, edits, _) = synthesize_missing_capability_argument_repair(
+        source,
         span,
         "argument 1 `fs`: expected HarnessFs, found string",
     )
@@ -314,6 +316,96 @@ fn missing_capability_argument_repair_uses_typed_root_field() {
     assert_eq!(edits[0].span.start, 12);
     assert_eq!(edits[0].span.end, 12);
     assert_eq!(edits[0].replacement, "harness.fs, ");
+}
+
+#[test]
+fn missing_capability_argument_repair_uses_source_coordinates_over_stale_offsets() {
+    let source =
+        "import { helper } from \"./helper\"\n\npipeline test(harness: Harness) {\n  call(\"value\")\n}\n";
+    let import_line = "import { helper } from \"./helper\"";
+    let stale_span = harn_lexer::Span::with_offsets(9, 9, 4, 8);
+
+    let (_, edits, _) = synthesize_missing_capability_argument_repair(
+        source,
+        stale_span,
+        "argument 1 `fs`: expected HarnessFs, found string",
+    )
+    .expect("capability migration repair");
+
+    let expected = source.find("\"value\"").expect("first argument");
+    assert_eq!(edits[0].span.start, expected);
+    assert_eq!(edits[0].span.end, expected);
+    assert_ne!(edits[0].span.start, stale_span.start);
+
+    let mut applied = source.to_string();
+    applied.replace_range(
+        edits[0].span.start..edits[0].span.end,
+        &edits[0].replacement,
+    );
+    assert!(
+        applied
+            .lines()
+            .next()
+            .is_some_and(|line| line == import_line),
+        "stale byte offset must not mutate an earlier import: {applied}"
+    );
+    assert!(
+        applied.contains("call(harness.fs, \"value\")"),
+        "expected capability argument prepended at the call site: {applied}"
+    );
+    harn_parser::parse_source(&applied).expect("first apply must remain parse-safe");
+
+    // A second capability-migration pass can still surface a stale local offset
+    // while keeping correct line/column. Planning/application must stay
+    // parse-safe and leave the import alone.
+    let second_arg = applied
+        .find("\"value\"")
+        .expect("argument after first apply");
+    let (line, column) = {
+        let mut line = 1usize;
+        let mut last_newline = 0usize;
+        for (idx, ch) in applied[..second_arg].char_indices() {
+            if ch == '\n' {
+                line += 1;
+                last_newline = idx + 1;
+            }
+        }
+        let column = applied[last_newline..second_arg].chars().count() + 1;
+        (line, column)
+    };
+    let still_stale = harn_lexer::Span::with_offsets(9, 9, line, column);
+    let (_, second_edits, _) = synthesize_missing_capability_argument_repair(
+        &applied,
+        still_stale,
+        "argument 1 `fs`: expected HarnessFs, found string",
+    )
+    .expect("second capability migration repair");
+    assert_eq!(second_edits[0].span.start, second_arg);
+    assert_ne!(second_edits[0].span.start, still_stale.start);
+
+    let mut second_applied = applied.clone();
+    second_applied.replace_range(
+        second_edits[0].span.start..second_edits[0].span.end,
+        &second_edits[0].replacement,
+    );
+    assert!(
+        second_applied
+            .lines()
+            .next()
+            .is_some_and(|line| line == import_line),
+        "second stale-offset pass must not corrupt the import: {second_applied}"
+    );
+    harn_parser::parse_source(&second_applied).expect("repeated apply must remain parse-safe");
+}
+
+#[test]
+fn source_coordinates_map_unicode_columns_to_byte_offsets() {
+    let source = "αβ\n  call(\"value\")\n";
+    let expected = source.find("\"value\"").expect("first argument");
+    assert_eq!(
+        harn_lexer::byte_offset_for_position(source, 2, 8),
+        Some(expected)
+    );
 }
 
 #[test]

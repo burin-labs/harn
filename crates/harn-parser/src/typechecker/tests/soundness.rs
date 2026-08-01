@@ -383,16 +383,25 @@ fn check_strict_with_source_enables_strict_mode() {
 
 #[test]
 fn interpolation_holes_are_type_checked() {
-    let errs = errors(
-        r#"
+    let source = r#"
 fn needs_int(p: int) -> int { return p + 1 }
 pipeline p() { log("${needs_int("nope")}") }
-"#,
-    );
+"#;
+    let diagnostics = check_source_with_source(source);
     assert!(
-        errs.iter()
-            .any(|e| e.contains("expected int, found string")),
-        "expected argument-type error inside interpolation, got: {errs:?}"
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("expected int, found string")),
+        "expected argument-type error inside interpolation, got: {diagnostics:?}"
+    );
+    let mismatch = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("expected int, found string"))
+        .expect("interpolation argument mismatch");
+    assert_eq!(
+        mismatch.span.map(|span| span.start),
+        source.find("\"nope\""),
+        "interpolation diagnostics must carry absolute file byte offsets"
     );
 }
 

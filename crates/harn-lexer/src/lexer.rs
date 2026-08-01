@@ -1,6 +1,8 @@
 use crate::token::*;
 use std::fmt;
 
+mod positioned;
+
 /// Lexer errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LexerError {
@@ -65,17 +67,6 @@ impl Lexer {
             byte_pos: 0,
             line: 1,
             column: 1,
-        }
-    }
-
-    /// Start counting at a source position when re-lexing interpolated expressions.
-    pub fn with_position(source: &str, line: usize, column: usize) -> Self {
-        Self {
-            source: source.chars().collect(),
-            pos: 0,
-            byte_pos: 0,
-            line,
-            column,
         }
     }
 
