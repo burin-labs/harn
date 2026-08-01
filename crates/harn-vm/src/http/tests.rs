@@ -298,6 +298,7 @@ async fn http_stream_mock_reads_in_chunks() {
     );
 
     let handle = vm_http_stream_open(
+        None,
         "https://api.example.com/stream",
         &crate::value::DictMap::new(),
     )
@@ -335,6 +336,7 @@ async fn http_download_mock_writes_file() {
     );
 
     let response = vm_http_download(
+        None,
         "https://api.example.com/download",
         &path.display().to_string(),
         &crate::value::DictMap::new(),
@@ -365,6 +367,7 @@ async fn http_download_mock_retries_retryable_status() {
     );
 
     let response = vm_http_download(
+        None,
         "https://api.example.com/download-retry",
         &path.display().to_string(),
         &crate::value::DictMap::from_iter([(
@@ -400,6 +403,7 @@ async fn http_download_mock_enforces_max_response_bytes() {
     );
 
     let error = vm_http_download(
+        None,
         "https://api.example.com/download-too-large",
         &path.display().to_string(),
         &crate::value::DictMap::from_iter([("max_response_bytes".to_string(), VmValue::Int(3))]),
@@ -439,6 +443,7 @@ async fn http_download_oversize_stream_preserves_existing_file() {
     });
 
     let error = vm_http_download(
+        None,
         &format!("http://127.0.0.1:{port}/oversize"),
         &path.display().to_string(),
         &crate::value::DictMap::from_iter([("max_response_bytes".to_string(), VmValue::Int(1))]),

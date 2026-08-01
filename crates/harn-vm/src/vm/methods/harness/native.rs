@@ -360,14 +360,17 @@ impl crate::vm::Vm {
                 .await
                 .map_err(tag_sandbox_denied)
             }
-            "download" => self
-                .call_capability_builtin("__http_download", args.to_vec())
-                .await
-                .map_err(tag_sandbox_denied),
-            "stream_open" => {
-                self.call_capability_builtin("__http_stream_open", args.to_vec())
-                    .await
-            }
+            "download" => crate::http::execute_harness_http_download(
+                handle.inner().fixtures().http_mocks(),
+                args.to_vec(),
+            )
+            .await
+            .map_err(tag_sandbox_denied),
+            "stream_open" => crate::http::execute_harness_http_stream_open(
+                handle.inner().fixtures().http_mocks(),
+                args.to_vec(),
+            )
+            .await,
             "stream_read" => {
                 self.call_capability_builtin("__http_stream_read", args.to_vec())
                     .await
@@ -384,10 +387,11 @@ impl crate::vm::Vm {
                 self.call_capability_builtin("__http_session", args.to_vec())
                     .await
             }
-            "session_request" => {
-                self.call_capability_builtin("__http_session_request", args.to_vec())
-                    .await
-            }
+            "session_request" => crate::http::execute_harness_http_session_request(
+                handle.inner().fixtures().http_mocks(),
+                args.to_vec(),
+            )
+            .await,
             "session_close" => {
                 self.call_capability_builtin("__http_session_close", args.to_vec())
                     .await

@@ -329,46 +329,6 @@ fn multipart_form(request: &MultipartRequest) -> Result<reqwest::multipart::Form
     Ok(form)
 }
 
-pub(super) async fn harness_http_verb_handler(
-    mocks: &crate::http::HttpMockRegistry,
-    method: &str,
-    has_body: bool,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let (url, options) = http_verb_request(method, has_body, &args)?;
-    harness_mocks::vm_execute_http_request_with_mocks(mocks, method, &url, &options).await
-}
-
-fn http_verb_request(
-    method: &str,
-    has_body: bool,
-    args: &[VmValue],
-) -> Result<(String, crate::value::DictMap), VmError> {
-    let url = args.first().map(|a| a.display()).unwrap_or_default();
-    if url.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("http_{}: URL is required", method.to_ascii_lowercase()),
-        ))));
-    }
-    let mut options = if has_body {
-        match (args.get(1), args.get(2)) {
-            (Some(VmValue::Dict(d)), None) => (**d).clone(),
-            (_, Some(VmValue::Dict(d))) => (**d).clone(),
-            _ => crate::value::DictMap::new(),
-        }
-    } else {
-        match args.get(1) {
-            Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => crate::value::DictMap::new(),
-        }
-    };
-    if has_body && !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
-        let body = args.get(1).map(|a| a.display()).unwrap_or_default();
-        options.put_str("body", body);
-    }
-    Ok((url, options))
-}
-
 fn parse_proxy_config(options: &crate::value::DictMap) -> Option<HttpProxyConfig> {
     let proxy = options.get("proxy")?;
     let (url, no_proxy) = match proxy {
@@ -1171,6 +1131,7 @@ pub(super) async fn vm_execute_http_request_with_client(
 }
 
 pub(super) async fn vm_http_download(
+    harness_mocks: Option<&super::HttpMockRegistry>,
     url: &str,
     dst_path: &str,
     options: &crate::value::DictMap,
@@ -1193,12 +1154,9 @@ pub(super) async fn vm_http_download(
     let mut egress_checked = false;
     let mut client = None;
     for attempt in 0..=config.retry.max {
-        if let Some(mock_response) = super::mock::consume_http_mock(
-            &method,
-            &final_url,
-            parts.recorded_headers.clone(),
-            parts.body.clone(),
-        ) {
+        if let Some(mock_response) =
+            harness_mocks::consume_http_mock(harness_mocks, &method, &final_url, &parts)
+        {
             let status = mock_response.status.clamp(0, u16::MAX as i64) as u16;
             if should_retry_response(&config, &parts.method, status, attempt) {
                 let retry_after = if config.retry.respect_retry_after {
@@ -1357,6 +1315,7 @@ fn write_http_download_bytes(resolved: &Path, bytes: &[u8]) -> Result<(), VmErro
 }
 
 pub(super) async fn vm_http_stream_open(
+    harness_mocks: Option<&super::HttpMockRegistry>,
     url: &str,
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
@@ -1369,12 +1328,9 @@ pub(super) async fn vm_http_stream_open(
     let parts = parse_http_request_parts(&method, options)?;
     let final_url = final_http_url(url, options, "http_stream_open")?;
     let id = next_transport_handle("http-stream");
-    if let Some(mock_response) = super::mock::consume_http_mock(
-        &method,
-        &final_url,
-        parts.recorded_headers.clone(),
-        parts.body.clone(),
-    ) {
+    if let Some(mock_response) =
+        harness_mocks::consume_http_mock(harness_mocks, &method, &final_url, &parts)
+    {
         let handle = HttpStreamHandle {
             kind: HttpStreamKind::Fake,
             status: mock_response.status,
@@ -1539,7 +1495,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             return Err(vm_error("http_download: destination path is required"));
         }
         let options = get_options_arg(&args, 2);
-        vm_http_download(&url, &dst_path, &options).await
+        vm_http_download(None, &url, &dst_path, &options).await
     });
 
     vm.register_async_builtin("__http_stream_open", |_ctx, args| async move {
@@ -1548,7 +1504,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             return Err(vm_error("http_stream_open: URL is required"));
         }
         let options = get_options_arg(&args, 1);
-        vm_http_stream_open(&url, &options).await
+        vm_http_stream_open(None, &url, &options).await
     });
 
     vm.register_async_builtin("__http_stream_read", |_ctx, args| async move {
