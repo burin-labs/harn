@@ -8,6 +8,7 @@
  */
 import {
   ui_resource,
+  ui_resource_to_mcp,
   ui_select_for_host,
   ui_structured_fallback,
   ui_tool_meta,
@@ -55,16 +56,15 @@ pipeline default(harness: Harness) {
       validation: {allow_network: false},
     },
   )
-  const meta = ui_tool_meta(
-    resource,
-    {visibility: "app_only", initial_view: {window: "7d", focus: "signups"}},
-  )
+  const meta = ui_tool_meta(resource, {visibility: ["app"]})
   const mcp_meta = ui_tool_meta_to_mcp(meta)
+  const mcp_resource = ui_resource_to_mcp(resource, {prefers_border: true})
   harness.stdio.println("ui_resource.uri=" + resource.uri)
   harness.stdio.println("ui_resource.validation.ok=" + to_string(resource.validation.ok))
   harness.stdio.println("ui_resource.size_bytes=" + to_string(resource.size_bytes))
   harness.stdio.println("mcp_meta.resourceUri=" + mcp_meta.ui.resourceUri)
   harness.stdio.println("mcp_meta.visibility=" + mcp_meta.ui.visibility)
+  harness.stdio.println("mcp_resource.mime_type=" + mcp_resource.mime_type)
   const result = ui_tool_result(
     resource,
     {structured_fallback: ui_structured_fallback(metrics, {text: "signups=42 churn=3 mrr=18400"})},

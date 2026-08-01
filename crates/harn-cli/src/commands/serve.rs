@@ -445,7 +445,7 @@ struct ScriptMcpHttpState {
 }
 
 #[derive(Clone)]
-struct ScriptMcpRuntime {
+pub(crate) struct ScriptMcpRuntime {
     tx: tokio_mpsc::UnboundedSender<ScriptMcpJob>,
 }
 
@@ -576,7 +576,7 @@ fn undeliverable_client_request_error(msg: &JsonValue) -> Option<JsonValue> {
 }
 
 impl ScriptMcpRuntime {
-    fn start(server: harn_vm::McpServer, mut vm: harn_vm::Vm) -> Self {
+    pub(crate) fn start(server: harn_vm::McpServer, mut vm: harn_vm::Vm) -> Self {
         let (tx, mut rx) = tokio_mpsc::unbounded_channel::<ScriptMcpJob>();
         tokio::task::spawn_local(async move {
             while let Some(job) = rx.recv().await {
@@ -589,7 +589,7 @@ impl ScriptMcpRuntime {
         Self { tx }
     }
 
-    async fn call(
+    pub(crate) async fn call(
         &self,
         request: JsonValue,
         bus: Option<harn_vm::mcp_elicit::ElicitationBus>,

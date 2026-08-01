@@ -28,6 +28,7 @@ pub mod json_events;
 mod lifecycle;
 mod llm_mock;
 mod manifest_runtime;
+mod mcp_serve;
 pub(crate) mod sandbox;
 
 pub(crate) use self::chunk_loading::{
@@ -48,6 +49,7 @@ pub use self::lifecycle::RunProfileOptions;
 use self::lifecycle::{RunExecution, TerminalRun};
 pub use self::llm_mock::*;
 pub(crate) use self::manifest_runtime::connect_mcp_servers;
+pub(crate) use self::mcp_serve::{RunFileAppServe, RunFileMcpServeHttp, RunFileMcpServeMode};
 #[cfg(test)]
 use self::sandbox::default_run_capability_policy;
 pub use self::sandbox::RunSandboxOptions;
@@ -194,16 +196,6 @@ fn build_run_json_sink(
         },
         fd_flag,
     }
-}
-
-pub(crate) enum RunFileMcpServeMode {
-    Stdio,
-    Http(Box<RunFileMcpServeHttp>),
-}
-
-pub(crate) struct RunFileMcpServeHttp {
-    pub options: harn_serve::McpHttpServeOptions,
-    pub auth_policy: harn_serve::AuthPolicy,
 }
 
 /// Core builtins that are never denied, even when using `--allow`.
@@ -2028,31 +2020,7 @@ pub(crate) async fn run_file_mcp_serve(
                     }
                 }
             }
-            match mode {
-                RunFileMcpServeMode::Stdio => {
-                    if let Err(e) = server.run(&mut vm).await {
-                        eprintln!("error: MCP server error: {e}");
-                        process::exit(1);
-                    }
-                }
-                RunFileMcpServeMode::Http(http) => {
-                    let RunFileMcpServeHttp {
-                        options,
-                        auth_policy,
-                    } = *http;
-                    if let Err(e) = crate::commands::serve::run_script_mcp_http_server(
-                        server,
-                        vm,
-                        options,
-                        auth_policy,
-                    )
-                    .await
-                    {
-                        eprintln!("error: MCP server error: {e}");
-                        process::exit(1);
-                    }
-                }
-            }
+            mcp_serve::run_server(server, vm, mode).await;
         })
         .await;
 }
