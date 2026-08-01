@@ -955,7 +955,7 @@ impl Vm {
 
     /// Clear the execution-local effect recorder and per-VM memo.
     pub fn clear_executed_effects(&mut self) {
-        self.runtime_effects.clear()
+        self.runtime_effects.clear();
     }
 
     pub(crate) fn record_capability_effects(
@@ -965,7 +965,7 @@ impl Vm {
         args: &[VmValue],
     ) {
         self.runtime_effects
-            .record_capability(capability, method, args)
+            .record_capability(capability, method, args);
     }
 
     pub(crate) fn record_builtin_contract_effects(&mut self, name: &str, args: &[VmValue]) {
@@ -980,7 +980,7 @@ impl Vm {
         specs: &'static [harn_builtin_meta::EffectSpec],
         args: &[VmValue],
     ) {
-        self.runtime_effects.record_specs(specs, args)
+        self.runtime_effects.record_specs(specs, args);
     }
 
     /// Replace the scoped immutable module-template cache used by this VM.
