@@ -203,6 +203,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "mcp_auth_required",
   "mcp_catalog_changed",
   "mcp_notification",
+  "model_job",
   "orchestration_decision",
   "pack_thinking_stripped",
   "progress_reported",

@@ -90,6 +90,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             SkillCommand::Match(matcher) => commands::skills::run_match(&matcher),
             SkillCommand::Install(install) => commands::skills::run_install(&install),
             SkillCommand::New(new_args) => commands::skills::run_new(&new_args),
+            SkillCommand::Validate(validate) => commands::skills::run_validate(&validate),
             SkillCommand::Key(key_args) => match key_args.command {
                 SkillKeyCommand::Generate(generate) => commands::skill::run_key_generate(&generate),
             },

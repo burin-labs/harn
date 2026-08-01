@@ -804,6 +804,24 @@ fn test_parses_skill_corpus_subcommands() {
     };
     assert_eq!(new_args.name, "deploy");
     assert_eq!(new_args.description.as_deref(), Some("Ship things"));
+
+    let cli = Cli::parse_from([
+        "harn",
+        "skill",
+        "validate",
+        ".harn/skills/deploy",
+        "--strict",
+        "--json",
+    ]);
+    let Command::Skill(args) = cli.command.unwrap() else {
+        panic!("expected skill command");
+    };
+    let SkillCommand::Validate(validate) = args.command else {
+        panic!("expected skill validate");
+    };
+    assert_eq!(validate.path, ".harn/skills/deploy");
+    assert!(validate.strict);
+    assert!(validate.json);
 }
 
 #[test]

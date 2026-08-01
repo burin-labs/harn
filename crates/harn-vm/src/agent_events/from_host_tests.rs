@@ -584,6 +584,29 @@ fn from_host_rejects_non_host_and_unknown_event_types() {
 }
 
 #[test]
+fn from_host_accepts_model_job_events_and_journals_them_as_tool_activity() {
+    let payload = json!({
+        "schema": "harn.model_job_event.v1",
+        "kind": "state_changed",
+        "job_id": "job-1",
+        "state": "running",
+    });
+    let event = AgentEvent::from_host_payload("s1", "model_job", &payload)
+        .expect("model_job is host-emittable");
+    assert!(matches!(
+        event,
+        AgentEvent::ModelJob {
+            session_id,
+            event,
+        } if session_id == "s1" && event == payload
+    ));
+    assert_eq!(
+        AgentEvent::host_transcript_role("model_job").map(|role| role.as_str()),
+        Some("tool"),
+    );
+}
+
+#[test]
 fn from_host_accepts_typed_tool_batch_disposition_receipts() {
     let event = AgentEvent::from_host_payload(
         "s1",

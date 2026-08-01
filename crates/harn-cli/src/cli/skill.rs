@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 
 use super::skills::{
     SkillsDumpArgs, SkillsGetArgs, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
-    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs,
+    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs, SkillsValidateArgs,
 };
 
 #[derive(Debug, Args)]
@@ -32,6 +32,8 @@ pub(crate) enum SkillCommand {
     Install(SkillsInstallArgs),
     /// Scaffold a new SKILL.md bundle under `.harn/skills/<name>/`.
     New(SkillsNewArgs),
+    /// Validate one SKILL.md bundle through the runtime's canonical parser.
+    Validate(SkillsValidateArgs),
     /// Manage Ed25519 signing keys for skill provenance.
     Key(SkillKeyArgs),
     /// Sign a skill manifest and emit `<path>.sig`.

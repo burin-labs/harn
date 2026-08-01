@@ -1,0 +1,273 @@
+import { MediaAsset } from "std/media/asset"
+
+/** Provider-neutral contracts for asynchronous model work. */
+pub type ModelTask = "image.generate" \
+  | "image.edit" \
+  | "audio.generate" \
+  | "video.generate" \
+  | "embedding" \
+  | "custom"
+
+pub type ModelJobState = "queued" | "running" | "succeeded" | "failed" | "canceled"
+
+pub type ModelOutputSpec = {
+  mime_type: string,
+  width?: int,
+  height?: int,
+  duration_ms?: int,
+  count?: int,
+}
+
+pub type ModelJobRequest = {
+  id: string,
+  task: ModelTask,
+  prompt: string,
+  output: ModelOutputSpec,
+  model?: string,
+  inputs?: list<MediaAsset>,
+  seed?: int,
+  params?: dict,
+  metadata?: dict,
+}
+
+pub type ModelJobOutput = {
+  name: string,
+  mime_type: string,
+  bytes?: bytes,
+  path?: string,
+  url?: string,
+  width?: int,
+  height?: int,
+  duration_ms?: int,
+  metadata?: dict,
+}
+
+pub type ModelJobErrorKind = "invalid_request" \
+  | "backend" \
+  | "invalid_state" \
+  | "invalid_transition" \
+  | "timeout" \
+  | "canceled" \
+  | "malformed_output" \
+  | "asset_mismatch" \
+  | "replay_mismatch"
+
+pub type ModelJobError = {
+  kind: ModelJobErrorKind,
+  message: string,
+  retryable: bool,
+  backend?: string,
+  job_id?: string,
+  detail?: unknown,
+}
+
+pub type ModelJobObservation = {
+  job_id: string,
+  state: ModelJobState,
+  backend_state?: string,
+  progress?: float,
+  outputs?: list<ModelJobOutput>,
+  error?: ModelJobError,
+  metadata?: dict,
+}
+
+pub type ModelJob = {
+  schema: "harn.model_job.v1",
+  id: string,
+  request_id: string,
+  request_digest: string,
+  backend: string,
+  state: ModelJobState,
+  backend_state?: string,
+  progress?: float,
+  outputs?: list<ModelJobOutput>,
+  error?: ModelJobError,
+  submitted_at_ms: int,
+  updated_at_ms: int,
+  metadata?: dict,
+}
+
+pub type ModelJobEventKind = "submitted" | "state_changed" | "progress" | "output" | "failed"
+
+pub type ModelJobEvent = {
+  schema: "harn.model_job_event.v1",
+  kind: ModelJobEventKind,
+  job_id: string,
+  request_id: string,
+  backend: string,
+  state: ModelJobState,
+  at_ms: int,
+  previous_state?: ModelJobState,
+  progress?: float,
+  output_count?: int,
+  error?: ModelJobError,
+}
+
+pub type ModelJobReceipt = {
+  schema: "harn.model_job_receipt.v1",
+  request_digest: string,
+  backend: string,
+  job: ModelJob,
+  assets: list<MediaAsset>,
+  events: list<ModelJobEvent>,
+}
+
+pub type ModelBackend = {
+  id: string,
+  submit: fn(Harness, ModelJobRequest) -> Result<ModelJobObservation, ModelJobError>,
+  inspect: fn(Harness, ModelJob) -> Result<ModelJobObservation, ModelJobError>,
+  cancel: fn(Harness, ModelJob) -> Result<ModelJobObservation, ModelJobError>,
+}
+
+/**
+ * Build a stable error envelope for adapters and callers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_job_error(kind: ModelJobErrorKind, message: string, options = {}) -> ModelJobError {
+  const opts = options ?? {}
+  let error: ModelJobError = {kind: kind, message: message, retryable: opts?.retryable ?? false}
+  if opts?.backend != nil {
+    error.backend = to_string(opts.backend)
+  }
+  if opts?.job_id != nil {
+    error.job_id = to_string(opts.job_id)
+  }
+  if opts?.detail != nil {
+    error.detail = opts.detail
+  }
+  return error
+}
+
+/**
+ * Map an untrusted provider status into Harn's closed state vocabulary.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_job_state_result(
+  raw_state: unknown,
+  backend = nil,
+  job_id = nil,
+) -> Result<ModelJobState, ModelJobError> {
+  const state = lowercase(trim(to_string(raw_state ?? "")))
+  if state == "queued" || state == "pending" || state == "created" || state == "submitted" {
+    return Ok("queued")
+  }
+  if state == "running" || state == "processing" || state == "in_progress" {
+    return Ok("running")
+  }
+  if state == "succeeded" || state == "success" || state == "completed" || state == "complete" {
+    return Ok("succeeded")
+  }
+  if state == "failed" || state == "error" || state == "errored" {
+    return Ok("failed")
+  }
+  if state == "canceled" || state == "cancelled" {
+    return Ok("canceled")
+  }
+  return Err(
+    model_job_error(
+      "invalid_state",
+      "unknown model job state: " + to_string(raw_state),
+      {backend: backend, job_id: job_id, detail: raw_state},
+    ),
+  )
+}
+
+/**
+ * Terminal states never transition to a different state.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_job_transition_result(
+  previous: ModelJobState,
+  next: ModelJobState,
+  backend = nil,
+  job_id = nil,
+) -> Result<ModelJobState, ModelJobError> {
+  if previous == next {
+    return Ok(next)
+  }
+  const terminal = previous == "succeeded" || previous == "failed" || previous == "canceled"
+  if terminal {
+    return Err(
+      model_job_error(
+        "invalid_transition",
+        "model job cannot transition from "
+          + to_string(previous)
+          + " to "
+          + to_string(next),
+        {backend: backend, job_id: job_id},
+      ),
+    )
+  }
+  if previous == "queued"
+    && (next == "running" || next == "succeeded" || next == "failed"
+    || next
+    == "canceled") {
+    return Ok(next)
+  }
+  if previous == "running" && (next == "succeeded" || next == "failed" || next == "canceled") {
+    return Ok(next)
+  }
+  return Err(
+    model_job_error(
+      "invalid_transition",
+      "model job cannot transition from " + to_string(previous) + " to " + to_string(next),
+      {backend: backend, job_id: job_id},
+    ),
+  )
+}
+
+/**
+ * Stable identity used by replay to reject the wrong request.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_job_request_digest(request: ModelJobRequest) -> string {
+  let inputs = []
+  for input in request.inputs ?? [] {
+    inputs = inputs + [{id: input.id, mime_type: input.mime_type, sha256: input.sha256}]
+  }
+  return sha256(
+    json_stringify(
+      {
+        task: request.task,
+        prompt: request.prompt,
+        output: request.output,
+        model: request.model,
+        inputs: inputs,
+        seed: request.seed,
+        params: request.params,
+      },
+    ),
+  )
+}
+
+/**
+ * Validate the provider-neutral request before any backend is called.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_job_request_result(
+  request: ModelJobRequest,
+) -> Result<ModelJobRequest, ModelJobError> {
+  if trim(request.id) == "" {
+    return Err(model_job_error("invalid_request", "model job request id is required"))
+  }
+  if trim(request.prompt) == "" && request.task != "embedding" {
+    return Err(model_job_error("invalid_request", "model job prompt is required"))
+  }
+  if trim(request.output.mime_type) == "" {
+    return Err(model_job_error("invalid_request", "model job output MIME type is required"))
+  }
+  if (request.output.count ?? 1) < 1 {
+    return Err(model_job_error("invalid_request", "model job output count must be positive"))
+  }
+  return Ok(request)
+}

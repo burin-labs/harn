@@ -1,0 +1,435 @@
+import { MediaAsset, MediaAssetFailure, media_asset_store_result } from "std/media/asset"
+import {
+  ModelBackend,
+  ModelJob,
+  ModelJobError,
+  ModelJobEvent,
+  ModelJobObservation,
+  ModelJobOutput,
+  ModelJobReceipt,
+  ModelJobRequest,
+  ModelJobState,
+  model_job_error,
+  model_job_request_digest,
+  model_job_request_result,
+  model_job_transition_result,
+} from "std/model_job/contracts"
+
+pub type ModelJobRunOptions = {
+  timeout_ms?: int,
+  interval_ms?: int,
+  max_attempts?: int,
+  asset_root?: string,
+  session_id?: string,
+  on_event?: fn(ModelJobEvent) -> nil,
+}
+
+type ModelJobIo = {fs: HarnessFs, net: HarnessNet}
+
+fn __model_job_event(job: ModelJob, kind, at_ms: int, options = {}) -> ModelJobEvent {
+  const opts = options ?? {}
+  let event: ModelJobEvent = {
+    schema: "harn.model_job_event.v1",
+    kind: kind,
+    job_id: job.id,
+    request_id: job.request_id,
+    backend: job.backend,
+    state: job.state,
+    at_ms: at_ms,
+  }
+  if opts?.previous_state != nil {
+    event.previous_state = opts.previous_state
+  }
+  if job.progress != nil {
+    event.progress = job.progress
+  }
+  if opts?.output_count != nil {
+    event.output_count = opts.output_count
+  }
+  if job.error != nil {
+    event.error = job.error
+  }
+  return event
+}
+
+fn __model_job_emit(agent: HarnessAgent, event: ModelJobEvent, options: ModelJobRunOptions) {
+  const opts = options ?? {}
+  if opts.on_event != nil {
+    opts.on_event(event)
+  }
+  const session_id = trim(to_string(opts.session_id ?? ""))
+  if session_id != "" {
+    agent.emit_event(session_id, "model_job", event)
+  }
+}
+
+fn __model_job_apply(
+  job: ModelJob,
+  observation: ModelJobObservation,
+  at_ms: int,
+) -> Result<ModelJob, ModelJobError> {
+  if trim(observation.job_id) == "" || observation.job_id != job.id {
+    return Err(
+      model_job_error(
+        "backend",
+        "model backend returned an observation for a different job",
+        {backend: job.backend, job_id: job.id, detail: observation.job_id},
+      ),
+    )
+  }
+  const transition = model_job_transition_result(job.state, observation.state, job.backend, job.id)
+  if !is_ok(transition) {
+    return Err(unwrap_err(transition))
+  }
+  let next: ModelJob = job + {state: unwrap(transition), updated_at_ms: at_ms}
+  if observation.backend_state != nil {
+    next.backend_state = observation.backend_state
+  }
+  if observation.progress != nil {
+    if observation.progress < 0.0 || observation.progress > 1.0 {
+      return Err(
+        model_job_error(
+          "backend",
+          "model backend progress must be between 0 and 1",
+          {backend: job.backend, job_id: job.id, detail: observation.progress},
+        ),
+      )
+    }
+    next.progress = observation.progress
+  }
+  if observation.outputs != nil {
+    next.outputs = observation.outputs
+  }
+  if observation.error != nil {
+    next.error = observation.error
+  }
+  if observation.metadata != nil {
+    next.metadata = observation.metadata
+  }
+  if next.state == "failed" && next.error == nil {
+    next.error = model_job_error(
+      "backend",
+      "model backend reported failure without an error",
+      {backend: job.backend, job_id: job.id},
+    )
+  }
+  return Ok(next)
+}
+
+fn __model_job_asset_error(job: ModelJob, failure: MediaAssetFailure) -> ModelJobError {
+  return model_job_error(
+    "asset_mismatch",
+    failure.message,
+    {backend: job.backend, job_id: job.id, detail: failure},
+  )
+}
+
+fn __model_job_output_bytes(
+  io: ModelJobIo,
+  job: ModelJob,
+  output: ModelJobOutput,
+) -> Result<bytes, ModelJobError> {
+  let sources = 0
+  if output.bytes != nil {
+    sources = sources + 1
+  }
+  if trim(to_string(output.path ?? "")) != "" {
+    sources = sources + 1
+  }
+  if trim(to_string(output.url ?? "")) != "" {
+    sources = sources + 1
+  }
+  if sources != 1 {
+    return Err(
+      model_job_error(
+        "malformed_output",
+        "model output must contain exactly one of bytes, path, or url",
+        {backend: job.backend, job_id: job.id, detail: output.name},
+      ),
+    )
+  }
+  if output.bytes != nil {
+    return Ok(output.bytes)
+  }
+  if output.path != nil && trim(output.path) != "" {
+    if !io.fs.exists(output.path) {
+      return Err(
+        model_job_error(
+          "malformed_output",
+          "model output path is missing: " + output.path,
+          {backend: job.backend, job_id: job.id},
+        ),
+      )
+    }
+    return Ok(io.fs.read_bytes(output.path))
+  }
+  const scratch = io.fs.mkdtemp_in_workspace("model-output-")
+  const destination = path_join(scratch, "output.bin")
+  const fetched = try {
+    io.net.download(to_string(output.url ?? ""), destination, {max_response_bytes: 536870912})
+  }
+  if !is_ok(fetched) {
+    return Err(
+      model_job_error(
+        "backend",
+        "failed to download model output",
+        {backend: job.backend, job_id: job.id, retryable: true, detail: unwrap_err(fetched)},
+      ),
+    )
+  }
+  return Ok(io.fs.read_bytes(destination))
+}
+
+fn __model_job_materialize(
+  io: ModelJobIo,
+  job: ModelJob,
+  options: ModelJobRunOptions,
+) -> Result<list<MediaAsset>, ModelJobError> {
+  const outputs = job.outputs ?? []
+  if len(outputs) == 0 {
+    return Err(
+      model_job_error(
+        "malformed_output",
+        "succeeded model job has no outputs",
+        {backend: job.backend, job_id: job.id},
+      ),
+    )
+  }
+  let assets: list<MediaAsset> = []
+  for output in outputs {
+    const content = __model_job_output_bytes(io, job, output)
+    if !is_ok(content) {
+      return Err(unwrap_err(content))
+    }
+    let asset_options = {mime_type: output.mime_type, producing_job: job.id}
+    if options.asset_root != nil {
+      asset_options.root = options.asset_root
+    }
+    if output.width != nil {
+      asset_options.width = output.width
+    }
+    if output.height != nil {
+      asset_options.height = output.height
+    }
+    if output.duration_ms != nil {
+      asset_options.duration_ms = output.duration_ms
+    }
+    if output.metadata != nil {
+      asset_options.metadata = output.metadata
+    }
+    const stored = media_asset_store_result(io.fs, unwrap(content), asset_options)
+    if !is_ok(stored) {
+      return Err(__model_job_asset_error(job, unwrap_err(stored)))
+    }
+    assets = assets + [unwrap(stored)]
+  }
+  return Ok(assets)
+}
+
+fn __model_job_terminal(state: ModelJobState) -> bool {
+  return state == "succeeded" || state == "failed" || state == "canceled"
+}
+
+fn __model_job_emit_failure(
+  harness: Harness,
+  job: ModelJob,
+  error: ModelJobError,
+  options: ModelJobRunOptions,
+) -> ModelJobError {
+  const at_ms = harness.clock.monotonic_ms()
+  const failed: ModelJob = job + {state: "failed", error: error, updated_at_ms: at_ms}
+  const event = __model_job_event(failed, "failed", at_ms, {previous_state: job.state})
+  __model_job_emit(harness.agent, event, options)
+  return error
+}
+
+fn __model_job_finish(
+  harness: Harness,
+  job: ModelJob,
+  events: list<ModelJobEvent>,
+  options: ModelJobRunOptions,
+) -> Result<ModelJobReceipt, ModelJobError> {
+  if job.state == "failed" {
+    const error = job.error
+      ?? model_job_error(
+      "backend",
+      "model job failed",
+      {backend: job.backend, job_id: job.id},
+    )
+    if len(events) == 0 || events[len(events) - 1].kind != "failed" {
+      __model_job_emit_failure(harness, job, error, options)
+    }
+    return Err(error)
+  }
+  if job.state == "canceled" {
+    return Err(
+      model_job_error("canceled", "model job was canceled", {backend: job.backend, job_id: job.id}),
+    )
+  }
+  const assets = __model_job_materialize({fs: harness.fs, net: harness.net}, job, options)
+  if !is_ok(assets) {
+    const error = unwrap_err(assets)
+    return Err(__model_job_emit_failure(harness, job, error, options))
+  }
+  const output_event = __model_job_event(
+    job,
+    "output",
+    harness.clock.monotonic_ms(),
+    {output_count: len(unwrap(assets))},
+  )
+  __model_job_emit(harness.agent, output_event, options)
+  return Ok(
+    {
+      schema: "harn.model_job_receipt.v1",
+      request_digest: job.request_digest,
+      backend: job.backend,
+      job: job,
+      assets: unwrap(assets),
+      events: events + [output_event],
+    },
+  )
+}
+
+/**
+ * Submit and drive one asynchronous model job to a terminal result.
+ *
+ * @effects: [clock, fs.read, fs.write, network, host]
+ * @errors: []
+ */
+pub fn model_job_run_result(
+  harness: Harness,
+  backend: ModelBackend,
+  request: ModelJobRequest,
+  options: ModelJobRunOptions = {},
+) -> Result<ModelJobReceipt, ModelJobError> {
+  const valid = model_job_request_result(request)
+  if !is_ok(valid) {
+    return Err(unwrap_err(valid))
+  }
+  if trim(backend.id) == "" {
+    return Err(model_job_error("invalid_request", "model backend id is required"))
+  }
+  const started = harness.clock.monotonic_ms()
+  const submitted = backend.submit(harness, request)
+  if !is_ok(submitted) {
+    return Err(unwrap_err(submitted))
+  }
+  const first = unwrap(submitted)
+  let job: ModelJob = {
+    schema: "harn.model_job.v1",
+    id: first.job_id,
+    request_id: request.id,
+    request_digest: model_job_request_digest(request),
+    backend: backend.id,
+    state: first.state,
+    submitted_at_ms: started,
+    updated_at_ms: started,
+  }
+  if first.backend_state != nil {
+    job.backend_state = first.backend_state
+  }
+  if first.progress != nil {
+    job.progress = first.progress
+  }
+  if first.outputs != nil {
+    job.outputs = first.outputs
+  }
+  if first.error != nil {
+    job.error = first.error
+  }
+  if first.metadata != nil {
+    job.metadata = first.metadata
+  }
+  const submitted_event = __model_job_event(job, "submitted", started)
+  let events: list<ModelJobEvent> = [submitted_event]
+  __model_job_emit(harness.agent, submitted_event, options)
+  if __model_job_terminal(job.state) {
+    return __model_job_finish(harness, job, events, options)
+  }
+  const timeout_ms = to_int(options.timeout_ms) ?? 300000
+  const interval_ms = to_int(options.interval_ms) ?? 500
+  const max_attempts = to_int(options.max_attempts) ?? 0
+  let attempts = 0
+  while true {
+    if max_attempts > 0 && attempts >= max_attempts {
+      const error = model_job_error(
+        "timeout",
+        "model job exceeded max_attempts",
+        {backend: backend.id, job_id: job.id, retryable: true},
+      )
+      return Err(__model_job_emit_failure(harness, job, error, options))
+    }
+    if harness.clock.monotonic_ms() - started >= timeout_ms {
+      const error = model_job_error(
+        "timeout",
+        "model job timed out",
+        {backend: backend.id, job_id: job.id, retryable: true},
+      )
+      return Err(__model_job_emit_failure(harness, job, error, options))
+    }
+    if interval_ms > 0 {
+      harness.clock.sleep_ms(interval_ms)
+    }
+    const observed = backend.inspect(harness, job)
+    attempts = attempts + 1
+    if !is_ok(observed) {
+      const error = unwrap_err(observed)
+      return Err(__model_job_emit_failure(harness, job, error, options))
+    }
+    const previous = job.state
+    const applied = __model_job_apply(job, unwrap(observed), harness.clock.monotonic_ms())
+    if !is_ok(applied) {
+      const error = unwrap_err(applied)
+      return Err(__model_job_emit_failure(harness, job, error, options))
+    }
+    job = unwrap(applied)
+    if job.state != previous {
+      const event = __model_job_event(
+        job,
+        if job.state == "failed" {
+          "failed"
+        } else {
+          "state_changed"
+        },
+        job.updated_at_ms,
+        {previous_state: previous},
+      )
+      events = events + [event]
+      __model_job_emit(harness.agent, event, options)
+    } else if job.progress != nil {
+      const progress_event = __model_job_event(job, "progress", job.updated_at_ms)
+      events = events + [progress_event]
+      __model_job_emit(harness.agent, progress_event, options)
+    }
+    if __model_job_terminal(job.state) {
+      return __model_job_finish(harness, job, events, options)
+    }
+  }
+}
+
+/**
+ * Request cancellation and enforce the same terminal-state invariants.
+ *
+ * @effects: [clock, network]
+ * @errors: []
+ */
+pub fn model_job_cancel_result(
+  harness: Harness,
+  backend: ModelBackend,
+  job: ModelJob,
+) -> Result<ModelJob, ModelJobError> {
+  if __model_job_terminal(job.state) {
+    return Err(
+      model_job_error(
+        "invalid_transition",
+        "terminal model job cannot be canceled",
+        {backend: backend.id, job_id: job.id},
+      ),
+    )
+  }
+  const canceled = backend.cancel(harness, job)
+  if !is_ok(canceled) {
+    return Err(unwrap_err(canceled))
+  }
+  return __model_job_apply(job, unwrap(canceled), harness.clock.monotonic_ms())
+}

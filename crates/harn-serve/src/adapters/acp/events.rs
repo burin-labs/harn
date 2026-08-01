@@ -8,7 +8,6 @@ use harn_vm::visible_text::sanitize_visible_assistant_text;
 use super::AcpOutput;
 
 /// Writes canonical ACP `session/update` notifications for each `AgentEvent`.
-/// Holds only the minimum state needed to serialize without the full AcpBridge.
 pub(super) struct AcpAgentEventSink {
     output: AcpOutput,
     replayed: bool,
@@ -1211,7 +1210,8 @@ impl AgentEventSink for AcpAgentEventSink {
             | AgentEvent::FinalWrapup { .. }
             | AgentEvent::PackThinkingStripped { .. }
             | AgentEvent::SelfConsistencyTie { .. }
-            | AgentEvent::CodeLibrarianQueryNlFallback { .. } => {
+            | AgentEvent::CodeLibrarianQueryNlFallback { .. }
+            | AgentEvent::ModelJob { .. } => {
                 let (kind, session_id, payload) = ext_payloads::documented_stdlib_event(event);
                 self.emit_agent_event_ext(kind, session_id, payload);
             }

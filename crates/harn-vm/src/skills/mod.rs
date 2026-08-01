@@ -39,7 +39,8 @@ pub use runtime::{
 };
 pub use source::{
     skill_entry_to_vm, skill_manifest_ref_to_vm, strip_untrusted_command_frontmatter,
-    FsSkillSource, HostSkillSource, Layer, Skill, SkillManifestRef, SkillSource,
+    validate_skill_bundle, FsSkillSource, HostSkillSource, Layer, Skill, SkillManifestRef,
+    SkillSource,
 };
 pub use substitute::{substitute_skill_body, SubstitutionContext};
 

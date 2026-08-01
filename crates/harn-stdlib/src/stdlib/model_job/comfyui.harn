@@ -1,0 +1,295 @@
+import {
+  ModelBackend,
+  ModelJob,
+  ModelJobError,
+  ModelJobObservation,
+  ModelJobOutput,
+  ModelJobRequest,
+  model_job_error,
+  model_job_state_result,
+} from "std/model_job/contracts"
+
+pub type ComfyWorkflowBuilder = fn(ModelJobRequest) -> dict
+
+pub type ComfyBackendOptions = {timeout_ms?: int, max_response_bytes?: int, client_id?: string}
+
+fn __comfy_endpoint(endpoint: string) -> string {
+  const clean = trim(endpoint)
+  if clean == "" {
+    throw "std/model_job/comfyui: endpoint is required"
+  }
+  if ends_with(clean, "/") {
+    return substring(clean, 0, len(clean) - 1)
+  }
+  return clean
+}
+
+fn __comfy_http_error(backend: string, message: string, detail = nil) -> ModelJobError {
+  return model_job_error("backend", message, {backend: backend, retryable: true, detail: detail})
+}
+
+fn __comfy_json(response, backend: string, action: string) -> Result<unknown, ModelJobError> {
+  if response?.status < 200 || response?.status >= 300 {
+    return Err(
+      __comfy_http_error(
+        backend,
+        "ComfyUI " + action + " returned HTTP " + to_string(response?.status),
+      ),
+    )
+  }
+  const parsed = try {
+    json_parse(response?.body ?? "")
+  }
+  if !is_ok(parsed) {
+    return Err(
+      model_job_error(
+        "backend",
+        "ComfyUI " + action + " returned malformed JSON",
+        {backend: backend, detail: unwrap_err(parsed)},
+      ),
+    )
+  }
+  return Ok(unwrap(parsed))
+}
+
+fn __comfy_request_options(options: ComfyBackendOptions) -> dict {
+  return {
+    headers: {"content-type": "application/json"},
+    timeout_ms: options.timeout_ms ?? 30000,
+    max_response_bytes: options.max_response_bytes ?? 16777216,
+  }
+}
+
+fn __comfy_output_url(endpoint: string, image) -> string {
+  return endpoint
+    + "/view?filename="
+    + url_encode(to_string(image?.filename ?? ""))
+    + "&subfolder="
+    + url_encode(to_string(image?.subfolder ?? ""))
+    + "&type="
+    + url_encode(to_string(image?.type ?? "output"))
+}
+
+fn __comfy_outputs(endpoint: string, history) -> list<ModelJobOutput> {
+  let outputs: list<ModelJobOutput> = []
+  for node in values(history?.outputs ?? {}) {
+    for image in node?.images ?? [] {
+      outputs = outputs
+        + [
+        {
+          name: to_string(image?.filename ?? "output.png"),
+          mime_type: "image/png",
+          url: __comfy_output_url(endpoint, image),
+          metadata: {filename: image?.filename, subfolder: image?.subfolder, type: image?.type},
+        },
+      ]
+    }
+  }
+  return outputs
+}
+
+fn __comfy_queue_contains(queue, job_id: string) -> bool {
+  for entry in queue ?? [] {
+    if to_string(entry?.[1] ?? "") == job_id {
+      return true
+    }
+  }
+  return false
+}
+
+fn __comfy_history_observation(
+  endpoint: string,
+  backend: string,
+  job: ModelJob,
+  body,
+) -> Result<ModelJobObservation, ModelJobError> {
+  const history = body?.[job.id]
+  if history == nil {
+    return Ok({job_id: job.id, state: "running", backend_state: "not_in_history"})
+  }
+  const status = history?.status ?? {}
+  const raw_state = status?.status_str
+    ?? if status?.completed ?? false {
+    "success"
+  } else {
+    "running"
+  }
+  const normalized = model_job_state_result(raw_state, backend, job.id)
+  if !is_ok(normalized) {
+    return Err(unwrap_err(normalized))
+  }
+  const state = unwrap(normalized)
+  if state == "failed" {
+    return Ok(
+      {
+        job_id: job.id,
+        state: "failed",
+        backend_state: to_string(raw_state),
+        error: model_job_error(
+          "backend",
+          "ComfyUI execution failed",
+          {backend: backend, job_id: job.id, detail: status?.messages ?? history},
+        ),
+      },
+    )
+  }
+  if state == "succeeded" {
+    const outputs = __comfy_outputs(endpoint, history)
+    if len(outputs) == 0 {
+      return Err(
+        model_job_error(
+          "malformed_output",
+          "ComfyUI completed without image outputs",
+          {backend: backend, job_id: job.id, detail: history?.outputs},
+        ),
+      )
+    }
+    return Ok(
+      {
+        job_id: job.id,
+        state: "succeeded",
+        backend_state: to_string(raw_state),
+        progress: 1.0,
+        outputs: outputs,
+      },
+    )
+  }
+  return Ok({job_id: job.id, state: state, backend_state: to_string(raw_state)})
+}
+
+/**
+ * Build a model-job backend over ComfyUI's stable HTTP queue API.
+ *
+ * The caller owns the workflow graph; this adapter owns submit, status,
+ * cancellation, output discovery, and error normalization.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn comfyui_backend(
+  endpoint: string,
+  build_workflow: ComfyWorkflowBuilder,
+  options: ComfyBackendOptions = {},
+) -> ModelBackend {
+  const base = __comfy_endpoint(endpoint)
+  const backend_id = "comfyui:" + base
+  const request_options = __comfy_request_options(options)
+  return {
+    id: backend_id,
+    submit: fn(harness, request) {
+      const workflow = build_workflow(request)
+      const response = harness.net.post(
+        base + "/prompt",
+        json_stringify({prompt: workflow, client_id: options.client_id ?? request.id}),
+        request_options,
+      )
+      const decoded = __comfy_json(response, backend_id, "submit")
+      if !is_ok(decoded) {
+        return Err(unwrap_err(decoded))
+      }
+      const prompt_id = trim(to_string(unwrap(decoded)?.prompt_id ?? ""))
+      if prompt_id == "" {
+        return Err(
+          model_job_error(
+            "backend",
+            "ComfyUI submit response is missing prompt_id",
+            {backend: backend_id, detail: unwrap(decoded)},
+          ),
+        )
+      }
+      return Ok({job_id: prompt_id, state: "queued", backend_state: "queued"})
+    },
+    inspect: fn(harness, job) {
+      const response = harness.net.get(base + "/history/" + url_encode(job.id), request_options)
+      const decoded = __comfy_json(response, backend_id, "status")
+      if !is_ok(decoded) {
+        return Err(unwrap_err(decoded))
+      }
+      return __comfy_history_observation(base, backend_id, job, unwrap(decoded))
+    },
+    cancel: fn(harness, job) {
+      const queue_response = harness.net.post(
+        base + "/queue",
+        json_stringify({delete: [job.id]}),
+        request_options,
+      )
+      if queue_response?.status < 200 || queue_response?.status >= 300 {
+        return Err(
+          __comfy_http_error(
+            backend_id,
+            "ComfyUI queue cancellation returned HTTP " + to_string(queue_response?.status),
+          ),
+        )
+      }
+      const current_response = harness.net.get(base + "/queue", request_options)
+      const current = __comfy_json(current_response, backend_id, "queue status")
+      if !is_ok(current) {
+        return Err(unwrap_err(current))
+      }
+      if __comfy_queue_contains(unwrap(current)?.queue_running, job.id) {
+        const interrupt_response = harness.net.post(base + "/interrupt", "", request_options)
+        if interrupt_response?.status < 200 || interrupt_response?.status >= 300 {
+          return Err(
+            __comfy_http_error(
+              backend_id,
+              "ComfyUI interrupt returned HTTP " + to_string(interrupt_response?.status),
+            ),
+          )
+        }
+      }
+      return Ok({job_id: job.id, state: "canceled", backend_state: "cancel_requested"})
+    },
+  }
+}
+
+/**
+ * Ready-to-run FLUX.2 Klein 4B distilled text-to-image graph.
+ *
+ * Model filenames match the official ComfyUI distribution. Width and height
+ * come from the provider-neutral request; the distilled model uses four steps.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn comfyui_flux2_klein_workflow(request: ModelJobRequest) -> dict {
+  const width = request.output.width ?? 1024
+  const height = request.output.height ?? 1024
+  const seed = request.seed ?? 0
+  const prefix = to_string(request.params?.filename_prefix ?? "harn/flux2-klein")
+  return {
+    "1": {
+      class_type: "UNETLoader",
+      inputs: {unet_name: "flux-2-klein-4b-fp8.safetensors", weight_dtype: "default"},
+    },
+    "2": {
+      class_type: "CLIPLoader",
+      inputs: {clip_name: "qwen_3_4b.safetensors", type: "flux2", device: "default"},
+    },
+    "3": {class_type: "VAELoader", inputs: {vae_name: "flux2-vae.safetensors"}},
+    "4": {class_type: "CLIPTextEncode", inputs: {text: request.prompt, clip: ["2", 0]}},
+    "5": {class_type: "ConditioningZeroOut", inputs: {conditioning: ["4", 0]}},
+    "6": {class_type: "RandomNoise", inputs: {noise_seed: seed}},
+    "7": {
+      class_type: "CFGGuider",
+      inputs: {model: ["1", 0], positive: ["4", 0], negative: ["5", 0], cfg: 1.0},
+    },
+    "8": {class_type: "KSamplerSelect", inputs: {sampler_name: "euler"}},
+    "9": {class_type: "Flux2Scheduler", inputs: {steps: 4, width: width, height: height}},
+    "10": {
+      class_type: "EmptyFlux2LatentImage",
+      inputs: {width: width, height: height, batch_size: request.output.count ?? 1},
+    },
+    "11": {
+      class_type: "SamplerCustomAdvanced",
+      inputs: {
+        noise: ["6", 0],
+        guider: ["7", 0],
+        sampler: ["8", 0],
+        sigmas: ["9", 0],
+        latent_image: ["10", 0],
+      },
+    },
+    "12": {class_type: "VAEDecode", inputs: {samples: ["11", 0], vae: ["3", 0]}},
+    "13": {class_type: "SaveImage", inputs: {images: ["12", 0], filename_prefix: prefix}},
+  }
+}

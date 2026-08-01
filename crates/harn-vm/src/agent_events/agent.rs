@@ -495,6 +495,11 @@ pub enum AgentEvent {
         session_id: String,
         checkpoint: serde_json::Value,
     },
+    /// A provider-neutral local or hosted model job changed lifecycle state.
+    ModelJob {
+        session_id: String,
+        event: serde_json::Value,
+    },
     FeedbackInjected {
         session_id: String,
         kind: String,
@@ -1145,6 +1150,7 @@ impl AgentEvent {
             | Self::SelfConsistencyTie { session_id, .. }
             | Self::CodeLibrarianQueryNlFallback { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
+            | Self::ModelJob { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::HostToolResult { session_id, .. }
             | Self::HostAttachment { session_id, .. }

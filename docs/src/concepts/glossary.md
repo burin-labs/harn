@@ -75,6 +75,15 @@ run. Holds artifacts, per-stage results, and the replay trace.
 
 ## Durable state
 
+**Model job.** One finite, asynchronous model request with a closed lifecycle:
+`queued`, `running`, `succeeded`, `failed`, or `canceled`. Harn owns its events,
+receipt, output storage, and replay; a backend owns provider translation. See
+[Why Harn has model jobs](./model-jobs.md).
+
+**Media asset.** Model output bytes stored under their SHA-256 digest. A media
+asset has a portable `asset://sha256/...` identity, a verified MIME type, and a
+current local path. See the [model-job reference](../stdlib/model-jobs.md).
+
 **Session.** The first-class VM resource that owns a transcript, subscribers,
 parent/child lineage, a pinned system prompt, and a pinned model. Created by
 `agent_session_open`. Outlives any single agent loop.
@@ -172,5 +181,6 @@ conversational-unit noun.
 | Pipelines, harness, lifecycle callbacks | [Pipeline lifecycle](../pipeline-lifecycle.md) |
 | System reminders, inject modes | [System reminders](../system-reminders.md) |
 | Skills | [Skills](../skills.md) |
+| Model jobs, receipts, media assets | [Model-job reference](../stdlib/model-jobs.md) |
 | Personas | [Personas](../personas.md) |
 | Daemon loops | [Daemon stdlib](../stdlib/daemon.md) |

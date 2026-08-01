@@ -21,7 +21,7 @@ if grep -Fqi "simpler and dumber" AGENTS.md; then
   fail "AGENTS.md contains the retired outcome-shrinking phrase"
 fi
 
-for skill in harn-agent harn-de-slop harn-orchestration harn-probe harn-product-quality harn-testing; do
+for skill in harn-agent harn-de-slop harn-docs harn-orchestration harn-probe harn-product-quality harn-testing; do
   [[ -f "crates/harn-skills/src/corpus/$skill/SKILL.md" ]] ||
     fail "missing canonical skill $skill"
 done
