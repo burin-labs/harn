@@ -797,19 +797,16 @@ fn review_branch(task) {}
 }
 
 #[test]
-fn test_flow_predicate_mode_attributes_warn_off_functions() {
-    let warns = warnings(
+fn test_flow_predicate_mode_attributes_warn_off_callable_declarations() {
+    let diagnostics = diagnostics_with_code(
         r"
 @deterministic
-pipeline invalid(task) {}
+struct Invalid { value: int }
 ",
+        Code::InvalidAttributeTarget,
+        DiagnosticSeverity::Warning,
     );
-    assert!(
-        warns
-            .iter()
-            .any(|warning| warning.contains("`@deterministic` only applies to function")),
-        "expected placement warning, got {warns:?}"
-    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
 }
 
 #[test]

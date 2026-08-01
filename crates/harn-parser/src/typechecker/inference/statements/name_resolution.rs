@@ -16,10 +16,11 @@ impl TypeChecker {
             && scope.get_var(name).is_none()
             && !self.legacy_ambient_capabilities
         {
-            self.error_at(
-                Code::UndefinedVariable,
+            self.unresolved_name_error_at(
+                name,
                 format!("undefined value `{name}`; pass it explicitly as `Harness`"),
                 span,
+                None,
             );
             return;
         }
@@ -63,15 +64,8 @@ impl TypeChecker {
             Some(s) => format!("value `{name}` is not defined or imported — did you mean `{s}`?"),
             None => format!("value `{name}` is not defined or imported"),
         };
-        match suggestion {
-            Some(s) => self.error_at_with_help(
-                Code::UndefinedVariable,
-                message,
-                span,
-                format!("did you mean `{s}`?"),
-            ),
-            None => self.error_at(Code::UndefinedVariable, message, span),
-        }
+        let help = suggestion.map(|candidate| format!("did you mean `{candidate}`?"));
+        self.unresolved_name_error_at(name, message, span, help);
     }
 
     pub(super) fn check_dict_key(&mut self, key: &SNode, scope: &mut TypeScope) {

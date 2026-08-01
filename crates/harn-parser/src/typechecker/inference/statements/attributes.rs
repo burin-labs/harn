@@ -1,4 +1,6 @@
 use super::*;
+use std::collections::BTreeSet;
+use std::rc::Rc;
 
 /// Recognized retry fields, shared by the compact `@job(retry: {...})` dict
 /// and the standalone `@retry(...)` attribute (documented aliases — keep them
@@ -118,11 +120,16 @@ impl TypeChecker {
             if matches!(
                 attr.name.as_str(),
                 "deterministic" | "semantic" | "archivist" | "retroactive"
-            ) && !matches!(inner.node, Node::FnDecl { .. })
-            {
+            ) && !matches!(
+                inner.node,
+                Node::FnDecl { .. } | Node::ToolDecl { .. } | Node::Pipeline { .. }
+            ) {
                 self.warning_at(
                     Code::InvalidAttributeTarget,
-                    format!("`@{}` only applies to function declarations", attr.name),
+                    format!(
+                        "`@{}` only applies to function, tool, or pipeline declarations",
+                        attr.name
+                    ),
                     attr.span,
                 );
             }
@@ -182,6 +189,7 @@ impl TypeChecker {
                     inv.span,
                 );
             }
+            self.validate_flow_capability_boundary(inner);
         } else {
             if let Some(arch) = archivist {
                 self.warning_at(
@@ -205,6 +213,49 @@ impl TypeChecker {
 
         if let Some(arch) = archivist {
             self.validate_archivist_args(arch);
+        }
+    }
+
+    fn validate_flow_capability_boundary(&mut self, inner: &SNode) {
+        let params = match &inner.node {
+            Node::FnDecl { params, .. }
+            | Node::ToolDecl { params, .. }
+            | Node::Pipeline { params, .. } => params,
+            _ => return,
+        };
+        let requests_ast = crate::is_flow_ast_injection_request(
+            params
+                .first()
+                .and_then(|parameter| parameter.type_expr.as_ref()),
+        );
+        let root_scope = Rc::clone(&self.scope);
+        let violations = {
+            let scope = root_scope.as_ref();
+            params
+                .iter()
+                .enumerate()
+                .filter_map(|(index, parameter)| {
+                    let resolved = self.resolve_alias(parameter.type_expr.as_ref()?, scope);
+                    if requests_ast
+                        && index == 0
+                        && matches!(&resolved, TypeExpr::Named(name) if name == "HarnessAst")
+                    {
+                        return None;
+                    }
+                    let mut capabilities = BTreeSet::new();
+                    collect_harness_capabilities(&resolved, &mut capabilities);
+                    (!capabilities.is_empty()).then(|| {
+                        (
+                            parameter.name.clone(),
+                            capabilities.into_iter().collect::<Vec<_>>(),
+                            parameter.span,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        for (parameter, capabilities, span) in violations {
+            self.flow_capability_boundary_error_at(&parameter, capabilities, span);
         }
     }
 
@@ -1216,5 +1267,58 @@ impl TypeChecker {
                 attr.span,
             );
         }
+    }
+}
+
+fn collect_harness_capabilities(ty: &TypeExpr, capabilities: &mut BTreeSet<String>) {
+    match ty {
+        TypeExpr::Named(name)
+            if name == "Harness"
+                || harn_builtin_meta::CapabilityId::from_type_name(name).is_some() =>
+        {
+            capabilities.insert(name.clone());
+        }
+        TypeExpr::Union(items) | TypeExpr::Intersection(items) | TypeExpr::Tuple(items) => {
+            for item in items {
+                collect_harness_capabilities(item, capabilities);
+            }
+        }
+        TypeExpr::Shape(fields) => {
+            for field in fields {
+                collect_harness_capabilities(&field.type_expr, capabilities);
+            }
+        }
+        TypeExpr::OpenShape { fields, rests } => {
+            for field in fields {
+                collect_harness_capabilities(&field.type_expr, capabilities);
+            }
+            for rest in rests {
+                collect_harness_capabilities(rest, capabilities);
+            }
+        }
+        TypeExpr::List(inner)
+        | TypeExpr::Iter(inner)
+        | TypeExpr::Generator(inner)
+        | TypeExpr::Stream(inner)
+        | TypeExpr::Owned(inner) => collect_harness_capabilities(inner, capabilities),
+        TypeExpr::DictType(key, value) => {
+            collect_harness_capabilities(key, capabilities);
+            collect_harness_capabilities(value, capabilities);
+        }
+        TypeExpr::FnType {
+            params,
+            return_type,
+        } => {
+            for parameter in params {
+                collect_harness_capabilities(parameter, capabilities);
+            }
+            collect_harness_capabilities(return_type, capabilities);
+        }
+        TypeExpr::Applied { args, .. } => {
+            for argument in args {
+                collect_harness_capabilities(argument, capabilities);
+            }
+        }
+        _ => {}
     }
 }

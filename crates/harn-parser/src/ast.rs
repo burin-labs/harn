@@ -984,3 +984,14 @@ impl TypedParam {
         params.iter().position(|p| p.default_value.is_some())
     }
 }
+
+/// Whether a Flow predicate's raw leading type opts into the AST capability
+/// injected by the evaluator.
+///
+/// This contract is intentionally syntactic: aliases and nested capability
+/// shapes are not runtime injection requests. Keeping the check here gives the
+/// typechecker and evaluator one semantic owner for argument alignment.
+pub fn is_flow_ast_injection_request(type_expr: Option<&TypeExpr>) -> bool {
+    type_expr
+        .is_some_and(|type_expr| matches!(type_expr, TypeExpr::Named(name) if name == "HarnessAst"))
+}

@@ -473,12 +473,15 @@ fn flow_predicate_args(
     closure: Option<&VmClosure>,
     domain_args: [VmValue; 3],
 ) -> Result<Vec<VmValue>, VmError> {
-    let requests_ast = closure
-        .and_then(|closure| closure.func.params.first())
-        .and_then(|param| param.type_expr.as_ref())
-        .is_some_and(|type_expr| {
-            matches!(type_expr, harn_parser::TypeExpr::Named(name) if name == "HarnessAst")
-        });
+    let requests_ast = closure.is_some_and(|closure| {
+        harn_parser::is_flow_ast_injection_request(
+            closure
+                .func
+                .params
+                .first()
+                .and_then(|parameter| parameter.type_expr.as_ref()),
+        )
+    });
     let mut args = Vec::with_capacity(domain_args.len() + usize::from(requests_ast));
     if requests_ast {
         let ast = ast.cloned().ok_or_else(|| {

@@ -1798,8 +1798,21 @@ fn print_gate_report(report: &PackageVerifyReport) {
             println!("  {detail}");
         }
         if !check.stderr.trim().is_empty() {
-            eprintln!("{} failed output:\n{}", check.name, check.stderr.trim());
+            eprintln!(
+                "{} {}:\n{}",
+                check.name,
+                gate_stderr_label(check),
+                check.stderr.trim()
+            );
         }
+    }
+}
+
+fn gate_stderr_label(check: &PackageVerifyCheck) -> &'static str {
+    if check.status == "fail" {
+        "failed output"
+    } else {
+        "diagnostics"
     }
 }
 

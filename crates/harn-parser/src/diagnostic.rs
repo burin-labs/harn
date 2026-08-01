@@ -596,7 +596,7 @@ fn type_diagnostic_primary_label(diag: &crate::typechecker::TypeDiagnostic) -> O
         Some(crate::typechecker::DiagnosticDetails::LintRule { rule }) => {
             Some(format!("lint[{rule}]"))
         }
-        Some(crate::typechecker::DiagnosticDetails::TypeMismatch) => {
+        Some(crate::typechecker::DiagnosticDetails::TypeMismatch { .. }) => {
             Some("found this type".to_string())
         }
         _ => None,

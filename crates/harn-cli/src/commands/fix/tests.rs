@@ -2,6 +2,21 @@ use super::*;
 use std::fs;
 use std::path::PathBuf;
 
+fn named_type(name: &str) -> TypeExpr {
+    TypeExpr::Named(name.to_string())
+}
+
+fn capability_shape(fields: &[(&str, &str)]) -> TypeExpr {
+    TypeExpr::Shape(
+        fields
+            .iter()
+            .map(|(field, type_name)| {
+                harn_parser::ShapeField::synthetic(*field, named_type(type_name), false)
+            })
+            .collect(),
+    )
+}
+
 fn candidate(file: &str, start: usize, end: usize) -> RepairCandidate {
     RepairCandidate {
         file: file.to_string(),
@@ -9,6 +24,8 @@ fn candidate(file: &str, start: usize, end: usize) -> RepairCandidate {
         severity: "warning",
         code: Code::FormatterWouldReformat,
         message: "test".to_string(),
+        unresolved_name: None,
+        expected_type: None,
         span: Some(Span::with_offsets(start, end, 1, start + 1)),
         repair: Repair::from_template(Code::FormatterWouldReformat.repair_template().unwrap()),
         impact: RepairImpactWire::generic(),
@@ -338,7 +355,8 @@ fn missing_capability_argument_repair_uses_typed_root_field() {
     let span = harn_lexer::Span::with_offsets(span, span + 5, 2, 10);
     let (_, edits, _) = synthesize_missing_capability_argument_repair(
         span,
-        "argument 1 `fs`: expected HarnessFs, found string",
+        &named_type("HarnessFs"),
+        &named_type("string"),
         source,
         &program,
     )
@@ -358,7 +376,8 @@ fn missing_capability_argument_is_inserted_at_the_diagnosed_position() {
     let span = harn_lexer::Span::with_offsets(start, start + 5, 2, 22);
     let (_, edits, _) = synthesize_missing_capability_argument_repair(
         span,
-        "argument 2 `system`: expected HarnessSystem, found string",
+        &named_type("HarnessSystem"),
+        &named_type("string"),
         source,
         &program,
     )
@@ -379,7 +398,8 @@ fn attenuated_capability_argument_repair_projects_existing_root_grant() {
     let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 2, 10);
     let (repair, edits, _) = synthesize_missing_capability_argument_repair(
         span,
-        "argument 1 `fs`: expected HarnessFs, found Harness",
+        &named_type("HarnessFs"),
+        &named_type("Harness"),
         source,
         &program,
     )
@@ -398,7 +418,8 @@ fn attenuated_capability_bundle_repair_projects_existing_root_grant() {
     let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 2, 10);
     let (repair, edits, _) = synthesize_missing_capability_argument_repair(
         span,
-        "argument 1 `io`: expected {fs: HarnessFs, tools: HarnessTools}, found Harness",
+        &capability_shape(&[("fs", "HarnessFs"), ("tools", "HarnessTools")]),
+        &named_type("Harness"),
         source,
         &program,
     )
@@ -431,7 +452,8 @@ fn missing_capability_argument_repair_inserts_before_parenthesized_expression() 
 
     let (_, edits, _) = synthesize_missing_capability_argument_repair(
         span,
-        "argument 1 `fs`: expected HarnessFs, found dict",
+        &named_type("HarnessFs"),
+        &named_type("dict"),
         source,
         &program,
     )
@@ -474,7 +496,8 @@ fn missing_capability_argument_repair_rejects_non_call_spans() {
     assert!(
         synthesize_missing_capability_argument_repair(
             import_span,
-            "argument 1 `ast`: expected HarnessAst, found string",
+            &named_type("HarnessAst"),
+            &named_type("string"),
             source,
             &program,
         )
