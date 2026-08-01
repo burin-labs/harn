@@ -718,6 +718,38 @@ fn capability_apply_widens_an_existing_handle_for_an_imported_bundle() {
 }
 
 #[test]
+fn capability_apply_inserts_an_argument_for_a_widened_existing_carrier() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "pub fn read_mode(harness: HarnessEnv) -> string {\n  llm_usage()\n  return harness.get_or(\"MODE\", \"\")\n}\n\nfn invoke() -> string {\n  return read_mode()\n}\n\nfn main(harness: Harness) {\n  invoke()\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("fn invoke(harness: {env: HarnessEnv, obs: HarnessObs})"),
+        "the caller should gain the propagated bundle: {updated}"
+    );
+    assert!(
+        updated.contains("read_mode(harness)"),
+        "the missing capability argument should be inserted: {updated}"
+    );
+}
+
+#[test]
 fn apply_thread_params_threads_harness_for_stdio_migration() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("stdio_apply.harn");

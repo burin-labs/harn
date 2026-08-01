@@ -181,15 +181,25 @@ pub(super) fn plan(
         let argument = argument_projection(binding, caller_desired, callee_desired)?;
         let call = &caller.info.calls[edge.call_idx];
         let edit = if let Some(carrier) = &callee.carrier {
-            let argument_span = call.args.get(carrier.param_index).copied().ok_or_else(|| {
-                format!(
-                    "{} requires capability argument {}",
-                    callee.info.name, carrier.param_index
+            if let Some(argument_span) = call.args.get(carrier.param_index).copied() {
+                FixEdit {
+                    span: argument_span,
+                    replacement: argument,
+                }
+            } else if call.args.len() == carrier.param_index {
+                add_call_argument_edit(
+                    &program_files[caller.file_idx].source,
+                    &call.span,
+                    &argument,
                 )
-            })?;
-            FixEdit {
-                span: argument_span,
-                replacement: argument,
+                .ok_or_else(|| format!("failed to update call to {}", callee.info.name))?
+            } else {
+                return Err(format!(
+                    "{} requires capability argument {} after {} omitted positional arguments",
+                    callee.info.name,
+                    carrier.param_index,
+                    carrier.param_index - call.args.len()
+                ));
             }
         } else {
             add_call_argument_edit(
