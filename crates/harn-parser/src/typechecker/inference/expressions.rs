@@ -285,16 +285,28 @@ impl TypeChecker {
         args: &[SNode],
         scope: &TypeScope,
     ) -> InferredType {
-        let (data_type, data_required) = self.llm_call_schema_data_type(args, scope)?;
-        let mut result = builtin_return_type(name)?;
+        let data = self.llm_call_schema_data_type(args, scope)?;
+        Some(Self::narrow_schema_data_field(
+            builtin_return_type(name)?,
+            data,
+        ))
+    }
+
+    /// Replace the envelope's `data` field with the type an `output` schema
+    /// promises. Both the ambient `llm_call` form and the `harness.llm.*`
+    /// capability method resolve through here so they cannot disagree.
+    fn narrow_schema_data_field(
+        mut result: TypeExpr,
+        (data_type, data_required): (TypeExpr, bool),
+    ) -> TypeExpr {
         let TypeExpr::Shape(fields) = &mut result else {
-            return Some(result);
+            return result;
         };
         if let Some(field) = fields.iter_mut().find(|field| field.name == "data") {
             field.type_expr = data_type;
             field.optional = !data_required;
         }
-        Some(result)
+        result
     }
 
     fn llm_call_schema_data_type(
@@ -725,10 +737,9 @@ impl TypeChecker {
                         .as_ref()
                         .is_some_and(|ty| self.type_may_include_nil(ty, scope));
                 let result = |ty| Self::optional_method_result_type(ty, include_optional_nil);
-                if let Some(method_type) = obj_type
-                    .as_ref()
-                    .and_then(|ty| self.harness_method_return_type(ty, method.as_str(), scope))
-                {
+                if let Some(method_type) = obj_type.as_ref().and_then(|ty| {
+                    self.harness_method_return_type(ty, method.as_str(), args, scope)
+                }) {
                     return Some(result(method_type));
                 }
                 // Iter<T> receiver: combinators preserve or transform T; sinks
@@ -1740,14 +1751,24 @@ impl TypeChecker {
         &self,
         receiver: &TypeExpr,
         method: &str,
+        args: &[SNode],
         scope: &TypeScope,
     ) -> InferredType {
         let receiver = self.resolve_alias(receiver, scope);
         match receiver {
             TypeExpr::Named(name) => {
                 let capability = harn_builtin_meta::CapabilityId::from_type_name(name.as_str())?;
-                builtin_signatures::lookup_capability_method(capability, method)
-                    .and_then(|sig| (!sig.returns.is_any()).then(|| sig.returns.to_type_expr()))
+                let declared = builtin_signatures::lookup_capability_method(capability, method)
+                    .and_then(|sig| (!sig.returns.is_any()).then(|| sig.returns.to_type_expr()))?;
+                if capability != harn_builtin_meta::CapabilityId::Llm
+                    || !matches!(method, "call" | "completion")
+                {
+                    return Some(declared);
+                }
+                let Some(data) = self.llm_call_schema_data_type(args, scope) else {
+                    return Some(declared);
+                };
+                Some(Self::narrow_schema_data_field(declared, data))
             }
             _ => None,
         }

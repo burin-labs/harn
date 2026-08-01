@@ -1147,6 +1147,30 @@ mod tests {
             nested_error.contains("cannot be serialized"),
             "{nested_error}"
         );
+
+        let VmValue::Harness(root) = crate::harness::Harness::null().into_vm_value() else {
+            unreachable!("Harness lowers to VmValue::Harness")
+        };
+        let fs = VmValue::Harness(root.sub_handle("fs").expect("root exposes fs").into());
+        let narrow_error = reject_harness_serialization(&fs, "json_stringify")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            narrow_error.contains("HarnessFs is runtime authority")
+                && narrow_error.contains("cannot be serialized"),
+            "{narrow_error}"
+        );
+
+        let tools = VmValue::Harness(root.sub_handle("tools").expect("root exposes tools").into());
+        let bundle = VmValue::dict([("fs", fs), ("tools", tools)]);
+        let bundle_error = reject_harness_serialization(&bundle, "json_stringify")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            bundle_error.contains("runtime authority")
+                && bundle_error.contains("cannot be serialized"),
+            "{bundle_error}"
+        );
     }
 
     #[test]

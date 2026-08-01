@@ -58,6 +58,7 @@ pub fn manifest() -> &'static [&'static BuiltinManifestEntry] {
                 .map(|def| {
                     Box::leak(Box::new(BuiltinManifestEntry {
                         name: def.signature.name,
+                        canonical_name: def.signature.name,
                         signature: &def.signature,
                         contract: def.contract,
                     })) as &'static BuiltinManifestEntry

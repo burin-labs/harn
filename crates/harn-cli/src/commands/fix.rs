@@ -7,8 +7,7 @@ use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
 use harn_parser::analysis::{AnalysisDatabase, AnalysisError};
 use harn_parser::{
-    visit, BindingPattern, DiagnosticCode as Code, DiagnosticSeverity, Node, Repair, RepairSafety,
-    SNode, TypeExpr, TypedParam,
+    visit, DiagnosticCode as Code, DiagnosticSeverity, Node, Repair, RepairSafety, SNode, TypeExpr,
 };
 use serde::Serialize;
 
@@ -17,14 +16,24 @@ use crate::commands;
 use crate::commands::check::collect_preflight_diagnostics_with_module_graph as preflight_diagnostics;
 use crate::package::{self, CheckConfig, PreflightSeverity};
 
+#[path = "fix/capability_migrations.rs"]
+mod capability_migrations;
 #[path = "fix/lint_context.rs"]
 mod lint_context;
+#[path = "fix/signature_threading.rs"]
+mod signature_threading;
+use capability_migrations::{ambient_call_rewrite, ambient_capability_handle, ambient_replacement};
 use lint_context::FixLintContext;
 #[path = "fix/apply.rs"]
 mod apply;
 use apply::apply_repairs_with_options;
 #[cfg(test)]
-use apply::{apply_repairs, repair_path};
+use apply::{apply_file_edits, apply_repairs, repair_path};
+use signature_threading::{
+    add_call_argument_edit, add_harness_param_edit, build_reverse_callers, collect_callable_infos,
+    harness_param_name_for_insert, propagate_harness_requirements,
+    repair_for_ambient_capability_plan,
+};
 
 pub(crate) const FIX_PLAN_SCHEMA_VERSION: u32 = 2;
 pub(crate) const FIX_APPLY_SCHEMA_VERSION: u32 = 2;
@@ -228,6 +237,7 @@ struct AmbientCapabilityCall {
     name: String,
     code: Code,
     span: Span,
+    args: Vec<Span>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -507,11 +517,20 @@ fn collect_file_candidates(
             if diag.code != Code::ArgumentTypeMismatch {
                 return None;
             }
+            if argument_mismatch_expected_type(&diag.message) == Some("Harness") {
+                return synthesize_missing_root_argument_repair(
+                    diag.span?,
+                    &source,
+                    &program,
+                    &exported_names,
+                    &ambient_context,
+                );
+            }
             synthesize_missing_capability_argument_repair(
-                &source,
-                &program,
                 diag.span?,
                 &diag.message,
+                &source,
+                &program,
             )
         });
         let (repair, edits, impact) = if let Some(repair) = synthesized {
@@ -664,7 +683,12 @@ fn is_capability_migration_repair(repair: &Repair) -> bool {
     id.starts_with("bindings/thread-harness")
         || matches!(
             id,
-            "bindings/thread-missing-harness" | "bindings/prepend-capability-argument"
+            "bindings/thread-missing-harness"
+                | "bindings/thread-root-argument"
+                | "bindings/prepend-capability-argument"
+                | "bindings/attenuate-harness"
+                | "bindings/attenuate-capability-argument"
+                | "bindings/attenuate-capability-bundle-argument"
         )
 }
 
@@ -728,8 +752,7 @@ fn synthesize_ambient_capability_repair(
         .or_else(|| harness_param_name_for_insert(owner).map(str::to_string));
     let replacement =
         ambient_replacement(diag.code, &ambient.name, replacement_binding.as_deref())?;
-    let mut edits =
-        replace_identifier_within_span_fix(source, diag.span, &ambient.name, &replacement)?;
+    let mut edits = ambient_call_rewrite(source, ambient, &replacement)?;
 
     if owner.harness_binding.is_some() {
         return Some((
@@ -789,27 +812,79 @@ fn synthesize_ambient_capability_repair(
 }
 
 fn synthesize_missing_capability_argument_repair(
-    source: &str,
-    program: &[SNode],
     span: Span,
     message: &str,
+    source: &str,
+    program: &[SNode],
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let expected = message
-        .strip_prefix("argument 1 ")?
-        .split_once("expected ")?
-        .1
-        .split_once(", found")?
-        .0
-        .trim();
-    let argument = if expected == "Harness" {
-        "harness".to_string()
-    } else {
-        let capability = harn_builtin_meta::CapabilityId::from_type_name(expected)?;
-        format!("harness.{}", capability.field_name())
-    };
-    let diagnostic_offset = harn_lexer::byte_offset_for_position(source, span.line, span.column)?;
-    let insertion = capability_argument_insert_offset(source, program, diagnostic_offset)
-        .unwrap_or(diagnostic_offset);
+    let (argument_label, mismatch) = message.strip_prefix("argument ")?.split_once(' ')?;
+    let argument_index = argument_label.parse::<usize>().ok()?.checked_sub(1)?;
+    let (expected, found) = mismatch.split_once("expected ")?.1.split_once(", found ")?;
+    let expected = expected.trim();
+    let found = found.trim();
+    let capability = (expected != "Harness")
+        .then(|| harn_builtin_meta::CapabilityId::from_type_name(expected))
+        .flatten();
+    let mut matched_argument = None;
+    visit::walk_program(program, &mut |node| {
+        let Node::FunctionCall { args, .. } = &node.node else {
+            return;
+        };
+        let Some(candidate) = args.get(argument_index) else {
+            return;
+        };
+        if candidate.span.start == span.start && candidate.span.end == span.end {
+            if let Node::Identifier(binding) = &candidate.node {
+                matched_argument = Some((candidate.span, binding.clone()));
+            }
+        }
+    });
+
+    // After attenuating a helper signature, turn an existing root grant into
+    // the expected sub-grant in place. Appending to a simple identifier is
+    // structural and preserves the caller's chosen binding name.
+    if found == "Harness" {
+        let (argument_span, binding) = matched_argument?;
+        if let Some(replacement) = capability_bundle_literal(expected, &binding) {
+            return Some((
+                Repair {
+                    id: harn_parser::RepairId::from_owned(
+                        "bindings/attenuate-capability-bundle-argument".to_string(),
+                    ),
+                    summary:
+                        "Pass the closed capability bundle required by the attenuated callable"
+                            .to_string(),
+                    safety: RepairSafety::SurfaceChanging,
+                },
+                vec![FixEdit {
+                    span: argument_span,
+                    replacement,
+                }],
+                RepairImpactWire::local_ambient("attenuate-capability-bundle-argument"),
+            ));
+        }
+        let capability = capability?;
+        return Some((
+            Repair {
+                id: harn_parser::RepairId::from_owned(
+                    "bindings/attenuate-capability-argument".to_string(),
+                ),
+                summary: format!(
+                    "Pass the `{expected}` sub-grant required by the attenuated callable"
+                ),
+                safety: RepairSafety::SurfaceChanging,
+            },
+            vec![FixEdit {
+                span: argument_span,
+                replacement: format!("{binding}.{}", capability.field_name()),
+            }],
+            RepairImpactWire::local_ambient("attenuate-capability-argument"),
+        ));
+    }
+
+    let _capability = capability?;
+    let argument = capability_argument_for_span(program, span, expected)?;
+    let edit = insert_call_argument_before_span(source, program, span, &argument)?;
     Some((
         Repair {
             id: harn_parser::RepairId::from_owned(
@@ -820,46 +895,112 @@ fn synthesize_missing_capability_argument_repair(
             ),
             safety: RepairSafety::SurfaceChanging,
         },
-        vec![FixEdit {
-            span: Span::with_offsets(insertion, insertion, span.line, span.column),
-            replacement: format!("{argument}, "),
-        }],
+        vec![edit],
         RepairImpactWire::local_ambient("prepend-capability-argument"),
     ))
 }
 
-/// Resolve the insertion point from the owning call node, rather than from the
-/// first argument's diagnostic span. Expression spans intentionally exclude
-/// grouping parentheses, so inserting at the diagnostic start would turn
-/// `call((value) + suffix)` into `call((harness, value) + suffix)`.
-fn capability_argument_insert_offset(
+fn argument_mismatch_expected_type(message: &str) -> Option<&str> {
+    message
+        .strip_prefix("argument ")?
+        .split_once("expected ")?
+        .1
+        .split_once(", found ")
+        .map(|(expected, _)| expected.trim())
+}
+
+fn insert_call_argument_before_span(
     source: &str,
     program: &[SNode],
-    diagnostic_offset: usize,
-) -> Option<usize> {
-    let mut owner: Option<Span> = None;
-    for node in program {
-        visit::walk_node(node, &mut |child| {
-            let Node::FunctionCall { args, .. } = &child.node else {
-                return;
-            };
-            let Some(first) = args.first() else {
-                return;
-            };
-            if first.span.start > diagnostic_offset || first.span.end < diagnostic_offset {
-                return;
+    span: Span,
+    argument: &str,
+) -> Option<FixEdit> {
+    let mut edit = None;
+    visit::walk_program(program, &mut |node| {
+        let Node::FunctionCall { args, .. } = &node.node else {
+            return;
+        };
+        let Some(index) = args.iter().position(|candidate| {
+            candidate.span.start == span.start && candidate.span.end == span.end
+        }) else {
+            return;
+        };
+        edit = if index == 0 {
+            add_call_argument_edit(source, &node.span, argument)
+        } else {
+            let previous = args[index - 1].span;
+            Some(FixEdit {
+                span: Span::with_offsets(
+                    previous.end,
+                    previous.end,
+                    previous.end_line,
+                    previous.column,
+                ),
+                replacement: format!(", {argument}"),
+            })
+        };
+    });
+    edit
+}
+
+fn capability_argument_for_span(program: &[SNode], span: Span, expected: &str) -> Option<String> {
+    let capability = harn_builtin_meta::CapabilityId::from_type_name(expected)?;
+    let field_name = capability.field_name();
+    let mut candidates = Vec::new();
+    visit::walk_program(program, &mut |node| {
+        let params = match &node.node {
+            Node::FnDecl { params, .. }
+            | Node::ToolDecl { params, .. }
+            | Node::Pipeline { params, .. }
+                if node.span.start <= span.start && node.span.end >= span.end =>
+            {
+                params
             }
-            if owner.is_none_or(|current| {
-                child.span.end.saturating_sub(child.span.start)
-                    < current.end.saturating_sub(current.start)
-            }) {
-                owner = Some(child.span);
+            _ => return,
+        };
+        let mut direct = None;
+        let mut bundled = None;
+        let mut root = None;
+        for param in params {
+            match param.type_expr.as_ref() {
+                Some(TypeExpr::Named(name)) if name == expected => {
+                    direct = Some(param.name.clone());
+                }
+                Some(TypeExpr::Named(name)) if name == "Harness" => {
+                    root = Some(format!("{}.{}", param.name, field_name));
+                }
+                Some(TypeExpr::Shape(fields))
+                    if fields.iter().any(|field| {
+                        field.name == field_name
+                            && matches!(&field.type_expr, TypeExpr::Named(name) if name == expected)
+                    }) =>
+                {
+                    bundled = Some(format!("{}.{}", param.name, field_name));
+                }
+                _ => {}
             }
-        });
-    }
-    let owner = owner?;
-    let region = source.get(owner.start..owner.end)?;
-    Some(owner.start + region.find('(')? + 1)
+        }
+        if let Some(argument) = direct.or(bundled).or(root) {
+            candidates.push((node.span.end.saturating_sub(node.span.start), argument));
+        }
+    });
+    candidates.sort_by_key(|(width, _)| *width);
+    candidates.into_iter().next().map(|(_, argument)| argument)
+}
+
+fn capability_bundle_literal(expected: &str, binding: &str) -> Option<String> {
+    let fields = expected.strip_prefix('{')?.strip_suffix('}')?;
+    let fields = fields
+        .split(',')
+        .map(str::trim)
+        .map(|field| {
+            let (name, ty) = field.split_once(':')?;
+            let name = name.trim();
+            let capability = harn_builtin_meta::CapabilityId::from_type_name(ty.trim())?;
+            (capability.field_name() == name).then(|| format!("{name}: {binding}.{name}"))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (fields.len() == 2).then(|| format!("{{{}}}", fields.join(", ")))
 }
 
 fn synthesize_missing_harness_repair(
@@ -916,6 +1057,75 @@ fn synthesize_missing_harness_repair(
     ))
 }
 
+fn synthesize_missing_root_argument_repair(
+    span: Span,
+    source: &str,
+    program: &[SNode],
+    exported_names: &BTreeSet<String>,
+    context: &AmbientRepairContext,
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    let infos = collect_callable_infos(program, source, exported_names);
+    let owner_idx = infos
+        .iter()
+        .enumerate()
+        .filter(|(_, info)| info.span.start <= span.start && info.span.end >= span.end)
+        .min_by_key(|(_, info)| info.span.end.saturating_sub(info.span.start))
+        .map(|(index, _)| index)?;
+    if let Some(owner_binding) = infos[owner_idx].harness_binding.as_deref() {
+        let edit = insert_call_argument_before_span(source, program, span, owner_binding)?;
+        return Some((
+            Repair {
+                id: harn_parser::RepairId::from_owned("bindings/thread-root-argument".to_string()),
+                summary: "Pass the root Harness required by the migrated callable".to_string(),
+                safety: RepairSafety::SurfaceChanging,
+            },
+            vec![edit],
+            RepairImpactWire::local_ambient("existing-root-harness-binding"),
+        ));
+    }
+    let reverse_callers = build_reverse_callers(&infos);
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
+    let owner_binding = harness_param_name_for_insert(&infos[owner_idx])?;
+    let mut edits = vec![insert_call_argument_before_span(
+        source,
+        program,
+        span,
+        owner_binding,
+    )?];
+    for &idx in &needed {
+        if infos[idx].harness_binding.is_none() {
+            edits.push(add_harness_param_edit(&infos[idx])?);
+        }
+    }
+    for (callee_idx, callers) in reverse_callers.iter().enumerate() {
+        if !needed.contains(&callee_idx) {
+            continue;
+        }
+        for &(caller_idx, call_idx) in callers {
+            let caller = &infos[caller_idx];
+            let argument = match caller.harness_binding.as_deref() {
+                Some(binding) => binding,
+                None if needed.contains(&caller_idx) => harness_param_name_for_insert(caller)?,
+                None => continue,
+            };
+            edits.push(add_call_argument_edit(
+                source,
+                &caller.calls[call_idx].span,
+                argument,
+            )?);
+        }
+    }
+    Some((
+        Repair {
+            id: harn_parser::RepairId::from_owned("bindings/thread-root-argument".to_string()),
+            summary: "Thread the root Harness required by the migrated callable".to_string(),
+            safety: RepairSafety::SurfaceChanging,
+        },
+        dedupe_edits(edits),
+        repair_impact_for_signature_threading(&infos, &needed, context.cross_module_importer_count),
+    ))
+}
+
 fn repair_impact_for_signature_threading(
     infos: &[CallableInfo],
     needed: &BTreeSet<usize>,
@@ -933,399 +1143,6 @@ fn repair_impact_for_signature_threading(
         })
         .collect::<Vec<_>>();
     RepairImpactWire::signature_threading(signature_changes, cross_module_importer_count)
-}
-
-fn ambient_capability_handle(code: Code) -> Option<&'static str> {
-    match code {
-        Code::LintAmbientClockBuiltin => Some("clock"),
-        Code::LintAmbientStdioBuiltin => Some("stdio"),
-        Code::LintAmbientFsBuiltin => Some("fs"),
-        Code::LintAmbientEnvBuiltin => Some("env"),
-        Code::LintAmbientRandomBuiltin => Some("random"),
-        Code::LintAmbientNetBuiltin => Some("net"),
-        _ => None,
-    }
-}
-
-fn ambient_code_for_call(name: &str, arg_count: usize) -> Option<Code> {
-    if harn_parser::diagnostic::harness_clock_replacement(name).is_some() {
-        return Some(Code::LintAmbientClockBuiltin);
-    }
-    if harn_parser::diagnostic::harness_stdio_replacement(name).is_some() {
-        return Some(Code::LintAmbientStdioBuiltin);
-    }
-    if harn_parser::diagnostic::harness_fs_replacement(name).is_some() {
-        return Some(Code::LintAmbientFsBuiltin);
-    }
-    if harn_parser::diagnostic::harness_env_replacement(name).is_some() {
-        return Some(Code::LintAmbientEnvBuiltin);
-    }
-    if harn_parser::diagnostic::harness_random_replacement(name).is_some()
-        && !is_explicit_seeded_random_call(name, arg_count)
-    {
-        return Some(Code::LintAmbientRandomBuiltin);
-    }
-    if harn_parser::diagnostic::harness_net_replacement(name).is_some() {
-        return Some(Code::LintAmbientNetBuiltin);
-    }
-    None
-}
-
-fn is_explicit_seeded_random_call(name: &str, arg_count: usize) -> bool {
-    matches!(
-        (name, arg_count),
-        ("random", 1) | ("random_int", 3) | ("random_choice", 2) | ("random_shuffle", 2)
-    )
-}
-
-fn ambient_replacement(code: Code, name: &str, binding: Option<&str>) -> Option<String> {
-    let replacement = match code {
-        Code::LintAmbientClockBuiltin => harn_parser::diagnostic::harness_clock_replacement(name),
-        Code::LintAmbientStdioBuiltin => harn_parser::diagnostic::harness_stdio_replacement(name),
-        Code::LintAmbientFsBuiltin => harn_parser::diagnostic::harness_fs_replacement(name),
-        Code::LintAmbientEnvBuiltin => harn_parser::diagnostic::harness_env_replacement(name),
-        Code::LintAmbientRandomBuiltin => harn_parser::diagnostic::harness_random_replacement(name),
-        Code::LintAmbientNetBuiltin => harn_parser::diagnostic::harness_net_replacement(name),
-        _ => None,
-    }?;
-    Some(replacement.replacen("harness", binding.unwrap_or("harness"), 1))
-}
-
-fn collect_callable_infos(
-    program: &[SNode],
-    source: &str,
-    exported_names: &BTreeSet<String>,
-) -> Vec<CallableInfo> {
-    let mut infos = Vec::new();
-    for node in program {
-        let inner = match &node.node {
-            Node::AttributedDecl { inner, .. } => inner.as_ref(),
-            _ => node,
-        };
-        match &inner.node {
-            Node::FnDecl {
-                name,
-                params,
-                body,
-                is_pub,
-                ..
-            }
-            | Node::ToolDecl {
-                name,
-                params,
-                body,
-                is_pub,
-                ..
-            } => {
-                let mut calls = Vec::new();
-                let mut ambient_capability_calls = Vec::new();
-                visit_callable_body(inner, &mut |child| {
-                    if let Node::FunctionCall { name, args, .. } = &child.node {
-                        calls.push(CallSite {
-                            callee: name.clone(),
-                            span: child.span,
-                        });
-                        if let Some(code) = ambient_code_for_call(name, args.len()) {
-                            ambient_capability_calls.push(AmbientCapabilityCall {
-                                name: name.clone(),
-                                code,
-                                span: child.span,
-                            });
-                        }
-                    }
-                });
-                let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
-                else {
-                    continue;
-                };
-                let bound_names = callable_bound_names(params, body);
-                infos.push(CallableInfo {
-                    name: name.clone(),
-                    span: inner.span,
-                    is_exported: *is_pub || exported_names.contains(name),
-                    insert_offset,
-                    has_params: has_params || !params.is_empty(),
-                    bound_names,
-                    harness_binding: harness_param_name(params).map(str::to_string),
-                    can_add_harness_param: true,
-                    calls,
-                    ambient_capability_calls,
-                });
-            }
-            Node::Pipeline {
-                name,
-                params,
-                body,
-                is_pub,
-                ..
-            } => {
-                let mut calls = Vec::new();
-                let mut ambient_capability_calls = Vec::new();
-                visit_callable_body(inner, &mut |child| {
-                    if let Node::FunctionCall { name, args, .. } = &child.node {
-                        calls.push(CallSite {
-                            callee: name.clone(),
-                            span: child.span,
-                        });
-                        if let Some(code) = ambient_code_for_call(name, args.len()) {
-                            ambient_capability_calls.push(AmbientCapabilityCall {
-                                name: name.clone(),
-                                code,
-                                span: child.span,
-                            });
-                        }
-                    }
-                });
-                let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
-                else {
-                    continue;
-                };
-                let bound_names = callable_bound_names(params, body);
-                infos.push(CallableInfo {
-                    name: name.clone(),
-                    span: inner.span,
-                    is_exported: *is_pub || exported_names.contains(name),
-                    insert_offset,
-                    has_params: has_params || !params.is_empty(),
-                    bound_names,
-                    harness_binding: harness_param_name(params).map(str::to_string),
-                    can_add_harness_param: true,
-                    calls,
-                    ambient_capability_calls,
-                });
-            }
-            _ => {}
-        }
-    }
-    infos
-}
-
-fn callable_bound_names(params: &[TypedParam], body: &[SNode]) -> BTreeSet<String> {
-    let mut names = params
-        .iter()
-        .map(|param| param.name.clone())
-        .collect::<BTreeSet<_>>();
-    collect_binding_names(body, &mut names);
-    names
-}
-
-fn collect_binding_names(nodes: &[SNode], names: &mut BTreeSet<String>) {
-    for node in nodes {
-        visit::walk_node(node, &mut |child| match &child.node {
-            Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
-                collect_pattern_names(pattern, names);
-            }
-            Node::ForIn { pattern, .. } => {
-                collect_pattern_names(pattern, names);
-            }
-            Node::Parallel {
-                variable: Some(name),
-                ..
-            } => {
-                names.insert(name.clone());
-            }
-            Node::TryCatch {
-                error_var: Some(name),
-                ..
-            } => {
-                names.insert(name.clone());
-            }
-            Node::Closure { params, .. } => {
-                names.extend(params.iter().map(|param| param.name.clone()));
-            }
-            _ => {}
-        });
-    }
-}
-
-fn collect_pattern_names(pattern: &BindingPattern, names: &mut BTreeSet<String>) {
-    match pattern {
-        BindingPattern::Identifier(name) => {
-            names.insert(name.clone());
-        }
-        BindingPattern::Dict(fields) => {
-            names.extend(
-                fields
-                    .iter()
-                    .map(|field| field.alias.as_ref().unwrap_or(&field.key).clone()),
-            );
-        }
-        BindingPattern::List(elements) => {
-            names.extend(elements.iter().map(|element| element.name.clone()));
-        }
-        BindingPattern::Pair(left, right) => {
-            names.insert(left.clone());
-            names.insert(right.clone());
-        }
-    }
-}
-
-fn visit_callable_body(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
-    let body = match &node.node {
-        Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } | Node::Pipeline { body, .. } => {
-            body
-        }
-        _ => return,
-    };
-    for stmt in body {
-        visit::walk_node(stmt, visitor);
-    }
-}
-
-fn callable_param_insert(source: &str, span: Span) -> Option<(usize, bool)> {
-    let region = source.get(span.start..span.end)?;
-    let open_paren = region.find('(')?;
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    let mut close_paren = None;
-    for (offset, ch) in region[open_paren..].char_indices() {
-        if let Some(delimiter) = quote {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == delimiter {
-                quote = None;
-            }
-            continue;
-        }
-        if matches!(ch, '"' | '\'') {
-            quote = Some(ch);
-            continue;
-        }
-        match ch {
-            '(' => depth += 1,
-            ')' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    close_paren = Some(open_paren + offset);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let close_paren = close_paren?;
-    let has_params = !region[open_paren + 1..close_paren].trim().is_empty();
-    Some((span.start + open_paren + 1, has_params))
-}
-
-fn harness_param_name(params: &[TypedParam]) -> Option<&str> {
-    params.iter().find_map(|param| {
-        let TypeExpr::Named(name) = param.type_expr.as_ref()? else {
-            return None;
-        };
-        if name == "Harness" && matches!(param.name.as_str(), "harness" | "_harness") {
-            Some(param.name.as_str())
-        } else {
-            None
-        }
-    })
-}
-
-fn build_reverse_callers(infos: &[CallableInfo]) -> Vec<Vec<(usize, usize)>> {
-    let by_name = infos
-        .iter()
-        .enumerate()
-        .map(|(idx, info)| (info.name.as_str(), idx))
-        .collect::<BTreeMap<_, _>>();
-    let mut reverse = vec![Vec::new(); infos.len()];
-    for (caller_idx, info) in infos.iter().enumerate() {
-        for (call_idx, call) in info.calls.iter().enumerate() {
-            let Some(&callee_idx) = by_name.get(call.callee.as_str()) else {
-                continue;
-            };
-            reverse[callee_idx].push((caller_idx, call_idx));
-        }
-    }
-    reverse
-}
-
-fn propagate_harness_requirements(
-    infos: &[CallableInfo],
-    reverse_callers: &[Vec<(usize, usize)>],
-    owner_idx: usize,
-) -> BTreeSet<usize> {
-    let mut needed = BTreeSet::from([owner_idx]);
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let snapshot = needed.iter().copied().collect::<Vec<_>>();
-        for callee_idx in snapshot {
-            for &(caller_idx, _) in &reverse_callers[callee_idx] {
-                if infos[caller_idx].harness_binding.is_none()
-                    && infos[caller_idx].can_add_harness_param
-                    && needed.insert(caller_idx)
-                {
-                    changed = true;
-                }
-            }
-        }
-    }
-    needed
-}
-
-fn repair_for_ambient_capability_plan(
-    code: Code,
-    infos: &[CallableInfo],
-    reverse_callers: &[Vec<(usize, usize)>],
-    needed: &BTreeSet<usize>,
-) -> Option<Repair> {
-    let surface_changing = needed.iter().any(|&idx| {
-        let info = &infos[idx];
-        info.is_exported || info.name == "main" || reverse_callers[idx].is_empty()
-    });
-    if surface_changing {
-        Some(Repair::from_template(
-            Code::InvalidMainSignature.repair_template()?,
-        ))
-    } else {
-        Some(Repair::from_template(code.repair_template()?))
-    }
-}
-
-fn add_harness_param_edit(info: &CallableInfo) -> Option<FixEdit> {
-    let name = harness_param_name_for_insert(info)?;
-    Some(FixEdit {
-        span: Span::with_offsets(
-            info.insert_offset,
-            info.insert_offset,
-            info.span.line,
-            info.span.column,
-        ),
-        replacement: if info.has_params {
-            format!("{name}: Harness, ")
-        } else {
-            format!("{name}: Harness")
-        },
-    })
-}
-
-fn harness_param_name_for_insert(info: &CallableInfo) -> Option<&'static str> {
-    if !info.bound_names.contains("harness") {
-        return Some("harness");
-    }
-    if !info.bound_names.contains("_harness") {
-        return Some("_harness");
-    }
-    None
-}
-
-fn add_call_argument_edit(source: &str, span: &Span, arg_name: &str) -> Option<FixEdit> {
-    let region = source.get(span.start..span.end)?;
-    let open_paren = region.find('(')?;
-    let close_paren = region[open_paren + 1..].find(')')? + open_paren + 1;
-    let has_args = !region[open_paren + 1..close_paren].trim().is_empty();
-    let insert_at = span.start + open_paren + 1;
-    Some(FixEdit {
-        span: Span::with_offsets(insert_at, insert_at, span.line, span.column),
-        replacement: if has_args {
-            format!("{arg_name}, ")
-        } else {
-            arg_name.to_string()
-        },
-    })
 }
 
 fn dedupe_edits(edits: Vec<FixEdit>) -> Vec<FixEdit> {

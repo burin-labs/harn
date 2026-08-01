@@ -349,7 +349,7 @@ Semantics:
   response without incremental deltas (the mock provider, cached results, or a
   transport that does not stream), `on_delta` still fires exactly once with the
   full visible text, so harness code sees a uniform "at least one delta, and the
-  concatenation equals the visible text" contract. `provider_capabilities(...)`
+  concatenation equals the visible text" contract. `harness.llm.provider_capabilities(...)`
   reports `requires_streaming` for models that must stream.
 - **Attempts are observable.** Schema retries, routing failover, and
   context-overflow reissues can each start a fresh provider call. `on_delta`

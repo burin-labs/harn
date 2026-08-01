@@ -1,20 +1,54 @@
-# HARN-LNT-069 — helper can accept narrower capabilities
+# HARN-LNT-069 — helper can take narrower capabilities
 
-An ordinary function accepts root `Harness`, but every observed use selects
-only one or two direct capability sub-handles. Root authority is appropriate
-at entry and orchestration boundaries; reusable helpers should advertise the
-smallest coherent capability interface they need.
+An ordinary function takes the root `Harness`, but every use in its body reads
+only one or two capabilities off it. Root authority belongs at entrypoints and
+orchestration boundaries. A reusable helper should ask for what it actually
+uses, so a reader can tell from the signature what the helper can touch.
 
 ## How to fix
 
-Replace the root parameter with the nominal `Harness*` types named by the
-diagnostic, and pass `harness.fs`, `harness.net`, or the corresponding
-sub-handle at each call site.
+When the helper uses one capability, change the parameter to the `Harness*`
+type the diagnostic names and pass that sub-handle at each call site:
 
-Keep root `Harness` when the function genuinely coordinates several
-capabilities or forwards authority. Runtime entrypoints—including `main`,
-jobs, trigger handlers, registered callbacks, and the standard connector
-exports—also keep root `Harness` because the host invokes those signatures
-directly. The lint derives connector exceptions from the connector ABI registry
-and suppresses itself when authority escapes or the local syntax cannot prove
-that narrowing is safe.
+```harn
+fn load_manifest(fs: HarnessFs, path: string) -> string {
+  return fs.read_text(path)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(load_manifest(harness.fs, "harn.toml"))
+}
+```
+
+When it uses two, take them as one record rather than two parameters, so each
+call site names what it grants:
+
+```harn
+fn refresh_index(io: {fs: HarnessFs, tools: HarnessTools}, path: string) {
+  io.tools.invoke("index", {source: io.fs.read_text(path)})
+}
+
+fn main(harness: Harness) {
+  refresh_index({fs: harness.fs, tools: harness.tools}, "src/index.md")
+}
+```
+
+A record keeps each grant named at the call site. Two positional handles are
+easy to swap by accident, and the swap still type-checks if the shapes are
+similar.
+
+`harn fix --apply --safety surface-changing` performs both rewrites. It changes
+the parameter, updates every use inside the helper, then narrows the argument at
+the call sites it can see (`harness` becomes `harness.fs`, or becomes
+`{fs: harness.fs, tools: harness.tools}`). It reuses the existing parameter
+name so the new binding cannot shadow anything else in scope; rename it yourself
+if a clearer name exists.
+
+## When to keep root `Harness`
+
+Keep it when the function genuinely coordinates several capabilities or hands
+authority onward. Runtime entrypoints keep it too, because the host calls those
+signatures directly: `main`, jobs, trigger handlers, registered callbacks, and
+the standard connector exports. The lint reads connector exceptions from the
+connector ABI registry, and stays quiet whenever authority escapes the function
+or the surrounding code cannot prove that narrowing is safe.

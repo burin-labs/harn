@@ -6,6 +6,7 @@ pub mod builtin_signatures;
 pub mod const_eval;
 pub mod diagnostic;
 pub mod diagnostic_codes;
+pub mod interpolation;
 pub mod lexical;
 mod parser;
 pub mod stdlib_metadata;

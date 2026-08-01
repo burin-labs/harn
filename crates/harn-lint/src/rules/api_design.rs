@@ -1,14 +1,15 @@
 //! API-shape guidance for capability attenuation and explicit call sites.
 //!
-//! These are deliberately conservative, non-fixing diagnostics. A root
+//! These are deliberately conservative diagnostics. A root
 //! `Harness` is right at entry and orchestration boundaries; an ordinary
 //! helper whose entire observed authority is one or two direct sub-handles
 //! should advertise those narrower nominal types instead. Public APIs with
 //! four or more same-typed positional values should use a named closed record
 //! so call sites state which value is which.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
+use harn_lexer::FixEdit;
 use harn_parser::{visit, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 use harn_vm::HarnessKind;
 
@@ -120,7 +121,9 @@ fn check_capability_attenuation(
         let mut direct_subhandle_uses = 0usize;
         let mut unknown_member = false;
         let mut subhandles = BTreeSet::new();
-        visit::walk_program(body, &mut |node| match &node.node {
+        let mut subhandle_accesses = Vec::new();
+        let mut shadowed_in_nested_callable = false;
+        let mut record_use = |node: &SNode| match &node.node {
             Node::Identifier(name) if name == &parameter.name => identifier_uses += 1,
             Node::PropertyAccess { object, property }
             | Node::OptionalPropertyAccess { object, property }
@@ -129,18 +132,34 @@ fn check_capability_attenuation(
                 direct_subhandle_uses += 1;
                 if let Some(kind) = HarnessKind::from_field_name(property) {
                     subhandles.insert((property.clone(), kind.type_name()));
+                    subhandle_accesses.push((node.span, property.clone()));
                 } else {
                     unknown_member = true;
                 }
             }
+            Node::FnDecl { params, .. } | Node::Closure { params, .. }
+                if params.iter().any(|nested| nested.name == parameter.name) =>
+            {
+                shadowed_in_nested_callable = true;
+            }
             _ => {}
-        });
+        };
+        // Defaults execute in the callable's scope and may use authority just
+        // like the body. Ignoring them can falsely attenuate a root parameter,
+        // leaving the default with an unreachable grant.
+        for candidate in params {
+            if let Some(default) = &candidate.default_value {
+                visit::walk_node(default, &mut record_use);
+            }
+        }
+        visit::walk_program(body, &mut record_use);
 
         // Suppress when the root escapes, is forwarded, or touches an unknown
         // member: local syntax no longer proves attenuation is safe.
         if identifier_uses == 0
             || identifier_uses != direct_subhandle_uses
             || unknown_member
+            || shadowed_in_nested_callable
             || !(1..=2).contains(&subhandles.len())
         {
             continue;
@@ -156,6 +175,38 @@ fn check_capability_attenuation(
             .map(|(field, _)| format!("`harness.{field}`"))
             .collect::<Vec<_>>()
             .join(" and ");
+        let fix = if !parameter.rest
+            && parameter.default_value.is_none()
+            && parameter.span != harn_lexer::Span::dummy()
+        {
+            let mut edits = Vec::with_capacity(subhandle_accesses.len() + 1);
+            if subhandles.len() == 1 {
+                let (_, ty) = subhandles.first().expect("one subhandle");
+                edits.push(FixEdit {
+                    span: parameter.span,
+                    // Preserve the existing binding. Choosing the capability
+                    // field as a new name could capture an existing parameter
+                    // or local; attenuation must not also perform a rename.
+                    replacement: format!("{}: {ty}", parameter.name),
+                });
+                edits.extend(subhandle_accesses.iter().map(|(span, _)| FixEdit {
+                    span: *span,
+                    replacement: parameter.name.clone(),
+                }));
+            } else {
+                // A two-handle closed record is the smallest coherent
+                // capability interface while retaining one explicit argument.
+                // Keeping the binding and field vocabulary unchanged avoids
+                // capture and makes every body access remain valid.
+                edits.push(FixEdit {
+                    span: parameter.span,
+                    replacement: format!("{}: {{{signature}}}", parameter.name),
+                });
+            }
+            Some(edits)
+        } else {
+            None
+        };
         diagnostics.push(LintDiagnostic {
             code: Code::LintBroadHarnessParameter,
             rule: ATTENUATION_RULE.into(),
@@ -168,12 +219,16 @@ fn check_capability_attenuation(
             } else {
                 LintSeverity::Info
             },
-            suggestion: Some(format!(
-                "accept the narrow capability parameter{} `{signature}` and pass the sub-handle{} at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration",
-                if subhandles.len() == 1 { "" } else { "s" },
-                if subhandles.len() == 1 { "" } else { "s" },
-            )),
-            fix: None,
+            suggestion: Some(if subhandles.len() == 1 {
+                format!(
+                    "accept the narrow capability parameter `{signature}` and pass the sub-handle at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration"
+                )
+            } else {
+                format!(
+                    "accept one closed capability record `{{{signature}}}` and construct it from the two sub-handles at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration"
+                )
+            }),
+            fix,
         });
     }
 }
@@ -184,24 +239,25 @@ fn check_homogeneous_positionals(
     declaration: &SNode,
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
-    let mut groups: HashMap<String, Vec<&str>> = HashMap::new();
+    let mut groups: Vec<(TypeExpr, Vec<&str>)> = Vec::new();
     for parameter in params {
         let Some(ty) = parameter.type_expr.as_ref() else {
             continue;
         };
         if parameter.rest
-            || parameter.default_value.is_some()
             || matches!(ty, TypeExpr::Named(name) if name == HarnessKind::Root.type_name())
         {
             continue;
         }
-        groups
-            .entry(format!("{ty:?}"))
-            .or_default()
-            .push(parameter.name.as_str());
+        if let Some((_, names)) = groups.iter_mut().find(|(candidate, _)| candidate == ty) {
+            names.push(parameter.name.as_str());
+        } else {
+            groups.push((ty.clone(), vec![parameter.name.as_str()]));
+        }
     }
     let Some(names) = groups
-        .values()
+        .iter()
+        .map(|(_, names)| names)
         .filter(|names| names.len() >= POSITIONAL_THRESHOLD)
         .max_by_key(|names| names.len())
     else {
@@ -243,8 +299,8 @@ mod tests {
 
     #[test]
     fn recommends_one_narrow_handle_for_an_ordinary_helper() {
-        let diagnostics =
-            lint("fn load(harness: Harness, path: string) { return harness.fs.read_text(path) }");
+        let source = "fn load(harness: Harness, path: string) { harness.fs.exists(path); return harness.fs.read_text(path) }";
+        let diagnostics = lint(source);
         assert_eq!(
             diagnostics
                 .iter()
@@ -257,6 +313,64 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("HarnessFs"));
+        assert_eq!(
+            diagnostics[0].repair().expect("repair").safety,
+            harn_parser::RepairSafety::SurfaceChanging
+        );
+        let fixed = FixEdit::apply_all(source, diagnostics[0].fix.as_deref().expect("fix"));
+        assert_eq!(
+            fixed,
+            "fn load(harness: HarnessFs, path: string) { harness.exists(path); return harness.read_text(path) }"
+        );
+    }
+
+    #[test]
+    fn fixes_two_capability_helpers_with_a_closed_capability_record() {
+        let multi = lint(
+            "fn copy(harness: Harness, path: string) { harness.obs.log_info(path); return harness.fs.read_text(path) }",
+        );
+        assert_eq!(multi.len(), 1);
+        let fixed = FixEdit::apply_all(
+            "fn copy(harness: Harness, path: string) { harness.obs.log_info(path); return harness.fs.read_text(path) }",
+            multi[0].fix.as_deref().expect("fix"),
+        );
+        assert_eq!(
+            fixed,
+            "fn copy(harness: {fs: HarnessFs, obs: HarnessObs}, path: string) { harness.obs.log_info(path); return harness.fs.read_text(path) }"
+        );
+    }
+
+    #[test]
+    fn does_not_fix_shadowed_receivers() {
+        let shadowed = lint(
+            "fn load(harness: Harness) { const callback = { harness: Harness -> harness.fs.cwd() }; return harness.fs.cwd() }",
+        );
+        assert!(shadowed
+            .iter()
+            .all(|diagnostic| diagnostic.rule != ATTENUATION_RULE));
+    }
+
+    #[test]
+    fn parameter_defaults_participate_in_authority_analysis() {
+        let multi = lint(
+            "fn load(harness: Harness, root: string = harness.fs.cwd()) { return harness.agent.current_id() }",
+        );
+        assert_eq!(multi.len(), 1);
+        let fixed = FixEdit::apply_all(
+            "fn load(harness: Harness, root: string = harness.fs.cwd()) { return harness.agent.current_id() }",
+            multi[0].fix.as_deref().expect("bundle fix"),
+        );
+        assert_eq!(
+            fixed,
+            "fn load(harness: {agent: HarnessAgent, fs: HarnessFs}, root: string = harness.fs.cwd()) { return harness.agent.current_id() }"
+        );
+
+        let escaped = lint(
+            "fn load(harness: Harness, root: string = project_root(harness)) { return harness.fs.read_text(root) }",
+        );
+        assert!(escaped
+            .iter()
+            .all(|diagnostic| diagnostic.rule != ATTENUATION_RULE));
     }
 
     #[test]
@@ -343,6 +457,16 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("closed-record"));
+    }
+
+    #[test]
+    fn counts_defaulted_parameters_that_remain_positional_at_call_sites() {
+        let diagnostics = lint(
+            "pub fn connect(host: string, user: string, password: string = \"\", database: string = \"\") {}",
+        );
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == POSITIONAL_RULE));
     }
 
     #[test]

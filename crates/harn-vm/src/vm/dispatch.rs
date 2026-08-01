@@ -20,7 +20,7 @@ use super::{
 ///
 /// Opening this is the one thing a dispatch path must do before invoking a
 /// handler. New observers belong here, not at a call site.
-struct BuiltinObservation<'a> {
+pub(in crate::vm) struct BuiltinObservation<'a> {
     _span: Option<ScopeSpan>,
     _timer: Option<crate::builtin_profile::BuiltinTimer<'a>>,
 }
@@ -32,7 +32,12 @@ struct ResolvedSyncBuiltin {
 
 impl Vm {
     fn builtin_span_kind(name: &str) -> Option<crate::tracing::SpanKind> {
-        match name {
+        // Capability dispatch passes the public `harness.<capability>.<method>`
+        // path while ambient dispatch passes the legacy global. Both resolve to
+        // the same registry entry, so the two surfaces cannot classify the same
+        // effect differently. `__cap_` is an internal renaming artifact.
+        let resolved = crate::stdlib::builtin_for_harness_path(name).unwrap_or(name);
+        match resolved.strip_prefix("__cap_").unwrap_or(resolved) {
             "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" | "agent_turn" => {
                 Some(crate::tracing::SpanKind::LlmCall)
             }
@@ -55,7 +60,7 @@ impl Vm {
     /// `Option<Box<_>>` keeps the frame local pointer-sized (an 8-byte niche
     /// `None` on the inert hot path, with no allocation) and only touches the
     /// heap when an observer is genuinely active. See harn#4928.
-    fn observe_builtin_call(name: &str) -> Option<Box<BuiltinObservation<'_>>> {
+    pub(in crate::vm) fn observe_builtin_call(name: &str) -> Option<Box<BuiltinObservation<'_>>> {
         let span = Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
         let timer = crate::builtin_profile::BuiltinTimer::start(name);
         if span.is_none() && timer.is_none() {

@@ -1700,12 +1700,9 @@ impl TypeChecker {
             let harn_lexer::StringSegment::Expression(src, line, col) = seg else {
                 continue;
             };
-            let mut lexer = interpolation_lexer(self.source.as_deref(), src, *line, *col);
-            let Ok(tokens) = lexer.tokenize() else {
-                continue;
-            };
-            let mut parser = crate::Parser::new(tokens);
-            let Ok(expr) = parser.parse_single_expression() else {
+            let Some(expr) =
+                crate::interpolation::parse_expression(self.source.as_deref(), src, *line, *col)
+            else {
                 continue;
             };
             self.check_node(&expr, scope);

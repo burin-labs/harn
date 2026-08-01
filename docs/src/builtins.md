@@ -700,8 +700,8 @@ builtins were deleted.
 | `harness.term.width()` | none | int | Current terminal column count |
 | `harness.term.height()` | none | int | Current terminal row count |
 | `harness.runtime.exit(code)` | code: int (default 0) | never | Terminate the process |
-| `harness.system.identity()` | none | dict | Host identity projection, including username, hostname, process id, and architecture |
-| `harness.system.platform()` | none | string | OS name: `"darwin"`, `"linux"`, or `"windows"` |
+| `harness.system.identity()` | none | dict | Host identity projection with `username`, `hostname`, and `pid` fields |
+| `harness.system.platform()` | none | dict | Platform projection with `os` (`"darwin"`, `"linux"`, or `"windows"`) and `arch` fields |
 | `harness.random.uuid()` | none | string | Generate a random v4 UUID |
 | `uuid_parse(str)` | str: string | string or nil | Parse and canonicalize a UUID string, or return nil if invalid |
 | `uuid_v5(namespace, name)` | namespace: UUID or `"dns"\|"url"\|"oid"\|"x500"`, name: string | string | Generate a deterministic namespaced v5 UUID |
@@ -2206,6 +2206,12 @@ prompt-visible Code Mode API. The default manifest hides denied tools; pass
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
+| `harness.obs.log(message, level?, fields?)` | message: string, optional level and fields | any | Emit a structured log event |
+| `harness.obs.log_debug(message, fields?)` | message: any, optional fields | nil | Emit a debug log line |
+| `harness.obs.log_info(message, fields?)` | message: any, optional fields | nil | Emit an info log line |
+| `harness.obs.log_warn(message, fields?)` | message: any, optional fields | nil | Emit a warning log line |
+| `harness.obs.log_error(message, fields?)` | message: any, optional fields | nil | Emit an error log line |
+| `harness.obs.set_level(level)` | level: `debug`, `info`, `warn`, or `error` | nil | Set the minimum structured log level |
 | `harness.obs.log_json(key, value)` | key: string, value: any | nil | Emit a JSON log line with timestamp |
 
 ## Metadata

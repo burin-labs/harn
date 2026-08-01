@@ -426,6 +426,7 @@ pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::Built
             out.push(
                 Box::leak(Box::new(harn_builtin_registry::BuiltinManifestEntry {
                     name: def.sig.name,
+                    canonical_name: def.sig.name,
                     signature: &def.sig,
                     contract: def.contract,
                 })) as &'static harn_builtin_registry::BuiltinManifestEntry,
@@ -443,6 +444,7 @@ pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::Built
                 out.push(
                     Box::leak(Box::new(harn_builtin_registry::BuiltinManifestEntry {
                         name: alias,
+                        canonical_name: def.sig.name,
                         signature,
                         contract: def.contract,
                     })) as &'static harn_builtin_registry::BuiltinManifestEntry,
@@ -478,7 +480,7 @@ pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::Built
             }
             out.push(*entry);
         }
-        for group in harn_builtin_meta::host_capabilities::HOST_CAPABILITY_GROUPS {
+        for group in harn_builtin_meta::host_capabilities::all_host_capability_groups() {
             for method in group.methods {
                 if !capability_methods.insert((group.capability, *method)) {
                     continue;
@@ -499,6 +501,7 @@ pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::Built
                 out.push(Box::leak(Box::new(
                     harn_builtin_registry::BuiltinManifestEntry {
                         name: internal_name,
+                        canonical_name: internal_name,
                         signature,
                         contract: harn_builtin_meta::BuiltinContract::harness(
                             group.capability,
@@ -559,16 +562,20 @@ fn builtin_manifest_index() -> &'static BuiltinManifestIndex {
                 "duplicate builtin manifest name `{}`",
                 entry.name
             );
+            // An alias repeats its primary's contract under a second name, so
+            // only the canonical entry may claim the capability method.
             if let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure {
-                assert!(
-                    by_capability
-                        .entry(capability)
-                        .or_default()
-                        .insert(method, *entry)
-                        .is_none(),
-                    "duplicate Harness method manifest entry `harness.{}.{method}`",
-                    capability.field_name()
-                );
+                if entry.is_canonical() {
+                    assert!(
+                        by_capability
+                            .entry(capability)
+                            .or_default()
+                            .insert(method, *entry)
+                            .is_none(),
+                        "duplicate Harness method manifest entry `harness.{}.{method}`",
+                        capability.field_name()
+                    );
+                }
             }
             if matches!(
                 entry.contract.exposure,
@@ -584,6 +591,30 @@ fn builtin_manifest_index() -> &'static BuiltinManifestIndex {
             recorded_effects_by_name,
         }
     })
+}
+
+/// Resolve the registry name behind a public `harness.<capability>.<method>`
+/// path.
+///
+/// Observation, diagnostics, and tooling classify a capability call by the
+/// same registry entry the removed ambient global resolved to, so a call
+/// through the typed handle profiles and audits identically.
+pub fn builtin_for_harness_path(path: &str) -> Option<&'static str> {
+    let (field, method) = path.strip_prefix("harness.")?.split_once('.')?;
+    let capability = harn_builtin_meta::CapabilityId::from_field_name(field)?;
+    capability_method_manifest_entry(capability, method).map(|entry| entry.name)
+}
+
+/// Resolve the typed Harness method that replaced an ambient builtin name.
+pub fn harness_method_for_builtin(
+    name: &str,
+) -> Option<(harn_builtin_meta::CapabilityId, &'static str)> {
+    match builtin_manifest_entry(name)?.contract.exposure {
+        harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } => {
+            Some((capability, method))
+        }
+        _ => None,
+    }
 }
 
 /// Resolve a source/runtime builtin contract without rescanning the manifest.
@@ -617,6 +648,133 @@ pub fn recorded_effect_builtin_manifest_entry(
         .recorded_effects_by_name
         .get(name)
         .copied()
+}
+
+/// How an ambient builtin's arguments map onto its typed Harness replacement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HarnessBuiltinArgumentMigration {
+    /// Preserve the original positional argument list.
+    Forward,
+    /// Wrap positional arguments in a named request record.
+    RequestRecord(&'static [&'static str]),
+    /// Replace a zero-argument legacy projection with a property of a typed
+    /// Harness snapshot, for example `platform()` with
+    /// `harness.system.platform().os`.
+    CallThenProperty(&'static str),
+}
+
+/// Complete migration recipe for a removed ambient builtin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HarnessBuiltinMigration {
+    pub capability: harn_builtin_meta::CapabilityId,
+    pub method: &'static str,
+    pub arguments: HarnessBuiltinArgumentMigration,
+}
+
+/// Resolve an ambient builtin to its canonical typed Harness call shape.
+///
+/// Most recipes project mechanically from `HarnessMethod` exposure. Legacy
+/// metadata globals and process/environment projections predate that manifest
+/// contract, so their explicit recipes preserve named request records and the
+/// structured System/Fs/Term snapshots instead of adding compatibility
+/// overloads to the typed handles.
+pub fn harness_migration_for_builtin(name: &str) -> Option<HarnessBuiltinMigration> {
+    if let Some((capability, method)) = harness_method_for_builtin(name) {
+        return Some(HarnessBuiltinMigration {
+            capability,
+            method,
+            arguments: HarnessBuiltinArgumentMigration::Forward,
+        });
+    }
+    use harn_builtin_meta::CapabilityId;
+    use HarnessBuiltinArgumentMigration::{CallThenProperty, Forward, RequestRecord};
+    let request_record = |method, fields| HarnessBuiltinMigration {
+        capability: CapabilityId::Project,
+        method,
+        arguments: RequestRecord(fields),
+    };
+    let projection = |capability, method, property| HarnessBuiltinMigration {
+        capability,
+        method,
+        arguments: CallThenProperty(property),
+    };
+    let forward = |capability, method| HarnessBuiltinMigration {
+        capability,
+        method,
+        arguments: Forward,
+    };
+    let (method, fields): (&'static str, &'static [&'static str]) = match name {
+        "metadata_get" | "metadata_resolve" => ("metadata_get", &["dir", "namespace"]),
+        "metadata_set" => ("metadata_set", &["dir", "namespace", "data"]),
+        "metadata_entries" => ("metadata_entries", &["namespace"]),
+        "metadata_save" => ("metadata_save", &[]),
+        "metadata_stale" => ("metadata_stale", &["dir"]),
+        "metadata_refresh_hashes" => ("metadata_refresh_hashes", &[]),
+        "metadata_status" => ("metadata_status", &["namespace"]),
+        "path_metadata_get" => ("path_metadata_get", &["path", "namespace", "options"]),
+        "path_metadata_set" => (
+            "path_metadata_set",
+            &["path", "namespace", "data", "options"],
+        ),
+        "path_metadata_entries" => ("path_metadata_entries", &["namespace", "options"]),
+        "platform" => return Some(projection(CapabilityId::System, "platform", "os")),
+        "arch" => return Some(projection(CapabilityId::System, "platform", "arch")),
+        "username" => return Some(projection(CapabilityId::System, "identity", "username")),
+        "hostname" => return Some(projection(CapabilityId::System, "identity", "hostname")),
+        "pid" => return Some(projection(CapabilityId::System, "identity", "pid")),
+        "execution_root" => {
+            return Some(projection(
+                CapabilityId::Fs,
+                "runtime_paths",
+                "execution_root",
+            ));
+        }
+        "asset_root" => {
+            return Some(projection(CapabilityId::Fs, "runtime_paths", "asset_root"));
+        }
+        "home_dir" => return Some(forward(CapabilityId::Fs, "home_dir")),
+        "runtime_paths" => return Some(forward(CapabilityId::Fs, "runtime_paths")),
+        "source_dir" => return Some(forward(CapabilityId::Fs, "source_dir")),
+        "project_root" => return Some(forward(CapabilityId::Fs, "project_root")),
+        "date_iso" => return Some(forward(CapabilityId::Clock, "date_iso")),
+        "term_width" => return Some(forward(CapabilityId::Term, "width")),
+        "term_height" => return Some(forward(CapabilityId::Term, "height")),
+        "security_policy" => {
+            return Some(forward(CapabilityId::System, "security_policy"));
+        }
+        "security_stamp_directive" => {
+            return Some(forward(CapabilityId::System, "security_stamp_directive"));
+        }
+        "security_verify_directive" => {
+            return Some(forward(CapabilityId::System, "security_verify_directive"));
+        }
+        "llm_catalog" => return Some(forward(CapabilityId::Llm, "catalog")),
+        "llm_catalog_refresh" => {
+            return Some(forward(CapabilityId::Llm, "catalog_refresh"));
+        }
+        "llm_provider_status" => return Some(forward(CapabilityId::Llm, "providers")),
+        "llm_session_cost" => return Some(forward(CapabilityId::Llm, "session_cost")),
+        "llm_budget" => return Some(forward(CapabilityId::Llm, "budget")),
+        "llm_budget_remaining" => {
+            return Some(forward(CapabilityId::Llm, "budget_remaining"));
+        }
+        "transport_mock_clear" => {
+            return Some(forward(CapabilityId::Testing, "transport_mock_clear"));
+        }
+        "transport_mock_calls" => {
+            return Some(forward(CapabilityId::Testing, "transport_mock_calls"));
+        }
+        "sse_mock" => return Some(forward(CapabilityId::Testing, "sse_mock")),
+        "sse_server_mock_receive" => {
+            return Some(forward(CapabilityId::Testing, "sse_server_mock_receive"));
+        }
+        "sse_server_mock_disconnect" => {
+            return Some(forward(CapabilityId::Testing, "sse_server_mock_disconnect"));
+        }
+        "websocket_mock" => return Some(forward(CapabilityId::Testing, "websocket_mock")),
+        _ => return None,
+    };
+    Some(request_record(method, fields))
 }
 
 /// Register every `#[harn_builtin]`-emitted def on the given VM. Drivers
@@ -781,6 +939,137 @@ fn main(harness: Harness) {
     }
 
     #[test]
+    fn harness_builtin_migrations_preserve_canonical_call_shapes() {
+        use harn_builtin_meta::CapabilityId;
+
+        assert_eq!(
+            harness_migration_for_builtin("provider_capabilities"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Llm,
+                method: "provider_capabilities",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("log_info"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Observability,
+                method: "log_info",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("runtime_introspection"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Runtime,
+                method: "introspection",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("project_fingerprint"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Project,
+                method: "fingerprint",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("project_scan_tree_native"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Project,
+                method: "scan_tree",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("llm_call"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Llm,
+                method: "call",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("llm_call_structured"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Llm,
+                method: "call_structured",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("security_policy"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::System,
+                method: "security_policy",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("llm_provider_status"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Llm,
+                method: "providers",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("agent_session_current_id"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Agent,
+                method: "current_id",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("metadata_set"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Project,
+                method: "metadata_set",
+                arguments: HarnessBuiltinArgumentMigration::RequestRecord(&[
+                    "dir",
+                    "namespace",
+                    "data",
+                ]),
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("metadata_save"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Project,
+                method: "metadata_save",
+                arguments: HarnessBuiltinArgumentMigration::RequestRecord(&[]),
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("platform"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::System,
+                method: "platform",
+                arguments: HarnessBuiltinArgumentMigration::CallThenProperty("os"),
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("arch"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::System,
+                method: "platform",
+                arguments: HarnessBuiltinArgumentMigration::CallThenProperty("arch"),
+            })
+        );
+        assert_eq!(
+            harness_migration_for_builtin("home_dir"),
+            Some(HarnessBuiltinMigration {
+                capability: CapabilityId::Fs,
+                method: "home_dir",
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        );
+        assert_eq!(harness_migration_for_builtin("json_parse"), None);
+    }
+
+    #[test]
     fn every_source_named_runtime_callable_has_a_typed_contract() {
         let manifest_names = all_builtin_manifest()
             .iter()
@@ -828,12 +1117,19 @@ fn main(harness: Harness) {
             );
             if let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure {
                 capability_entries += 1;
-                assert!(
-                    std::ptr::eq(
-                        capability_method_manifest_entry(capability, method)
-                            .expect("indexed Harness method entry"),
-                        *entry,
-                    ),
+                let indexed = capability_method_manifest_entry(capability, method)
+                    .expect("indexed Harness method entry");
+                // An alias shares its primary's contract under a second name.
+                // The capability index answers with the primary either way.
+                assert_eq!(
+                    indexed.name,
+                    entry.canonical_name,
+                    "capability index projected a different builtin for `harness.{}.{method}`",
+                    capability.field_name()
+                );
+                assert_eq!(
+                    indexed.contract,
+                    entry.contract,
                     "capability index projected a different contract for `harness.{}.{method}`",
                     capability.field_name()
                 );

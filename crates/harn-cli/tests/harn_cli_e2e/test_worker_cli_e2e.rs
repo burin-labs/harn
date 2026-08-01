@@ -258,7 +258,7 @@ pipeline test_manifest_mock(harness: Harness, _task) {
   with_capability_fixtures(
     harness.testing,
     [{capability: "synthetic_fixture", method: "answer", result: 42}],
-    { _ -> nil },
+    { _ -> assert_eq(len(harness.testing.calls()), 0) },
   )
 }
 "#,

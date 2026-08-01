@@ -89,9 +89,9 @@ pub(crate) fn reset_scoped_host_state() {
 }
 
 /// Push the current host-mock state onto an internal stack and start a
-/// fresh empty scope. Paired with `pop_host_mock_scope`. Used by the
-/// `with_host_mocks` helper in `std/testing` to give tests automatic
-/// cleanup, including when the body throws.
+/// fresh empty scope. Paired with `pop_host_mock_scope` for privileged
+/// runtime tests that still exercise the wire layer directly. Script tests use
+/// per-Harness capability fixtures instead.
 fn push_host_mock_scope() {
     let mocks = HOST_MOCKS.with(|v| std::mem::take(&mut *v.borrow_mut()));
     let calls = HOST_MOCK_CALLS.with(|v| std::mem::take(&mut *v.borrow_mut()));

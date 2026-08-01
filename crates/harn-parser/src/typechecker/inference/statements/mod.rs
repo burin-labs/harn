@@ -16,7 +16,6 @@ mod blocks;
 mod check_helpers;
 mod check_node;
 mod expressions;
-mod interpolation;
 mod name_resolution;
 mod patterns;
 mod test_attributes;
@@ -41,7 +40,6 @@ use super::super::union::{
 use super::super::{InlayHintInfo, TypeChecker};
 use super::decls::CallableDeclarationContext;
 use super::flow::{pattern_alternatives, resolve_union_shape_members};
-use interpolation::interpolation_lexer;
 
 #[derive(Clone, Copy)]
 enum UntypedAccessKind {

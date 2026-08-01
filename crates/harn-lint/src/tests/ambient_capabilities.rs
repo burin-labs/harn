@@ -65,13 +65,53 @@ fn ambient_fs_lints_full_surface_inside_main() {
   read_lines("m")
   walk_dir("n")
   glob("o")
+  cwd()
 }
 "#;
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-fs-builtin"),
-        16,
+        17,
         "expected one lint per ambient fs call, got: {diags:?}"
+    );
+}
+
+#[test]
+fn ambient_cwd_default_rewrites_to_harness_fs() {
+    let source =
+        "fn resolve(harness: Harness, path: string, base: string = cwd()) -> string {\n  return base + path\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(count_rule(&diags, "ambient-fs-builtin"), 1);
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("base: string = harness.fs.cwd()"),
+        "expected default-value rewrite to harness.fs.cwd, got: {fixed}"
+    );
+}
+
+#[test]
+fn ambient_metadata_builtin_recommends_typed_project_request() {
+    let source = "fn main(harness: Harness) {\n  metadata_get(\"src\", \"classification\")\n}\n";
+    let diags = lint_source(source);
+    let diagnostic = diags
+        .iter()
+        .find(|diag| diag.rule == "ambient-harness-method")
+        .expect("ambient metadata diagnostic");
+    assert!(
+        diagnostic.message.contains("harness.project.metadata_get"),
+        "{diagnostic:?}"
+    );
+    assert!(
+        diagnostic
+            .suggestion
+            .as_deref()
+            .is_some_and(|suggestion| suggestion
+                .contains("harness.project.metadata_get({dir: ..., namespace: ...})")),
+        "request-record migration needs an actionable shape: {diagnostic:?}"
+    );
+    assert!(
+        diagnostic.fix.is_none(),
+        "request-record migration belongs to harn fix"
     );
 }
 
@@ -219,5 +259,73 @@ fn ambient_capability_lint_without_harness_param_keeps_no_fix() {
         suggestion.contains("--safety surface-changing")
             && suggestion.contains("explicit capability"),
         "suggestion should describe explicit capability threading, got: {suggestion}"
+    );
+}
+
+#[test]
+fn manifest_owned_ambient_llm_method_rewrites_without_a_second_table() {
+    let source = r#"fn main(harness: Harness) {
+  const caps = provider_capabilities("anthropic", "claude-opus-4-7")
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "ambient-harness-method"),
+        1,
+        "manifest HarnessMethod exposure should drive the lint: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("harness.llm.provider_capabilities(\"anthropic\", \"claude-opus-4-7\")"),
+        "expected registry-derived Harness rewrite: {fixed}"
+    );
+}
+
+#[test]
+fn legacy_host_projection_recommends_the_structured_typed_snapshot() {
+    let source = "fn main(harness: Harness) {\n  const os = platform()\n}\n";
+    let diags = lint_source(source);
+    let entry = diags
+        .iter()
+        .find(|diag| diag.rule == "ambient-harness-method")
+        .expect("legacy host projection should receive migration guidance");
+    assert!(
+        entry.fix.is_none(),
+        "whole-call projection needs the CLI fixer"
+    );
+    assert!(
+        entry
+            .suggestion
+            .as_deref()
+            .is_some_and(|text| text.contains("harness.system.platform().os")),
+        "unexpected projection guidance: {entry:?}"
+    );
+}
+
+#[test]
+fn ambient_calls_inside_interpolation_are_linted_with_absolute_spans() {
+    let source = r#"fn main(harness: Harness) {
+  const label = "host ${platform()} ${read_file("name.txt")}"
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(count_rule(&diags, "ambient-harness-method"), 1, "{diags:?}");
+    assert_eq!(count_rule(&diags, "ambient-fs-builtin"), 1, "{diags:?}");
+
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("${harness.fs.read_text(\"name.txt\")}"),
+        "interpolation fix must target the containing source: {fixed}"
+    );
+}
+
+#[test]
+fn pure_global_with_similar_domain_is_not_an_ambient_harness_method() {
+    let source = "fn main(harness: Harness) {\n  const value = json_parse(\"{}\")\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "ambient-harness-method"),
+        0,
+        "only HarnessMethod manifest entries should migrate: {diags:?}"
     );
 }

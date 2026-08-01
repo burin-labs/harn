@@ -902,6 +902,7 @@ mod tests {
             type_expr: None,
             default_value: Some(Box::new(default)),
             rest: false,
+            span: Span::dummy(),
         }
     }
 

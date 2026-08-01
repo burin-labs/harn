@@ -34,6 +34,36 @@ fn conflict_detection_marks_overlapping_edits() {
 }
 
 #[test]
+fn file_edits_compose_projection_before_same_offset_insertion() {
+    let temp = tempfile::NamedTempFile::new().unwrap();
+    fs::write(temp.path(), "call(harness, value)\n").unwrap();
+    let start = "call(".len();
+    apply_file_edits(
+        temp.path(),
+        &[
+            FixEditWire {
+                span: SpanWire::from(Span::with_offsets(start, start, 1, start + 1)),
+                replacement: "harness, ".to_string(),
+            },
+            FixEditWire {
+                span: SpanWire::from(Span::with_offsets(
+                    start,
+                    start + "harness".len(),
+                    1,
+                    start + 1,
+                )),
+                replacement: "harness.fs".to_string(),
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(temp.path()).unwrap(),
+        "call(harness, harness.fs, value)\n"
+    );
+}
+
+#[test]
 fn plan_reports_repairable_diagnostics_without_writing() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("repair_demo.harn");
@@ -293,7 +323,7 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
 #[test]
 fn callable_param_insert_handles_dict_defaults_before_body() {
     let source = "pub fn poll(check, options: dict = {}) -> any {\n  harness.clock.now_ms()\n}\n";
-    let (offset, has_params) = callable_param_insert(
+    let (offset, has_params) = super::signature_threading::callable_param_insert(
         source,
         harn_lexer::Span::with_offsets(0, source.len(), 1, 1),
     )
@@ -304,127 +334,185 @@ fn callable_param_insert_handles_dict_defaults_before_body() {
 
 #[test]
 fn missing_capability_argument_repair_uses_typed_root_field() {
-    let source = "pipeline main(harness: Harness) {}\n";
-    let span = harn_lexer::Span::with_offsets(12, 16, 1, 13);
+    let source = "fn main(harness: Harness) {\n  helper(\"old\")\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let span = source.find("\"old\"").unwrap();
+    let span = harn_lexer::Span::with_offsets(span, span + 5, 2, 10);
     let (_, edits, _) = synthesize_missing_capability_argument_repair(
-        source,
-        &[],
         span,
         "argument 1 `fs`: expected HarnessFs, found string",
+        source,
+        &program,
     )
     .expect("capability migration repair");
     assert_eq!(edits.len(), 1);
-    assert_eq!(edits[0].span.start, 12);
-    assert_eq!(edits[0].span.end, 12);
+    let insert_at = source.find("(\"old\")").unwrap() + 1;
+    assert_eq!(edits[0].span.start, insert_at);
+    assert_eq!(edits[0].span.end, insert_at);
     assert_eq!(edits[0].replacement, "harness.fs, ");
 }
 
 #[test]
-fn missing_capability_argument_repair_uses_source_coordinates_over_stale_offsets() {
-    let source =
-        "import { helper } from \"./helper\"\n\npipeline test(harness: Harness) {\n  call(\"value\")\n}\n";
-    let import_line = "import { helper } from \"./helper\"";
-    let stale_span = harn_lexer::Span::with_offsets(9, 9, 4, 8);
-
+fn missing_capability_argument_is_inserted_at_the_diagnosed_position() {
+    let source = "fn main(harness: Harness) {\n  helper(harness.fs, \"old\")\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let start = source.find("\"old\"").unwrap();
+    let span = harn_lexer::Span::with_offsets(start, start + 5, 2, 22);
     let (_, edits, _) = synthesize_missing_capability_argument_repair(
+        span,
+        "argument 2 `system`: expected HarnessSystem, found string",
         source,
-        &harn_parser::parse_source(source).expect("source parses"),
-        stale_span,
-        "argument 1 `fs`: expected HarnessFs, found string",
+        &program,
     )
-    .expect("capability migration repair");
-
-    let expected = source.find("\"value\"").expect("first argument");
-    assert_eq!(edits[0].span.start, expected);
-    assert_eq!(edits[0].span.end, expected);
-    assert_ne!(edits[0].span.start, stale_span.start);
-
-    let mut applied = source.to_string();
-    applied.replace_range(
-        edits[0].span.start..edits[0].span.end,
-        &edits[0].replacement,
+    .expect("positioned capability repair");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].replacement, ", harness.system");
+    assert_eq!(
+        FixEdit::apply_all(source, &edits),
+        "fn main(harness: Harness) {\n  helper(harness.fs, harness.system, \"old\")\n}\n"
     );
-    assert!(
-        applied
-            .lines()
-            .next()
-            .is_some_and(|line| line == import_line),
-        "stale byte offset must not mutate an earlier import: {applied}"
-    );
-    assert!(
-        applied.contains("call(harness.fs, \"value\")"),
-        "expected capability argument prepended at the call site: {applied}"
-    );
-    harn_parser::parse_source(&applied).expect("first apply must remain parse-safe");
-
-    // A second capability-migration pass can still surface a stale local offset
-    // while keeping correct line/column. Planning/application must stay
-    // parse-safe and leave the import alone.
-    let second_arg = applied
-        .find("\"value\"")
-        .expect("argument after first apply");
-    let (line, column) = {
-        let mut line = 1usize;
-        let mut last_newline = 0usize;
-        for (idx, ch) in applied[..second_arg].char_indices() {
-            if ch == '\n' {
-                line += 1;
-                last_newline = idx + 1;
-            }
-        }
-        let column = applied[last_newline..second_arg].chars().count() + 1;
-        (line, column)
-    };
-    let still_stale = harn_lexer::Span::with_offsets(9, 9, line, column);
-    let (_, second_edits, _) = synthesize_missing_capability_argument_repair(
-        &applied,
-        &harn_parser::parse_source(&applied).expect("first apply parses"),
-        still_stale,
-        "argument 1 `fs`: expected HarnessFs, found string",
-    )
-    .expect("second capability migration repair");
-    assert_eq!(second_edits[0].span.start, second_arg);
-    assert_ne!(second_edits[0].span.start, still_stale.start);
-
-    let mut second_applied = applied.clone();
-    second_applied.replace_range(
-        second_edits[0].span.start..second_edits[0].span.end,
-        &second_edits[0].replacement,
-    );
-    assert!(
-        second_applied
-            .lines()
-            .next()
-            .is_some_and(|line| line == import_line),
-        "second stale-offset pass must not corrupt the import: {second_applied}"
-    );
-    harn_parser::parse_source(&second_applied).expect("repeated apply must remain parse-safe");
 }
 
 #[test]
-fn missing_capability_argument_repair_preserves_parenthesized_first_argument() {
-    let source = "pipeline test(harness: Harness, params: dict) {\n  host_search_request((params ?? {}) + {path: \"root\"})\n}\n";
-    let program = harn_parser::parse_source(source).expect("source parses");
-    let diagnostic_offset = source.find("params ??").expect("first argument");
-    let prefix = &source[..diagnostic_offset];
-    let line = prefix.chars().filter(|ch| *ch == '\n').count() + 1;
-    let line_start = prefix.rfind('\n').map_or(0, |offset| offset + 1);
-    let column = source[line_start..diagnostic_offset].chars().count() + 1;
-    let stale_span = harn_lexer::Span::with_offsets(0, 0, line, column);
-
-    let (_, edits, _) = synthesize_missing_capability_argument_repair(
+fn attenuated_capability_argument_repair_projects_existing_root_grant() {
+    let source = "fn main(harness: Harness) {\n  helper(harness, \"old\")\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let start = source.find("harness, \"").unwrap();
+    let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 2, 10);
+    let (repair, edits, _) = synthesize_missing_capability_argument_repair(
+        span,
+        "argument 1 `fs`: expected HarnessFs, found Harness",
         source,
         &program,
-        stale_span,
-        "argument 1 `harness`: expected Harness, found dict",
+    )
+    .expect("attenuation repair");
+    assert_eq!(repair.id.as_str(), "bindings/attenuate-capability-argument");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].span, span);
+    assert_eq!(edits[0].replacement, "harness.fs");
+}
+
+#[test]
+fn attenuated_capability_bundle_repair_projects_existing_root_grant() {
+    let source = "fn main(harness: Harness) {\n  helper(harness, \"old\")\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let start = source.find("harness, \"").unwrap();
+    let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 2, 10);
+    let (repair, edits, _) = synthesize_missing_capability_argument_repair(
+        span,
+        "argument 1 `io`: expected {fs: HarnessFs, tools: HarnessTools}, found Harness",
+        source,
+        &program,
+    )
+    .expect("capability bundle repair");
+    assert_eq!(
+        repair.id.as_str(),
+        "bindings/attenuate-capability-bundle-argument"
+    );
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].span, span);
+    assert_eq!(
+        edits[0].replacement,
+        "{fs: harness.fs, tools: harness.tools}"
+    );
+}
+
+#[test]
+fn missing_capability_argument_repair_inserts_before_parenthesized_expression() {
+    let source = "fn main(harness: Harness) {\n  helper((params ?? {}) + {path: \"src\"})\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let mut span = None;
+    visit::walk_program(&program, &mut |node| {
+        if let Node::FunctionCall { name, args, .. } = &node.node {
+            if name == "helper" {
+                span = args.first().map(|arg| arg.span);
+            }
+        }
+    });
+    let span = span.expect("helper first argument");
+
+    let (_, edits, _) = synthesize_missing_capability_argument_repair(
+        span,
+        "argument 1 `fs`: expected HarnessFs, found dict",
+        source,
+        &program,
     )
     .expect("capability migration repair");
+    let insert_at = source.find("((params").unwrap() + 1;
+    assert_eq!(edits[0].span.start, insert_at);
+    assert_eq!(edits[0].replacement, "harness.fs, ");
+}
 
-    let mut applied = source.to_string();
-    applied.replace_range(
-        edits[0].span.start..edits[0].span.end,
-        &edits[0].replacement,
+#[test]
+fn missing_root_argument_threads_a_distinct_root_past_a_narrow_harness_binding() {
+    let source = "fn leaf(harness: HarnessFs, path: string) {\n  needs_root(harness, path)\n}\n\nfn main(harness: Harness) {\n  leaf(harness.fs, \"old\")\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let start = source.find("harness, path").unwrap();
+    let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 2, 14);
+    let (_, edits, _) = synthesize_missing_root_argument_repair(
+        span,
+        source,
+        &program,
+        &BTreeSet::new(),
+        &AmbientRepairContext {
+            cross_module_importer_count: 0,
+        },
+    )
+    .expect("root threading repair");
+    let fixed = FixEdit::apply_all(source, &edits);
+    assert_eq!(
+        fixed,
+        "fn leaf(_harness: Harness, harness: HarnessFs, path: string) {\n  needs_root(_harness, harness, path)\n}\n\nfn main(harness: Harness) {\n  leaf(harness, harness.fs, \"old\")\n}\n"
     );
+}
+
+#[test]
+fn missing_capability_argument_repair_rejects_non_call_spans() {
+    let source = "import { helper } from \"./lib\"\n\nfn main(harness: Harness) {}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let start = source.find("helper").unwrap();
+    let import_span = harn_lexer::Span::with_offsets(start, start + "helper".len(), 1, 10);
+
+    assert!(
+        synthesize_missing_capability_argument_repair(
+            import_span,
+            "argument 1 `ast`: expected HarnessAst, found string",
+            source,
+            &program,
+        )
+        .is_none(),
+        "an imported-declaration diagnostic must never edit the importer"
+    );
+}
+
+#[test]
+fn missing_root_argument_repair_preserves_parenthesized_first_argument() {
+    // An expression span excludes its grouping parentheses, so a repair that
+    // inserted at the diagnosed offset would produce `((harness, params ...`.
+    let source = "pipeline test(harness: Harness, params: dict) {\n  host_search_request((params ?? {}) + {path: \"root\"})\n}\n";
+    let program = harn_parser::parse_source(source).expect("source parses");
+    let mut span = None;
+    visit::walk_program(&program, &mut |node| {
+        if let Node::FunctionCall { name, args, .. } = &node.node {
+            if name == "host_search_request" {
+                span = args.first().map(|arg| arg.span);
+            }
+        }
+    });
+    let span = span.expect("host_search_request first argument");
+
+    let (_, edits, _) = synthesize_missing_root_argument_repair(
+        span,
+        source,
+        &program,
+        &BTreeSet::new(),
+        &AmbientRepairContext {
+            cross_module_importer_count: 0,
+        },
+    )
+    .expect("root argument repair");
+
+    let applied = FixEdit::apply_all(source, &edits);
     assert!(
         applied.contains("host_search_request(harness, (params ?? {}) + {path: \"root\"})"),
         "capability must be inserted at the call boundary: {applied}"
@@ -434,7 +522,7 @@ fn missing_capability_argument_repair_preserves_parenthesized_first_argument() {
 
 #[test]
 fn source_coordinates_map_unicode_columns_to_byte_offsets() {
-    let source = "αβ\n  call(\"value\")\n";
+    let source = "\u{3b1}\u{3b2}\n  call(\"value\")\n";
     let expected = source.find("\"value\"").expect("first argument");
     assert_eq!(
         harn_lexer::byte_offset_for_position(source, 2, 8),
@@ -448,7 +536,7 @@ fn capability_only_plan_excludes_unrelated_repairs() {
     let script = temp.path().join("capability_only.harn");
     fs::write(
         &script,
-        "pub const EXPORTED = 1\n\npub fn helper() {\n  println(\"hi\")\n}\n",
+        "pub const EXPORTED = 1\n\npub fn helper() {\n  println(\"hi\")\n}\n\nfn load(harness: Harness) {\n  return harness.fs.cwd()\n}\n",
     )
     .unwrap();
     let plan = build_plan_with_options(
@@ -460,10 +548,15 @@ fn capability_only_plan_excludes_unrelated_repairs() {
     )
     .unwrap();
     assert!(!plan.repairs.is_empty());
+    assert!(plan.repairs.iter().all(|repair| repair
+        .repair
+        .id
+        .starts_with("bindings/thread-harness")
+        || repair.repair.id == "bindings/attenuate-harness"));
     assert!(plan
         .repairs
         .iter()
-        .all(|repair| { repair.repair.id.starts_with("bindings/thread-harness") }));
+        .any(|repair| repair.repair.id == "bindings/attenuate-harness"));
 }
 
 #[test]
@@ -486,7 +579,8 @@ fn capability_apply_converges_transitive_repairs_in_one_invocation() {
     )
     .unwrap();
 
-    assert!(result.applied.len() >= 2, "{result:#?}");
+    assert!(!result.applied.is_empty(), "{result:#?}");
+    assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
         updated.contains("fn wrapper(harness: Harness, value: string)"),
@@ -740,6 +834,79 @@ fn apply_scope_local_rewrites_ambient_calls_inside_pipeline() {
 }
 
 #[test]
+fn apply_threads_missing_harness_into_pipeline_boundary() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("pipeline_missing_harness.harn");
+    fs::write(&script, "pipeline default(task) {\n  println(task)\n}\n").unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(
+        result.applied.iter().any(|repair| {
+            repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
+                && repair.repair_id == "bindings/thread-harness-needs-param"
+        }),
+        "{result:#?}"
+    );
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("pipeline default(harness: Harness, task)"),
+        "pipeline entrypoints must receive the root Harness first: {updated}"
+    );
+    assert!(
+        updated.contains("harness.stdio.println(task)"),
+        "pipeline ambient call should use the inserted Harness: {updated}"
+    );
+}
+
+#[test]
+fn apply_threads_registry_owned_harness_method_through_helper() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("provider_caps.harn");
+    fs::write(
+        &script,
+        "fn caps() {\n  return provider_capabilities(\"anthropic\", \"claude-opus-4-7\")\n}\n\nfn main(harness: Harness) {\n  caps()\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(
+        result.applied.iter().any(|repair| {
+            repair.diagnostic_code == Code::LintAmbientHarnessMethod.to_string()
+                && repair.repair_id.starts_with("bindings/thread-harness")
+        }),
+        "{result:#?}"
+    );
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("fn caps(harness: HarnessLlm)"),
+        "{updated}"
+    );
+    assert!(updated.contains("caps(harness.llm)"), "{updated}");
+    assert!(
+        updated.contains("harness.provider_capabilities(\"anthropic\", \"claude-opus-4-7\")"),
+        "{updated}"
+    );
+}
+
+#[test]
 fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("pipeline_helper.harn");
@@ -888,6 +1055,197 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
     assert!(
         updated.contains("load(harness, \"notes.txt\")"),
         "pipeline caller should pass the runtime harness into the public API: {updated}"
+    );
+}
+
+#[test]
+fn apply_threads_ambient_capability_from_default_parameter() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("cwd_default.harn");
+    fs::write(
+        &script,
+        "pub fn resolve(path: string, base: string = cwd()) -> string {\n  return base + path\n}\n\nfn main(harness: Harness) {\n  resolve(\"notes.txt\")\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(
+        result.applied.iter().any(|repair| {
+            repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
+                && repair.repair_id == "bindings/thread-harness-needs-param"
+        }),
+        "{result:#?}"
+    );
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains(
+            "pub fn resolve(harness: HarnessFs, path: string, base: string = harness.cwd())"
+        ),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("resolve(harness.fs, \"notes.txt\")"),
+        "{updated}"
+    );
+}
+
+#[test]
+fn apply_rewrites_positional_metadata_builtin_to_typed_request() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("metadata_request.harn");
+    fs::write(
+        &script,
+        "fn read_fact(dir: string) {\n  return metadata_get(dir, \"classification\")\n}\n\nfn main(harness: Harness) {\n  read_fact(\"src\")\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(
+        result.applied.iter().any(|repair| {
+            repair.diagnostic_code == Code::LintAmbientHarnessMethod.to_string()
+                && repair.repair_id.starts_with("bindings/thread-harness")
+        }),
+        "{result:#?}"
+    );
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("fn read_fact(harness: HarnessProject, dir: string)"),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("harness.metadata_get({dir: dir, namespace: \"classification\"})"),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("read_fact(harness.project, \"src\")"),
+        "{updated}"
+    );
+}
+
+#[test]
+fn apply_rewrites_zero_and_optional_metadata_arguments_to_named_requests() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("metadata_optional_requests.harn");
+    fs::write(
+        &script,
+        "fn main(harness: Harness) {\n  metadata_save()\n  metadata_entries()\n  metadata_status(\"classification\")\n}\n",
+    )
+    .unwrap();
+
+    apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("harness.project.metadata_save({})"),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("harness.project.metadata_entries({})"),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("harness.project.metadata_status({namespace: \"classification\"})"),
+        "{updated}"
+    );
+}
+
+#[test]
+fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("host_projections.harn");
+    fs::write(
+        &script,
+        "fn describe() {\n  return platform() + \"-\" + arch() + home_dir()\n}\n\nfn main(harness: Harness) {\n  describe()\n}\n",
+    )
+    .unwrap();
+
+    apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("harness.system.platform().os"),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("harness.system.platform().arch"),
+        "{updated}"
+    );
+    assert!(updated.contains("harness.fs.home_dir()"), "{updated}");
+    assert!(
+        updated.contains("fn describe(harness: {fs: HarnessFs, system: HarnessSystem})"),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("describe({fs: harness.fs, system: harness.system})"),
+        "{updated}"
+    );
+}
+
+#[test]
+fn apply_rewrites_ambient_calls_inside_interpolation() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("interpolation.harn");
+    fs::write(
+        &script,
+        r#"fn main(harness: Harness) {
+  const label = "host ${platform()} ${read_file("name.txt")}"
+}
+"#,
+    )
+    .unwrap();
+
+    apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("${harness.system.platform().os}"),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("${harness.fs.read_text(\"name.txt\")}"),
+        "{updated}"
     );
 }
 

@@ -104,17 +104,26 @@ fn load_manifest(fs: HarnessFs, path: string) -> string {
   return fs.read_text(path)
 }
 
+fn refresh_index(io: {fs: HarnessFs, tools: HarnessTools}, path: string) {
+  let source = io.fs.read_text(path)
+  io.tools.invoke("index", {source})
+}
+
 fn main(harness: Harness) {
   harness.stdio.println(load_manifest(harness.fs, "harn.toml"))
+  refresh_index({fs: harness.fs, tools: harness.tools}, "src/index.md")
 }
 ```
 
-Keep root `Harness` at entry and genuine orchestration boundaries. Helpers
-accept the smallest coherent capability interface they need—not mechanically
-the fewest possible arguments. The `capability-attenuation` lint identifies
-root parameters used only through one or two sub-handles and offers the narrow
-signature. Narrow handles provide actual isolation: a `HarnessFs` value has no
-environment, process, network, or sibling-handle surface.
+Keep root `Harness` at entrypoints and at boundaries that genuinely coordinate
+several capabilities. Elsewhere, ask for what the function actually uses — not
+mechanically the fewest arguments. One capability is a plain handle. Two are a
+record, so each grant is named where it is made. The `capability-attenuation`
+lint spots root parameters used through only one or two sub-handles, and offers
+the narrower signature along with the call-site changes it can prove are safe.
+
+Narrowing is real isolation, not a naming convention: a `HarnessFs` value has
+no environment, process, network, or sibling-handle surface to reach through.
 
 Harness values are runtime authority and cannot be serialized or persisted as
 domain state. Persist ordinary data and stable identifiers, then let the

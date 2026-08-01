@@ -26,9 +26,10 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
 ];
 
 #[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "project_context_profile_native(path?: string, options?: dict) -> dict",
+    exposure = "harness.project.context_profile",
+    effects = ["fs.read@arg0"],
+    sig = "__cap_project_context_profile(path?: string, options?: dict) -> ProjectContextProfile",
+    aliases = ["project_context_profile_native"],
     category = "project"
 )]
 fn project_context_profile_native_impl(
@@ -56,9 +57,10 @@ fn project_context_profile_native_impl(
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "project_fingerprint(path?: string) -> ProjectFingerprint",
+    exposure = "harness.project.fingerprint",
+    effects = ["fs.read@arg0"],
+    sig = "__cap_project_fingerprint(path?: string) -> ProjectFingerprint",
+    aliases = ["project_fingerprint"],
     category = "project"
 )]
 fn project_fingerprint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -76,9 +78,10 @@ fn project_fingerprint_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "project_scan_native(path?: string, options?: dict) -> dict",
+    exposure = "harness.project.scan",
+    effects = ["fs.read@arg0"],
+    sig = "__cap_project_scan(path?: string, options?: dict) -> dict",
+    aliases = ["project_scan_native"],
     category = "project"
 )]
 fn project_scan_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -92,9 +95,10 @@ fn project_scan_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "project_scan_tree_native(path?: string, options?: dict) -> dict",
+    exposure = "harness.project.scan_tree",
+    effects = ["fs.read@arg0"],
+    sig = "__cap_project_scan_tree(path?: string, options?: dict) -> dict",
+    aliases = ["project_scan_tree_native"],
     category = "project"
 )]
 fn project_scan_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -113,9 +117,10 @@ fn project_scan_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "project_walk_tree_native(path?: string, options?: dict) -> list",
+    exposure = "harness.project.walk_tree",
+    effects = ["fs.read@arg0"],
+    sig = "__cap_project_walk_tree(path?: string, options?: dict) -> list",
+    aliases = ["project_walk_tree_native"],
     category = "project"
 )]
 fn project_walk_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -134,9 +139,10 @@ fn project_walk_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<
 }
 
 #[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
+    exposure = "harness.project.catalog",
     effects = [],
-    sig = "project_catalog_native() -> list",
+    sig = "__cap_project_catalog() -> list",
+    aliases = ["project_catalog_native"],
     category = "project"
 )]
 fn project_catalog_native_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

@@ -122,17 +122,28 @@ impl crate::vm::Vm {
                 }
             }
         }
-        if let Some(capability) = handle.kind().capability_id() {
-            if let Some(dispatch) = self
-                .capability_methods
-                .get(&capability)
-                .and_then(|methods| methods.get(method))
-                .cloned()
-            {
-                let qualified_name = format!("harness.{}.{method}", capability.field_name());
-                return self
-                    .call_builtin_entry(&qualified_name, dispatch, args.to_vec())
-                    .await;
+        // A mock harness owns every effect it represents. Declared capability
+        // implementations must not run for real just because the method now has
+        // a typed Harness exposure, so the real dispatch paths below stay shut
+        // while `call_mock_harness_method` serves the canned response.
+        let serves_canned_response = matches!(handle.inner().mode(), HarnessMode::Mock(_))
+            && !matches!(handle.kind(), HarnessKind::Runtime | HarnessKind::Testing);
+        if !serves_canned_response {
+            if let Some(capability) = handle.kind().capability_id() {
+                if let Some(dispatch) = self
+                    .capability_methods
+                    .get(&capability)
+                    .and_then(|methods| methods.get(method))
+                    .cloned()
+                {
+                    let qualified_name = format!("harness.{}.{method}", capability.field_name());
+                    // Capability dispatch bypasses `call_builtin_impl`, so it
+                    // owns opening the observation scope for this call.
+                    let _observe = Self::observe_builtin_call(&qualified_name);
+                    return self
+                        .call_builtin_entry(&qualified_name, dispatch, args.to_vec())
+                        .await;
+                }
             }
         }
         // A same-named global builtin is not implicitly a capability method.
@@ -152,6 +163,7 @@ impl crate::vm::Vm {
             })
         });
         if declared_builtin_method
+            && !serves_canned_response
             && (self.builtins.contains_key(method) || self.async_builtins.contains_key(method))
         {
             return self.call_capability_builtin(method, args.to_vec()).await;
@@ -188,10 +200,20 @@ impl crate::vm::Vm {
                 }
             }
         }
-        if matches!(handle.inner().mode(), HarnessMode::Mock(_))
-            && !matches!(handle.kind(), HarnessKind::Runtime | HarnessKind::Testing)
-        {
+        if serves_canned_response {
             return self.call_mock_harness_method(handle, method, args).await;
+        }
+        if let Some(capability) = handle.kind().capability_id() {
+            if harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method) {
+                return self
+                    .call_dict_host_capability_method(
+                        handle,
+                        capability.field_name(),
+                        method,
+                        args,
+                    )
+                    .await;
+            }
         }
         match handle.kind() {
             HarnessKind::Root => self.call_harness_root_method(handle, method, args).await,

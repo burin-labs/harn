@@ -565,7 +565,7 @@ fn runtime_builtin_name_is_callable_only_with_the_legacy_bridge() {
 #[test]
 fn legacy_signature_without_manifest_fails_closed() {
     harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
-    let error = try_compile("pipeline default(harness: Harness) { secret_get(\"key\") }")
+    let error = try_compile("pipeline default(harness: Harness) { agent_preset(\"audit\") }")
         .expect_err("a parser-only legacy signature must not grant runtime authority");
     assert!(
         error.message.contains("no typed runtime contract"),

@@ -255,6 +255,7 @@ impl TypeChecker {
                 type_expr: Some(TypeExpr::Named(ty)),
                 default_value: None,
                 rest: false,
+                ..
             }] if matches!(name.as_str(), "harness" | "_harness") && ty == "Harness"
         );
         if signature_ok {

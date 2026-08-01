@@ -79,6 +79,17 @@ appropriate `harness.*` handle. Notable capability families include:
   model and own rate limiting and cost accounting; Harn caches embeddings
   per `(model_hint, content_hash)` so replays are deterministic. See
   [Memory](memory.md) for the recall and storage contract.
+- `workspace.*`, `session.*`, `lsp.*`, and `credentials.*` — host-owned
+  workspace, editor/session, language-service, and credential operations.
+- `dashboard.*`, `merge_captain.*`, `pr_monitor.*`, and `workflow.*` —
+  optional product and repository-integration protocols. Harn still owns their
+  method signatures even when only one embedder implements them.
+
+A host's capability manifest says which of these optional methods that host
+supplies. It cannot add a method a script could call. Every call, such as
+`harness.workspace.search(request)`, is type-checked, audited, dispatched, and
+fixture-matched from the same registry, and a method Harn does not know is a
+compile error. Ordinary scripts have no `host_call` escape hatch.
 
 Tests satisfy registered capabilities through the `HarnessTesting` handle:
 `harness.testing.respond(...)`, `respond_error(...)`, and `calls()`. Unknown

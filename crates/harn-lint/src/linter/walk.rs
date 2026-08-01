@@ -1,6 +1,5 @@
-//! The main AST dispatch for the linter walk. Kept in its own submodule
-//! so the giant `lint_node` match doesn't dominate the surrounding
-//! state-tracking plumbing.
+//! The main AST dispatch, isolated so `lint_node` does not dominate the
+//! surrounding state-tracking plumbing.
 
 use harn_lexer::{FixEdit, Span, StringSegment};
 use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode};
@@ -346,6 +345,7 @@ impl<'a> Linter<'a> {
                 self.check_ambient_env_builtin(name, snode.span);
                 self.check_ambient_random_builtin(name, args.len(), snode.span);
                 self.check_ambient_net_builtin(name, snode.span);
+                self.check_ambient_harness_method(name, args, snode.span);
                 self.references.insert(name.clone());
                 self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
@@ -1109,8 +1109,8 @@ impl<'a> Linter<'a> {
                     self.lint_node(&entry.value);
                 }
             }
-
             Node::InterpolatedString(segments) => {
+                self.check_interpolated_ambient_calls(segments);
                 for seg in segments {
                     if let StringSegment::Expression(expr, _, _) = seg {
                         // Record any identifier tokens inside `${...}` as

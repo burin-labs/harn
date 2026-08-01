@@ -380,7 +380,7 @@ is a shipped TOML matrix overridable per-project via
 effective matrix at runtime with:
 
 ```harn
-const caps = provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider, model, native_tools, text_tool_wire_format_supported,
 //   preferred_tool_format: "native" | "text",
@@ -398,8 +398,8 @@ const caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // }
 ```
 
-The `provider_capabilities_install(toml_src)` and
-`provider_capabilities_clear()` builtins let scripts install and
+The `harness.llm.provider_capabilities_install(toml_src)` and
+`harness.llm.provider_capabilities_clear()` builtins let scripts install and
 revert overrides in-process for cases where editing the manifest is
 awkward (runtime proxy detection, conformance test setup). See
 `docs/src/llm/providers.md#capability-matrix--harntoml-overrides`

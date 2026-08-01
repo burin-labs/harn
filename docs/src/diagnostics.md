@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 70 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 71 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -321,8 +321,9 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-066`](#harn-lnt-066) | the result of a pure collection method is discarded, so the call has no effect on the receiver | — | — |
 | [`HARN-LNT-067`](#harn-lnt-067) | public callable parameter or return is missing an explicit type | — | — |
 | [`HARN-LNT-068`](#harn-lnt-068) | prompt template names a filter the engine does not implement | — | — |
-| [`HARN-LNT-069`](#harn-lnt-069) | helper accepts root Harness but uses only narrow capability handles | — | — |
+| [`HARN-LNT-069`](#harn-lnt-069) | helper accepts root Harness but uses only narrow capability handles | `bindings/attenuate-harness` | `surface-changing` |
 | [`HARN-LNT-070`](#harn-lnt-070) | public API has too many same-typed positional parameters | — | — |
+| [`HARN-LNT-071`](#harn-lnt-071) | global builtin has moved to a Harness capability method | `bindings/thread-harness-method` | `scope-local` |
 
 ## FMT — Formatter
 
@@ -3722,24 +3723,61 @@ Hello {{ name | upper }}
 
 helper accepts root Harness but uses only narrow capability handles
 
-An ordinary function accepts root `Harness`, but every observed use selects
-only one or two direct capability sub-handles. Root authority is appropriate
-at entry and orchestration boundaries; reusable helpers should advertise the
-smallest coherent capability interface they need.
+- **Repair:** `bindings/attenuate-harness` &nbsp;·&nbsp; **Safety:** `surface-changing`
+- Replace the root Harness parameter with the single capability the helper uses
+
+An ordinary function takes the root `Harness`, but every use in its body reads
+only one or two capabilities off it. Root authority belongs at entrypoints and
+orchestration boundaries. A reusable helper should ask for what it actually
+uses, so a reader can tell from the signature what the helper can touch.
 
 #### How to fix
 
-Replace the root parameter with the nominal `Harness*` types named by the
-diagnostic, and pass `harness.fs`, `harness.net`, or the corresponding
-sub-handle at each call site.
+When the helper uses one capability, change the parameter to the `Harness*`
+type the diagnostic names and pass that sub-handle at each call site:
 
-Keep root `Harness` when the function genuinely coordinates several
-capabilities or forwards authority. Runtime entrypoints—including `main`,
-jobs, trigger handlers, registered callbacks, and the standard connector
-exports—also keep root `Harness` because the host invokes those signatures
-directly. The lint derives connector exceptions from the connector ABI registry
-and suppresses itself when authority escapes or the local syntax cannot prove
-that narrowing is safe.
+```harn
+fn load_manifest(fs: HarnessFs, path: string) -> string {
+  return fs.read_text(path)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(load_manifest(harness.fs, "harn.toml"))
+}
+```
+
+When it uses two, take them as one record rather than two parameters, so each
+call site names what it grants:
+
+```harn
+fn refresh_index(io: {fs: HarnessFs, tools: HarnessTools}, path: string) {
+  io.tools.invoke("index", {source: io.fs.read_text(path)})
+}
+
+fn main(harness: Harness) {
+  refresh_index({fs: harness.fs, tools: harness.tools}, "src/index.md")
+}
+```
+
+A record keeps each grant named at the call site. Two positional handles are
+easy to swap by accident, and the swap still type-checks if the shapes are
+similar.
+
+`harn fix --apply --safety surface-changing` performs both rewrites. It changes
+the parameter, updates every use inside the helper, then narrows the argument at
+the call sites it can see (`harness` becomes `harness.fs`, or becomes
+`{fs: harness.fs, tools: harness.tools}`). It reuses the existing parameter
+name so the new binding cannot shadow anything else in scope; rename it yourself
+if a clearer name exists.
+
+#### When to keep root `Harness`
+
+Keep it when the function genuinely coordinates several capabilities or hands
+authority onward. Runtime entrypoints keep it too, because the host calls those
+signatures directly: `main`, jobs, trigger handlers, registered callbacks, and
+the standard connector exports. The lint reads connector exceptions from the
+connector ABI registry, and stays quiet whenever authority escapes the function
+or the surrounding code cannot prove that narrowing is safe.
 
 ### `HARN-LNT-070`
 
@@ -3747,18 +3785,63 @@ that narrowing is safe.
 
 public API has too many same-typed positional parameters
 
-A public function has four or more positional parameters with the same type.
-At call sites, swapping those values still type-checks and the argument order
-does not explain each value's role.
+A public function takes four or more positional parameters of the same type.
+A caller who swaps two of them still type-checks, and nothing at the call site
+says which value is which.
 
 #### How to fix
 
-Replace the homogeneous group with one named closed-record parameter. Build
-that record with explicit field names at call sites and destructure it inside
-the function.
+Take the group as one record instead, so the call site names each value:
 
-This is informational API guidance, not a blanket arity limit. Private helpers,
-heterogeneous signatures, defaults, and rest parameters are not reported.
+```harn
+pub fn draw_box(rect: {x: int, y: int, width: int, height: int}) {
+  // ...
+}
+
+draw_box({x: 0, y: 0, width: 80, height: 24})
+```
+
+This is guidance about a public API's readability, not a limit on how many
+parameters a function may have. It does not fire for private helpers, or for
+signatures where the types already tell the values apart. Parameters with
+defaults do count, since callers still pass them positionally. A rest parameter
+does not.
+
+### `HARN-LNT-071`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+global builtin has moved to a Harness capability method
+
+- **Repair:** `bindings/thread-harness-method` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the ambient runtime builtin with its typed `harness.*` method and thread authority through local callers
+
+This builtin was called as a global, but it performs an effect, so it now lives
+on a `Harness` capability instead. Reaching it through the harness is what makes
+a script's effects readable from its signatures.
+
+#### How to fix
+
+Call the method on the handle the diagnostic names, and pass that handle into
+the helper that needs it:
+
+```harn
+fn report(stdio: HarnessStdio, message: string) {
+  stdio.println(message)
+}
+```
+
+Some globals that returned a single value are now a field on a structured
+snapshot. For example, `platform()` becomes `harness.system.platform().os`, and
+`username()` becomes `harness.system.identity().username`.
+
+Keep the root `Harness` at entrypoints and at boundaries that genuinely
+coordinate several capabilities. Elsewhere, pass the narrowest handle that
+covers what the function does.
+
+`harn fix --apply --safety surface-changing` rewrites these calls for you,
+including calls inside `${...}` string interpolation, and adds the parameter to
+the local callers that need to supply the handle.
 
 ### `HARN-FMT-001`
 

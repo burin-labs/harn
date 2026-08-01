@@ -1,14 +1,23 @@
 # HARN-LNT-070 — public positional API is ambiguous
 
-A public function has four or more positional parameters with the same type.
-At call sites, swapping those values still type-checks and the argument order
-does not explain each value's role.
+A public function takes four or more positional parameters of the same type.
+A caller who swaps two of them still type-checks, and nothing at the call site
+says which value is which.
 
 ## How to fix
 
-Replace the homogeneous group with one named closed-record parameter. Build
-that record with explicit field names at call sites and destructure it inside
-the function.
+Take the group as one record instead, so the call site names each value:
 
-This is informational API guidance, not a blanket arity limit. Private helpers,
-heterogeneous signatures, defaults, and rest parameters are not reported.
+```harn
+pub fn draw_box(rect: {x: int, y: int, width: int, height: int}) {
+  // ...
+}
+
+draw_box({x: 0, y: 0, width: 80, height: 24})
+```
+
+This is guidance about a public API's readability, not a limit on how many
+parameters a function may have. It does not fire for private helpers, or for
+signatures where the types already tell the values apart. Parameters with
+defaults do count, since callers still pass them positionally. A rest parameter
+does not.

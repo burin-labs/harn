@@ -2,7 +2,41 @@
 mod tests {
     use super::*;
     use crate::secrets::SecretProvider;
+    use crate::VmValue;
     use async_trait::async_trait;
+
+    #[derive(Default)]
+    struct RecordingWorkspaceBridge {
+        calls: Mutex<Vec<(String, String, crate::value::DictMap)>>,
+    }
+
+    impl crate::stdlib::host::HostCallBridge for RecordingWorkspaceBridge {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            params: &'a crate::value::DictMap,
+        ) -> crate::stdlib::host::HostCallDispatchFuture<'a> {
+            self.calls.lock().expect("calls poisoned").push((
+                capability.to_string(),
+                operation.to_string(),
+                params.clone(),
+            ));
+            crate::stdlib::host::host_call_ready(Ok(Some(
+                crate::stdlib::json_to_vm_value(
+                    &serde_json::json!({"matches": ["src/runtime.rs"]}),
+                ),
+            )))
+        }
+    }
+
+    struct HostBridgeGuard;
+
+    impl Drop for HostBridgeGuard {
+        fn drop(&mut self) {
+            crate::stdlib::host::clear_host_call_bridge();
+        }
+    }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct SecretCall {
@@ -319,6 +353,28 @@ mod tests {
         assert_eq!(stdio.kind(), HarnessKind::Stdio);
         assert!(stdio.sub_handle("clock").is_none(), "nested access denied");
         assert!(root.sub_handle("not_a_field").is_none());
+    }
+
+    #[test]
+    fn narrowed_helper_cannot_recover_an_ungranted_sibling_capability() {
+        let error = run_harness_source(
+            r#"
+fn fetch(fs: HarnessFs) {
+  return fs.net.get("https://example.test")
+}
+
+fn main(harness: Harness) {
+  fetch(harness.fs)
+}
+"#,
+            Harness::real(),
+        )
+        .expect_err("HarnessFs must not expose HarnessNet authority");
+
+        assert!(
+            error.contains("cannot access property `net` on HarnessFs"),
+            "unexpected attenuation error: {error}"
+        );
     }
 
     #[test]
@@ -775,6 +831,11 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\ntrue\n"
                 "scan",
                 crate::stdlib::json_to_vm_value(&serde_json::json!({"language": "rust"})),
             )
+            .capability_response(
+                harn_builtin_meta::CapabilityId::Workspace,
+                "search",
+                crate::stdlib::json_to_vm_value(&serde_json::json!({"matches": ["src/lib.rs"]})),
+            )
             .build();
 
         run_harness_source(
@@ -783,16 +844,21 @@ pipeline default(harness: Harness) {
   const process = harness.process.run({program: "never-executed"})
   const answer = harness.interaction.ask("continue?")
   const project = harness.project.scan("/never-read")
+  const search = harness.workspace.search({query: "Harness"})
   harness.stdio.println(process.ok)
   harness.stdio.println(answer)
   harness.stdio.println(project.language)
+  harness.stdio.println(search.matches[0])
 }
 "#,
             harness.clone(),
         )
         .expect("every effect is served by the harness instance");
 
-        assert_eq!(harness.captured_stdio(), "true\nyes\nrust\n");
+        assert_eq!(
+            harness.captured_stdio(),
+            "true\nyes\nrust\nsrc/lib.rs\n"
+        );
         let observed = harness
             .calls()
             .into_iter()
@@ -804,10 +870,40 @@ pipeline default(harness: Harness) {
                 (HarnessKind::Process, "run".to_string()),
                 (HarnessKind::Interaction, "ask".to_string()),
                 (HarnessKind::Project, "scan".to_string()),
+                (HarnessKind::Workspace, "search".to_string()),
+                (HarnessKind::Stdio, "println".to_string()),
                 (HarnessKind::Stdio, "println".to_string()),
                 (HarnessKind::Stdio, "println".to_string()),
                 (HarnessKind::Stdio, "println".to_string()),
             ]
+        );
+    }
+
+    #[test]
+    fn optional_typed_capability_dispatches_through_the_embedder_bridge() {
+        let bridge = Arc::new(RecordingWorkspaceBridge::default());
+        crate::stdlib::host::set_host_call_bridge(bridge.clone());
+        let _guard = HostBridgeGuard;
+
+        let output = run_harness_source(
+            r#"
+fn main(harness: Harness) {
+  const result = harness.workspace.search({query: "runtime"})
+  harness.stdio.println(result.matches[0])
+}
+"#,
+            Harness::real(),
+        )
+        .expect("typed optional capability reaches the host bridge");
+
+        assert_eq!(output, "src/runtime.rs\n");
+        let calls = bridge.calls.lock().expect("calls poisoned");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "workspace");
+        assert_eq!(calls[0].1, "search");
+        assert_eq!(
+            calls[0].2.get("query").map(VmValue::display).as_deref(),
+            Some("runtime")
         );
     }
 

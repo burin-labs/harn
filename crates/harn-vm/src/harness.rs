@@ -72,6 +72,16 @@ impl HarnessKind {
     pub const Runtime: Self = Self(Some(harn_builtin_meta::CapabilityId::Runtime));
     pub const Interaction: Self = Self(Some(harn_builtin_meta::CapabilityId::Interaction));
     pub const Project: Self = Self(Some(harn_builtin_meta::CapabilityId::Project));
+    pub const Dashboard: Self = Self(Some(harn_builtin_meta::CapabilityId::Dashboard));
+    pub const Workspace: Self = Self(Some(harn_builtin_meta::CapabilityId::Workspace));
+    pub const MergeCaptain: Self = Self(Some(harn_builtin_meta::CapabilityId::MergeCaptain));
+    pub const Session: Self = Self(Some(harn_builtin_meta::CapabilityId::Session));
+    pub const Permission: Self = Self(Some(harn_builtin_meta::CapabilityId::Permission));
+    pub const Text: Self = Self(Some(harn_builtin_meta::CapabilityId::Text));
+    pub const Lsp: Self = Self(Some(harn_builtin_meta::CapabilityId::Lsp));
+    pub const Credentials: Self = Self(Some(harn_builtin_meta::CapabilityId::Credentials));
+    pub const PrMonitor: Self = Self(Some(harn_builtin_meta::CapabilityId::PrMonitor));
+    pub const Workflow: Self = Self(Some(harn_builtin_meta::CapabilityId::Workflow));
     pub const Testing: Self = Self(Some(harn_builtin_meta::CapabilityId::Testing));
 
     pub const fn capability_id(self) -> Option<harn_builtin_meta::CapabilityId> {
@@ -140,6 +150,16 @@ impl HarnessKind {
         HarnessKind::Runtime,
         HarnessKind::Interaction,
         HarnessKind::Project,
+        HarnessKind::Dashboard,
+        HarnessKind::Workspace,
+        HarnessKind::MergeCaptain,
+        HarnessKind::Session,
+        HarnessKind::Permission,
+        HarnessKind::Text,
+        HarnessKind::Lsp,
+        HarnessKind::Credentials,
+        HarnessKind::PrMonitor,
+        HarnessKind::Workflow,
         HarnessKind::Testing,
     ];
 
@@ -181,6 +201,16 @@ impl HarnessKind {
         HarnessKind::Runtime,
         HarnessKind::Interaction,
         HarnessKind::Project,
+        HarnessKind::Dashboard,
+        HarnessKind::Workspace,
+        HarnessKind::MergeCaptain,
+        HarnessKind::Session,
+        HarnessKind::Permission,
+        HarnessKind::Text,
+        HarnessKind::Lsp,
+        HarnessKind::Credentials,
+        HarnessKind::PrMonitor,
+        HarnessKind::Workflow,
         HarnessKind::Testing,
     ];
 }

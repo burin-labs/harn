@@ -226,6 +226,66 @@ fn runtime_only_builtins_never_shadow_a_static_parser_entry() {
     );
 }
 
+/// Every parser-recognized fallback name must resolve to an installed runtime
+/// contract or to a mechanical typed-Harness migration. Otherwise the parser
+/// advertises a source API that the compiler deliberately refuses to execute.
+#[test]
+fn static_parser_signatures_have_runtime_owners_or_migrations() {
+    // These signatures describe named exports from typed stdlib modules. They
+    // become callable only after import creates a local binding, so they are
+    // neither ambient APIs nor runtime-registry entries.
+    const STATIC_MODULE_EXPORTS: &[&str] = &[
+        "agent_chat_route_input",
+        "agent_chat_wait_for_user_tools",
+        "agent_preset",
+        "agent_preset_kinds",
+        "agent_preset_register",
+        "agent_typed_output_checkpoint",
+        "agentic_user",
+        "fixture_user",
+        "runtime_introspection_tools",
+        "scripted_user",
+        "simulated_user_post_turn",
+        "simulated_user_read_tools",
+        "simulated_user_respond",
+        "simulated_user_status",
+        "transcript.clear_reminders",
+        "transcript.inject_reminder",
+        "user_tools",
+        "workflow_typed_output_checkpoint",
+    ];
+    let has_legacy_capability_migration = |name| {
+        let diagnostic = harn_parser::diagnostic::harness_clock_replacement(name)
+            .or_else(|| harn_parser::diagnostic::harness_stdio_replacement(name))
+            .or_else(|| harn_parser::diagnostic::harness_fs_replacement(name))
+            .or_else(|| harn_parser::diagnostic::harness_env_replacement(name))
+            .or_else(|| harn_parser::diagnostic::harness_random_replacement(name))
+            .or_else(|| harn_parser::diagnostic::harness_net_replacement(name));
+        diagnostic.is_some() || harn_vm::stdlib::harness_migration_for_builtin(name).is_some()
+    };
+    let manifest_names: BTreeSet<&str> = harn_vm::stdlib::all_builtin_manifest()
+        .iter()
+        .map(|entry| entry.name)
+        .collect();
+    let mut missing: Vec<&str> = harn_parser::static_signature_names()
+        .filter(|name| {
+            !manifest_names.contains(name)
+                && !has_legacy_capability_migration(name)
+                && !harn_parser::builtin_signatures::is_language_intrinsic(name)
+                && !name.starts_with("__")
+                && !matches!(*name, "e" | "pi")
+                && !STATIC_MODULE_EXPORTS.contains(name)
+        })
+        .collect();
+    missing.sort_unstable();
+    missing.dedup();
+
+    assert!(
+        missing.is_empty(),
+        "parser-only builtin signatures advertise APIs with no runtime owner or typed-Harness migration:\n  {missing:#?}"
+    );
+}
+
 #[test]
 fn linkme_distributed_slice_populates_with_all_builtins() {
     let linkme_count = harn_vm::stdlib::macros::ALL_BUILTIN_DEFS.len();

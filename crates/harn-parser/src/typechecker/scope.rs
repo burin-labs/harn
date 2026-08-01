@@ -271,6 +271,7 @@ impl TypeScope {
                             type_expr: Some(TypeExpr::Named("T".into())),
                             default_value: None,
                             rest: false,
+                            span: Span::dummy(),
                         }],
                         // Synthesized builtin: no source text, so no span.
                         span: Span::dummy(),
@@ -282,6 +283,7 @@ impl TypeScope {
                             type_expr: Some(TypeExpr::Named("E".into())),
                             default_value: None,
                             rest: false,
+                            span: Span::dummy(),
                         }],
                         span: Span::dummy(),
                     },

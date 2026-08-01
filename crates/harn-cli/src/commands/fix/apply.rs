@@ -113,14 +113,22 @@ pub(super) fn repair_path(plan: &RepairPlan, repair: &RepairWire) -> Result<Stri
         })
 }
 
-fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
+pub(super) fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
     if edits.is_empty() {
         return Ok(());
     }
     let mut result = std::fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let mut sorted = edits.to_vec();
-    sorted.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
+    // Two edits can share a start when one inserts an argument where another
+    // rewrites the expression that begins there. Applying the wider one first
+    // keeps the narrower edit's offsets valid.
+    sorted.sort_by_key(|edit| {
+        (
+            std::cmp::Reverse(edit.span.start),
+            std::cmp::Reverse(edit.span.end),
+        )
+    });
     for edit in sorted {
         if edit.span.start > edit.span.end || edit.span.end > result.len() {
             return Err(format!(

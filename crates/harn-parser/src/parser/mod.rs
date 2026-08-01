@@ -554,10 +554,8 @@ interface Repository<T> {
 
     #[test]
     fn parses_typed_and_legacy_pipeline_parameters() {
-        let program = parse_source(
-            "pub pipeline deploy(config: DeployConfig, dry_run: bool) -> string {\n  return \"ok\"\n}\npipeline legacy(task) {}\n",
-        )
-        .expect("typed pipeline parameters should parse");
+        let source = "pub pipeline deploy(config: DeployConfig, dry_run: bool) -> string {\n  return \"ok\"\n}\npipeline legacy(task) {}\n";
+        let program = parse_source(source).expect("typed pipeline parameters should parse");
 
         let Node::Pipeline { params, .. } = &program[0].node else {
             panic!("expected typed pipeline");
@@ -577,7 +575,12 @@ interface Repository<T> {
         let Node::Pipeline { params, .. } = &program[1].node else {
             panic!("expected legacy pipeline");
         };
-        assert_eq!(params, &[TypedParam::untyped("task")]);
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "task");
+        assert_eq!(params[0].type_expr, None);
+        assert!(params[0].default_value.is_none());
+        assert!(!params[0].rest);
+        assert_eq!(&source[params[0].span.start..params[0].span.end], "task");
     }
 
     #[test]
