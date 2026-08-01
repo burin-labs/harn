@@ -187,9 +187,10 @@ pub(super) fn plan(
                     replacement: argument,
                 }
             } else if call.args.len() == carrier.param_index {
-                add_call_argument_edit(
+                add_call_argument_at_index_edit(
                     &program_files[caller.file_idx].source,
-                    &call.span,
+                    call,
+                    carrier.param_index,
                     &argument,
                 )
                 .ok_or_else(|| format!("failed to update call to {}", callee.info.name))?
@@ -642,6 +643,22 @@ fn final_binding(callable: &ProgramCallable) -> Option<&str> {
                 .then_some("harness")
                 .or_else(|| (!callable.info.bound_names.contains("_harness")).then_some("_harness"))
         })
+}
+
+fn add_call_argument_at_index_edit(
+    source: &str,
+    call: &super::CallSite,
+    index: usize,
+    argument: &str,
+) -> Option<FixEdit> {
+    if index == 0 {
+        return add_call_argument_edit(source, &call.span, argument);
+    }
+    let previous = call.args.get(index - 1)?;
+    Some(FixEdit {
+        span: Span::with_offsets(previous.end, previous.end, call.span.line, call.span.column),
+        replacement: format!(", {argument}"),
+    })
 }
 
 fn argument_projection(

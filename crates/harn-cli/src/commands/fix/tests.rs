@@ -723,7 +723,7 @@ fn capability_apply_inserts_an_argument_for_a_widened_existing_carrier() {
     let script = temp.path().join("main.harn");
     fs::write(
         &script,
-        "pub fn read_mode(harness: HarnessEnv) -> string {\n  llm_usage()\n  return harness.get_or(\"MODE\", \"\")\n}\n\nfn invoke() -> string {\n  return read_mode()\n}\n\nfn main(harness: Harness) {\n  invoke()\n}\n",
+        "pub fn read_mode(prefix: string, harness: HarnessEnv) -> string {\n  llm_usage()\n  return prefix + harness.get_or(\"MODE\", \"\")\n}\n\nfn invoke() -> string {\n  return read_mode(\"mode=\")\n}\n\nfn main(harness: Harness) {\n  invoke()\n}\n",
     )
     .unwrap();
 
@@ -744,8 +744,8 @@ fn capability_apply_inserts_an_argument_for_a_widened_existing_carrier() {
         "the caller should gain the propagated bundle: {updated}"
     );
     assert!(
-        updated.contains("read_mode(harness)"),
-        "the missing capability argument should be inserted: {updated}"
+        updated.contains("read_mode(\"mode=\", harness)"),
+        "the missing capability argument should be inserted at its declared position: {updated}"
     );
 }
 
