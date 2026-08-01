@@ -4,6 +4,7 @@ mod approval_rules;
 mod effects;
 mod nested_budget;
 mod operator_grant;
+pub(crate) mod tool_enforcement;
 mod types;
 
 use crate::value::VmDictExt;
@@ -41,6 +42,8 @@ pub use operator_grant::{
     current_operator_approval_grant, install_operator_approval_grant, OperatorApprovalGrant,
     OperatorApprovalGrantGuard,
 };
+pub use tool_enforcement::enforce_current_policy_for_tool;
+pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant;
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
     ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy, JoinPolicy,
@@ -660,93 +663,6 @@ pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmErr
         return reject_policy(format!(
             "bridged builtin '{name}' exceeds execution policy; declare an explicit capability/tool surface instead"
         ));
-    }
-    Ok(())
-}
-
-pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), PolicyDenial> {
-    enforce_current_policy_for_tool_with_side_effect_grant(tool_name, None)
-}
-
-/// Enforce the active tool policy, optionally honoring one exact
-/// dispatch-local side-effect grant. Tool and capability ceilings remain hard
-/// requirements, and argument constraints are enforced by the caller after
-/// this function returns.
-pub(crate) fn enforce_current_policy_for_tool_with_side_effect_grant(
-    tool_name: &str,
-    side_effect_grant: Option<&SideEffectCeilingGrant>,
-) -> Result<(), PolicyDenial> {
-    enforce_current_policy_for_tool_with_annotations_and_side_effect_grant(
-        tool_name,
-        None,
-        side_effect_grant,
-    )
-}
-
-/// Enforce the active tool policy using the ambient policy's authoritative
-/// annotations when present, or the concrete dispatch catalog's annotations
-/// otherwise. Dynamic tool registries are assembled after an ACP mode policy
-/// is installed, so ignoring their annotations would make an honestly tagged
-/// `process_exec` tool look effect-free under a `read_only` ceiling.
-pub(crate) fn enforce_current_policy_for_tool_with_annotations_and_side_effect_grant(
-    tool_name: &str,
-    dispatch_annotations: Option<&ToolAnnotations>,
-    side_effect_grant: Option<&SideEffectCeilingGrant>,
-) -> Result<(), PolicyDenial> {
-    use crate::agent_events::DenialGate;
-    let Some(policy) = current_execution_policy() else {
-        return Ok(());
-    };
-    if !policy_allows_tool(&policy, tool_name) {
-        return reject_tool(
-            DenialGate::ToolCeiling,
-            None,
-            format!("tool '{tool_name}' is not in the active allowed-tool list"),
-        );
-    }
-    if let Some(annotations) = policy
-        .tool_annotations
-        .get(tool_name)
-        .or(dispatch_annotations)
-    {
-        for (capability, ops) in &annotations.capabilities {
-            for op in ops {
-                if !policy_allows_capability(&policy, capability, op) {
-                    return reject_tool(
-                        DenialGate::CapabilityCeiling,
-                        Some(format!("{capability}.{op}")),
-                        format!("tool '{tool_name}' requires {capability}.{op}"),
-                    );
-                }
-            }
-        }
-        let requested_level = annotations.side_effect_level;
-        if requested_level != SideEffectLevel::None
-            && !policy_allows_side_effect(&policy, requested_level.as_str())
-        {
-            let ceiling = policy
-                .side_effect_level
-                .as_deref()
-                .map(SideEffectLevel::parse)
-                .expect("a side-effect refusal requires an active policy ceiling");
-            let violation = SideEffectCeilingViolation {
-                ceiling,
-                required_level: requested_level,
-            };
-            if side_effect_grant.is_some_and(|grant| grant.matches(tool_name, violation)) {
-                return Ok(());
-            }
-            return Err(PolicyDenial {
-                gate: DenialGate::SideEffectCeiling,
-                capability: None,
-                reason: DenialGate::SideEffectCeiling.render_reason(format!(
-                    "tool '{tool_name}' requires side-effect level '{}' but the active ceiling is '{}'",
-                    requested_level.as_str(),
-                    ceiling.as_str(),
-                )),
-                side_effect_ceiling: Some(violation),
-            });
-        }
     }
     Ok(())
 }

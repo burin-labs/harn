@@ -23,9 +23,10 @@ use super::signing::{
     verify_session_chain,
 };
 use super::store::{
-    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
-    SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, Snapshot, SnapshotId,
-    StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport, MAX_READ_BATCH,
+    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ListOrder,
+    ListSortKey, ReadRange, SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore,
+    Snapshot, SnapshotId, StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport,
+    MAX_READ_BATCH,
 };
 
 struct SessionRecord {
@@ -248,7 +249,17 @@ impl SessionStore for MemorySessionStore {
             .map(|record| record.meta.clone())
             .filter(|meta| match_filter(meta, &filter))
             .collect();
-        out.sort_by_key(|meta| meta.created_at_ms);
+        out.sort_by(|left, right| {
+            let timestamp_order = match filter.sort_by {
+                ListSortKey::CreatedAt => left.created_at_ms.cmp(&right.created_at_ms),
+                ListSortKey::UpdatedAt => left.updated_at_ms.cmp(&right.updated_at_ms),
+            };
+            let timestamp_order = match filter.order {
+                ListOrder::Ascending => timestamp_order,
+                ListOrder::Descending => timestamp_order.reverse(),
+            };
+            timestamp_order.then_with(|| left.id.cmp(&right.id))
+        });
         if let Some(cursor) = filter.cursor.as_ref() {
             let position = out.iter().position(|meta| meta.id == *cursor);
             if let Some(start) = position {

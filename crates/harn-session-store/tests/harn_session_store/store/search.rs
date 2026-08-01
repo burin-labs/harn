@@ -788,6 +788,117 @@ async fn list_cursor_paginates_in_creation_order() {
 }
 
 #[tokio::test]
+async fn list_descending_is_bounded_before_pagination() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let mut expected = Vec::new();
+        for i in 0..5 {
+            let meta = store
+                .create(CreateSession {
+                    id: Some(format!("session-{i:02}")),
+                    ..Default::default()
+                })
+                .await
+                .expect("create");
+            expected.push(meta);
+        }
+        expected.sort_by(|left, right| {
+            right
+                .created_at_ms
+                .cmp(&left.created_at_ms)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let first_page = store
+            .list(ListFilter {
+                limit: Some(2),
+                order: ListOrder::Descending,
+                ..Default::default()
+            })
+            .await
+            .expect("list descending page 1");
+        assert_eq!(
+            first_page
+                .iter()
+                .map(|meta| meta.id.as_str())
+                .collect::<Vec<_>>(),
+            expected[..2]
+                .iter()
+                .map(|meta| meta.id.as_str())
+                .collect::<Vec<_>>()
+        );
+        let second_page = store
+            .list(ListFilter {
+                limit: Some(2),
+                cursor: Some(first_page[1].id.clone()),
+                order: ListOrder::Descending,
+                ..Default::default()
+            })
+            .await
+            .expect("list descending page 2");
+        assert_eq!(
+            second_page
+                .iter()
+                .map(|meta| meta.id.as_str())
+                .collect::<Vec<_>>(),
+            expected[2..4]
+                .iter()
+                .map(|meta| meta.id.as_str())
+                .collect::<Vec<_>>()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn list_can_rank_by_most_recent_mutation() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let first = store
+            .create(CreateSession {
+                id: Some("z-updated".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("create first");
+        let second = store
+            .create(CreateSession {
+                id: Some("a-idle".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("create second");
+        let updated = store
+            .update(
+                &first.id,
+                UpdateSession {
+                    title: Some("updated".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("update first");
+        let mut expected = [updated, second];
+        expected.sort_by(|left, right| {
+            right
+                .updated_at_ms
+                .cmp(&left.updated_at_ms)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        let listed = store
+            .list(ListFilter {
+                sort_by: ListSortKey::UpdatedAt,
+                order: ListOrder::Descending,
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .expect("list most recently updated");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, expected[0].id);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn sweep_retention_archives_closed_sessions_before_soft_delete() {
     use std::sync::Mutex;
 
