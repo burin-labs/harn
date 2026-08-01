@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::commands::time::{self, PhaseRecord, RunTiming};
+use harn_vm::clock::{now_wall_ms, RealClock};
 use harn_vm::event_log::EventLog;
 
 use super::{RunAttestationOptions, RunProfileOptions};
@@ -446,10 +447,7 @@ fn receipt_output_path(
 }
 
 pub(super) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
+    now_wall_ms(&RealClock::new())
 }
 
 /// Map a script's top-level return value to a process exit code.
