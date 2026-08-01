@@ -24,6 +24,12 @@ mkdir -p "$fake_bin"
 cat > "$fake_bin/harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${STALE_HARN_LIMIT_PREFLIGHT:-0}" == "1" \
+  && "$*" == "run scripts/drift_preflight_members.harn -- --tier source" ]]; then
+  printf 'selected\n' > "${STALE_HARN_SELECTOR_RECORD:?}"
+  printf 'check-language-spec\n'
+  exit 0
+fi
 case "${1:-}" in
   check|lint|parse)
     printf 'forbidden stale parser command: %s\n' "$*" >> "${STALE_HARN_RECORD:?}"
@@ -66,14 +72,33 @@ fi
 
 printf '\n<!-- stale-binary source-preflight negative -->\n' >> "$mirror_path"
 record="$tmp_root/forbidden-commands.txt"
+selector_record="$tmp_root/selector-record.txt"
 output="$tmp_root/check-drift.out"
+
+# Prove the authoritative registry routes the language-spec mirror through the
+# source preflight. The negative invocation below then narrows the aggregate to
+# that one member: running every unrelated source audit made this single-member
+# dispatch regression spend ~20 minutes in CI without strengthening its claim.
+source_members="$("$real_harn" run scripts/drift_preflight_members.harn -- --tier source)"
+if [[ " $source_members " != *" check-language-spec "* ]]; then
+  echo "source drift preflight no longer registers check-language-spec" >&2
+  printf 'source members: %s\n' "$source_members" >&2
+  exit 1
+fi
 
 if PATH="$fake_bin:$PATH" \
   HARN_BIN="$fake_bin/harn" \
+  STALE_HARN_LIMIT_PREFLIGHT=1 \
   STALE_HARN_REAL="$real_harn" \
   STALE_HARN_RECORD="$record" \
+  STALE_HARN_SELECTOR_RECORD="$selector_record" \
   make -C "$repo_root" --no-print-directory check-drift > "$output" 2>&1; then
   echo "source drift preflight accepted a stale committed mirror" >&2
+  cat "$output" >&2
+  exit 1
+fi
+if [[ "$(cat "$selector_record" 2>/dev/null || true)" != "selected" ]]; then
+  echo "source drift preflight did not resolve its registered member set" >&2
   cat "$output" >&2
   exit 1
 fi
