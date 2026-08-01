@@ -3734,8 +3734,12 @@ diagnostic, and pass `harness.fs`, `harness.net`, or the corresponding
 sub-handle at each call site.
 
 Keep root `Harness` when the function genuinely coordinates several
-capabilities or forwards authority. The lint suppresses itself when authority
-escapes or the local syntax cannot prove that narrowing is safe.
+capabilities or forwards authority. Runtime entrypoints—including `main`,
+jobs, trigger handlers, registered callbacks, and the standard connector
+exports—also keep root `Harness` because the host invokes those signatures
+directly. The lint derives connector exceptions from the connector ABI registry
+and suppresses itself when authority escapes or the local syntax cannot prove
+that narrowing is safe.
 
 ### `HARN-LNT-070`
 

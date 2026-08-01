@@ -3281,7 +3281,7 @@ Package authors should prefer `std/connectors/shared` for provider API calls:
 ```harn
 import { connector_http_json } from "std/connectors/shared"
 
-const response = connector_http_json("POST", url, {
+const response = connector_http_json(harness.clock, harness.net, "POST", url, {
   headers: {Authorization: "Bearer " + token, Accept: "application/json"},
   body: json_stringify(payload),
   idempotency_key: "create:" + payload.id,
