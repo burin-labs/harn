@@ -544,7 +544,11 @@ capability_method!(
 capability_method!(
     agent_session_flush,
     "harness.agent.session_flush",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_flush(session_id: string) -> nil",
     "Flush a live agent transcript."
 );
@@ -562,173 +566,289 @@ capability_method!(
 capability_method!(
     agent_session_init,
     "harness.agent.session_init",
-    ["state.mutate@const=agent-sessions"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> string",
     "Initialize an agent execution session."
 );
 capability_method!(
     agent_session_finalize,
     "harness.agent.session_finalize",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_finalize(session_id: string, status: dict) -> dict",
     "Finalize an agent execution session."
 );
 capability_method!(
     agent_session_messages,
     "harness.agent.session_messages",
-    ["state.read@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_messages(session_id: string) -> list",
     "Read an agent session's messages."
 );
 capability_method!(
     agent_session_visible_messages,
     "harness.agent.session_visible_messages",
-    ["state.read@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_visible_messages(session_id: string, messages?: list|nil) -> list",
     "Project an agent session's provider-visible messages."
 );
 capability_method!(
     agent_session_record_assistant,
     "harness.agent.session_record_assistant",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_record_assistant(session_id: string, llm_result: dict) -> nil",
     "Record an assistant result."
 );
 capability_method!(
     agent_session_pop_last_assistant,
     "harness.agent.session_pop_last_assistant",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_pop_last_assistant(session_id: string) -> dict",
     "Remove and return the last assistant message."
 );
 capability_method!(
     agent_session_record_tool_results,
     "harness.agent.session_record_tool_results",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_record_tool_results(session_id: string, dispatch: dict) -> nil",
     "Record dispatched tool results."
 );
 capability_method!(
     agent_session_pair_orphaned_tool_use,
     "harness.agent.session_pair_orphaned_tool_use",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_pair_orphaned_tool_use(session_id: string, feedback: string) -> int",
     "Pair orphaned tool calls with synthetic results."
 );
 capability_method!(
     agent_session_record_usage,
     "harness.agent.session_record_usage",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_record_usage(session_id: string, llm_result: dict) -> dict",
     "Record model usage."
 );
-capability_method!(agent_reminder_providers_fire, "harness.agent.reminder_providers_fire", ["state.mutate@arg0"], "__cap_agent_reminder_providers_fire(session_id: string, event: string, payload?: dict|nil, options?: dict|nil) -> dict", "Run registered reminder providers for a session event.");
+capability_method!(agent_reminder_providers_fire, "harness.agent.reminder_providers_fire",     // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [], "__cap_agent_reminder_providers_fire(session_id: string, event: string, payload?: dict|nil, options?: dict|nil) -> dict", "Run registered reminder providers for a session event.");
 capability_method!(
     agent_session_drain_feedback,
     "harness.agent.session_drain_feedback",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_drain_feedback(session_id: string) -> list",
     "Drain queued session feedback."
 );
 capability_method!(
     agent_session_drain_command_updates,
     "harness.agent.session_drain_command_updates",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_drain_command_updates(session_id: string) -> list",
     "Drain queued command updates."
 );
 capability_method!(
     agent_session_await_inbox,
     "harness.agent.session_await_inbox",
-    ["state.observe@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_await_inbox(session_id: string, timeout_ms: int) -> bool",
     "Wait for agent inbox activity."
 );
-capability_method!(agent_session_drain_host_injections, "harness.agent.session_drain_host_injections", ["state.mutate@arg0"], "__cap_agent_session_drain_host_injections(session_id: string, delivery: string, seam: string) -> list", "Drain host injections at a delivery seam.");
+capability_method!(agent_session_drain_host_injections, "harness.agent.session_drain_host_injections",     // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [], "__cap_agent_session_drain_host_injections(session_id: string, delivery: string, seam: string) -> list", "Drain host injections at a delivery seam.");
 capability_method!(
     agent_session_totals,
     "harness.agent.session_totals",
-    ["state.read@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_totals(session_id: string) -> dict",
     "Read aggregate session totals."
 );
 capability_method!(
     agent_session_inject_feedback,
     "harness.agent.session_inject_feedback",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_inject_feedback(session_id: string, kind: string, content: string) -> nil",
     "Inject session feedback."
 );
 capability_method!(
     agent_session_inject_reminder,
     "harness.agent.session_inject_reminder",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_inject_reminder(session_id: string, options: dict) -> string",
     "Inject a session reminder."
 );
-capability_method!(agent_session_post_event, "harness.agent.session_post_event", ["state.write@arg0"], "__cap_agent_session_post_event(session_id: string, kind: string, content: string, source?: string|nil) -> nil", "Post a session event.");
+capability_method!(agent_session_post_event, "harness.agent.session_post_event",     // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [], "__cap_agent_session_post_event(session_id: string, kind: string, content: string, source?: string|nil) -> nil", "Post a session event.");
 capability_method!(
     agent_session_apply_reminder_post_turn,
     "harness.agent.session_apply_reminder_post_turn",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_apply_reminder_post_turn(session_id: string, turn?: dict|nil) -> dict",
     "Apply post-turn reminder policy."
 );
 capability_method!(
     agent_session_set_active_skills,
     "harness.agent.session_set_active_skills",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_set_active_skills(session_id: string, skills: list) -> nil",
     "Set active session skills."
 );
 capability_method!(
     agent_session_active_skills,
     "harness.agent.session_active_skills",
-    ["state.read@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_active_skills(session_id: string) -> list",
     "Read active session skills."
 );
-capability_method!(agent_session_record_skill_event, "harness.agent.session_record_skill_event", ["state.write@arg0"], "__cap_agent_session_record_skill_event(session_id: string, kind: string, metadata: dict) -> nil", "Record a skill lifecycle event.");
+capability_method!(agent_session_record_skill_event, "harness.agent.session_record_skill_event",     // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [], "__cap_agent_session_record_skill_event(session_id: string, kind: string, metadata: dict) -> nil", "Record a skill lifecycle event.");
 capability_method!(
     agent_session_compact_if_needed,
     "harness.agent.session_compact_if_needed",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_compact_if_needed(session_id: string, options: dict) -> dict",
     "Compact a session when its policy requires it."
 );
-capability_method!(agent_session_replace_messages, "harness.agent.session_replace_messages", ["state.mutate@arg0"], "__cap_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> nil", "Replace session messages after compaction.");
+capability_method!(agent_session_replace_messages, "harness.agent.session_replace_messages",     // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [], "__cap_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> nil", "Replace session messages after compaction.");
 capability_method!(
     agent_budget_pre_call_blocked,
     "harness.agent.budget_pre_call_blocked",
-    ["state.read@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_budget_pre_call_blocked(session_id: string, envelope: dict) -> bool",
     "Evaluate the session budget before a model call."
 );
 capability_method!(
     agent_record_native_tool_fallback,
     "harness.agent.record_native_tool_fallback",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_record_native_tool_fallback(session_id: string, payload: dict) -> nil",
     "Record a native-tool fallback."
 );
 capability_method!(
     agent_record_compaction,
     "harness.agent.record_compaction",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_record_compaction(session_id: string, payload: dict) -> nil",
     "Record a compaction event."
 );
 capability_method!(
     agent_session_project_turn,
     "harness.agent.session_project_turn",
-    ["state.read@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_project_turn(session_id: string, options?: dict|nil) -> dict",
     "Project the current session turn."
 );
 capability_method!(
     agent_session_claim_tool_format,
     "harness.agent.session_claim_tool_format",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_claim_tool_format(session_id: string, tool_format: string) -> dict",
     "Claim the session tool format."
 );
@@ -742,35 +862,55 @@ capability_method!(
 capability_method!(
     agent_session_push_bridge_injection,
     "harness.agent.session_push_bridge_injection",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_push_bridge_injection(session_id: string, options: dict) -> string",
     "Queue a bridge injection."
 );
 capability_method!(
     agent_session_push_user_message,
     "harness.agent.session_push_user_message",
-    ["state.write@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_push_user_message(session_id: string, options: dict) -> string",
     "Queue a user message."
 );
 capability_method!(
     agent_session_pending_injections,
     "harness.agent.session_pending_injections",
-    ["state.read@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_pending_injections(session_id: string) -> list",
     "Read pending session injections."
 );
 capability_method!(
     agent_session_revoke_reminder,
     "harness.agent.session_revoke_reminder",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_revoke_reminder(session_id: string, reminder_id: string) -> bool",
     "Revoke a pending reminder."
 );
 capability_method!(
     agent_session_drain_bridge_injections,
     "harness.agent.session_drain_bridge_injections",
-    ["state.mutate@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_session_drain_bridge_injections(session_id: string, checkpoint: dict) -> list",
     "Drain bridge injections at a checkpoint."
 );
