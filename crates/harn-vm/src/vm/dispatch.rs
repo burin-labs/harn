@@ -339,11 +339,13 @@ impl Vm {
         }
         let mut projections =
             std::collections::BTreeMap::<String, Option<VmBuiltinDispatch>>::new();
-        for ((_capability, method), dispatch) in self.capability_methods.iter() {
-            projections
-                .entry(method.clone())
-                .and_modify(|entry| *entry = None)
-                .or_insert_with(|| Some(dispatch.clone()));
+        for methods in self.capability_methods.values() {
+            for (method, dispatch) in methods {
+                projections
+                    .entry(method.clone())
+                    .and_modify(|entry| *entry = None)
+                    .or_insert_with(|| Some(dispatch.clone()));
+            }
         }
         for (method, dispatch) in projections {
             if self.builtins.contains_key(&method) || self.async_builtins.contains_key(&method) {
