@@ -329,11 +329,21 @@ fn multipart_form(request: &MultipartRequest) -> Result<reqwest::multipart::Form
     Ok(form)
 }
 
-pub(super) async fn http_verb_handler(
+pub(super) async fn harness_http_verb_handler(
+    mocks: &crate::http::HttpMockRegistry,
     method: &str,
     has_body: bool,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
+    let (url, options) = http_verb_request(method, has_body, &args)?;
+    harness_mocks::vm_execute_http_request_with_mocks(mocks, method, &url, &options).await
+}
+
+fn http_verb_request(
+    method: &str,
+    has_body: bool,
+    args: &[VmValue],
+) -> Result<(String, crate::value::DictMap), VmError> {
     let url = args.first().map(|a| a.display()).unwrap_or_default();
     if url.is_empty() {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -356,7 +366,7 @@ pub(super) async fn http_verb_handler(
         let body = args.get(1).map(|a| a.display()).unwrap_or_default();
         options.put_str("body", body);
     }
-    vm_execute_http_request(method, &url, &options).await
+    Ok((url, options))
 }
 
 fn parse_proxy_config(options: &crate::value::DictMap) -> Option<HttpProxyConfig> {

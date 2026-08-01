@@ -312,9 +312,14 @@ impl crate::vm::Vm {
             _ => None,
         };
         if let Some((http_method, has_body)) = verb {
-            return crate::http::execute_http_verb(http_method, has_body, args.to_vec())
-                .await
-                .map_err(tag_sandbox_denied);
+            return crate::http::execute_harness_http_verb(
+                handle.inner().fixtures().http_mocks(),
+                http_method,
+                has_body,
+                args.to_vec(),
+            )
+            .await
+            .map_err(tag_sandbox_denied);
         }
         let server_builtin = match method {
             "server" => Some("__http_server"),

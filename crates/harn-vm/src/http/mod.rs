@@ -53,12 +53,42 @@ pub(crate) fn register_harness_http_mock(
     registry.register(method, url_pattern, parse_mock_responses(response));
 }
 
-pub(crate) async fn execute_http_verb(
+pub(crate) async fn execute_harness_http_verb(
+    registry: &HttpMockRegistry,
     method: &str,
     has_body: bool,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    client::http_verb_handler(method, has_body, args).await
+    client::harness_http_verb_handler(registry, method, has_body, args).await
+}
+
+pub(crate) fn harness_http_mock_matches(
+    registry: &HttpMockRegistry,
+    harness_method: &str,
+    args: &[VmValue],
+) -> bool {
+    let (http_method, url) = if harness_method == "request" {
+        match (args.first(), args.get(1)) {
+            (Some(VmValue::String(method)), Some(VmValue::String(url))) => {
+                (method.as_str(), url.as_str())
+            }
+            _ => return false,
+        }
+    } else {
+        let http_method = match harness_method {
+            "get" => "GET",
+            "post" => "POST",
+            "put" => "PUT",
+            "patch" => "PATCH",
+            "delete" => "DELETE",
+            _ => return false,
+        };
+        let Some(VmValue::String(url)) = args.first() else {
+            return false;
+        };
+        (http_method, url.as_str())
+    };
+    registry.has_match(http_method, url)
 }
 #[cfg(test)]
 use mock::{mock_call_headers_value, redact_mock_call_url};

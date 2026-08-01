@@ -73,15 +73,10 @@ impl crate::vm::Vm {
         if let Some(capability) = handle.kind().capability_id() {
             let deterministic_http_fixture = capability
                 == harn_builtin_meta::CapabilityId::Net
-                && method == "request"
-                && matches!(
-                    (args.first(), args.get(1)),
-                    (Some(VmValue::String(http_method)), Some(VmValue::String(url)))
-                        if handle
-                            .inner()
-                            .fixtures()
-                            .http_mocks()
-                            .has_match(http_method, url)
+                && crate::http::harness_http_mock_matches(
+                    handle.inner().fixtures().http_mocks(),
+                    method,
+                    args,
                 );
             if deterministic_http_fixture {
                 // A harness-owned mock is authority to return deterministic
