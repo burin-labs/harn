@@ -152,6 +152,7 @@ mod tests {
             persona: None,
             parent_session_id: None,
             title: None,
+            title_pinned: false,
             cwd: None,
             model: None,
             session_type: None,
