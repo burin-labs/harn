@@ -49,6 +49,15 @@ pipeline test(harness: Harness, task) {
     ),
     0.3,
   )
+  // Once a provider reports cached reads, an absent cache-read tier is
+  // unknown pricing—not permission to charge those tokens at the input tier.
+  assert_eq(
+    estimate_cost_usd(
+      {inputPerMTok: 3.0, outputPerMTok: 15.0},
+      {inputTokens: 1000000, cacheReadTokens: 1000000},
+    ),
+    nil,
+  )
   // realized_trial_cost_usd: a cached replay realizes $0; otherwise pass-through.
   assert_eq(realized_trial_cost_usd(0.42, true), 0.0)
   assert_eq(realized_trial_cost_usd(0.42, false), 0.42)

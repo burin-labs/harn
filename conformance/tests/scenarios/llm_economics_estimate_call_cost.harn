@@ -57,6 +57,19 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println("unknown_known=" + to_string(unknown.pricing_known))
   harness.stdio.println("unknown_cost_nil=" + to_string(unknown.cost_usd == nil))
+  // The route has priced input and prompt caching, but no published cached-read
+  // tier. Cached usage is therefore explicitly unpriceable.
+  const unknown_cache_tier = estimate_call_cost(
+    {
+      provider: "deepinfra",
+      model: "deepinfra/deepseek-ai/DeepSeek-V3.2",
+      input_tokens: 1000,
+      cache_read_tokens: 800,
+    },
+  )
+  harness.stdio.println("unknown_cache_known=" + to_string(unknown_cache_tier.pricing_known))
+  harness.stdio.println("unknown_cache_cost_nil=" + to_string(unknown_cache_tier.cost_usd == nil))
+  harness.stdio.println("unknown_cache_reason=" + to_string(unknown_cache_tier.unpriced_reason))
   // Free provider (ollama): pricing_known=true, cost=0.
   const free = estimate_call_cost(
     {provider: "ollama", model: "llama3.2", input_tokens: 1000, output_tokens: 500},
