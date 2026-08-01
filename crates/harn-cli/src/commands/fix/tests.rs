@@ -683,7 +683,7 @@ fn capability_apply_widens_an_existing_handle_for_an_imported_bundle() {
     .unwrap();
     fs::write(
         &entry,
-        "import { run_auto_mode } from \"./mode\"\n\nfn invoke(harness: HarnessObs, setting: string = \"\") -> string {\n  return run_auto_mode(harness, setting)\n}\n\nfn main(harness: Harness) {\n  invoke(harness.obs)\n}\n",
+        "import { run_auto_mode } from \"./mode\"\n\nfn invoke(setting: string, harness: HarnessObs) -> string {\n  return run_auto_mode(harness, setting)\n}\n\nfn main(harness: Harness) {\n  invoke(\"\", harness.obs)\n}\n",
     )
     .unwrap();
 
@@ -700,7 +700,7 @@ fn capability_apply_widens_an_existing_handle_for_an_imported_bundle() {
     assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
     let updated = fs::read_to_string(&entry).unwrap();
     assert!(
-        updated.contains("fn invoke(harness: {env: HarnessEnv, obs: HarnessObs}"),
+        updated.contains("fn invoke(setting: string, harness: {env: HarnessEnv, obs: HarnessObs}"),
         "the existing capability carrier must be widened, not supplemented: {updated}"
     );
     assert!(
@@ -708,7 +708,7 @@ fn capability_apply_widens_an_existing_handle_for_an_imported_bundle() {
         "the repair must not invent a second capability parameter: {updated}"
     );
     assert!(
-        updated.contains("invoke({env: harness.env, obs: harness.obs})"),
+        updated.contains("invoke(\"\", {env: harness.env, obs: harness.obs})"),
         "the caller update must land with the widened signature: {updated}"
     );
     assert!(

@@ -29,6 +29,7 @@ enum CarrierKind {
 #[derive(Debug, Clone)]
 struct Carrier {
     name: String,
+    param_index: usize,
     param: TypedParam,
     kind: CarrierKind,
 }
@@ -43,10 +44,17 @@ struct ProgramFile {
 struct ProgramCallable {
     file_idx: usize,
     info: CallableInfo,
-    body: Vec<SNode>,
+    receiver_accesses: Vec<ReceiverAccess>,
     boundary: bool,
     carrier: Option<Carrier>,
     direct_requirements: BTreeSet<CapabilityId>,
+}
+
+#[derive(Debug)]
+struct ReceiverAccess {
+    object_span: Span,
+    access_span: Span,
+    property: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -78,12 +86,13 @@ pub(super) fn plan(
             let Some((params, body, boundary)) = declaration_parts(&program, info.span) else {
                 continue;
             };
-            let carrier = capability_carrier(&params);
-            let direct_requirements = direct_requirements(&params, &body, carrier.as_ref());
+            let carrier = capability_carrier(params);
+            let direct_requirements = direct_requirements(params, body, carrier.as_ref());
+            let receiver_accesses = collect_receiver_accesses(body, carrier.as_ref());
             callables.push(ProgramCallable {
                 file_idx,
                 info,
-                body,
+                receiver_accesses,
                 boundary,
                 carrier,
                 direct_requirements,
@@ -171,13 +180,15 @@ pub(super) fn plan(
         };
         let argument = argument_projection(binding, caller_desired, callee_desired)?;
         let call = &caller.info.calls[edge.call_idx];
-        let edit = if callee.carrier.is_some() {
-            let first =
-                call.args.first().copied().ok_or_else(|| {
-                    format!("{} requires a capability argument", callee.info.name)
-                })?;
+        let edit = if let Some(carrier) = &callee.carrier {
+            let argument_span = call.args.get(carrier.param_index).copied().ok_or_else(|| {
+                format!(
+                    "{} requires capability argument {}",
+                    callee.info.name, carrier.param_index
+                )
+            })?;
             FixEdit {
-                span: first,
+                span: argument_span,
                 replacement: argument,
             }
         } else {
@@ -245,7 +256,7 @@ pub(super) fn plan(
     Ok(planned)
 }
 
-fn declaration_parts(program: &[SNode], span: Span) -> Option<(Vec<TypedParam>, Vec<SNode>, bool)> {
+fn declaration_parts(program: &[SNode], span: Span) -> Option<(&[TypedParam], &[SNode], bool)> {
     for node in program {
         let inner = match &node.node {
             Node::AttributedDecl { inner, .. } => inner.as_ref(),
@@ -260,16 +271,38 @@ fn declaration_parts(program: &[SNode], span: Span) -> Option<(Vec<TypedParam>, 
             }
             | Node::ToolDecl {
                 name, params, body, ..
-            } => Some((params.clone(), body.clone(), name == "main")),
-            Node::Pipeline { params, body, .. } => Some((params.clone(), body.clone(), true)),
+            } => Some((params, body, name == "main")),
+            Node::Pipeline { params, body, .. } => Some((params, body, true)),
             _ => None,
         };
     }
     None
 }
 
+fn collect_receiver_accesses(body: &[SNode], carrier: Option<&Carrier>) -> Vec<ReceiverAccess> {
+    let Some(carrier) = carrier else {
+        return Vec::new();
+    };
+    let mut accesses = Vec::new();
+    visit::walk_program(body, &mut |node| {
+        let (Node::PropertyAccess { object, property }
+        | Node::OptionalPropertyAccess { object, property }) = &node.node
+        else {
+            return;
+        };
+        if matches!(&object.node, Node::Identifier(name) if name == &carrier.name) {
+            accesses.push(ReceiverAccess {
+                object_span: object.span,
+                access_span: node.span,
+                property: property.clone(),
+            });
+        }
+    });
+    accesses
+}
+
 fn capability_carrier(params: &[TypedParam]) -> Option<Carrier> {
-    params.iter().find_map(|param| {
+    params.iter().enumerate().find_map(|(param_index, param)| {
         let kind = match param.type_expr.as_ref()? {
             TypeExpr::Named(name) if name == "Harness" => CarrierKind::Root,
             TypeExpr::Named(name) => CarrierKind::Narrow(CapabilityId::from_type_name(name)?),
@@ -287,6 +320,7 @@ fn capability_carrier(params: &[TypedParam]) -> Option<Carrier> {
         };
         Some(Carrier {
             name: param.name.clone(),
+            param_index,
             param: param.clone(),
             kind,
         })
@@ -526,36 +560,20 @@ fn receiver_projection_edits(callable: &ProgramCallable, desired: &CarrierKind) 
     let mut edits = Vec::new();
     match (&carrier.kind, desired) {
         (CarrierKind::Root, CarrierKind::Narrow(capability)) => {
-            visit::walk_program(&callable.body, &mut |node| {
-                let (Node::PropertyAccess { object, property }
-                | Node::OptionalPropertyAccess { object, property }) = &node.node
-                else {
-                    return;
-                };
-                if property == capability.field_name()
-                    && matches!(&object.node, Node::Identifier(name) if name == &carrier.name)
-                {
+            for access in &callable.receiver_accesses {
+                if access.property == capability.field_name() {
                     edits.push(FixEdit {
-                        span: node.span,
+                        span: access.access_span,
                         replacement: carrier.name.clone(),
                     });
                 }
-            });
+            }
         }
         (CarrierKind::Narrow(capability), CarrierKind::Bundle(_)) => {
-            visit::walk_program(&callable.body, &mut |node| {
-                let (Node::PropertyAccess { object, .. }
-                | Node::OptionalPropertyAccess { object, .. }) = &node.node
-                else {
-                    return;
-                };
-                if matches!(&object.node, Node::Identifier(name) if name == &carrier.name) {
-                    edits.push(FixEdit {
-                        span: object.span,
-                        replacement: format!("{}.{}", carrier.name, capability.field_name()),
-                    });
-                }
-            });
+            edits.extend(callable.receiver_accesses.iter().map(|access| FixEdit {
+                span: access.object_span,
+                replacement: format!("{}.{}", carrier.name, capability.field_name()),
+            }));
         }
         _ => {}
     }
