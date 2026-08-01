@@ -1,0 +1,339 @@
+import { AgentStallConfig, AgentStallState } from "std/agent/stall_types"
+import { verification_gate_input } from "std/verification"
+
+/**
+ * Action-stream observation for stall diagnostics.
+ *
+ * This module owns normalization and recurrence for one dispatched tool call.
+ * Consecutive streaks remain consecutive; the separate recurrence map counts
+ * exact `(tool, arguments, result)` observations across interleaved calls.
+ */
+pub fn __agent_tool_call_name(call) -> string {
+  return to_string(call?.name ?? call?.tool_name ?? "")
+}
+
+pub fn __agent_tool_call_args(call) -> dict {
+  const raw = call?.arguments ?? call?.tool_args
+  if type_of(raw) == "dict" {
+    return raw
+  }
+  return {}
+}
+
+pub fn __agent_tool_call_signature(call) -> string {
+  const args_text = json_stringify(__agent_tool_call_args(call))
+  return __agent_tool_call_name(call) + "\n" + args_text
+}
+
+pub fn __agent_stall_result_ok(result) -> bool {
+  if result?.ok != nil {
+    return result.ok ? true : false
+  }
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  const status = to_string(result?.status ?? "")
+  return status == "ok" || status == "success"
+}
+
+pub fn __agent_stall_result_name(result) -> string {
+  return to_string(result?.tool_name ?? result?.name ?? "")
+}
+
+pub fn __agent_stall_is_context_window_error(text: string) -> bool {
+  const lowered = lowercase(text)
+  return contains(lowered, "context window")
+    || contains(lowered, "context length")
+    || contains(lowered, "context_length")
+    || contains(lowered, "maximum context")
+    || contains(lowered, "token limit")
+    || contains(lowered, "too many tokens")
+    || contains(lowered, "context_length_exceeded")
+    || contains(lowered, "max_tokens")
+}
+
+pub fn __agent_stall_delta_signature(current: dict) -> string {
+  const signatures = current?.signatures ?? []
+  const count = to_int(current?.count) ?? len(signatures)
+  return "err:" + sha256(json_stringify({signatures: signatures, count: count}))
+}
+
+pub fn __agent_stall_result_error_signature(delta, result) -> string {
+  if len(delta.current.signatures) > 0 {
+    return __agent_stall_delta_signature(delta.current)
+  }
+  const fallback = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  return "err:" + sha256(fallback)
+}
+
+pub fn __agent_stall_current_hashes(result) {
+  if type_of(result) != "dict" {
+    return nil
+  }
+  return result?.current_hashes
+    ?? result?.currentHashes
+    ?? result?.file_hashes
+    ?? result?.fileHashes
+}
+
+pub fn __agent_stall_gate_input(agent: HarnessAgent, previous, result) {
+  return verification_gate_input(agent, previous, result, __agent_stall_current_hashes(result))
+}
+
+/** Normalize a dispatch result into an outcome kind and stable signature. */
+pub fn __agent_stall_result_outcome(agent: HarnessAgent, result) -> dict {
+  if __agent_stall_result_ok(result) {
+    const payload = json_stringify(result?.result ?? result?.output ?? result?.content)
+    return {kind: "ok", signature: "ok:" + sha256(payload)}
+  }
+  const error_text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  if __agent_stall_is_context_window_error(error_text) {
+    return {kind: "context_window", signature: "ctx"}
+  }
+  const gate = __agent_stall_gate_input(agent, nil, result)
+  if !gate.feedsGates {
+    return {kind: "advisory", signature: "advisory:" + sha256(json_stringify(gate.current))}
+  }
+  return {kind: "error", signature: __agent_stall_result_error_signature(gate.delta, result)}
+}
+
+/** Find the dispatch result for the action being folded. */
+pub fn __agent_stall_outcome_for(agent: HarnessAgent, prev_dispatch, tool_name: string) {
+  if prev_dispatch == nil {
+    return nil
+  }
+  const results = if type_of(prev_dispatch) == "list" {
+    prev_dispatch
+  } else {
+    prev_dispatch?.results ?? []
+  }
+  for result in results {
+    if __agent_stall_result_name(result) == tool_name {
+      return __agent_stall_result_outcome(agent, result)
+    }
+  }
+  return nil
+}
+
+/** Fold one action signature through the strict A/B ping-pong detector. */
+pub fn __agent_stall_update_ping_pong(
+  state: AgentStallState,
+  signature: string,
+) -> AgentStallState {
+  const a = state.ping_pong_a
+  const b = state.ping_pong_b
+  if a == "" {
+    return state + {ping_pong_a: signature, ping_pong_b: "", ping_pong_alternations: 0}
+  }
+  if b == "" {
+    if a == signature {
+      return state + {ping_pong_alternations: 0}
+    }
+    return state + {ping_pong_b: signature, ping_pong_alternations: 1}
+  }
+  const expected_next = if state.ping_pong_alternations % 2 == 1 {
+    a
+  } else {
+    b
+  }
+  if expected_next == signature {
+    return state + {ping_pong_alternations: state.ping_pong_alternations + 1}
+  }
+  if a == signature || b == signature {
+    return state + {ping_pong_a: signature, ping_pong_b: "", ping_pong_alternations: 0}
+  }
+  return state + {ping_pong_a: signature, ping_pong_b: "", ping_pong_alternations: 0}
+}
+
+/** Fold one exact successful observation into its session recurrence count. */
+pub fn __agent_stall_observation_recurrence(
+  state: AgentStallState,
+  action_signature: string,
+  observation_signature: string,
+  outcome_present: bool,
+  outcome_kind: string,
+) -> dict {
+  const counts = state.observation_recurrence_counts ?? {}
+  if !outcome_present || outcome_kind != "ok" {
+    return {counts: counts, count: 0}
+  }
+  const key = sha256(action_signature + "\n" + observation_signature)
+  const count = (to_int(counts[key] ?? 0) ?? 0) + 1
+  return {counts: counts + {[key]: count}, count: count}
+}
+
+/**
+ * Fold one tool call and its result into adjacent and cumulative detectors.
+ *
+ * Cumulative recurrence is keyed by a digest of both the action signature and
+ * the normalized result signature. A changing result therefore creates a new
+ * counter structurally, while a dead observation survives unrelated calls.
+ */
+pub fn __agent_stall_process_call(
+  agent: HarnessAgent,
+  state: AgentStallState,
+  config: AgentStallConfig,
+  call,
+  tool_name: string,
+  prev_dispatch,
+  turn_made_edit: bool,
+) -> dict {
+  const signature = __agent_tool_call_signature(call)
+  const same_action = signature == state.last_signature
+  const outcome = __agent_stall_outcome_for(agent, prev_dispatch, tool_name)
+  const obs_signature = if outcome != nil {
+    outcome.signature
+  } else {
+    "sig:" + sha256(signature)
+  }
+  const outcome_kind = if outcome != nil {
+    outcome.kind
+  } else {
+    "ok"
+  }
+  let next_state = __agent_stall_update_ping_pong(state, signature)
+  const streak = if same_action {
+    next_state.streak + 1
+  } else {
+    1
+  }
+  const repeated = if streak > 1 {
+    next_state.repeated_tool_calls + 1
+  } else {
+    next_state.repeated_tool_calls
+  }
+  const both_known = outcome != nil && next_state.last_outcome_kind != ""
+  const observation_changed = both_known && obs_signature != next_state.last_observation_signature
+  const new_same_observation_streak = if !same_action || outcome_kind != "ok" {
+    if outcome_kind == "ok" {
+      1
+    } else {
+      0
+    }
+  } else if observation_changed {
+    1
+  } else {
+    next_state.same_observation_streak + 1
+  }
+  const recurrence = __agent_stall_observation_recurrence(
+    next_state,
+    signature,
+    obs_signature,
+    outcome != nil,
+    outcome_kind,
+  )
+  const new_same_success_streak = if !same_action || outcome_kind != "ok" || turn_made_edit {
+    if outcome_kind == "ok" && !turn_made_edit {
+      1
+    } else {
+      0
+    }
+  } else if !observation_changed {
+    1
+  } else {
+    next_state.same_success_streak + 1
+  }
+  const new_same_error_streak = if !same_action || outcome_kind != "error" {
+    if outcome_kind == "error" {
+      1
+    } else {
+      0
+    }
+  } else if observation_changed {
+    1
+  } else {
+    next_state.same_error_streak + 1
+  }
+  const new_context_streak = if outcome_kind == "context_window" {
+    next_state.context_window_error_streak + 1
+  } else {
+    0
+  }
+  next_state = next_state
+    + {
+    last_signature: signature,
+    streak: streak,
+    repeated_tool_calls: repeated,
+    last_observation_signature: obs_signature,
+    last_outcome_kind: if outcome != nil {
+      outcome_kind
+    } else {
+      ""
+    },
+    same_observation_streak: new_same_observation_streak,
+    observation_recurrence_counts: recurrence.counts,
+    same_success_streak: new_same_success_streak,
+    same_error_streak: new_same_error_streak,
+    context_window_error_streak: new_context_streak,
+  }
+  const trip = __agent_stall_classify_trip(
+    config,
+    {
+      context_streak: new_context_streak,
+      same_error_streak: new_same_error_streak,
+      same_observation_streak: new_same_observation_streak,
+      observation_recurrence_count: recurrence.count,
+      same_success_streak: new_same_success_streak,
+      outcome_kind: outcome_kind,
+      ping_pong_cycles: next_state.ping_pong_alternations / 2,
+      outcome_present: outcome != nil,
+      streak: streak,
+    },
+  )
+  return {state: next_state, trip: trip}
+}
+
+/** Decide which stall condition owns this processed call. */
+pub fn __agent_stall_classify_trip(config: AgentStallConfig, s) {
+  const repair_owns_repeat = config.repair_aware
+  if s.context_streak >= config.repeat_context_window_error {
+    return {
+      pattern: "repeated_context_window_error",
+      count: s.context_streak,
+      threshold: config.repeat_context_window_error,
+    }
+  }
+  if !repair_owns_repeat && s.same_error_streak >= config.repeat_same_error {
+    return {
+      pattern: "repeated_error",
+      count: s.same_error_streak,
+      threshold: config.repeat_same_error,
+    }
+  }
+  if !repair_owns_repeat
+    && s.outcome_kind == "ok"
+    && s.same_observation_streak >= config.repeat_same_observation {
+    return {
+      pattern: "repeated_same_observation",
+      count: s.same_observation_streak,
+      threshold: config.repeat_same_observation,
+    }
+  }
+  if !repair_owns_repeat
+    && s.outcome_kind == "ok"
+    && s.same_observation_streak < config.repeat_same_observation
+    && s.observation_recurrence_count
+    == config
+    .repeat_same_observation {
+    return {
+      pattern: "repeated_observation_recurrence",
+      count: s.observation_recurrence_count,
+      threshold: config.repeat_same_observation,
+      advisory_only: true,
+    }
+  }
+  if s.outcome_kind == "ok" && s.same_success_streak >= config.repeat_success {
+    return {
+      pattern: "repeated_success",
+      count: s.same_success_streak,
+      threshold: config.repeat_success,
+    }
+  }
+  if s.ping_pong_cycles >= config.ping_pong_cycles {
+    return {pattern: "ping_pong", count: s.ping_pong_cycles, threshold: config.ping_pong_cycles}
+  }
+  if !s.outcome_present && s.streak >= config.threshold {
+    return {pattern: "repeated_same_signature", count: s.streak, threshold: config.threshold}
+  }
+  return nil
+}
