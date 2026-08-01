@@ -13,16 +13,16 @@ pipeline default(harness: Harness) {
   const result = harness.process.run(
     {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "worktree"},
   )
-  harness.stdio.println(result?.success)
-  harness.stdio.println(result?.stdout)
+  harness.stdio.println(result.success)
+  harness.stdio.println(result.stdout)
   const unrestricted = harness.process.run(
     {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "unrestricted"},
   )
-  harness.stdio.println(unrestricted?.success)
+  harness.stdio.println(unrestricted.success)
   const workspace_paths = harness.process.run(
     {program: argv[0], args: argv[1:len(argv)], sandbox_profile: "workspace_paths"},
   )
-  harness.stdio.println(workspace_paths?.success)
+  harness.stdio.println(workspace_paths.success)
   const bad = try {
     harness.process.run({program: argv[0], args: argv[1:len(argv)], sandbox_profile: "wide_open"})
     nil

@@ -8,6 +8,6 @@ pipeline default(harness: Harness) {
     {command: "printf hi", shell_id: default_shell?.id},
   )
   const result = harness.process.run({program: invocation.program, args: invocation.args})
-  harness.stdio.println(result?.success)
-  harness.stdio.println(result?.combined)
+  harness.stdio.println(result.success)
+  harness.stdio.println(result.combined)
 }

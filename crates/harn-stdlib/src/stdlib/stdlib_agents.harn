@@ -130,8 +130,7 @@ pub fn verify_command(process: HarnessProcess, config) {
   const output = process.run({program: invocation.program, args: invocation.args})
   let ok = output?.success
   if config?.expect_status != nil {
-    const actual_status = output?.exit_code ?? output?.legacy_status ?? output?.status
-    ok = actual_status == config.expect_status
+    ok = output?.exit_code == config.expect_status
   }
   if config?.expect_text != nil {
     ok = ok && contains(output?.combined ?? "", config?.expect_text)

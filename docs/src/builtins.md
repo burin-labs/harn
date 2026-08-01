@@ -696,7 +696,7 @@ builtins were deleted.
 | `harness.process.exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute argv inside a specific directory |
 | `harness.process.shell(cmd)` | cmd: string | dict | Execute a user-authored shell command |
 | `harness.process.shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute a shell command inside a specific directory |
-| `harness.process.run(command)` | command: dict | dict | Run an external command synchronously through the `Harness` process capability. `command` is `{program, args?, cwd?, env?, stdin?, timeout_ms?}` and supports feeding a stdin payload plus a per-call timeout. Returns `{exit_code, stdout, stderr, duration_ms, success, timed_out}`. On timeout the child is killed, `exit_code = -1`, `success = false`, and `timed_out = true` |
+| `harness.process.run(command)` | `{program, args?, cwd?, env?, stdin?, timeout_ms?}` | closed record | Run a child process and wait for it to finish. The result has typed `exit_code`, `stdout`, `stderr`, `duration_ms`, `success`, and `timed_out` fields. On timeout, Harn kills the child and returns `exit_code: -1`, `success: false`, and `timed_out: true`. |
 | `harness.term.width()` | none | int | Current terminal column count |
 | `harness.term.height()` | none | int | Current terminal row count |
 | `harness.runtime.exit(code)` | code: int (default 0) | never | Terminate the process |

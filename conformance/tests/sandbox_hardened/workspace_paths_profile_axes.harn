@@ -40,8 +40,8 @@ pipeline default(harness: Harness) {
       // so the cwd check has a root to accept regardless of where the
       // conformance runner itself was started.
       const result = harness.process.run({program: argv[0], args: argv[1:len(argv)], cwd: root})
-      harness.stdio.println(result?.success)
-      harness.stdio.println(result?.stdout)
+      harness.stdio.println(result.success)
+      harness.stdio.println(result.stdout)
     },
   )
   // The in-root write landed; the rejected out-of-root write never did.

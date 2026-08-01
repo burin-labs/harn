@@ -9,5 +9,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(invocation?.program == default_shell?.path)
   harness.stdio.println(invocation?.args != nil)
   const result = harness.process.run({program: invocation.program, args: invocation.args})
-  harness.stdio.println(result?.stdout)
+  harness.stdio.println(result.stdout)
 }
