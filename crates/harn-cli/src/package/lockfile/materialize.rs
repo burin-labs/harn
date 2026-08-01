@@ -95,6 +95,14 @@ pub(crate) fn validate_lock_matches_manifest(
 }
 
 pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), PackageError> {
+    let workspace = PackageWorkspace::from_current_dir()?;
+    ensure_dependencies_materialized_in(&workspace, anchor)
+}
+
+pub(crate) fn ensure_dependencies_materialized_in(
+    workspace: &PackageWorkspace,
+    anchor: &Path,
+) -> Result<(), PackageError> {
     let Some((manifest, dir)) = load_nearest_manifest(anchor).into_result()? else {
         return Ok(());
     };
@@ -108,10 +116,25 @@ pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), PackageErro
             ctx.lock_path().display()
         )
     })?;
-    let workspace = PackageWorkspace::from_current_dir()?;
-    validate_lock_matches_manifest(&workspace, &ctx, &lock)?;
-    materialize_dependencies_from_lock(&workspace, &ctx, &lock, None, false)?;
+    validate_lock_matches_manifest(workspace, &ctx, &lock)?;
+    let runtime_lock = lock_for_materialization(workspace, &ctx, lock)?;
+    materialize_dependencies_from_lock(workspace, &ctx, &runtime_lock, None, false)?;
     Ok(())
+}
+
+fn lock_for_materialization(
+    workspace: &PackageWorkspace,
+    ctx: &ManifestContext,
+    lock: LockFile,
+) -> Result<LockFile, PackageError> {
+    if !lock.requires_git_hash_migration() {
+        return Ok(lock);
+    }
+
+    // Old lock files remain valid inputs to read-only package commands. Build
+    // a current in-memory projection for the immutable runtime generation;
+    // only `harn install` rewrites the project's harn.lock.
+    build_lockfile(workspace, ctx, Some(&lock), None, false, true, false)
 }
 
 pub(super) fn dependency_manifest_item(

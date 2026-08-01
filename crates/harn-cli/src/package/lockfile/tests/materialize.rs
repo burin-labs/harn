@@ -89,3 +89,59 @@ fn materialization_rejects_lock_alias_path_traversal_before_removing_paths() {
         "malicious alias should not remove paths outside the materialization root"
     );
 }
+
+#[test]
+fn read_only_materialization_accepts_v4_git_hashes_without_rewriting_the_lock() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project_tmp = tempfile::tempdir().unwrap();
+    let root = project_tmp.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
+"#
+        ),
+    )
+    .unwrap();
+
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let lock_path = root.join(LOCK_FILE);
+    let current = LockFile::load(&lock_path).unwrap().unwrap();
+    let entry = current.find("acme-lib").unwrap();
+    let canonical_hash = entry.content_hash.as_deref().unwrap();
+    let cache_dir = git_cache_dir_in(
+        workspace.env(),
+        &entry.source,
+        entry.commit.as_deref().unwrap(),
+    )
+    .unwrap();
+    let v4_hash = compute_archive_content_hash(&cache_dir).unwrap();
+    let v4_lock = fs::read_to_string(&lock_path)
+        .unwrap()
+        .replace("version = 5", "version = 4")
+        .replace(canonical_hash, &v4_hash);
+    fs::write(&lock_path, &v4_lock).unwrap();
+
+    ensure_dependencies_materialized_in(workspace.env(), root).unwrap();
+
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), v4_lock);
+    assert!(current_packages_dir(root)
+        .join("acme-lib")
+        .join("lib.harn")
+        .is_file());
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(root)
+        .unwrap()
+        .unwrap();
+    let runtime_lock = fs::read_to_string(snapshot.lock_path()).unwrap();
+    assert!(runtime_lock.contains(canonical_hash));
+    assert!(!runtime_lock.contains(&v4_hash));
+}
