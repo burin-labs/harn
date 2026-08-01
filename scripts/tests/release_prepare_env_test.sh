@@ -416,6 +416,38 @@ assert_ordered_ship_events full \
   "make=portal-check" \
   "gate=audit --receipt $receipt"
 
+full_candidate_diff="$tmp_root/full-candidate.diff"
+git -C "$release_root" diff --binary HEAD -- > "$full_candidate_diff"
+
+run_ship_prepare materialized --materialize-candidate
+assert_ordered_ship_events materialized \
+  "make=sync-language-spec" \
+  "make=gen-highlight" \
+  "gate=prepare --bump patch --allow-dirty" \
+  "make=gen-grammar-fitness"
+if grep -Eq '^gate=(audit|publish)' "$record_ship"; then
+  echo "release candidate materialization ran a certification or publication gate" >&2
+  cat "$record_ship" >&2
+  exit 1
+fi
+if grep -Fq "make=portal-check" "$record_make"; then
+  echo "release candidate materialization ran the composed prepare audit" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+if ! grep -Fq "Uncertified release candidate staged" "$tmp_root/ship-materialized.txt"; then
+  echo "release candidate materialization did not report its uncertified terminal state" >&2
+  cat "$tmp_root/ship-materialized.txt" >&2
+  exit 1
+fi
+materialized_candidate_diff="$tmp_root/materialized-candidate.diff"
+git -C "$release_root" diff --binary HEAD -- > "$materialized_candidate_diff"
+if ! cmp -s "$full_candidate_diff" "$materialized_candidate_diff"; then
+  echo "materialize-candidate and canonical prepare produced different candidate trees" >&2
+  diff -u "$full_candidate_diff" "$materialized_candidate_diff" >&2 || true
+  exit 1
+fi
+
 rm -rf "$target_dir"
 run_ship_prepare residual --audit-receipt "$receipt"
 assert_ordered_ship_events residual \
@@ -449,6 +481,33 @@ if ! grep -Fq "error: unknown arg: --skip-audit" "$tmp_root/ship-removed-skip.tx
 fi
 if [[ -s "$record_make" || -s "$record_ship" ]]; then
   echo "release_ship started work before rejecting removed --skip-audit" >&2
+  cat "$record_make" "$record_ship" >&2
+  exit 1
+fi
+
+: > "$record_make"
+: > "$record_ship"
+if HARN_RELEASE_ROOT="$release_root" \
+  HARN_RELEASE_HARNESS=1 \
+  HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
+  CARGO_TARGET_DIR="$target_dir" \
+  SHIP_GATE_RECORD="$record_ship" \
+  FAKE_MAKE_RECORD="$record_make" \
+  PATH="$fake_bin:$PATH" \
+    "$repo_root/scripts/release_ship.sh" \
+      --prepare --materialize-candidate --bump patch --audit-receipt "$receipt" \
+      > "$tmp_root/ship-materialize-receipt.txt" 2>&1; then
+  echo "release_ship accepted materialization with a certification receipt" >&2
+  exit 1
+fi
+if ! grep -Fq "error: --materialize-candidate cannot be combined with --audit-receipt" \
+  "$tmp_root/ship-materialize-receipt.txt"; then
+  echo "release_ship did not reject the mixed materialize/certify contract" >&2
+  cat "$tmp_root/ship-materialize-receipt.txt" >&2
+  exit 1
+fi
+if [[ -s "$record_make" || -s "$record_ship" ]]; then
+  echo "release_ship started work before rejecting mixed materialize/certify mode" >&2
   cat "$record_make" "$record_ship" >&2
   exit 1
 fi
