@@ -339,6 +339,11 @@ impl Vm {
     /// the parser/compiler under the ambient bridge and dispatched by
     /// [`Self::try_dispatch_runtime_context_builtin`] / harness-method
     /// projection rather than by duplicating every hidden contract name here.
+    ///
+    /// Runtime-internal host primitives (`__host_agent_emit_event`, …) are also
+    /// projected under their pre-cutover ambient names (`agent_emit_event`) so
+    /// ambient pipelines keep calling the in-process implementation instead of
+    /// falling through to an embedder bridge under execution policy.
     pub(crate) fn project_legacy_capability_globals(&mut self) {
         if self.global("harness").is_none() {
             return;
@@ -365,6 +370,43 @@ impl Vm {
                     self.register_async_builtin(&method, move |ctx, args| handler(ctx, args));
                 }
                 None => {}
+            }
+        }
+        self.project_legacy_host_internal_globals();
+    }
+
+    fn project_legacy_host_internal_globals(&mut self) {
+        if !harn_parser::legacy_ambient_capabilities_enabled() {
+            return;
+        }
+        let mut projections = Vec::new();
+        for (name, handler) in self.builtins.iter() {
+            if let Some(ambient) = name.strip_prefix("__host_") {
+                projections.push((
+                    ambient.to_string(),
+                    VmBuiltinDispatch::Sync(handler.clone()),
+                ));
+            }
+        }
+        for (name, handler) in self.async_builtins.iter() {
+            if let Some(ambient) = name.strip_prefix("__host_") {
+                projections.push((
+                    ambient.to_string(),
+                    VmBuiltinDispatch::Async(handler.clone()),
+                ));
+            }
+        }
+        for (ambient, dispatch) in projections {
+            if self.builtins.contains_key(&ambient) || self.async_builtins.contains_key(&ambient) {
+                continue;
+            }
+            match dispatch {
+                VmBuiltinDispatch::Sync(handler) => {
+                    self.register_builtin(&ambient, move |args, output| handler(args, output));
+                }
+                VmBuiltinDispatch::Async(handler) => {
+                    self.register_async_builtin(&ambient, move |ctx, args| handler(ctx, args));
+                }
             }
         }
     }

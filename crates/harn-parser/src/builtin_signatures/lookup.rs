@@ -95,20 +95,17 @@ pub fn legacy_privileged_wire_entry(
 }
 
 /// Canonical runtime builtin name for an ambient call site under the legacy
-/// bridge. Prefer privileged-wire `__name` spellings over capability-contract
-/// `__cap_*` names when both exist, because harness dispatch implements those
-/// privileged builtins directly.
+/// bridge.
+///
+/// Only rewrite when the runtime registers a different spelling than the
+/// source call. Privileged-wire builtins publish as `__name`. Host internals
+/// (`__host_*`) and capability `__cap_*` contracts keep their short ambient
+/// names; the VM projects those globals under the ambient bridge.
 pub fn legacy_ambient_runtime_name(name: &str) -> Option<&'static str> {
     if let Some(target) = crate::legacy_builtin_alias_target(name) {
         return Some(target);
     }
-    if let Some(entry) = legacy_privileged_wire_entry(name) {
-        return Some(entry.name);
-    }
-    if let Some(entry) = legacy_ambient_cap_global_entry(name) {
-        return Some(entry.name);
-    }
-    None
+    legacy_privileged_wire_entry(name).map(|entry| entry.name)
 }
 
 fn ambient_harness_method_entries(
