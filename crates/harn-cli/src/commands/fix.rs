@@ -1420,4 +1420,7 @@ impl From<&Repair> for RepairMetadataWire {
 }
 
 #[cfg(test)]
+#[path = "fix/capability_apply_tests.rs"]
+mod capability_apply_tests;
+#[cfg(test)]
 mod tests;

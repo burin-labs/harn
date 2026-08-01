@@ -493,29 +493,19 @@ fn resolve_edges(
     let mut edges = Vec::new();
     for (caller_idx, caller) in callables.iter().enumerate() {
         let caller_path = &files[caller.file_idx].path;
-        let imports = module_graph.imports_for_module(caller_path);
         for (call_idx, call) in caller.info.calls.iter().enumerate() {
-            let local = by_file_name
-                .get(&(caller_path.clone(), call.callee.clone()))
-                .copied();
-            let imported = imports.iter().filter_map(|import| {
-                if import.namespace_alias.is_some()
-                    || import
-                        .selective_names
-                        .as_ref()
-                        .is_some_and(|names| !names.contains(&call.callee))
-                {
-                    return None;
-                }
-                let target = canonical(import.resolved_path.as_deref()?);
-                by_file_name.get(&(target, call.callee.clone())).copied()
-            });
-            let mut targets = local.into_iter().chain(imported).collect::<BTreeSet<_>>();
-            if targets.len() == 1 {
+            let target = module_graph
+                .definition_of(caller_path, &call.callee)
+                .and_then(|definition| {
+                    by_file_name
+                        .get(&(canonical(&definition.file), definition.name))
+                        .copied()
+                });
+            if let Some(callee) = target {
                 edges.push(ProgramEdge {
                     caller: caller_idx,
                     call_idx,
-                    callee: targets.pop_first().expect("one target"),
+                    callee,
                 });
             }
         }
