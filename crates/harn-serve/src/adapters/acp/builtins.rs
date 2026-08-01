@@ -250,7 +250,20 @@ pub(super) async fn register_acp_builtins(
 
     let b = bridge.clone();
     vm.register_builtin("emit_response", move |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        // Host capability contract is `request: dict`; accept either that shape
+        // (`{text: ...}`) or a legacy bare string from older pipelines.
+        let text = match args.first() {
+            Some(value) => {
+                if let Some(map) = value.as_dict() {
+                    map.get("text")
+                        .map(|item| item.display())
+                        .unwrap_or_else(|| value.display())
+                } else {
+                    value.display()
+                }
+            }
+            None => String::new(),
+        };
         b.send_update(&text);
         Ok(harn_vm::VmValue::Nil)
     });
