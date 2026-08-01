@@ -121,9 +121,11 @@ fn is_protected_project_file(target: &str, active_cwd: Option<&Path>) -> bool {
         return true;
     };
     if target.contains(['$', '*', '?', '[', ']', '{', '}', '~']) {
-        // The catastrophic floor only hard-denies writes it can resolve to a
-        // tracked file. Dynamic paths remain write-intent commands and may be
-        // denied or routed through consent by the configured policy.
+        // The floor is precision-first: without the shell's environment and
+        // expansion result we cannot prove that this word names reviewed
+        // project state. Sandboxed output mounts intentionally use variables
+        // such as `$HARN_OUTPUTS_DIR`; treating every expansion as tracked
+        // would make the supported output channel unusable.
         return false;
     }
     let target = resolved_target(cwd, target);
@@ -247,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_targets_are_left_to_write_policy_when_the_floor_cannot_resolve_them() {
+    fn unresolved_shell_expansions_are_not_assumed_to_be_project_state() {
         let temp = tempfile::tempdir().unwrap();
         let cwd = temp.path();
         init_git(cwd);
