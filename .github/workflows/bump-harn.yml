@@ -83,6 +83,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          path: package
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Install caller Node.js toolchain
@@ -143,6 +144,7 @@ jobs:
           version: ${{ steps.resolve.outputs.version }}
 
       - name: Run bump orchestration
+        working-directory: package
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -167,4 +169,4 @@ jobs:
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
-          harn run --no-sandbox .harn-runtime/scripts/bump_harn_runtime.harn
+          harn run --no-sandbox ../.harn-runtime/scripts/bump_harn_runtime.harn

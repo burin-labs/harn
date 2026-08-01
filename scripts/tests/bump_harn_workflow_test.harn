@@ -10,6 +10,16 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
     errors = errors + ["node-version must remain a typed reusable-workflow input"]
   }
   const steps = workflow?.jobs?.bump?.steps ?? []
+  const package_checkout = steps.find({ step -> step?.name == "Checkout package repo" })
+  if package_checkout?.with?.path != "package" {
+    errors = errors + ["consumer package must be checked out below the workflow workspace"]
+  }
+  const runtime_checkout = steps.find(
+    { step -> step?.name == "Checkout Harn runtime orchestration" },
+  )
+  if runtime_checkout?.with?.path != ".harn-runtime" {
+    errors = errors + ["runtime orchestration must remain outside the consumer package checkout"]
+  }
   const node = steps.find({ step -> step?.name == "Install caller Node.js toolchain" })
   if node == nil || node?.if != "inputs.node-version != ''" {
     errors = errors + ["optional Node setup must be gated by node-version"]
@@ -17,6 +27,9 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   const run = steps.find({ step -> step?.name == "Run bump orchestration" })
   if run == nil {
     return errors + ["workflow must keep one attributable bump orchestration step"]
+  }
+  if run?.get("working-directory") != "package" {
+    errors = errors + ["refresh, validation, and git effects must run from the consumer package"]
   }
   const env = run?.env ?? {}
   if env?.HARN_BUMP_REFRESH_COMMAND != "$" + "{{ inputs.refresh-command }}" {
@@ -31,6 +44,7 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
     "> \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "eval \"$HARN_BUMP_VALIDATE_COMMAND\"",
+    "../.harn-runtime/scripts/bump_harn_runtime.harn",
   ] {
     if !command.contains(required) {
       errors = errors + ["orchestration must fail closed across runtime version skew: " + required]
@@ -43,7 +57,10 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
 }
 
 @test
-pipeline test_reusable_bump_workflow_preserves_refresh_boundary(harness: Harness, task) {
+pipeline test_reusable_bump_workflow_preserves_refresh_and_workspace_boundaries(
+  harness: Harness,
+  task,
+) {
   const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
   const text = harness.fs.read_text(path)
   assert_eq(bump_workflow_errors(read_yaml(harness.fs, path), text), [])
