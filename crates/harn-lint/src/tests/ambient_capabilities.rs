@@ -329,3 +329,36 @@ fn pure_global_with_similar_domain_is_not_an_ambient_harness_method() {
         "only HarnessMethod manifest entries should migrate: {diags:?}"
     );
 }
+
+#[test]
+fn language_intrinsic_with_capability_name_is_not_an_ambient_harness_method() {
+    let source = "fn main(harness: Harness) {\n  const task = spawn { harness.stdio.log(\"x\") }\n  cancel(task)\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "ambient-harness-method"),
+        0,
+        "language intrinsics remain source-callable even when a capability method shares the name: {diags:?}"
+    );
+}
+
+#[test]
+fn forward_declared_callable_is_not_an_ambient_harness_method() {
+    let source = "fn main(harness: Harness) {\n  harness.stdio.println(counter())\n}\nfn counter() {\n  return 1\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "ambient-harness-method"),
+        0,
+        "hoisted source callables must win over same-named capability methods: {diags:?}"
+    );
+}
+
+#[test]
+fn wildcard_imported_callable_is_not_an_ambient_harness_method() {
+    let source = "import \"std/runtime\"\nfn main(harness: Harness) {\n  runtime_prompt_content(harness.runtime)\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "ambient-harness-method"),
+        0,
+        "wildcard imports may supply the apparent ambient name: {diags:?}"
+    );
+}

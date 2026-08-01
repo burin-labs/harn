@@ -468,6 +468,7 @@ impl<'a> Linter<'a> {
 
     fn has_local_or_imported_name(&self, name: &str) -> bool {
         self.scopes.iter().any(|scope| scope.contains(name))
+            || (self.known_functions.contains(name) && !self.builtin_functions.contains(name))
             || self
                 .imports
                 .iter()
@@ -1492,11 +1493,40 @@ impl<'a> Linter<'a> {
     }
 
     pub(crate) fn lint_program(&mut self, nodes: &[SNode]) {
+        self.collect_hoisted_callable_names(nodes);
         self.collect_persona_step_metadata(nodes);
         self.collect_impl_method_names(nodes);
         self.run_program_rules(nodes);
         for node in nodes {
             self.lint_node(node);
+        }
+    }
+
+    /// Collect source-level callables before the order-sensitive lint walk.
+    ///
+    /// Harn function declarations are hoisted, so a call may legally precede
+    /// its declaration. Ambient-migration diagnostics must see the same name
+    /// resolution or a later `fn counter` can be mistaken for a capability
+    /// method with the same name.
+    fn collect_hoisted_callable_names(&mut self, nodes: &[SNode]) {
+        for node in nodes {
+            let node = match &node.node {
+                Node::AttributedDecl { inner, .. } => &inner.node,
+                node => node,
+            };
+            let name = match node {
+                Node::Pipeline { name, .. }
+                | Node::FnDecl { name, .. }
+                | Node::ToolDecl { name, .. }
+                | Node::SkillDecl { name, .. }
+                | Node::StructDecl { name, .. }
+                | Node::EnumDecl { name, .. } => Some(name),
+                Node::EvalPackDecl { binding_name, .. } => Some(binding_name),
+                _ => None,
+            };
+            if let Some(name) = name {
+                self.known_functions.insert(name.clone());
+            }
         }
     }
 

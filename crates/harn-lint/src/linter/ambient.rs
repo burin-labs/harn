@@ -51,16 +51,35 @@ impl Linter<'_> {
         }
     }
 
+    /// Whether an `import "module"` could be supplying `name`.
+    ///
+    /// A wildcard import hides the real name set, so a call that looks like a
+    /// removed global may be a module function that takes its handle as an
+    /// ordinary argument — `std/runtime` exports
+    /// `runtime_prompt_content(runtime: HarnessRuntime)`, which reads exactly
+    /// like the global it replaced.
+    pub(super) fn wildcard_import_may_supply(&self, name: &str) -> bool {
+        if self.use_module_graph_for_wildcards {
+            return self
+                .module_graph_wildcard_exports
+                .as_ref()
+                .is_none_or(|exports| exports.contains(name));
+        }
+        self.has_wildcard_import
+    }
+
     /// Catch every remaining migration recipe so new typed capabilities do
     /// not silently lose repair coverage.
     pub(super) fn check_ambient_harness_method(&mut self, name: &str, _args: &[SNode], span: Span) {
         if harness_clock_replacement(name).is_some()
+            || harn_parser::is_language_intrinsic(name)
             || harness_stdio_replacement(name).is_some()
             || harness_fs_replacement(name).is_some()
             || harness_env_replacement(name).is_some()
             || harness_random_replacement(name).is_some()
             || harness_net_replacement(name).is_some()
             || self.has_local_or_imported_name(name)
+            || self.wildcard_import_may_supply(name)
         {
             return;
         }
