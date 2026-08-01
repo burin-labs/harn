@@ -598,12 +598,8 @@ crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::detector_spec_token_ru
 crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::token_runaway_post_turn
 crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::unified_detectors_post_turn
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_clip_head_tail
-crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_classify_trip
-crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_current_hashes
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_delta_previous
-crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_gate_input
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_maybe_emit
-crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_outcome_for
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_turn_result
 crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::__agent_done_judge_stall_cadence
 crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::agent_stall_current_failure

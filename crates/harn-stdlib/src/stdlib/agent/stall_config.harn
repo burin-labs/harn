@@ -504,6 +504,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     last_observation_signature: "",
     last_outcome_kind: "",
     same_observation_streak: 0,
+    observation_recurrence_counts: {},
     same_success_streak: 0,
     same_error_streak: 0,
     context_window_error_streak: 0,

@@ -70,6 +70,7 @@ pub type AgentStallState = {
   last_observation_signature: string,
   last_outcome_kind: string,
   same_observation_streak: int,
+  observation_recurrence_counts: dict,
   same_success_streak: int,
   same_error_streak: int,
   context_window_error_streak: int,

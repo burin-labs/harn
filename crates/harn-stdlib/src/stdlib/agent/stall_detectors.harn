@@ -3,6 +3,7 @@ import {
   agent_monologue_actuation_initial_state,
   agent_monologue_actuation_observe,
 } from "std/agent/monologue_actuation"
+import { __agent_stall_gate_input } from "std/agent/stall_action_observation"
 import "std/agent/stall_observation"
 import {
   AgentStallConfig,
@@ -15,7 +16,6 @@ import {
   agent_session_inject_feedback,
   agent_session_totals,
 } from "std/agent/state"
-import { verification_gate_input } from "std/verification"
 
 // Unified detector subsystem (#rearch R2). The detector conditions above
 // (repeated-observation / ping-pong loops, no-progress monologue, same-error /

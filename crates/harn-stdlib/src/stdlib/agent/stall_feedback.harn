@@ -77,6 +77,9 @@ pub fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
   const core = if pattern == "repeated_same_observation" {
     "the action `" + warning.tool_name + "` produced the same observation " + count
       + " times in a row"
+  } else if pattern == "repeated_observation_recurrence" {
+    "the action `" + warning.tool_name + "` produced the same observation " + count
+      + " times across interleaved calls"
   } else if pattern == "repeated_success" {
     "the action `" + warning.tool_name + "` already succeeded and you re-ran it " + count
       + " times with no intervening change — re-running it will not produce a new result; "

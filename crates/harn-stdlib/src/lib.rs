@@ -206,6 +206,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/recurring_diagnostic" => "stdlib/agent/recurring_diagnostic.harn",
     "agent/stall_config" => "stdlib/agent/stall_config.harn",
     "agent/stall_feedback" => "stdlib/agent/stall_feedback.harn",
+    "agent/stall_action_observation" => "stdlib/agent/stall_action_observation.harn",
     "agent/stall_observation" => "stdlib/agent/stall_observation.harn",
     "agent/stall_verification" => "stdlib/agent/stall_verification.harn",
     "agent/stall_detectors" => "stdlib/agent/stall_detectors.harn",
