@@ -49,8 +49,9 @@ pub use signing::{
 };
 pub use sqlite::SqliteSessionStore;
 pub use store::{
-    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
-    SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, SessionType,
-    SharedSessionStore, Snapshot, SnapshotId, StoreContention, StoreError, StoreHooks, StoreResult,
-    SweepReport, TruncateResult, UpdateSession, VerifyFailure, VerifyReport, MAX_READ_BATCH,
+    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ListOrder,
+    ListSortKey, ReadRange, SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore,
+    SessionType, SharedSessionStore, Snapshot, SnapshotId, StoreContention, StoreError, StoreHooks,
+    StoreResult, SweepReport, TruncateResult, UpdateSession, VerifyFailure, VerifyReport,
+    MAX_READ_BATCH,
 };

@@ -9,24 +9,42 @@
 /// unconditionally and `enforce_tool_arg_constraints` would iterate the empty
 /// constraint list of `CapabilityPolicy::default()` — skipping both is
 /// behavior-preserving and avoids building that default policy per call.
-pub(super) fn enforce_dispatch_policies(
-    policy_machinery_active: bool,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-    side_effect_grant: Option<&crate::orchestration::SideEffectCeilingGrant>,
-) -> Result<(), crate::orchestration::PolicyDenial> {
-    if !policy_machinery_active {
-        return Ok(());
+pub(super) struct DispatchPolicy<'a> {
+    active: bool,
+    annotations: Option<&'a crate::tool_annotations::ToolAnnotations>,
+}
+
+impl<'a> DispatchPolicy<'a> {
+    pub(super) fn new(
+        active: bool,
+        annotations: Option<&'a crate::tool_annotations::ToolAnnotations>,
+    ) -> Self {
+        Self {
+            active,
+            annotations,
+        }
     }
-    crate::orchestration::enforce_current_policy_for_tool_with_side_effect_grant(
-        tool_name,
-        side_effect_grant,
-    )?;
-    crate::orchestration::enforce_tool_arg_constraints(
-        &crate::orchestration::current_execution_policy().unwrap_or_default(),
-        tool_name,
-        tool_args,
-    )
+
+    pub(super) fn enforce(
+        &self,
+        tool_name: &str,
+        tool_args: &serde_json::Value,
+        side_effect_grant: Option<&crate::orchestration::SideEffectCeilingGrant>,
+    ) -> Result<(), crate::orchestration::PolicyDenial> {
+        if !self.active {
+            return Ok(());
+        }
+        crate::orchestration::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant(
+            tool_name,
+            self.annotations,
+            side_effect_grant,
+        )?;
+        crate::orchestration::enforce_tool_arg_constraints(
+            &crate::orchestration::current_execution_policy().unwrap_or_default(),
+            tool_name,
+            tool_args,
+        )
+    }
 }
 
 pub(super) fn tool_denial_from_policy(

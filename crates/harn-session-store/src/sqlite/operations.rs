@@ -138,15 +138,19 @@ impl SessionStore for SqliteSessionStore {
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>> {
         let conn = self.lock();
         let limit = filter.limit.unwrap_or(MAX_READ_BATCH).min(MAX_READ_BATCH) as i64;
+        let sort_column = match filter.sort_by {
+            ListSortKey::CreatedAt => "created_at_ms",
+            ListSortKey::UpdatedAt => "updated_at_ms",
+        };
         // Pull the cursor's anchor row up front so the SQL can do
-        // keyset pagination on `(created_at_ms, id)` instead of scanning
+        // keyset pagination on the selected timestamp and id instead of scanning
         // every prior row into memory.
         let cursor_anchor: Option<(i64, String)> = filter
             .cursor
             .as_ref()
             .map(|id| {
                 conn.query_row(
-                    "SELECT created_at_ms, id FROM sessions WHERE id = ?1",
+                    &format!("SELECT {sort_column}, id FROM sessions WHERE id = ?1"),
                     params![id],
                     |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
                 )
@@ -201,13 +205,23 @@ impl SessionStore for SqliteSessionStore {
             args.push((":before", before.into()));
         }
         if let Some((anchor_ms, anchor_id)) = cursor_anchor {
-            sql.push_str(
-                " AND (s.created_at_ms > :cursor_ms OR (s.created_at_ms = :cursor_ms AND s.id > :cursor_id))",
-            );
+            let comparison = match filter.order {
+                ListOrder::Ascending => ">",
+                ListOrder::Descending => "<",
+            };
+            sql.push_str(&format!(
+                " AND (s.{sort_column} {comparison} :cursor_ms OR (s.{sort_column} = :cursor_ms AND s.id > :cursor_id))"
+            ));
             args.push((":cursor_ms", anchor_ms.into()));
             args.push((":cursor_id", anchor_id.into()));
         }
-        sql.push_str(" ORDER BY s.created_at_ms ASC, s.id ASC LIMIT :limit");
+        let direction = match filter.order {
+            ListOrder::Ascending => "ASC",
+            ListOrder::Descending => "DESC",
+        };
+        sql.push_str(&format!(
+            " ORDER BY s.{sort_column} {direction}, s.id ASC LIMIT :limit"
+        ));
         args.push((":limit", limit.into()));
 
         let named_args: Vec<(&str, &dyn rusqlite::ToSql)> = args

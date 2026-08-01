@@ -3,10 +3,12 @@ use std::collections::BTreeMap;
 use crate::agent_events::DenialGate;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 
+use super::super::tool_enforcement::enforce_current_policy_for_tool_with_side_effect_grant;
 use super::super::{
     enforce_current_policy_for_builtin, enforce_current_policy_for_capability,
-    enforce_current_policy_for_tool, enforce_current_policy_for_tool_with_side_effect_grant,
-    pop_execution_policy, push_execution_policy, CapabilityPolicy,
+    enforce_current_policy_for_tool,
+    enforce_current_policy_for_tool_with_annotations_and_side_effect_grant, pop_execution_policy,
+    push_execution_policy, CapabilityPolicy,
 };
 
 #[test]
@@ -109,5 +111,34 @@ fn side_effect_ceiling_grant_is_exact_to_the_denied_tool_and_effect() {
             .expect("typed side-effect details")
             .required_level,
         SideEffectLevel::Network
+    );
+}
+
+#[test]
+fn dispatch_catalog_annotations_fill_an_unannotated_mode_ceiling() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        ..CapabilityPolicy::neutral()
+    });
+    let dispatch_annotations = ToolAnnotations {
+        side_effect_level: SideEffectLevel::ProcessExec,
+        ..Default::default()
+    };
+
+    let denial = enforce_current_policy_for_tool_with_annotations_and_side_effect_grant(
+        "run",
+        Some(&dispatch_annotations),
+        None,
+    )
+    .unwrap_err();
+    pop_execution_policy();
+
+    assert_eq!(denial.gate, DenialGate::SideEffectCeiling);
+    assert_eq!(
+        denial
+            .side_effect_ceiling
+            .expect("typed side-effect details")
+            .required_level,
+        SideEffectLevel::ProcessExec
     );
 }
