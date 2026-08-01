@@ -309,9 +309,7 @@ fn declaration_parts(program: &[SNode], span: Span) -> Option<(&[TypedParam], &[
 }
 
 fn collect_receiver_accesses(body: &[SNode], carrier: Option<&Carrier>) -> Vec<ReceiverAccess> {
-    let Some(carrier) = carrier else {
-        return Vec::new();
-    };
+    let receiver = carrier.map_or("harness", |carrier| carrier.name.as_str());
     let mut accesses = Vec::new();
     visit::walk_program(body, &mut |node| {
         let (Node::PropertyAccess { object, property }
@@ -319,7 +317,7 @@ fn collect_receiver_accesses(body: &[SNode], carrier: Option<&Carrier>) -> Vec<R
         else {
             return;
         };
-        if matches!(&object.node, Node::Identifier(name) if name == &carrier.name) {
+        if matches!(&object.node, Node::Identifier(name) if name == receiver) {
             accesses.push(ReceiverAccess {
                 object_span: object.span,
                 access_span: node.span,
@@ -399,6 +397,44 @@ fn seed_ambient_requirements(
     callables: &mut [ProgramCallable],
     diagnostics: &[RepairCandidate],
 ) {
+    let undefined_harness_by_file = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code == Code::UndefinedVariable && diagnostic.message.contains("`harness`")
+        })
+        .filter_map(|diagnostic| {
+            diagnostic.span.map(|span| {
+                (
+                    canonical(Path::new(&diagnostic.file)),
+                    (span.start, span.end),
+                )
+            })
+        })
+        .fold(
+            BTreeMap::<PathBuf, BTreeSet<(usize, usize)>>::new(),
+            |mut by_file, (file, span)| {
+                by_file.entry(file).or_default().insert(span);
+                by_file
+            },
+        );
+    for callable in callables
+        .iter_mut()
+        .filter(|callable| callable.carrier.is_none())
+    {
+        let undefined = undefined_harness_by_file.get(&files[callable.file_idx].path);
+        callable.receiver_accesses.retain(|access| {
+            undefined.is_some_and(|spans| {
+                spans.contains(&(access.object_span.start, access.object_span.end))
+            })
+        });
+        callable.direct_requirements.extend(
+            callable
+                .receiver_accesses
+                .iter()
+                .filter_map(|access| CapabilityId::from_field_name(&access.property)),
+        );
+    }
+
     for diagnostic in diagnostics {
         if !is_ambient_code(diagnostic.code) {
             continue;
@@ -612,25 +648,44 @@ fn parameter_type_span(source: &str, param: &TypedParam) -> Option<Span> {
 }
 
 fn receiver_projection_edits(callable: &ProgramCallable, desired: &CarrierKind) -> Vec<FixEdit> {
-    let Some(carrier) = &callable.carrier else {
-        return Vec::new();
-    };
+    let binding = final_binding(callable).unwrap_or("harness");
     let mut edits = Vec::new();
-    match (&carrier.kind, desired) {
-        (CarrierKind::Root, CarrierKind::Narrow(capability)) => {
+    match (
+        callable.carrier.as_ref().map(|carrier| &carrier.kind),
+        desired,
+    ) {
+        (Some(CarrierKind::Root), CarrierKind::Narrow(capability)) => {
             for access in &callable.receiver_accesses {
                 if access.property == capability.field_name() {
                     edits.push(FixEdit {
                         span: access.access_span,
-                        replacement: carrier.name.clone(),
+                        replacement: binding.to_string(),
                     });
                 }
             }
         }
-        (CarrierKind::Narrow(capability), CarrierKind::Bundle(_)) => {
+        (Some(CarrierKind::Narrow(capability)), CarrierKind::Bundle(_)) => {
             edits.extend(callable.receiver_accesses.iter().map(|access| FixEdit {
                 span: access.object_span,
-                replacement: format!("{}.{}", carrier.name, capability.field_name()),
+                replacement: format!("{binding}.{}", capability.field_name()),
+            }));
+        }
+        (None, CarrierKind::Narrow(capability)) => {
+            edits.extend(
+                callable
+                    .receiver_accesses
+                    .iter()
+                    .filter(|access| access.property == capability.field_name())
+                    .map(|access| FixEdit {
+                        span: access.access_span,
+                        replacement: binding.to_string(),
+                    }),
+            );
+        }
+        (None, CarrierKind::Root | CarrierKind::Bundle(_)) if binding != "harness" => {
+            edits.extend(callable.receiver_accesses.iter().map(|access| FixEdit {
+                span: access.object_span,
+                replacement: binding.to_string(),
             }));
         }
         _ => {}

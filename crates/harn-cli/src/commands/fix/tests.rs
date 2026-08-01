@@ -750,6 +750,56 @@ fn capability_apply_inserts_an_argument_for_a_widened_existing_carrier() {
 }
 
 #[test]
+fn capability_apply_absorbs_an_implicit_root_receiver_in_the_first_program_plan() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "pub fn write_result(text: string) -> nil {\n  const input = pipeline_input() ?? {}\n  if input?.emit ?? false {\n    harness.stdio.print(text)\n  }\n}\n\nfn main(harness: Harness) {\n  write_result(\"hello\")\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
+    assert_eq!(
+        result.applied.len(),
+        1,
+        "the signature and implicit receiver must migrate in one program plan: {result:#?}"
+    );
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains(
+            "pub fn write_result(harness: {stdio: HarnessStdio, runtime: HarnessRuntime}, text: string)"
+        ),
+        "the implicit root receiver and ambient builtin need one carrier: {updated}"
+    );
+    assert!(
+        updated.contains("harness.runtime.pipeline_input()"),
+        "{updated}"
+    );
+    assert!(updated.contains("harness.stdio.print(text)"), "{updated}");
+    assert!(
+        !updated.contains("harness: Harness, _harness:")
+            && !updated.contains("_harness: HarnessEnv, harness:"),
+        "the convergence pass must not synthesize a second carrier: {updated}"
+    );
+    assert!(
+        updated
+            .contains("write_result({stdio: harness.stdio, runtime: harness.runtime}, \"hello\")"),
+        "the caller must project the complete carrier: {updated}"
+    );
+}
+
+#[test]
 fn capability_apply_preserves_root_values_that_escape() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("main.harn");
