@@ -66,8 +66,14 @@ async fn sandboxed_npm_install_resolves_file_tarball_dependency_offline() {
                     "--no-fund".to_string(),
                 ],
                 cwd: Some("/workspace".to_string()),
+                // Environment variables outrank the fixture's project .npmrc.
+                // Pin the cache here so an inherited runner-global
+                // NPM_CONFIG_CACHE cannot escape the writable workspace mount.
+                // Keep it relative to the mapped cwd: Linux exposes
+                // `/workspace`, while the macOS sandbox uses the host path.
                 env: BTreeMap::from([
                     ("NO_UPDATE_NOTIFIER".to_string(), "1".to_string()),
+                    ("NPM_CONFIG_CACHE".to_string(), ".npm-cache".to_string()),
                     ("NPM_CONFIG_PROGRESS".to_string(), "false".to_string()),
                 ]),
                 timeout: Some(Duration::from_secs(30)),
@@ -126,6 +132,9 @@ fn pack_dependency(npm: &Path, package: &Path, destination: &Path) {
         .arg("--pack-destination")
         .arg(destination)
         .arg("--ignore-scripts")
+        // `npm pack` consults the cache even for a local package. Keep this
+        // setup phase independent of runner-global npm configuration too.
+        .env("NPM_CONFIG_CACHE", package.join(".npm-cache"))
         .current_dir(package)
         .output()
         .expect("run npm pack");
