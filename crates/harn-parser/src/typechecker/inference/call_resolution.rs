@@ -5,7 +5,7 @@ use crate::builtin_signatures;
 use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
 
-use super::super::scope::{is_builtin, TypeScope};
+use super::super::scope::TypeScope;
 use super::super::TypeChecker;
 
 impl TypeChecker {
@@ -20,7 +20,7 @@ impl TypeChecker {
             return;
         };
 
-        let resolvable = is_builtin(name)
+        let resolvable = self.is_builtin(name)
             || name == "schema_of"
             || scope.get_fn(name).is_some()
             || scope.get_struct(name).is_some()

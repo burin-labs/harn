@@ -1342,8 +1342,9 @@ impl TypeChecker {
             self.check_call_signature_arguments(
                 check_sig, type_args, args, has_spread, scope, span,
             );
-        } else if let Some(sig) =
-            builtin_signatures::lookup(name).filter(|_| !self.name_is_imported(name))
+        } else if let Some(sig) = self
+            .lookup_builtin(name)
+            .filter(|_| !self.name_is_imported(name))
         {
             // An explicit `import { name } from ...` shadows a same-named
             // builtin, matching the VM's runtime resolution. Guards the

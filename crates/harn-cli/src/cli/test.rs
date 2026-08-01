@@ -38,6 +38,11 @@ pub(crate) struct TestArgs {
     /// Repeatable. Names are exact (for example `git.push`).
     #[arg(long = "approve-risky", value_name = "OPERATION")]
     pub approve_risky: Vec<String>,
+    /// Compile imported route modules as an explicitly trusted Rust
+    /// host-dispatch graph. This is required only when testing sources whose
+    /// production embedder owns privileged host wiring such as `host_call`.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub trusted_host_dispatch: bool,
     /// Fail a passing user test whose total wall-clock time exceeds this
     /// many milliseconds. Also honored via HARN_TEST_MAX_MS.
     #[arg(long = "max-test-ms", value_name = "MS", env = "HARN_TEST_MAX_MS")]

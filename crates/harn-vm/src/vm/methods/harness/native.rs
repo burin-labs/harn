@@ -917,6 +917,16 @@ impl crate::vm::Vm {
             "respond" | "respond_error" => {
                 let capability_name = string_arg(args, 0, &format!("HarnessTesting.{method}"))?;
                 let target_method = string_arg(args, 1, &format!("HarnessTesting.{method}"))?;
+                let unregistered_ok = match args.get(5) {
+                    None | Some(VmValue::Nil) => false,
+                    Some(VmValue::Bool(value)) => *value,
+                    Some(other) => {
+                        return Err(VmError::TypeError(format!(
+                            "HarnessTesting.{method}: unregistered_ok must be a bool, got {}",
+                            other.type_name()
+                        )))
+                    }
+                };
                 if let Some(capability) =
                     harn_builtin_meta::CapabilityId::from_field_name(capability_name)
                 {
@@ -941,10 +951,12 @@ impl crate::vm::Vm {
                 } else if !crate::stdlib::host::host_operation_is_registered(
                     capability_name,
                     target_method,
-                ) {
+                ) && !unregistered_ok
+                {
                     return Err(VmError::TypeError(format!(
                         "HarnessTesting.{method}: unknown capability or host operation \
-                         `{capability_name}.{target_method}`"
+                         `{capability_name}.{target_method}`; pass unregistered_ok=true only for \
+                         an operation the embedding host registers at runtime"
                     )));
                 }
                 let response = if method == "respond" {

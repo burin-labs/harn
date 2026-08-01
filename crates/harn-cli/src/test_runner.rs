@@ -122,6 +122,9 @@ pub struct RunOptions {
     /// teardown) to stderr. Also honored via `HARN_TEST_DIAGNOSE=1` so
     /// users can flip the flag without restarting their shell.
     pub diagnose: bool,
+    /// Run each case in an explicitly trusted host-dispatch VM. This keeps
+    /// privileged wire access behind an operator-selected test boundary.
+    pub trusted_host_dispatch: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,6 +194,8 @@ struct TestCase {
     /// File-scoped fixture result cloned through Harn's isolate-safe COW
     /// contract before this case enters its fresh VM.
     file_fixture_value: Option<IsolateValue>,
+    /// Operator-selected authority for this case and its private import graph.
+    trusted_host_dispatch: bool,
 }
 
 fn canonicalize_existing_path(path: &Path) -> PathBuf {
@@ -231,6 +236,7 @@ pub async fn run_tests(
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress: None,
         diagnose: diagnose_enabled_via_env(),
+        trusted_host_dispatch: false,
     };
     run_tests_with_options(path, &options).await
 }
@@ -256,6 +262,7 @@ pub async fn run_tests_with_progress(
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress,
         diagnose: diagnose_enabled_via_env(),
+        trusted_host_dispatch: false,
     };
     run_tests_with_options(path, &options).await
 }
@@ -344,6 +351,9 @@ async fn run_tests_with_session_impl(
         .unwrap_or_default();
 
     let mut discovery = discover_test_cases(&files, options.filter.as_deref(), workers);
+    for case in &mut discovery.cases {
+        case.trusted_host_dispatch = options.trusted_host_dispatch;
+    }
     if let Some(shard) = options.shard {
         discovery.cases = select_shard_cases(discovery.cases, &timings, shard);
         if shard.index() > 1 {

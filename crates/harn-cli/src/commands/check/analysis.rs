@@ -51,6 +51,7 @@ pub(crate) fn typecheck_config(
         .collect();
     TypeCheckConfig::new()
         .with_strict_types(config.strict_types)
+        .with_privileged_wire_builtins(config.trusted_host_dispatch)
         .with_imported_names(module_graph.imported_names_for_file(path))
         .with_imported_type_decls(
             module_graph

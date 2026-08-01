@@ -69,9 +69,12 @@ pub(super) async fn execute_case(
 ) -> TestResult {
     let total_start = Instant::now();
     let compile_start = Instant::now();
-    let compiler = crate::compiler_with_imported_enum_candidates(
-        case.imported_enum_candidates.iter().cloned(),
-    );
+    let imported_enums = case.imported_enum_candidates.iter().cloned();
+    let compiler = if case.trusted_host_dispatch {
+        harn_vm::Compiler::new_trusted_host_dispatch().with_imported_enum_candidates(imported_enums)
+    } else {
+        crate::compiler_with_imported_enum_candidates(imported_enums)
+    };
     let case_fixture = case
         .fixture
         .as_ref()
@@ -122,9 +125,12 @@ pub(super) async fn execute_file_fixture(
 ) -> Result<harn_vm::IsolateValue, TestResult> {
     let total_start = Instant::now();
     let compile_start = Instant::now();
-    let compiler = crate::compiler_with_imported_enum_candidates(
-        case.imported_enum_candidates.iter().cloned(),
-    );
+    let imported_enums = case.imported_enum_candidates.iter().cloned();
+    let compiler = if case.trusted_host_dispatch {
+        harn_vm::Compiler::new_trusted_host_dispatch().with_imported_enum_candidates(imported_enums)
+    } else {
+        crate::compiler_with_imported_enum_candidates(imported_enums)
+    };
     let entry = match compiler.compile_named_function_entry(&case.program, &fixture.name) {
         Ok(entry) => entry,
         Err(error) => {
@@ -198,6 +204,10 @@ async fn execute_compiled(
     let file_display = case.file.display().to_string();
     let setup_start = Instant::now();
     let mut vm = harn_vm::Vm::new();
+    if case.trusted_host_dispatch {
+        vm.enable_trusted_host_dispatch()
+            .expect("fresh test VM accepts explicit trusted host-dispatch authority");
+    }
     let module_phase_recorder = vm.enable_module_phase_timing();
     let result = local
         .run_until(async {

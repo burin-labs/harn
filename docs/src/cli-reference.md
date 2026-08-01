@@ -528,6 +528,7 @@ harn test tests/ --replay              # replay LLM fixtures
 harn test tests/ --coverage            # print per-file line coverage
 harn test tests/ --coverage-out lcov.info  # also write an LCOV tracefile
 harn test --approve-risky git.push tests/release_branch_push.harn
+harn test --trusted-host-dispatch tests/host_routes.harn
 harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 ```
 
@@ -551,6 +552,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly. A failing user test's captured output is included as `<system-out>` |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup and shared import-graph compilation are measured separately and do not consume the pipeline-execution budget; other targets bound their test case or subprocess |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for user-test execution; repeatable (for example `git.push`) |
+| `--trusted-host-dispatch` | Compile the test and its private import graph for a Rust-host-selected route boundary, exposing privileged wire builtins such as `host_call`. Ordinary tests remain unprivileged. |
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget |
 | `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
@@ -1084,6 +1086,7 @@ unresolved import itself still fails at runtime.
 harn check main.harn
 harn check src/ tests/
 harn check --host-capabilities host-capabilities.json main.harn
+harn check --trusted-host-dispatch --host-capabilities host-capabilities.json routes/
 harn check --bundle-root .bundle main.harn
 harn check --invariants main.harn
 harn check --strict --strict-types src/
@@ -1094,6 +1097,7 @@ harn check --preflight warning src/
 | Flag | Description |
 |---|---|
 | `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries with optional `param_discriminators` literal sets. Discriminator policies may explicitly allow a dynamic forwarding boundary when the host verifies it separately. Overrides `[check].host_capabilities_path` in `harn.toml`. |
+| `--trusted-host-dispatch` | Check an embedder-owned route module graph with privileged host builtins such as `host_call` visible. Use only when a Rust host selects and loads the graph through the trusted-dispatch VM boundary; ordinary modules remain unprivileged. Monotonically enables `[check].trusted_host_dispatch`. |
 | `--bundle-root <dir>` | Validate `harness.fs.render_prompt(...)`, and template paths against an alternate bundled layout root |
 | `--invariants` | Evaluate `@invariant(...)` annotations on functions, tools, and pipelines. Violations fail the check and are reported as `invariant[<name>]` diagnostics with concrete source spans. |
 | `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |
@@ -1179,6 +1183,11 @@ strict = true
 # Enable boundary-value type checks persistently. Combine the one-shot flags as
 # `harn check --strict --strict-types` for a zero-warning type-safety gate.
 strict_types = true
+
+# Check only embedder-owned route modules that a Rust host loads through the
+# trusted-dispatch VM boundary. The one-shot equivalent is
+# `harn check --trusted-host-dispatch`.
+trusted_host_dispatch = true
 
 # Downgrade preflight errors to warnings (or suppress entirely with "off").
 # Keeps type diagnostics visible while an external capability schema is

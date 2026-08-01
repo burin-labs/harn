@@ -43,6 +43,8 @@ struct TestRunParams {
     skill_dirs: Vec<PathBuf>,
     #[serde(default)]
     diagnose: bool,
+    #[serde(default)]
+    trusted_host_dispatch: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -223,6 +225,7 @@ async fn run_tests(id: Value, params: Value, state: &mut WorkerState) -> Value {
         cli_skill_dirs: params.skill_dirs,
         progress: None,
         diagnose: params.diagnose,
+        trusted_host_dispatch: params.trusted_host_dispatch,
     };
     let cache_before = state.session.stats();
     let summary =

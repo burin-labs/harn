@@ -47,6 +47,7 @@ pub(crate) struct CheckCliOverrides {
     pub bundle_root: Option<String>,
     pub strict: bool,
     pub strict_types: bool,
+    pub trusted_host_dispatch: bool,
     pub preflight: Option<String>,
     pub invariants: bool,
 }
@@ -58,6 +59,7 @@ impl From<&crate::cli::CheckArgs> for CheckCliOverrides {
             bundle_root: args.bundle_root.clone(),
             strict: args.strict,
             strict_types: args.strict_types,
+            trusted_host_dispatch: args.trusted_host_dispatch,
             preflight: args.preflight.clone(),
             invariants: args.invariants,
         }
@@ -414,6 +416,9 @@ fn build_check_contexts_with(
         }
         if overrides.strict_types {
             config.strict_types = true;
+        }
+        if overrides.trusted_host_dispatch {
+            config.trusted_host_dispatch = true;
         }
         if let Some(severity) = overrides.preflight.as_deref() {
             config.preflight_severity = Some(severity.to_string());

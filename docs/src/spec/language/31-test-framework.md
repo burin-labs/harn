@@ -11,6 +11,12 @@ harn test path/to/tests/         # run all test files in a directory
 harn test path/to/test_file.harn # run tests in a single file
 ```
 
+Tests are ordinary unprivileged modules by default. A Rust-hosted service may
+use `harn test --trusted-host-dispatch path/to/test_file.harn` to compile the
+test and its private import graph with the same explicit privileged-wire
+authority as its host-selected production route graph. The flag does not
+change the authority of modules loaded by ordinary Harn imports.
+
 ### Test discovery
 
 The test runner scans `.harn` files for pipelines whose names start with

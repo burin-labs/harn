@@ -18,12 +18,26 @@ use super::{BuiltinMetadata, BuiltinSignature, Ty, TyExt};
 /// Runtime validation calls this for every builtin invocation, so the owning
 /// registry lookup must not materialize or linearly scan its whole manifest.
 pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
+    lookup_with_privileged_wire(name, false)
+}
+
+/// Resolve a builtin for an explicitly trusted host-dispatch compilation.
+/// This widens only `PrivilegedWire`; it does not restore legacy Harness
+/// methods or runtime-internal names as ambient globals.
+pub fn lookup_with_privileged_wire(
+    name: &str,
+    allow_privileged_wire: bool,
+) -> Option<&'static BuiltinSignature> {
     if let Some(entry) = harn_builtin_registry::builtin_entry(name) {
         return matches!(
             entry.contract.exposure,
             BuiltinExposure::PureGlobal | BuiltinExposure::CapabilityFunction { .. }
         )
         .then_some(entry.signature)
+        .or_else(|| {
+            (allow_privileged_wire && entry.contract.exposure == BuiltinExposure::PrivilegedWire)
+                .then_some(entry.signature)
+        })
         .or_else(|| {
             (crate::legacy_ambient_capabilities_enabled()
                 && matches!(
@@ -149,6 +163,12 @@ pub fn capability_method_entry(
 /// Is `name` a builtin known to the parser?
 pub fn is_builtin(name: &str) -> bool {
     lookup(name).is_some()
+        || (crate::legacy_ambient_capabilities_enabled()
+            && crate::is_registered_legacy_hostlib_name(name))
+}
+
+pub fn is_builtin_with_privileged_wire(name: &str, allow_privileged_wire: bool) -> bool {
+    lookup_with_privileged_wire(name, allow_privileged_wire).is_some()
         || (crate::legacy_ambient_capabilities_enabled()
             && crate::is_registered_legacy_hostlib_name(name))
 }

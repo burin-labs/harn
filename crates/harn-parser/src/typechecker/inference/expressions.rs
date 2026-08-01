@@ -561,7 +561,7 @@ impl TypeChecker {
                 // TypeExpr, then apply bindings to the declared return
                 // type. Falls through to `builtin_return_type` when no T
                 // can be bound (e.g. llm_call without an `output` schema).
-                if let Some(sig) = builtin_signatures::lookup(name).filter(|s| s.is_generic()) {
+                if let Some(sig) = self.lookup_builtin(name).filter(|s| s.is_generic()) {
                     let type_param_names = sig.type_param_names();
                     let bindings =
                         self.infer_builtin_call_type_bindings(sig, type_args, args, scope);

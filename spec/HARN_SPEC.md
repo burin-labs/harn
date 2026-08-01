@@ -6699,6 +6699,7 @@ up.
 [check]
 strict = true
 strict_types = true
+trusted_host_dispatch = true
 host_capabilities_path = "./schemas/host-capabilities.json"
 preflight_severity = "warning"          # "error" (default), "warning", "off"
 preflight_allow = ["mystery.*", "runtime.task"]
@@ -6746,6 +6747,11 @@ workspace = ["read_text", "write_text"]
 - `strict_types` enables boundary-value type checks persistently. Its one-shot
   equivalent is `--strict-types`; combine it with `--strict` for a zero-warning
   type-safety gate.
+- `trusted_host_dispatch` exposes privileged host builtins only while checking
+  an embedder-owned route module graph. Its one-shot equivalent is
+  `--trusted-host-dispatch`. Enable it only when a Rust host selects and loads
+  the graph through the trusted-dispatch VM boundary; ordinary modules remain
+  unprivileged.
 - `preflight_severity` downgrades preflight diagnostics to warnings or
   suppresses them entirely. Type-checker and lint diagnostics are
   unaffected — preflight failures are reported under the `preflight`
@@ -7793,6 +7799,12 @@ Harn includes a built-in test runner invoked via `harn test`.
 harn test path/to/tests/         # run all test files in a directory
 harn test path/to/test_file.harn # run tests in a single file
 ```
+
+Tests are ordinary unprivileged modules by default. A Rust-hosted service may
+use `harn test --trusted-host-dispatch path/to/test_file.harn` to compile the
+test and its private import graph with the same explicit privileged-wire
+authority as its host-selected production route graph. The flag does not
+change the authority of modules loaded by ordinary Harn imports.
 
 ### Test discovery
 

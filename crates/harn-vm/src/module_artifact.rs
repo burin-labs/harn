@@ -24,14 +24,19 @@ type ImportedEnumCache = BTreeMap<PathBuf, ([u8; 32], Vec<String>)>;
 /// Authority provenance carried by a compiled module.
 ///
 /// Ordinary source compilation always produces [`User`](Self::User).
-/// [`PrivilegedWire`](Self::PrivilegedWire) can only be selected through the
-/// explicit trusted-embedder compiler entry point; there is no source
-/// annotation, filename convention, or environment switch that grants it.
+/// Privileged variants can only be selected through explicit trusted-embedder
+/// entry points; there is no source annotation, filename convention, or
+/// environment switch that grants them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ModuleProvenance {
     #[default]
     User,
     PrivilegedWire,
+    /// A Rust embedder-selected route module and its private import graph.
+    /// Unlike `PrivilegedWire`, callables may be exported because only the
+    /// selecting host can receive them; ordinary Harn imports never load this
+    /// provenance.
+    TrustedHostDispatch,
 }
 
 fn imported_enum_cache() -> &'static Mutex<ImportedEnumCache> {
@@ -194,6 +199,9 @@ fn compile_module_artifact_with_provenance(
     let compiler = || match provenance {
         ModuleProvenance::User => crate::Compiler::new(),
         ModuleProvenance::PrivilegedWire => {
+            crate::Compiler::with_options(crate::CompilerOptions::privileged_wire())
+        }
+        ModuleProvenance::TrustedHostDispatch => {
             crate::Compiler::with_options(crate::CompilerOptions::privileged_wire())
         }
     };
@@ -387,6 +395,25 @@ pub fn compile_privileged_wire_module_artifact_from_source(
         Some(source_path.display().to_string()),
         &imported_enum_candidates,
         ModuleProvenance::PrivilegedWire,
+    )
+}
+
+/// Compile one module in a Rust embedder-owned host-dispatch graph.
+///
+/// The runtime loader is responsible for keeping this provenance outside the
+/// ordinary import/cache path and returning only the host-selected callable.
+pub fn compile_trusted_host_dispatch_module_artifact_from_source(
+    source_path: &Path,
+    source: &str,
+) -> Result<ModuleArtifact, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    let imported_enum_candidates =
+        imported_enum_candidates_for_program(source_path, source, &program);
+    compile_module_artifact_with_provenance(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_enum_candidates,
+        ModuleProvenance::TrustedHostDispatch,
     )
 }
 

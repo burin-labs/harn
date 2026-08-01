@@ -103,8 +103,8 @@ impl CompilerOptions {
     /// Options for a trusted embedder-owned wire module.
     ///
     /// This is intentionally not selected from source syntax, paths, or an
-    /// environment variable. Only the explicit privileged module compiler
-    /// entry point may grant the authority.
+    /// environment variable. Only explicit trusted-embedder compiler entry
+    /// points may grant the authority.
     pub(crate) fn privileged_wire() -> Self {
         Self {
             optimize: true,

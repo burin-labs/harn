@@ -255,6 +255,7 @@ fn fold_config(
     let CheckConfig {
         strict,
         strict_types,
+        trusted_host_dispatch,
         disable_rules,
         host_capabilities,
         host_capabilities_path,
@@ -264,6 +265,7 @@ fn fold_config(
     } = config;
     fold("strict", &[u8::from(*strict)]);
     fold("strict-types", &[u8::from(*strict_types)]);
+    fold("trusted-host-dispatch", &[u8::from(*trusted_host_dispatch)]);
     let mut disable_rules: Vec<&String> = disable_rules.iter().collect();
     disable_rules.sort();
     for rule in disable_rules {

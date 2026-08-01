@@ -127,6 +127,9 @@ pub struct TypeChecker {
     /// Snapshotted when the checker is created so one check cannot change
     /// semantics midway through an import graph.
     legacy_ambient_capabilities: bool,
+    /// Explicit authority for embedder-owned host-dispatch source. Unlike the
+    /// legacy compatibility mode, this exposes only `PrivilegedWire` builtins.
+    privileged_wire_builtins: bool,
     /// Lexical depth of enclosing function-like bodies (fn/tool/pipeline/closure).
     /// `try*` requires `fn_depth > 0` so the rethrow has a body to live in.
     fn_depth: usize,
@@ -334,6 +337,7 @@ impl TypeChecker {
             hints: Vec::new(),
             strict_types: false,
             legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
+            privileged_wire_builtins: false,
             fn_depth: 0,
             stream_fn_depth: 0,
             stream_emit_types: Vec::new(),
@@ -358,6 +362,7 @@ impl TypeChecker {
             hints: Vec::new(),
             strict_types: strict,
             legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
+            privileged_wire_builtins: false,
             fn_depth: 0,
             stream_fn_depth: 0,
             stream_emit_types: Vec::new(),
@@ -391,6 +396,25 @@ impl TypeChecker {
     pub(crate) fn with_legacy_ambient_capabilities(mut self) -> Self {
         self.legacy_ambient_capabilities = true;
         self
+    }
+
+    pub fn with_privileged_wire_builtins(mut self, enabled: bool) -> Self {
+        self.privileged_wire_builtins = enabled;
+        self
+    }
+
+    pub(in crate::typechecker) fn lookup_builtin(
+        &self,
+        name: &str,
+    ) -> Option<&'static crate::builtin_signatures::BuiltinSignature> {
+        crate::builtin_signatures::lookup_with_privileged_wire(name, self.privileged_wire_builtins)
+    }
+
+    pub(in crate::typechecker) fn is_builtin(&self, name: &str) -> bool {
+        crate::builtin_signatures::is_builtin_with_privileged_wire(
+            name,
+            self.privileged_wire_builtins,
+        )
     }
 
     /// Attach imported type / struct / enum / interface declarations. The
