@@ -883,6 +883,7 @@ pub fn __upload_jsonl_file(harness: Harness, input: JsonlFileUploadInput) -> dic
     return {
       ok: false,
       error: input.provider + " batch file upload failed using " + input.credential_env,
+      cause: response["error"],
       status: response["status"],
       response: body,
     }

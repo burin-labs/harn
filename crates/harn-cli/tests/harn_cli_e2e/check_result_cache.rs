@@ -123,11 +123,11 @@ fn template_probe_invalidates_when_file_appears() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let cache = tempfile::TempDir::new().expect("cache dir");
     let root = temp.path();
-    // render() of a missing template -> preflight diagnostic recorded with an
-    // existence probe on the candidate paths.
+    // render_prompt() of a missing template -> preflight diagnostic recorded
+    // with an existence probe on the candidate paths.
     std::fs::write(
         root.join("main.harn"),
-        "pipeline main(task) {\n  return render(\"prompt.md\", {})\n}\n",
+        "pipeline main(harness: Harness, task) {\n  return harness.fs.render_prompt(\"prompt.md\", {})\n}\n",
     )
     .expect("main");
 

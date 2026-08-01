@@ -6,7 +6,7 @@
 //! - `Result::Ok(_)`    → exits 0
 //! - `Result::Err(msg)` → writes msg to stderr, exits 1
 //! - implicit           → exits 0
-//! - `exit(code)`       → exits code (existing builtin, still honored)
+//! - `harness.runtime.exit(code)` → exits code
 
 use crate::test_util;
 
@@ -61,7 +61,7 @@ fn pipeline_main_returning_ok_exits_zero() {
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn pipeline_main_implicit_return_exits_zero() {
-    let out = run_script("pipeline main() {\n  __io_println(\"hi\")\n}\n");
+    let out = run_script("pipeline main(harness: Harness) {\n  harness.stdio.println(\"hi\")\n}\n");
     assert_eq!(out.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&out.stdout).contains("hi"));
 }
@@ -78,8 +78,8 @@ fn pipeline_main_int_clamped_to_byte_range() {
 #[test]
 fn explicit_exit_builtin_still_works() {
     let out = run_script(
-        "pipeline main() {\n  __io_println(\"stdout before exit\")\n  \\
-         __io_eprintln(\"stderr before exit\")\n  exit(3)\n}\n",
+        "pipeline main(harness: Harness) {\n  harness.stdio.println(\"stdout before exit\")\n  \\
+         harness.stdio.eprintln(\"stderr before exit\")\n  harness.runtime.exit(3)\n}\n",
     );
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "stdout before exit\n");

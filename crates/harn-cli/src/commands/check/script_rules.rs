@@ -1,5 +1,6 @@
 //! `.harn`-authored custom lint rules — the ESLint-plugin equivalent, but in
-//! Harn.
+//! Harn. Effectful rules declare `lint(rules: HarnessRules, source)`; pure rules
+//! may retain `lint(source)`.
 //!
 //! A project drops a `*.lint.harn` module into a `[rules] ruleDirs` directory.
 //! `harn lint` discovers it, runs its exported `pub fn lint(source)` over each
@@ -11,12 +12,12 @@
 //!
 //! ```harn
 //! // rules/no-foo.lint.harn
-//! pub fn lint(source) {
+//! pub fn lint(rules: HarnessRules, source) {
 //!   // Inspect `source` (the raw text of the file being linted) and return
 //!   // findings. The structural rule engine is available read-only, so a rule
 //!   // can delegate to `rules_diagnostics` and return its diagnostics envelope
 //!   // directly:
-//!   return rules_diagnostics({rule: rule_src, source: source, language: "harn"})
+//!   return rules_diagnostics(rules, {rule: rule_src, source: source, language: "harn"})
 //! }
 //! ```
 //!
@@ -315,7 +316,20 @@ mod imp {
                     }
                     LoadedRule::Ok { id, lint } => {
                         let arg = VmValue::String(arcstr::ArcStr::from(source.as_str()));
-                        match vm.call_closure_pub(lint, &[arg]).await {
+                        let args = harn_vm::inject_leading_authority(
+                            &vm,
+                            lint,
+                            &[arg],
+                            "script lint export `lint`",
+                        );
+                        let args = match args {
+                            Ok(args) => args,
+                            Err(error) => {
+                                diagnostics.push(rule_error_diagnostic(id, &error.to_string()));
+                                continue;
+                            }
+                        };
+                        match vm.call_closure_pub(lint, &args).await {
                             Ok(value) => map_return(id, &value, &mut diagnostics),
                             Err(error) => {
                                 diagnostics.push(rule_error_diagnostic(id, &error.to_string()));

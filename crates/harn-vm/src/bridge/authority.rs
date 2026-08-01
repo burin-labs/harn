@@ -39,11 +39,13 @@ pub(super) fn directive_authority(
     }
 }
 
-pub(super) fn inject_export_authority(
+/// Prepend the root or nominal sub-handle declared by a callable's leading
+/// parameter. Pure callables with no authority parameter are unchanged.
+pub fn inject_leading_authority(
     vm: &Vm,
     closure: &VmClosure,
     args: &[VmValue],
-    export_name: &str,
+    callable_label: &str,
 ) -> Result<Vec<VmValue>, VmError> {
     let Some(type_name) = closure
         .func
@@ -73,7 +75,7 @@ pub(super) fn inject_export_authority(
     }
     .ok_or_else(|| {
         VmError::Runtime(format!(
-            "playground host export `{export_name}` requires `{type_name}`, \
+            "{callable_label} requires `{type_name}`, \
              but no root Harness is installed"
         ))
     })?;
@@ -82,6 +84,20 @@ pub(super) fn inject_export_authority(
     call_args.push(authority);
     call_args.extend_from_slice(args);
     Ok(call_args)
+}
+
+pub(super) fn inject_export_authority(
+    vm: &Vm,
+    closure: &VmClosure,
+    args: &[VmValue],
+    export_name: &str,
+) -> Result<Vec<VmValue>, VmError> {
+    inject_leading_authority(
+        vm,
+        closure,
+        args,
+        &format!("playground host export `{export_name}`"),
+    )
 }
 
 fn named_type(type_expr: &TypeExpr) -> Option<&str> {

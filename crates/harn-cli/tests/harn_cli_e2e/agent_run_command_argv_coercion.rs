@@ -57,14 +57,14 @@ fn capture(request, args) {
   return "MODE=" + to_string(request?.mode) + " ARGV=" + json_stringify(request?.argv)
 }
 
-pipeline main(_) {
+pipeline main(harness: Harness) {
   const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
-  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
   const from_command = h({command: ["bash", "-lc", "ls -1"]})
   const from_argv = h({argv: ["bash", "-lc", "ls -1"]})
-  __io_println("COMMAND_REASON=" + from_command.reason)
-  __io_println("ARGV_REASON=" + from_argv.reason)
-  __io_println("EQUAL=" + to_string(from_command.reason == from_argv.reason))
+  harness.stdio.println("COMMAND_REASON=" + from_command.reason)
+  harness.stdio.println("ARGV_REASON=" + from_argv.reason)
+  harness.stdio.println("EQUAL=" + to_string(from_command.reason == from_argv.reason))
 }
 "#;
     let stdout = run_script(body);
@@ -88,11 +88,11 @@ fn capture(request, args) {
   return "MODE=" + to_string(request?.mode)
 }
 
-pipeline main(_) {
+pipeline main(harness: Harness) {
   const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
-  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
   const r = h({argv: ["echo", "hi"]})
-  __io_println("REASON=" + r.reason)
+  harness.stdio.println("REASON=" + r.reason)
 }
 "#;
     let stdout = run_script(body);
@@ -114,11 +114,11 @@ fn capture(request, args) {
   return "CWD=" + to_string(request?.cwd) + " SANDBOX=" + json_stringify(request?.sandbox?.workspace_roots)
 }
 
-pipeline main(_) {
+pipeline main(harness: Harness) {
   const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
-  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
   const r = h({argv: ["echo", "hi"]})
-  __io_println("REASON=" + r.reason)
+  harness.stdio.println("REASON=" + r.reason)
 }
 "#;
     let stdout = run_script(body);
@@ -138,16 +138,16 @@ fn require_approval(request, args) {
   return {require_approval: true, reason: "needs human approval", approval_id: "approval-123"}
 }
 
-pipeline main(_) {
+pipeline main(harness: Harness) {
   const opts = {root: "/workspace", command_policy: require_approval, output_format: "value"}
-  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
   const r = h({argv: ["definitely-not-run-command-policy-sentinel"]})
-  __io_println("STATUS=" + to_string(r.status))
-  __io_println("REQUIRES=" + to_string(r.requires_approval))
-  __io_println("REASON=" + r.reason)
-  __io_println("APPROVAL_ID=" + r.approval_id)
-  __io_println("MODE=" + to_string(r.request?.mode))
-  __io_println("ARGV=" + json_stringify(r.request?.argv))
+  harness.stdio.println("STATUS=" + to_string(r.status))
+  harness.stdio.println("REQUIRES=" + to_string(r.requires_approval))
+  harness.stdio.println("REASON=" + r.reason)
+  harness.stdio.println("APPROVAL_ID=" + r.approval_id)
+  harness.stdio.println("MODE=" + to_string(r.request?.mode))
+  harness.stdio.println("ARGV=" + json_stringify(r.request?.argv))
 }
 "#;
     let stdout = run_script(body);
@@ -185,11 +185,11 @@ fn capture(request, args) {
   return "MODE=" + to_string(request?.mode)
 }
 
-pipeline main(_) {
+pipeline main(harness: Harness) {
   const opts = {root: "/workspace", allow_shell: false, command_policy: capture, output_format: "value"}
-  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
   const r = h({command: ["bash", "-lc", "ls"]})
-  __io_println("REASON=" + r.reason)
+  harness.stdio.println("REASON=" + r.reason)
 }
 "#;
     let stdout = run_script(body);
@@ -206,14 +206,14 @@ fn non_string_command_list_is_rejected() {
     let body = r#"
 import { agent_command_tools } from "std/agent/host_tools"
 
-pipeline main(_) {
+pipeline main(harness: Harness) {
   const opts = {root: "/workspace", allow_shell: true, output_format: "value"}
-  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
   const r = try { h({command: ["bash", 7]}) }
   if is_ok(r) {
-    __io_println("OUTCOME=unexpected-ok")
+    harness.stdio.println("OUTCOME=unexpected-ok")
   } else {
-    __io_println("OUTCOME=" + to_string(r))
+    harness.stdio.println("OUTCOME=" + to_string(r))
   }
 }
 "#;
@@ -232,14 +232,14 @@ fn shell_string_with_shell_disabled_gives_actionable_error() {
     let body = r#"
 import { agent_command_tools } from "std/agent/host_tools"
 
-pipeline main(_) {
+pipeline main(harness: Harness) {
   const opts = {root: "/workspace", allow_shell: false, output_format: "value"}
-  const h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
   const r = try { h({command: "echo hi"}) }
   if is_ok(r) {
-    __io_println("OUTCOME=unexpected-ok")
+    harness.stdio.println("OUTCOME=unexpected-ok")
   } else {
-    __io_println("OUTCOME=" + to_string(r))
+    harness.stdio.println("OUTCOME=" + to_string(r))
   }
 }
 "#;

@@ -12,7 +12,6 @@ use base64::Engine;
 use sha2::{Digest, Sha256};
 use x509_parser::prelude::{FromDer, X509Certificate};
 
-use super::mock::consume_http_mock;
 use super::{
     get_options_arg, handle_from_value, next_transport_handle, string_option, vm_error,
     vm_get_bool_option, vm_get_int_option, vm_get_int_option_prefer, vm_get_optional_int_option,
@@ -20,6 +19,8 @@ use super::{
     DEFAULT_RETRYABLE_STATUSES, DEFAULT_TIMEOUT_MS, MAX_HTTP_SESSIONS, MAX_HTTP_STREAMS,
     MAX_RETRY_DELAY_MS, MULTIPART_MOCK_BOUNDARY,
 };
+
+pub(super) mod harness_mocks;
 
 #[derive(Clone)]
 struct RetryConfig {
@@ -326,36 +327,6 @@ fn multipart_form(request: &MultipartRequest) -> Result<reqwest::multipart::Form
         form = form.part(field.name.clone(), part);
     }
     Ok(form)
-}
-
-pub(super) async fn http_verb_handler(
-    method: &str,
-    has_body: bool,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let url = args.first().map(|a| a.display()).unwrap_or_default();
-    if url.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("http_{}: URL is required", method.to_ascii_lowercase()),
-        ))));
-    }
-    let mut options = if has_body {
-        match (args.get(1), args.get(2)) {
-            (Some(VmValue::Dict(d)), None) => (**d).clone(),
-            (_, Some(VmValue::Dict(d))) => (**d).clone(),
-            _ => crate::value::DictMap::new(),
-        }
-    } else {
-        match args.get(1) {
-            Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => crate::value::DictMap::new(),
-        }
-    };
-    if has_body && !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
-        let body = args.get(1).map(|a| a.display()).unwrap_or_default();
-        options.put_str("body", body);
-    }
-    vm_execute_http_request(method, &url, &options).await
 }
 
 fn parse_proxy_config(options: &crate::value::DictMap) -> Option<HttpProxyConfig> {
@@ -1034,7 +1005,7 @@ pub(super) async fn vm_execute_http_request(
 
     let config = parse_http_options(options);
     let client = pooled_http_client(&config)?;
-    vm_execute_http_request_with_client(client, &config, method, url, options).await
+    vm_execute_http_request_with_client(None, client, &config, method, url, options).await
 }
 
 pub(super) async fn vm_execute_http_session_request(
@@ -1051,10 +1022,12 @@ pub(super) async fn vm_execute_http_session_request(
     };
     let merged_options = merge_options(&session.options, options);
     let config = parse_http_options(&merged_options);
-    vm_execute_http_request_with_client(session.client, &config, method, url, &merged_options).await
+    vm_execute_http_request_with_client(None, session.client, &config, method, url, &merged_options)
+        .await
 }
 
-async fn vm_execute_http_request_with_client(
+pub(super) async fn vm_execute_http_request_with_client(
+    harness_mocks: Option<&super::HttpMockRegistry>,
     client: reqwest::Client,
     config: &HttpRequestConfig,
     method: &str,
@@ -1071,12 +1044,9 @@ async fn vm_execute_http_request_with_client(
     }
     // http_mock is in-process; match download/stream — egress only for real sockets.
     for attempt in 0..=config.retry.max {
-        if let Some(mock_response) = consume_http_mock(
-            method,
-            &final_url,
-            parts.recorded_headers.clone(),
-            parts.body.clone(),
-        ) {
+        let mock_response =
+            harness_mocks::consume_http_mock(harness_mocks, method, &final_url, &parts);
+        if let Some(mock_response) = mock_response {
             let status = mock_response.status.clamp(0, u16::MAX as i64) as u16;
             if should_retry_response(config, &parts.method, status, attempt) {
                 let retry_after = if config.retry.respect_retry_after {
@@ -1161,6 +1131,7 @@ async fn vm_execute_http_request_with_client(
 }
 
 pub(super) async fn vm_http_download(
+    harness_mocks: Option<&super::HttpMockRegistry>,
     url: &str,
     dst_path: &str,
     options: &crate::value::DictMap,
@@ -1183,12 +1154,9 @@ pub(super) async fn vm_http_download(
     let mut egress_checked = false;
     let mut client = None;
     for attempt in 0..=config.retry.max {
-        if let Some(mock_response) = consume_http_mock(
-            &method,
-            &final_url,
-            parts.recorded_headers.clone(),
-            parts.body.clone(),
-        ) {
+        if let Some(mock_response) =
+            harness_mocks::consume_http_mock(harness_mocks, &method, &final_url, &parts)
+        {
             let status = mock_response.status.clamp(0, u16::MAX as i64) as u16;
             if should_retry_response(&config, &parts.method, status, attempt) {
                 let retry_after = if config.retry.respect_retry_after {
@@ -1347,6 +1315,7 @@ fn write_http_download_bytes(resolved: &Path, bytes: &[u8]) -> Result<(), VmErro
 }
 
 pub(super) async fn vm_http_stream_open(
+    harness_mocks: Option<&super::HttpMockRegistry>,
     url: &str,
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
@@ -1359,12 +1328,9 @@ pub(super) async fn vm_http_stream_open(
     let parts = parse_http_request_parts(&method, options)?;
     let final_url = final_http_url(url, options, "http_stream_open")?;
     let id = next_transport_handle("http-stream");
-    if let Some(mock_response) = consume_http_mock(
-        &method,
-        &final_url,
-        parts.recorded_headers.clone(),
-        parts.body.clone(),
-    ) {
+    if let Some(mock_response) =
+        harness_mocks::consume_http_mock(harness_mocks, &method, &final_url, &parts)
+    {
         let handle = HttpStreamHandle {
             kind: HttpStreamKind::Fake,
             status: mock_response.status,
@@ -1529,7 +1495,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             return Err(vm_error("http_download: destination path is required"));
         }
         let options = get_options_arg(&args, 2);
-        vm_http_download(&url, &dst_path, &options).await
+        vm_http_download(None, &url, &dst_path, &options).await
     });
 
     vm.register_async_builtin("__http_stream_open", |_ctx, args| async move {
@@ -1538,7 +1504,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             return Err(vm_error("http_stream_open: URL is required"));
         }
         let options = get_options_arg(&args, 1);
-        vm_http_stream_open(&url, &options).await
+        vm_http_stream_open(None, &url, &options).await
     });
 
     vm.register_async_builtin("__http_stream_read", |_ctx, args| async move {

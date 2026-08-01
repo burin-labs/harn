@@ -291,10 +291,10 @@ pub fn with_llm_mocks(llm: HarnessLlm, mocks, body) {
 pub type CapabilityFixture = {
   capability: string,
   method: string,
-  result: any?,
-  error: string?,
-  when: dict?,
-  repeat: bool?,
+  result?: any,
+  error?: string,
+  when?: dict,
+  repeat?: bool,
 }
 
 /**
@@ -315,21 +315,21 @@ pub fn with_capability_fixtures(
   testing.push_scope()
   try {
     for fixture in fixtures {
-      if fixture.error != nil {
+      if fixture?.error != nil {
         testing.respond_error(
           fixture.capability,
           fixture.method,
           fixture.error,
-          fixture.when,
-          fixture.repeat,
+          fixture?.when,
+          fixture?.repeat,
         )
       } else {
         testing.respond(
           fixture.capability,
           fixture.method,
-          fixture.result,
-          fixture.when,
-          fixture.repeat,
+          fixture?.result,
+          fixture?.when,
+          fixture?.repeat,
         )
       }
     }

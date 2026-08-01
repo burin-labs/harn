@@ -75,7 +75,7 @@ import "std/triggers"
 const marker = "{}"
 
 pub fn on_ok(harness: Harness, event: TriggerEvent) -> dict {{
-  write_file(marker, event.kind)
+  harness.fs.write_text(marker, event.kind)
   return {{event_id: event.id, kind: event.kind}}
 }}
 

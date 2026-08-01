@@ -101,9 +101,9 @@ fn precompiles_call_to_builtin_colliding_stdlib_import() {
         &source,
         r#"import { render } from "std/disclosure"
 
-pipeline default(task) {
+pipeline default(harness: Harness, task) {
   const chain = {sub: "user:k", act: {sub: "agent:b"}}
-  log(render(chain, "git", {project: false, env: false, config: {}}))
+  harness.stdio.log(render(harness.env, harness.fs, chain, "git", {project: false, env: false, config: {}}))
 }
 "#,
     )
@@ -260,7 +260,7 @@ fn write_hello(dir: &Path, name: &str) -> PathBuf {
     let path = dir.join(name);
     std::fs::write(
         &path,
-        "pipeline default(task) {\n  log(\"hello from precompile\")\n}\n",
+        "pipeline default(harness: Harness, task) {\n  harness.stdio.log(\"hello from precompile\")\n}\n",
     )
     .expect("write hello.harn");
     path

@@ -35,14 +35,14 @@ fn write_fixture(temp: &TempDir) {
         temp.path(),
         "acp_fixture.harn",
         r#"
-pub pipeline main() {
-  const sid = agent_session_current_id()
+pub pipeline main(harness: Harness) {
+  const sid = harness.agent.current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
   if prompt != "snapshot" {
-    agent_session_inject(sid, {role: "user", content: prompt})
+    harness.agent.inject(sid, {role: "user", content: prompt})
   }
-  const snap = agent_session_snapshot(sid)
-  __io_println(
+  const snap = harness.agent.snapshot(sid)
+  harness.stdio.println(
     json_stringify({
       session_id: sid,
       len: len(snap["messages"]),
@@ -81,6 +81,22 @@ fn send_request(
         other => panic!("unexpected ACP server request: {other}"),
     });
     (exchange.notifications, exchange.response)
+}
+
+fn select_code_mode(client: &mut StdioJsonRpcClient, session_id: &str) {
+    let (_, response) = send_request(
+        client,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "select-code-mode",
+            "method": "session/set_mode",
+            "params": {"sessionId": session_id, "modeId": "code"},
+        }),
+    );
+    assert!(
+        response["error"].is_null(),
+        "failed to select ACP code mode: {response:#}"
+    );
 }
 
 fn latest_prompt_summary(notifications: &[JsonValue], session_id: &str) -> JsonValue {
@@ -197,6 +213,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
         }),
     );
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+    select_code_mode(&mut client, &session_id);
 
     let (alpha_notifications, alpha_response) = send_request(
         &mut client,
@@ -210,7 +227,10 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             }
         }),
     );
-    assert_eq!(alpha_response["result"]["stopReason"], "end_turn");
+    assert_eq!(
+        alpha_response["result"]["stopReason"], "end_turn",
+        "ACP response: {alpha_response:#}"
+    );
     let alpha_summary = latest_prompt_summary(&alpha_notifications, &session_id);
     assert_eq!(alpha_summary["len"], 1);
 
@@ -354,11 +374,11 @@ fn acp_session_set_config_option_model_pins_for_next_prompt() {
         temp.path(),
         "pin_fixture.harn",
         r#"
-pub pipeline main() {
-  const sid = agent_session_current_id()
+pub pipeline main(harness: Harness) {
+  const sid = harness.agent.current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
-  const snap = agent_session_snapshot(sid)
-  __io_println(
+  const snap = harness.agent.snapshot(sid)
+  harness.stdio.println(
     json_stringify({
       session_id: sid,
       pinned_model: snap["pinned_model"],
@@ -437,7 +457,10 @@ pub pipeline main() {
             },
         }),
     );
-    assert_eq!(prompt_response["result"]["stopReason"], "end_turn");
+    assert_eq!(
+        prompt_response["result"]["stopReason"], "end_turn",
+        "ACP response: {prompt_response:#}"
+    );
     let summary = latest_prompt_summary(&prompt_notifications, &session_id);
     assert_eq!(summary["pinned_model"], "claude-sonnet-4-6");
 
@@ -483,6 +506,7 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
         }),
     );
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+    select_code_mode(&mut client, &session_id);
 
     let (alpha_notifications, alpha_response) = send_request(
         &mut client,
@@ -615,6 +639,7 @@ default_provider = "openai"
         }),
     );
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+    select_code_mode(&mut client, &session_id);
 
     let (notifications, response) = send_request(
         &mut client,
@@ -628,7 +653,10 @@ default_provider = "openai"
             }
         }),
     );
-    assert_eq!(response["result"]["stopReason"], "end_turn");
+    assert_eq!(
+        response["result"]["stopReason"], "end_turn",
+        "ACP response: {response:#}"
+    );
     let summary = latest_prompt_summary(&notifications, &session_id);
     assert_eq!(summary["messages"][0]["content"], "packaged");
 

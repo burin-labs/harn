@@ -62,16 +62,16 @@ fn write_llm_summary_script(dir: &std::path::Path, name: &str) -> std::path::Pat
         dir,
         name,
         r#"
-pipeline main(_) {
-    llm_mock_clear()
-    llm_mock({
+pipeline main(harness: Harness) {
+    harness.llm.mock_clear()
+    harness.llm.mock_enqueue({
       text: "pong",
       input_tokens: 7,
       output_tokens: 5,
       model: "mock",
     })
-    const response = llm_call("ping", nil, {provider: "mock"})
-    __io_println(response.text)
+    const response = harness.llm.call("ping", nil, {provider: "mock"})
+    harness.stdio.println(response.text)
 }
 "#,
     )
@@ -84,10 +84,10 @@ fn run_json_emits_monotonic_seq_with_typed_events() {
         tmp.path(),
         "hello.harn",
         r#"
-pipeline main(_) {
-    __io_println("hello")
-    __io_println("world")
-    __io_println("!")
+pipeline main(harness: Harness) {
+    harness.stdio.println("hello")
+    harness.stdio.println("world")
+    harness.stdio.println("!")
 }
 "#,
     );
@@ -240,8 +240,8 @@ fn run_emit_summary_json_file_sink_does_not_change_run_json_stdout() {
         tmp.path(),
         "summary_file.harn",
         r#"
-pipeline main(_) {
-    __io_println("hello")
+pipeline main(harness: Harness) {
+    harness.stdio.println("hello")
 }
 "#,
     );
@@ -303,8 +303,8 @@ fn run_emit_summary_json_fd_sink_writes_inherited_descriptor() {
         tmp.path(),
         "summary_fd.harn",
         r#"
-pipeline main(_) {
-    __io_println("fd")
+pipeline main(harness: Harness) {
+    harness.stdio.println("fd")
 }
 "#,
     );
@@ -449,8 +449,8 @@ fn run_emit_phase_json_defaults_to_terminal_stderr_with_fixed_phase_shape() {
         tmp.path(),
         "phase_stderr.harn",
         r#"
-pipeline main(_) {
-    __io_println("phase")
+pipeline main(harness: Harness) {
+    harness.stdio.println("phase")
 }
 "#,
     );
@@ -513,8 +513,8 @@ fn run_emit_phase_and_rusage_file_sinks_keep_run_json_stdout_clean() {
         tmp.path(),
         "phase_file.harn",
         r#"
-pipeline main(_) {
-    __io_println("hello")
+pipeline main(harness: Harness) {
+    harness.stdio.println("hello")
 }
 "#,
     );
@@ -588,8 +588,8 @@ fn run_emit_rusage_json_fd_sink_writes_inherited_descriptor() {
         tmp.path(),
         "rusage_fd.harn",
         r#"
-pipeline main(_) {
-    __io_println("fd")
+pipeline main(harness: Harness) {
+    harness.stdio.println("fd")
 }
 "#,
     );
@@ -663,8 +663,8 @@ fn run_json_quiet_suppresses_stdout_events() {
         tmp.path(),
         "quiet.harn",
         r#"
-pipeline main(_) {
-    __io_println("noisy")
+pipeline main(harness: Harness) {
+    harness.stdio.println("noisy")
 }
 "#,
     );

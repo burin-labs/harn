@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::cli::ToolNewArgs;
+use crate::commands::run::RunSandboxOptions;
 use crate::commands::scaffold_common::harn_identifier_with_prefix;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
@@ -75,10 +76,11 @@ async fn dispatch_to_script(
     let _desc_env = ScopedEnvVar::set("HARN_TOOL_DESCRIPTION", description);
     let _range_env = ScopedEnvVar::set("HARN_TOOL_HARN_RANGE", &harn_range);
     let _version_env = ScopedEnvVar::set("HARN_TOOL_HARN_VERSION", env!("CARGO_PKG_VERSION"));
-    let exit = dispatch::dispatch_to_embedded_script(
+    let exit = dispatch::dispatch_to_embedded_script_with_sandbox(
         "scaffold/tool_new",
         Vec::new(),
         /* json_mode */ false,
+        RunSandboxOptions::default().with_workspace_root(dest),
     )
     .await;
     if exit != 0 {
@@ -94,11 +96,59 @@ fn harn_identifier(name: &str) -> Result<String, PackageError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn harn_identifier_normalizes_package_names() {
         assert_eq!(harn_identifier("acme-tool").unwrap(), "acme_tool");
         assert_eq!(harn_identifier("123-tool").unwrap(), "tool_123_tool");
+    }
+
+    #[test]
+    fn generated_tool_projects_typed_harness_and_is_canonically_formatted() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let destination = temp.path().join("example-tool");
+        let destination_arg = destination.display().to_string();
+        let result = std::thread::Builder::new()
+            .name("typed-tool-scaffold".to_string())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime");
+                runtime.block_on(async {
+                    let _guard =
+                        crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+                    run_new(&ToolNewArgs {
+                        name: "example-tool".to_string(),
+                        description: None,
+                        dir: Some(destination_arg),
+                        force: false,
+                    })
+                    .await
+                })
+            })
+            .expect("scaffold thread")
+            .join()
+            .expect("scaffold thread completed");
+        result.expect("tool scaffold");
+
+        for relative in ["main.harn", "tests/test_tool.harn"] {
+            let source = fs::read_to_string(destination.join(relative)).expect("generated source");
+            assert!(source.contains("harness: Harness"), "{relative}");
+            assert!(
+                source.contains("agent_dispatch_tool_call(\n    harness.tools,"),
+                "{relative}"
+            );
+            assert_generated_harn_is_formatted(destination.as_path(), relative);
+        }
+    }
+
+    fn assert_generated_harn_is_formatted(root: &Path, relative: &str) {
+        let source = fs::read_to_string(root.join(relative)).expect("generated source");
+        let formatted = harn_fmt::format_source(&source).expect("format generated source");
+        assert_eq!(source, formatted, "{relative} is not canonical");
     }
 
     // The force-overwrite behavior moved to a subprocess parity test in

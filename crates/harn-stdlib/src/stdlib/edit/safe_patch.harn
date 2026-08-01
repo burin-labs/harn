@@ -672,7 +672,7 @@ pub fn edit_rename_symbol(code_index: HarnessCodeIndex, params) {
  * @effects: [host, fs]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: edit_dry_run({plan: [{op: "apply_node", path: "src/lib.rs", query: query, replacement: "{ 42 }"}]})
+ * @example: edit_dry_run(harness.ast, {plan: [{op: "apply_node", path: "src/lib.rs", query: query, replacement: "{ 42 }"}]})
  */
 pub fn edit_dry_run(ast: HarnessAst, params) {
   const plan = params?.plan ?? []

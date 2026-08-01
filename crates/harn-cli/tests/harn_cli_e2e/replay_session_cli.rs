@@ -379,9 +379,11 @@ fn replay_counterfactual_accepts_plan_that_returns_dry_run_result() {
         &plan,
         format!(
             r#"import {{ edit_dry_run }} from "std/edit"
-return edit_dry_run({{plan: [
-  {{op: "safe_text_patch", path: "{}", old_text: "mode = off", new_text: "mode = on"}},
-]}})
+pipeline main(harness: Harness) {{
+  return edit_dry_run(harness.ast, {{plan: [
+    {{op: "safe_text_patch", path: "{}", old_text: "mode = off", new_text: "mode = on"}},
+  ]}})
+}}
 "#,
             target.to_str().unwrap(),
         ),
@@ -503,10 +505,12 @@ fn replay_counterfactual_plan_side_effects_are_isolated() {
     std::fs::write(
         &plan,
         format!(
-            r#"write_file("{}", "mutated before return\n")
-return [
-  {{op: "safe_text_patch", path: "{}", old_text: "safe", new_text: "preview"}},
-]
+            r#"pipeline main(harness: Harness) {{
+  harness.fs.write_text("{}", "mutated before return\n")
+  return [
+    {{op: "safe_text_patch", path: "{}", old_text: "safe", new_text: "preview"}},
+  ]
+}}
 "#,
             target.to_str().unwrap(),
             target.to_str().unwrap(),

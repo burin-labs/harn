@@ -310,9 +310,9 @@ fn init_agent_result_surface_reports_terminal_status() {
 
 fn main(harness: Harness) {
   if argv[0] == "done" {
-    exit(emit_agent_result(harness, {status: "done", visible_text: "complete"}))
+    harness.runtime.exit(emit_agent_result(harness, {status: "done", visible_text: "complete"}))
   }
-  exit(emit_agent_result(harness, {status: "error", error: {message: "provider unavailable"}}))
+  harness.runtime.exit(emit_agent_result(harness, {status: "error", error: {message: "provider unavailable"}}))
 }
 "#,
     )

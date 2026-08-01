@@ -11,6 +11,7 @@ use harn_vm::orchestration::{
     EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome, EvalPackManifest,
 };
 use serde_json::Value as JsonValue;
+use sha2::{Digest, Sha256};
 
 use crate::cli::EvalCodingAgentArgs;
 use crate::commands::eval_model_selector::{selector_is_local, selector_label, ModelSelector};
@@ -328,6 +329,10 @@ fn coding_agent_eval_pack_manifest(
         "replicate".to_string(),
         JsonValue::Number(serde_json::Number::from(replicate)),
     );
+    metadata.insert(
+        "ledger_namespace".to_string(),
+        JsonValue::String(coding_agent_ledger_namespace(run_dir)?),
+    );
     Ok(EvalPackManifest {
         version: 1,
         id: CODING_AGENT_EVAL_PACK_ID.to_string(),
@@ -339,6 +344,23 @@ fn coding_agent_eval_pack_manifest(
         metadata,
         ..EvalPackManifest::default()
     })
+}
+
+fn coding_agent_ledger_namespace(run_dir: &Path) -> Result<String, String> {
+    let output_dir = run_dir
+        .parent()
+        .ok_or_else(|| format!("run directory has no output parent: {}", run_dir.display()))?;
+    let canonical_output_dir = output_dir.canonicalize().map_err(|error| {
+        format!(
+            "failed to resolve coding-agent output directory {}: {error}",
+            output_dir.display()
+        )
+    })?;
+    let digest = Sha256::digest(canonical_output_dir.to_string_lossy().as_bytes());
+    Ok(format!(
+        "{CODING_AGENT_EVAL_PACK_ID}-{}",
+        &hex::encode(digest)[..16]
+    ))
 }
 
 fn coding_agent_executor_spec() -> EvalPackCommandSpec {

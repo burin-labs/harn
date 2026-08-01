@@ -364,6 +364,7 @@ pub fn eval_pack_harness_config_fingerprint(
         "prompt_version",
         "toolFormat",
         "tool_format",
+        "replicate",
         "pipelineRev",
         "pipeline_rev",
         "pipelineRevision",

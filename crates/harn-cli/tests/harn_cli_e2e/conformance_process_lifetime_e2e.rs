@@ -128,12 +128,12 @@ impl LifetimeFixture {
             .expect("fixture FIFO path is shell-safe");
         let source = format!(
             "import {{ process_shell }} from \"std/runtime\"\n\
-             pipeline test(task) {{\n\
-               const start = process_shell(\"sh -c 'echo $$ \
+             pipeline test(harness: Harness, task) {{\n\
+               const start = process_shell(harness.process, \"sh -c 'echo $$ \
                  $HARN_INTERNAL_PROCESS_OWNER_TOKEN >&{report_write}; exec cat \
                  {fifo_shell}' >/dev/null 2>&1{background}\")\n\
                require start?.success, \"helper started\"\n\
-               __io_println(true)\n\
+               harness.stdio.println(true)\n\
              }}\n"
         );
         std::fs::write(suite.join("lifetime.harn"), source).expect("write lifetime fixture");

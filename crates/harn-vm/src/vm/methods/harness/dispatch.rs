@@ -63,7 +63,29 @@ impl crate::vm::Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
+        if handle.kind() == HarnessKind::Testing
+            && matches!(method, "http_mock" | "http_mock_clear" | "http_mock_calls")
+        {
+            return self
+                .call_testing_capability_method(handle, method, args)
+                .await;
+        }
         if let Some(capability) = handle.kind().capability_id() {
+            let deterministic_http_fixture = capability
+                == harn_builtin_meta::CapabilityId::Net
+                && crate::http::harness_http_mock_matches(
+                    handle.inner().fixtures().http_mocks(),
+                    method,
+                    args,
+                );
+            if deterministic_http_fixture {
+                // A harness-owned mock is authority to return deterministic
+                // test data, not authority to perform the represented network
+                // mutation. Preserve the effect receipt while bypassing the
+                // real-world autonomy and execution ceilings.
+                self.record_capability_effects(capability, method, args);
+                return self.call_harness_net_method(handle, method, args).await;
+            }
             let autonomy_decision =
                 crate::autonomy::enforce_capability_side_effect(handle, capability, method, args)
                     .await?;

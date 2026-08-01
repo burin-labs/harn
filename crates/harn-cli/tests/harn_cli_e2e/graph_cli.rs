@@ -276,42 +276,37 @@ fn main(harness: Harness) {
         .expect("requires_capabilities array");
     let cap_strings: Vec<&str> = caps.iter().filter_map(|v| v.as_str()).collect();
     assert!(
-        cap_strings.contains(&"workspace.read_text"),
-        "expected harness.fs.read_text to produce workspace.read_text capability, got: {cap_strings:?}"
+        cap_strings.contains(&"fs.read"),
+        "expected harness.fs.read_text to produce fs.read capability, got: {cap_strings:?}"
     );
     assert!(
-        cap_strings.contains(&"workspace.write_text"),
-        "expected harness.fs.mkdtemp to produce workspace.write_text capability, got: {cap_strings:?}"
+        cap_strings.contains(&"fs.write"),
+        "expected harness.fs.mkdtemp to produce fs.write capability, got: {cap_strings:?}"
     );
     assert!(
-        cap_strings.contains(&"network.http"),
-        "expected harness.net.get to produce network.http capability, got: {cap_strings:?}"
+        cap_strings.contains(&"network.access"),
+        "expected harness.net.get to produce network.access capability, got: {cap_strings:?}"
     );
     assert!(
-        cap_strings.contains(&"llm.catalog"),
-        "expected harness.llm.* to produce llm.catalog capability, got: {cap_strings:?}"
+        cap_strings.contains(&"llm.model"),
+        "expected harness.llm.* to produce llm.model capability, got: {cap_strings:?}"
     );
     assert!(
-        cap_strings.contains(&"terminal.dimensions"),
-        "expected harness.term.width to produce terminal.dimensions capability, got: {cap_strings:?}"
-    );
-    assert!(
-        cap_strings.contains(&"terminal.read_password"),
-        "expected harness.term.read_password to produce terminal.read_password capability, got: {cap_strings:?}"
+        cap_strings.contains(&"stdio.access"),
+        "expected harness.term and harness.stdio calls to produce stdio.access capability, got: {cap_strings:?}"
     );
     let effects = main["effects"].as_array().expect("effects array");
     let effect_strings: Vec<&str> = effects.iter().filter_map(|v| v.as_str()).collect();
     assert!(
-        effect_strings.contains(&"llm.catalog"),
-        "expected harness.llm.* to produce llm.catalog effect, got: {effect_strings:?}"
+        effect_strings.contains(&"llm.model"),
+        "expected harness.llm.* to produce llm.model effect, got: {effect_strings:?}"
     );
     let host_calls = main["host_calls"].as_array().expect("host_calls array");
     let host_call_strings: Vec<&str> = host_calls.iter().filter_map(|v| v.as_str()).collect();
     assert!(
         host_call_strings.contains(&"harness.llm.catalog")
-            && host_call_strings.contains(&"harness.llm.providers")
-            && host_call_strings.contains(&"harness.crypto.sha256"),
-        "expected harness.llm.* and harness.crypto.sha256 host calls, got: {host_call_strings:?}"
+            && host_call_strings.contains(&"harness.llm.providers"),
+        "expected harness.llm.* host calls, got: {host_call_strings:?}"
     );
     assert!(
         host_call_strings.contains(&"harness.term.width"),

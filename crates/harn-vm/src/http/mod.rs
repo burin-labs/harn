@@ -15,6 +15,7 @@ mod streaming;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use mock::HttpMockRegistry;
 use mock::{
     clear_http_mocks, http_mock_calls_value, parse_mock_responses, register_http_mock,
     reset_http_mocks,
@@ -34,12 +35,101 @@ pub(crate) async fn execute_http_request(
     client::vm_execute_http_request(method, url, options).await
 }
 
-pub(crate) async fn execute_http_verb(
+pub(crate) async fn execute_harness_http_request(
+    registry: &HttpMockRegistry,
+    method: &str,
+    url: &str,
+    options: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::vm_execute_http_request_with_mocks(registry, method, url, options).await
+}
+
+pub(crate) fn register_harness_http_mock(
+    registry: &HttpMockRegistry,
+    method: String,
+    url_pattern: String,
+    response: &crate::value::DictMap,
+) {
+    registry.register(method, url_pattern, parse_mock_responses(response));
+}
+
+pub(crate) async fn execute_harness_http_verb(
+    registry: &HttpMockRegistry,
     method: &str,
     has_body: bool,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    client::http_verb_handler(method, has_body, args).await
+    client::harness_mocks::http_verb_handler(registry, method, has_body, args).await
+}
+
+pub(crate) async fn execute_harness_http_download(
+    registry: &HttpMockRegistry,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::download(registry, args).await
+}
+
+pub(crate) async fn execute_harness_http_stream_open(
+    registry: &HttpMockRegistry,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::stream_open(registry, args).await
+}
+
+pub(crate) async fn execute_harness_http_session_request(
+    registry: &HttpMockRegistry,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::session_request(registry, args).await
+}
+
+pub(crate) fn harness_http_mock_matches(
+    registry: &HttpMockRegistry,
+    harness_method: &str,
+    args: &[VmValue],
+) -> bool {
+    let (http_method, url) = if harness_method == "request" {
+        match (args.first(), args.get(1)) {
+            (Some(VmValue::String(method)), Some(VmValue::String(url))) => {
+                (method.to_string(), url.to_string())
+            }
+            _ => return false,
+        }
+    } else if harness_method == "session_request" {
+        match (args.get(1), args.get(2)) {
+            (Some(VmValue::String(method)), Some(VmValue::String(url))) => {
+                (method.to_string(), url.to_string())
+            }
+            _ => return false,
+        }
+    } else {
+        let default_method = match harness_method {
+            "get" => "GET",
+            "post" => "POST",
+            "put" => "PUT",
+            "patch" => "PATCH",
+            "delete" => "DELETE",
+            "download" | "stream_open" => "GET",
+            _ => return false,
+        };
+        let Some(VmValue::String(url)) = args.first() else {
+            return false;
+        };
+        let options_index = match harness_method {
+            "download" => Some(2),
+            "stream_open" => Some(1),
+            _ => None,
+        };
+        let http_method = options_index
+            .and_then(|index| args.get(index))
+            .and_then(VmValue::as_dict)
+            .and_then(|options| options.get("method"))
+            .map(VmValue::display)
+            .filter(|method| !method.is_empty())
+            .unwrap_or_else(|| default_method.to_string());
+        (http_method, url.to_string())
+    };
+    registry.has_match(&http_method, &url)
 }
 #[cfg(test)]
 use mock::{mock_call_headers_value, redact_mock_call_url};

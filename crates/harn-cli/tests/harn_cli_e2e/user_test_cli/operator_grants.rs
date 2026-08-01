@@ -83,8 +83,9 @@ fn operator_grant_supports_run_and_stale_lease_user_test_receipts() {
         format!(
             r#"import {{ git_push }} from "std/git"
 
-pipeline main(_task) {{
+pipeline main(harness: Harness, _task) {{
   const receipt = git_push(
+    harness.process,
     "origin",
     "HEAD:refs/heads/main",
     {},
@@ -94,7 +95,7 @@ pipeline main(_task) {{
   assert_eq(receipt.approval?.schema, "harn.operator-approval-grant.v1")
   assert_eq(receipt.approval?.approver, "cli")
   assert_eq(receipt.approval?.grant_source, "explicit_cli_flag")
-  __io_println("grant-ok")
+  harness.stdio.println("grant-ok")
 }}
 "#,
             harn_string(&fixture.repo),
@@ -107,6 +108,7 @@ pipeline main(_task) {{
         &fixture,
         &[
             "run",
+            "--allow-process-network",
             "--approve-risky",
             "git.push",
             run_script.to_str().unwrap(),
@@ -125,8 +127,9 @@ pipeline main(_task) {{
         format!(
             r#"import {{ git_push }} from "std/git"
 
-pipeline test_stale_lease(_task) {{
+pipeline test_stale_lease(harness: Harness, _task) {{
   const receipt = git_push(
+    harness.process,
     "origin",
     "HEAD:refs/heads/main",
     {},
@@ -165,8 +168,9 @@ fn user_test_requires_a_matching_operator_grant_across_worker_threads() {
         format!(
             r#"import {{ git_push }} from "std/git"
 
-pipeline test_protected_push(_task) {{
+pipeline test_protected_push(harness: Harness, _task) {{
   const receipt = git_push(
+    harness.process,
     "origin",
     "HEAD:refs/heads/main",
     {},

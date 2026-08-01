@@ -23,7 +23,7 @@ fn write_hello_script(dir: &std::path::Path) -> std::path::PathBuf {
     let path = dir.join("hello.harn");
     std::fs::write(
         &path,
-        "import { greeting } from \"./helper\"\n\npipeline default(task) {\n  log(greeting())\n}\n",
+        "import { greeting } from \"./helper\"\n\npipeline default(harness: Harness, task) {\n  harness.stdio.log(greeting())\n}\n",
     )
     .expect("write hello.harn");
     path
@@ -259,7 +259,13 @@ fn time_run_eval_mode_emits_envelope() {
     let cache_dir = tempfile::tempdir().expect("cache dir");
 
     let output = Command::new(binary_path())
-        .args(["time", "run", "--json", "-e", "__io_println(\"inline\")"])
+        .args([
+            "time",
+            "run",
+            "--json",
+            "-e",
+            "harness.stdio.println(\"inline\")",
+        ])
         .current_dir(workdir.path())
         .env("HARN_CACHE_DIR", cache_dir.path())
         .env("HARN_BYTECODE_CACHE", "1")

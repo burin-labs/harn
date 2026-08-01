@@ -46,12 +46,12 @@ pub fn fail(kind: string) -> string {
   throw "boom:" + kind
 }
 
-pub fn spin(label: string) -> string {
+pub fn spin(harness: Harness, label: string) -> string {
   let ticks = 0
   while !is_cancelled() {
     ticks = ticks + 1
-    mcp_report_progress(ticks, {message: "spinning " + label})
-    sleep(1ms)
+    harness.tools.mcp_report_progress(ticks, {message: "spinning " + label})
+    harness.clock.sleep_ms(1ms)
   }
   return "cancelled:" + label
 }
@@ -64,7 +64,7 @@ fn write_script_surface_fixture(temp: &TempDir) {
     fs::write(
         temp.path().join("script_surface.harn"),
         r##"
-pipeline main(task) {
+pipeline main(harness: Harness, task) {
   let tools = tool_registry()
   tools = tool_define(tools, "echo", "Echo input", {
     parameters: {text: "string"},
@@ -81,16 +81,16 @@ pipeline main(task) {
       let i = 0
       while i < args.steps {
         i = i + 1
-        if mcp_report_progress(i, {total: args.steps, message: "step " + to_string(i)}) {
+        if harness.tools.mcp_report_progress(i, {total: args.steps, message: "step " + to_string(i)}) {
           sent = sent + 1
         }
       }
       "ramp:" + to_string(args.steps) + ":sent=" + to_string(sent)
     }
   })
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
 
-  mcp_resource({
+  harness.tools.mcp_resource({
     uri: "docs://readme",
     name: "README",
     description: "Project readme",
@@ -98,7 +98,7 @@ pipeline main(task) {
     text: "# Hello from MCP"
   })
 
-  mcp_resource_template({
+  harness.tools.mcp_resource_template({
     uri_template: "config://{key}",
     name: "Config",
     description: "Config values",
@@ -107,7 +107,7 @@ pipeline main(task) {
     handler: { args -> "value:" + args.key }
   })
 
-  mcp_prompt({
+  harness.tools.mcp_prompt({
     name: "review",
     description: "Review prompt",
     arguments: [
@@ -414,7 +414,7 @@ fn serve_mcp_preserves_explicit_pipeline_exit_code() {
     let temp = TempDir::new().unwrap();
     fs::write(
         temp.path().join("exit.harn"),
-        "pipeline main(task) {\n  __io_eprintln(\"before explicit exit\")\n  exit(17)\n}\n",
+        "pipeline main(harness: Harness, task) {\n  harness.stdio.eprintln(\"before explicit exit\")\n  harness.runtime.exit(17)\n}\n",
     )
     .unwrap();
 
@@ -995,8 +995,8 @@ fn write_elicit_fixture(temp: &TempDir) {
     fs::write(
         temp.path().join("server.harn"),
         r#"
-pipeline default() {
-  mcp_server_metadata(
+pipeline default(harness: Harness) {
+  harness.tools.mcp_server_metadata(
     {
       name: "harn-http-elicit-race-test",
       version: "1.0.0",
@@ -1011,7 +1011,7 @@ pipeline default() {
     {
       parameters: {prompt: "string"},
       handler: { args ->
-        const response = mcp_elicit(
+        const response = harness.tools.mcp_elicit(
           {
             message: args.prompt ?? "Choose environment",
             requestedSchema: {
@@ -1027,7 +1027,7 @@ pipeline default() {
       },
     },
   )
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
 }
 "#,
     )

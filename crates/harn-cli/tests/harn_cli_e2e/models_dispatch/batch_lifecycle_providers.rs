@@ -11,6 +11,10 @@ fn write_http_fixture(path: &std::path::Path, mocks: serde_json::Value) {
     .expect("write HTTP fixture");
 }
 
+fn fixture_calls_diagnostic(path: &std::path::Path) -> String {
+    fs::read_to_string(path).unwrap_or_else(|error| format!("<unavailable: {error}>"))
+}
+
 #[test]
 fn models_batch_xai_manifest_fixture_is_valid_json() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -104,7 +108,11 @@ fn models_batch_azure_openai_live_fixture_covers_submit_cancel_status_and_downlo
         ],
         &[],
     );
-    assert_eq!(prepared.exit_code, 0, "stderr={}", prepared.stderr);
+    assert_eq!(
+        prepared.exit_code, 0,
+        "stdout={}\nstderr={}",
+        prepared.stdout, prepared.stderr
+    );
     let prepared_json = parse_json(&prepared.stdout, "Azure prepare");
     let prepared_data = success_data(&prepared_json);
     let prepare_receipt = prepared_data["receipt"].as_str().expect("prepare receipt");
@@ -164,7 +172,14 @@ fn models_batch_azure_openai_live_fixture_covers_submit_cancel_status_and_downlo
             ),
         ],
     );
-    assert_eq!(submitted.exit_code, 0, "stderr={}", submitted.stderr);
+    assert_eq!(
+        submitted.exit_code,
+        0,
+        "stdout={}\nstderr={}\nfixture calls={}",
+        submitted.stdout,
+        submitted.stderr,
+        fixture_calls_diagnostic(&calls)
+    );
     let submitted_json = parse_json(&submitted.stdout, "Azure submit");
     let submitted_job = &success_data(&submitted_json)["jobs"][0];
     assert_eq!(submitted_job["provider_batch_id"], "az-batch");
@@ -343,7 +358,11 @@ fn models_batch_bedrock_live_fixture_covers_signed_lifecycle_and_rejoin_wire() {
         ],
         &[],
     );
-    assert_eq!(prepared.exit_code, 0, "stderr={}", prepared.stderr);
+    assert_eq!(
+        prepared.exit_code, 0,
+        "stdout={}\nstderr={}",
+        prepared.stdout, prepared.stderr
+    );
     let prepared_json = parse_json(&prepared.stdout, "Bedrock prepare");
     let prepared_data = success_data(&prepared_json);
     let job = &prepared_data["jobs"][0];
@@ -406,7 +425,14 @@ fn models_batch_bedrock_live_fixture_covers_signed_lifecycle_and_rejoin_wire() {
         ],
         &aws_env,
     );
-    assert_eq!(submitted.exit_code, 0, "stderr={}", submitted.stderr);
+    assert_eq!(
+        submitted.exit_code,
+        0,
+        "stdout={}\nstderr={}\nfixture calls={}",
+        submitted.stdout,
+        submitted.stderr,
+        fixture_calls_diagnostic(&calls)
+    );
     let submission_text = fs::read_to_string(&submission).expect("submission");
     assert!(!submission_text.contains("fixture-secret-key"));
     assert!(!submission_text.contains("AKIATESTFIXTURE"));
