@@ -739,7 +739,10 @@ fn prompt_mark_rendered_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 // wraps every push in a matching `defer { __pop_llm_render_context() }`.
 #[harn_builtin(
     exposure = "harness.agent.push_llm_render_context",
-    effects = ["state.mutate@const=llm-render-context"],
+    // Ambient thread-local render frame for `.harn.prompt` branching — not a
+    // durable model-facing state effect. Claiming state.mutate rejected the
+    // push under agent-loop execution policy and aborted turns mid-flight.
+    effects = [],
     sig = "__push_llm_render_context(provider: string, model?: string) -> bool",
     category = "strings"
 )]
@@ -762,8 +765,10 @@ fn push_llm_render_context_impl(args: &[VmValue], _out: &mut String) -> Result<V
 
 #[harn_builtin(
     exposure = "harness.agent.pop_llm_render_context",
-    effects = ["state.mutate@const=llm-render-context"],
-    sig = "__pop_llm_render_context() -> nil", category = "strings"
+    // Pair with `push_llm_render_context`: ambient stack pop, not durable state.
+    effects = [],
+    sig = "__pop_llm_render_context() -> nil",
+    category = "strings"
 )]
 fn pop_llm_render_context_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     crate::stdlib::template::pop_llm_render_context();
