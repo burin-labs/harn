@@ -13,9 +13,10 @@ const RERANK_BUILTINS: &[&VmBuiltinDef] = &[&SELF_CERTAINTY_BUILTIN_DEF];
 
 /// Return length-normalized confidence from token log probabilities.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "__llm_self_certainty(text_or_result: string|dict, options?: dict|nil) -> float",
+    exposure = "harness.llm.self_certainty",
+    effects = ["llm.write@arg1.provider", "llm.write@arg1.model"],
+    sig = "__cap_llm_self_certainty(text_or_result: string|dict, options?: dict|nil) -> float",
+    aliases = ["__llm_self_certainty"],
     kind = "async",
     category = "llm.rerank"
 )]

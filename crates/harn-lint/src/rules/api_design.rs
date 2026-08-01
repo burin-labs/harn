@@ -1,13 +1,13 @@
 //! API-shape guidance for capability attenuation and explicit call sites.
 //!
-//! These are deliberately conservative, non-fixing diagnostics. A root
+//! These are deliberately conservative diagnostics. A root
 //! `Harness` is right at entry and orchestration boundaries; an ordinary
 //! helper whose entire observed authority is one or two direct sub-handles
 //! should advertise those narrower nominal types instead. Public APIs with
 //! four or more same-typed positional values should use a named closed record
 //! so call sites state which value is which.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use harn_parser::{visit, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 use harn_vm::HarnessKind;
@@ -120,7 +120,8 @@ fn check_capability_attenuation(
         let mut direct_subhandle_uses = 0usize;
         let mut unknown_member = false;
         let mut subhandles = BTreeSet::new();
-        visit::walk_program(body, &mut |node| match &node.node {
+        let mut shadowed_in_nested_callable = false;
+        let mut record_use = |node: &SNode| match &node.node {
             Node::Identifier(name) if name == &parameter.name => identifier_uses += 1,
             Node::PropertyAccess { object, property }
             | Node::OptionalPropertyAccess { object, property }
@@ -133,14 +134,29 @@ fn check_capability_attenuation(
                     unknown_member = true;
                 }
             }
+            Node::FnDecl { params, .. } | Node::Closure { params, .. }
+                if params.iter().any(|nested| nested.name == parameter.name) =>
+            {
+                shadowed_in_nested_callable = true;
+            }
             _ => {}
-        });
+        };
+        // Defaults execute in the callable's scope and may use authority just
+        // like the body. Ignoring them can falsely attenuate a root parameter,
+        // leaving the default with an unreachable grant.
+        for candidate in params {
+            if let Some(default) = &candidate.default_value {
+                visit::walk_node(default, &mut record_use);
+            }
+        }
+        visit::walk_program(body, &mut record_use);
 
         // Suppress when the root escapes, is forwarded, or touches an unknown
         // member: local syntax no longer proves attenuation is safe.
         if identifier_uses == 0
             || identifier_uses != direct_subhandle_uses
             || unknown_member
+            || shadowed_in_nested_callable
             || !(1..=2).contains(&subhandles.len())
         {
             continue;
@@ -168,11 +184,19 @@ fn check_capability_attenuation(
             } else {
                 LintSeverity::Info
             },
-            suggestion: Some(format!(
-                "accept the narrow capability parameter{} `{signature}` and pass the sub-handle{} at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration",
-                if subhandles.len() == 1 { "" } else { "s" },
-                if subhandles.len() == 1 { "" } else { "s" },
-            )),
+            suggestion: Some(if subhandles.len() == 1 {
+                format!(
+                    "accept the narrow capability parameter `{signature}` and pass the sub-handle at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration"
+                )
+            } else {
+                format!(
+                    "accept one closed capability record `{{{signature}}}` and construct it from the two sub-handles at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration"
+                )
+            }),
+            // Narrowing a signature is only safe when every call site moves
+            // with it, and a caller can live in a module this rule never sees.
+            // Until the fixer resolves capability requirements across module
+            // boundaries, this stays advisory.
             fix: None,
         });
     }
@@ -184,24 +208,25 @@ fn check_homogeneous_positionals(
     declaration: &SNode,
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
-    let mut groups: HashMap<String, Vec<&str>> = HashMap::new();
+    let mut groups: Vec<(TypeExpr, Vec<&str>)> = Vec::new();
     for parameter in params {
         let Some(ty) = parameter.type_expr.as_ref() else {
             continue;
         };
         if parameter.rest
-            || parameter.default_value.is_some()
             || matches!(ty, TypeExpr::Named(name) if name == HarnessKind::Root.type_name())
         {
             continue;
         }
-        groups
-            .entry(format!("{ty:?}"))
-            .or_default()
-            .push(parameter.name.as_str());
+        if let Some((_, names)) = groups.iter_mut().find(|(candidate, _)| candidate == ty) {
+            names.push(parameter.name.as_str());
+        } else {
+            groups.push((ty.clone(), vec![parameter.name.as_str()]));
+        }
     }
     let Some(names) = groups
-        .values()
+        .iter()
+        .map(|(_, names)| names)
         .filter(|names| names.len() >= POSITIONAL_THRESHOLD)
         .max_by_key(|names| names.len())
     else {
@@ -243,8 +268,8 @@ mod tests {
 
     #[test]
     fn recommends_one_narrow_handle_for_an_ordinary_helper() {
-        let diagnostics =
-            lint("fn load(harness: Harness, path: string) { return harness.fs.read_text(path) }");
+        let source = "fn load(harness: Harness, path: string) { harness.fs.exists(path); return harness.fs.read_text(path) }";
+        let diagnostics = lint(source);
         assert_eq!(
             diagnostics
                 .iter()
@@ -257,6 +282,59 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("HarnessFs"));
+        assert_eq!(
+            diagnostics[0].repair().expect("repair").safety,
+            harn_parser::RepairSafety::SurfaceChanging
+        );
+        // Advisory only: a caller can live in a module this rule never sees,
+        // so narrowing the signature is not safe to apply automatically.
+        assert!(diagnostics[0].fix.is_none());
+    }
+
+    #[test]
+    fn recommends_a_closed_capability_record_for_two_capability_helpers() {
+        let multi = lint(
+            "fn copy(harness: Harness, path: string) { harness.obs.log_info(path); return harness.fs.read_text(path) }",
+        );
+        assert_eq!(multi.len(), 1);
+        let suggestion = multi[0].suggestion.as_deref().expect("suggestion");
+        assert!(
+            suggestion.contains("{fs: HarnessFs, obs: HarnessObs}"),
+            "{suggestion}"
+        );
+        assert!(multi[0].fix.is_none());
+    }
+
+    #[test]
+    fn does_not_fix_shadowed_receivers() {
+        let shadowed = lint(
+            "fn load(harness: Harness) { const callback = { harness: Harness -> harness.fs.cwd() }; return harness.fs.cwd() }",
+        );
+        assert!(shadowed
+            .iter()
+            .all(|diagnostic| diagnostic.rule != ATTENUATION_RULE));
+    }
+
+    #[test]
+    fn parameter_defaults_participate_in_authority_analysis() {
+        let multi = lint(
+            "fn load(harness: Harness, root: string = harness.fs.cwd()) { return harness.agent.current_id() }",
+        );
+        assert_eq!(multi.len(), 1);
+        // The default executes in the callable's scope, so its `harness.fs`
+        // use has to widen the recommendation alongside the body's agent use.
+        let suggestion = multi[0].suggestion.as_deref().expect("suggestion");
+        assert!(
+            suggestion.contains("{agent: HarnessAgent, fs: HarnessFs}"),
+            "{suggestion}"
+        );
+
+        let escaped = lint(
+            "fn load(harness: Harness, root: string = project_root(harness)) { return harness.fs.read_text(root) }",
+        );
+        assert!(escaped
+            .iter()
+            .all(|diagnostic| diagnostic.rule != ATTENUATION_RULE));
     }
 
     #[test]
@@ -343,6 +421,16 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("closed-record"));
+    }
+
+    #[test]
+    fn counts_defaulted_parameters_that_remain_positional_at_call_sites() {
+        let diagnostics = lint(
+            "pub fn connect(host: string, user: string, password: string = \"\", database: string = \"\") {}",
+        );
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == POSITIONAL_RULE));
     }
 
     #[test]

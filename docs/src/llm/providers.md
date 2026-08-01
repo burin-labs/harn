@@ -459,8 +459,8 @@ onto Interactions — so check the route before switching it. The
 honors project overrides:
 
 ```harn
-const caps = provider_capabilities("gemini", "gemini-3.5-flash")
-__io_println(to_string(caps.live_endpoint_family ?? "nil"))   // gemini_interactions
+const caps = harness.llm.provider_capabilities("gemini", "gemini-3.5-flash")
+harness.stdio.println(to_string(caps.live_endpoint_family ?? "nil"))   // gemini_interactions
 ```
 
 `harn provider dispatch-explain gemini <model>` also prints `live_endpoint`, but
@@ -499,7 +499,7 @@ The provider support table is generated from
 capability surface without carrying vendor-specific knowledge:
 
 ```harn
-const caps = provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   native_tools: true, text_tool_wire_format_supported: true,
 //   preferred_tool_format: "native", tool_mode_parity: "unknown",
@@ -680,14 +680,14 @@ vLLM, llama.cpp, and MLX to `[[provider.openai]]` by default.
 Two programmatic helpers mirror the `harn.toml` path for cases where
 editing the manifest is awkward:
 
-- `provider_capabilities_install(toml_src)` — install overrides from
+- `harness.llm.provider_capabilities_install(toml_src)` — install overrides from
   a TOML string (same layout as `capabilities.toml`, without the
   `capabilities.` prefix: just `[[provider.<name>]]`). Useful when a
   script detects a proxied endpoint at runtime.
-- `provider_capabilities_clear()` — revert to shipped defaults.
+- `harness.llm.provider_capabilities_clear()` — revert to shipped defaults.
 
 Batch APIs are modeled as Harn provider capability data instead of Burin eval
-branches. `provider_capabilities(provider, model)` reports an effective
+branches. `harness.llm.provider_capabilities(provider, model)` reports an effective
 `batch_api` flag from the provider catalog's `batch` feature plus any
 model-specific capability row, and only reports lifecycle details when that
 effective flag is true: provider wire/input shape, published limits,

@@ -621,9 +621,10 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "agent_session_current_id() -> string?",
+    exposure = "harness.agent.current_id",
+    effects = ["state.read@const=current-agent-session"],
+    sig = "__cap_agent_current_id() -> string?",
+    aliases = ["agent_session_current_id"],
     category = "agent.session",
     doc = "Return the innermost active agent session id."
 )]

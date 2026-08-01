@@ -40,18 +40,12 @@ pub enum Category {
     Rcv,
     Mat,
     Pol,
-    /// Meta — restrictions on what may appear in compile-time-evaluated
-    /// positions (e.g. `const` initializers). Reserved by issue #1791
-    /// (bounded const-eval).
+    /// Meta restrictions for bounded compile-time evaluation (issue #1791).
     Met,
-    /// Const-eval sandbox — bounded compile-time interpreter limits and
-    /// capability violations (steps, recursion depth, fs/net/env/process
-    /// denial). Reserved by issue #1791.
+    /// Const-eval sandbox limits and capability violations (issue #1791).
     Cst,
-    /// Bytecode compilation — structural/codegen errors the type checker does
-    /// not catch but that prevent the program from running (e.g. unsupported
-    /// nested match patterns, `break` outside a loop, malformed string
-    /// interpolation). Surfaced by `harn check` as well as `harn run`.
+    /// Structural/codegen errors that prevent bytecode execution and surface
+    /// through both `harn check` and `harn run`.
     Cmp,
 }
 
@@ -153,9 +147,7 @@ macro_rules! diagnostic_codes {
                 }
             }
 
-            /// Full markdown explanation embedded at compile time. Every
-            /// registered code must ship a matching file under
-            /// `diagnostic_codes/explanations/`; missing files fail the build.
+            /// Embedded markdown; a missing explanation file fails the build.
             pub const fn explanation(self) -> &'static str {
                 match self {
                     $(Code::$variant => include_str!(
@@ -360,6 +352,7 @@ diagnostic_codes! {
     LintTemplateUnknownFilter, "HARN-LNT-068", Lnt, "prompt template names a filter the engine does not implement";
     LintBroadHarnessParameter, "HARN-LNT-069", Lnt, "helper accepts root Harness but uses only narrow capability handles";
     LintHomogeneousPositionalApi, "HARN-LNT-070", Lnt, "public API has too many same-typed positional parameters";
+    LintAmbientHarnessMethod, "HARN-LNT-071", Lnt, "global builtin has moved to a Harness capability method";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";
@@ -857,6 +850,8 @@ impl Code {
             Code::LintAmbientRandomBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_RANDOM),
             Code::LintAmbientNetBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_NET),
             Code::LintAmbientStdioBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS),
+            Code::LintAmbientHarnessMethod => Some(&REPAIR_BINDINGS_THREAD_HARNESS_METHOD),
+            Code::LintBroadHarnessParameter => Some(&REPAIR_BINDINGS_ATTENUATE_HARNESS),
             Code::LintDeprecatedLlmOptions => Some(&REPAIR_LLM_MIGRATE_DEPRECATED_OPTION),
             Code::LintTemplateProviderIdentityBranch => Some(&REPAIR_LLM_USE_CAPABILITY_FLAG),
             Code::LintPromptInjectionRisk => Some(&REPAIR_PROMPTS_ESCAPE_INJECTION),
@@ -958,6 +953,12 @@ const REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM: RepairTemplate = RepairTemplat
     id: "bindings/thread-harness-needs-param",
     summary: "Add a `harness: Harness` parameter where the stdio capability handle is required and update local callers",
     safety: RepairSafety::SurfaceChanging,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS_METHOD: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-method",
+    summary: "Replace the ambient runtime builtin with its typed `harness.*` method and thread authority through local callers",
+    safety: RepairSafety::ScopeLocal,
 };
 
 const REPAIR_BINDINGS_THREAD_HARNESS_CLOCK: RepairTemplate = RepairTemplate {
@@ -1104,6 +1105,12 @@ const REPAIR_STDLIB_MIGRATE_RENAMED: RepairTemplate = RepairTemplate {
     safety: RepairSafety::ScopeLocal,
 };
 
+const REPAIR_BINDINGS_ATTENUATE_HARNESS: RepairTemplate = RepairTemplate {
+    id: "bindings/attenuate-harness",
+    summary: "Replace the root Harness parameter with the single capability the helper uses",
+    safety: RepairSafety::SurfaceChanging,
+};
+
 const REPAIR_LLM_MIGRATE_DEPRECATED_OPTION: RepairTemplate = RepairTemplate {
     id: "llm/migrate-deprecated-option",
     summary: "Replace the deprecated option with its supported equivalent",
@@ -1164,9 +1171,8 @@ const REPAIR_MANUAL_NEEDS_HUMAN: RepairTemplate = RepairTemplate {
     safety: RepairSafety::NeedsHuman,
 };
 
-/// Every distinct repair template registered by [`Code::repair_template`],
-/// in source order. Used by the catalog wire-up in E1.7 and by tests
-/// asserting the catalog is healthy.
+/// Every repair template registered by [`Code::repair_template`], in source
+/// order for catalog generation and health checks.
 pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_INSERT_EXPLICIT_CONVERSION,
     &REPAIR_REWRITE_STRING_INTERPOLATION,
@@ -1179,6 +1185,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_RENAME_SHADOW,
     &REPAIR_BINDINGS_THREAD_HARNESS,
     &REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM,
+    &REPAIR_BINDINGS_THREAD_HARNESS_METHOD,
     &REPAIR_BINDINGS_THREAD_HARNESS_CLOCK,
     &REPAIR_BINDINGS_THREAD_HARNESS_FS,
     &REPAIR_BINDINGS_THREAD_HARNESS_ENV,
@@ -1203,6 +1210,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_COLLECTION_PREFER_LAZY,
     &REPAIR_DEAD_CODE_REMOVE,
     &REPAIR_STDLIB_MIGRATE_RENAMED,
+    &REPAIR_BINDINGS_ATTENUATE_HARNESS,
     &REPAIR_LLM_MIGRATE_DEPRECATED_OPTION,
     &REPAIR_LLM_ADD_SCHEMA,
     &REPAIR_LLM_USE_CAPABILITY_FLAG,

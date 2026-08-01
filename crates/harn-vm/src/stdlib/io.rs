@@ -620,22 +620,10 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
     }
     use harn_builtin_meta::CapabilityId;
     vm.register_capability_method(CapabilityId::Term, "set_color_mode", set_color_mode_builtin);
-    vm.register_capability_method(CapabilityId::Stdio, "log", log_builtin);
-    vm.register_capability_method(CapabilityId::Stdio, "progress", progress_builtin);
     vm.register_capability_method(CapabilityId::Stdio, "read_stdin", read_stdin_builtin);
     vm.register_capability_method(CapabilityId::Stdio, "is_stdin_tty", is_stdin_tty_builtin);
     vm.register_capability_method(CapabilityId::Stdio, "is_stdout_tty", is_stdout_tty_builtin);
     vm.register_capability_method(CapabilityId::Stdio, "is_stderr_tty", is_stderr_tty_builtin);
-    vm.register_capability_method(CapabilityId::Observability, "log_debug", log_debug_builtin);
-    vm.register_capability_method(CapabilityId::Observability, "log_info", log_info_builtin);
-    vm.register_capability_method(CapabilityId::Observability, "log_warn", log_warn_builtin);
-    vm.register_capability_method(CapabilityId::Observability, "log_error", log_error_builtin);
-    vm.register_capability_method(
-        CapabilityId::Observability,
-        "set_level",
-        log_set_level_builtin,
-    );
-    vm.register_capability_method(CapabilityId::Observability, "log_json", log_json_builtin);
     vm.register_capability_method(CapabilityId::Testing, "stdin_set", mock_stdin_builtin);
     vm.register_capability_method(CapabilityId::Testing, "stdin_reset", unmock_stdin_builtin);
     vm.register_capability_method(CapabilityId::Testing, "tty_set", mock_tty_builtin);
@@ -653,9 +641,10 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "log(message: any) -> nil",
+    exposure = "harness.stdio.log",
+    effects = ["stdio.write@const=stdout"],
+    sig = "__cap_stdio_log(message: any) -> nil",
+    aliases = ["log"],
     category = "io",
     doc = "Write a Harn-prefixed message to stdout."
 )]
@@ -1148,9 +1137,10 @@ pub(crate) fn read_password_legacy_value(prompt: &str) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "log_debug(message: any, fields?: dict) -> nil",
+    exposure = "harness.obs.log_debug",
+    effects = ["observability.write@const=log"],
+    sig = "__cap_obs_log_debug(message: any, fields?: dict) -> nil",
+    aliases = ["log_debug"],
     category = "io",
     doc = "Write a structured debug log line."
 )]
@@ -1160,9 +1150,10 @@ fn log_debug_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "log_info(message: any, fields?: dict) -> nil",
+    exposure = "harness.obs.log_info",
+    effects = ["observability.write@const=log"],
+    sig = "__cap_obs_log_info(message: any, fields?: dict) -> nil",
+    aliases = ["log_info"],
     category = "io",
     doc = "Write a structured info log line."
 )]
@@ -1172,9 +1163,10 @@ fn log_info_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "log_warn(message: any, fields?: dict) -> nil",
+    exposure = "harness.obs.log_warn",
+    effects = ["observability.write@const=log"],
+    sig = "__cap_obs_log_warn(message: any, fields?: dict) -> nil",
+    aliases = ["log_warn"],
     category = "io",
     doc = "Write a structured warning log line."
 )]
@@ -1184,9 +1176,10 @@ fn log_warn_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "log_error(message: any, fields?: dict) -> nil",
+    exposure = "harness.obs.log_error",
+    effects = ["observability.write@const=log"],
+    sig = "__cap_obs_log_error(message: any, fields?: dict) -> nil",
+    aliases = ["log_error"],
     category = "io",
     doc = "Write a structured error log line."
 )]
@@ -1196,9 +1189,10 @@ fn log_error_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "log_set_level(level: string) -> nil",
+    exposure = "harness.obs.set_level",
+    effects = ["observability.mutate@const=log-level"],
+    sig = "__cap_obs_set_level(level: string) -> nil",
+    aliases = ["log_set_level"],
     category = "io",
     doc = "Set the minimum structured log level."
 )]
@@ -1218,9 +1212,10 @@ fn log_set_level_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "progress(phase: string, message: string, progress_or_options?: any, total?: int) -> nil",
+    exposure = "harness.stdio.progress",
+    effects = ["stdio.write@const=stdout"],
+    sig = "__cap_stdio_progress(phase: string, message: string, progress_or_options?: any, total?: int) -> nil",
+    aliases = ["progress"],
     category = "io",
     doc = "Write a human-readable progress log line."
 )]
@@ -1230,9 +1225,10 @@ fn progress_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "log_json(key: string, value?: any) -> nil",
+    exposure = "harness.obs.log_json",
+    effects = ["observability.write@const=log"],
+    sig = "__cap_obs_log_json(key: string, value?: any) -> nil",
+    aliases = ["log_json"],
     category = "io",
     doc = "Write a structured JSON log line."
 )]

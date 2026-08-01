@@ -2,28 +2,28 @@ capability_method!(
     llm_catalog,
     "harness.llm.catalog",
     ["llm.read@const=catalog"],
-    "__cap_llm_catalog() -> list",
+    harn_builtin_meta::signatures::LLM_CATALOG.with_name("__cap_llm_catalog"),
     "Read the model catalog."
 );
 capability_method!(
     llm_catalog_refresh,
     "harness.llm.catalog_refresh",
     ["llm.mutate@const=catalog"],
-    "__cap_llm_catalog_refresh() -> list",
+    harn_builtin_meta::signatures::LLM_CATALOG_REFRESH.with_name("__cap_llm_catalog_refresh"),
     "Refresh and read the model catalog."
 );
 capability_method!(
     llm_providers,
     "harness.llm.providers",
     ["llm.read@const=providers"],
-    "__cap_llm_providers() -> list",
+    harn_builtin_meta::signatures::LLM_PROVIDER_STATUS.with_name("__cap_llm_providers"),
     "Read provider status."
 );
 capability_method!(
     llm_call,
     "harness.llm.call",
     ["llm.write@arg2.provider", "llm.write@arg2.model"],
-    "__cap_llm_call(prompt: string, system?: string, options?: dict) -> dict",
+    harn_builtin_meta::signatures::LLM_CALL.with_name("__cap_llm_call"),
     "Execute one routed model call."
 );
 capability_method!(

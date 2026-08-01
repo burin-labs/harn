@@ -72,6 +72,16 @@ impl HarnessKind {
     pub const Runtime: Self = Self(Some(harn_builtin_meta::CapabilityId::Runtime));
     pub const Interaction: Self = Self(Some(harn_builtin_meta::CapabilityId::Interaction));
     pub const Project: Self = Self(Some(harn_builtin_meta::CapabilityId::Project));
+    pub const Dashboard: Self = Self(Some(harn_builtin_meta::CapabilityId::Dashboard));
+    pub const Workspace: Self = Self(Some(harn_builtin_meta::CapabilityId::Workspace));
+    pub const MergeCaptain: Self = Self(Some(harn_builtin_meta::CapabilityId::MergeCaptain));
+    pub const Session: Self = Self(Some(harn_builtin_meta::CapabilityId::Session));
+    pub const Permission: Self = Self(Some(harn_builtin_meta::CapabilityId::Permission));
+    pub const Text: Self = Self(Some(harn_builtin_meta::CapabilityId::Text));
+    pub const Lsp: Self = Self(Some(harn_builtin_meta::CapabilityId::Lsp));
+    pub const Credentials: Self = Self(Some(harn_builtin_meta::CapabilityId::Credentials));
+    pub const PrMonitor: Self = Self(Some(harn_builtin_meta::CapabilityId::PrMonitor));
+    pub const Workflow: Self = Self(Some(harn_builtin_meta::CapabilityId::Workflow));
     pub const Testing: Self = Self(Some(harn_builtin_meta::CapabilityId::Testing));
 
     pub const fn capability_id(self) -> Option<harn_builtin_meta::CapabilityId> {
@@ -140,6 +150,16 @@ impl HarnessKind {
         HarnessKind::Runtime,
         HarnessKind::Interaction,
         HarnessKind::Project,
+        HarnessKind::Dashboard,
+        HarnessKind::Workspace,
+        HarnessKind::MergeCaptain,
+        HarnessKind::Session,
+        HarnessKind::Permission,
+        HarnessKind::Text,
+        HarnessKind::Lsp,
+        HarnessKind::Credentials,
+        HarnessKind::PrMonitor,
+        HarnessKind::Workflow,
         HarnessKind::Testing,
     ];
 
@@ -181,6 +201,16 @@ impl HarnessKind {
         HarnessKind::Runtime,
         HarnessKind::Interaction,
         HarnessKind::Project,
+        HarnessKind::Dashboard,
+        HarnessKind::Workspace,
+        HarnessKind::MergeCaptain,
+        HarnessKind::Session,
+        HarnessKind::Permission,
+        HarnessKind::Text,
+        HarnessKind::Lsp,
+        HarnessKind::Credentials,
+        HarnessKind::PrMonitor,
+        HarnessKind::Workflow,
         HarnessKind::Testing,
     ];
 }
@@ -407,243 +437,6 @@ impl HarnessInner {
     }
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct CapabilityFixtureState {
-    inner: Mutex<CapabilityFixtureScopes>,
-    http_mocks: crate::http::HttpMockRegistry,
-}
-
-#[derive(Debug, Default)]
-struct CapabilityFixtureScopes {
-    current: CapabilityFixtureInner,
-    stack: Vec<CapabilityFixtureInner>,
-}
-
-#[derive(Debug, Default, Clone)]
-struct CapabilityFixtureInner {
-    enabled: bool,
-    responses: BTreeMap<(String, String), VecDeque<CapabilityFixtureResponse>>,
-    calls: Vec<CapabilityFixtureCall>,
-}
-
-#[derive(Debug, Clone)]
-struct CapabilityFixtureResponse {
-    when: Option<crate::value::DictMap>,
-    repeat: bool,
-    result: Result<crate::VmValue, String>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CapabilityFixtureCall {
-    pub(crate) capability: String,
-    pub(crate) member: String,
-    pub(crate) args: Vec<crate::VmValue>,
-    pub(crate) host_operation: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CapabilityDriverFixtureContract {
-    pub(crate) capability: harn_builtin_meta::CapabilityId,
-    pub(crate) method: &'static str,
-}
-
-/// Host-driver response seams whose enclosing capability remains VM-owned.
-///
-/// These are deliberately distinct from public harness methods: a fixture for
-/// `interaction.approval_response` supplies a human decision while still
-/// exercising Harn's request envelope, quorum, signing, waitpoint, and receipt
-/// logic. Keep this registry closed so testing cannot invent ambient wire
-/// operations.
-pub(crate) const CAPABILITY_DRIVER_FIXTURES: &[CapabilityDriverFixtureContract] = &[
-    CapabilityDriverFixtureContract {
-        capability: harn_builtin_meta::CapabilityId::Interaction,
-        method: "question_response",
-    },
-    CapabilityDriverFixtureContract {
-        capability: harn_builtin_meta::CapabilityId::Interaction,
-        method: "approval_response",
-    },
-    CapabilityDriverFixtureContract {
-        capability: harn_builtin_meta::CapabilityId::Interaction,
-        method: "dual_control_response",
-    },
-    CapabilityDriverFixtureContract {
-        capability: harn_builtin_meta::CapabilityId::Interaction,
-        method: "escalation_response",
-    },
-    CapabilityDriverFixtureContract {
-        capability: harn_builtin_meta::CapabilityId::Embed,
-        method: "text_response",
-    },
-];
-
-pub(crate) fn is_capability_driver_fixture(
-    capability: harn_builtin_meta::CapabilityId,
-    method: &str,
-) -> bool {
-    CAPABILITY_DRIVER_FIXTURES
-        .iter()
-        .any(|contract| contract.capability == capability && contract.method == method)
-}
-
-impl CapabilityFixtureState {
-    pub(crate) fn clear(&self) {
-        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
-        scopes.current = CapabilityFixtureInner {
-            enabled: true,
-            ..CapabilityFixtureInner::default()
-        };
-        drop(scopes);
-        self.http_mocks.clear();
-    }
-
-    pub(crate) fn http_mocks(&self) -> &crate::http::HttpMockRegistry {
-        &self.http_mocks
-    }
-
-    pub(crate) fn push_scope(&self) {
-        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
-        let previous = std::mem::replace(
-            &mut scopes.current,
-            CapabilityFixtureInner {
-                enabled: true,
-                ..CapabilityFixtureInner::default()
-            },
-        );
-        scopes.stack.push(previous);
-    }
-
-    pub(crate) fn pop_scope(&self) -> Result<(), crate::VmError> {
-        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
-        let Some(previous) = scopes.stack.pop() else {
-            return Err(crate::VmError::Runtime(
-                "HarnessTesting.pop_scope called without a matching push_scope".to_string(),
-            ));
-        };
-        scopes.current = previous;
-        Ok(())
-    }
-
-    pub(crate) fn respond(
-        &self,
-        capability: &str,
-        member: &str,
-        response: Result<crate::VmValue, String>,
-        when: Option<crate::value::DictMap>,
-        repeat: bool,
-    ) {
-        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
-        scopes.current.enabled = true;
-        scopes
-            .current
-            .responses
-            .entry((capability.to_string(), member.to_string()))
-            .or_default()
-            .push_back(CapabilityFixtureResponse {
-                when,
-                repeat,
-                result: response,
-            });
-    }
-
-    pub(crate) fn dispatch(
-        &self,
-        capability: harn_builtin_meta::CapabilityId,
-        method: &str,
-        args: &[crate::VmValue],
-    ) -> Option<Result<crate::VmValue, crate::VmError>> {
-        self.dispatch_target(capability.field_name(), method, args, false)
-    }
-
-    pub(crate) fn dispatch_host(
-        &self,
-        capability: &str,
-        operation: &str,
-        params: &crate::value::DictMap,
-    ) -> Option<Result<crate::VmValue, crate::VmError>> {
-        self.dispatch_target(
-            capability,
-            operation,
-            &[crate::VmValue::dict(params.clone())],
-            true,
-        )
-    }
-
-    fn dispatch_target(
-        &self,
-        capability: &str,
-        member: &str,
-        args: &[crate::VmValue],
-        host_operation: bool,
-    ) -> Option<Result<crate::VmValue, crate::VmError>> {
-        let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
-        if !scopes.current.enabled {
-            return None;
-        }
-        let key = (capability.to_string(), member.to_string());
-        if !scopes.current.responses.contains_key(&key) {
-            return None;
-        }
-        scopes.current.calls.push(CapabilityFixtureCall {
-            capability: capability.to_string(),
-            member: member.to_string(),
-            args: args.to_vec(),
-            host_operation,
-        });
-        let queue = scopes
-            .current
-            .responses
-            .get_mut(&key)
-            .expect("fixture key checked above");
-        let selector_match = |fixture: &CapabilityFixtureResponse| {
-            let Some(selector) = fixture.when.as_ref() else {
-                return false;
-            };
-            let Some(actual) = args.first().and_then(crate::VmValue::as_dict) else {
-                return false;
-            };
-            selector.iter().all(|(key, expected)| {
-                actual
-                    .get(key)
-                    .is_some_and(|value| crate::value::values_equal(value, expected))
-            })
-        };
-        let matched = queue
-            .iter()
-            .position(selector_match)
-            .or_else(|| queue.iter().position(|fixture| fixture.when.is_none()));
-        match matched {
-            Some(index) => {
-                let fixture = if queue[index].repeat {
-                    Some(queue[index].clone())
-                } else {
-                    queue.remove(index)
-                };
-                fixture.map(|fixture| {
-                    fixture.result.map_err(|message| {
-                        crate::VmError::Thrown(crate::VmValue::String(arcstr::ArcStr::from(
-                            message,
-                        )))
-                    })
-                })
-            }
-            None => Some(Err(crate::VmError::Runtime(format!(
-                "no fixture for {capability}.{member} matched arguments {}",
-                crate::VmValue::List(std::sync::Arc::new(args.to_vec())).display()
-            )))),
-        }
-    }
-
-    pub(crate) fn calls(&self) -> Vec<CapabilityFixtureCall> {
-        self.inner
-            .lock()
-            .expect("capability fixtures poisoned")
-            .current
-            .calls
-            .clone()
-    }
-}
-
 #[derive(Debug)]
 pub(crate) enum HarnessMode {
     Real,
@@ -761,6 +554,23 @@ impl MockHarnessState {
             .expect("capability responses poisoned")
             .get_mut(&(capability, method.to_string()))
             .and_then(VecDeque::pop_front)
+    }
+
+    /// Whether a canned response is still queued for this capability method.
+    ///
+    /// `capability_response` consumes one response per call, so dispatch needs
+    /// this to decide whether the mock owns a method without spending the
+    /// answer it is deciding about.
+    pub(crate) fn has_capability_response(
+        &self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+    ) -> bool {
+        self.capability_responses
+            .lock()
+            .expect("capability responses poisoned")
+            .get(&(capability, method.to_string()))
+            .is_some_and(|queued| !queued.is_empty())
     }
 
     pub(crate) fn advance_clock(&self, duration: std::time::Duration) {
@@ -1290,6 +1100,7 @@ impl HarnessClock {
     }
 }
 
+include!("harness/fixtures.rs");
 include!("harness/value.rs");
 include!("harness/tests.rs");
 /// fs sub-handle: `read_file`, `write_file`, `exists`, `list_dir`,

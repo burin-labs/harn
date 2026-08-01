@@ -946,6 +946,9 @@ pub struct TypedParam {
     pub default_value: Option<Box<SNode>>,
     /// If true, this is a rest parameter (`...name`) that collects remaining arguments.
     pub rest: bool,
+    /// Complete source span from an optional `...` through the default value.
+    /// Synthetic parameters use [`Span::dummy`].
+    pub span: Span,
 }
 
 impl TypedParam {
@@ -956,6 +959,7 @@ impl TypedParam {
             type_expr: None,
             default_value: None,
             rest: false,
+            span: Span::dummy(),
         }
     }
 
@@ -966,6 +970,7 @@ impl TypedParam {
             type_expr: Some(type_expr),
             default_value: None,
             rest: false,
+            span: Span::dummy(),
         }
     }
 

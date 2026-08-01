@@ -227,6 +227,7 @@ pub fn harness_fs_replacement(name: &str) -> Option<&'static str> {
         "glob" => Some("harness.fs.glob"),
         "find_text" => Some("harness.fs.find_text"),
         "find_evidence" => Some("harness.fs.find_evidence"),
+        "cwd" => Some("harness.fs.cwd"),
         _ => None,
     }
 }
@@ -461,12 +462,7 @@ fn render_diagnostic_inner(input: RenderDiagnostic<'_>) -> String {
 
         if let Some(label_text) = label {
             // Span width must use char count, not byte offsets, so carets align with the source text.
-            let span_len = if span.end > span.start && span.start <= source.len() {
-                let span_text = &source[span.start.min(source.len())..span.end.min(source.len())];
-                span_text.chars().count().max(1)
-            } else {
-                1
-            };
+            let span_len = diagnostic_span_char_len(source, span);
             let col_num = col_num.max(1);
             let padding = " ".repeat(col_num - 1);
             let carets = style_fragment(&"^".repeat(span_len), severity_color, true);
@@ -640,12 +636,7 @@ fn render_related_span(
             line_num,
             width = gutter_width + 1,
         ));
-        let span_len = if span.end > span.start && span.start <= source.len() {
-            let span_text = &source[span.start.min(source.len())..span.end.min(source.len())];
-            span_text.chars().count().max(1)
-        } else {
-            1
-        };
+        let span_len = diagnostic_span_char_len(source, span);
         let padding = " ".repeat(col_num.max(1) - 1);
         let carets = style_fragment(&"^".repeat(span_len), severity_color, true);
         out.push_str(&format!(
@@ -654,6 +645,24 @@ fn render_related_span(
             width = gutter_width + 1,
         ));
     }
+}
+
+fn diagnostic_span_char_len(source: &str, span: &Span) -> usize {
+    if span.end <= span.start || span.start >= source.len() {
+        return 1;
+    }
+    let mut start = span.start.min(source.len());
+    while start > 0 && !source.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = span.end.min(source.len());
+    while end < source.len() && !source.is_char_boundary(end) {
+        end += 1;
+    }
+    source
+        .get(start..end)
+        .map(|text| text.chars().count().max(1))
+        .unwrap_or(1)
 }
 
 fn severity_color(severity: &str) -> Color {
@@ -851,6 +860,25 @@ mod tests {
         );
         assert!(result.contains("line2"));
         assert!(result.contains("^^^^^"));
+    }
+
+    #[test]
+    fn diagnostic_rendering_tolerates_offsets_inside_utf8_codepoints() {
+        disable_colors();
+        let source = "// capability owner — narrow helper";
+        let em_dash = source.find('—').expect("em dash");
+        let span = Span::with_offsets(0, em_dash + 1, 1, 1);
+        let output = render_diagnostic(
+            source,
+            "unicode.harn",
+            &span,
+            "warning",
+            "legacy comment",
+            Some("rewrite this comment"),
+            None,
+        );
+        assert!(output.contains("capability owner — narrow helper"));
+        assert!(output.contains("rewrite this comment"));
     }
 
     #[test]

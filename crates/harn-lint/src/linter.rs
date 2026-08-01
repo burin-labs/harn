@@ -24,6 +24,7 @@ use crate::fixes::{
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
 use crate::rule::{Rule, RuleCtx};
 
+mod ambient;
 mod connector_effects;
 mod discarded_result;
 mod public_api_types;
@@ -31,11 +32,6 @@ mod walk;
 
 use discarded_result::BlockKind;
 
-/// Inputs threaded into [`Linter::check_ambient_capability_builtin`].
-/// One value per ambient call site keeps the per-sub-handle wrappers
-/// (`check_ambient_clock_builtin`, etc.) tiny: they only carry the
-/// per-capability replacement table, diagnostic code, rule name, and
-/// the `require_harness_in_scope` switch.
 struct AmbientCapabilityLint<'a> {
     name: &'a str,
     span: Span,

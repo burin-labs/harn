@@ -8,6 +8,7 @@ import {
   llm_text,
   llm_tool_call,
   llm_tool_calls,
+  with_capability_fixtures,
   with_fs,
   with_llm_script,
   with_scenario,
@@ -15,6 +16,14 @@ import {
 } from "std/testing"
 
 pipeline test_testing_toolkit(harness: Harness, task) {
+  // Optional fixture controls are genuinely optional record fields, not
+  // required fields whose values happen to admit nil.
+  const fixture_result = with_capability_fixtures(
+    harness.testing,
+    [{capability: "runtime", method: "pipeline_input", result: {fixture: "minimal"}}],
+    { -> harness.runtime.pipeline_input() },
+  )
+  assert_eq(fixture_result.fixture, "minimal")
   // === LLM turn builders produce the shapes `llm_mock` accepts ===
   assert_eq(llm_text("hi"), {text: "hi"})
   assert_eq(llm_done(), {text: "##DONE##"})

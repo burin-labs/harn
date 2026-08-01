@@ -79,6 +79,7 @@ impl Compiler {
                             type_expr: None,
                             default_value: None,
                             rest: false,
+                            span: harn_lexer::Span::dummy(),
                         }],
                         return_type: None,
                         throws: None,

@@ -75,10 +75,15 @@ Authority narrows as control moves inward. Entrypoints and orchestration
 functions may accept root `Harness`; ordinary helpers should accept the
 smallest coherent nominal capability interface that describes their work.
 One handle is not automatically better than two, and a coordinator that
-genuinely combines several capabilities may retain the root. The
-`capability-attenuation` lint reports helpers whose root parameter is used only
-through one or two direct sub-handles and suggests the corresponding
-`Harness*` signature.
+genuinely combines several capabilities may retain the root. A helper that
+needs one capability accepts that `Harness*` handle. A helper that needs two
+accepts them as one record, such as `{fs: HarnessFs, tools: HarnessTools}`,
+which the caller builds as `{fs: harness.fs, tools: harness.tools}`. A record
+keeps the grant as narrow as two separate parameters would, and names each
+capability at the call site so two handles of similar shape cannot be swapped
+by mistake. The `capability-attenuation` lint reports both shapes, and offers
+to rewrite the signature and its call sites together when the surrounding code
+proves the rewrite is safe.
 
 `Harness` and every `Harness*` sub-handle are runtime authority, not domain
 data. They cannot be JSON-serialized, placed in the persistent store,
@@ -103,15 +108,27 @@ contract manifest is the exhaustive method reference; these groups describe
 the stable ownership boundaries:
 
 | Fields | Ownership |
-|---|---|---|
+|---|---|
 | `stdio`, `term`, `clock`, `env`, `random`, `system` | Process observation, user I/O, time, and entropy |
 | `fs`, `process`, `net`, `channels`, `secrets` | External I/O and durable communication |
 | `llm`, `agent`, `tools`, `interaction`, `verdict` | Model, worker, tool, human-interaction, and decision authority |
 | `tenant`, `auth`, `obs`, `runtime`, `project` | Identity, authentication, telemetry, runtime, and project state |
+| `dashboard`, `workspace`, `session`, `permission` | Host presentation, workspace services, session facts, approvals |
+| `text`, `lsp`, `credentials` | Host text analysis, language services, and product credential custody |
+| `merge_captain`, `pr_monitor`, `workflow` | Repository integration and durable host-workflow services |
 | `ast`, `code_index`, `scanner`, `rules`, `lint` | Language and code-analysis services |
 | `computer`, `embed`, `memory`, `sqlite`, `postgres` | Native interaction and data services |
 | `fs_watch`, `host_lease`, `secret_store`, `terminal` | Long-lived resource factories |
 | `testing` | Per-harness deterministic fixtures, captured calls, and virtual-clock control |
+
+Optional host protocol methods are part of this same typed surface. A host may
+implement `harness.workspace.search(request)` or
+`harness.project.peer_message(request)` through its bridge, but a script cannot
+add a method of its own or reach the host by passing a method name as a string.
+One capability registry drives type checking, effect inference, runtime
+dispatch, fixture validation, and contract exports. A host's capability
+manifest says which optional methods that host implements: it can remove a
+method from what a script may call, never add one.
 
 Write-side actions:
 

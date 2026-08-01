@@ -460,9 +460,10 @@ async fn cost_route_builtin(
 
 /// Execute one LLM call and return the normalized Harn result dict.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig_expr = harn_builtin_meta::signatures::LLM_CALL,
+    exposure = "harness.llm.call",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL.with_name("__cap_llm_call"),
+    aliases = ["llm_call"],
     kind = "async",
     category = "llm.host"
 )]
@@ -475,9 +476,10 @@ async fn llm_call_builtin(
 
 /// Execute one streaming LLM call and return the normalized Harn result dict.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "llm_stream_call(prompt: string, system?: string, options?: @LLM_CALL_OPTIONS) -> stream",
+    exposure = "harness.llm.stream_call",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig = "__cap_llm_stream_call(prompt: string, system?: string, options?: dict) -> stream",
+    aliases = ["llm_stream_call"],
     kind = "async",
     category = "llm.host"
 )]
@@ -583,11 +585,13 @@ fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// context_window, runtime_context_window, capabilities, harn_version, harness} for the
 /// most recent llm_call on this thread. Fields are nil before any llm_call has run. The
 /// model-callable surface (current_model() / current_provider() / ...) is opt-in via
-/// `runtime_introspection_tools(registry)`; this builtin is the underlying read.
+/// `runtime_introspection_tools(registry)`; the typed Harness method is the
+/// source API for this underlying read.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "runtime_introspection() -> dict",
+    exposure = "harness.runtime.introspection",
+    effects = ["host.read@const=runtime-tools"],
+    sig = "__cap_runtime_introspection() -> dict",
+    aliases = ["runtime_introspection"],
     category = "llm.introspection"
 )]
 fn runtime_introspection_builtin_wrap(
@@ -639,9 +643,10 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
 
 /// Execute one LLM call and return a non-throwing safe envelope.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig_expr = harn_builtin_meta::signatures::LLM_CALL_SAFE,
+    exposure = "harness.llm.call_safe",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_SAFE.with_name("__cap_llm_call_safe"),
+    aliases = ["llm_call_safe"],
     kind = "async",
     category = "llm.host"
 )]
@@ -657,9 +662,11 @@ async fn llm_call_safe_builtin(
 
 /// Call an LLM for JSON data and return parsed schema-valid data.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED,
+    exposure = "harness.llm.call_structured",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED
+        .with_name("__cap_llm_call_structured"),
+    aliases = ["llm_call_structured"],
     kind = "async",
     category = "llm.structured"
 )]
@@ -674,9 +681,11 @@ async fn llm_call_structured_builtin(
 
 /// Call an LLM for JSON data and return a non-throwing schema envelope.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_SAFE,
+    exposure = "harness.llm.call_structured_safe",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_SAFE
+        .with_name("__cap_llm_call_structured_safe"),
+    aliases = ["llm_call_structured_safe"],
     kind = "async",
     category = "llm.structured"
 )]
@@ -698,9 +707,11 @@ async fn llm_call_structured_safe_builtin(
 
 /// Call an LLM for JSON data and return a diagnostic structured-output envelope.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_RESULT,
+    exposure = "harness.llm.call_structured_result",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_RESULT
+        .with_name("__cap_llm_call_structured_result"),
+    aliases = ["llm_call_structured_result"],
     kind = "async",
     category = "llm.structured"
 )]
@@ -713,9 +724,11 @@ async fn llm_call_structured_result_builtin(
 
 /// Recover malformed JSON text against a schema using deterministic and optional LLM repair.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig_expr = harn_builtin_meta::signatures::SCHEMA_RECOVER,
+    exposure = "harness.llm.recover_schema",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::SCHEMA_RECOVER
+        .with_name("__cap_llm_recover_schema"),
+    aliases = ["schema_recover"],
     kind = "async",
     category = "schema.recovery"
 )]
@@ -728,9 +741,10 @@ async fn schema_recover_builtin(
 
 /// Run a closure behind the provider rate limiter with retryable-error backoff.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "with_rate_limit(provider: string, callback: closure, options?: dict|nil) -> any",
+    exposure = "harness.llm.with_rate_limit",
+    effects = ["state.mutate@arg0", "llm.write@arg0"],
+    sig = "__cap_llm_with_rate_limit(provider: string, callback: closure, options?: dict) -> any",
+    aliases = ["with_rate_limit"],
     kind = "async",
     category = "llm.rate_limit"
 )]
@@ -797,9 +811,10 @@ async fn with_rate_limit_builtin(
 
 /// Execute a fill-in-the-middle LLM completion request.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig_expr = harn_builtin_meta::signatures::LLM_COMPLETION,
+    exposure = "harness.llm.completion",
+    effects = ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_COMPLETION.with_name("__cap_llm_completion"),
+    aliases = ["llm_completion"],
     kind = "async",
     category = "llm.host"
 )]
@@ -856,9 +871,10 @@ async fn llm_completion_builtin(
 
 /// Execute a channel-based streaming LLM request.
 #[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "llm_stream(prompt: string, system?: string, options?: dict) -> channel",
+    exposure = "harness.llm.stream",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig = "__cap_llm_stream(prompt: string, system?: string, options?: dict) -> channel",
+    aliases = ["llm_stream"],
     kind = "async",
     category = "llm.host"
 )]

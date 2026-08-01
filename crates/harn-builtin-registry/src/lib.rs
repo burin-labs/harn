@@ -20,8 +20,21 @@ use harn_builtin_meta::{BuiltinContract, BuiltinSignature};
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinManifestEntry {
     pub name: &'static str,
+    /// The builtin's primary name. Equal to [`Self::name`] except on an alias
+    /// entry, which repeats the primary's signature and contract under a second
+    /// name. Projections keyed by something other than the name — a capability
+    /// method, say — must use only the entry where these two agree, or they
+    /// will see one builtin as several.
+    pub canonical_name: &'static str,
     pub signature: &'static BuiltinSignature,
     pub contract: BuiltinContract,
+}
+
+impl BuiltinManifestEntry {
+    /// Whether this entry is the builtin's primary name rather than an alias.
+    pub fn is_canonical(&self) -> bool {
+        self.name == self.canonical_name
+    }
 }
 
 /// A complete description of one builtin: its signature, its aliases, the

@@ -101,13 +101,27 @@ source for checking, policy, receipts, and reference generation. Test fixtures
 are scoped to one harness through `harness.testing`, including
 `respond`/`calls`, HTTP and transport mocks, and the virtual clock.
 
-Keep root `Harness` at entrypoints and genuine orchestration boundaries.
-Helpers accept the smallest coherent nominal capability interface they need.
+Globals that returned one host value now read a field off a snapshot:
+`platform()` and `arch()` are `harness.system.platform().os` and `.arch`;
+`username()`, `hostname()`, and `pid()` come from `harness.system.identity()`;
+path globals live on `harness.fs`. `harn fix` rewrites these calls, including
+calls inside `${...}` interpolation, and adds the parameter to callers that
+need to supply the handle.
+
+Keep root `Harness` at entrypoints and at boundaries that genuinely coordinate
+several capabilities. Elsewhere pass the narrowest handle the function needs.
 `capability-attenuation` warns when a helper takes root but uses only one
-sub-handle (and reports an informational suggestion for two). Harness values
-are runtime authority: never serialize, store, or checkpoint them. For public
-APIs with four or more easy-to-swap parameters of the same type,
-`homogeneous-positional-api` recommends one named closed record.
+sub-handle, and suggests a named record when it uses exactly two. The
+surface-changing fixer updates the signatures and call sites it can prove are
+safe. Harness values are runtime authority: never serialize, store, or
+checkpoint them. For public APIs with four or more easy-to-swap parameters of
+the same type, `homogeneous-positional-api` recommends one named record.
+
+Optional host protocols use the same typed surface, for example
+`harness.workspace.search(request)`, `harness.lsp.diagnostics(request)`, and
+`harness.pr_monitor.gh_snapshot(request)`. A host manifest says which of these
+optional methods that host implements. It cannot add methods a script could
+call.
 
 ## Merge captain eval loop
 
@@ -1377,7 +1391,7 @@ live_endpoint_family = "gemini_interactions"
 ```
 
 Not every model is served by both endpoints; confirm with
-`provider_capabilities(provider, model).live_endpoint_family`, which honors
+`harness.llm.provider_capabilities(provider, model).live_endpoint_family`, which honors
 project overrides.
 
 See [Providers](../src/llm/providers.md#gemini-interactions-api) for the full
@@ -1641,7 +1655,7 @@ thinking_modes = ["effort"]
 Query the effective matrix at runtime:
 
 ```harn
-const caps = provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider: "anthropic", model: "claude-opus-4-7",
 //   native_tools: true, text_tool_wire_format_supported: true,
@@ -1682,11 +1696,11 @@ if "bm25" in caps.tool_search {
 
 Additional helpers:
 
-- `provider_capabilities_install(toml_src)` — install overrides from
+- `harness.llm.provider_capabilities_install(toml_src)` — install overrides from
   a TOML string (same layout as the shipped table). Useful for
   scripts that detect a proxied endpoint at runtime without editing
   `harn.toml`.
-- `provider_capabilities_clear()` — revert to the shipped defaults.
+- `harness.llm.provider_capabilities_clear()` — revert to the shipped defaults.
 
 Rule schema (per `[[provider.<name>]]` entry). Shared defaults can also be
 set under `[provider_defaults.<name>]`:

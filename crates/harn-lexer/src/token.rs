@@ -118,7 +118,16 @@ impl FixEdit {
     /// on-save fixer must agree on byte-for-byte.
     pub fn dedupe_overlapping(edits: &[FixEdit]) -> Vec<FixEdit> {
         let mut sorted = edits.to_vec();
-        sorted.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
+        // At the same offset, apply a replacement before an insertion. This
+        // makes independently synthesized "project this argument" and
+        // "prepend a new argument" edits compose as
+        // `root, root.capability` instead of overwriting the insertion.
+        sorted.sort_by_key(|edit| {
+            (
+                std::cmp::Reverse(edit.span.start),
+                std::cmp::Reverse(edit.span.end),
+            )
+        });
         let mut accepted: Vec<FixEdit> = Vec::new();
         for edit in sorted {
             let overlaps = accepted
@@ -174,6 +183,20 @@ mod fix_edit_tests {
             FixEdit::dedupe_overlapping(&[edit(2, 6, "x"), edit(4, 8, "y")]).len(),
             1
         );
+    }
+
+    #[test]
+    fn apply_all_composes_replacement_then_insertion_at_same_offset() {
+        let source = "call(harness, value)";
+        let start = source.find("harness").unwrap();
+        let out = FixEdit::apply_all(
+            source,
+            &[
+                edit(start, start, "harness, "),
+                edit(start, start + "harness".len(), "harness.fs"),
+            ],
+        );
+        assert_eq!(out, "call(harness, harness.fs, value)");
     }
 }
 

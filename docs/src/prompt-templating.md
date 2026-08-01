@@ -322,7 +322,7 @@ llm = {
   provider: "anthropic",          // resolved provider name
   model:    "claude-3-5-sonnet",  // resolved model id
   family:   "anthropic-claude",   // canonical review-diversity family token
-  capabilities: { ... },          // result of provider_capabilities()
+  capabilities: { ... },          // result of harness.llm.provider_capabilities()
 }
 ```
 

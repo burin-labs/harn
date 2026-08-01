@@ -262,7 +262,7 @@ pub fn llm_call_count(llm: HarnessLlm) -> int {
  * pushed via `harness.llm.mock_enqueue(...)` and consumed in order by the body. The
  * prior LLM-mock queue plus call log is restored on exit — even if
  * the body throws. Nested scopes stack the same way as
- * `with_host_mocks`.
+ * `with_capability_fixtures`.
  *
  * Returns whatever `body` returns. Re-raises any thrown error after
  * cleanup.

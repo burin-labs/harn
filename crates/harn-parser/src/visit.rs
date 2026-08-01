@@ -537,6 +537,7 @@ mod tests {
                 type_expr: None,
                 default_value: Some(Box::new(default)),
                 rest: false,
+                span: harn_lexer::Span::dummy(),
             }],
             return_type: None,
             throws: None,

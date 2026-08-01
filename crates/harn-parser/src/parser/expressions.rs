@@ -1242,6 +1242,7 @@ impl Parser {
             } else {
                 break;
             }
+            let param_start = self.current_span();
             let is_rest = if self.check(&TokenKind::Dot) {
                 let p1 = self.pos + 1;
                 let p2 = self.pos + 2;
@@ -1289,6 +1290,7 @@ impl Parser {
                 type_expr,
                 default_value,
                 rest: is_rest,
+                span: Span::merge(param_start, self.prev_span()),
             });
             if self.check(&TokenKind::Comma) {
                 self.advance();
