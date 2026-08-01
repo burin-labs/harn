@@ -45,7 +45,7 @@ cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
-  lint-actions|lint-md)
+  lint-actions-source|lint-md)
     exit 0
     ;;
 esac

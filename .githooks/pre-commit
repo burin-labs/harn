@@ -148,7 +148,7 @@ fi
 
 if hook_paths_match "$changed" "$HOOK_ACTIONS_PATTERN"; then
   echo "=== Pre-commit: checking GitHub Actions workflows ==="
-  make lint-actions
+  make lint-actions-source
   echo "    GitHub Actions workflows OK."
 else
   echo "=== Pre-commit: skipping GitHub Actions lint (no workflow/hook changes) ==="
