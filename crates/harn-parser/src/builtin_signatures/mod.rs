@@ -32,8 +32,8 @@ mod types;
 
 pub use lookup::{
     builtin_return_type, capability_method_entry, is_builtin, is_untyped_boundary_source,
-    iter_builtin_metadata, iter_builtin_names, legacy_capability_method_entry, lookup,
-    lookup_capability_method, static_signature_names,
+    iter_builtin_metadata, iter_builtin_names, legacy_ambient_cap_global_entry,
+    legacy_capability_method_entry, lookup, lookup_capability_method, static_signature_names,
 };
 pub use types::{
     ty_to_type_expr, BuiltinMetadata, BuiltinSignature, BuiltinSignatureExt, Param,
@@ -142,5 +142,27 @@ mod tests {
     #[test]
     fn return_type_none_for_unknown_names() {
         assert_eq!(builtin_return_type("not_a_real_thing"), None);
+    }
+}
+
+#[cfg(test)]
+mod ambient_prefixed_lookup_tests {
+    use super::*;
+
+    #[test]
+    fn ambient_lookup_resolves_declared_capability_global_names() {
+        // Ensure contracts are visible the same way the CLI installs them.
+        let _ = harn_capability_contracts::manifest();
+        std::env::set_var("HARN_LEGACY_AMBIENT_CAPABILITIES", "1");
+        assert!(
+            lookup("runtime_context_set").is_some(),
+            "ambient must resolve declared global name runtime_context_set"
+        );
+        assert!(
+            lookup("context_set").is_some(),
+            "ambient must still resolve unique short method context_set"
+        );
+        std::env::remove_var("HARN_LEGACY_AMBIENT_CAPABILITIES");
+        assert!(lookup("runtime_context_set").is_none());
     }
 }

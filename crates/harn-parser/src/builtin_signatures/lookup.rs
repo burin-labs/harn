@@ -39,6 +39,9 @@ pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
         if let Some(entry) = legacy_capability_method_entry(name) {
             return Some(entry.signature);
         }
+        if let Some(entry) = legacy_ambient_cap_global_entry(name) {
+            return Some(entry.signature);
+        }
         if let Some(canonical) = crate::legacy_builtin_alias_target(name) {
             return lookup(canonical);
         }
@@ -59,16 +62,30 @@ pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
 pub fn legacy_capability_method_entry(
     name: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
-    let mut matches = harn_builtin_registry::installed_manifest()
-        .into_iter()
-        .filter(|entry| {
-            matches!(
-                entry.contract.exposure,
-                BuiltinExposure::HarnessMethod { method, .. } if method == name
-            )
-        });
+    let mut matches = ambient_harness_method_entries().filter(|entry| {
+        matches!(
+            entry.contract.exposure,
+            BuiltinExposure::HarnessMethod { method, .. } if method == name
+        )
+    });
     let entry = matches.next()?;
     matches.next().is_none().then_some(entry)
+}
+
+/// Resolve a pre-cutover ambient global whose typed contract is published under
+/// the hidden `__cap_<name>` spelling (for example `runtime_context_set` →
+/// `__cap_runtime_context_set` for `harness.runtime.context_set`).
+pub fn legacy_ambient_cap_global_entry(
+    name: &str,
+) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
+    ambient_harness_method_entries().find(|entry| entry.name.strip_prefix("__cap_") == Some(name))
+}
+
+fn ambient_harness_method_entries(
+) -> impl Iterator<Item = &'static harn_builtin_registry::BuiltinManifestEntry> {
+    harn_builtin_registry::installed_manifest()
+        .into_iter()
+        .chain(harn_capability_contracts::manifest().iter().copied())
 }
 
 /// Resolve the signature paired with one capability method contract.

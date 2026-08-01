@@ -333,6 +333,12 @@ impl Vm {
     /// Restore unqualified capability-method calls for an explicitly opted-in
     /// legacy process. Only uniquely owned method names are projected; a name
     /// shared by two capabilities remains unavailable.
+    ///
+    /// Pre-cutover ambient globals whose contracts are published as
+    /// `__cap_<name>` (for example `runtime_context_set`) are recognized by
+    /// the parser/compiler under the ambient bridge and dispatched by
+    /// [`Self::try_dispatch_runtime_context_builtin`] / harness-method
+    /// projection rather than by duplicating every hidden contract name here.
     pub(crate) fn project_legacy_capability_globals(&mut self) {
         if self.global("harness").is_none() {
             return;
@@ -361,6 +367,26 @@ impl Vm {
                 None => {}
             }
         }
+    }
+
+    fn try_dispatch_runtime_context_builtin(
+        &mut self,
+        name: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        if !Self::is_runtime_context_builtin(name) {
+            return None;
+        }
+        Some(match name {
+            "runtime_context" | "task_current" => {
+                Ok(crate::runtime_context::runtime_context_value(self))
+            }
+            "runtime_context_values" => Ok(VmValue::dict(self.runtime_context.values.clone())),
+            "runtime_context_get" => crate::runtime_context::runtime_context_get(self, args),
+            "runtime_context_set" => crate::runtime_context::runtime_context_set(self, args),
+            "runtime_context_clear" => crate::runtime_context::runtime_context_clear(self, args),
+            _ => Err(VmError::UndefinedBuiltin(name.to_string())),
+        })
     }
 
     /// Remove a sync builtin (so an async version can take precedence).
@@ -867,6 +893,8 @@ impl Vm {
         } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
             self.call_builtin_entry(name, VmBuiltinDispatch::Async(async_builtin), args)
                 .await
+        } else if let Some(result) = self.try_dispatch_runtime_context_builtin(name, &args) {
+            result
         } else if let Some(bridge) = &self.bridge {
             if enforce_contract {
                 crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;

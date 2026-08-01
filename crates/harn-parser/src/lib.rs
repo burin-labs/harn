@@ -62,6 +62,7 @@ pub fn is_registered_legacy_hostlib_name(name: &str) -> bool {
 pub fn legacy_builtin_alias_target(name: &str) -> Option<&'static str> {
     match name {
         "regex_replace_all" => Some("regex_replace"),
+        "task_current" => Some("runtime_context"),
         _ => None,
     }
 }
