@@ -895,13 +895,10 @@ fn apply_threads_registry_owned_harness_method_through_helper() {
     );
 
     let updated = fs::read_to_string(&script).unwrap();
+    assert!(updated.contains("fn caps(harness: Harness)"), "{updated}");
+    assert!(updated.contains("caps(harness)"), "{updated}");
     assert!(
-        updated.contains("fn caps(harness: HarnessLlm)"),
-        "{updated}"
-    );
-    assert!(updated.contains("caps(harness.llm)"), "{updated}");
-    assert!(
-        updated.contains("harness.provider_capabilities(\"anthropic\", \"claude-opus-4-7\")"),
+        updated.contains("harness.llm.provider_capabilities(\"anthropic\", \"claude-opus-4-7\")"),
         "{updated}"
     );
 }
@@ -1088,12 +1085,12 @@ fn apply_threads_ambient_capability_from_default_parameter() {
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
         updated.contains(
-            "pub fn resolve(harness: HarnessFs, path: string, base: string = harness.cwd())"
+            "pub fn resolve(harness: Harness, path: string, base: string = harness.fs.cwd())"
         ),
         "{updated}"
     );
     assert!(
-        updated.contains("resolve(harness.fs, \"notes.txt\")"),
+        updated.contains("resolve(harness, \"notes.txt\")"),
         "{updated}"
     );
 }
@@ -1127,17 +1124,10 @@ fn apply_rewrites_positional_metadata_builtin_to_typed_request() {
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains("fn read_fact(harness: HarnessProject, dir: string)"),
+        updated.contains("harness.project.metadata_get({dir: dir, namespace: \"classification\"})"),
         "{updated}"
     );
-    assert!(
-        updated.contains("harness.metadata_get({dir: dir, namespace: \"classification\"})"),
-        "{updated}"
-    );
-    assert!(
-        updated.contains("read_fact(harness.project, \"src\")"),
-        "{updated}"
-    );
+    assert!(updated.contains("read_fact(harness, \"src\")"), "{updated}");
 }
 
 #[test]
@@ -1205,14 +1195,7 @@ fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
         "{updated}"
     );
     assert!(updated.contains("harness.fs.home_dir()"), "{updated}");
-    assert!(
-        updated.contains("fn describe(harness: {fs: HarnessFs, system: HarnessSystem})"),
-        "{updated}"
-    );
-    assert!(
-        updated.contains("describe({fs: harness.fs, system: harness.system})"),
-        "{updated}"
-    );
+    assert!(updated.contains("describe(harness)"), "{updated}");
 }
 
 #[test]

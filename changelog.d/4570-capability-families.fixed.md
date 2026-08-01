@@ -18,6 +18,13 @@
   `{fs: harness.fs, tools: harness.tools}` for a two-capability record. Repairs
   now locate the argument in the parsed source, so a diagnostic that points at
   no call argument produces no edit rather than a guessed one.
+- **`HARN-LNT-069` reports a two-capability helper accurately.** The rule now
+  reads parameter defaults, which execute in the callable's scope and can use
+  authority just like the body, and it stays quiet when a nested closure
+  shadows the parameter it is reasoning about. Both cases previously produced
+  advice that would have stranded a grant. The rule remains advisory: narrowing
+  a signature is only safe when every call site moves with it, and a caller can
+  live in a module the linter never sees.
 - **One owner parses `${...}` holes.** The typechecker, the linter, and
   `harn fix` share `harn_parser::interpolation`, so all three see spans in the
   containing file's coordinates.
