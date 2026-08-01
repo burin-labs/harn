@@ -13,7 +13,7 @@ use harn_vm::event_log::{
 use harn_vm::llm::vm_value_to_json;
 use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, TrustOutcome, TrustRecord};
-use harn_vm::{ActorChain, TenantId, TraceId, Vm, VmValue};
+use harn_vm::{inject_leading_authority, ActorChain, TenantId, TraceId, Vm, VmValue};
 use tokio::task::LocalSet;
 use tracing::Instrument;
 
@@ -612,7 +612,15 @@ impl DispatchCore {
                             script_path.display()
                         )));
                     };
-                    let args = build_vm_args(&request.arguments, function, &vm)?;
+                    let mut args = inject_leading_authority(
+                        &vm,
+                        closure,
+                        &[],
+                        &format!("serve export `{}`", request.function),
+                    )
+                    .map_err(classify_vm_error)?;
+                    let user_args = build_vm_args(&request.arguments, function, !args.is_empty())?;
+                    args.extend(user_args);
                     let result = vm.call_closure_pub(closure, &args).await;
 
                     match result {
@@ -686,7 +694,15 @@ impl DispatchCore {
                         .map_err(classify_vm_error)?;
                     let closure = closure
                         .ok_or_else(|| DispatchError::MissingExport(function.name.clone()))?;
-                    let args = build_vm_args(&arguments, &function, &vm)?;
+                    let mut args = inject_leading_authority(
+                        &vm,
+                        &closure,
+                        &[],
+                        &format!("serve pipeline `{}`", function.name),
+                    )
+                    .map_err(classify_vm_error)?;
+                    let user_args = build_vm_args(&arguments, &function, !args.is_empty())?;
+                    args.extend(user_args);
                     let result = vm.call_closure_pub(&closure, &args).await;
 
                     match result {
@@ -751,26 +767,14 @@ impl DispatchCore {
 fn build_vm_args(
     arguments: &CallArguments,
     function: &crate::ExportedFunction,
-    vm: &Vm,
+    has_leading_authority: bool,
 ) -> Result<Vec<VmValue>, DispatchError> {
     let mut params = function.params.as_slice();
-    let mut prefix = Vec::new();
-    // Exported `pub fn foo(harness: Harness, ...)` opts the function
-    // into the runtime-supplied capability handle the same way
-    // top-level `fn main(harness: Harness)` does. The dispatch surface
-    // hands JSON in, so the host fills the slot from
-    // `vm.set_harness(...)` instead of asking the caller to encode a
-    // Harness through CallArguments; only the first positional slot qualifies.
-    if first_param_is_harness(function) {
-        let harness = vm
-            .root_harness_value()
-            .ok_or_else(|| {
-                DispatchError::Execution(
-                    "Harness handle not installed; DispatchCore must call vm.set_harness() before invoking exported functions that take a harness param"
-                        .to_string(),
-                )
-            })?;
-        prefix.push(harness);
+    // Authority-bearing parameters are host-injected instead of JSON-bound.
+    // Exclude the leading root or nominal Harness slot from the public request
+    // schema; the VM bridge remains the semantic owner of deriving the
+    // declared handle from the installed root.
+    if has_leading_authority {
         params = &params[1..];
     }
 
@@ -813,8 +817,7 @@ fn build_vm_args(
         }
     };
 
-    prefix.extend(rest);
-    Ok(prefix)
+    Ok(rest)
 }
 
 /// Tolerate MCP/JSON-RPC clients that emit a single-object-parameter tool's
@@ -858,18 +861,6 @@ fn lift_flat_single_object_arg(
     }
     let wrapped = serde_json::Value::Object(values.clone().into_iter().collect());
     Some(BTreeMap::from([(only.name.clone(), wrapped)]))
-}
-
-/// `true` when the first exported param is the canonical `harness`
-/// capability handle slot. Type annotation is optional (most pubs use
-/// untyped `harness` in stdlib) so we only check the name; the
-/// typechecker still enforces the `Harness` type in declared signatures.
-fn first_param_is_harness(function: &crate::ExportedFunction) -> bool {
-    function
-        .params
-        .first()
-        .map(|param| param.name == "harness")
-        .unwrap_or(false)
 }
 
 fn trim_trailing_defaults(mut args: Vec<VmValue>) -> Vec<VmValue> {

@@ -51,8 +51,12 @@ async fn dispatch_core_requires_explicit_trusted_host_authority() {
     std::fs::write(
         &script,
         r#"
-pub fn route(value: string) {
-  return host_call("cloud.echo", {value: value})
+import { span } from "std/observability"
+
+pub fn route(obs: HarnessObs, value: string) {
+  return span(obs, "trusted.route", {}, { ->
+    host_call("cloud.echo", {value: value})
+  })
 }
 "#,
     )
@@ -73,4 +77,46 @@ pub fn route(value: string) {
     harn_vm::clear_host_call_bridge();
 
     assert_eq!(response.value, serde_json::json!("through-host"));
+}
+
+#[tokio::test]
+async fn dispatch_core_preserves_untyped_harness_entrypoints() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+pub fn route(harness, value: string) {
+  return value
+}
+",
+    )
+    .expect("write script");
+
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let response = core.dispatch(request()).await.expect("dispatch");
+
+    assert_eq!(response.value, serde_json::json!("through-host"));
+}
+
+#[tokio::test]
+async fn dispatch_core_injects_nominal_authority_into_pipelines() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { span } from "std/observability"
+
+pipeline route(obs: HarnessObs, value: string) {
+  span(obs, "trusted.pipeline", {value: value}, { -> value })
+}
+"#,
+    )
+    .expect("write script");
+
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.trusted_host_dispatch = true;
+    let core = DispatchCore::new(config).expect("core");
+    core.dispatch(request()).await.expect("pipeline dispatch");
 }
