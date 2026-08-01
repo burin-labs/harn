@@ -10,6 +10,10 @@ declared refresh and validation commands.
 - Orchestration: `scripts/bump_harn_runtime.harn` → `std/bump/runtime` (pure
   state machine) → `std/bump/live` (git and authenticated `gh` calls via
   `std/command`).
+- Workspace boundary: the caller is checked out at `package/`; the target Harn
+  orchestration checkout is its sibling. Refresh, validation, git, and `gh`
+  effects run from `package/`, so package discovery cannot traverse the
+  workflow's private runtime checkout.
 - Receipt schema: `harn-bump-runtime-v1` (printed to stdout; key fields also
   land as step outputs and a step-summary block).
 
