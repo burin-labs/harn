@@ -5,3 +5,5 @@ savings=0.027
 unknown_recommended=false
 unknown_reason=unknown_pricing
 unknown_break_even_nil=true
+unknown_cache_known=false
+unknown_cache_reason=cache_read_rate_unknown

@@ -328,7 +328,17 @@ pub fn cache_break_even(opts) {
     }
   }
   const input_rate = pricing.input_per_mtok / 1000000.0
-  const cache_read_rate = __cache_read_rate(pricing, input_rate)
+  const cache_read_rate = __cache_read_rate_or_nil(pricing)
+  if cache_read_rate == nil {
+    return {
+      pricing_known: false,
+      break_even_calls: nil,
+      write_cost: nil,
+      savings_per_hit: nil,
+      recommended: false,
+      reason: "cache_read_rate_unknown",
+    }
+  }
   const cache_write_rate = __cache_write_rate_or_nil(pricing)
   const savings_per_hit = (input_rate - cache_read_rate) * prompt_tokens
   if savings_per_hit <= 0.0 {
