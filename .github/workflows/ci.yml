@@ -2051,11 +2051,20 @@ jobs:
         id: docs-changed
         run: |
           BEFORE="${{ github.event.before }}"
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+          # Ask the build for its own input set instead of restating it here.
+          # A hand-written path pattern silently missed published artifacts
+          # (the provider catalog and the installer scripts), so the site served
+          # stale content with no deploy. See scripts/build_docs_site.sh.
+          mapfile -t inputs < <(./scripts/build_docs_site.sh --print-inputs)
+          if [ "${#inputs[@]}" -eq 0 ]; then
+            # Never let an unreadable input list turn into a silent skip.
+            echo "::warning::could not read docs site input set; deploying to be safe."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             # New branch, force-push, or unreachable base — deploy to be safe.
             echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BEFORE" HEAD | grep -Eq '^(docs/|website/|scripts/build_docs_site\.sh$)'; then
+          elif [ -n "$(git diff --name-only "$BEFORE" HEAD -- "${inputs[@]}")" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
