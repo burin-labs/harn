@@ -108,6 +108,9 @@ fn map_error(error: StoreError) -> (StatusCode, Json<ErrorBody>) {
         StoreError::InvalidInput(_) => (StatusCode::BAD_REQUEST, "invalid_input"),
         StoreError::Tenant(_) => (StatusCode::FORBIDDEN, "tenant"),
         StoreError::Contention { .. } => (StatusCode::SERVICE_UNAVAILABLE, "resource_busy"),
+        StoreError::SchemaIncompatible { .. } => {
+            (StatusCode::INTERNAL_SERVER_ERROR, "schema_incompatible")
+        }
         StoreError::Backend(_) => (StatusCode::INTERNAL_SERVER_ERROR, "backend_error"),
     };
     (
@@ -526,6 +529,22 @@ mod tests {
         assert_eq!(
             body.error.message,
             "retryable backend contention (database_locked): database table is locked"
+        );
+    }
+
+    #[test]
+    fn incompatible_schema_is_a_typed_non_retryable_http_failure() {
+        let (status, body) = map_error(StoreError::SchemaIncompatible {
+            schema: "harn_session_store".to_string(),
+            stored: 9,
+            supported: 1,
+        });
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body.error.code, "schema_incompatible");
+        assert_eq!(
+            body.error.message,
+            "schema incompatible: harn_session_store version 9 is newer than supported version 1"
         );
     }
 }
