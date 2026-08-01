@@ -475,7 +475,10 @@ mod tests {
         assert_eq!(resolutions.load(Ordering::Relaxed), 1);
         assert_eq!(contexts.len(), 1);
         let first_context = &contexts[&check_config_key(&first)];
-        assert!(first_context.host_capabilities.capabilities["custom"].contains("inspect"));
+        assert!(first_context
+            .host_capabilities
+            .capabilities
+            .contains_operation("custom", "inspect"));
         assert_eq!(
             first_context.host_capabilities.source_content.as_deref(),
             Some(manifest_content)

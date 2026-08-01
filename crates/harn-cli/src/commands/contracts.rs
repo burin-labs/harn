@@ -191,17 +191,9 @@ fn host_capabilities_value(args: &ContractsHostCapabilitiesArgs) -> serde_json::
         config.host_capabilities_path = Some(path.clone());
     }
     let capabilities = check::load_host_capabilities(&config);
-    let sorted = capabilities
-        .into_iter()
-        .map(|(capability, ops)| {
-            let mut ops = ops.into_iter().collect::<Vec<_>>();
-            ops.sort();
-            (capability, ops)
-        })
-        .collect::<BTreeMap<_, _>>();
     json!({
         "version": 1,
-        "capabilities": sorted,
+        "capabilities": capabilities.into_manifest_entries(),
     })
 }
 
