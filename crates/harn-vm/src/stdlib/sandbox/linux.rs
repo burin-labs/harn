@@ -184,6 +184,21 @@ fn landlock_profile(
             true,
         )?;
     }
+    if proc_runtime_reads_are_contained() {
+        // Some language runtimes (notably Swift on Linux) discover argv by
+        // reading their own memory map. A rule for `/proc/self/maps` cannot
+        // cover grandchildren: Landlock resolves it to the immediate child's
+        // PID-specific inode, while compiler drivers and shell scripts spawn
+        // fresh processes. Grant file reads below procfs only when Yama keeps
+        // a sandboxed descendant from reading its parent or sibling process
+        // state. READ_DIR remains denied, so procfs cannot be enumerated.
+        push_rule(
+            &mut profile,
+            PathBuf::from("/proc"),
+            LANDLOCK_ACCESS_FS_READ_FILE,
+            true,
+        )?;
+    }
     // Naming an absolute executable is explicit authority to read and execute
     // that file, even when it lives outside the workspace and standard system
     // roots. This is common for verified CI/release artifacts under
@@ -338,7 +353,6 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
     }
-    install_current_process_maps_rule(profile)?;
     unsafe {
         if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
             return Err(io::Error::last_os_error());
@@ -351,58 +365,14 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
     Ok(())
 }
 
-/// Permit the process to read its own memory map without exposing procfs.
-///
-/// Swift's Linux runtime reads `/proc/self/maps` while initializing
-/// `CommandLine.arguments`. When Landlock denies that file, every Swift
-/// process observes an empty argument vector even though the kernel supplied
-/// `argc`/`argv`; `swift` and `swiftc` then trap before doing useful work.
-///
-/// `/proc/self` is a dynamic symlink, so a file descriptor opened while the
-/// policy is prepared belongs to the parent process and cannot authorize the
-/// eventual child. Open and register the single file in `pre_exec`, after the
-/// fork but before Landlock restricts the child. The raw syscalls are
-/// async-signal-safe and the rule grants only READ_FILE on this process's maps
-/// inode. In particular, it does not expose `/proc/self/environ` or any sibling
-/// process under `/proc`.
-fn install_current_process_maps_rule(profile: &LandlockProfile) -> io::Result<()> {
-    const PROC_SELF_MAPS: &[u8] = b"/proc/self/maps\0";
+fn proc_runtime_reads_are_contained() -> bool {
+    std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
+        .ok()
+        .is_some_and(|value| yama_scope_contains_process_reads(&value))
+}
 
-    let fd = unsafe {
-        libc::open(
-            PROC_SELF_MAPS.as_ptr().cast(),
-            libc::O_PATH | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        let error = io::Error::last_os_error();
-        if error.kind() == io::ErrorKind::NotFound {
-            return Ok(());
-        }
-        return Err(error);
-    }
-
-    let path_beneath = LandlockPathBeneathAttr {
-        allowed_access: LANDLOCK_ACCESS_FS_READ_FILE & profile.handled_access_fs,
-        parent_fd: fd,
-    };
-    let result = unsafe {
-        libc::syscall(
-            libc::SYS_landlock_add_rule,
-            profile.ruleset_fd,
-            LANDLOCK_RULE_PATH_BENEATH,
-            &raw const path_beneath,
-            0,
-        )
-    };
-    let error = (result < 0).then(io::Error::last_os_error);
-    unsafe {
-        libc::close(fd);
-    }
-    match error {
-        Some(error) => Err(error),
-        None => Ok(()),
-    }
+fn yama_scope_contains_process_reads(value: &str) -> bool {
+    value.trim().parse::<u8>().is_ok_and(|scope| scope >= 1)
 }
 
 /// Compile the syscall allowlist into a BPF program.
@@ -1308,5 +1278,18 @@ mod tests {
             0,
             "ABI 5+ kernels should explicitly mediate device ioctls",
         );
+    }
+
+    #[test]
+    fn proc_runtime_reads_require_restricted_yama_scope() {
+        for safe in ["1", "2\n", "3"] {
+            assert!(yama_scope_contains_process_reads(safe), "scope {safe}");
+        }
+        for unsafe_or_unknown in ["0", "", "disabled", "256"] {
+            assert!(
+                !yama_scope_contains_process_reads(unsafe_or_unknown),
+                "scope {unsafe_or_unknown} must not grant procfs reads",
+            );
+        }
     }
 }

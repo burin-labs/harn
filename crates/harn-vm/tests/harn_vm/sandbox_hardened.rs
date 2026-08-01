@@ -147,11 +147,21 @@ fn active_backend_name_matches_target_os() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn linux_sandbox_grants_only_the_childs_proc_self_maps_runtime_file() {
+fn linux_sandbox_grants_proc_self_maps_to_descendant_runtimes() {
+    let ptrace_scope = std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
+        .ok()
+        .and_then(|value| value.trim().parse::<u8>().ok());
+    if ptrace_scope.is_none_or(|scope| scope < 1) {
+        eprintln!("skipping: the secure descendant-runtime proc grant requires Yama scope >= 1");
+        return;
+    }
     let workspace = tempfile::tempdir().unwrap();
     let _guard = PolicyGuard::push(SandboxProfile::Worktree, workspace.path());
     let helper = crate::support::process_helper();
-    let args = vec!["--proc-self-maps".to_string()];
+    let args = vec![
+        "--proc-self-maps-child".to_string(),
+        std::process::id().to_string(),
+    ];
     let mut command =
         process_sandbox::std_command_for(&helper, &args).expect("prepare sandboxed process helper");
     command.current_dir(workspace.path());
@@ -165,7 +175,7 @@ fn linux_sandbox_grants_only_the_childs_proc_self_maps_runtime_file() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "maps-readable|environ-denied"
+        "child-maps-readable|parent-environ-denied"
     );
 }
 
