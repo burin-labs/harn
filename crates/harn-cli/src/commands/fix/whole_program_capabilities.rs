@@ -351,9 +351,7 @@ fn declaration_parts(
         if inner.span.start != span.start || inner.span.end != span.end {
             continue;
         }
-        let flow_predicate = attributes
-            .iter()
-            .any(|attribute| attribute.name == "invariant" && attribute.args.is_empty());
+        let flow_predicate = harn_parser::is_flow_predicate_declaration(&inner.node, attributes);
         return match &inner.node {
             Node::FnDecl {
                 name, params, body, ..

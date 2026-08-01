@@ -11,7 +11,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use harn_lexer::{Lexer, Span};
-use harn_parser::{peel_attributes, Attribute, AttributeArg, Node, Parser};
+use harn_parser::{
+    is_flow_predicate_declaration, peel_attributes, Attribute, AttributeArg, Node, Parser,
+};
 use sha2::{Digest, Sha256};
 
 use super::executor::{PredicateKind, SemanticFallbackPolicy};
@@ -161,8 +163,11 @@ pub fn parse_invariants_source(source: &str) -> ParsedInvariantFile {
     let mut predicates = Vec::new();
     for node in &program {
         let (attrs, inner) = peel_attributes(node);
-        let Node::FnDecl { name, .. } = &inner.node else {
+        if !is_flow_predicate_declaration(&inner.node, attrs) {
             continue;
+        }
+        let Node::FnDecl { name, .. } = &inner.node else {
+            unreachable!("Flow predicate ownership requires a function declaration");
         };
         let Some(predicate) =
             predicate_from_attributes(source, name, attrs, inner.span, &mut diagnostics)
@@ -192,12 +197,8 @@ fn predicate_from_attributes(
     span: Span,
     diagnostics: &mut Vec<DiscoveryDiagnostic>,
 ) -> Option<DiscoveredPredicate> {
-    // The Flow predicate marker is a *bare* `@invariant`. Anything with
-    // arguments is the handler-IR form and is not part of Flow discovery.
-    let invariant = attrs.iter().find(|a| a.name == "invariant")?;
-    if !invariant.args.is_empty() {
-        return None;
-    }
+    // The caller has already applied the shared Flow predicate declaration
+    // contract, including the bare-`@invariant` marker distinction.
 
     let deterministic = attrs.iter().any(|a| a.name == "deterministic");
     let semantic = attrs.iter().any(|a| a.name == "semantic");

@@ -995,3 +995,15 @@ pub fn is_flow_ast_injection_request(type_expr: Option<&TypeExpr>) -> bool {
     type_expr
         .is_some_and(|type_expr| matches!(type_expr, TypeExpr::Named(name) if name == "HarnessAst"))
 }
+
+/// Whether an attributed declaration is discoverable as a Flow predicate.
+///
+/// Flow discovers only function declarations carrying a bare `@invariant`;
+/// argument-bearing invariants belong to handler IR, while tools and pipelines
+/// are callable handler declarations rather than predicate entrypoints.
+pub fn is_flow_predicate_declaration(node: &Node, attributes: &[Attribute]) -> bool {
+    matches!(node, Node::FnDecl { .. })
+        && attributes
+            .iter()
+            .any(|attribute| attribute.name == "invariant" && attribute.args.is_empty())
+}

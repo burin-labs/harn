@@ -189,7 +189,9 @@ impl TypeChecker {
                     inv.span,
                 );
             }
-            self.validate_flow_capability_boundary(inner);
+            if crate::is_flow_predicate_declaration(&inner.node, attributes) {
+                self.validate_flow_capability_boundary(inner);
+            }
         } else {
             if let Some(arch) = archivist {
                 self.warning_at(
@@ -218,9 +220,7 @@ impl TypeChecker {
 
     fn validate_flow_capability_boundary(&mut self, inner: &SNode) {
         let params = match &inner.node {
-            Node::FnDecl { params, .. }
-            | Node::ToolDecl { params, .. }
-            | Node::Pipeline { params, .. } => params,
+            Node::FnDecl { params, .. } => params,
             _ => return,
         };
         let requests_ast = crate::is_flow_ast_injection_request(
