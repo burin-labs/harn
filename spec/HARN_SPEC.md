@@ -7294,9 +7294,11 @@ requires a new hash version.
 Harn verifies the hash whenever it reuses a cached package or prepares a package
 generation. Lockfiles through version 4 used an unversioned `sha256:<hex>` Git
 projection. Run `harn install` once to migrate those entries and commit the
-version 5 lockfile; `--locked` and `--offline` fail closed until that migration
-is committed. Archive dependencies retain their publisher-supplied
-`sha256:<hex>` expanded-tree checksum.
+version 5 lockfile. Read-only package consumers can materialize a current
+in-memory generation from a version 4 lock without rewriting it. `--locked` and
+`--offline` reject version 4 Git hashes until the migration is committed.
+Archive dependencies retain their publisher-supplied `sha256:<hex>`
+expanded-tree checksum.
 
 `manifest_digest` separately hashes the resolved
 package manifest so audit and host policy can detect package-surface drift

@@ -3242,7 +3242,10 @@ Git locks use the platform-independent `sha256-v2:<hex>` tree identity in
 `harn.lock` version 5. Paths, text line endings, permissions, and symlink
 handling follow the canonical package projection defined in the language spec.
 To migrate a version 4 lock, run `harn install` and commit the rewritten lock.
-Locked or offline installs fail closed while an unversioned Git hash remains.
+Commands such as `harn check`, `harn lint`, and `harn run` can read a version 4
+lock. They build a version 5 package snapshot in memory and leave `harn.lock`
+unchanged. Locked and offline installs reject version 4 Git hashes because
+those modes cannot change the committed lock.
 
 ## harn install
 

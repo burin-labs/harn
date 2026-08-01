@@ -63,7 +63,9 @@ fn lock_file_v5_rejects_unversioned_git_hashes_on_write() {
     let error = lock.encode().unwrap_err();
 
     assert!(
-        error.to_string().contains("unversioned Git content hash"),
+        error
+            .to_string()
+            .contains("run `harn install` to migrate the project lock"),
         "{error}"
     );
 }

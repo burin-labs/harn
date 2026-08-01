@@ -178,7 +178,7 @@ impl LockFile {
         normalized.sort_entries();
         if normalized.requires_git_hash_migration() {
             return Err(format!(
-                "cannot write harn.lock version {LOCK_FILE_VERSION} with an unversioned Git content hash"
+                "cannot write harn.lock version {LOCK_FILE_VERSION} with an unversioned Git content hash; run `harn install` to migrate the project lock"
             )
             .into());
         }
