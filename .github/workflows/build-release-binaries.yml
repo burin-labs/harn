@@ -138,9 +138,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # Keep a narrow release-size ratchet while allowing the current stripped,
-  # CLI-AOT-bearing Linux x86_64 binary (217.33 MiB in the v0.10.48 candidate).
-  BINARY_SIZE_BUDGET_MB: "218.00"
 
 jobs:
   setup:
@@ -158,6 +155,7 @@ jobs:
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
       build_mode: ${{ steps.resolve.outputs.build_mode }}
       runner_profile: ${{ steps.resolve.outputs.runner_profile }}
+      binary_size_budget_bytes: ${{ steps.binary-size-policy.outputs.budget_bytes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,6 +168,26 @@ jobs:
           # HEAD^. depth: 2 is enough; the default depth=1 would make
           # HEAD^ point at nothing on a fresh clone.
           fetch-depth: 2
+
+      - name: Resolve release binary-size policy
+        id: binary-size-policy
+        shell: bash
+        env:
+          # Registry entries need an explicit workflow gate and report surface
+          # before they become enforced release targets.
+          BINARY_SIZE_TARGET: x86_64-unknown-linux-gnu
+        run: |
+          set -euo pipefail
+          if ! budget_bytes="$(
+            jq -er \
+              --arg target "$BINARY_SIZE_TARGET" \
+              -f .github/release-binary-size-policy.jq \
+              .github/release-binary-size-policy.json
+          )"; then
+            echo "::error::.github/release-binary-size-policy.json violates the closed release binary-size policy contract" >&2
+            exit 2
+          fi
+          echo "budget_bytes=$budget_bytes" >> "$GITHUB_OUTPUT"
 
       - name: Resolve release context
         id: resolve
@@ -1170,6 +1188,7 @@ jobs:
         shell: bash
         env:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
+          BINARY_SIZE_BUDGET_BYTES: ${{ needs.setup.outputs.binary_size_budget_bytes }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
@@ -1178,14 +1197,11 @@ jobs:
             echo "::error::harn binary not found at $harn_bin"
             exit 1
           fi
-          if [[ ! "${BINARY_SIZE_BUDGET_MB}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-            echo "::error::BINARY_SIZE_BUDGET_MB must be a positive number, got '${BINARY_SIZE_BUDGET_MB}'"
+          if [[ ! "${BINARY_SIZE_BUDGET_BYTES}" =~ ^[0-9]+$ ]] || (( BINARY_SIZE_BUDGET_BYTES <= 0 )); then
+            echo "::error::BINARY_SIZE_BUDGET_BYTES must be a positive integer, got '${BINARY_SIZE_BUDGET_BYTES}'"
             exit 2
           fi
-          budget_bytes="$(awk -v mb="$BINARY_SIZE_BUDGET_MB" 'BEGIN { if (mb <= 0) exit 2; printf "%.0f\n", mb * 1024 * 1024 }')" || {
-            echo "::error::BINARY_SIZE_BUDGET_MB must be a positive number, got '${BINARY_SIZE_BUDGET_MB}'"
-            exit 2
-          }
+          budget_bytes="$BINARY_SIZE_BUDGET_BYTES"
           actual_bytes="$(wc -c < "$harn_bin" | tr -d '[:space:]')"
           format_mib() {
             awk -v bytes="$1" 'BEGIN { printf "%.2f", bytes / 1024 / 1024 }'

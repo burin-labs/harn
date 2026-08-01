@@ -61,6 +61,7 @@ exempt_checks = [
   "check-optional-dep-feature-contracts", # optional-dep feature completeness ratchet (#5690), not a mirror
   "check-all-features",             # cargo check --all-features compile gate (#5690), not a mirror
   "check-release-audit-contract",  # validates typed release proof mapping against CI, not a mirror
+  "check-binary-size-policy",     # validates typed/bootstrap release size policy parity, not a mirror
   "check-generated-registry",       # the auditor itself
   "check-drift",                    # fast preflight aggregator (derives members from [preflight.dispatch])
   "check-drift-binary",             # binary-tier preflight aggregator (derives members from [preflight.dispatch])
@@ -484,6 +485,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-stdlib-strict-types" = "binary"
 "check-stdlib-public-return-types" = "binary"
 "check-schema-strict" = "binary"
+"check-binary-size-policy" = "binary" # typed policy contract and jq bootstrap parity
 "check-optional-dep-feature-contracts" = "binary" # Harn TOML contract over Cargo.toml feature sets
 # --- excluded: build/test, external toolchain, cross-repo, runtime fixtures, or perf soak ---
 "check-all-features" = "excluded"             # cargo check --workspace --all-features (build)

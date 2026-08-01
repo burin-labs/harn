@@ -1,21 +1,32 @@
+import { command_run } from "std/command"
 import "std/schema"
+import { with_temp_dir } from "std/testing"
 // Tests for scripts/check_binary_size.harn — argument parsing, budget
 // math, report formatting, and release-workflow default drift. The
 // build/bloat paths shell out and are covered by behavior-parity runs.
 import "../check_binary_size.harn"
 
+fn gha_expression(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
 type ReleaseWorkflowStep = {
+  id?: string,
   name?: string,
   if?: string,
+  shell?: string,
   uses?: string,
   run?: string,
-  env?: {HARN_REQUIRE_CLI_AOT?: string},
+  env?: {
+    HARN_REQUIRE_CLI_AOT?: string,
+    BINARY_SIZE_BUDGET_BYTES?: string,
+    BINARY_SIZE_TARGET?: string,
+  },
 }
 
 type ReleaseWorkflow = {
-  env: {BINARY_SIZE_BUDGET_MB: string},
   jobs: {
-    setup: {steps: list<ReleaseWorkflowStep>},
+    setup: {outputs: {binary_size_budget_bytes: string}, steps: list<ReleaseWorkflowStep>},
     prepare_cli_aot: {needs: string, if: string, steps: list<ReleaseWorkflowStep>},
     build: {needs: list<string>, steps: list<ReleaseWorkflowStep>},
     release: {needs: list<string>, if: string},
@@ -26,20 +37,36 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
   const step_schema = schema_object(
     {
       name: schema_field(schema_string(), false),
+      id: schema_field(schema_string(), false),
       if: schema_field(schema_string(), false),
+      shell: schema_field(schema_string(), false),
       env: schema_field(
-        schema_object({HARN_REQUIRE_CLI_AOT: schema_field(schema_string(), false)}),
+        schema_object(
+          {
+            HARN_REQUIRE_CLI_AOT: schema_field(schema_string(), false),
+            BINARY_SIZE_BUDGET_BYTES: schema_field(schema_string(), false),
+            BINARY_SIZE_TARGET: schema_field(schema_string(), false),
+          },
+        ),
         false,
       ),
     },
   )
   const schema: Schema<ReleaseWorkflow> = schema_object(
     {
-      env: schema_field(schema_object({BINARY_SIZE_BUDGET_MB: schema_field(schema_string())})),
       jobs: schema_field(
         schema_object(
           {
-            setup: schema_field(schema_object({steps: schema_field(schema_list(step_schema))})),
+            setup: schema_field(
+              schema_object(
+                {
+                  outputs: schema_field(
+                    schema_object({binary_size_budget_bytes: schema_field(schema_string())}),
+                  ),
+                  steps: schema_field(schema_list(step_schema)),
+                },
+              ),
+            ),
             prepare_cli_aot: schema_field(
               schema_object(
                 {
@@ -84,7 +111,28 @@ fn release_workflow_step(steps: list<ReleaseWorkflowStep>, name: string) -> Rele
 }
 
 fn defaults() {
-  return {target: "", harn_bin: "", budget_mb: default_binary_size_budget_mb(), report_dir: ""}
+  return {target: "", harn_bin: "", budget_mb: "", budget_bytes: "", report_dir: ""}
+}
+
+fn valid_baseline() -> ReleaseBinarySizeBaseline {
+  return {
+    version: "0.10.51",
+    source_sha: "1347f161a30aaaaa7c36546f2101c65aed2154a7",
+    bytes: 228819544,
+    observed_at: "2026-08-01T23:34:02Z",
+  }
+}
+
+fn valid_target_policy() -> ReleaseBinarySizeTargetPolicy {
+  return {target: "x86_64-unknown-linux-gnu", budget_bytes: 230686720, baseline: valid_baseline()}
+}
+
+fn valid_policy() -> ReleaseBinarySizePolicy {
+  return {
+    schema_version: 1,
+    default_target: "x86_64-unknown-linux-gnu",
+    targets: [valid_target_policy()],
+  }
 }
 
 // --- parse_args -------------------------------------------------------------
@@ -94,7 +142,9 @@ pipeline test_parse_args_defaults(harness: Harness, task) {
   assert_eq(res.ok, true)
   assert_eq(res.opts.build_release, true)
   assert_eq(res.opts.emit_bloat, true)
-  assert_eq(res.opts.budget_mb, default_binary_size_budget_mb())
+  assert_eq(res.opts.budget_mb, "")
+  assert_eq(res.opts.budget_mb_explicit, false)
+  assert_eq(res.opts.budget_bytes, "")
   assert_eq(res.opts.help, false)
 }
 
@@ -109,6 +159,7 @@ pipeline test_parse_args_flags(harness: Harness, task) {
   assert_eq(res.opts.emit_bloat, false)
   assert_eq(res.opts.target, "x86_64-unknown-linux-gnu")
   assert_eq(res.opts.budget_mb, "50")
+  assert_eq(res.opts.budget_mb_explicit, true)
 }
 
 @test
@@ -149,8 +200,7 @@ pipeline test_parse_args_help(harness: Harness, task) {
 // --- parse_budget_mb / budget_bytes_of --------------------------------------
 @test
 pipeline test_budget_parse_valid(harness: Harness, task) {
-  assert_eq(default_binary_size_budget_mb(), "218.00")
-  assert_eq(parse_budget_mb(default_binary_size_budget_mb()), 218.0)
+  assert_eq(parse_budget_mb("219.00"), 219.0)
   assert_eq(parse_budget_mb("1.2"), 1.2)
 }
 
@@ -162,6 +212,14 @@ pipeline test_budget_parse_invalid(harness: Harness, task) {
 }
 
 @test
+pipeline test_positive_integer_budget_parse(harness: Harness, task) {
+  assert_eq(parse_positive_int("230686720"), 230686720)
+  assert_eq(parse_positive_int("0"), nil)
+  assert_eq(parse_positive_int("1.5"), nil)
+  assert_eq(parse_positive_int("+1"), nil)
+}
+
+@test
 pipeline test_budget_bytes_rounding(harness: Harness, task) {
   assert_eq(budget_bytes_of(192.0), 201326592)
   // awk printf "%.0f", 1.2 * 1024 * 1024 == 1258291
@@ -169,8 +227,290 @@ pipeline test_budget_bytes_rounding(harness: Harness, task) {
 }
 
 @test
-pipeline test_workflow_budget_matches_helper_default(harness: Harness, task) {
-  assert_eq(release_workflow(harness.fs).env.BINARY_SIZE_BUDGET_MB, default_binary_size_budget_mb())
+pipeline test_budget_resolution_preserves_exact_bytes_and_override_precedence(
+  harness: Harness,
+  task,
+) {
+  const policy = valid_policy()
+  assert_eq(
+    resolve_binary_size_budget_bytes(
+      policy,
+      "",
+      {budget_mb: "", budget_mb_explicit: false, budget_bytes: ""},
+    ),
+    Ok(230686720),
+  )
+  assert_eq(
+    resolve_binary_size_budget_bytes(
+      policy,
+      "",
+      {budget_mb: "", budget_mb_explicit: false, budget_bytes: "229700000"},
+    ),
+    Ok(229700000),
+  )
+  assert_eq(
+    resolve_binary_size_budget_bytes(
+      policy,
+      "",
+      {budget_mb: "1.2", budget_mb_explicit: false, budget_bytes: "229700000"},
+    ),
+    Ok(229700000),
+  )
+  assert_eq(
+    resolve_binary_size_budget_bytes(
+      policy,
+      "",
+      {budget_mb: "1.2", budget_mb_explicit: true, budget_bytes: "229700000"},
+    ),
+    Ok(1258291),
+  )
+  assert_eq(
+    resolve_binary_size_budget_bytes(
+      policy,
+      "missing-target",
+      {budget_mb: "", budget_mb_explicit: false, budget_bytes: ""},
+    ),
+    Err(
+      "release binary-size policy has no target 'missing-target'; add a target entry or pass an explicit budget override",
+    ),
+  )
+}
+
+@test
+pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(harness: Harness, task) {
+  const result = read_release_binary_size_policy_result(
+    harness.fs,
+    "../../.github/release-binary-size-policy.json",
+  )
+  assert(
+    is_ok(result),
+    json_stringify(
+      if is_err(result) {
+        unwrap_err(result)
+      } else {
+        {}
+      },
+    ),
+  )
+  const policy = unwrap(result)
+  assert_eq(release_binary_size_policy_errors(policy), [])
+  assert_eq(policy.default_target, "x86_64-unknown-linux-gnu")
+  assert_eq(policy.targets.count, 1)
+  const target = policy.targets[0]
+  assert_eq(target?.budget_bytes, 230686720)
+  assert_eq(target?.baseline.version, "0.10.51")
+  assert_eq(target?.baseline.source_sha, "1347f161a30aaaaa7c36546f2101c65aed2154a7")
+  assert_eq(target?.baseline.bytes, 228819544)
+  assert_eq(target?.budget_bytes - target?.baseline.bytes, 1867176)
+  assert_eq(release_binary_size_target_policy(policy, policy.default_target), target)
+}
+
+@test
+pipeline test_binary_size_policy_rejects_invalid_topology(harness: Harness, task) {
+  const target = valid_target_policy()
+  assert_eq(
+    release_binary_size_policy_errors({schema_version: 2, default_target: "missing", targets: []}),
+    [
+      "schema_version must be 1",
+      "targets must not be empty",
+      "default_target must name one target policy",
+    ],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      {schema_version: 1, default_target: target.target, targets: [target, target]},
+    ),
+    ["target must be unique: x86_64-unknown-linux-gnu"],
+  )
+}
+
+@test
+pipeline test_binary_size_policy_rejects_every_invalid_baseline_field(harness: Harness, task) {
+  const target = valid_target_policy()
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy()
+        + {
+        targets: [target + {baseline: target.baseline + {bytes: 0}, budget_bytes: 1048576}],
+      },
+    ),
+    ["x86_64-unknown-linux-gnu: baseline.bytes must be positive"],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {baseline: target.baseline + {version: "next"}}]},
+    ),
+    ["x86_64-unknown-linux-gnu: baseline.version must be a semantic release version"],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {baseline: target.baseline + {source_sha: "short"}}]},
+    ),
+    ["x86_64-unknown-linux-gnu: baseline.source_sha must be a full lowercase Git commit"],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {baseline: target.baseline + {observed_at: "today"}}]},
+    ),
+    ["x86_64-unknown-linux-gnu: baseline.observed_at must be a UTC second-resolution timestamp"],
+  )
+}
+
+@test
+pipeline test_binary_size_policy_enforces_bounded_headroom(harness: Harness, task) {
+  const target = valid_target_policy()
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {budget_bytes: target.baseline.bytes + 1048575}]},
+    ),
+    ["x86_64-unknown-linux-gnu: binary-size headroom must be at least 1048576 bytes"],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {budget_bytes: target.baseline.bytes + 4194305}]},
+    ),
+    ["x86_64-unknown-linux-gnu: binary-size headroom must be at most 4194304 bytes"],
+  )
+}
+
+@test
+pipeline test_binary_size_policy_schema_is_closed(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "policy.json")
+      harness.fs.write_text(path, json_stringify(valid_policy() + {notes: "not in the contract"}))
+      assert(is_err(read_release_binary_size_policy_result(harness.fs, path)))
+    },
+    "binary-size-policy-closed",
+  )
+}
+
+@test
+pipeline test_bootstrap_query_matches_typed_policy_contract(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const jq_version = command_run(harness.tools, ["jq", "--version"])
+      assert(jq_version.success, "jq is required to validate the release bootstrap projection")
+      const query_path = path_join(root, "policy.jq")
+      const policy_path = path_join(root, "policy.json")
+      harness.fs.write_text(
+        query_path,
+        harness.fs.read_text("../../.github/release-binary-size-policy.jq"),
+      )
+      const cases = [
+        valid_policy(),
+        valid_policy() + {extra: true},
+        valid_policy() + {schema_version: 2},
+        valid_policy() + {targets: []},
+        valid_policy() + {default_target: "missing"},
+        valid_policy() + {targets: [valid_target_policy(), valid_target_policy()]},
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {budget_bytes: valid_target_policy().baseline.bytes + 1048575},
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {budget_bytes: valid_target_policy().baseline.bytes + 4194305},
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {baseline: valid_target_policy().baseline + {version: "next"}},
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {baseline: valid_target_policy().baseline + {source_sha: "short"}},
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {
+              baseline: valid_target_policy().baseline + {observed_at: "today"},
+            },
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {
+              baseline: valid_target_policy().baseline + {bytes: 0},
+              budget_bytes: 1048576,
+            },
+          ],
+        },
+        valid_policy() + {targets: [valid_target_policy() + {target: ""}]},
+      ]
+      let index = 0
+      for policy in cases {
+        harness.fs.write_text(policy_path, json_stringify(policy))
+        const typed_result = read_release_binary_size_policy_result(harness.fs, policy_path)
+        const typed_accepts = if is_err(typed_result) {
+          false
+        } else {
+          release_binary_size_policy_errors(unwrap(typed_result)).count == 0
+        }
+        const result = command_run(
+          harness.tools,
+          [
+            "jq",
+            "-er",
+            "--arg",
+            "target",
+            "x86_64-unknown-linux-gnu",
+            "-f",
+            query_path,
+            policy_path,
+          ],
+        )
+        if index == 0 {
+          assert(typed_accepts)
+          assert(result.success)
+          assert_eq(result.stdout.trim(), "230686720")
+        } else {
+          assert(!typed_accepts)
+          assert(!result.success)
+        }
+        index = index + 1
+      }
+    },
+    "binary-size-policy-bootstrap-parity",
+  )
+}
+
+@test
+pipeline test_workflow_projects_typed_binary_size_policy(harness: Harness, task) {
+  const workflow = release_workflow(harness.fs)
+  assert_eq(
+    workflow.jobs.setup.outputs.binary_size_budget_bytes,
+    gha_expression("steps.binary-size-policy.outputs.budget_bytes"),
+  )
+  const policy_step = release_workflow_step(
+    workflow.jobs.setup.steps,
+    "Resolve release binary-size policy",
+  )
+  assert_eq(policy_step.id, "binary-size-policy")
+  assert_eq(policy_step.shell, "bash")
+  assert_eq(policy_step.env?.BINARY_SIZE_TARGET, "x86_64-unknown-linux-gnu")
+  assert_eq(
+    release_workflow_step(workflow.jobs.build.steps, "Check binary size budget").env
+      ?.BINARY_SIZE_BUDGET_BYTES,
+    gha_expression("needs.setup.outputs.binary_size_budget_bytes"),
+  )
 }
 
 @test

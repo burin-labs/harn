@@ -1135,6 +1135,9 @@ jobs:
       # Zero-baseline strict gate for the std/schema facade: strict-types and
       # strict lint must both be clean on stdlib_schema.harn and its contracts.
       - run: make check-schema-strict
+      # Closed policy, exact-byte resolution, and bootstrap jq parity. This
+      # focused sub-second suite keeps release admission live on every PR.
+      - run: make check-binary-size-policy
       # Sync guards. check-generated-registry is the meta-guard
       # that keeps scripts/generated_artifacts.toml in agreement with the
       # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
