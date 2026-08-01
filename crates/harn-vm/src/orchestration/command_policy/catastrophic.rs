@@ -114,7 +114,7 @@ fn segment_catastrophe(
     depth: usize,
 ) -> Option<String> {
     // Redirect-onto-source is a whole-segment property → check raw text.
-    if let Some(reason) = tracked_writes::redirect_over_tracked_reason(segment, active_cwd) {
+    if let Some(reason) = tracked_writes::redirect_over_tracked_reason(segment, active_cwd, roots) {
         return Some(reason);
     }
     if is_fork_bomb(segment) {
@@ -169,7 +169,7 @@ fn invocation_catastrophe(
             "`{command}` (filesystem format) is blocked: it would destroy a device"
         )),
         "chmod" => chmod_catastrophe(args),
-        "truncate" => tracked_writes::truncate_catastrophe(args, active_cwd),
+        "truncate" => tracked_writes::truncate_catastrophe(args, active_cwd, roots),
         _ => None,
     }
 }

@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub(super) fn truncate_catastrophe(args: &[String], active_cwd: Option<&Path>) -> Option<String> {
+pub(super) fn truncate_catastrophe(
+    args: &[String],
+    active_cwd: Option<&Path>,
+    workspace_roots: &[String],
+) -> Option<String> {
     let mut size_zero = false;
     let mut targets: Vec<&str> = Vec::new();
     let mut index = 0;
@@ -37,7 +41,7 @@ pub(super) fn truncate_catastrophe(args: &[String], active_cwd: Option<&Path>) -
     (size_zero
         && targets
             .iter()
-            .any(|target| is_protected_project_file(target, active_cwd)))
+            .any(|target| is_protected_project_file(target, active_cwd, workspace_roots)))
     .then(|| {
         "`truncate -s 0` of a tracked project file is blocked: it would erase the file's contents. Use the edit tool to rewrite it.".to_string()
     })
@@ -46,6 +50,7 @@ pub(super) fn truncate_catastrophe(args: &[String], active_cwd: Option<&Path>) -
 pub(super) fn redirect_over_tracked_reason(
     segment: &str,
     active_cwd: Option<&Path>,
+    workspace_roots: &[String],
 ) -> Option<String> {
     let chars: Vec<char> = segment.chars().collect();
     let mut in_single = false;
@@ -73,7 +78,7 @@ pub(super) fn redirect_over_tracked_reason(
                     continue;
                 }
                 let (target, end) = redirect_target(&chars, cursor);
-                if is_protected_project_file(&target, active_cwd) {
+                if is_protected_project_file(&target, active_cwd, workspace_roots) {
                     return Some(format!(
                         "shell redirection (`>`/`>>`) onto the tracked project file `{target}` is blocked: it would replace or append to reviewed project state. Use the edit tool to change it."
                     ));
@@ -116,16 +121,22 @@ fn redirect_target(chars: &[char], mut cursor: usize) -> (String, usize) {
     (target, cursor)
 }
 
-fn is_protected_project_file(target: &str, active_cwd: Option<&Path>) -> bool {
+fn is_protected_project_file(
+    target: &str,
+    active_cwd: Option<&Path>,
+    workspace_roots: &[String],
+) -> bool {
     let Some(cwd) = active_cwd else {
         return true;
     };
     if target.contains(['$', '*', '?', '[', ']', '{', '}', '~']) {
-        // Without the shell's expansion result, an in-project dynamic path
-        // cannot be proven safe. A non-Git execution root (including the
-        // isolated local-sandbox session) has no tracked project state for
-        // this classifier to protect.
-        return git_root(cwd).is_some();
+        // Without the shell's expansion result, block only when the active
+        // repository is inside a writable execution root. A local sandbox may
+        // be physically nested below the host checkout while its policy grants
+        // access only to the isolated session root; that enclosing repository
+        // is not command-owned state. A mounted repository is represented by a
+        // workspace root and remains protected.
+        return workspace_contains_git_root(cwd, workspace_roots);
     }
     let target = resolved_target(cwd, target);
     match git_tracks_file(cwd, &target) {
@@ -133,6 +144,20 @@ fn is_protected_project_file(target: &str, active_cwd: Option<&Path>) -> bool {
         None if target.is_absolute() && !target.starts_with(cwd) => false,
         None => target.symlink_metadata().is_ok(),
     }
+}
+
+fn workspace_contains_git_root(cwd: &Path, workspace_roots: &[String]) -> bool {
+    let Some(repository_root) = git_root(cwd) else {
+        return false;
+    };
+    if workspace_roots.is_empty() {
+        return true;
+    }
+    workspace_roots.iter().any(|root| {
+        Path::new(root)
+            .canonicalize()
+            .is_ok_and(|root| repository_root.starts_with(root))
+    })
 }
 
 fn resolved_target(cwd: &Path, target: &str) -> PathBuf {
@@ -209,10 +234,10 @@ mod tests {
         let cwd = temp.path();
         init_git(cwd);
 
-        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd)).is_none());
+        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd), &[]).is_none());
         std::fs::write(cwd.join("generated.rs"), "old").unwrap();
         git(cwd, &["add", "generated.rs"]);
-        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd)).is_some());
+        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd), &[]).is_some());
     }
 
     #[test]
@@ -226,10 +251,10 @@ mod tests {
             "generated.harn".to_string(),
         ];
 
-        assert!(truncate_catastrophe(&args, Some(cwd)).is_none());
+        assert!(truncate_catastrophe(&args, Some(cwd), &[]).is_none());
         std::fs::write(cwd.join("generated.harn"), "old").unwrap();
         git(cwd, &["add", "generated.harn"]);
-        assert!(truncate_catastrophe(&args, Some(cwd)).is_some());
+        assert!(truncate_catastrophe(&args, Some(cwd), &[]).is_some());
     }
 
     #[test]
@@ -239,7 +264,7 @@ mod tests {
         init_git(cwd);
         std::fs::write(cwd.join("generated.rs"), "old").unwrap();
 
-        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd)).is_none());
+        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd), &[]).is_none());
     }
 
     #[test]
@@ -248,7 +273,7 @@ mod tests {
         let cwd = temp.path();
         init_git(cwd);
 
-        assert!(redirect_over_tracked_reason("printf x > /dev/null", Some(cwd)).is_none());
+        assert!(redirect_over_tracked_reason("printf x > /dev/null", Some(cwd), &[]).is_none());
     }
 
     #[test]
@@ -259,11 +284,39 @@ mod tests {
         assert!(redirect_over_tracked_reason(
             "printf x > \"$HARN_OUTPUTS_DIR/result.txt\"",
             Some(cwd),
+            &[],
         )
         .is_none());
 
         init_git(cwd);
-        assert!(redirect_over_tracked_reason("printf x > $PWD/result.txt", Some(cwd)).is_some());
+        assert!(
+            redirect_over_tracked_reason("printf x > $PWD/result.txt", Some(cwd), &[]).is_some()
+        );
+    }
+
+    #[test]
+    fn unresolved_expansions_respect_writable_workspace_boundaries() {
+        let temp = tempfile::tempdir().unwrap();
+        let repository = temp.path();
+        init_git(repository);
+        let sandbox = repository.join("harn-sandbox-session");
+        std::fs::create_dir(&sandbox).unwrap();
+
+        let sandbox_roots = [sandbox.display().to_string()];
+        assert!(redirect_over_tracked_reason(
+            "printf x > $OUTPUT/result.txt",
+            Some(&sandbox),
+            &sandbox_roots,
+        )
+        .is_none());
+
+        let repository_roots = [repository.display().to_string()];
+        assert!(redirect_over_tracked_reason(
+            "printf x > $OUTPUT/result.txt",
+            Some(&sandbox),
+            &repository_roots,
+        )
+        .is_some());
     }
 
     #[test]
@@ -271,6 +324,7 @@ mod tests {
         assert!(redirect_over_tracked_reason(
             "printf x > /dev/null",
             Some(Path::new("/workspace/project")),
+            &[],
         )
         .is_none());
     }
@@ -284,10 +338,12 @@ mod tests {
         git(cwd, &["add", "tracked-without-extension"]);
         std::fs::remove_file(cwd.join("tracked-without-extension")).unwrap();
 
-        assert!(
-            redirect_over_tracked_reason("printf x > tracked-without-extension", Some(cwd),)
-                .is_some()
-        );
+        assert!(redirect_over_tracked_reason(
+            "printf x > tracked-without-extension",
+            Some(cwd),
+            &[],
+        )
+        .is_some());
     }
 
     #[test]
@@ -298,8 +354,12 @@ mod tests {
         std::fs::write(cwd.join("tracked file"), "old").unwrap();
         git(cwd, &["add", "tracked file"]);
 
-        assert!(redirect_over_tracked_reason("printf x >| \"tracked file\"", Some(cwd)).is_some());
-        assert!(redirect_over_tracked_reason("printf x > tracked\\ file", Some(cwd)).is_some());
+        assert!(
+            redirect_over_tracked_reason("printf x >| \"tracked file\"", Some(cwd), &[]).is_some()
+        );
+        assert!(
+            redirect_over_tracked_reason("printf x > tracked\\ file", Some(cwd), &[]).is_some()
+        );
     }
 
     fn init_git(root: &Path) {
