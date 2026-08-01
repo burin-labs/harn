@@ -12,7 +12,6 @@ use base64::Engine;
 use sha2::{Digest, Sha256};
 use x509_parser::prelude::{FromDer, X509Certificate};
 
-use super::mock::consume_http_mock;
 use super::{
     get_options_arg, handle_from_value, next_transport_handle, string_option, vm_error,
     vm_get_bool_option, vm_get_int_option, vm_get_int_option_prefer, vm_get_optional_int_option,
@@ -20,6 +19,8 @@ use super::{
     DEFAULT_RETRYABLE_STATUSES, DEFAULT_TIMEOUT_MS, MAX_HTTP_SESSIONS, MAX_HTTP_STREAMS,
     MAX_RETRY_DELAY_MS, MULTIPART_MOCK_BOUNDARY,
 };
+
+pub(super) mod harness_mocks;
 
 #[derive(Clone)]
 struct RetryConfig {
@@ -1034,7 +1035,7 @@ pub(super) async fn vm_execute_http_request(
 
     let config = parse_http_options(options);
     let client = pooled_http_client(&config)?;
-    vm_execute_http_request_with_client(client, &config, method, url, options).await
+    vm_execute_http_request_with_client(None, client, &config, method, url, options).await
 }
 
 pub(super) async fn vm_execute_http_session_request(
@@ -1051,10 +1052,12 @@ pub(super) async fn vm_execute_http_session_request(
     };
     let merged_options = merge_options(&session.options, options);
     let config = parse_http_options(&merged_options);
-    vm_execute_http_request_with_client(session.client, &config, method, url, &merged_options).await
+    vm_execute_http_request_with_client(None, session.client, &config, method, url, &merged_options)
+        .await
 }
 
-async fn vm_execute_http_request_with_client(
+pub(super) async fn vm_execute_http_request_with_client(
+    harness_mocks: Option<&super::HttpMockRegistry>,
     client: reqwest::Client,
     config: &HttpRequestConfig,
     method: &str,
@@ -1071,12 +1074,9 @@ async fn vm_execute_http_request_with_client(
     }
     // http_mock is in-process; match download/stream — egress only for real sockets.
     for attempt in 0..=config.retry.max {
-        if let Some(mock_response) = consume_http_mock(
-            method,
-            &final_url,
-            parts.recorded_headers.clone(),
-            parts.body.clone(),
-        ) {
+        let mock_response =
+            harness_mocks::consume_http_mock(harness_mocks, method, &final_url, &parts);
+        if let Some(mock_response) = mock_response {
             let status = mock_response.status.clamp(0, u16::MAX as i64) as u16;
             if should_retry_response(config, &parts.method, status, attempt) {
                 let retry_after = if config.retry.respect_retry_after {
@@ -1183,7 +1183,7 @@ pub(super) async fn vm_http_download(
     let mut egress_checked = false;
     let mut client = None;
     for attempt in 0..=config.retry.max {
-        if let Some(mock_response) = consume_http_mock(
+        if let Some(mock_response) = super::mock::consume_http_mock(
             &method,
             &final_url,
             parts.recorded_headers.clone(),
@@ -1359,7 +1359,7 @@ pub(super) async fn vm_http_stream_open(
     let parts = parse_http_request_parts(&method, options)?;
     let final_url = final_http_url(url, options, "http_stream_open")?;
     let id = next_transport_handle("http-stream");
-    if let Some(mock_response) = consume_http_mock(
+    if let Some(mock_response) = super::mock::consume_http_mock(
         &method,
         &final_url,
         parts.recorded_headers.clone(),

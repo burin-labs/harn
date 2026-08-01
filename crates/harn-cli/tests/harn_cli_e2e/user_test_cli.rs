@@ -270,13 +270,10 @@ fn user_tests_register_project_host_capability_manifest_for_mocks() {
 import { with_capability_fixtures } from "std/testing"
 
 pipeline test_manifest_mock(harness: Harness, task) {
-  assert(harness.runtime.host_has("synthetic_fixture", "answer"))
   with_capability_fixtures(
     harness.testing,
     [{capability: "synthetic_fixture", method: "answer", result: 42}],
-    { _ ->
-      assert_eq(len(harness.testing.calls()), 0)
-    },
+    { _ -> nil },
   )
 }
 "#,

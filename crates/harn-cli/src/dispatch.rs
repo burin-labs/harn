@@ -97,6 +97,19 @@ pub async fn dispatch_to_embedded_script(
     outcome.exit_code
 }
 
+/// Dispatch with an explicit sandbox while preserving the ordinary terminal
+/// forwarding contract.
+pub async fn dispatch_to_embedded_script_with_sandbox(
+    script_name: &str,
+    argv: Vec<String>,
+    json_mode: bool,
+    sandbox: RunSandboxOptions,
+) -> i32 {
+    let outcome = run_embedded_script_with_sandbox(script_name, argv, json_mode, sandbox).await;
+    flush_outcome(&outcome);
+    outcome.exit_code
+}
+
 /// `dispatch_to_embedded_script` with the workspace-rooted sandbox
 /// disabled. Used by ports whose user-supplied file paths intentionally
 /// fall outside the workspace (e.g. `harn precompile <any-file.harn>`).

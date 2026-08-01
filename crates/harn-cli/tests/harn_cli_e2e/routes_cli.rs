@@ -135,7 +135,7 @@ fn routes_json_reports_manifest_trigger_inventory() {
     assert!(webhook["framework_overhead_tokens"].as_u64().unwrap() > 0);
     assert_eq!(
         webhook["requires_capabilities"],
-        serde_json::json!(["network.http", "template.render", "workspace.read_text"])
+        serde_json::json!(["fs.read", "network.access", "template.render"])
     );
 
     let match_path = triggers

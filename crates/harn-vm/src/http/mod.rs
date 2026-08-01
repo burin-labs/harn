@@ -15,6 +15,7 @@ mod streaming;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use mock::HttpMockRegistry;
 use mock::{
     clear_http_mocks, http_mock_calls_value, parse_mock_responses, register_http_mock,
     reset_http_mocks,
@@ -32,6 +33,24 @@ pub(crate) async fn execute_http_request(
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     client::vm_execute_http_request(method, url, options).await
+}
+
+pub(crate) async fn execute_harness_http_request(
+    registry: &HttpMockRegistry,
+    method: &str,
+    url: &str,
+    options: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::vm_execute_http_request_with_mocks(registry, method, url, options).await
+}
+
+pub(crate) fn register_harness_http_mock(
+    registry: &HttpMockRegistry,
+    method: String,
+    url_pattern: String,
+    response: &crate::value::DictMap,
+) {
+    registry.register(method, url_pattern, parse_mock_responses(response));
 }
 
 pub(crate) async fn execute_http_verb(

@@ -108,6 +108,7 @@ pipeline main(harness: Harness, _task) {{
         &fixture,
         &[
             "run",
+            "--allow-process-network",
             "--approve-risky",
             "git.push",
             run_script.to_str().unwrap(),

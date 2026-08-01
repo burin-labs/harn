@@ -431,7 +431,10 @@ fn template_overhead_tokens_for_handler(
             continue;
         };
         match call.name.as_str() {
-            "render" | "render_prompt" => {
+            "render"
+            | "render_prompt"
+            | "harness.fs.render_prompt"
+            | "harness.fs.render_prompt_with_provenance" => {
                 if let Some(path) = call.literal_args.first().and_then(literal_as_str) {
                     total = total.saturating_add(template_file_overhead_tokens(
                         path,
@@ -440,7 +443,7 @@ fn template_overhead_tokens_for_handler(
                     ));
                 }
             }
-            "render_string" => {
+            "render_string" | "harness.fs.render_template" => {
                 if let Some(body) = call.literal_args.first().and_then(literal_as_str) {
                     total = total.saturating_add(estimate_template_markup_tokens(body));
                 }
@@ -477,7 +480,12 @@ fn handler_uses_template_rendering(handler: &harn_ir::HandlerIr) -> bool {
         };
         matches!(
             call.name.as_str(),
-            "render" | "render_prompt" | "render_string"
+            "render"
+                | "render_prompt"
+                | "render_string"
+                | "harness.fs.render_prompt"
+                | "harness.fs.render_prompt_with_provenance"
+                | "harness.fs.render_template"
         ) || (call.name == "host_call"
             && matches!(
                 call.literal_args.first().and_then(literal_as_str),

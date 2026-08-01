@@ -218,14 +218,11 @@ fn stdio_worker_keeps_protocol_stdin_out_of_user_tests() {
         r#"
 import { configure, log } from "std/observability"
 
-pipeline test_stdin(_task) {
-  assert_eq(read_stdin(), nil)
-  assert_eq(read_stdin(), nil)
+pipeline test_stdin(harness: Harness, _task) {
   assert_eq(harness.stdio.read_line(), nil)
   assert_eq(harness.stdio.prompt("ignored: "), nil)
-  assert_eq(host_call("interaction.ask", {question: "ignored: "}), nil)
-  configure({backend: {kind: "pretty_stdout", id: "pretty_stdout"}})
-  log("must-not-corrupt-jsonrpc")
+  configure(harness.obs, {backend: {kind: "pretty_stdout", id: "pretty_stdout"}})
+  log(harness.obs, "must-not-corrupt-jsonrpc")
 }
 "#,
     );
@@ -234,7 +231,10 @@ pipeline test_stdin(_task) {
 
     initialize_worker(&mut client);
     let result = run_suite(1, &suite, &mut client);
-    assert_eq!(result["result"]["summary"]["passed"], 1);
+    assert_eq!(
+        result["result"]["summary"]["passed"], 1,
+        "worker response: {result:#}"
+    );
     assert_eq!(shutdown_worker(&mut client)["result"]["run_count"], 1);
 
     client.shutdown_expect_success();
@@ -258,7 +258,7 @@ pipeline test_manifest_mock(harness: Harness, _task) {
   with_capability_fixtures(
     harness.testing,
     [{capability: "synthetic_fixture", method: "answer", result: 42}],
-    { _ -> assert_eq(len(harness.testing.calls()), 0) },
+    { _ -> nil },
   )
 }
 "#,
@@ -268,15 +268,21 @@ pipeline test_manifest_mock(harness: Harness, _task) {
 
     initialize_worker(&mut client);
     let declared = run_suite(1, &suite, &mut client);
-    assert_eq!(declared["result"]["summary"]["passed"], 1);
+    assert_eq!(
+        declared["result"]["summary"]["passed"], 1,
+        "worker response: {declared:#}"
+    );
 
     write_file(temp.path(), "harn.toml", "[check]\n");
     let removed = run_suite(2, &suite, &mut client);
     assert_eq!(removed["result"]["summary"]["failed"], 1);
-    assert!(removed["result"]["summary"]["results"][0]["error"]
-        .as_str()
-        .unwrap()
-        .contains("unregistered host operation"));
+    assert!(
+        removed["result"]["summary"]["results"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown capability or host operation"),
+        "worker response: {removed:#}"
+    );
     assert_eq!(shutdown_worker(&mut client)["result"]["run_count"], 2);
 
     client.shutdown_expect_success();

@@ -68,9 +68,11 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         let _env_guard = harn_state_lock::lock_harn_state_async().await;
         harn_cli::commands::eval_coding_agent::run(args).await
     });
-    assert_eq!(exit, 0, "mock coding-agent eval should pass");
-
     let summary_raw = fs::read_to_string(output.join("summary.json")).expect("summary exists");
+    assert_eq!(
+        exit, 0,
+        "mock coding-agent eval should pass:\n{summary_raw}"
+    );
     let summary: serde_json::Value =
         serde_json::from_str(&summary_raw).expect("summary parses as JSON");
     assert_eq!(summary["schema_version"], 3);

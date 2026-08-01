@@ -346,9 +346,14 @@ impl crate::vm::Vm {
                     Some(VmValue::Dict(d)) => (**d).clone(),
                     _ => crate::value::DictMap::new(),
                 };
-                crate::http::execute_http_request(&http_method.to_uppercase(), &url, &options)
-                    .await
-                    .map_err(tag_sandbox_denied)
+                crate::http::execute_harness_http_request(
+                    handle.inner().fixtures().http_mocks(),
+                    &http_method.to_uppercase(),
+                    &url,
+                    &options,
+                )
+                .await
+                .map_err(tag_sandbox_denied)
             }
             "download" => self
                 .call_capability_builtin("__http_download", args.to_vec())
@@ -784,6 +789,61 @@ impl crate::vm::Vm {
     ) -> Result<VmValue, VmError> {
         let fixtures = handle.inner().fixtures();
         match method {
+            "http_mock" => {
+                let method = string_arg(args, 0, "HarnessTesting.http_mock")?.to_string();
+                let url_pattern =
+                    string_arg(args, 1, "HarnessTesting.http_mock")?.to_string();
+                let response = args
+                    .get(2)
+                    .and_then(VmValue::as_dict)
+                    .cloned()
+                    .unwrap_or_default();
+                crate::http::register_harness_http_mock(
+                    fixtures.http_mocks(),
+                    method,
+                    url_pattern,
+                    &response,
+                );
+                Ok(VmValue::Nil)
+            }
+            "http_mock_clear" => {
+                require_no_args(handle, method, args)?;
+                fixtures.http_mocks().clear();
+                Ok(VmValue::Nil)
+            }
+            "http_mock_calls" => {
+                let options = args.first().and_then(VmValue::as_dict);
+                let include_sensitive = options.is_some_and(|options| {
+                    options
+                        .get("include_sensitive")
+                        .and_then(|value| match value {
+                            VmValue::Bool(value) => Some(*value),
+                            _ => None,
+                        })
+                        .unwrap_or(false)
+                        || options
+                            .get("include_sensitive_headers")
+                            .and_then(|value| match value {
+                                VmValue::Bool(value) => Some(*value),
+                                _ => None,
+                            })
+                            .unwrap_or(false)
+                });
+                let redact_sensitive = !include_sensitive
+                    && options.is_none_or(|options| {
+                        options
+                            .get("redact_sensitive")
+                            .or_else(|| options.get("redact_headers"))
+                            .and_then(|value| match value {
+                                VmValue::Bool(value) => Some(*value),
+                                _ => None,
+                            })
+                            .unwrap_or(true)
+                    });
+                Ok(VmValue::List(std::sync::Arc::new(
+                    fixtures.http_mocks().calls_value(redact_sensitive),
+                )))
+            }
             "clock_set" => {
                 let unix_ms = args.first().and_then(VmValue::as_int).ok_or_else(|| {
                     VmError::TypeError(

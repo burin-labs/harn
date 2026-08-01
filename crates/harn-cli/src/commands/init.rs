@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use crate::cli::{NewArgs, ProjectTemplate};
+use crate::commands::run::RunSandboxOptions;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::package::current_harn_range_example;
@@ -79,7 +80,13 @@ async fn dispatch_to_script(
         "HARN_INIT_MODE",
         if name.is_some() { "new" } else { "init" },
     );
-    dispatch::dispatch_to_embedded_script("scaffold/init", Vec::new(), /* json_mode */ false).await
+    dispatch::dispatch_to_embedded_script_with_sandbox(
+        "scaffold/init",
+        Vec::new(),
+        /* json_mode */ false,
+        RunSandboxOptions::default().with_workspace_root(dir),
+    )
+    .await
 }
 
 fn template_id(template: ProjectTemplate) -> &'static str {
@@ -97,8 +104,9 @@ fn template_id(template: ProjectTemplate) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_new_args, template_id};
+    use super::{dispatch_to_script, resolve_new_args, template_id};
     use crate::cli::{NewArgs, ProjectTemplate};
+    use std::fs;
 
     #[test]
     fn new_package_kind_resolves_to_package_template() {
@@ -118,5 +126,43 @@ mod tests {
         assert_eq!(template_id(ProjectTemplate::McpServer), "mcp-server");
         assert_eq!(template_id(ProjectTemplate::PipelineLab), "pipeline-lab");
         assert_eq!(template_id(ProjectTemplate::Connector), "connector");
+    }
+
+    #[test]
+    fn generated_connector_projects_typed_harness() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let destination = temp.path().join("typed-connector");
+        fs::create_dir(&destination).expect("connector destination");
+        let moved_destination = destination.clone();
+        let exit = std::thread::Builder::new()
+            .name("typed-connector-scaffold".to_string())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime");
+                runtime.block_on(async {
+                    let _guard =
+                        crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+                    dispatch_to_script(
+                        Some("typed-connector"),
+                        &moved_destination,
+                        "typed-connector",
+                        ProjectTemplate::Connector,
+                    )
+                    .await
+                })
+            })
+            .expect("scaffold thread")
+            .join()
+            .expect("scaffold thread completed");
+        assert_eq!(exit, 0);
+
+        let source =
+            fs::read_to_string(destination.join("connectors/echo.harn")).expect("connector source");
+        assert!(source.contains("pub fn normalize_inbound(_harness: Harness, raw)"));
+        let formatted = harn_fmt::format_source(&source).expect("format connector source");
+        assert_eq!(source, formatted, "connector source is not canonical");
     }
 }

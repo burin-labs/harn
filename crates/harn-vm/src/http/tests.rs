@@ -9,7 +9,8 @@ use super::streaming::{
 };
 use super::{
     handle_from_value, http_mock_calls_snapshot, mock_call_headers_value, push_http_mock,
-    redact_mock_call_url, reset_http_state, HttpMockResponse,
+    redact_mock_call_url, register_harness_http_mock, reset_http_state, HttpMockRegistry,
+    HttpMockResponse,
 };
 use crate::connectors::test_util::{FakeHttpResponse, FakeHttpServer};
 use crate::value::VmValue;
@@ -56,6 +57,42 @@ fn retry_delay_honors_retry_after_floor() {
     let delay = compute_retry_delay(0, 1, Some(Duration::from_millis(250)));
     assert!(delay >= Duration::from_millis(250));
     assert!(delay <= Duration::from_mins(1));
+}
+
+#[test]
+fn harness_http_mocks_follow_the_harness_across_threads_without_leaking() {
+    let registry = Arc::new(HttpMockRegistry::default());
+    register_harness_http_mock(
+        &registry,
+        "POST".to_string(),
+        "https://api.example.test/jobs".to_string(),
+        &crate::value::DictMap::from_iter([
+            ("status".to_string(), VmValue::Int(200)),
+            (
+                "body".to_string(),
+                VmValue::String(arcstr::ArcStr::from(r#"{"id":"job-1"}"#)),
+            ),
+        ]),
+    );
+    let isolated = HttpMockRegistry::default();
+    assert!(!isolated.has_match("POST", "https://api.example.test/jobs"));
+
+    let moved = Arc::clone(&registry);
+    let response = std::thread::spawn(move || {
+        moved.consume(
+            "POST",
+            "https://api.example.test/jobs",
+            crate::value::DictMap::new(),
+            Some("{}".to_string()),
+        )
+    })
+    .join()
+    .expect("fixture thread")
+    .expect("harness-owned mock follows its harness");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(registry.calls_value(false).len(), 1);
+    assert!(isolated.calls_value(false).is_empty());
 }
 
 #[tokio::test]

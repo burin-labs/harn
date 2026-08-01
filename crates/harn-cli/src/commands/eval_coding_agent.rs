@@ -359,13 +359,27 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         if report.skipped && args.fail_on_unauthorized {
             had_error = true;
         }
-        eprintln!(
-            "{} {} {}: {}",
-            report.fixture_id,
-            selector_label(&report.selector),
-            report.tool_format,
-            report.status
-        );
+        let detail = report
+            .error
+            .as_deref()
+            .or(report.stderr_excerpt.as_deref())
+            .filter(|detail| !detail.trim().is_empty());
+        match detail {
+            Some(detail) => eprintln!(
+                "{} {} {}: {} ({detail})",
+                report.fixture_id,
+                selector_label(&report.selector),
+                report.tool_format,
+                report.status
+            ),
+            None => eprintln!(
+                "{} {} {}: {}",
+                report.fixture_id,
+                selector_label(&report.selector),
+                report.tool_format,
+                report.status
+            ),
+        }
         reports.push(report);
     }
 

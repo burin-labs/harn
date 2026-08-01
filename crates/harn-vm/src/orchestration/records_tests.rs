@@ -344,6 +344,25 @@ fn resumable_pack_payload() -> serde_json::Value {
 }
 
 #[test]
+fn eval_pack_harness_fingerprint_distinguishes_outer_replicates() {
+    let mut first = resumable_pack_payload();
+    first["metadata"]["replicate"] = serde_json::json!(1);
+    let first =
+        normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(&first)).unwrap();
+
+    let mut second = resumable_pack_payload();
+    second["metadata"]["replicate"] = serde_json::json!(2);
+    let second =
+        normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(&second)).unwrap();
+
+    assert_ne!(
+        eval_pack_harness_config_fingerprint(&first).unwrap(),
+        eval_pack_harness_config_fingerprint(&second).unwrap(),
+        "replicates are distinct eval cells and must not share a resume key"
+    );
+}
+
+#[test]
 fn eval_pack_resumable_skips_matching_cells_and_records_all_skip_heartbeat() {
     let temp = tempfile::tempdir().unwrap();
     install_sqlite_event_log(temp.path().join("events.sqlite"));

@@ -2,9 +2,7 @@
 //! stdin/stdout when `harn run --bridge` is active.
 
 mod authority;
-
 pub use authority::inject_leading_authority;
-
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::io::Write;
@@ -171,12 +169,7 @@ impl InProcessHost {
         };
 
         let mut vm = self.vm.child_vm_for_host();
-        let call_args = inject_leading_authority(
-            &vm,
-            closure,
-            args,
-            &format!("playground host export `{name}`"),
-        )?;
+        let call_args = authority::inject_export_authority(&vm, closure, args, name)?;
         let result = vm.call_closure_pub(closure, &call_args).await?;
         Ok(crate::llm::vm_value_to_json(&result))
     }

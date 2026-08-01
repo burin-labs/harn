@@ -236,7 +236,7 @@ fn __submit_bedrock(harness: Harness, job: dict, payload: dict) -> dict {
   if !safe_bool(upload["ok"], false) {
     return {
       ok: false,
-      job: base_job + {status: "failed", upload_status: upload["status"]},
+      job: base_job + {status: "failed", upload: upload},
       errors: ["Bedrock input upload failed for job " + safe_string(job["id"], "")],
     }
   }

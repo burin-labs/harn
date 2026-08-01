@@ -1,10 +1,11 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Mutex;
 
 use crate::value::VmValue;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct MockResponse {
     pub(super) status: i64,
     pub(super) body: String,
@@ -52,6 +53,7 @@ impl From<HttpMockResponse> for MockResponse {
     }
 }
 
+#[derive(Debug)]
 struct HttpMock {
     method: String,
     url_pattern: String,
@@ -59,7 +61,7 @@ struct HttpMock {
     next_response: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct HttpMockCall {
     method: String,
     url: String,
@@ -78,6 +80,100 @@ pub struct HttpMockCallSnapshot {
 thread_local! {
     static HTTP_MOCKS: RefCell<Vec<HttpMock>> = const { RefCell::new(Vec::new()) };
     static HTTP_MOCK_CALLS: RefCell<Vec<HttpMockCall>> = const { RefCell::new(Vec::new()) };
+}
+
+/// HTTP fixture state bound to one typed `Harness`.
+///
+/// The legacy ambient mock registry is thread-local. A typed harness can cross
+/// executor threads between fixture registration and an awaited request, so
+/// its deterministic transport state must travel with the harness instead.
+#[derive(Debug, Default)]
+pub(crate) struct HttpMockRegistry {
+    inner: Mutex<HttpMockRegistryInner>,
+}
+
+#[derive(Debug, Default)]
+struct HttpMockRegistryInner {
+    mocks: Vec<HttpMock>,
+    calls: Vec<HttpMockCall>,
+}
+
+impl HttpMockRegistry {
+    pub(crate) fn clear(&self) {
+        let mut inner = self.inner.lock().expect("harness HTTP mocks poisoned");
+        inner.mocks.clear();
+        inner.calls.clear();
+    }
+
+    pub(crate) fn has_match(&self, method: &str, url: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("harness HTTP mocks poisoned")
+            .mocks
+            .iter()
+            .any(|mock| {
+                !mock.responses.is_empty()
+                    && (mock.method == "*" || mock.method.eq_ignore_ascii_case(method))
+                    && url_matches(&mock.url_pattern, url)
+            })
+    }
+
+    pub(super) fn register(
+        &self,
+        method: impl Into<String>,
+        url_pattern: impl Into<String>,
+        responses: Vec<MockResponse>,
+    ) {
+        let method = method.into();
+        let url_pattern = url_pattern.into();
+        let mut inner = self.inner.lock().expect("harness HTTP mocks poisoned");
+        inner
+            .mocks
+            .retain(|mock| !(mock.method == method && mock.url_pattern == url_pattern));
+        inner.mocks.push(HttpMock {
+            method,
+            url_pattern,
+            responses,
+            next_response: 0,
+        });
+    }
+
+    pub(super) fn consume(
+        &self,
+        method: &str,
+        url: &str,
+        headers: crate::value::DictMap,
+        body: Option<String>,
+    ) -> Option<MockResponse> {
+        let mut inner = self.inner.lock().expect("harness HTTP mocks poisoned");
+        let response = inner.mocks.iter_mut().find_map(|mock| {
+            if (mock.method == "*" || mock.method.eq_ignore_ascii_case(method))
+                && url_matches(&mock.url_pattern, url)
+            {
+                let last_index = mock.responses.len().checked_sub(1)?;
+                let index = mock.next_response.min(last_index);
+                let response = mock.responses[index].clone();
+                if mock.next_response < last_index {
+                    mock.next_response += 1;
+                }
+                Some(response)
+            } else {
+                None
+            }
+        })?;
+        inner.calls.push(HttpMockCall {
+            method: method.to_string(),
+            url: url.to_string(),
+            headers,
+            body,
+        });
+        Some(response)
+    }
+
+    pub(crate) fn calls_value(&self, redact_sensitive: bool) -> Vec<VmValue> {
+        let inner = self.inner.lock().expect("harness HTTP mocks poisoned");
+        http_mock_calls_from(&inner.calls, redact_sensitive)
+    }
 }
 
 pub(super) fn reset_http_mocks() {
@@ -145,29 +241,30 @@ pub fn http_mock_calls_snapshot() -> Vec<HttpMockCallSnapshot> {
 }
 
 pub(super) fn http_mock_calls_value(redact_sensitive: bool) -> Vec<VmValue> {
-    HTTP_MOCK_CALLS.with(|calls| {
-        calls
-            .borrow()
-            .iter()
-            .map(|call| {
-                let mut dict = BTreeMap::new();
-                dict.put_str("method", call.method.as_str());
-                dict.put_str("url", redact_mock_call_url(&call.url, redact_sensitive));
-                dict.insert(
-                    "headers".to_string(),
-                    VmValue::dict(mock_call_headers_value(&call.headers, redact_sensitive)),
-                );
-                dict.insert(
-                    "body".to_string(),
-                    match &call.body {
-                        Some(body) => VmValue::String(arcstr::ArcStr::from(body.as_str())),
-                        None => VmValue::Nil,
-                    },
-                );
-                VmValue::dict(dict)
-            })
-            .collect()
-    })
+    HTTP_MOCK_CALLS.with(|calls| http_mock_calls_from(&calls.borrow(), redact_sensitive))
+}
+
+fn http_mock_calls_from(calls: &[HttpMockCall], redact_sensitive: bool) -> Vec<VmValue> {
+    calls
+        .iter()
+        .map(|call| {
+            let mut dict = BTreeMap::new();
+            dict.put_str("method", call.method.as_str());
+            dict.put_str("url", redact_mock_call_url(&call.url, redact_sensitive));
+            dict.insert(
+                "headers".to_string(),
+                VmValue::dict(mock_call_headers_value(&call.headers, redact_sensitive)),
+            );
+            dict.insert(
+                "body".to_string(),
+                match &call.body {
+                    Some(body) => VmValue::String(arcstr::ArcStr::from(body.as_str())),
+                    None => VmValue::Nil,
+                },
+            );
+            VmValue::dict(dict)
+        })
+        .collect()
 }
 
 pub(super) fn parse_mock_responses(response: &crate::value::DictMap) -> Vec<MockResponse> {

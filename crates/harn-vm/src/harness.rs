@@ -410,6 +410,7 @@ impl HarnessInner {
 #[derive(Debug, Default)]
 pub(crate) struct CapabilityFixtureState {
     inner: Mutex<CapabilityFixtureScopes>,
+    http_mocks: crate::http::HttpMockRegistry,
 }
 
 #[derive(Debug, Default)]
@@ -492,6 +493,12 @@ impl CapabilityFixtureState {
             enabled: true,
             ..CapabilityFixtureInner::default()
         };
+        drop(scopes);
+        self.http_mocks.clear();
+    }
+
+    pub(crate) fn http_mocks(&self) -> &crate::http::HttpMockRegistry {
+        &self.http_mocks
     }
 
     pub(crate) fn push_scope(&self) {

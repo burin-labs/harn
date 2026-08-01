@@ -86,6 +86,20 @@ pub fn inject_leading_authority(
     Ok(call_args)
 }
 
+pub(super) fn inject_export_authority(
+    vm: &Vm,
+    closure: &VmClosure,
+    args: &[VmValue],
+    export_name: &str,
+) -> Result<Vec<VmValue>, VmError> {
+    inject_leading_authority(
+        vm,
+        closure,
+        args,
+        &format!("playground host export `{export_name}`"),
+    )
+}
+
 fn named_type(type_expr: &TypeExpr) -> Option<&str> {
     match type_expr {
         TypeExpr::Named(name) => Some(name),
