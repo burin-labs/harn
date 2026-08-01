@@ -38,7 +38,18 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         if let Some(capability) = handle.kind().capability_id() {
-            if crate::stdlib::capability_method_manifest_entry(capability, method).is_none() {
+            let declared = crate::stdlib::capability_method_manifest_entry(capability, method)
+                .is_some();
+            let host_method =
+                harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method);
+            if !declared && !host_method {
+                if capability != harn_builtin_meta::CapabilityId::Testing {
+                    if let Some(response) =
+                        handle.inner().fixtures().dispatch(capability, method, args)
+                    {
+                        return response;
+                    }
+                }
                 return Err(method_unsupported(handle, method));
             }
         }
@@ -422,8 +433,18 @@ impl crate::vm::Vm {
             .kind()
             .capability_id()
             .expect("non-root harness kind has a capability id");
-        let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
-            return Some(Err(method_unsupported(handle, method)));
+        let entry = match crate::stdlib::capability_method_manifest_entry(capability, method) {
+            Some(entry) => entry,
+            None => {
+                if capability != harn_builtin_meta::CapabilityId::Testing {
+                    if let Some(response) =
+                        handle.inner().fixtures().dispatch(capability, method, args)
+                    {
+                        return Some(response);
+                    }
+                }
+                return Some(Err(method_unsupported(handle, method)));
+            }
         };
         runtime_effects.record_specs(entry.contract.effects, args);
         if let HarnessMode::Null(state) = handle.inner().mode() {

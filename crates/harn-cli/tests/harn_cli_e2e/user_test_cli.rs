@@ -296,6 +296,62 @@ pipeline test_manifest_mock(harness: Harness, task) {
 }
 
 #[test]
+fn scoped_capability_fixtures_intercept_host_calls_and_preserve_thrown_values() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite = temp.path().join("suite");
+    std::fs::create_dir_all(&suite).expect("create suite");
+    std::fs::write(
+        suite.join("test_scoped_fixture.harn"),
+        r#"
+import { with_capability_fixtures } from "std/testing"
+
+pipeline test_scoped_fixture(harness: Harness, task) {
+  const answer = with_capability_fixtures(
+    harness.testing,
+    [{capability: "workspace", method: "project_root", result: "/tmp/project"}],
+    { _ -> harness.workspace.project_root({}) },
+  )
+  assert_eq(answer, "/tmp/project")
+
+  const result = with_capability_fixtures(
+    harness.testing,
+    [{capability: "runtime", method: "set_result", result: "captured", unregistered_ok: true}],
+    { _ -> harness.runtime.set_result({status: "done"}) },
+  )
+  assert_eq(result, "captured")
+
+  const caught = try {
+    with_capability_fixtures(
+      harness.testing,
+      [{capability: "workspace", method: "project_root", result: "/tmp/project"}],
+      { _ -> throw "fixture-body-failure" },
+    )
+    "unreachable"
+  } catch (error) {
+    error
+  }
+  assert_eq(caught, "fixture-body-failure")
+  assert_eq(len(harness.testing.calls()), 0)
+}
+"#,
+    )
+    .expect("write test");
+
+    let output = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["test", suite.to_str().unwrap(), "--timeout", "10000"])
+        .output()
+        .expect("spawn harn test");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn user_tests_reject_mock_operation_missing_from_project_manifest() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let suite = temp.path().join("suite");
