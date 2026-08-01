@@ -437,7 +437,7 @@ mod tests {
         let receipt = llm_mock_load_jsonl_builtin(
             &[VmValue::String(arcstr::ArcStr::from(
                 "{\"schemaVersion\":1,\"strictScopes\":false}\n\
-                 {\"id\":\"custom-1\",\"scope\":\"custom.review\",\"consume\":\"once\",\"text\":\"CUSTOM\"}\n\
+                 {\"id\":\"custom-1\",\"scope\":\"custom_review\",\"consume\":\"once\",\"text\":\"CUSTOM\"}\n\
                  {\"id\":\"main-1\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"MAIN\"}\n",
             ))],
             &mut out,
