@@ -38,7 +38,12 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         if let Some(capability) = handle.kind().capability_id() {
-            if crate::stdlib::capability_method_manifest_entry(capability, method).is_none() {
+            let declared = crate::stdlib::capability_method_manifest_entry(capability, method)
+                .is_some();
+            let host_method =
+                harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method);
+            let fixture_configured = handle.inner().fixtures().has_response(capability, method);
+            if !declared && !host_method && !fixture_configured {
                 return Err(method_unsupported(handle, method));
             }
         }

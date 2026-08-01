@@ -940,7 +940,14 @@ impl crate::vm::Vm {
                         target_method,
                     )
                     .is_some();
+                    let host_method =
+                        harn_builtin_meta::host_capabilities::is_host_capability_method(
+                            capability,
+                            target_method,
+                        );
                     if !declared
+                        && !host_method
+                        && !unregistered_ok
                         && !crate::harness::is_capability_driver_fixture(capability, target_method)
                     {
                         return Err(VmError::TypeError(format!(
