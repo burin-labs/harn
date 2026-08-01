@@ -45,8 +45,10 @@ jobs:
     with:
       version: ${{ inputs.version }}
       # Optional repository-owned materialization. The target tag is inherited
-      # as HARN_BUMP_TARGET_TAG. All mutations are included in the one signed
-      # commit; a non-zero exit blocks it.
+      # as HARN_BUMP_TARGET_TAG. The reusable workflow first applies the target
+      # runtime's deterministic capability migrations, then runs this refresh.
+      # All mutations are included in the one signed commit; a non-zero exit
+      # blocks it.
       refresh-command: |
         harn install --locked
         ./scripts/regenerate-derived-sources "$HARN_BUMP_TARGET_TAG"

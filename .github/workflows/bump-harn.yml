@@ -165,7 +165,12 @@ jobs:
           # directly; older runtimes reach validation, whose first operation
           # fails unless refresh completed successfully.
           # shellcheck disable=SC2016 # expand in the child shell, not here
-          export HARN_BUMP_REFRESH='set -euo pipefail; eval "$HARN_BUMP_REFRESH_COMMAND"; printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
+          # The target runtime owns its capability migration registry. Apply
+          # that deterministic codemod before the caller-owned refresh so a
+          # runtime bump can carry source compatibility forward in the same
+          # signed PR. This callback is reached only after a real version
+          # change; the already-current path remains mutation-free.
+          export HARN_BUMP_REFRESH='set -euo pipefail; harn fix --apply --safety surface-changing --capability-migrations-only .; eval "$HARN_BUMP_REFRESH_COMMAND"; printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
