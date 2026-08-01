@@ -427,6 +427,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 }
             }
         }
+        Command::App(args) => commands::app::run(args).await,
         Command::Fmt(args) => {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             // Anchor config resolution on the first target; CLI flags

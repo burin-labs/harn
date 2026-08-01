@@ -24,13 +24,24 @@ pipeline default(harness: Harness) {
   harness.stdio.println(resource.validation.ok)
   harness.stdio.println(resource.content_sha256.starts_with("sha256:"))
   harness.stdio.println(len(resource.permissions))
-  const meta_options: UiToolMetaOptions = {visibility: "app_only", initial_view: {tab: "signups"}}
+  const meta_options: UiToolMetaOptions = {visibility: ["app"]}
   const meta: UiToolMeta = ui_tool_meta(resource, meta_options)
   const mcp_meta = ui_tool_meta_to_mcp(meta)
   harness.stdio.println(meta.schema)
   harness.stdio.println(mcp_meta.ui.resourceUri)
   harness.stdio.println(mcp_meta.ui.visibility)
-  harness.stdio.println(mcp_meta.ui.initialView.tab)
+  const mcp_resource = ui_resource_to_mcp(
+    resource,
+    {
+      connect_domains: ["https://api.example.test"],
+      permissions: {clipboardWrite: {}},
+      prefers_border: true,
+    },
+  )
+  harness.stdio.println(mcp_resource.mime_type)
+  harness.stdio.println(mcp_resource.meta.ui.csp.connectDomains)
+  harness.stdio.println(mcp_resource.meta.ui.permissions.clipboardWrite != nil)
+  harness.stdio.println(mcp_resource.meta.ui.prefersBorder)
   const csp_header = ui_resource_csp_header(resource.csp)
   harness.stdio.println(csp_header.contains("default-src 'self'"))
   harness.stdio.println(csp_header.contains("connect-src 'none'"))
@@ -89,8 +100,7 @@ pipeline default(harness: Harness) {
     {id: "ctx-1"},
   )
   harness.stdio.println(ctx_update.method)
-  harness.stdio.println(ctx_update.params.key)
-  harness.stdio.println(ctx_update.params.model_visible)
+  harness.stdio.println(ctx_update.params.structuredContent.selection.tile)
   const bad_uri = try {
     ui_resource("http://example/widget", "Bad", "<html></html>")
   }

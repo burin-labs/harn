@@ -591,14 +591,6 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     );
     result.put_str("combined", combined);
     result.insert(
-        crate::value::intern_key("exit_status"),
-        VmValue::Int(response.exit_code as i64),
-    );
-    result.insert(
-        crate::value::intern_key("legacy_status"),
-        VmValue::Int(response.exit_code as i64),
-    );
-    result.insert(
         crate::value::intern_key("success"),
         VmValue::Bool(response.success),
     );

@@ -36,7 +36,7 @@ capability_method!(
 capability_method!(
     net_egress_policy,
     "harness.net.egress_policy",
-    ["network.mutate@const=egress-policy"],
+    ["state.mutate@const=egress-policy"],
     "__cap_net_egress_policy(config: dict) -> dict",
     "Install the outbound network policy for this execution."
 );
@@ -442,7 +442,7 @@ capability_method!(
     process_run,
     "harness.process.run",
     ["process.write@arg0.program", "process.write@arg0.command"],
-    "__cap_process_run(command: dict) -> dict",
+    "__cap_process_run(command: dict) -> @PROCESS_RESULT",
     "Run a structured child process and capture its result."
 );
 capability_method!(

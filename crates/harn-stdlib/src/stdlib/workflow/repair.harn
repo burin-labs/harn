@@ -97,7 +97,7 @@ fn __repair_command_verifier(tools: HarnessTools, spec) {
     }
     const out = command_run(tools, run_spec, {capture: {max_inline_bytes: 65536}})
     const expected = __repair_int(spec?.expect_status) ?? 0
-    const code = __repair_int(out?.exit_code) ?? __repair_int(out?.exit_status) ?? -1
+    const code = __repair_int(out?.exit_code) ?? -1
     const detail = __repair_string(out?.combined, __repair_string(out?.stdout, ""))
     return if code == expected {
       {ok: true, findings: []}

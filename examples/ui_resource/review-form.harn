@@ -49,15 +49,13 @@ fn render_review_html(item) {
     + "  window.parent && window.parent.postMessage(envelope, '*');"
     + "}"
     + "document.getElementById('next-1').addEventListener('click', () => {"
-    + "  notify('context/update', { key: 'review.summary',"
-    + "                             value: document.getElementById('summary').value,"
-    + "                             model_visible: true });"
+    + "  notify('ui/update-model-context', { structuredContent: {"
+    + "    reviewSummary: document.getElementById('summary').value } });"
     + "  show(2);"
     + "});"
     + "document.getElementById('next-2').addEventListener('click', () => {"
-    + "  notify('context/update', { key: 'review.decision',"
-    + "                             value: document.getElementById('decision').value,"
-    + "                             model_visible: true });"
+    + "  notify('ui/update-model-context', { structuredContent: {"
+    + "    reviewDecision: document.getElementById('decision').value } });"
     + "  show(3);"
     + "});"
     + "document.getElementById('review').addEventListener('submit', (event) => {"
@@ -78,8 +76,7 @@ pipeline default(harness: Harness) {
     render_review_html(item),
     {
       description: "Three-step review form with summary, decision, and confidence inputs",
-      permissions: ["tools/call", "context/update"],
-      capabilities: ["tools/call", "context/update"],
+      capabilities: ["tools/call", "ui/update-model-context"],
       version: "2026-05-11",
       csp: {
         default_src: ["'self'"],
@@ -95,7 +92,7 @@ pipeline default(harness: Harness) {
   const result = ui_tool_result(
     resource,
     {
-      tool_meta_options: {visibility: "model_visible", initial_view: {step: 1, item_id: item.id}},
+      tool_meta_options: {visibility: ["model", "app"]},
       structured_fallback: ui_structured_fallback(
         {
           item_id: item.id,

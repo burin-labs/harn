@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root { color-scheme: light; font: 14px Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 760px; min-height: 560px; background: #f4f1e9; color: #20251f; }
+    .studio { height: 100vh; display: grid; grid-template-columns: minmax(480px, 1fr) 300px; }
+    .work { padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+    .bar { display: flex; align-items: center; gap: 8px; }
+    h1 { margin: 0 auto 0 0; font-family: Georgia, serif; font-size: 20px; font-weight: 500; }
+    button, select, textarea { font: inherit; }
+    button, select { border: 1px solid #b9b5a9; border-radius: 7px; background: #fffdf7; padding: 7px 10px; color: inherit; }
+    button:hover { border-color: #506a55; }
+    .canvas-wrap { flex: 1; min-height: 420px; display: grid; place-items: center; border: 1px solid #c8c3b7; border-radius: 12px; background: #ded9cb; overflow: hidden; }
+    canvas { width: min(100%, 1100px); aspect-ratio: 16 / 9; background: #fffef9; box-shadow: 0 8px 35px #56513e30; touch-action: none; cursor: crosshair; }
+    aside { padding: 24px 20px; border-left: 1px solid #c8c3b7; background: #fffcf4; display: flex; flex-direction: column; gap: 12px; }
+    label { display: block; font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: #62665e; }
+    textarea { width: 100%; flex: 1; resize: none; border: 1px solid #c8c3b7; border-radius: 9px; padding: 12px; background: white; line-height: 1.45; color: inherit; }
+    .polish { padding: 11px 14px; border: 0; color: white; background: #385943; font-weight: 650; }
+    .polish:disabled { opacity: .55; }
+    #status { min-height: 36px; color: #5d625a; font-size: 12px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div class="studio">
+    <section class="work">
+      <div class="bar"><h1>Burin Logo Studio</h1><button id="undo">Undo</button><button id="clear">Clear</button></div>
+      <div class="canvas-wrap"><canvas id="canvas" width="1200" height="675" aria-label="Logo sketch canvas"></canvas></div>
+    </section>
+    <aside>
+      <label for="notes">What should the polished logo convey?</label>
+      <textarea id="notes">The cursive lettering “Cornflower Garden” in the foreground should be cornflower blue. Use a calm green for grass blades behind it, with a dark outline only if the lettering needs more contrast.</textarea>
+      <label for="model">Image model</label>
+      <select id="model"><option value="local:auto">Local — automatic</option><option value="replay">Replay fixture</option></select>
+      <button class="polish" id="polish">Polish drawing</button>
+      <div id="status">Connecting to Harn…</div>
+    </aside>
+  </div>
+  <script>
+    const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+    const status = document.getElementById('status'), polish = document.getElementById('polish');
+    let drawing = false, history = [], nextId = 1, ready = false;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 7; ctx.strokeStyle = '#486449';
+    function point(event) { const r = canvas.getBoundingClientRect(); return {x:(event.clientX-r.left)*canvas.width/r.width,y:(event.clientY-r.top)*canvas.height/r.height}; }
+    function snapshot() { history.push(ctx.getImageData(0,0,canvas.width,canvas.height)); if(history.length>30) history.shift(); }
+    canvas.addEventListener('pointerdown', event => { snapshot(); drawing=true; const p=point(event); ctx.beginPath(); ctx.moveTo(p.x,p.y); canvas.setPointerCapture(event.pointerId); });
+    canvas.addEventListener('pointermove', event => { if(!drawing)return; const p=point(event); ctx.lineTo(p.x,p.y); ctx.stroke(); });
+    canvas.addEventListener('pointerup', () => drawing=false);
+    document.getElementById('undo').onclick=()=>{const image=history.pop();if(image)ctx.putImageData(image,0,0)};
+    document.getElementById('clear').onclick=()=>{snapshot();ctx.clearRect(0,0,canvas.width,canvas.height)};
+    const pending = new Map();
+    function request(method, params) { const id=nextId++; parent.postMessage({jsonrpc:'2.0',id,method,params},'*'); return new Promise((resolve,reject)=>pending.set(id,{resolve,reject})); }
+    addEventListener('message', event => { const message=event.data;if(!message||message.jsonrpc!=='2.0')return; const waiter=pending.get(message.id);if(!waiter)return;pending.delete(message.id);message.error?waiter.reject(new Error(message.error.message)):waiter.resolve(message.result); });
+    async function connect(){const init=await request('ui/initialize',{protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['fullscreen']},appInfo:{name:'burin-logo-studio',version:'1'}});parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized',params:{}},'*');ready=true;status.textContent='Ready — sketch loosely, then describe the intended finish.';return init}
+    polish.onclick=async()=>{if(!ready)return;polish.disabled=true;status.textContent='Sending the sketch through Harn…';try{const result=await request('tools/call',{name:'logo.polish',arguments:{prompt:document.getElementById('notes').value,model:document.getElementById('model').value,sketch:canvas.toDataURL('image/png')}});status.textContent=result.content?.[0]?.text||'Polish request completed.'}catch(error){status.textContent='Could not polish: '+error.message}finally{polish.disabled=false}};
+    connect().catch(error=>status.textContent='Could not connect: '+error.message);
+  </script>
+</body>
+</html>

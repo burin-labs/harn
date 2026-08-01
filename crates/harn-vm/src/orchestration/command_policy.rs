@@ -766,9 +766,9 @@ pub fn blocked_command_response(
     result.insert("timed_out".to_string(), VmValue::Bool(false));
     result.put_str("stdout", "");
     result.put_str("stderr", message);
+    result.insert("stdout_utf8_valid".to_string(), VmValue::Bool(true));
+    result.insert("stderr_utf8_valid".to_string(), VmValue::Bool(true));
     result.put_str("combined", message);
-    result.insert("exit_status".to_string(), VmValue::Int(-1));
-    result.insert("legacy_status".to_string(), VmValue::Int(-1));
     result.insert("success".to_string(), VmValue::Bool(false));
     result.put_str("error", "permission_denied");
     result.put_str("reason", message);

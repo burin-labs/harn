@@ -96,7 +96,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         },
     );
 
-    // mcp_resource({uri, name, text, description?, mime_type?}) -> nil
+    // mcp_resource({uri, name, text, description?, mime_type?, meta?}) -> nil
     vm.register_capability_method(
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_resource",
@@ -121,6 +121,17 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
             let title = dict.get("title").map(|v| v.display());
             let description = dict.get("description").map(|v| v.display());
             let mime_type = dict.get("mime_type").map(|v| v.display());
+            let meta = match dict.get("meta") {
+                Some(VmValue::Dict(value)) => Some(super::convert::vm_value_to_json(
+                    &VmValue::Dict(value.clone()),
+                )),
+                Some(VmValue::Nil) | None => None,
+                Some(_) => {
+                    return Err(VmError::Runtime(
+                        "mcp_resource: 'meta' must be a dict".into(),
+                    ));
+                }
+            };
             let text = dict
                 .get("text")
                 .map(|v| v.display())
@@ -133,6 +144,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
                     title,
                     description,
                     mime_type,
+                    meta,
                     text,
                 });
             });

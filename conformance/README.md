@@ -1,16 +1,14 @@
 # Conformance tests
 
-This directory is Harn's primary behavioral test suite. Each test is a
-`.harn` program with a sibling baseline file the runner diffs against;
-together they define the contract the Harn language, stdlib, runtime, and
-orchestration substrate are expected to honor.
+This directory is Harn's executable behavioral specification. Each test pairs
+a `.harn` program with an expected result. Together, the files define the
+public language, standard library, runtime, and orchestration contracts.
 
 ## Why "conformance"?
 
-The label is load-bearing. These tests are written as if a second Harn
-implementation might one day need to pass them — they encode the language
-contract, not internal implementation details. Two consequences flow from
-that framing:
+Conformance tests describe public behavior rather than implementation details.
+A second Harn implementation should be able to run the same tests. This rule
+has two practical consequences:
 
 1. **Tests treat the Harn CLI as a black box.** Inputs are `.harn` source
    plus optional sidecar files (`*.llm-mock.jsonl`, `*.process-tape.json`,
@@ -22,10 +20,9 @@ that framing:
    description (what behavior changed, what spec section is affected if
    any). Pure refactors should not touch `.expected` / `.error` files.
 
-This is the same shape as ECMAScript Test262, the WebAssembly spec
-testsuite, and TypeScript's `tests/cases/conformance/` directory — even
-though Harn has a single implementation today, the suite is structured so
-that constraint can relax later without rewriting the tests.
+This follows the approach used by [ECMAScript Test262](https://github.com/tc39/test262),
+the [WebAssembly specification tests](https://github.com/WebAssembly/spec/tree/main/test),
+and [TypeScript's conformance tests](https://github.com/microsoft/TypeScript/tree/main/tests/cases/conformance).
 
 For fast, implementation-coupled checks (parser AST shape, VM dispatch
 internals, type checker invariants), see Rust unit tests under
@@ -80,7 +77,7 @@ tests by the feature surface they exercise:
 | `cli/`                | CLI flag + envelope contracts                         |
 | `fmt/`                | `harn fmt` formatter idempotence                      |
 | `harn_pack/`          | `harn pack` signing, manifests, asset bundling        |
-| `harness/`            | Test harness self-checks                              |
+| `harness/`            | Harness capability and host-behavior contracts       |
 | `compression/`        | Context compression policies                          |
 | `net_policy/`         | Network capability sandbox                            |
 | `sandbox_hardened/`   | Tightened sandbox profile                             |
@@ -90,11 +87,11 @@ tests by the feature surface they exercise:
 |                       | mcp × skills × tool middleware × …)                   |
 | `errors_by_feature/`  | Error tests grouped by the feature that produces them |
 
-High-volume categories may have a second level. `stdlib/` currently splits
-into `stdlib/oauth/`, `stdlib/json/`, `stdlib/hitl/`,
-`stdlib/preset_hooks/`, `stdlib/tool_hooks/`, and `stdlib/project/`.
-Other categories may grow similar subdirectories when their flat file
-count crosses ~50 tests.
+Use a second level when it names a stable public boundary and makes tests easier
+to find. Keep each `.harn` file beside its expected result and other sidecars.
+Do not copy the Rust module tree. For example, `harness/process/` owns the
+public process-capability contracts, while `stdlib/oauth/` owns the public OAuth
+standard-library contracts.
 
 ### `errors/` — behavioral error tests by error class
 

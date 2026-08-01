@@ -6,9 +6,34 @@ to text or structured tool output when a host does not advertise UI support.
 
 [mcp-apps]: https://modelcontextprotocol.io/extensions/apps/overview
 
+## Run an app locally
+
+Register at least one UI resource and one linked tool, then launch the same
+script in Harn's standalone host:
+
+```sh
+harn app run examples/apps/logo-studio.harn
+```
+
+The host binds to a random loopback port, opens the default browser, and puts
+the app inside a separate-origin sandbox proxy. Use `--no-open` in automation,
+`--bind 127.0.0.1:4321` for a stable port, or `--resource ui://...` to select
+among multiple declared views. Non-loopback binds are rejected; deploy remote
+apps through an authenticated host instead.
+
+![The logo studio canvas after a live tool round trip](assets/logo-studio-e2e.png)
+
+The app view speaks standard MCP JSON-RPC over `postMessage`. Calls to
+`tools/call` and `resources/read` are checked by the host and dispatched to the
+same in-process MCP server used by `harn serve mcp`; app-only tool visibility is
+therefore enforced at the protocol boundary rather than by UI convention. RPC
+requests must also carry the exact host origin, which blocks another browser
+origin or a DNS-rebinding page from driving tools through the loopback server.
+
 ```harn
 import {
   ui_resource,
+  ui_resource_to_mcp,
   ui_select_for_host,
   ui_structured_fallback,
   ui_tool_result,
@@ -19,8 +44,10 @@ const resource = ui_resource(
   "ui://harn-dashboard/kpis@v1",
   "Weekly KPIs",
   weekly_kpi_html,
-  {permissions: ["tools/call"], capabilities: ["tools/call", "context/read"]},
+  {capabilities: ["tools/call", "resources/read"]},
 )
+
+harness.tools.mcp_resource(ui_resource_to_mcp(resource))
 
 const result = ui_tool_result(
   resource,
@@ -42,7 +69,7 @@ const rendered = ui_select_for_host(result, host_capabilities)
 | `mime_type` | Defaults to `text/html;profile=mcp-app`, matching the MCP Apps profile contract |
 | `contents` / `contents_encoding` | UTF-8 (default) or base64-encoded HTML |
 | `content_sha256` / `size_bytes` | Integrity hash and size for host caches and audit |
-| `permissions` | Host-mediated permissions the resource will request (`tools/call`, `context/update`, etc.) |
+| `permissions` | Harn-level capability labels; browser permissions belong in `ui_resource_to_mcp` options |
 | `capabilities` | JSON-RPC methods the resource may use over `postMessage` |
 | `csp` | Source-list directives Harn surfaces back as a `Content-Security-Policy` header value via `ui_resource_csp_header` and a sandbox attribute via `ui_resource_sandbox_attr` |
 | `validation` | Summary of the embedded `std/artifact/web` validation: `ok`, `error_codes`, `warning_codes` |
@@ -59,22 +86,22 @@ rules used by safe artifact patching. The validator defaults to
 
 `ui_tool_meta(resource, options?: UiToolMetaOptions)` returns a
 `UiToolMeta` (`harn.ui_tool_meta.v1`) envelope and
-`ui_tool_meta_to_mcp(meta)` serializes it into the
-camelCase dict shape MCP Apps hosts read from `_meta.ui`:
+`ui_tool_meta_to_mcp(meta)` serializes it into the stable MCP Apps shape
+served from a tool's `_meta.ui`:
 
 | MCP key | Harn field |
 |---|---|
 | `resourceUri` | `ui.resource_uri` |
-| `resourceName` | `ui.resource_name` |
-| `profile` | `ui.profile` (defaults to `mcp-app`) |
-| `visibility` | `ui.visibility` (`app_only`, `model_visible`, or `always_visible`) |
-| `initialView` | `ui.initial_view` (host-side initial state, never trusted as durable storage) |
-| `permissions` / `capabilities` | Mirrored from the resource envelope |
+| `visibility` | `ui.visibility` (some combination of `model` and `app`) |
 
-Use `visibility: "app_only"` for UIs the model should not see in its
-own context, `model_visible` when the structured fallback is also model
-context, and `always_visible` when the same payload is useful in both
-places.
+Use `visibility: ["app"]` for tools callable only by the embedded app,
+`["model"]` for model-only tools, and `["model", "app"]` for both.
+
+`ui_resource_to_mcp(resource, options?)` produces the exact record accepted
+by `harness.tools.mcp_resource`. Its `meta.ui` block carries the resource
+CSP domains, browser permissions, dedicated domain, and border preference;
+Harn's MCP server projects it as `_meta.ui` on both resource discovery and
+`resources/read` content. External domains and permissions default empty.
 
 ## Fallbacks
 
@@ -102,10 +129,9 @@ whether the host can render the `mcp-app` profile.
 `ui_tool_call_envelope(name, params?, options?)` produces the
 host→guest JSON-RPC `tools/call` payload a sandboxed iframe receives
 through `window.parent.postMessage`. `ui_context_update_envelope(key,
-value, options?)` produces the guest→host envelope used to keep
-model-visible context in sync as the user interacts with the widget.
-Both default to `model_visible: true` for context updates so the model
-sees the same state the UI does.
+value, options?)` produces the stable guest→host
+`ui/update-model-context` request, storing the keyed value in
+`structuredContent` for future model turns.
 
 ## Validation contract
 

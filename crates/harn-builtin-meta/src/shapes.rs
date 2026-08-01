@@ -26,8 +26,8 @@
 //!   callsites still work.
 
 use crate::{
-    ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT, TY_INT, TY_LIST,
-    TY_NIL, TY_STRING, TY_STRING_OR_NIL,
+    ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT, TY_INT,
+    TY_INT_OR_NIL, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
 const TY_BOOL_OR_DICT: Ty = Ty::Union(&[TY_BOOL, TY_DICT]);
@@ -67,6 +67,31 @@ pub const WAITPOINT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("value", TY_ANY),
     ShapeFieldDescriptor::new("reason", TY_STRING_OR_NIL),
     ShapeFieldDescriptor::new("metadata", TY_DICT_OR_NIL),
+]);
+
+/// Stable synchronous subprocess result returned by `harness.process.run`.
+///
+/// This is the typed projection of `process_exec_response` in `harn-vm`.
+/// Keep every runtime field here so callers can use a narrower named record
+/// alias without losing typo checking at the public capability boundary.
+pub const PROCESS_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("command_id", TY_STRING),
+    ShapeFieldDescriptor::new("status", TY_STRING),
+    ShapeFieldDescriptor::new("pid", TY_INT_OR_NIL),
+    ShapeFieldDescriptor::new("process_group_id", TY_INT_OR_NIL),
+    ShapeFieldDescriptor::new("handle_id", TY_NIL),
+    ShapeFieldDescriptor::new("started_at", TY_STRING),
+    ShapeFieldDescriptor::new("ended_at", TY_STRING),
+    ShapeFieldDescriptor::new("duration_ms", TY_INT),
+    ShapeFieldDescriptor::new("exit_code", TY_INT),
+    ShapeFieldDescriptor::new("signal", TY_NIL),
+    ShapeFieldDescriptor::new("timed_out", TY_BOOL),
+    ShapeFieldDescriptor::new("stdout", TY_STRING),
+    ShapeFieldDescriptor::new("stderr", TY_STRING),
+    ShapeFieldDescriptor::new("stdout_utf8_valid", TY_BOOL),
+    ShapeFieldDescriptor::new("stderr_utf8_valid", TY_BOOL),
+    ShapeFieldDescriptor::new("combined", TY_STRING),
+    ShapeFieldDescriptor::new("success", TY_BOOL),
 ]);
 
 // ---------------------------------------------------------------------------

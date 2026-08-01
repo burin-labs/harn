@@ -184,6 +184,21 @@ fn landlock_profile(
             true,
         )?;
     }
+    if proc_runtime_reads_are_contained() {
+        // Some language runtimes (notably Swift on Linux) discover argv by
+        // reading their own memory map. A rule for `/proc/self/maps` cannot
+        // cover grandchildren: Landlock resolves it to the immediate child's
+        // PID-specific inode, while compiler drivers and shell scripts spawn
+        // fresh processes. Grant file reads below procfs only when Yama keeps
+        // a sandboxed descendant from reading its parent or sibling process
+        // state. READ_DIR remains denied, so procfs cannot be enumerated.
+        push_rule(
+            &mut profile,
+            PathBuf::from("/proc"),
+            LANDLOCK_ACCESS_FS_READ_FILE,
+            true,
+        )?;
+    }
     // Naming an absolute executable is explicit authority to read and execute
     // that file, even when it lives outside the workspace and standard system
     // roots. This is common for verified CI/release artifacts under
@@ -348,6 +363,16 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn proc_runtime_reads_are_contained() -> bool {
+    std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
+        .ok()
+        .is_some_and(|value| yama_scope_contains_process_reads(&value))
+}
+
+fn yama_scope_contains_process_reads(value: &str) -> bool {
+    value.trim().parse::<u8>().is_ok_and(|scope| scope >= 1)
 }
 
 /// Compile the syscall allowlist into a BPF program.
@@ -1253,5 +1278,18 @@ mod tests {
             0,
             "ABI 5+ kernels should explicitly mediate device ioctls",
         );
+    }
+
+    #[test]
+    fn proc_runtime_reads_require_restricted_yama_scope() {
+        for safe in ["1", "2\n", "3"] {
+            assert!(yama_scope_contains_process_reads(safe), "scope {safe}");
+        }
+        for unsafe_or_unknown in ["0", "", "disabled", "256"] {
+            assert!(
+                !yama_scope_contains_process_reads(unsafe_or_unknown),
+                "scope {unsafe_or_unknown} must not grant procfs reads",
+            );
+        }
     }
 }

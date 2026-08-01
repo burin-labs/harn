@@ -1,0 +1,50 @@
+/**
+ * Burin Logo Studio — standalone Harn App smoke test.
+ *
+ * Run with: harn app run examples/apps/logo-studio.harn
+ */
+import { ui_resource, ui_resource_to_mcp, ui_tool_meta, ui_tool_meta_to_mcp } from "std/ui_resource"
+
+pipeline main(harness: Harness, task) {
+  const html = harness.fs.read_text(path_join(harness.fs.source_dir(), "logo-studio.html"))
+  const resource = ui_resource(
+    "ui://burin-labs/logo-studio",
+    "Burin Logo Studio",
+    html,
+    {
+      description: "Sketch, annotate, and polish a layered logo",
+      capabilities: ["tools/call", "ui/update-model-context"],
+      version: "1",
+      validation: {allow_network: false},
+    },
+  )
+  const tool_meta = ui_tool_meta(resource, {visibility: ["model", "app"]})
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "logo.polish",
+    "Polish a rough logo sketch using its annotations and selected image model",
+    {
+      title: "Polish logo",
+      parameters: {
+        prompt: {type: "string", required: true},
+        model: {type: "string", required: true},
+        sketch: {type: "string", required: true},
+      },
+      handler: { args -> "Logo request accepted for " + args.model + ": " + args.prompt },
+      meta: ui_tool_meta_to_mcp(tool_meta),
+      annotations: {
+        title: "Polish logo",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+  )
+  harness.tools.mcp_server_metadata(
+    {name: "burin-logo-studio", instructions: "Use logo.polish for interactive logo drafts."},
+  )
+  harness.tools.mcp_tools(tools)
+  harness.tools.mcp_resource(ui_resource_to_mcp(resource, {prefers_border: false}))
+}

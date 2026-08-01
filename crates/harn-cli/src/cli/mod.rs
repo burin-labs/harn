@@ -10,6 +10,7 @@
 //! by name from outside this module. Those types stay private to their
 //! per-subcommand module and are accessed through their parent enum.
 
+mod app;
 mod bench;
 mod canon;
 mod check;
@@ -81,6 +82,7 @@ mod viz;
 mod watch;
 mod workflow;
 
+pub(crate) use app::{AppArgs, AppCommand};
 pub(crate) use bench::{BenchArgs, BenchCommand, BenchReplayArgs};
 pub(crate) use canon::{CanonArgs, CanonCheckArgs, CanonCommand};
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
@@ -300,6 +302,8 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Build and run interactive AI applications written in Harn.
+    App(AppArgs),
     /// Execute a .harn file or an inline expression.
     #[command(long_about = "\
 Execute a .harn file or an inline expression.
