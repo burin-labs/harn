@@ -46,6 +46,21 @@ pipeline main(harness: Harness) {
 }
 
 #[test]
+fn legacy_ambient_projects_declared_capability_global_names() {
+    // Pre-cutover ambient globals are spelled `runtime_context_set` while the
+    // typed contract is published as `__cap_runtime_context_set`. The ambient
+    // bridge must accept the historical spelling and dispatch on the parent VM.
+    let source = r#"
+pipeline main(harness: Harness) {
+  runtime_context_set("ambient-bridge", 7)
+  return runtime_context_get("ambient-bridge", 0)
+}
+"#;
+    let (_, value) = run_harn_with_legacy_ambient_capabilities(source);
+    assert_eq!(value.display(), "7");
+}
+
+#[test]
 fn harness_fs_source_dir_tracks_the_owning_imported_module() {
     let project = tempfile::tempdir().unwrap();
     let library_dir = project.path().join("lib");

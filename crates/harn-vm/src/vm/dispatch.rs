@@ -333,6 +333,17 @@ impl Vm {
     /// Restore unqualified capability-method calls for an explicitly opted-in
     /// legacy process. Only uniquely owned method names are projected; a name
     /// shared by two capabilities remains unavailable.
+    ///
+    /// Pre-cutover ambient globals whose contracts are published as
+    /// `__cap_<name>` (for example `runtime_context_set`) are recognized by
+    /// the parser/compiler under the ambient bridge and dispatched by
+    /// [`Self::try_dispatch_runtime_context_builtin`] / harness-method
+    /// projection rather than by duplicating every hidden contract name here.
+    ///
+    /// Runtime-internal host primitives (`__host_agent_emit_event`, …) are also
+    /// projected under their pre-cutover ambient names (`agent_emit_event`) so
+    /// ambient pipelines keep calling the in-process implementation instead of
+    /// falling through to an embedder bridge under execution policy.
     pub(crate) fn project_legacy_capability_globals(&mut self) {
         if self.global("harness").is_none() {
             return;
@@ -361,6 +372,63 @@ impl Vm {
                 None => {}
             }
         }
+        self.project_legacy_host_internal_globals();
+    }
+
+    fn project_legacy_host_internal_globals(&mut self) {
+        if !harn_parser::legacy_ambient_capabilities_enabled() {
+            return;
+        }
+        let mut projections = Vec::new();
+        for (name, handler) in self.builtins.iter() {
+            if let Some(ambient) = name.strip_prefix("__host_") {
+                projections.push((
+                    ambient.to_string(),
+                    VmBuiltinDispatch::Sync(handler.clone()),
+                ));
+            }
+        }
+        for (name, handler) in self.async_builtins.iter() {
+            if let Some(ambient) = name.strip_prefix("__host_") {
+                projections.push((
+                    ambient.to_string(),
+                    VmBuiltinDispatch::Async(handler.clone()),
+                ));
+            }
+        }
+        for (ambient, dispatch) in projections {
+            if self.builtins.contains_key(&ambient) || self.async_builtins.contains_key(&ambient) {
+                continue;
+            }
+            match dispatch {
+                VmBuiltinDispatch::Sync(handler) => {
+                    self.register_builtin(&ambient, move |args, output| handler(args, output));
+                }
+                VmBuiltinDispatch::Async(handler) => {
+                    self.register_async_builtin(&ambient, move |ctx, args| handler(ctx, args));
+                }
+            }
+        }
+    }
+
+    fn try_dispatch_runtime_context_builtin(
+        &mut self,
+        name: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        if !Self::is_runtime_context_builtin(name) {
+            return None;
+        }
+        Some(match name {
+            "runtime_context" | "task_current" => {
+                Ok(crate::runtime_context::runtime_context_value(self))
+            }
+            "runtime_context_values" => Ok(VmValue::dict(self.runtime_context.values.clone())),
+            "runtime_context_get" => crate::runtime_context::runtime_context_get(self, args),
+            "runtime_context_set" => crate::runtime_context::runtime_context_set(self, args),
+            "runtime_context_clear" => crate::runtime_context::runtime_context_clear(self, args),
+            _ => Err(VmError::UndefinedBuiltin(name.to_string())),
+        })
     }
 
     /// Remove a sync builtin (so an async version can take precedence).
@@ -867,6 +935,8 @@ impl Vm {
         } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
             self.call_builtin_entry(name, VmBuiltinDispatch::Async(async_builtin), args)
                 .await
+        } else if let Some(result) = self.try_dispatch_runtime_context_builtin(name, &args) {
+            result
         } else if let Some(bridge) = &self.bridge {
             if enforce_contract {
                 crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;

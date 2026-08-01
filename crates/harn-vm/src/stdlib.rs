@@ -848,3 +848,34 @@ fn main(harness: Harness) {
         .is_none());
     }
 }
+
+#[cfg(test)]
+mod ambient_host_internal_projection_tests {
+    use super::*;
+
+    #[test]
+    fn ambient_bridge_projects_host_internal_emit_event_alias() {
+        let previous = std::env::var_os(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV);
+        unsafe {
+            std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, "1");
+        }
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        assert!(
+            vm.builtin_metadata_for("agent_emit_event").is_some(),
+            "ambient bridge must project __host_agent_emit_event as agent_emit_event"
+        );
+        assert!(
+            vm.builtin_metadata_for("__host_agent_emit_event").is_some(),
+            "canonical host internal must remain registered"
+        );
+        unsafe {
+            match previous {
+                Some(value) => {
+                    std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, value);
+                }
+                None => std::env::remove_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV),
+            }
+        }
+    }
+}

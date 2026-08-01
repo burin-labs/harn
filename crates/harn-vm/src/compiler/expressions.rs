@@ -154,7 +154,7 @@ impl Compiler {
             return self.compile_value_call(args);
         }
         let runtime_name = if self.options.legacy_ambient_capabilities() {
-            harn_parser::legacy_builtin_alias_target(name).unwrap_or(name)
+            harn_parser::builtin_signatures::legacy_ambient_runtime_name(name).unwrap_or(name)
         } else {
             name
         };
@@ -190,6 +190,10 @@ impl Compiler {
                 && !(self.options.legacy_ambient_capabilities()
                     && (harn_parser::is_registered_legacy_hostlib_name(name)
                         || harn_parser::builtin_signatures::legacy_capability_method_entry(name)
+                            .is_some()
+                        || harn_parser::builtin_signatures::legacy_ambient_cap_global_entry(name)
+                            .is_some()
+                        || harn_parser::builtin_signatures::legacy_privileged_wire_entry(name)
                             .is_some()))
             {
                 return Err(CompileError {

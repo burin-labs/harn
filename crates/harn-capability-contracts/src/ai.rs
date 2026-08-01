@@ -551,7 +551,11 @@ capability_method!(
 capability_method!(
     agent_emit_event,
     "harness.agent.emit_event",
-    ["state.write@arg0"],
+    // Match `__host_agent_emit_event` (effects = []): session event ingress is a
+    // runtime-owned journal write, not a model-facing state.write tool effect.
+    // Claiming state.write@arg0 rejected ambient/typed emit under agent-loop
+    // execution policy and aborted turns before they could reply.
+    [],
     "__cap_agent_emit_event(session_id: string, event_type: string, payload: dict) -> nil",
     "Append an agent session event."
 );

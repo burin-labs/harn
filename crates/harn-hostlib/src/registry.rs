@@ -254,14 +254,18 @@ impl HostlibRegistry {
             );
             let handler = builtin.handler.clone();
             if self.builtins.uses_command_policy(builtin.name) {
-                vm.register_async_capability_method(
-                    capability,
-                    capability_method,
-                    move |ctx, args| {
+                let ambient_name = builtin.name;
+                let policy_handler = Arc::new({
+                    let handler = handler.clone();
+                    move |ctx: harn_vm::AsyncBuiltinCtx,
+                          args: Vec<VmValue>|
+                          -> Pin<
+                        Box<dyn Future<Output = Result<VmValue, VmError>> + Send>,
+                    > {
                         let handler = handler.clone();
-                        async move {
+                        Box::pin(async move {
                             let request = crate::schemas::validate_request_args(
-                                builtin.name,
+                                ambient_name,
                                 module,
                                 method,
                                 &args,
@@ -269,13 +273,12 @@ impl HostlibRegistry {
                             .map_err(VmError::from)?;
                             let params = request.as_dict().ok_or_else(|| {
                                 VmError::Runtime(format!(
-                                    "{}: validated request must be a dict",
-                                    builtin.name
+                                    "{ambient_name}: validated request must be a dict"
                                 ))
                             })?;
                             let caller = serde_json::json!({
                                 "surface": "hostlib",
-                                "builtin": builtin.name,
+                                "builtin": ambient_name,
                                 "module": module,
                                 "method": method,
                                 "session_id": harn_vm::current_agent_session_id(),
@@ -297,7 +300,7 @@ impl HostlibRegistry {
                                         params, status, &message, context, decisions,
                                     );
                                     crate::schemas::validate_response(
-                                        builtin.name,
+                                        ambient_name,
                                         module,
                                         method,
                                         crate::tools::policy_blocked_run_command_response(response),
@@ -314,7 +317,7 @@ impl HostlibRegistry {
                                     // boundary before the hostlib parser sees it.
                                     let rewritten = VmValue::dict(params.clone());
                                     let validated = crate::schemas::validate_request_args(
-                                        builtin.name,
+                                        ambient_name,
                                         module,
                                         method,
                                         &[rewritten],
@@ -323,7 +326,7 @@ impl HostlibRegistry {
                                     let result = handler(&[validated]).map_err(VmError::from)?;
                                     if crate::tools::run_command_request_is_background(&params) {
                                         return crate::schemas::validate_response(
-                                            builtin.name,
+                                            ambient_name,
                                             module,
                                             method,
                                             result,
@@ -340,7 +343,7 @@ impl HostlibRegistry {
                                     )
                                     .await?;
                                     crate::schemas::validate_response(
-                                        builtin.name,
+                                        ambient_name,
                                         module,
                                         method,
                                         result,
@@ -348,16 +351,31 @@ impl HostlibRegistry {
                                     .map_err(VmError::from)
                                 }
                             }
-                        }
-                    },
-                );
-            } else {
-                vm.register_capability_method(
+                        })
+                    }
+                });
+                let capability_dispatch = Arc::clone(&policy_handler);
+                vm.register_async_capability_method(
                     capability,
                     capability_method,
-                    move |args, _out| -> Result<VmValue, VmError> {
+                    move |ctx, args| capability_dispatch(ctx, args),
+                );
+                // Legacy ambient wire name (`hostlib_tools_run_command`, …).
+                // Keep the typed capability as the sole semantic owner; this
+                // only re-exposes the pre-cutover global call shape.
+                if harn_parser::legacy_ambient_capabilities_enabled() {
+                    let ambient_dispatch = Arc::clone(&policy_handler);
+                    vm.register_async_builtin(ambient_name, move |ctx, args| {
+                        ambient_dispatch(ctx, args)
+                    });
+                }
+            } else {
+                let ambient_name = builtin.name;
+                let sync_handler = Arc::new({
+                    let handler = handler.clone();
+                    move |args: &[VmValue], _out: &mut String| -> Result<VmValue, VmError> {
                         let request = crate::schemas::validate_request_args(
-                            builtin.name,
+                            ambient_name,
                             module,
                             method,
                             args,
@@ -365,8 +383,16 @@ impl HostlibRegistry {
                         .map_err(VmError::from)?;
                         let validated_args = [request];
                         handler(&validated_args).map_err(VmError::from)
-                    },
-                );
+                    }
+                });
+                let capability_dispatch = Arc::clone(&sync_handler);
+                vm.register_capability_method(capability, capability_method, move |args, out| {
+                    capability_dispatch(args, out)
+                });
+                if harn_parser::legacy_ambient_capabilities_enabled() {
+                    let ambient_dispatch = Arc::clone(&sync_handler);
+                    vm.register_builtin(ambient_name, move |args, out| ambient_dispatch(args, out));
+                }
             }
         }
         for builtin in self.builtins.async_builtins.iter().cloned() {
@@ -378,26 +404,37 @@ impl HostlibRegistry {
                 method,
                 "Hostlib schema-backed operation registered at runtime.",
             );
-            let handler = builtin.handler.clone();
-            vm.register_async_capability_method(
-                capability,
-                capability_method,
-                move |_ctx, args| {
+            let ambient_name = builtin.name;
+            let handler = Arc::new({
+                let handler = builtin.handler.clone();
+                move |_ctx: harn_vm::AsyncBuiltinCtx,
+                      args: Vec<VmValue>|
+                      -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send>> {
                     let handler = handler.clone();
-                    async move {
+                    Box::pin(async move {
                         let request = crate::schemas::validate_request_args(
-                            builtin.name,
+                            ambient_name,
                             module,
                             method,
                             &args,
                         )
                         .map_err(VmError::from)?;
                         let result = handler(vec![request]).await.map_err(VmError::from)?;
-                        crate::schemas::validate_response(builtin.name, module, method, result)
+                        crate::schemas::validate_response(ambient_name, module, method, result)
                             .map_err(VmError::from)
-                    }
-                },
-            );
+                    })
+                }
+            });
+            let capability_dispatch = Arc::clone(&handler);
+            vm.register_async_capability_method(capability, capability_method, move |ctx, args| {
+                capability_dispatch(ctx, args)
+            });
+            if harn_parser::legacy_ambient_capabilities_enabled() {
+                let ambient_dispatch = Arc::clone(&handler);
+                vm.register_async_builtin(ambient_name, move |ctx, args| {
+                    ambient_dispatch(ctx, args)
+                });
+            }
         }
     }
 
@@ -416,6 +453,45 @@ impl HostlibRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ambient_bridge_projects_legacy_hostlib_wire_names() {
+        // Process-global env; keep this test self-contained and restore after.
+        let previous = std::env::var_os(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV);
+        // SAFETY: single-threaded unit test restoring the prior value.
+        unsafe {
+            std::env::remove_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV);
+        }
+        let mut strict_vm = Vm::new();
+        crate::install_default(&mut strict_vm);
+        assert!(
+            strict_vm
+                .builtin_metadata_for("hostlib_tools_run_command")
+                .is_none(),
+            "strict install must keep hostlib wire names off the ambient map"
+        );
+
+        unsafe {
+            std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, "1");
+        }
+        let mut ambient_vm = Vm::new();
+        crate::install_default(&mut ambient_vm);
+        assert!(
+            ambient_vm
+                .builtin_metadata_for("hostlib_tools_run_command")
+                .is_some(),
+            "ambient bridge must project hostlib wire names as globals"
+        );
+
+        unsafe {
+            match previous {
+                Some(value) => {
+                    std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, value);
+                }
+                None => std::env::remove_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV),
+            }
+        }
+    }
 
     #[test]
     fn unimplemented_builtins_route_through_error() {
