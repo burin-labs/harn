@@ -856,6 +856,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         .unwrap_or(1000)
         .max(1) as u64;
     let bridge = current_host_bridge();
+    let dispatch_annotations = tool_annotations_for(tools, &tool_name);
     // Happy-path fast path: when NO policy/permission machinery is
     // configured, the three blocks below — session policy guard install,
     // execution-policy enforcement, and the dynamic-permission check — are
@@ -882,9 +883,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
     };
 
     let mut approval_status = None;
-    if let Err(policy_denial) =
-        enforce_dispatch_policies(policy_machinery_active, &tool_name, &tool_args, None)
-    {
+    if let Err(policy_denial) = enforce_dispatch_policies(
+        policy_machinery_active,
+        &tool_name,
+        &tool_args,
+        dispatch_annotations.as_ref(),
+        None,
+    ) {
         if let Some(violation) = policy_denial.side_effect_ceiling {
             // A side-effect ceiling is the one static policy refusal that can
             // offer an explicit, dispatch-local ACP approval. The grant below
@@ -912,6 +917,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         policy_machinery_active,
                         &tool_name,
                         &tool_args,
+                        dispatch_annotations.as_ref(),
                         Some(&grant),
                     ) {
                         let denial = tool_denial_from_policy(recheck_denial, &tool_name);

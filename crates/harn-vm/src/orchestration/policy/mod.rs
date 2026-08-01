@@ -676,6 +676,23 @@ pub(crate) fn enforce_current_policy_for_tool_with_side_effect_grant(
     tool_name: &str,
     side_effect_grant: Option<&SideEffectCeilingGrant>,
 ) -> Result<(), PolicyDenial> {
+    enforce_current_policy_for_tool_with_annotations_and_side_effect_grant(
+        tool_name,
+        None,
+        side_effect_grant,
+    )
+}
+
+/// Enforce the active tool policy using the ambient policy's authoritative
+/// annotations when present, or the concrete dispatch catalog's annotations
+/// otherwise. Dynamic tool registries are assembled after an ACP mode policy
+/// is installed, so ignoring their annotations would make an honestly tagged
+/// `process_exec` tool look effect-free under a `read_only` ceiling.
+pub(crate) fn enforce_current_policy_for_tool_with_annotations_and_side_effect_grant(
+    tool_name: &str,
+    dispatch_annotations: Option<&ToolAnnotations>,
+    side_effect_grant: Option<&SideEffectCeilingGrant>,
+) -> Result<(), PolicyDenial> {
     use crate::agent_events::DenialGate;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
@@ -687,7 +704,11 @@ pub(crate) fn enforce_current_policy_for_tool_with_side_effect_grant(
             format!("tool '{tool_name}' is not in the active allowed-tool list"),
         );
     }
-    if let Some(annotations) = policy.tool_annotations.get(tool_name) {
+    if let Some(annotations) = policy
+        .tool_annotations
+        .get(tool_name)
+        .or(dispatch_annotations)
+    {
         for (capability, ops) in &annotations.capabilities {
             for op in ops {
                 if !policy_allows_capability(&policy, capability, op) {
