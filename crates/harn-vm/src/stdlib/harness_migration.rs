@@ -354,8 +354,8 @@ mod registered_capability_migration_tests {
     use harn_builtin_meta::CapabilityId;
 
     use super::{
-        all_builtin_manifest, capability_method_index, harness_migration_for_builtin,
-        HarnessBuiltinArgumentMigration, HarnessBuiltinMigration,
+        all_builtin_manifest, harness_migration_for_builtin, HarnessBuiltinArgumentMigration,
+        HarnessBuiltinMigration,
     };
     use crate::stdlib::stdlib_probe_vm;
 
@@ -387,11 +387,49 @@ mod registered_capability_migration_tests {
         assert_eq!(harness_migration_for_builtin("len"), None);
     }
 
-    /// A capability method whose name matches a global nobody can call is a
-    /// global that moved. Every one of those needs a repair, or the cutover
-    /// leaves scripts with a bare "not defined" and no way forward.
+    /// Whether the linter can tell a caller where this global went.
+    ///
+    /// The clock, stdio, fs, env, random, and net families predate the recipe
+    /// table and keep their own replacement maps in `harn-parser`, which the
+    /// linter consults first.
+    fn has_a_repair(name: &str) -> bool {
+        use harn_parser::diagnostic::{
+            harness_clock_replacement, harness_env_replacement, harness_fs_replacement,
+            harness_net_replacement, harness_random_replacement, harness_stdio_replacement,
+        };
+        harness_migration_for_builtin(name).is_some()
+            || harness_clock_replacement(name).is_some()
+            || harness_stdio_replacement(name).is_some()
+            || harness_fs_replacement(name).is_some()
+            || harness_env_replacement(name).is_some()
+            || harness_random_replacement(name).is_some()
+            || harness_net_replacement(name).is_some()
+    }
+
+    /// Runtime plumbing that never had a script-facing name to migrate.
+    ///
+    /// `exec_opts` and `exec_at_opts` parse option records for the process
+    /// builtins, `render` backs the template engine, `host_tool_*` is the
+    /// host tool wire, and the rest are internals of the LLM mock and the
+    /// fact cache. None of them is a global that moved onto a handle.
+    const RUNTIME_PLUMBING: &[&str] = &[
+        "exec_at_opts",
+        "exec_opts",
+        "host_tool_call",
+        "host_tool_list",
+        "invalidate_facts",
+        "llm_mock_known_scopes",
+        "llm_mock_load_jsonl",
+        "llm_mock_receipts",
+        "render",
+    ];
+
+    /// A builtin Harn source cannot name is either a global that moved onto a
+    /// handle or runtime plumbing. The first kind needs a repair, or the
+    /// cutover leaves callers with a bare "not defined" and no way forward;
+    /// the second kind belongs on the list above, where a reviewer sees it.
     #[test]
-    fn every_runtime_internal_builtin_that_moved_keeps_a_repair() {
+    fn every_runtime_internal_builtin_is_migrated_or_named_as_plumbing() {
         use harn_builtin_meta::BuiltinExposure;
 
         let offenders = all_builtin_manifest()
@@ -399,13 +437,8 @@ mod registered_capability_migration_tests {
             .filter(|entry| entry.is_canonical())
             .filter(|entry| matches!(entry.contract.exposure, BuiltinExposure::RuntimeInternal))
             .filter(|entry| !entry.name.starts_with("__"))
-            .filter(|entry| {
-                capability_method_index()
-                    .methods_by_capability
-                    .values()
-                    .any(|methods| methods.contains(entry.name))
-            })
-            .filter(|entry| harness_migration_for_builtin(entry.name).is_none())
+            .filter(|entry| !RUNTIME_PLUMBING.contains(&entry.name))
+            .filter(|entry| !has_a_repair(entry.name))
             .map(|entry| entry.name)
             .collect::<Vec<_>>();
 

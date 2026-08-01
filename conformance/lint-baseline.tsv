@@ -48,7 +48,6 @@
 13	agents/zero_write_terminal_verify_guard.harn	HARN-LNT-025
 2	concurrency/runtime_context.harn	HARN-LNT-018
 1	concurrency/spawn_await.harn	HARN-LNT-014
-1	concurrency/spawn_cancel.harn	HARN-LNT-071
 1	concurrency/supervisor_circuit_open.harn	HARN-LNT-018
 1	concurrency/supervisor_one_for_one.harn	HARN-LNT-018
 1	concurrency/supervisor_restart_window.harn	HARN-LNT-018
@@ -65,7 +64,6 @@
 1	errors_by_feature/typed_catch_propagate.harn	HARN-LNT-020
 1	functions/closure_reference_capture.harn	HARN-LNT-009
 1	functions/closure_reference_capture.harn	HARN-LNT-018
-2	functions/closure_reference_capture.harn	HARN-LNT-071
 1	functions/default_args_self_name.harn	HARN-LNT-009
 1	hooks_session/on_finish_preset_compose.harn	HARN-LNT-014
 5	language/binding_mutation_matrix.harn	HARN-OWN-001
@@ -143,7 +141,6 @@
 2	stdlib/coordination_addressed_inbox.harn	HARN-LNT-014
 5	stdlib/document_pdf.harn	HARN-LNT-018
 1	stdlib/graphql_sdk.harn	HARN-LNT-029
-1	stdlib/hitl/hitl_pending.harn	HARN-LNT-071
 2	stdlib/http_builtins.harn	HARN-LNT-014
 2	stdlib/http_timeout_ms.harn	HARN-LNT-014
 1	stdlib/jsonl_helpers.harn	HARN-LNT-016

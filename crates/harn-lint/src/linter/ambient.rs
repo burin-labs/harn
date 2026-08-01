@@ -4,14 +4,205 @@ use harn_lexer::Span;
 use harn_parser::diagnostic::{
     harness_clock_replacement, harness_env_replacement, harness_fs_replacement,
     harness_net_replacement, harness_random_replacement, harness_stdio_replacement,
+    renamed_stdlib_symbol,
 };
-use harn_parser::{DiagnosticCode as Code, SNode};
+use harn_parser::{DiagnosticCode as Code, SNode, TypeExpr, TypedParam};
 
 use super::Linter;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::fixes::replace_identifier_text_fix;
 
+struct AmbientCapabilityLint<'a> {
+    name: &'a str,
+    span: Span,
+    replacement: Option<&'static str>,
+    code: Code,
+    rule: &'static str,
+    sub_handle: &'static str,
+    require_harness_in_scope: bool,
+}
+
+fn is_explicit_seeded_random_call(name: &str, arg_count: usize) -> bool {
+    matches!(
+        (name, arg_count),
+        ("random", 1) | ("random_int", 3) | ("random_choice", 2) | ("random_shuffle", 2)
+    )
+}
+
 impl Linter<'_> {
+    pub(super) fn check_renamed_stdlib_symbol(&mut self, name: &str, span: Span) {
+        if harness_stdio_replacement(name).is_some() {
+            return;
+        }
+        let Some(replacement) = renamed_stdlib_symbol(name) else {
+            return;
+        };
+        self.diagnostics.push(LintDiagnostic {
+            code: Code::LintRenamedStdlibSymbol,
+            rule: "renamed-stdlib-symbol".into(),
+            message: format!("`{name}` was renamed to `{replacement}`"),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!("replace `{name}` with `{replacement}`")),
+            fix: replace_identifier_text_fix(self.source, span, name, replacement),
+        });
+    }
+
+    /// Flag ambient clock builtins (`now_ms`, `monotonic_ms`, `sleep_ms`,
+    /// `timestamp`, `elapsed`) so migration can rewrite them to
+    /// `harness.clock.*`.
+    pub(super) fn check_ambient_clock_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_clock_replacement(name),
+            code: Code::LintAmbientClockBuiltin,
+            rule: "ambient-clock-builtin",
+            sub_handle: "clock",
+            require_harness_in_scope: false,
+        });
+    }
+
+    /// Flag ambient stdio builtins so migration can rewrite them through the
+    /// explicit stdio capability.
+    pub(super) fn check_ambient_stdio_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_stdio_replacement(name),
+            code: Code::LintAmbientStdioBuiltin,
+            rule: "ambient-stdio-builtin",
+            sub_handle: "stdio",
+            require_harness_in_scope: false,
+        });
+    }
+
+    pub(super) fn check_ambient_fs_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_fs_replacement(name),
+            code: Code::LintAmbientFsBuiltin,
+            rule: "ambient-fs-builtin",
+            sub_handle: "fs",
+            require_harness_in_scope: false,
+        });
+    }
+
+    pub(super) fn check_ambient_env_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_env_replacement(name),
+            code: Code::LintAmbientEnvBuiltin,
+            rule: "ambient-env-builtin",
+            sub_handle: "env",
+            require_harness_in_scope: false,
+        });
+    }
+
+    /// Seeded RNG calls are deterministic data operations, not ambient host
+    /// random access.
+    pub(super) fn check_ambient_random_builtin(
+        &mut self,
+        name: &str,
+        arg_count: usize,
+        span: Span,
+    ) {
+        if is_explicit_seeded_random_call(name, arg_count) {
+            return;
+        }
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_random_replacement(name),
+            code: Code::LintAmbientRandomBuiltin,
+            rule: "ambient-random-builtin",
+            sub_handle: "random",
+            require_harness_in_scope: false,
+        });
+    }
+
+    pub(super) fn check_ambient_net_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_net_replacement(name),
+            code: Code::LintAmbientNetBuiltin,
+            rule: "ambient-net-builtin",
+            sub_handle: "net",
+            require_harness_in_scope: false,
+        });
+    }
+
+    fn check_ambient_capability_builtin(&mut self, lint: AmbientCapabilityLint<'_>) {
+        let Some(replacement) = lint.replacement else {
+            return;
+        };
+        if self.has_local_or_imported_name(lint.name) {
+            return;
+        }
+        let harness_binding = self.harness_binding_name();
+        if lint.require_harness_in_scope && harness_binding.is_none() {
+            return;
+        }
+        let replacement = harness_binding
+            .map(|binding| replacement.replacen("harness", binding, 1))
+            .unwrap_or_else(|| replacement.to_string());
+        let fix = harness_binding.and_then(|_| {
+            replace_identifier_text_fix(self.source, lint.span, lint.name, &replacement)
+        });
+        let suggestion = if harness_binding.is_some() {
+            format!("replace `{}` with `{}`", lint.name, replacement)
+        } else {
+            format!(
+                "run `harn fix --apply --safety surface-changing` to thread the explicit capability \
+                 parameter required by `{replacement}`"
+            )
+        };
+        self.diagnostics.push(LintDiagnostic {
+            code: lint.code,
+            rule: lint.rule.into(),
+            message: format!(
+                "ambient `{}` is deprecated — capabilities now route through `harness.{}.*`",
+                lint.name, lint.sub_handle,
+            ),
+            span: lint.span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(suggestion),
+            fix,
+        });
+    }
+
+    pub(super) fn harness_binding_name(&self) -> Option<&str> {
+        self.harness_param_stack
+            .last()
+            .and_then(|name| name.as_deref())
+    }
+
+    fn has_local_or_imported_name(&self, name: &str) -> bool {
+        self.scopes.iter().any(|scope| scope.contains(name))
+            || (self.known_functions.contains(name) && !self.builtin_functions.contains(name))
+            || self
+                .imports
+                .iter()
+                .any(|import| import.names.iter().any(|imported| imported == name))
+            || self
+                .fn_declarations
+                .iter()
+                .any(|declaration| declaration.name == name)
+    }
+
+    pub(super) fn callable_harness_param(params: &[TypedParam]) -> Option<String> {
+        params.iter().find_map(|param| {
+            let TypeExpr::Named(name) = param.type_expr.as_ref()? else {
+                return None;
+            };
+            (name == "Harness" && matches!(param.name.as_str(), "harness" | "_harness"))
+                .then(|| param.name.clone())
+        })
+    }
+
     pub(super) fn check_interpolated_ambient_calls(
         &mut self,
         segments: &[harn_lexer::StringSegment],
