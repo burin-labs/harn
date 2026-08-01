@@ -47,6 +47,7 @@ struct ProgramCallable {
     receiver_accesses: Vec<ReceiverAccess>,
     boundary: bool,
     carrier: Option<Carrier>,
+    root_attenuation: Option<BTreeSet<CapabilityId>>,
     direct_requirements: BTreeSet<CapabilityId>,
 }
 
@@ -81,13 +82,29 @@ pub(super) fn plan(
             .exports_for_module(file)
             .into_iter()
             .collect::<BTreeSet<_>>();
+        let root_attenuations = harn_lint::capability_attenuations(&program)
+            .into_iter()
+            .map(|candidate| {
+                (
+                    (
+                        candidate.declaration_span.start,
+                        candidate.declaration_span.end,
+                    ),
+                    candidate.capabilities,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
         let infos = collect_callable_infos(&program, &source, &exported);
         for info in infos {
             let Some((params, body, boundary)) = declaration_parts(&program, info.span) else {
                 continue;
             };
             let carrier = capability_carrier(params);
-            let direct_requirements = direct_requirements(params, body, carrier.as_ref());
+            let root_attenuation = root_attenuations
+                .get(&(info.span.start, info.span.end))
+                .cloned();
+            let direct_requirements =
+                direct_requirements(params, body, carrier.as_ref(), root_attenuation.as_ref());
             let receiver_accesses = collect_receiver_accesses(body, carrier.as_ref());
             callables.push(ProgramCallable {
                 file_idx,
@@ -95,6 +112,7 @@ pub(super) fn plan(
                 receiver_accesses,
                 boundary,
                 carrier,
+                root_attenuation,
                 direct_requirements,
             });
         }
@@ -342,14 +360,18 @@ fn direct_requirements(
     params: &[TypedParam],
     body: &[SNode],
     carrier: Option<&Carrier>,
+    root_attenuation: Option<&BTreeSet<CapabilityId>>,
 ) -> BTreeSet<CapabilityId> {
     let Some(carrier) = carrier else {
         return BTreeSet::new();
     };
+    if matches!(&carrier.kind, CarrierKind::Root) && root_attenuation.is_none() {
+        return BTreeSet::new();
+    }
     let mut required = match &carrier.kind {
         CarrierKind::Narrow(capability) => BTreeSet::from([*capability]),
         CarrierKind::Bundle(capabilities) => capabilities.clone(),
-        CarrierKind::Root => BTreeSet::new(),
+        CarrierKind::Root => root_attenuation.cloned().unwrap_or_default(),
     };
     let mut observe = |node: &SNode| {
         let (Node::PropertyAccess { object, property }
@@ -481,6 +503,13 @@ fn desired_carrier(
     callable: &ProgramCallable,
     requirements: &BTreeSet<CapabilityId>,
 ) -> Option<CarrierKind> {
+    if matches!(
+        callable.carrier.as_ref().map(|carrier| &carrier.kind),
+        Some(CarrierKind::Root)
+    ) && callable.root_attenuation.is_none()
+    {
+        return Some(CarrierKind::Root);
+    }
     if requirements.is_empty() {
         return callable
             .carrier

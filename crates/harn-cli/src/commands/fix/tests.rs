@@ -750,6 +750,40 @@ fn capability_apply_inserts_an_argument_for_a_widened_existing_carrier() {
 }
 
 #[test]
+fn capability_apply_preserves_root_values_that_escape() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "fn consume(harness: Harness) {}\n\nfn keep_root(harness: Harness) {\n  consume(harness)\n}\n\nfn narrow(harness: Harness) -> string {\n  return harness.fs.cwd()\n}\n\nfn main(harness: Harness) {\n  keep_root(harness)\n  narrow(harness)\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("fn keep_root(harness: Harness)"),
+        "{updated}"
+    );
+    assert!(updated.contains("consume(harness)"), "{updated}");
+    assert!(
+        updated.contains("fn narrow(harness: HarnessFs)"),
+        "{updated}"
+    );
+    assert!(updated.contains("narrow(harness.fs)"), "{updated}");
+}
+
+#[test]
 fn apply_thread_params_threads_harness_for_stdio_migration() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("stdio_apply.harn");
