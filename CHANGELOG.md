@@ -9,6 +9,185 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.50
+
+### Added
+
+- Scoped LLM mock fixtures can use a `shared` auxiliary absorber with strict
+  scope checking, while legacy `default` fallback remains compatible and
+  application-owned dotted scopes no longer produce advisory noise.
+- **Host capability manifests can validate discriminated operations (#5870).**
+  Per-operation `param_discriminators` contracts let `harn check` reject
+  unknown, missing, or dynamic nested operation literals before dispatch.
+- **Trusted host dispatch is now an explicit embedder boundary (#5874).**
+  Rust hosts can opt a fresh VM, `harn check`, and `harn test` into
+  provenance-separated privileged host calls without restoring ambient
+  authority to ordinary Harn modules. `HarnessTesting.respond` and
+  `respond_error` also accept an explicit `unregistered_ok` flag for test-local
+  host operations that the embedding Rust host registers at runtime; unknown
+  operations still fail closed by default.
+- **The 0.10 migration guide now covers the capability cutover.** The largest
+  change in the release — effects moving from globals onto typed `Harness`
+  handles — had no migration section, so the only guidance was per-diagnostic
+  linter output. The guide now explains why a signature carries its authority,
+  gives the exact `harn fix` invocation that performs the rewrite, shows
+  before/after for the single- and multi-capability cases, tabulates the
+  globals that became a field on a snapshot, and documents
+  `HARN_LEGACY_AMBIENT_CAPABILITIES` for staging the upgrade across many
+  packages.
+
+### Fixed
+
+- Keep warm release workflows within the GitHub Actions cache budget by pruning
+  the smallest sufficient non-release cache after protected release generations
+  have been compacted, and include the eviction receipt in the budget report.
+- Project and product host protocols now project onto closed nominal Harness
+  handles, including workspace, session, LSP, credential, workflow, PR-monitor,
+  and dashboard families. Helpers can therefore accept the smallest coherent
+  capability they need, and lint guidance identifies ordinary helpers that retain
+  unnecessarily broad root authority or expose long homogeneous positional APIs.
+
+  The ambient-capability migration is now derived from builtin contracts, walks
+  default parameter expressions, and safely rewrites only the matched local call.
+  Legacy project-metadata globals cut over directly to named request records on
+  `HarnessProject`; `metadata_get` and `metadata_resolve` converge on the single
+  inherited `metadata_get` contract. Legacy platform, identity, runtime-path,
+  clock, and terminal projections cut over to their structured System, Fs,
+  Clock, and Term handles, including calls nested in `${...}` interpolation
+  expressions. Structured logging and progress implementations now declare their
+  Harness method contracts directly, so legacy `log_*`, `log_json`, `log`, and
+  `progress` calls receive the same generated migration. Per-Harness fixtures
+  accept genuinely optional selector, error, result, and repeat fields.
+  Capability repairs now preserve UTF-8 diagnostic boundaries, insert a missing
+  grant at its diagnosed argument position, project root grants into closed
+  two-capability bundles, and thread a distinct root binding through local callers
+  when a helper already uses `harness` for a narrow handle. Repeated fix passes
+  therefore converge without corrupting argument order or shadowing a capability
+  binding.
+- Migrate generated projects, counterfactual replay, and embedded CLI fixtures
+  to the typed `Harness` capability surface so released product paths remain
+  compatible with the capability cutover.
+
+  Bind deterministic HTTP fixtures to their typed `Harness`, and keep coding-agent
+  eval resume ledgers distinct across replicates and output roots.
+- Typed Harness and builtin hot paths now keep a VM-local receipt-equivalent
+  effect-call memo beside the shared execution-tree recorder. Exact contract and
+  resource-bearing argument matches skip the shared mutex, while collisions and
+  evictions only cost work and never drop evidence.
+- Cost estimates now report cached-read usage as unpriceable when a model has no
+  published cache-read tier, instead of silently billing cached tokens at the
+  full input rate.
+- Git hooks now run the source-only GitHub Actions checks, so workflow and hook
+  changes no longer trigger a cold Harn build. CI continues to enforce the
+  Harn-backed runner-tier contract with its exact-commit binary.
+- Stall diagnostics now notice a byte-identical tool observation recurring across
+  interleaved calls while keeping changing polling results exempt and the new
+  recurrence warning advisory-only.
+- Exact-candidate releases now collect the test-case wall-clock ratchet on their
+  hosted macOS certification runner instead of a shared developer workstation,
+  so unrelated local builds cannot invalidate an otherwise-green release. The
+  hosted lane uses its own measured runner profile rather than weakening the
+  faster local Apple Silicon baseline.
+- Session-store callers can now distinguish a newer incompatible database schema from corruption or generic
+  backend failures through the typed `schema_incompatible` error category.
+- The reusable Harn runtime bump workflow now keeps its private orchestration
+  checkout outside the consumer package, so package validation no longer scans
+  Harn's own negative conformance fixtures.
+- **A mock harness again owns every effect it stands in for.** Exposing an
+  effect as a typed `Harness` method also registered it as a capability
+  implementation, and that implementation ran for real ahead of the mock. Mock
+  interception now precedes capability and builtin dispatch, so a mocked
+  `harness.project.scan(...)` returns its canned response instead of scanning
+  the filesystem.
+- **`harness.llm.call` and `harness.llm.completion` narrow `.data` from their
+  `output` schema.** The narrowing only applied to the removed ambient
+  `llm_call`, so the same request typed as `any` when made through the capability
+  handle. Both forms now resolve through one owner and cannot disagree.
+- **Profiles attribute LLM time to the calling step again.** Span
+  classification matched removed ambient builtin names, so a call through
+  `harness.llm.*` recorded no LLM span. Capability calls now resolve to the same
+  registry entry the ambient global did, and profile and audit identically.
+- **`harn fix` narrows an existing root grant instead of only prepending one.**
+  When an attenuated helper wants `HarnessFs` and the caller still passes
+  `harness`, the repair rewrites the argument to `harness.fs`, or to
+  `{fs: harness.fs, tools: harness.tools}` for a two-capability record. Repairs
+  now locate the argument in the parsed source, so a diagnostic that points at
+  no call argument produces no edit rather than a guessed one.
+- **`HARN-LNT-069` reports a two-capability helper accurately.** The rule now
+  reads parameter defaults, which execute in the callable's scope and can use
+  authority just like the body, and it stays quiet when a nested closure
+  shadows the parameter it is reasoning about. Both cases previously produced
+  advice that would have stranded a grant. The rule remains advisory: narrowing
+  a signature is only safe when every call site moves with it, and a caller can
+  live in a module the linter never sees.
+- **One owner parses `${...}` holes.** The typechecker, the linter, and
+  `harn fix` share `harn_parser::interpolation`, so all three see spans in the
+  containing file's coordinates.
+- **A builtin alias no longer registers as a second capability method.** Adding
+  a legacy alias to a builtin that is also exposed as `harness.<cap>.<method>`
+  made the manifest see one builtin as two.
+- `harn lint` and `harn fix` now find where a global went whenever it kept its
+  name on the handle it moved to. Recipes used to be a hand-written table, so a
+  capability that gained a method without someone also editing that table left
+  callers with a bare "not defined" and no repair. Across one large downstream
+  corpus that gap covered 105 of 169 removed globals.
+
+  The recipe is now read off the capability surface itself. `exit` resolves to
+  `harness.runtime.exit`, `hostlib_code_index_rebuild` to
+  `harness.code_index.rebuild`, and `agent_session_open` to `harness.agent.open`.
+  A name that several methods answer to is settled by parameter list, and a name
+  that is still a callable global stays uncovered, because it has not moved.
+
+  A new drift check fails the build when a global moves onto a handle without a
+  repair, so the next capability rename cannot quietly reopen the gap.
+- `harn lint` and `harn fix` now know where every runtime-registered capability
+  method went. Store, checkpoint, metadata, and other methods installed on the VM
+  at startup never reach the builtin manifest, so calls to their pre-cutover
+  global names reported only "not defined" with no repair. They now report
+  `HARN-LNT-071` naming the owning capability, and `harn fix --apply --safety
+  surface-changing` rewrites them and threads the handle.
+
+  `secret_get`, which the connector runtime used to inject for the duration of an
+  export call, migrates to `harness.secrets.read`.
+- `harn lint` and `harn fix` now repair the globals that were renamed rather than
+  moved onto a handle. `regex_replace_all` and `task_current` were recorded as
+  exact behavior-preserving renames, but only the legacy compatibility bridge read
+  that record, so strict source reported a bare "not defined" and left the call
+  for a human. They now report `HARN-LNT-001` naming the new spelling, and
+  `harn fix` rewrites them.
+
+  A definition in the same file still wins: a script that declares its own
+  `fn regex_replace_all` keeps its meaning. An import of the old spelling is still
+  rewritten, since that is the case the rule exists for.
+- ACP `emit_response` accepts the host-capability `{text: ...}` dict as well as a
+  legacy bare string, matching the typed `runtime.emit_response` contract.
+- ACP `harness.stdio.log` now emits the vendor `log` session update instead of
+  an assistant `agent_message_chunk`, so diagnostic logs no longer displace the
+  turn's final reply on interactive surfaces.
+- `harness.agent.emit_event` effect metadata matches the host journal builtin, so
+  agent-loop event emission is no longer rejected by execution policy mid-turn.
+- `harness.agent.session_*` (and related live-session journal) capability effect
+  metadata now matches the `__host_agent_*` runtime_internal builtins (`effects =
+  []`), and `push`/`pop_llm_render_context` no longer claim durable
+  `state.mutate`, so agent-loop session init/render/finalize no longer trip the
+  active effect ceiling mid-turn.
+- Hostlib re-exposes legacy `hostlib_*` ambient globals when
+  `HARN_LEGACY_AMBIENT_CAPABILITIES` is enabled, so ambient pipelines keep
+  calling the typed capability implementations instead of falling through to
+  an embedder host bridge.
+- The opt-in legacy ambient-capability bridge now resolves pre-cutover ambient
+  globals whose typed contracts are published as `__cap_<name>` (for example
+  `runtime_context_set`), and the runtime dispatches those runtime-context
+  builtins on the parent VM.
+- Ambient legacy calls resolve to in-process runtime handlers: privileged-wire
+  builtins such as `security_policy` lower to `__security_policy`, and
+  `__host_*` primitives are projected under their pre-cutover names (for
+  example `agent_emit_event`) so agent-loop event emission does not fall
+  through to the embedder bridge under execution policy.
+- `hostlib_enable` is a no-op compatibility stub again after the typed
+  `HarnessTools` cutover, so legacy ambient callers do not fall through to an
+  embedder host bridge.
+
 ## v0.10.49
 
 ### Added

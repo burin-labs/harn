@@ -15,10 +15,10 @@ include = [
 [dependencies]
 blake3 = "1"
 croner = "3.0.1"
-harn-flock = { path = "../harn-flock", version = "=0.10.49" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.49" }
-harn-parser = { path = "../harn-parser", version = "=0.10.49" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.49" }
+harn-flock = { path = "../harn-flock", version = "=0.10.50" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.50" }
+harn-parser = { path = "../harn-parser", version = "=0.10.50" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.50" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 toml = "1.1"
