@@ -142,12 +142,38 @@ pub fn harness_migration_for_builtin(name: &str) -> Option<HarnessBuiltinMigrati
         // of an export call. Connector exports now receive a root Harness, so
         // the same read is a plain capability method.
         "secret_get" => return Some(forward(CapabilityId::Secrets, "read")),
-        // The mock clock moved under the testing handle and was renamed at the
-        // same time, so the derived name match below cannot find it.
+        // These globals were renamed on the way onto their handle, so the
+        // name match below has nothing to follow. Everything that kept its
+        // name resolves without an entry here.
         "mock_time" => return Some(forward(CapabilityId::Testing, "clock_set")),
         "unmock_time" => return Some(forward(CapabilityId::Testing, "clock_reset")),
         "advance_time" => return Some(forward(CapabilityId::Testing, "clock_advance")),
+        "mock_stdin" => return Some(forward(CapabilityId::Testing, "stdin_set")),
+        "unmock_stdin" => return Some(forward(CapabilityId::Testing, "stdin_reset")),
+        "mock_tty" => return Some(forward(CapabilityId::Testing, "tty_set")),
+        "unmock_tty" => return Some(forward(CapabilityId::Testing, "tty_reset")),
+        "host_mock_push_scope" => return Some(forward(CapabilityId::Testing, "push_scope")),
+        "host_mock_pop_scope" => return Some(forward(CapabilityId::Testing, "pop_scope")),
+        "host_mock_calls" => return Some(forward(CapabilityId::Testing, "calls")),
         "llm_mock" => return Some(forward(CapabilityId::Llm, "mock_enqueue")),
+        "render_string" => return Some(forward(CapabilityId::Fs, "render_template")),
+        "render_with_provenance" => {
+            return Some(forward(CapabilityId::Fs, "render_prompt_with_provenance"));
+        }
+        "crypto_random_bytes" => return Some(forward(CapabilityId::Random, "bytes")),
+        "emit_channel" => return Some(forward(CapabilityId::Channels, "append")),
+        "flush_trigger_aggregations" => {
+            return Some(forward(CapabilityId::Channels, "flush_aggregations"));
+        }
+        // The handle is `harness.channels`; the globals were singular.
+        "channel_ack" => return Some(forward(CapabilityId::Channels, "ack")),
+        "channel_events" => return Some(forward(CapabilityId::Channels, "events")),
+        "channel_subscribe" => return Some(forward(CapabilityId::Channels, "subscribe")),
+        "channel_consumer_cursor" => {
+            return Some(forward(CapabilityId::Channels, "consumer_cursor"));
+        }
+        "pg_connect" => return Some(forward(CapabilityId::Postgres, "connect")),
+        "pg_pool" => return Some(forward(CapabilityId::Postgres, "pool")),
         _ => {
             return derived_capability_owner(name)
                 .map(|(capability, method)| forward(capability, method));

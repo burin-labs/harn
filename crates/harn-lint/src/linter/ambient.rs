@@ -72,7 +72,7 @@ impl Linter<'_> {
     /// not silently lose repair coverage.
     pub(super) fn check_ambient_harness_method(&mut self, name: &str, _args: &[SNode], span: Span) {
         if harness_clock_replacement(name).is_some()
-            || harn_parser::is_language_intrinsic(name)
+            || harn_parser::builtin_signatures::is_language_intrinsic(name)
             || harness_stdio_replacement(name).is_some()
             || harness_fs_replacement(name).is_some()
             || harness_env_replacement(name).is_some()
