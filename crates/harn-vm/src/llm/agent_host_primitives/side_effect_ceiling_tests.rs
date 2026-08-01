@@ -51,8 +51,32 @@ fn policy_options(session_id: &str) -> crate::value::DictMap {
     options
 }
 
+fn policy_options_without_annotations(session_id: &str) -> crate::value::DictMap {
+    let mut options = crate::value::DictMap::new();
+    options.insert(
+        crate::value::intern_key("session_id"),
+        crate::stdlib::json_to_vm_value(&serde_json::json!(session_id)),
+    );
+    options.insert(
+        crate::value::intern_key("policy"),
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "tools": ["read_file"],
+            "side_effect_level": "read_only"
+        })),
+    );
+    options
+}
+
 async fn dispatch_read_file(
     path: &std::path::Path,
+    options: &crate::value::DictMap,
+) -> serde_json::Value {
+    dispatch_read_file_with_catalog(path, None, options).await
+}
+
+async fn dispatch_read_file_with_catalog(
+    path: &std::path::Path,
+    catalog: Option<&crate::value::VmValue>,
     options: &crate::value::DictMap,
 ) -> serde_json::Value {
     let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
@@ -63,12 +87,27 @@ async fn dispatch_read_file(
     let result = host_agent_dispatch_tool_call(
         crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
         call,
-        None,
+        catalog,
         options,
     )
     .await
     .expect("policy refusal is a normal tool result");
     crate::llm::helpers::vm_value_to_json(&result)
+}
+
+fn read_file_catalog_with_process_exec_annotation() -> crate::value::VmValue {
+    crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "_type": "tool_registry",
+        "tools": [{
+            "name": "read_file",
+            "description": "Read a file through a deliberately effectful fixture contract",
+            "parameters": {"path": {"type": "string"}},
+            "annotations": {
+                "kind": "execute",
+                "side_effect_level": "process_exec"
+            }
+        }]
+    }))
 }
 
 fn side_effect_violation() -> SideEffectCeilingViolation {
@@ -223,6 +262,34 @@ async fn side_effect_ceiling_rejection_stays_terminal() {
         }
         SideEffectPermissionOutcome::Allowed { .. } => panic!("rejection must not allow dispatch"),
     }
+}
+
+#[tokio::test]
+async fn dispatch_catalog_side_effect_annotation_triggers_acp_approval() {
+    crate::orchestration::clear_execution_policy_stacks();
+    let captured = Arc::new(StdMutex::new(Vec::new()));
+    let bridge = responding_bridge(
+        crate::llm::acp_permission::reject_response(Some("fixture rejection".to_string())),
+        captured.clone(),
+    );
+    let _bridge_guard = HostBridgeGuard::replace(Some(bridge));
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("proof.txt");
+    std::fs::write(&path, "must not run before approval").expect("fixture");
+    let catalog = read_file_catalog_with_process_exec_annotation();
+    let options = policy_options_without_annotations("catalog-side-effect");
+
+    let result = dispatch_read_file_with_catalog(&path, Some(&catalog), &options).await;
+
+    assert_eq!(result["ok"], serde_json::json!(false));
+    assert_eq!(result["denial"]["gate"], serde_json::json!("host_rejected"));
+    let requests = captured.lock().expect("captured requests");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0]["params"]["toolCall"]["_meta"]["harn"]["approvalRequest"]["undo_metadata"]
+            ["side_effect_ceiling"]["required_level"],
+        serde_json::json!("process_exec")
+    );
 }
 
 #[tokio::test]
