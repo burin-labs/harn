@@ -60,11 +60,11 @@ fn __int_or(value, fallback) {
   return to_int(value)
 }
 
-fn __cache_read_rate(pricing, input_rate) {
+fn __cache_read_rate_or_nil(pricing) {
   if pricing?.cache_read_per_mtok != nil {
     return pricing.cache_read_per_mtok / 1000000.0
   }
-  return input_rate
+  return nil
 }
 
 fn __cache_write_rate_or_nil(pricing) {
@@ -103,7 +103,10 @@ pub fn pricing_for(provider, model = nil) {
  *
  * Returns a dict with cost_usd, pricing_known, breakdown (per-bucket
  * dollar amounts), and the resolved pricing. When pricing is unknown the
- * cost_usd field is nil — branch on `pricing_known`.
+ * cost_usd field is nil — branch on `pricing_known`. A call that reports
+ * cached reads without a published cache-read tier is likewise unpriceable and
+ * carries `unpriced_reason: "cache_read_rate_unknown"` rather than billing the
+ * reads at the full input rate.
  *
  * @effects: []
  * @errors: []
@@ -136,13 +139,31 @@ pub fn estimate_call_cost(opts) {
       per_call_usd: nil,
       calls: calls,
       breakdown: nil,
+      unpriced_reason: "pricing_unknown",
       provider: provider,
       model: model,
     }
   }
+  if cache_read_tokens > 0 && pricing?.cache_read_per_mtok == nil {
+    return {
+      pricing_known: false,
+      pricing: pricing,
+      cost_usd: nil,
+      per_call_usd: nil,
+      calls: calls,
+      breakdown: nil,
+      unpriced_reason: "cache_read_rate_unknown",
+      provider: pricing?.provider ?? provider,
+      model: pricing?.model ?? model,
+    }
+  }
   const input_rate = pricing.input_per_mtok / 1000000.0
   const output_rate = pricing.output_per_mtok / 1000000.0
-  const cache_read_rate = __cache_read_rate(pricing, input_rate)
+  const cache_read_rate = if cache_read_tokens > 0 {
+    __cache_read_rate_or_nil(pricing) ?? 0.0
+  } else {
+    0.0
+  }
   const cache_write_rate = __cache_write_rate_or_nil(pricing) ?? input_rate
   const billable = __billable_input(input_tokens, cache_read_tokens, cache_write_tokens)
   const per_call = billable * input_rate
@@ -163,6 +184,7 @@ pub fn estimate_call_cost(opts) {
     per_call_usd: per_call,
     calls: calls,
     breakdown: breakdown,
+    unpriced_reason: nil,
     provider: pricing?.provider ?? provider,
     model: pricing?.model ?? model,
   }
@@ -306,7 +328,17 @@ pub fn cache_break_even(opts) {
     }
   }
   const input_rate = pricing.input_per_mtok / 1000000.0
-  const cache_read_rate = __cache_read_rate(pricing, input_rate)
+  const cache_read_rate = __cache_read_rate_or_nil(pricing)
+  if cache_read_rate == nil {
+    return {
+      pricing_known: false,
+      break_even_calls: nil,
+      write_cost: nil,
+      savings_per_hit: nil,
+      recommended: false,
+      reason: "cache_read_rate_unknown",
+    }
+  }
   const cache_write_rate = __cache_write_rate_or_nil(pricing)
   const savings_per_hit = (input_rate - cache_read_rate) * prompt_tokens
   if savings_per_hit <= 0.0 {

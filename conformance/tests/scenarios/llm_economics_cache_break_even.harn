@@ -22,4 +22,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println("unknown_recommended=" + to_string(unknown.recommended))
   harness.stdio.println("unknown_reason=" + unknown.reason)
   harness.stdio.println("unknown_break_even_nil=" + to_string(unknown.break_even_calls == nil))
+  const unknown_cache_tier = cache_break_even(
+    {provider: "deepinfra", model: "deepinfra/deepseek-ai/DeepSeek-V3.2", prompt_tokens: 1000},
+  )
+  harness.stdio.println("unknown_cache_known=" + to_string(unknown_cache_tier.pricing_known))
+  harness.stdio.println("unknown_cache_reason=" + unknown_cache_tier.reason)
 }

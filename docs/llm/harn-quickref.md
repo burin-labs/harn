@@ -4110,9 +4110,12 @@ Nine opinionated modules wrap common LLM patterns:
 - `std/llm/economics` — `pricing_for(provider?, model)`,
   `estimate_call_cost`, `estimate_session_cost`, `compare_model_costs`,
   `cache_break_even`, `volume_cost`, `format_usd`. Unknown pricing
-  surfaces as `pricing_known: false` / `cost_usd: nil` rather than $0;
-  only providers explicitly configured to $0 (ollama, local, llamacpp,
-  mlx, vllm, tgi) report cost=$0 with pricing_known=true.
+  surfaces as `pricing_known: false` / `cost_usd: nil` rather than $0.
+  Cached-read usage with no published `cache_read_per_mtok` tier is also
+  unpriceable (`unpriced_reason: "cache_read_rate_unknown"`); it is never
+  silently billed at the full input rate. Only providers explicitly configured
+  to $0 (ollama, local, llamacpp, mlx, vllm, tgi) report cost=$0 with
+  pricing_known=true.
 - `std/llm/defaults` — `pack_for(opts)` and convenience wrappers
   (`pack_chat`, `pack_agent`, `pack_refine`, `pack_judge`,
   `pack_summarize`, `pack_code`, `pack_json`). Calibrated for
