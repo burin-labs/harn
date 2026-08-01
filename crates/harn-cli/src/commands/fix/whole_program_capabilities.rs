@@ -577,11 +577,15 @@ fn ambient_edits(
         .filter(|diagnostic| {
             is_ambient_code(diagnostic.code) && canonical(Path::new(&diagnostic.file)) == file
         })
-        .filter_map(|diagnostic| diagnostic.span.map(|span| (diagnostic.code, span)))
+        .filter_map(|diagnostic| {
+            diagnostic
+                .span
+                .map(|span| (diagnostic.code, span.start, span.end))
+        })
         .collect::<BTreeSet<_>>();
     let mut edits = Vec::new();
     for ambient in &callable.info.ambient_capability_calls {
-        if !diagnostic_spans.contains(&(ambient.code, ambient.span)) {
+        if !diagnostic_spans.contains(&(ambient.code, ambient.span.start, ambient.span.end)) {
             continue;
         }
         let Some(mut replacement) = ambient_replacement(ambient.code, &ambient.name, Some(binding))
