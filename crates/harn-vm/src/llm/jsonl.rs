@@ -73,6 +73,7 @@ pub fn parse_llm_mocks_jsonl(text: &str) -> Result<LlmMockFixture, String> {
         }
         if fixture.schema_version > 0
             && !mock::KNOWN_MOCK_SCOPES.contains(&mock.scope.as_str())
+            && !mock.scope.contains('.')
             && warned_scopes.insert(mock.scope.clone())
         {
             fixture.warnings.push(format!(
@@ -1191,15 +1192,26 @@ mod tests {
     }
 
     #[test]
-    fn v1_unknown_scopes_are_advisory_and_deduplicated() {
+    fn v1_host_namespaced_scopes_are_open_without_advisory_noise() {
         let fixture = parse_llm_mocks_jsonl(
             "{\"schemaVersion\":1,\"strictScopes\":false}\n\
              {\"id\":\"one\",\"scope\":\"custom.review\",\"consume\":\"once\",\"text\":\"ONE\"}\n\
              {\"id\":\"two\",\"scope\":\"custom.review\",\"consume\":\"once\",\"text\":\"TWO\"}\n",
         )
         .expect("open scope strings remain valid");
+        assert!(fixture.warnings.is_empty());
+    }
+
+    #[test]
+    fn v1_unqualified_unknown_scopes_are_advisory_and_deduplicated() {
+        let fixture = parse_llm_mocks_jsonl(
+            "{\"schemaVersion\":1,\"strictScopes\":false}\n\
+             {\"id\":\"one\",\"scope\":\"custom_review\",\"consume\":\"once\",\"text\":\"ONE\"}\n\
+             {\"id\":\"two\",\"scope\":\"custom_review\",\"consume\":\"once\",\"text\":\"TWO\"}\n",
+        )
+        .expect("open scope strings remain valid");
         assert_eq!(fixture.warnings.len(), 1);
-        assert!(fixture.warnings[0].contains("custom.review"));
+        assert!(fixture.warnings[0].contains("custom_review"));
         assert!(fixture.warnings[0].contains("completion.judge"));
     }
 
