@@ -29,7 +29,32 @@ workspace = ["read_text", "write_text"]
   for a single invocation. The external file is JSON or TOML with the
   namespaced shape `{ capability: [op, ...], ... }`; nested
   `{ capabilities: { ... } }` wrappers and per-op metadata dictionaries
-  are accepted.
+  are accepted. An operation metadata dictionary may declare literal params
+  that select a narrower hosted operation:
+
+  ```json
+  {
+    "capabilities": {
+      "harn_cloud": {
+        "operations": {
+          "agent_api": {
+            "param_discriminators": {
+              "operation": ["agents.get", "agents.list"]
+            }
+          }
+        }
+      }
+    }
+  }
+  ```
+
+  When `param_discriminators` is present, preflight requires the named params
+  field to be a literal string and rejects values outside the declared set.
+  Dynamic or missing discriminator values cannot establish the static host
+  contract and fail preflight. A host that separately proves a forwarding
+  boundary may use the explicit object form
+  `{ "values": ["agents.get"], "allow_dynamic": true }`; the field must still
+  be present, and every literal value remains checked.
 - `strict` treats warnings from every `harn check` phase as failures after all
   files have been rendered. `harn check --strict` monotonically enables the
   same policy for one invocation; it cannot disable manifest strictness.

@@ -33,7 +33,9 @@ fn register_manifest_host_operations(extensions: &crate::package::RuntimeExtensi
         return;
     };
     let check = crate::package::absolutize_check_config_paths(manifest.check.clone(), manifest_dir);
-    for (capability, operations) in crate::commands::check::load_host_capabilities(&check) {
+    for (capability, operations) in
+        crate::commands::check::load_host_capabilities(&check).into_operations()
+    {
         for operation in operations {
             harn_vm::stdlib::host::register_scoped_mockable_host_operation(
                 &capability,

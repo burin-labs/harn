@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use harn_modules::resolve_import_path;
@@ -12,7 +12,11 @@ use super::mock_host::collect_mock_host_capabilities;
 use super::source::parse_resolved_module;
 use crate::package::CheckConfig;
 
+mod host_param_discriminators;
 mod llm_composition;
+
+use host_param_discriminators::scan_host_param_discriminators;
+pub(super) use host_param_discriminators::{host_render_path_arg, parse_host_call_args};
 
 pub(crate) struct PreflightDiagnostic {
     pub(crate) code: Code,
@@ -59,7 +63,7 @@ pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
         source,
         program,
         &mut mocked_caps_visited,
-        &mut host_capabilities,
+        host_capabilities.operations_mut(),
     );
     scan_program_preflight(
         &canonical,
@@ -874,7 +878,7 @@ fn scan_program_preflight(
     source: &str,
     program: &[SNode],
     config: &CheckConfig,
-    host_capabilities: &HashMap<String, HashSet<String>>,
+    host_capabilities: &HostCapabilities,
     visited: &mut HashSet<PathBuf>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
@@ -900,7 +904,7 @@ fn scan_node_preflight(
     file_path: &Path,
     source: &str,
     config: &CheckConfig,
-    host_capabilities: &HashMap<String, HashSet<String>>,
+    host_capabilities: &HostCapabilities,
     visited: &mut HashSet<PathBuf>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
@@ -1121,6 +1125,17 @@ fn scan_node_preflight(
                         ),
                         tags: Some(format!("{cap}.{op}")),
                     });
+                } else {
+                    scan_host_param_discriminators(
+                        node,
+                        params_arg,
+                        host_capabilities,
+                        &cap,
+                        &op,
+                        file_path,
+                        source,
+                        diagnostics,
+                    );
                 }
                 if cap == "template" && op == "render" {
                     if let Some(template_path) = host_render_path_arg(params_arg) {
@@ -2000,7 +2015,7 @@ fn scan_children(
     file_path: &Path,
     source: &str,
     config: &CheckConfig,
-    host_capabilities: &HashMap<String, HashSet<String>>,
+    host_capabilities: &HostCapabilities,
     visited: &mut HashSet<PathBuf>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
@@ -2111,31 +2126,6 @@ fn scan_stdlib_prompt_target(
         });
     }
     true
-}
-
-pub(super) fn host_render_path_arg(arg: Option<&SNode>) -> Option<String> {
-    let Node::DictLiteral(entries) = &arg?.node else {
-        return None;
-    };
-    entries
-        .iter()
-        .find_map(|entry| match (&entry.key.node, &entry.value.node) {
-            (Node::Identifier(key), Node::StringLiteral(path)) if key == "path" => {
-                Some(path.clone())
-            }
-            (Node::StringLiteral(key), Node::StringLiteral(path)) if key == "path" => {
-                Some(path.clone())
-            }
-            _ => None,
-        })
-}
-
-pub(super) fn parse_host_call_args(args: &[SNode]) -> Option<(String, String, Option<&SNode>)> {
-    let Node::StringLiteral(name) = &args.first()?.node else {
-        return None;
-    };
-    let (capability, operation) = name.split_once('.')?;
-    Some((capability.to_string(), operation.to_string(), args.get(1)))
 }
 
 pub(super) fn literal_string(node: &SNode) -> Option<String> {
@@ -2262,7 +2252,7 @@ fn walk_for_basename(
 fn scan_tool_define_preflight(
     node: &SNode,
     args: &[SNode],
-    host_capabilities: &HashMap<String, HashSet<String>>,
+    host_capabilities: &HostCapabilities,
     file_path: &Path,
     source: &str,
     diagnostics: &mut Vec<PreflightDiagnostic>,

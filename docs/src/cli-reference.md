@@ -1093,7 +1093,7 @@ harn check --preflight warning src/
 
 | Flag | Description |
 |---|---|
-| `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries. Overrides `[check].host_capabilities_path` in `harn.toml`. |
+| `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries with optional `param_discriminators` literal sets. Discriminator policies may explicitly allow a dynamic forwarding boundary when the host verifies it separately. Overrides `[check].host_capabilities_path` in `harn.toml`. |
 | `--bundle-root <dir>` | Validate `harness.fs.render_prompt(...)`, and template paths against an alternate bundled layout root |
 | `--invariants` | Evaluate `@invariant(...)` annotations on functions, tools, and pipelines. Violations fail the check and are reported as `invariant[<name>]` diagnostics with concrete source spans. |
 | `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |

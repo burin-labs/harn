@@ -15,11 +15,11 @@ use super::config::{
     build_module_graph, build_module_graph_and_seed_analysis, collect_cross_file_imports,
 };
 use super::config::{collect_harn_targets, HarnLintConfig};
-use super::host_capabilities::parse_host_capability_value;
 use super::lint::lint_file_inner;
 use super::lint_report::lint_file_report;
 use super::preflight::{is_preflight_allowed, PreflightDiagnostic};
 
+mod host_capability_discriminators;
 mod prompt_lint;
 mod target_discovery;
 
@@ -1180,21 +1180,6 @@ pipeline main() {
         diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn parse_host_capability_value_accepts_top_level_object_schema() {
-    let value = serde_json::json!({
-        "workspace": ["project_root", "file_exists"],
-        "runtime": {
-            "operations": ["task", "pipeline_input"]
-        }
-    });
-    let parsed = parse_host_capability_value(&value);
-    assert!(parsed["workspace"].contains("project_root"));
-    assert!(parsed["workspace"].contains("file_exists"));
-    assert!(parsed["runtime"].contains("task"));
-    assert!(parsed["runtime"].contains("pipeline_input"));
 }
 
 #[test]
