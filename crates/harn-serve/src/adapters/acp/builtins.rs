@@ -103,16 +103,28 @@ pub(super) async fn register_acp_builtins(
             harn_vm::shells::default_shell_vm_value()
         };
 
-    // `harness.stdio.log` is diagnostic, not assistant-visible reply text.
-    // Routing it through `agent_message_chunk` pollutes the streaming bubble and
-    // suppresses Response-only final-reply fallback on interactive surfaces
-    // (Burin TUI smoke: AUTO stdio.log hid `TUI_SMOKE_REPLY` from set_result).
+    // Diagnostic logs must not become assistant-visible reply text.
+    // Product paths call `harness.stdio.log` (capability method), not the bare
+    // ambient `log` builtin. Routing either through `agent_message_chunk`
+    // pollutes the streaming bubble and suppresses Response-only final-reply
+    // fallback on interactive surfaces (Burin TUI smoke: AUTO stdio.log hid
+    // `TUI_SMOKE_REPLY` from set_result).
     let b = bridge.clone();
     vm.register_builtin("log", move |args, _out| {
         let msg = args.first().map(|a| a.display()).unwrap_or_default();
         b.send_log("info", &msg, None);
         Ok(harn_vm::VmValue::Nil)
     });
+    let b = bridge.clone();
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Stdio,
+        "log",
+        move |args, _out| {
+            let msg = args.first().map(|a| a.display()).unwrap_or_default();
+            b.send_log("info", &msg, None);
+            Ok(harn_vm::VmValue::Nil)
+        },
+    );
 
     let b = bridge.clone();
     vm.register_builtin("print", move |args, _out| {
