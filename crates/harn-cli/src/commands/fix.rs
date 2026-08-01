@@ -7,7 +7,8 @@ use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
 use harn_parser::analysis::{AnalysisDatabase, AnalysisError};
 use harn_parser::{
-    visit, DiagnosticCode as Code, DiagnosticSeverity, Node, Repair, RepairSafety, SNode, TypeExpr,
+    visit, DiagnosticCode as Code, DiagnosticDetails, DiagnosticSeverity, Node, Repair,
+    RepairSafety, SNode, TypeExpr,
 };
 use serde::Serialize;
 
@@ -20,6 +21,8 @@ use crate::package::{self, CheckConfig, PreflightSeverity};
 mod capability_migrations;
 #[path = "fix/lint_context.rs"]
 mod lint_context;
+#[path = "fix/reporting.rs"]
+mod reporting;
 #[path = "fix/signature_threading.rs"]
 mod signature_threading;
 #[path = "fix/whole_program_capabilities.rs"]
@@ -31,6 +34,7 @@ mod apply;
 use apply::apply_repairs_with_options;
 #[cfg(test)]
 use apply::{apply_file_edits, apply_repairs, repair_path};
+use reporting::{print_apply_result, print_human_plan, skipped_files_error};
 use signature_threading::{
     add_call_argument_edit, add_harness_param_edit, build_reverse_callers, collect_callable_infos,
     harness_param_name_for_insert, propagate_harness_requirements,
@@ -208,6 +212,8 @@ struct RepairCandidate {
     severity: &'static str,
     code: Code,
     message: String,
+    unresolved_name: Option<String>,
+    expected_type: Option<TypeExpr>,
     span: Option<Span>,
     repair: Repair,
     impact: RepairImpactWire,
@@ -545,8 +551,18 @@ fn collect_file_candidates(
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;
         }
+        let unresolved_name = match diag.details.as_ref() {
+            Some(DiagnosticDetails::UnresolvedName { name }) => Some(name.clone()),
+            _ => None,
+        };
+        let (expected_type, actual_type) = match diag.details.as_ref() {
+            Some(DiagnosticDetails::TypeMismatch { expected, actual }) => {
+                (Some(expected.clone()), Some(actual.clone()))
+            }
+            _ => (None, None),
+        };
         let synthesized = (diag.code == Code::UndefinedVariable
-            && diag.message.contains("`harness`"))
+            && unresolved_name.as_deref() == Some("harness"))
         .then(|| {
             synthesize_missing_harness_repair(
                 diag.span?,
@@ -561,7 +577,7 @@ fn collect_file_candidates(
             if diag.code != Code::ArgumentTypeMismatch {
                 return None;
             }
-            if argument_mismatch_expected_type(&diag.message) == Some("Harness") {
+            if matches!(expected_type.as_ref(), Some(TypeExpr::Named(expected)) if expected == "Harness") {
                 return synthesize_missing_root_argument_repair(
                     diag.span?,
                     &source,
@@ -572,10 +588,24 @@ fn collect_file_candidates(
             }
             synthesize_missing_capability_argument_repair(
                 diag.span?,
-                &diag.message,
+                expected_type.as_ref()?,
+                actual_type.as_ref()?,
                 &source,
                 &program,
             )
+            .or_else(|| {
+                let TypeExpr::Named(expected) = expected_type.as_ref()? else {
+                    return None;
+                };
+                harn_builtin_meta::CapabilityId::from_type_name(expected)?;
+                synthesize_missing_root_argument_repair(
+                    diag.span?,
+                    &source,
+                    &program,
+                    &exported_names,
+                    &ambient_context,
+                )
+            })
         });
         let (repair, edits, impact) = if let Some(repair) = synthesized {
             repair
@@ -601,6 +631,8 @@ fn collect_file_candidates(
             severity: severity_label(diag.severity),
             code: diag.code,
             message: diag.message.clone(),
+            unresolved_name,
+            expected_type,
             span: diag.span,
             repair,
             impact,
@@ -637,6 +669,8 @@ fn collect_file_candidates(
             severity: lint_severity_label(diag.severity),
             code: diag.code,
             message: diag.message.clone(),
+            unresolved_name: None,
+            expected_type: None,
             span: Some(diag.span),
             repair,
             impact,
@@ -868,29 +902,26 @@ fn synthesize_ambient_capability_repair(
 
 fn synthesize_missing_capability_argument_repair(
     span: Span,
-    message: &str,
+    expected: &TypeExpr,
+    actual: &TypeExpr,
     source: &str,
     program: &[SNode],
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let (argument_label, mismatch) = message.strip_prefix("argument ")?.split_once(' ')?;
-    let argument_index = argument_label.parse::<usize>().ok()?.checked_sub(1)?;
-    let (expected, found) = mismatch.split_once("expected ")?.1.split_once(", found ")?;
-    let expected = expected.trim();
-    let found = found.trim();
-    let capability = (expected != "Harness")
-        .then(|| harn_builtin_meta::CapabilityId::from_type_name(expected))
-        .flatten();
+    let expected_name = match expected {
+        TypeExpr::Named(name) => Some(name.as_str()),
+        _ => None,
+    };
+    let capability = expected_name.and_then(harn_builtin_meta::CapabilityId::from_type_name);
     let mut matched_argument = None;
     visit::walk_program(program, &mut |node| {
         let Node::FunctionCall { args, .. } = &node.node else {
             return;
         };
-        let Some(candidate) = args.get(argument_index) else {
-            return;
-        };
-        if candidate.span.start == span.start && candidate.span.end == span.end {
-            if let Node::Identifier(binding) = &candidate.node {
-                matched_argument = Some((candidate.span, binding.clone()));
+        for candidate in args {
+            if candidate.span.start == span.start && candidate.span.end == span.end {
+                if let Node::Identifier(binding) = &candidate.node {
+                    matched_argument = Some((candidate.span, binding.clone()));
+                }
             }
         }
     });
@@ -898,7 +929,7 @@ fn synthesize_missing_capability_argument_repair(
     // After attenuating a helper signature, turn an existing root grant into
     // the expected sub-grant in place. Appending to a simple identifier is
     // structural and preserves the caller's chosen binding name.
-    if found == "Harness" {
+    if matches!(actual, TypeExpr::Named(name) if name == "Harness") {
         let (argument_span, binding) = matched_argument?;
         if let Some(replacement) = capability_bundle_literal(expected, &binding) {
             return Some((
@@ -919,13 +950,14 @@ fn synthesize_missing_capability_argument_repair(
             ));
         }
         let capability = capability?;
+        let expected_name = expected_name?;
         return Some((
             Repair {
                 id: harn_parser::RepairId::from_owned(
                     "bindings/attenuate-capability-argument".to_string(),
                 ),
                 summary: format!(
-                    "Pass the `{expected}` sub-grant required by the attenuated callable"
+                    "Pass the `{expected_name}` sub-grant required by the attenuated callable"
                 ),
                 safety: RepairSafety::SurfaceChanging,
             },
@@ -938,7 +970,8 @@ fn synthesize_missing_capability_argument_repair(
     }
 
     let _capability = capability?;
-    let argument = capability_argument_for_span(program, span, expected)?;
+    let expected_name = expected_name?;
+    let argument = capability_argument_for_span(program, span, expected_name)?;
     let edit = insert_call_argument_before_span(source, program, span, &argument)?;
     Some((
         Repair {
@@ -946,22 +979,13 @@ fn synthesize_missing_capability_argument_repair(
                 "bindings/prepend-capability-argument".to_string(),
             ),
             summary: format!(
-                "Pass the explicit `{expected}` capability required by the migrated callable"
+                "Pass the explicit `{expected_name}` capability required by the migrated callable"
             ),
             safety: RepairSafety::SurfaceChanging,
         },
         vec![edit],
         RepairImpactWire::local_ambient("prepend-capability-argument"),
     ))
-}
-
-fn argument_mismatch_expected_type(message: &str) -> Option<&str> {
-    message
-        .strip_prefix("argument ")?
-        .split_once("expected ")?
-        .1
-        .split_once(", found ")
-        .map(|(expected, _)| expected.trim())
 }
 
 fn insert_call_argument_before_span(
@@ -1043,19 +1067,25 @@ fn capability_argument_for_span(program: &[SNode], span: Span, expected: &str) -
     candidates.into_iter().next().map(|(_, argument)| argument)
 }
 
-fn capability_bundle_literal(expected: &str, binding: &str) -> Option<String> {
-    let fields = expected.strip_prefix('{')?.strip_suffix('}')?;
+fn capability_bundle_literal(expected: &TypeExpr, binding: &str) -> Option<String> {
+    let TypeExpr::Shape(fields) = expected else {
+        return None;
+    };
     let fields = fields
-        .split(',')
-        .map(str::trim)
+        .iter()
         .map(|field| {
-            let (name, ty) = field.split_once(':')?;
-            let name = name.trim();
-            let capability = harn_builtin_meta::CapabilityId::from_type_name(ty.trim())?;
-            (capability.field_name() == name).then(|| format!("{name}: {binding}.{name}"))
+            if field.optional {
+                return None;
+            }
+            let TypeExpr::Named(type_name) = &field.type_expr else {
+                return None;
+            };
+            let capability = harn_builtin_meta::CapabilityId::from_type_name(type_name)?;
+            (capability.field_name() == field.name)
+                .then(|| format!("{}: {binding}.{}", field.name, field.name))
         })
         .collect::<Option<Vec<_>>>()?;
-    (fields.len() == 2).then(|| format!("{{{}}}", fields.join(", ")))
+    (!fields.is_empty()).then(|| format!("{{{}}}", fields.join(", ")))
 }
 
 fn synthesize_missing_harness_repair(
@@ -1290,6 +1320,8 @@ fn collect_preflight(
             },
             code: diag.code,
             message: diag.message,
+            unresolved_name: None,
+            expected_type: None,
             span: Some(diag.span),
             repair,
             impact: RepairImpactWire::generic(),
@@ -1340,82 +1372,6 @@ fn edits_conflict(left: &FixEdit, right: &FixEdit) -> bool {
         return left.replacement != right.replacement;
     }
     left.span.start < right.span.end && left.span.end > right.span.start
-}
-
-fn print_human_plan(plan: &RepairPlan) {
-    if plan.repairs.is_empty() && plan.skipped_files.is_empty() {
-        println!("{}: no repairable diagnostics found", plan.path);
-        return;
-    }
-    if !plan.repairs.is_empty() {
-        println!(
-            "{}: {} repairable diagnostic(s)",
-            plan.path,
-            plan.repairs.len()
-        );
-        println!(
-            "idx  code          safety               edits  clean  impact                    repair"
-        );
-        for repair in &plan.repairs {
-            let clean = if repair.applies_cleanly { "yes" } else { "no" };
-            println!(
-                "{:<4} {:<13} {:<20} {:<5} {:<5} {:<25} {}",
-                repair.diagnostic_index,
-                repair.diagnostic_code,
-                repair.repair.safety,
-                repair.edits.len(),
-                clean,
-                repair.impact.classification,
-                repair.repair.id
-            );
-            for note in &repair.impact.notes {
-                println!("      note: {note}");
-            }
-        }
-    }
-    print_skipped_files(&plan.skipped_files);
-}
-
-fn print_skipped_files(skipped_files: &[SkippedFileWire]) {
-    if skipped_files.is_empty() {
-        return;
-    }
-    println!("skipped {} file(s):", skipped_files.len());
-    for skipped in skipped_files {
-        println!("skipped {}: {}", skipped.path, skipped.reason);
-        for diagnostic in &skipped.diagnostics {
-            let code = diagnostic.code.as_deref().unwrap_or("no-code");
-            println!("  {}[{}]: {}", diagnostic.source, code, diagnostic.message);
-            if let Some(help) = &diagnostic.help {
-                println!("    help: {help}");
-            }
-        }
-    }
-}
-
-fn print_apply_result(result: &ApplyResult) {
-    let verb = if result.dry_run {
-        "would apply"
-    } else {
-        "applied"
-    };
-    println!(
-        "{verb} {} repair(s), skipped {}; post-apply diagnostics: {}",
-        result.applied.len(),
-        result.skipped.len(),
-        result.post_apply_diagnostics_count
-    );
-    for skipped in &result.skipped {
-        println!(
-            "skipped {} {} in {}: {}",
-            skipped.diagnostic_code, skipped.repair_id, skipped.path, skipped.reason
-        );
-    }
-    print_skipped_files(&result.skipped_files);
-}
-
-fn skipped_files_error(count: usize) -> String {
-    format!("harn fix skipped {count} file(s) due to read, lex, or parse errors")
 }
 
 fn severity_label(severity: DiagnosticSeverity) -> &'static str {

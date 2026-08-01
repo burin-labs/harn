@@ -89,7 +89,22 @@ pub struct RelatedDiagnostic {
 pub enum DiagnosticDetails {
     /// A concrete expected/found mismatch. Renderers can use this to
     /// provide stable labels without scraping human-readable text.
-    TypeMismatch,
+    TypeMismatch {
+        expected: TypeExpr,
+        actual: TypeExpr,
+    },
+    /// A value-position name that failed resolution. Tooling must consume
+    /// this field instead of parsing the display message, whose wording and
+    /// suggestions are free to evolve.
+    UnresolvedName { name: String },
+    /// A Flow predicate requested authority outside the evaluator's injected
+    /// contract. Tooling can report or migrate the exact parameter and
+    /// capability set without parsing the human-readable diagnostic.
+    FlowCapabilityBoundary {
+        parameter: String,
+        capabilities: Vec<String>,
+        allowed: Vec<String>,
+    },
     /// A `match` expression with missing variant coverage. `missing`
     /// holds the formatted literal values of each uncovered variant
     /// (quoted for strings, bare for ints), ready to drop into a new
@@ -586,6 +601,57 @@ impl TypeChecker {
         });
     }
 
+    pub(in crate::typechecker) fn unresolved_name_error_at(
+        &mut self,
+        name: &str,
+        message: String,
+        span: Span,
+        help: Option<String>,
+    ) {
+        self.diagnostics.push(TypeDiagnostic {
+            code: Code::UndefinedVariable,
+            message,
+            severity: DiagnosticSeverity::Error,
+            span: Some(span),
+            help,
+            related: Vec::new(),
+            fix: None,
+            details: Some(DiagnosticDetails::UnresolvedName {
+                name: name.to_string(),
+            }),
+            repair: default_repair(Code::UndefinedVariable),
+        });
+    }
+
+    pub(in crate::typechecker) fn flow_capability_boundary_error_at(
+        &mut self,
+        parameter: &str,
+        capabilities: Vec<String>,
+        span: Span,
+    ) {
+        let capabilities_display = capabilities.join(", ");
+        self.diagnostics.push(TypeDiagnostic {
+            code: Code::FlowInvariantAttributeInvalid,
+            message: format!(
+                "Flow `@invariant` parameter `{parameter}` requests unsupported capability authority: {capabilities_display}; Flow evaluation injects only a leading `HarnessAst`"
+            ),
+            severity: DiagnosticSeverity::Error,
+            span: Some(span),
+            help: Some(
+                "move the effect outside the predicate or accept the injected `HarnessAst` as its first parameter"
+                    .to_string(),
+            ),
+            related: Vec::new(),
+            fix: None,
+            details: Some(DiagnosticDetails::FlowCapabilityBoundary {
+                parameter: parameter.to_string(),
+                capabilities,
+                allowed: vec!["HarnessAst".to_string()],
+            }),
+            repair: default_repair(Code::FlowInvariantAttributeInvalid),
+        });
+    }
+
     pub(in crate::typechecker) fn type_mismatch_at(
         &mut self,
         code: Code,
@@ -629,7 +695,10 @@ impl TypeChecker {
             help: coercion_suggestion(expected, actual, value_span, self.source.as_deref()),
             related,
             fix: None,
-            details: Some(DiagnosticDetails::TypeMismatch),
+            details: Some(DiagnosticDetails::TypeMismatch {
+                expected: expected.clone(),
+                actual: actual.clone(),
+            }),
             repair: default_repair(code),
         });
     }

@@ -1,6 +1,7 @@
 use super::*;
 use crate::diagnostic_codes::Code;
 use crate::typechecker::DiagnosticDetails;
+use crate::TypeExpr;
 
 #[test]
 fn enum_payload_closure_reassignment_does_not_poison_outer_narrowing() {
@@ -42,10 +43,13 @@ fn read(value: int = value) -> int { return value }"#,
         .unwrap_or_else(|| {
             panic!("self-named default must resolve the outer string binding: {diagnostics:?}")
         });
-    assert!(matches!(
-        mismatch.details,
-        Some(DiagnosticDetails::TypeMismatch)
-    ));
+    match mismatch.details.as_ref() {
+        Some(DiagnosticDetails::TypeMismatch { expected, actual }) => {
+            assert_eq!(expected, &TypeExpr::Named("int".to_string()));
+            assert_eq!(actual, &TypeExpr::Named("string".to_string()));
+        }
+        details => panic!("expected typed mismatch details, got {details:?}"),
+    }
     assert_eq!(
         mismatch.message,
         "parameter default `value`: expected int, found string"

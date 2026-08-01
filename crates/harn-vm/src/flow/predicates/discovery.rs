@@ -161,14 +161,14 @@ pub fn parse_invariants_source(source: &str) -> ParsedInvariantFile {
     let mut predicates = Vec::new();
     for node in &program {
         let (attrs, inner) = peel_attributes(node);
+        if !harn_parser::is_flow_predicate_declaration(attrs, inner) {
+            continue;
+        }
         let Node::FnDecl { name, .. } = &inner.node else {
             continue;
         };
-        let Some(predicate) =
-            predicate_from_attributes(source, name, attrs, inner.span, &mut diagnostics)
-        else {
-            continue;
-        };
+        let predicate =
+            predicate_from_attributes(source, name, attrs, inner.span, &mut diagnostics);
         predicates.push(predicate);
     }
 
@@ -191,14 +191,7 @@ fn predicate_from_attributes(
     attrs: &[Attribute],
     span: Span,
     diagnostics: &mut Vec<DiscoveryDiagnostic>,
-) -> Option<DiscoveredPredicate> {
-    // The Flow predicate marker is a *bare* `@invariant`. Anything with
-    // arguments is the handler-IR form and is not part of Flow discovery.
-    let invariant = attrs.iter().find(|a| a.name == "invariant")?;
-    if !invariant.args.is_empty() {
-        return None;
-    }
-
+) -> DiscoveredPredicate {
     let deterministic = attrs.iter().any(|a| a.name == "deterministic");
     let semantic = attrs.iter().any(|a| a.name == "semantic");
     let kind = match (deterministic, semantic) {
@@ -259,7 +252,7 @@ fn predicate_from_attributes(
     }
     let source_hash = predicate_source_hash(source, attrs, span);
 
-    Some(DiscoveredPredicate {
+    DiscoveredPredicate {
         name: name.to_string(),
         kind,
         fallback,
@@ -268,7 +261,7 @@ fn predicate_from_attributes(
         retroactive,
         source_hash,
         span,
-    })
+    }
 }
 
 fn parse_semantic_fallback(attr: &Attribute) -> Option<String> {
@@ -706,6 +699,29 @@ fn handler_check(slice) -> bool { return true }
 "#;
         let parsed = parse_invariants_source(source);
         assert!(parsed.predicates.is_empty(), "{:?}", parsed.predicates);
+    }
+
+    #[test]
+    fn parse_discovers_bare_invariants_on_functions_only() {
+        let source = r"
+@invariant
+tool tool_check(slice) -> bool { return true }
+
+@invariant
+pipeline pipeline_check(slice) {}
+
+@invariant
+fn function_check(slice) -> bool { return true }
+";
+        let parsed = parse_invariants_source(source);
+        assert_eq!(
+            parsed
+                .predicates
+                .iter()
+                .map(|predicate| predicate.name.as_str())
+                .collect::<Vec<_>>(),
+            ["function_check"]
+        );
     }
 
     #[test]

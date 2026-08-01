@@ -214,7 +214,7 @@ impl TypeChecker {
                     // `Rc::make_mut`; otherwise the live child clone would
                     // force `make_mut` to copy the root scope.
                     let mut scope = TypeScope::child_of(&self.scope);
-                    self.check_node(snode, &mut scope);
+                    self.check_node(inner_node, &mut scope);
                     let TypeScope {
                         vars,
                         mutable_vars,

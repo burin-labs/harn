@@ -17,6 +17,7 @@ pub(super) fn apply_repairs_with_options(
 ) -> Result<ApplyResult, String> {
     let mut applied = Vec::new();
     let mut skipped = Vec::new();
+    let mut edited_files = BTreeSet::new();
     let max_passes = if options.capability_migrations_only && !dry_run {
         CAPABILITY_MIGRATION_MAX_PASSES
     } else {
@@ -77,6 +78,7 @@ pub(super) fn apply_repairs_with_options(
         for (path, edits) in &edits_by_file {
             let edits = dedupe_wire_edits(edits);
             apply_file_edits(Path::new(path), &edits)?;
+            edited_files.insert(path.clone());
         }
         if !options.capability_migrations_only {
             converged = true;
@@ -90,6 +92,10 @@ pub(super) fn apply_repairs_with_options(
         ));
     }
 
+    if options.capability_migrations_only && !dry_run {
+        format_edited_files(&edited_files)?;
+    }
+
     let remaining = count_remaining_diagnostics(target)?;
     Ok(ApplyResult {
         schema_version: FIX_APPLY_SCHEMA_VERSION,
@@ -99,6 +105,38 @@ pub(super) fn apply_repairs_with_options(
         post_apply_diagnostics_count: remaining.count,
         dry_run,
     })
+}
+
+pub(super) fn format_edited_files(paths: &BTreeSet<String>) -> Result<(), String> {
+    for path in paths {
+        let config = match harn_modules::project_config::load_for_path(Path::new(path)) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to load formatter config for {path}: {error}; using defaults"
+                );
+                harn_modules::project_config::HarnConfig::default()
+            }
+        };
+        let mut options = harn_fmt::FmtOptions::default();
+        if let Some(line_width) = config.fmt.line_width {
+            options.line_width = line_width;
+        }
+        if let Some(separator_width) = config.fmt.separator_width {
+            options.separator_width = separator_width;
+        }
+        let source = std::fs::read_to_string(path)
+            .map_err(|error| format!("failed to read {path} before formatting: {error}"))?;
+        let formatted = harn_fmt::format_source_opts(&source, &options).map_err(|error| {
+            format!("failed to format capability migration output {path}: {error}")
+        })?;
+        if source != formatted {
+            std::fs::write(path, formatted).map_err(|error| {
+                format!("failed to write formatted migration output {path}: {error}")
+            })?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn repair_path(plan: &RepairPlan, repair: &RepairWire) -> Result<String, String> {

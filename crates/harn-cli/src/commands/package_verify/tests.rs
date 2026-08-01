@@ -74,6 +74,18 @@ fn package_dir_from_anchor_finds_manifest_for_nested_file() {
 }
 
 #[test]
+fn package_gate_stderr_label_matches_gate_status() {
+    let mut check = PackageVerifyCheck {
+        status: "pass".to_string(),
+        ..PackageVerifyCheck::default()
+    };
+    assert_eq!(gate_stderr_label(&check), "diagnostics");
+
+    check.status = "fail".to_string();
+    assert_eq!(gate_stderr_label(&check), "failed output");
+}
+
+#[test]
 fn package_dependency_path_canonicalizes_relative_package_dir() {
     let cwd = std::env::current_dir().unwrap();
     let dir = tempfile::Builder::new()

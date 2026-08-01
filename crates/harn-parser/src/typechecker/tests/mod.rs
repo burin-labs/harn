@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 
+use crate::diagnostic_codes::Code;
 use crate::Parser;
 use harn_lexer::Lexer;
 
@@ -12,6 +13,8 @@ use super::{DiagnosticSeverity, TypeChecker, TypeDiagnostic};
 
 mod acp_ambient_globals;
 mod attributes;
+mod callable_attributes;
+mod calls_and_generics;
 mod coalesce;
 mod enum_construct;
 mod exhaustiveness;
@@ -41,6 +44,17 @@ pub(super) fn check_source(source: &str) -> Vec<TypeDiagnostic> {
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
     TypeChecker::new().check(&program)
+}
+
+pub(super) fn diagnostics_with_code(
+    source: &str,
+    code: Code,
+    severity: DiagnosticSeverity,
+) -> Vec<TypeDiagnostic> {
+    check_source(source)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == code && diagnostic.severity == severity)
+        .collect()
 }
 
 pub(super) fn check_source_with_imports(source: &str, imported: &[&str]) -> Vec<TypeDiagnostic> {

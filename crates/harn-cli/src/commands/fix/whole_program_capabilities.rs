@@ -46,6 +46,7 @@ struct ProgramCallable {
     info: CallableInfo,
     receiver_accesses: Vec<ReceiverAccess>,
     boundary: bool,
+    flow_predicate: bool,
     carrier: Option<Carrier>,
     root_attenuation: Option<BTreeSet<CapabilityId>>,
     direct_requirements: BTreeSet<CapabilityId>,
@@ -96,7 +97,9 @@ pub(super) fn plan(
             .collect::<BTreeMap<_, _>>();
         let infos = collect_callable_infos(&program, &source, &exported);
         for info in infos {
-            let Some((params, body, boundary)) = declaration_parts(&program, info.span) else {
+            let Some((params, body, boundary, flow_predicate)) =
+                declaration_parts(&program, info.span)
+            else {
                 continue;
             };
             let carrier = capability_carrier(params);
@@ -111,6 +114,7 @@ pub(super) fn plan(
                 info,
                 receiver_accesses,
                 boundary,
+                flow_predicate,
                 carrier,
                 root_attenuation,
                 direct_requirements,
@@ -133,6 +137,24 @@ pub(super) fn plan(
         .collect::<Vec<_>>();
     propagate_requirements(&edges, &mut requirements);
 
+    for (callable, required) in callables.iter().zip(&requirements) {
+        if !callable.flow_predicate {
+            continue;
+        }
+        let unsupported = required
+            .iter()
+            .filter(|capability| **capability != CapabilityId::Ast)
+            .map(|capability| capability.field_name())
+            .collect::<Vec<_>>();
+        if !unsupported.is_empty() {
+            return Err(format!(
+                "flow predicate `{}` requires unsupported injected capabilities: {}; flow evaluation injects only HarnessAst",
+                callable.info.name,
+                unsupported.join(", ")
+            ));
+        }
+    }
+
     let desired = callables
         .iter()
         .enumerate()
@@ -147,6 +169,7 @@ pub(super) fn plan(
         && !callables
             .iter()
             .any(|callable| !callable.info.ambient_capability_calls.is_empty())
+        && !diagnostics.iter().any(is_missing_capability_argument)
     {
         return Ok(Vec::new());
     }
@@ -193,6 +216,15 @@ pub(super) fn plan(
                 diagnostics,
                 &program_files[callable.file_idx].path,
             ));
+        edits_by_file.entry(callable.file_idx).or_default().extend(
+            explicit_capability_argument_edits(
+                &program_files[callable.file_idx].source,
+                callable,
+                desired,
+                diagnostics,
+                &program_files[callable.file_idx].path,
+            ),
+        );
     }
     for edge in &edges {
         if !changed[edge.callee] {
@@ -283,6 +315,8 @@ pub(super) fn plan(
             code,
             message: "thread the least capability authority through the invocation graph"
                 .to_string(),
+            unresolved_name: None,
+            expected_type: None,
             span: edits.first().map(|edit| edit.span),
             repair: Repair {
                 id: harn_parser::RepairId::from_owned(
@@ -308,23 +342,24 @@ pub(super) fn plan(
     Ok(planned)
 }
 
-fn declaration_parts(program: &[SNode], span: Span) -> Option<(&[TypedParam], &[SNode], bool)> {
+fn declaration_parts(
+    program: &[SNode],
+    span: Span,
+) -> Option<(&[TypedParam], &[SNode], bool, bool)> {
     for node in program {
-        let inner = match &node.node {
-            Node::AttributedDecl { inner, .. } => inner.as_ref(),
-            _ => node,
-        };
+        let (attributes, inner) = harn_parser::peel_attributes(node);
         if inner.span.start != span.start || inner.span.end != span.end {
             continue;
         }
+        let flow_predicate = harn_parser::is_flow_predicate_declaration(attributes, inner);
         return match &inner.node {
             Node::FnDecl {
                 name, params, body, ..
             }
             | Node::ToolDecl {
                 name, params, body, ..
-            } => Some((params, body, name == "main")),
-            Node::Pipeline { params, body, .. } => Some((params, body, true)),
+            } => Some((params, body, name == "main", flow_predicate)),
+            Node::Pipeline { params, body, .. } => Some((params, body, true, flow_predicate)),
             _ => None,
         };
     }
@@ -423,7 +458,8 @@ fn seed_ambient_requirements(
     let undefined_harness_by_file = diagnostics
         .iter()
         .filter(|diagnostic| {
-            diagnostic.code == Code::UndefinedVariable && diagnostic.message.contains("`harness`")
+            diagnostic.code == Code::UndefinedVariable
+                && diagnostic.unresolved_name.as_deref() == Some("harness")
         })
         .filter_map(|diagnostic| {
             diagnostic.span.map(|span| {
@@ -491,6 +527,40 @@ fn seed_ambient_requirements(
             if let Some(capability) = capability {
                 callable.direct_requirements.insert(capability);
             }
+        }
+    }
+
+    for diagnostic in diagnostics {
+        if !is_missing_capability_argument(diagnostic) {
+            continue;
+        }
+        let Some(span) = diagnostic.span else {
+            continue;
+        };
+        let Some(capability) = diagnostic_capability(diagnostic) else {
+            continue;
+        };
+        let path = canonical(Path::new(&diagnostic.file));
+        let Some((file_idx, _)) = files.iter().enumerate().find(|(_, file)| file.path == path)
+        else {
+            continue;
+        };
+        if let Some(callable) = callables
+            .iter_mut()
+            .filter(|callable| {
+                callable.file_idx == file_idx
+                    && callable.info.span.start <= span.start
+                    && callable.info.span.end >= span.end
+            })
+            .min_by_key(|callable| {
+                callable
+                    .info
+                    .span
+                    .end
+                    .saturating_sub(callable.info.span.start)
+            })
+        {
+            callable.direct_requirements.insert(capability);
         }
     }
 }
@@ -570,6 +640,12 @@ fn desired_carrier(
     callable: &ProgramCallable,
     requirements: &BTreeSet<CapabilityId>,
 ) -> Option<CarrierKind> {
+    if callable.flow_predicate
+        && requirements.len() == 1
+        && requirements.contains(&CapabilityId::Ast)
+    {
+        return Some(CarrierKind::Narrow(CapabilityId::Ast));
+    }
     if matches!(
         callable.carrier.as_ref().map(|carrier| &carrier.kind),
         Some(CarrierKind::Root)
@@ -746,6 +822,74 @@ fn ambient_edits(
         }
     }
     edits
+}
+
+fn explicit_capability_argument_edits(
+    source: &str,
+    callable: &ProgramCallable,
+    desired: &CarrierKind,
+    diagnostics: &[RepairCandidate],
+    file: &Path,
+) -> Vec<FixEdit> {
+    let Some(binding) = final_binding(callable) else {
+        return Vec::new();
+    };
+    let mut edited_calls = BTreeSet::new();
+    let mut edits = Vec::new();
+    for diagnostic in diagnostics.iter().filter(|diagnostic| {
+        is_missing_capability_argument(diagnostic) && canonical(Path::new(&diagnostic.file)) == file
+    }) {
+        let Some(span) = diagnostic.span else {
+            continue;
+        };
+        if span.start < callable.info.span.start || span.end > callable.info.span.end {
+            continue;
+        }
+        let Some(capability) = diagnostic_capability(diagnostic) else {
+            continue;
+        };
+        let argument = match desired {
+            CarrierKind::Narrow(current) if *current == capability => binding.to_string(),
+            CarrierKind::Root | CarrierKind::Bundle(_) => {
+                format!("{binding}.{}", capability.field_name())
+            }
+            CarrierKind::Narrow(_) => continue,
+        };
+        let Some((call, argument_index)) = callable.info.calls.iter().find_map(|call| {
+            call.args
+                .iter()
+                .position(|candidate| candidate.start == span.start && candidate.end == span.end)
+                .map(|index| (call, index))
+        }) else {
+            continue;
+        };
+        if !edited_calls.insert((call.span.start, call.span.end)) {
+            // Argument indexes describe the pre-edit call. Apply at most one
+            // insertion to each call per fixed-point pass, then let the next
+            // typecheck locate the remaining mismatch in the updated call.
+            continue;
+        }
+        if let Some(edit) = add_call_argument_at_index_edit(source, call, argument_index, &argument)
+        {
+            edits.push(edit);
+        }
+    }
+    edits
+}
+
+fn is_missing_capability_argument(diagnostic: &RepairCandidate) -> bool {
+    diagnostic.code == Code::ArgumentTypeMismatch
+        && matches!(
+            diagnostic.repair.id.as_str(),
+            "bindings/prepend-capability-argument" | "bindings/thread-root-argument"
+        )
+}
+
+fn diagnostic_capability(diagnostic: &RepairCandidate) -> Option<CapabilityId> {
+    let TypeExpr::Named(expected) = diagnostic.expected_type.as_ref()? else {
+        return None;
+    };
+    CapabilityId::from_type_name(expected)
 }
 
 fn final_binding(callable: &ProgramCallable) -> Option<&str> {

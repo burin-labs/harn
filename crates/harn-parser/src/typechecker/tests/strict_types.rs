@@ -1,6 +1,8 @@
 //! Strict-types boundary checks (`json_parse`, `llm_call`) and cross-module call resolution.
 
 use super::*;
+use crate::diagnostic_codes::Code;
+use crate::typechecker::DiagnosticDetails;
 
 fn render_unresolved_call(source: &str) -> String {
     let diag = check_source_with_imports(source, &[])
@@ -301,15 +303,22 @@ fn test_cross_module_unresolved_value_identifier_errors() {
 }",
         &["other_helper"],
     );
-    let errs: Vec<&String> = diags
+    let unresolved: Vec<&str> = diags
         .iter()
-        .filter(|d| d.severity == DiagnosticSeverity::Error)
-        .map(|d| &d.message)
+        .filter(|diagnostic| diagnostic.code == Code::UndefinedVariable)
+        .filter_map(|diagnostic| match diagnostic.details.as_ref() {
+            Some(DiagnosticDetails::UnresolvedName { name }) => Some(name.as_str()),
+            _ => None,
+        })
         .collect();
-    assert!(
-        errs.iter().any(|m| m.contains("SOME_ALLOWLIST")),
-        "expected undefined value identifier error, got: {errs:?}"
-    );
+    assert_eq!(unresolved, ["SOME_ALLOWLIST"]);
+    assert!(diags.iter().all(|diagnostic| {
+        diagnostic.code != Code::UndefinedVariable
+            || matches!(
+                diagnostic.details,
+                Some(DiagnosticDetails::UnresolvedName { .. })
+            )
+    }));
 }
 
 #[test]
