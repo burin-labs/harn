@@ -81,6 +81,36 @@ pub fn legacy_ambient_cap_global_entry(
     ambient_harness_method_entries().find(|entry| entry.name.strip_prefix("__cap_") == Some(name))
 }
 
+/// Resolve a privileged-wire builtin published as `__<name>` (for example
+/// ambient `security_policy` → `__security_policy`).
+pub fn legacy_privileged_wire_entry(
+    name: &str,
+) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
+    harn_builtin_registry::installed_manifest()
+        .into_iter()
+        .find(|entry| {
+            matches!(entry.contract.exposure, BuiltinExposure::PrivilegedWire)
+                && entry.name.strip_prefix("__") == Some(name)
+        })
+}
+
+/// Canonical runtime builtin name for an ambient call site under the legacy
+/// bridge. Prefer privileged-wire `__name` spellings over capability-contract
+/// `__cap_*` names when both exist, because harness dispatch implements those
+/// privileged builtins directly.
+pub fn legacy_ambient_runtime_name(name: &str) -> Option<&'static str> {
+    if let Some(target) = crate::legacy_builtin_alias_target(name) {
+        return Some(target);
+    }
+    if let Some(entry) = legacy_privileged_wire_entry(name) {
+        return Some(entry.name);
+    }
+    if let Some(entry) = legacy_ambient_cap_global_entry(name) {
+        return Some(entry.name);
+    }
+    None
+}
+
 fn ambient_harness_method_entries(
 ) -> impl Iterator<Item = &'static harn_builtin_registry::BuiltinManifestEntry> {
     harn_builtin_registry::installed_manifest()

@@ -574,6 +574,21 @@ fn legacy_signature_without_manifest_fails_closed() {
 }
 
 #[test]
+fn ambient_bridge_lowers_privileged_wire_security_policy() {
+    harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+    let options = CompilerOptions::optimized().with_legacy_ambient_capabilities();
+    let chunk = compile_source_with_options(
+        r#"pipeline default() { security_policy({mode: "off"}); return true }"#,
+        options,
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(
+        disasm.contains("__security_policy"),
+        "ambient security_policy must lower to privileged-wire __security_policy: {disasm}"
+    );
+}
+
+#[test]
 fn test_compile_if_else() {
     let chunk = compile_source(
         r#"pipeline test(harness: Harness, task) { if true { harness.stdio.log("yes") } else { harness.stdio.log("no") } }"#,
