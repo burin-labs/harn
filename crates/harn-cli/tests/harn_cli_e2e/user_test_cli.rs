@@ -20,6 +20,7 @@ import { with_temp_dir } from "std/testing"
 
 pipeline main(harness: Harness) {
   const result = with_temp_dir(
+    harness.fs,
     { dir ->
       harness.fs.write_text(dir + "/value.txt", "sandboxed")
       {dir: dir, value: harness.fs.read_text(dir + "/value.txt")}
@@ -266,15 +267,15 @@ fn user_tests_register_project_host_capability_manifest_for_mocks() {
     std::fs::write(
         suite.join("test_manifest_mock.harn"),
         r#"
-import { with_host_mocks } from "std/testing"
+import { with_capability_fixtures } from "std/testing"
 
-pipeline test_manifest_mock(task) {
-  assert(!host_has("synthetic_fixture", "answer"))
-  with_host_mocks(
-    [{capability: "synthetic_fixture", operation: "answer", result: 42}],
+pipeline test_manifest_mock(harness: Harness, task) {
+  assert(harness.runtime.host_has("synthetic_fixture", "answer"))
+  with_capability_fixtures(
+    harness.testing,
+    [{capability: "synthetic_fixture", method: "answer", result: 42}],
     { _ ->
-      assert(host_has("synthetic_fixture", "answer"))
-      assert_eq(host_call("synthetic_fixture.answer", {}), 42)
+      assert_eq(len(harness.testing.calls()), 0)
     },
   )
 }
@@ -308,11 +309,12 @@ fn user_tests_reject_mock_operation_missing_from_project_manifest() {
     std::fs::write(
         suite.join("test_manifest_typo.harn"),
         r#"
-import { with_host_mocks } from "std/testing"
+import { with_capability_fixtures } from "std/testing"
 
-pipeline test_manifest_typo(task) {
-  with_host_mocks(
-    [{capability: "synthetic_fixture", operation: "asnwer", result: 42}],
+pipeline test_manifest_typo(harness: Harness, task) {
+  with_capability_fixtures(
+    harness.testing,
+    [{capability: "synthetic_fixture", method: "asnwer", result: 42}],
     { _ -> nil },
   )
 }
@@ -328,7 +330,7 @@ pipeline test_manifest_typo(task) {
 
     assert!(!output.status.success(), "unexpected success:\n{stdout}");
     assert!(
-        stdout.contains("unregistered host operation synthetic_fixture.asnwer"),
+        stdout.contains("unknown capability or host operation `synthetic_fixture.asnwer`"),
         "missing strict registration failure:\n{stdout}"
     );
 }

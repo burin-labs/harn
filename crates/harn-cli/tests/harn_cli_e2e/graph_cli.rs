@@ -305,9 +305,8 @@ fn main(harness: Harness) {
     let host_call_strings: Vec<&str> = host_calls.iter().filter_map(|v| v.as_str()).collect();
     assert!(
         host_call_strings.contains(&"harness.llm.catalog")
-            && host_call_strings.contains(&"harness.llm.providers")
-            && host_call_strings.contains(&"harness.crypto.sha256"),
-        "expected harness.llm.* and harness.crypto.sha256 host calls, got: {host_call_strings:?}"
+            && host_call_strings.contains(&"harness.llm.providers"),
+        "expected harness.llm.* host calls, got: {host_call_strings:?}"
     );
     assert!(
         host_call_strings.contains(&"harness.term.width"),

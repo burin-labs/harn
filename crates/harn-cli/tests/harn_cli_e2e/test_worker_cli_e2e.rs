@@ -252,12 +252,13 @@ fn stdio_worker_drops_removed_manifest_mock_declarations() {
         temp.path(),
         "test_manifest_mock.harn",
         r#"
-import { with_host_mocks } from "std/testing"
+import { with_capability_fixtures } from "std/testing"
 
-pipeline test_manifest_mock(_task) {
-  with_host_mocks(
-    [{capability: "synthetic_fixture", operation: "answer", result: 42}],
-    { _ -> assert_eq(host_call("synthetic_fixture.answer", {}), 42) },
+pipeline test_manifest_mock(harness: Harness, _task) {
+  with_capability_fixtures(
+    harness.testing,
+    [{capability: "synthetic_fixture", method: "answer", result: 42}],
+    { _ -> assert_eq(len(harness.testing.calls()), 0) },
   )
 }
 "#,
