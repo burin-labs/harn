@@ -48,7 +48,7 @@ harn run --resume .harn/workers/worker_...json
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
-| `--allow-process-network` | Permit spawned commands to open network sockets while retaining the worktree filesystem/process sandbox |
+| `--allow-process-network` | Allow network access for the Harn run and its child processes. Filesystem and process confinement remain active. See [Network grants](./sandboxing.md#network-grants-are-coarser-than-they-look). |
 | `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |

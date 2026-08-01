@@ -15,6 +15,8 @@ use super::EnvironmentPolicyConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+mod network;
+
 fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
     std::fs::write(
         root.join("harn.toml"),

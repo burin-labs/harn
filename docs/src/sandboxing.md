@@ -59,9 +59,17 @@ starts. That policy:
 So a script can read and write inside its own project and nowhere else, and
 neither it nor anything it spawns can open a socket.
 
-To let a spawned command reach the network, pass `--allow-process-network`.
-That raises the side-effect ceiling and nothing else: the filesystem and
-process sandboxes stay exactly as they were.
+Pass `--allow-process-network` to allow network access for the Harn run and its
+child processes. Filesystem and process confinement remain active.
+
+`harness.net.egress_policy(...)` does not grant network access. It restricts
+the destinations available to a run that already has network access, so a
+script can install its policy before the network grant. See the
+[egress-policy reference](./builtins.md#http) for the policy fields.
+
+A matching [`harness.testing.http_mock`](./builtins.md#mock-http) is an
+in-process fixture, so it does not require a network grant. An unmatched HTTP
+call still requires network access and passes through the active egress policy.
 
 ## Widening the sandbox for one path
 
@@ -103,12 +111,11 @@ path you actually need.
 
 ## Network grants are coarser than they look
 
-`--allow-process-network` is deliberately broader than Harn's egress
-allowlist, and the difference matters. `HARN_EGRESS_ALLOW` and
-`harness.net.egress_policy(...)` constrains calls the Harn runtime makes itself: HTTP,
-providers, connectors. The OS backends underneath a subprocess can only
-allow or deny sockets outright. They cannot enforce hostname rules on
-traffic from an arbitrary child process.
+`--allow-process-network` grants socket access to the Harn runtime and its
+child processes. `HARN_EGRESS_ALLOW` and `harness.net.egress_policy(...)`
+restrict calls made by Harn, including HTTP, provider, and connector calls.
+The child-process sandbox can allow or deny sockets, but it cannot enforce
+hostname rules for an arbitrary child process.
 
 Once you pass `--allow-process-network`, that child can talk to anything.
 Use it only for a command whose network behavior you already trust and have
