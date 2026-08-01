@@ -872,7 +872,7 @@ mod ambient_host_internal_projection_tests {
         unsafe {
             match previous {
                 Some(value) => {
-                    std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, value)
+                    std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, value);
                 }
                 None => std::env::remove_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV),
             }
