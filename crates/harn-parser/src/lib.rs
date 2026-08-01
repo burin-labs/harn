@@ -71,6 +71,12 @@ pub fn is_known_builtin(name: &str) -> bool {
     builtin_signatures::is_builtin(name)
 }
 
+/// Opt-in ambient bridge: treat a registered builtin as known without a typed
+/// `Harness` capability import.
+pub fn is_legacy_ambient_builtin(name: &str) -> bool {
+    legacy_ambient_capabilities_enabled() && is_known_builtin(name)
+}
+
 /// Every builtin name known to the parser, alphabetically. Enables bidirectional
 /// drift checks against the VM's runtime registry.
 pub fn known_builtin_names() -> impl Iterator<Item = &'static str> {
