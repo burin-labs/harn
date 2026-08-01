@@ -124,6 +124,9 @@ mod web;
 pub mod workflow_messages;
 pub(crate) mod xml;
 
+use harn_builtin_meta::CapabilityId;
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
 use crate::mcp::register_mcp_builtins;
@@ -776,62 +779,186 @@ pub fn harness_migration_for_builtin(name: &str) -> Option<HarnessBuiltinMigrati
         // of an export call. Connector exports now receive a root Harness, so
         // the same read is a plain capability method.
         "secret_get" => return Some(forward(CapabilityId::Secrets, "read")),
+        // The mock clock moved under the testing handle and was renamed at the
+        // same time, so the derived name match below cannot find it.
+        "mock_time" => return Some(forward(CapabilityId::Testing, "clock_set")),
+        "unmock_time" => return Some(forward(CapabilityId::Testing, "clock_reset")),
+        "advance_time" => return Some(forward(CapabilityId::Testing, "clock_advance")),
+        "llm_mock" => return Some(forward(CapabilityId::Llm, "mock_enqueue")),
         _ => {
-            return registered_capability_owner(name)
+            return derived_capability_owner(name)
                 .map(|(capability, method)| forward(capability, method));
         }
     };
     Some(request_record(method, fields))
 }
 
-/// Capability owner for a method installed by `register_capability_method`
-/// rather than by `#[harn_builtin]` exposure.
+/// Every typed Harness method, indexed by method name and by owning
+/// capability.
 ///
-/// Store, checkpoint, metadata, and host-injected methods are registered on
-/// the VM at startup, so they never reach the builtin manifest. Projecting the
-/// probe VM's dispatch table keeps the migration recipe — and with it the
-/// linter and `harn fix` — aware of them instead of relying on a second
-/// hand-maintained list that drifts every time a host adds a capability.
-///
-/// This mirrors the set the legacy ambient bridge restores, so a script that
-/// still runs under `HARN_LEGACY_AMBIENT_CAPABILITIES` gets a repair for every
-/// global that bridge is covering for. Two kinds of name stay out:
-///
-///   * A name owned by more than one capability, because the rewrite target
-///     would be ambiguous and guessing an owner would point callers at the
-///     wrong capability.
-///   * A name that is still a declared global builtin, because that call
-///     resolves on its own and has not moved anywhere.
-fn registered_capability_owner(
-    name: &str,
-) -> Option<(harn_builtin_meta::CapabilityId, &'static str)> {
-    static OWNERS: std::sync::OnceLock<
-        std::collections::BTreeMap<&'static str, Option<harn_builtin_meta::CapabilityId>>,
-    > = std::sync::OnceLock::new();
-    let owners = OWNERS.get_or_init(|| {
-        let declared: std::collections::BTreeSet<&'static str> = all_builtin_manifest()
-            .iter()
-            .map(|entry| entry.name)
-            .collect();
-        let mut owners = std::collections::BTreeMap::new();
-        for (capability, method) in stdlib_probe_vm().capability_method_names() {
-            if declared.contains(method.as_str()) {
-                continue;
+/// Two registration paths reach the same dispatch table. `#[harn_builtin]`
+/// declares most methods through `HarnessMethod` exposure; store, checkpoint,
+/// metadata, and host-injected methods are installed on the VM at startup and
+/// never reach the builtin manifest at all. Projecting both keeps the
+/// migration recipe — and with it the linter and `harn fix` — aware of the
+/// whole surface instead of a hand-maintained list that drifts every time a
+/// host adds a capability.
+struct CapabilityMethodIndex {
+    /// Owner of a method installed by `register_capability_method`, or `None`
+    /// when several capabilities install it. This is the surface the legacy
+    /// ambient bridge restores, so it decides what a bare global used to mean.
+    bridged_owner: BTreeMap<&'static str, Option<CapabilityId>>,
+    methods_by_capability: BTreeMap<CapabilityId, BTreeSet<&'static str>>,
+}
+
+fn capability_method_index() -> &'static CapabilityMethodIndex {
+    static INDEX: std::sync::OnceLock<CapabilityMethodIndex> = std::sync::OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut index = CapabilityMethodIndex {
+            bridged_owner: BTreeMap::new(),
+            methods_by_capability: BTreeMap::new(),
+        };
+        for entry in all_builtin_manifest() {
+            if let harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } =
+                entry.contract.exposure
+            {
+                index
+                    .methods_by_capability
+                    .entry(capability)
+                    .or_default()
+                    .insert(method);
             }
+        }
+        for (capability, method) in stdlib_probe_vm().capability_method_names() {
             let method: &'static str = Box::leak(method.into_boxed_str());
-            owners
+            index
+                .bridged_owner
                 .entry(method)
-                .and_modify(|owner: &mut Option<harn_builtin_meta::CapabilityId>| {
+                .and_modify(|owner| {
                     if *owner != Some(capability) {
                         *owner = None;
                     }
                 })
                 .or_insert(Some(capability));
+            index
+                .methods_by_capability
+                .entry(capability)
+                .or_default()
+                .insert(method);
         }
-        owners
-    });
-    let (method, owner) = owners.get_key_value(name)?;
-    Some(((*owner)?, method))
+        index
+    })
+}
+
+/// Where a pre-cutover global went, derived from the capability surface
+/// itself rather than from a parallel list.
+///
+/// A global that moved onto a handle nearly always kept its own name, so the
+/// method index doubles as the migration table. Three spellings show up:
+///
+///   * the name survived verbatim — `exit` became `harness.runtime.exit`;
+///   * the name already carried its capability — `hostlib_code_index_rebuild`
+///     became `harness.code_index.rebuild`;
+///   * the name carried a family prefix the handle now supplies —
+///     `agent_session_open` became `harness.agent.open`.
+///
+/// Two rules keep a guess from becoming a wrong rewrite. A name that is still
+/// a callable global resolves to nothing, because that call works as written
+/// and has not moved. A name several methods answer to is settled by parameter
+/// list — `agent_session_open(id?, opts?)` matches `harness.agent.open` and not
+/// `harness.agent.session_open` — and if that still leaves a tie, the name
+/// resolves to nothing rather than sending a bare `read` to `harness.fs.read`
+/// when the caller meant `harness.secrets.read`.
+fn derived_capability_owner(name: &str) -> Option<(CapabilityId, &'static str)> {
+    if is_source_visible_global(name) {
+        return None;
+    }
+    let index = capability_method_index();
+    if let Some((method, Some(owner))) = index.bridged_owner.get_key_value(name) {
+        return Some((*owner, method));
+    }
+
+    let mut candidates: Vec<(CapabilityId, &'static str)> = Vec::new();
+    let unprefixed = name.strip_prefix("hostlib_").unwrap_or(name);
+    for (capability, methods) in &index.methods_by_capability {
+        if let Some(method) = methods.get(name) {
+            candidates.push((*capability, method));
+        }
+        for prefix in [
+            capability.field_name().to_string(),
+            snake_case(capability.variant_name()),
+        ] {
+            let Some(rest) = unprefixed
+                .strip_prefix(&prefix)
+                .and_then(|rest| rest.strip_prefix('_'))
+            else {
+                continue;
+            };
+            // `agent_session_open` and `agent_open` both mean an agent method:
+            // the handle already says which session.
+            for method in [Some(rest), rest.strip_prefix("session_")]
+                .into_iter()
+                .flatten()
+                .filter_map(|method| methods.get(method))
+            {
+                candidates.push((*capability, method));
+            }
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+    if candidates.len() > 1 {
+        candidates
+            .retain(|(capability, method)| takes_the_same_parameters(name, *capability, method));
+    }
+    match candidates.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    }
+}
+
+/// Whether a capability method accepts what the removed global accepted.
+///
+/// Capability methods repeat the global's parameter list verbatim, so this
+/// separates a genuine successor from a same-named neighbour.
+fn takes_the_same_parameters(removed_global: &str, capability: CapabilityId, method: &str) -> bool {
+    let Some(before) = builtin_manifest_entry(removed_global) else {
+        return false;
+    };
+    let Some(after) = capability_method_manifest_entry(capability, method) else {
+        return false;
+    };
+    let names = |entry: &'static harn_builtin_registry::BuiltinManifestEntry| {
+        entry
+            .signature
+            .params
+            .iter()
+            .map(|param| param.name)
+            .collect::<Vec<_>>()
+    };
+    names(before) == names(after)
+}
+
+fn snake_case(camel: &str) -> String {
+    let mut out = String::with_capacity(camel.len() + 2);
+    for (index, ch) in camel.char_indices() {
+        if ch.is_ascii_uppercase() && index > 0 {
+            out.push('_');
+        }
+        out.push(ch.to_ascii_lowercase());
+    }
+    out
+}
+
+/// Whether Harn source can still call `name` as a plain global.
+fn is_source_visible_global(name: &str) -> bool {
+    builtin_manifest_entry(name).is_some_and(|entry| {
+        matches!(
+            entry.contract.exposure,
+            harn_builtin_meta::BuiltinExposure::PureGlobal
+                | harn_builtin_meta::BuiltinExposure::CapabilityFunction { .. }
+        )
+    })
 }
 
 /// Register every `#[harn_builtin]`-emitted def on the given VM. Drivers
@@ -1127,6 +1254,62 @@ fn main(harness: Harness) {
     }
 
     #[test]
+    fn migration_recipes_follow_names_that_moved_onto_a_handle() {
+        let forward = |capability, method| {
+            Some(HarnessBuiltinMigration {
+                capability,
+                method,
+                arguments: HarnessBuiltinArgumentMigration::Forward,
+            })
+        };
+        // The name survived verbatim.
+        assert_eq!(
+            harness_migration_for_builtin("exit"),
+            forward(CapabilityId::Runtime, "exit")
+        );
+        // The name already carried its capability.
+        assert_eq!(
+            harness_migration_for_builtin("hostlib_code_index_rebuild"),
+            forward(CapabilityId::CodeIndex, "rebuild")
+        );
+        // The name carried a family prefix the handle now supplies.
+        assert_eq!(
+            harness_migration_for_builtin("agent_session_open"),
+            forward(CapabilityId::Agent, "open")
+        );
+        // A global that still resolves has not moved anywhere.
+        assert_eq!(harness_migration_for_builtin("len"), None);
+    }
+
+    /// A capability method whose name matches a global nobody can call is a
+    /// global that moved. Every one of those needs a repair, or the cutover
+    /// leaves scripts with a bare "not defined" and no way forward.
+    #[test]
+    fn every_runtime_internal_builtin_that_moved_keeps_a_repair() {
+        use harn_builtin_meta::BuiltinExposure;
+
+        let offenders = all_builtin_manifest()
+            .iter()
+            .filter(|entry| entry.is_canonical())
+            .filter(|entry| matches!(entry.contract.exposure, BuiltinExposure::RuntimeInternal))
+            .filter(|entry| !entry.name.starts_with("__"))
+            .filter(|entry| {
+                capability_method_index()
+                    .methods_by_capability
+                    .values()
+                    .any(|methods| methods.contains(entry.name))
+            })
+            .filter(|entry| harness_migration_for_builtin(entry.name).is_none())
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+
+        assert!(
+            offenders.is_empty(),
+            "these globals moved onto a handle but report no repair: {offenders:?}"
+        );
+    }
+
+    #[test]
     fn every_source_named_runtime_callable_has_a_typed_contract() {
         let manifest_names = all_builtin_manifest()
             .iter()
@@ -1305,7 +1488,7 @@ mod registered_capability_migration_tests {
             return;
         };
         assert!(
-            super::registered_capability_owner(&method).is_none(),
+            super::derived_capability_owner(&method).is_none(),
             "`{method}` is owned by several capabilities and must not resolve to one"
         );
     }
