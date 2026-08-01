@@ -1,8 +1,8 @@
 # Coming from elsewhere
 
 Harn's vocabulary doesn't always match what you'd read in OpenAI's, Anthropic's,
-LangGraph's, Inngest's, Mastra's, or the ACP/A2A/MCP specs. This page is the
-cross-reference.
+Flue's, LangGraph's, Inngest's, Mastra's, or the ACP/A2A/MCP specs. This page is
+the cross-reference.
 
 If a term in your home system collides with a Harn term, find your row in the
 table for that system.
@@ -50,6 +50,28 @@ LangGraph's biggest *Harn-doesn't-have-this-by-default* is **typed-state
 channels with reducers**. Harn's v0 design keeps artifacts and transcripts as
 the common path, then adds explicit workflow state channels for structured
 fan-out/reduce cases.
+
+## Flue
+
+Flue and Harn both put agents inside a harness and separate continuing agents
+from finite workflows. Flue is a TypeScript framework. Harn is a language and
+runtime with host adapters.
+
+| Flue term | Harn equivalent | Notes |
+|---|---|---|
+| `defineAgent()` | configured `agent_loop` or persona | Both bind a model, instructions, tools, skills, and an execution environment. |
+| Agent instance | session | Both preserve one continuing conversation identity. |
+| `defineWorkflow()` | workflow or pipeline | Both describe finite work; Harn uses a typed stage graph when the graph must be inspectable. |
+| Durable event stream | transcript plus EventLog | Both retain replayable runtime events. Harn also uses the EventLog for deterministic effect replay. |
+| `@flue/react` hooks | Harn Apps host plus MCP Apps UI resource | Flue projects durable state into React hooks. Harn serves host-neutral app resources and lets each host own native presentation. |
+| Virtual, local, or remote sandbox | Harn sandbox and host capabilities | Both keep conversation persistence separate from workspace lifetime and access policy. |
+| Target | host or deployment adapter | Flue targets Node.js and Cloudflare. A Harn program runs through CLI, IDE, protocol, self-hosted, or cloud adapters. |
+
+Start with Flue's [agent guide](https://flueframework.com/docs/guide/building-agents/),
+[workflow guide](https://flueframework.com/docs/guide/workflows/),
+[event reference](https://flueframework.com/docs/api/events-reference/), and
+[React guide](https://flueframework.com/docs/guide/react/) when comparing a
+specific developer path.
 
 ## Inngest
 
@@ -143,6 +165,7 @@ shapes. Harn's `serve` adapter emits AG-UI-compatible events.
   overview](https://docs.claude.com/en/agent-sdk/overview)
 - [LangGraph Graph API
   overview](https://docs.langchain.com/oss/python/langgraph/graph-api)
+- [Flue documentation](https://flueframework.com/docs/)
 - [Inngest — step.run
   reference](https://www.inngest.com/docs/reference/functions/step-run)
 - [Mastra — Memory threads and

@@ -21,9 +21,9 @@ use harn_vm::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use tokio::sync::mpsc;
 mod plan_document;
 mod registration_fixtures;
+mod schema_contract;
 mod subagent_stop;
 mod tool_data;
-
 use plan_document::fixture_plan_document_event;
 
 pub(super) async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {

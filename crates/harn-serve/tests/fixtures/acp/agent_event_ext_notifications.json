@@ -374,6 +374,24 @@
     "jsonrpc": "2.0",
     "method": "_harn/agentEvent",
     "params": {
+      "event": {
+        "at_ms": 12,
+        "backend": "fixture",
+        "job_id": "job-1",
+        "kind": "state_changed",
+        "request_id": "logo-1",
+        "schema": "harn.model_job_event.v1",
+        "state": "running"
+      },
+      "kind": "model_job",
+      "sessionId": "session-1"
+    }
+  },
+
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
       "checkpoint": {
         "stage": "verify",
         "type": "stage_gate"

@@ -149,6 +149,7 @@
             "sessionId": { "type": "string", "minLength": 1 },
             "kind": {
               "enum": [
+                "boundary_failure",
                 "budget_circuit_breaker",
                 "budget_exhausted",
                 "code_librarian_query_nl_fallback",
@@ -164,6 +165,7 @@
                 "final_wrapup",
                 "host_attachment",
                 "host_tool_result",
+                "input_guardrail_verdict",
                 "iteration_end",
                 "iteration_start",
                 "judge_decision",
@@ -172,6 +174,8 @@
                 "mcp_auth_required",
                 "mcp_catalog_changed",
                 "mcp_notification",
+                "model_job",
+                "orchestration_decision",
                 "pack_thinking_stripped",
                 "progress_reported",
                 "require_successful_tools_violation",
@@ -180,6 +184,7 @@
                 "self_consistency_tie",
                 "session_closed",
                 "structural_validator_decision",
+                "subagent_stop",
                 "step_judge_decision",
                 "tool_batch_disposition",
                 "tool_call_audit",

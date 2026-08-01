@@ -343,6 +343,9 @@ The `harn skill` noun covers two complementary surfaces:
   there is byte-for-byte the registry that `harn run` / `harn test` /
   `harn check` hand to the VM.
 
+Run `harn skill validate <path>` before committing any filesystem skill.
+It uses the same parser and required-field checks as those runtime commands.
+
 ### `harn skill list`
 
 Lists the canonical skill corpus for this build of `harn`. By default
@@ -353,10 +356,11 @@ CI can pipe through `jq`.
 
 ```text
 $ harn skill list
-Embedded canonical skills (12):
+Embedded canonical skills (13):
   harn-agent          Agent runtime, supervisor wiring, and tool callers.
   harn-de-slop        Remove duplicated policy and weak contracts.
   harn-diagnostics    Diagnostic codes, severity rules, suppression hints.
+  harn-docs           Task-shaped developer documentation in plain language.
   harn-language       Harn syntax, modules, types, diagnostics, script structure.
   harn-orchestration  Triggers, orchestrator handoffs, parallelism primitives.
   harn-probe          Evidence-first codebase and runtime investigation.
@@ -377,7 +381,7 @@ same frontmatter fields shown above:
 
 ```bash
 $ harn skill list --json | jq '.data.skills | length'
-12
+13
 ```
 
 ### `harn skill get <name>`
@@ -418,7 +422,7 @@ existing files unless `--force` is passed.
 
 ```text
 $ harn skill dump --all --out /tmp/skills
-Wrote 7 skill(s) to /tmp/skills
+Wrote 13 skill(s) to /tmp/skills
   /tmp/skills/harn-agent/SKILL.md
   /tmp/skills/harn-diagnostics/SKILL.md
   …
@@ -514,8 +518,36 @@ Scaffolded skill 'deploy' at .harn/skills/deploy
   files/README.md
 
 Edit the SKILL.md frontmatter and body, then run `harn skill resolved`
-to verify the compact card is picked up.
+after `harn skill validate .harn/skills/deploy` succeeds.
 ```
+
+### `harn skill validate [<path>]`
+
+Validates one skill directory or `SKILL.md` file through Harn's canonical
+parser. The path defaults to the current directory. A valid skill must have
+well-formed YAML frontmatter, a non-empty `short` card, and a name supplied by
+either frontmatter or the containing directory.
+
+```text
+$ harn skill validate .harn/skills/deploy
+valid: .harn/skills/deploy
+id:    deploy
+short: Deploy the application when the user asks for a release
+files: 2 bundled file(s)
+```
+
+Unknown frontmatter fields are warnings by default so a newer skill format can
+still load on an older Harn release. Use `--strict` in CI to reject them. Use
+`--json` for the versioned envelope listed by `harn --json-schemas`:
+
+```bash
+harn skill validate .harn/skills/deploy --strict --json \
+  | jq -e '.ok and .data.id == "deploy"'
+```
+
+Detached signing, endorsement, verification, and local signer trust live under
+the same `harn skill` command. See [Skill provenance](./skill-provenance.md) for
+the complete workflow.
 
 Pass `--dir <path>` to target a different destination (for example
 `~/.harn/skills/deploy` to scaffold under the user layer instead of

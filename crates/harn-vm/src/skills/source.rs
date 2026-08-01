@@ -345,6 +345,29 @@ impl SkillSource for FsSkillSource {
     }
 }
 
+/// Parse and validate one skill bundle through the same boundary used by
+/// layered discovery. `path` may name the bundle directory or its SKILL.md.
+pub fn validate_skill_bundle(path: impl AsRef<Path>) -> Result<Skill, String> {
+    let candidate = path.as_ref();
+    let dir = if candidate.is_file() {
+        if candidate.file_name().and_then(|name| name.to_str()) != Some("SKILL.md") {
+            return Err(format!(
+                "{} is a file; expected SKILL.md or a skill directory",
+                candidate.display(),
+            ));
+        }
+        candidate
+            .parent()
+            .ok_or_else(|| format!("{} has no containing skill directory", candidate.display()))?
+    } else {
+        candidate
+    };
+    if !dir.is_dir() {
+        return Err(format!("skill directory does not exist: {}", dir.display()));
+    }
+    FsSkillSource::new(dir, Layer::Cli).load_from_dir(dir)
+}
+
 /// Callable the bridge adapter hands to [`HostSkillSource`] to
 /// enumerate skills via `skills/list`.
 pub type HostSkillLister = Arc<dyn Fn() -> Vec<SkillManifestRef> + Send + Sync>;
@@ -746,6 +769,31 @@ mod tests {
         assert!(src.list().is_empty());
         let err = src.fetch("broken").unwrap_err();
         assert!(err.contains("`short`"), "{err}");
+    }
+
+    #[test]
+    fn validate_skill_bundle_accepts_directory_or_manifest_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "review/SKILL.md",
+            "---\nshort: Review developer docs\nfuture-field: retained\n---\nbody",
+        );
+        let dir = tmp.path().join("review");
+        let from_dir = validate_skill_bundle(&dir).expect("directory validates");
+        let from_file =
+            validate_skill_bundle(dir.join("SKILL.md")).expect("manifest path validates");
+        assert_eq!(from_dir.id(), "review");
+        assert_eq!(from_file.id(), "review");
+        assert_eq!(from_dir.unknown_fields, vec!["future-field"]);
+    }
+
+    #[test]
+    fn validate_skill_bundle_rejects_non_manifest_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "notes.md", "not a skill");
+        let error = validate_skill_bundle(tmp.path().join("notes.md")).unwrap_err();
+        assert!(error.contains("expected SKILL.md"), "{error}");
     }
 
     #[test]

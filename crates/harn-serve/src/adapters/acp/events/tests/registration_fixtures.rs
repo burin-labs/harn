@@ -47,5 +47,17 @@ pub(super) fn events() -> Vec<AgentEvent> {
             result_count: 2,
             text: "where is session recovery implemented?".to_string(),
         },
+        AgentEvent::ModelJob {
+            session_id: "session-1".to_string(),
+            event: serde_json::json!({
+                "schema": "harn.model_job_event.v1",
+                "kind": "state_changed",
+                "job_id": "job-1",
+                "request_id": "logo-1",
+                "backend": "fixture",
+                "state": "running",
+                "at_ms": 12
+            }),
+        },
     ]
 }

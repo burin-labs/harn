@@ -1,0 +1,123 @@
+import {
+  ModelBackend,
+  ModelJobError,
+  ModelJobEvent,
+  ModelJobObservation,
+  ModelJobOutput,
+  ModelJobReceipt,
+  model_job_error,
+  model_job_request_digest,
+} from "std/model_job/contracts"
+
+/**
+ * Build a strict backend from a fixed sequence of observations.
+ *
+ * Use this in lifecycle and UI tests. It never reads the network.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_job_fake_backend(id: string, observations: list<ModelJobObservation>) -> ModelBackend {
+  let cursor = 0
+  fn next() -> Result<ModelJobObservation, ModelJobError> {
+    if cursor >= len(observations) {
+      return Err(
+        model_job_error("backend", "fake model backend exhausted its observations", {backend: id}),
+      )
+    }
+    const observation = observations[cursor]
+    if observation == nil {
+      return Err(model_job_error("backend", "fake model backend observation is missing"))
+    }
+    cursor = cursor + 1
+    return Ok(observation)
+  }
+  return {
+    id: id,
+    submit: fn(_harness, _request) { return next() },
+    inspect: fn(_harness, _job) { return next() },
+    cancel: fn(_harness, job) { return Ok(
+      {job_id: job.id, state: "canceled", backend_state: "fake_canceled"},
+    ) },
+  }
+}
+
+/**
+ * Build an offline backend from a completed receipt.
+ *
+ * Replay rejects a request whose digest differs from the recording. It reads
+ * only the asset paths named in the receipt.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_job_replay_backend(receipt: ModelJobReceipt) -> ModelBackend {
+  let cursor = 0
+  fn observation_for(event: ModelJobEvent) -> ModelJobObservation {
+    let observation: ModelJobObservation = {job_id: receipt.job.id, state: event.state}
+    if event.progress != nil {
+      observation.progress = event.progress
+    }
+    if event.state == "succeeded" {
+      let outputs: list<ModelJobOutput> = []
+      for asset in receipt.assets {
+        outputs = outputs
+          + [
+          {
+            name: asset.id,
+            mime_type: asset.mime_type,
+            path: asset.path,
+            width: asset.width,
+            height: asset.height,
+            duration_ms: asset.duration_ms,
+            metadata: {replayed_from: receipt.job.id},
+          },
+        ]
+      }
+      observation.outputs = outputs
+    }
+    if event.error != nil {
+      observation.error = event.error
+    }
+    return observation
+  }
+  fn next() -> Result<ModelJobObservation, ModelJobError> {
+    while cursor < len(receipt.events) {
+      const event = receipt.events[cursor]
+      cursor = cursor + 1
+      if event == nil {
+        return Err(model_job_error("replay_mismatch", "recorded model job event is missing"))
+      }
+      if event.kind != "output" {
+        return Ok(observation_for(event))
+      }
+    }
+    return Err(
+      model_job_error(
+        "replay_mismatch",
+        "model job replay exhausted its recorded events",
+        {backend: "replay", job_id: receipt.job.id},
+      ),
+    )
+  }
+  return {
+    id: "replay:" + receipt.backend,
+    submit: fn(_harness, request) {
+      const digest = model_job_request_digest(request)
+      if digest != receipt.request_digest {
+        return Err(
+          model_job_error(
+            "replay_mismatch",
+            "model job replay request does not match recording",
+            {backend: "replay", job_id: receipt.job.id, detail: digest},
+          ),
+        )
+      }
+      return next()
+    },
+    inspect: fn(_harness, _job) { return next() },
+    cancel: fn(_harness, job) { return Ok(
+      {job_id: job.id, state: "canceled", backend_state: "replay_canceled"},
+    ) },
+  }
+}

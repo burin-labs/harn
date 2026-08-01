@@ -232,7 +232,7 @@ pub(crate) use skill::{
 };
 pub(crate) use skills::{
     SkillsDumpArgs, SkillsGetArgs, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
-    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs,
+    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs, SkillsValidateArgs,
 };
 pub(crate) use supervisor::{
     SupervisorArgs, SupervisorCommand, SupervisorDlqCommand, SupervisorDlqListArgs,

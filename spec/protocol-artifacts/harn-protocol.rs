@@ -288,6 +288,7 @@ pub enum HarnAgentEventKind {
     McpAuthRequired,
     McpCatalogChanged,
     McpNotification,
+    ModelJob,
     OrchestrationDecision,
     PackThinkingStripped,
     ProgressReported,
@@ -334,6 +335,7 @@ impl HarnAgentEventKind {
             Self::McpAuthRequired => "mcp_auth_required",
             Self::McpCatalogChanged => "mcp_catalog_changed",
             Self::McpNotification => "mcp_notification",
+            Self::ModelJob => "model_job",
             Self::OrchestrationDecision => "orchestration_decision",
             Self::PackThinkingStripped => "pack_thinking_stripped",
             Self::ProgressReported => "progress_reported",
@@ -395,6 +397,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "mcp_auth_required" => Self::McpAuthRequired,
             "mcp_catalog_changed" => Self::McpCatalogChanged,
             "mcp_notification" => Self::McpNotification,
+            "model_job" => Self::ModelJob,
             "orchestration_decision" => Self::OrchestrationDecision,
             "pack_thinking_stripped" => Self::PackThinkingStripped,
             "progress_reported" => Self::ProgressReported,
@@ -1020,6 +1023,7 @@ pub const HARN_AGENT_EVENT_KIND_LOOP_STUCK: &str = "loop_stuck";
 pub const HARN_AGENT_EVENT_KIND_MCP_AUTH_REQUIRED: &str = "mcp_auth_required";
 pub const HARN_AGENT_EVENT_KIND_MCP_CATALOG_CHANGED: &str = "mcp_catalog_changed";
 pub const HARN_AGENT_EVENT_KIND_MCP_NOTIFICATION: &str = "mcp_notification";
+pub const HARN_AGENT_EVENT_KIND_MODEL_JOB: &str = "model_job";
 pub const HARN_AGENT_EVENT_KIND_ORCHESTRATION_DECISION: &str = "orchestration_decision";
 pub const HARN_AGENT_EVENT_KIND_PACK_THINKING_STRIPPED: &str = "pack_thinking_stripped";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
@@ -1063,6 +1067,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
+    "model_job",
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",

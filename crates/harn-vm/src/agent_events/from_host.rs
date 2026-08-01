@@ -118,6 +118,7 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     // reports a drop through the same typed event as the Rust funnel.
     host_event("boundary_failure", None),
     host_event("typed_checkpoint", ASSISTANT),
+    host_event("model_job", TOOL),
     host_event("loop_stuck", ASSISTANT),
     host_event("reserved_terminal_verify", ASSISTANT),
     host_event("agent_loop_stall_warning", ASSISTANT),
@@ -199,6 +200,10 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         "typed_checkpoint" => AgentEvent::TypedCheckpoint {
             session_id: sid(),
             checkpoint: payload.clone(),
+        },
+        "model_job" => AgentEvent::ModelJob {
+            session_id: sid(),
+            event: payload.clone(),
         },
         "loop_stuck" => AgentEvent::LoopStuckSignal {
             session_id: sid(),

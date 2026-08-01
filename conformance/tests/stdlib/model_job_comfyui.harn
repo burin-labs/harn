@@ -1,0 +1,75 @@
+import {
+  ComfyWorkflowBuilder,
+  ModelJob,
+  ModelJobRequest,
+  ModelOutputSpec,
+  ModelTask,
+  comfyui_backend,
+  comfyui_flux2_klein_workflow,
+  model_job_request_digest,
+} from "std/model_job"
+
+pipeline test(harness: Harness, task) {
+  const endpoint = "https://comfy.example.test"
+  harness.testing.http_mock(
+    "POST",
+    endpoint + "/prompt",
+    {status: 200, body: "{\"prompt_id\":\"prompt-1\"}"},
+  )
+  harness.testing.http_mock(
+    "GET",
+    endpoint + "/history/prompt-1",
+    {
+      responses: [
+        {status: 200, body: "{}"},
+        {
+          status: 200,
+          body:
+            "{\"prompt-1\":{\"status\":{\"status_str\":\"success\",\"completed\":true},\"outputs\":{\"13\":{\"images\":[{\"filename\":\"logo.png\",\"subfolder\":\"harn\",\"type\":\"output\"}]}}}}",
+        },
+      ],
+    },
+  )
+  harness.testing.http_mock("POST", endpoint + "/queue", {status: 200, body: "{}"})
+  harness.testing.http_mock(
+    "GET",
+    endpoint + "/queue",
+    {status: 200, body: "{\"queue_running\":[[1,\"prompt-1\",{},{}]],\"queue_pending\":[]}"},
+  )
+  harness.testing.http_mock("POST", endpoint + "/interrupt", {status: 200, body: "{}"})
+  const task_kind: ModelTask = "image.generate"
+  const output_spec: ModelOutputSpec = {mime_type: "image/png", width: 1024, height: 768}
+  const request: ModelJobRequest = {
+    id: "request-1",
+    task: task_kind,
+    prompt: "A simple cornflower",
+    output: output_spec,
+    seed: 42,
+  }
+  const build: ComfyWorkflowBuilder =
+    fn(job: ModelJobRequest) { return comfyui_flux2_klein_workflow(
+    job,
+  ) }
+  const backend = comfyui_backend(endpoint, build)
+  const submitted = unwrap(backend.submit(harness, request))
+  harness.stdio.log(submitted.state)
+  const job: ModelJob = {
+    schema: "harn.model_job.v1",
+    id: submitted.job_id,
+    request_id: request.id,
+    request_digest: model_job_request_digest(request),
+    backend: backend.id,
+    state: submitted.state,
+    submitted_at_ms: 0,
+    updated_at_ms: 0,
+  }
+  const running = unwrap(backend.inspect(harness, job))
+  harness.stdio.log(running.state)
+  const complete = unwrap(backend.inspect(harness, job + {state: "running"}))
+  harness.stdio.log(complete.state)
+  harness.stdio.log(complete.outputs[0]?.name ?? "missing")
+  harness.stdio.log(complete.outputs[0]?.url ?? "missing")
+  const canceled = unwrap(backend.cancel(harness, job + {state: "running"}))
+  harness.stdio.log(canceled.state)
+  harness.stdio.log(to_string(len(harness.testing.http_mock_calls())))
+}

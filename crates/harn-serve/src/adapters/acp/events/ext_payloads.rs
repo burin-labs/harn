@@ -166,6 +166,9 @@ pub(super) fn documented_stdlib_event(
                 "text": text,
             }),
         ),
+        AgentEvent::ModelJob { session_id, event } => {
+            ("model_job", session_id, serde_json::json!({"event": event}))
+        }
         _ => unreachable!("documented_stdlib_event called for unrelated event"),
     }
 }

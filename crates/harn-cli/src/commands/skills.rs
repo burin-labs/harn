@@ -29,14 +29,14 @@ use harn_skills::{
 };
 use harn_vm::skills::{
     build_fs_discovery, default_system_dirs, default_user_dir, parse_env_skills_path,
-    DiscoveryOptions, FsLayerConfig, Layer, LayeredDiscovery, ManifestSource, Skill,
-    SkillManifestRef,
+    validate_skill_bundle, DiscoveryOptions, FsLayerConfig, Layer, LayeredDiscovery,
+    ManifestSource, Skill, SkillManifestRef,
 };
 use harn_vm::text::truncate_end;
 
 use crate::cli::{
     SkillsDumpArgs, SkillsGetArgs, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
-    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs,
+    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs, SkillsValidateArgs,
 };
 use crate::json_envelope::{self, JsonEnvelope, JsonOutput};
 use crate::package::{load_skills_config, resolve_skills_paths, SkillSourceEntry};
@@ -48,6 +48,8 @@ const SKILLS_CACHE_DIR: &str = ".harn/skills-cache";
 pub(crate) const SKILLS_LIST_SCHEMA_VERSION: u32 = 1;
 /// `JsonEnvelope` schemaVersion for `harn skill get --json`.
 pub(crate) const SKILLS_GET_SCHEMA_VERSION: u32 = 1;
+/// `JsonEnvelope` schemaVersion for `harn skill validate --json`.
+pub(crate) const SKILLS_VALIDATE_SCHEMA_VERSION: u32 = 1;
 
 /// One row in the `skills list --json` payload — frontmatter only,
 /// no body, to keep `list` cheap to consume.
@@ -135,6 +137,24 @@ impl SkillsGetPayload {
 
 impl JsonOutput for SkillsGetPayload {
     const SCHEMA_VERSION: u32 = SKILLS_GET_SCHEMA_VERSION;
+    type Data = Self;
+
+    fn into_envelope(self) -> JsonEnvelope<Self::Data> {
+        JsonEnvelope::ok(Self::SCHEMA_VERSION, self)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillsValidatePayload {
+    pub path: String,
+    pub id: String,
+    pub short: String,
+    pub unknown_fields: Vec<String>,
+    pub bundled_files: Vec<String>,
+}
+
+impl JsonOutput for SkillsValidatePayload {
+    const SCHEMA_VERSION: u32 = SKILLS_VALIDATE_SCHEMA_VERSION;
     type Data = Self;
 
     fn into_envelope(self) -> JsonEnvelope<Self::Data> {
@@ -800,8 +820,88 @@ They are accessible to the skill body via `${{HARN_SKILL_DIR}}/files/<name>`.\n"
     println!("  files/README.md");
     println!();
     println!(
-        "Edit the SKILL.md frontmatter and body, then run `harn skill resolved` to verify it's picked up."
+        "Edit the SKILL.md, run `harn skill validate {}` and then `harn skill resolved`.",
+        dest.display(),
     );
+}
+
+/// Validate one filesystem skill through the same parser and required-field
+/// checks used by `harn run`, `harn check`, and layered discovery.
+pub(crate) fn run_validate(args: &SkillsValidateArgs) {
+    let path = PathBuf::from(&args.path);
+    let skill = match validate_skill_bundle(&path) {
+        Ok(skill) => skill,
+        Err(error) => {
+            if args.json {
+                let envelope: JsonEnvelope<SkillsValidatePayload> =
+                    JsonEnvelope::err(SKILLS_VALIDATE_SCHEMA_VERSION, "skill_invalid", error)
+                        .with_details(serde_json::json!({"path": path}));
+                println!("{}", json_envelope::to_string_pretty(&envelope));
+            } else {
+                eprintln!("error: {error}");
+            }
+            process::exit(1);
+        }
+    };
+    if args.strict && !skill.unknown_fields.is_empty() {
+        let message = format!(
+            "unknown frontmatter field(s): {}",
+            skill.unknown_fields.join(", "),
+        );
+        if args.json {
+            let envelope: JsonEnvelope<SkillsValidatePayload> = JsonEnvelope::err(
+                SKILLS_VALIDATE_SCHEMA_VERSION,
+                "skill_unknown_fields",
+                &message,
+            )
+            .with_details(serde_json::json!({
+                "path": path,
+                "unknown_fields": skill.unknown_fields,
+            }));
+            println!("{}", json_envelope::to_string_pretty(&envelope));
+        } else {
+            eprintln!("error: {message}");
+        }
+        process::exit(1);
+    }
+
+    let skill_dir = skill.skill_dir.as_deref().unwrap_or(&path);
+    let bundled_files: Vec<String> = collect_bundled_files(skill_dir)
+        .into_iter()
+        .map(|file| file.display().to_string())
+        .collect();
+    let payload = SkillsValidatePayload {
+        path: skill_dir.display().to_string(),
+        id: skill.id(),
+        short: skill.manifest.short.clone(),
+        unknown_fields: skill.unknown_fields.clone(),
+        bundled_files,
+    };
+    if args.json {
+        let mut envelope = payload.into_envelope();
+        if !skill.unknown_fields.is_empty() {
+            envelope = envelope.with_warning(
+                "skill.unknown_frontmatter",
+                format!(
+                    "unknown frontmatter field(s): {}",
+                    skill.unknown_fields.join(", "),
+                ),
+            );
+        }
+        println!("{}", json_envelope::to_string_pretty(&envelope));
+        return;
+    }
+
+    println!("valid: {}", skill_dir.display());
+    println!("id:    {}", payload.id);
+    println!("short: {}", payload.short);
+    println!("files: {} bundled file(s)", payload.bundled_files.len());
+    if !skill.unknown_fields.is_empty() {
+        eprintln!(
+            "warning: unknown frontmatter field(s): {}",
+            skill.unknown_fields.join(", "),
+        );
+    }
 }
 
 // --- shared helpers --------------------------------------------------------

@@ -1,0 +1,318 @@
+/**
+ * std/media/asset — content-addressed files produced or consumed by models.
+ *
+ * An asset has a portable `asset://sha256/...` identity and an optional local
+ * materialization path. The digest and MIME declaration are checked against
+ * the bytes before a descriptor is returned.
+ */
+pub type MediaKind = "image" | "audio" | "video" | "document" | "other"
+
+pub type MediaAsset = {
+  schema: "harn.media_asset.v1",
+  id: string,
+  uri: string,
+  path: string,
+  kind: MediaKind,
+  mime_type: string,
+  sha256: string,
+  size_bytes: int,
+  width?: int,
+  height?: int,
+  duration_ms?: int,
+  producing_job?: string,
+  metadata?: dict,
+}
+
+pub type MediaAssetOptions = {
+  mime_type: string,
+  root?: string,
+  width?: int,
+  height?: int,
+  duration_ms?: int,
+  producing_job?: string,
+  metadata?: dict,
+}
+
+pub type MediaAssetFailureKind = "invalid" | "mime_mismatch" | "digest_mismatch" | "missing"
+
+pub type MediaAssetFailure = {
+  kind: MediaAssetFailureKind,
+  message: string,
+  path?: string,
+  expected?: string,
+  actual?: string,
+}
+
+fn __media_failure(
+  kind: MediaAssetFailureKind,
+  message: string,
+  details = {},
+) -> MediaAssetFailure {
+  return {kind: kind, message: message} + (details ?? {})
+}
+
+/**
+ * Return the broad media family owned by a MIME type.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn media_kind(mime_type: string) -> MediaKind {
+  const mime = lowercase(trim(mime_type))
+  if starts_with(mime, "image/") {
+    return "image"
+  }
+  if starts_with(mime, "audio/") {
+    return "audio"
+  }
+  if starts_with(mime, "video/") {
+    return "video"
+  }
+  if mime == "application/pdf" || starts_with(mime, "text/") {
+    return "document"
+  }
+  return "other"
+}
+
+fn __media_extension(mime_type: string) -> string? {
+  const mime = lowercase(trim(mime_type))
+  if mime == "image/png" {
+    return "png"
+  }
+  if mime == "image/jpeg" {
+    return "jpg"
+  }
+  if mime == "image/webp" {
+    return "webp"
+  }
+  if mime == "image/gif" {
+    return "gif"
+  }
+  if mime == "image/svg+xml" {
+    return "svg"
+  }
+  if mime == "audio/wav" {
+    return "wav"
+  }
+  if mime == "audio/mpeg" {
+    return "mp3"
+  }
+  if mime == "video/mp4" {
+    return "mp4"
+  }
+  if mime == "application/pdf" {
+    return "pdf"
+  }
+  return nil
+}
+
+fn __media_magic_matches(content: bytes, mime_type: string) -> bool {
+  const mime = lowercase(trim(mime_type))
+  if mime == "image/png" {
+    return bytes_slice(content, 0, 8) == bytes_from_base64("iVBORw0KGgo=")
+  }
+  if mime == "image/jpeg" {
+    return bytes_slice(content, 0, 3) == bytes_from_base64("/9j/")
+  }
+  if mime == "image/gif" {
+    return bytes_slice(content, 0, 4) == bytes_from_string("GIF8")
+  }
+  if mime == "image/webp" {
+    return bytes_slice(content, 0, 4) == bytes_from_string("RIFF")
+      && bytes_slice(content, 8, 12)
+      == bytes_from_string(
+      "WEBP",
+    )
+  }
+  if mime == "image/svg+xml" {
+    const prefix = lowercase(trim(bytes_to_string_lossy(bytes_slice(content, 0, 512))))
+    return starts_with(prefix, "<svg") || (starts_with(prefix, "<?xml") && contains(prefix, "<svg"))
+  }
+  if mime == "application/pdf" {
+    return bytes_slice(content, 0, 5) == bytes_from_string("%PDF-")
+  }
+  if mime == "audio/wav" {
+    return bytes_slice(content, 0, 4) == bytes_from_string("RIFF")
+      && bytes_slice(content, 8, 12)
+      == bytes_from_string(
+      "WAVE",
+    )
+  }
+  if mime == "video/mp4" {
+    return bytes_slice(content, 4, 8) == bytes_from_string("ftyp")
+  }
+  return false
+}
+
+fn __media_positive(value, label: string) -> Result<int?, MediaAssetFailure> {
+  if value == nil {
+    return Ok(nil)
+  }
+  const number = to_int(value)
+  if number == nil || number <= 0 {
+    return Err(__media_failure("invalid", label + " must be a positive integer"))
+  }
+  return Ok(number)
+}
+
+fn __media_validate_options(options: MediaAssetOptions) -> Result<dict, MediaAssetFailure> {
+  const mime = lowercase(trim(options.mime_type))
+  if __media_extension(mime) == nil {
+    return Err(__media_failure("invalid", "unsupported media MIME type: " + mime))
+  }
+  const width = __media_positive(options.width, "width")
+  if !is_ok(width) {
+    return Err(unwrap_err(width))
+  }
+  const height = __media_positive(options.height, "height")
+  if !is_ok(height) {
+    return Err(unwrap_err(height))
+  }
+  const duration = __media_positive(options.duration_ms, "duration_ms")
+  if !is_ok(duration) {
+    return Err(unwrap_err(duration))
+  }
+  if media_kind(mime) == "image" && options.width == nil != (options.height == nil) {
+    return Err(__media_failure("invalid", "image width and height must be declared together"))
+  }
+  return Ok(
+    {mime_type: mime, width: unwrap(width), height: unwrap(height), duration_ms: unwrap(duration)},
+  )
+}
+
+/**
+ * Validate bytes and place them in the shared media store.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: []
+ */
+pub fn media_asset_store_result(
+  fs: HarnessFs,
+  content: bytes,
+  options: MediaAssetOptions,
+) -> Result<MediaAsset, MediaAssetFailure> {
+  const checked = __media_validate_options(options)
+  if !is_ok(checked) {
+    return Err(unwrap_err(checked))
+  }
+  const resolved = unwrap(checked)
+  if !__media_magic_matches(content, resolved.mime_type) {
+    return Err(
+      __media_failure(
+        "mime_mismatch",
+        "content does not match declared MIME type " + resolved.mime_type,
+        {expected: resolved.mime_type},
+      ),
+    )
+  }
+  const digest = sha256(content)
+  const root = path_normalize(
+    options.root ?? path_join(fs.runtime_paths().asset_root, "media", "sha256"),
+  )
+  const path = path_join(
+    root,
+    substring(digest, 0, 2),
+    digest + "." + to_string(__media_extension(resolved.mime_type)),
+  )
+  fs.mkdir(dirname(path))
+  if fs.exists(path) {
+    const found = fs.read_bytes(path)
+    if sha256(found) != digest {
+      return Err(
+        __media_failure(
+          "digest_mismatch",
+          "content-addressed destination contains different bytes",
+          {path: path, expected: digest, actual: sha256(found)},
+        ),
+      )
+    }
+  } else {
+    fs.write_bytes(path, content)
+  }
+  let asset: MediaAsset = {
+    schema: "harn.media_asset.v1",
+    id: "sha256:" + digest,
+    uri: "asset://sha256/" + digest,
+    path: path,
+    kind: media_kind(resolved.mime_type),
+    mime_type: resolved.mime_type,
+    sha256: digest,
+    size_bytes: bytes_len(content),
+  }
+  if resolved.width != nil {
+    asset.width = resolved.width
+    asset.height = resolved.height
+  }
+  if resolved.duration_ms != nil {
+    asset.duration_ms = resolved.duration_ms
+  }
+  if options.producing_job != nil {
+    asset.producing_job = options.producing_job
+  }
+  if options.metadata != nil {
+    asset.metadata = options.metadata
+  }
+  return Ok(asset)
+}
+
+/**
+ * Throwing convenience form of `media_asset_store_result`.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: [invalid, mime_mismatch, digest_mismatch]
+ */
+pub fn media_asset_store(fs: HarnessFs, content: bytes, options: MediaAssetOptions) -> MediaAsset {
+  return unwrap(media_asset_store_result(fs, content, options))
+}
+
+/**
+ * Re-read and verify a materialized asset descriptor.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn media_asset_verify_result(
+  fs: HarnessFs,
+  asset: MediaAsset,
+) -> Result<MediaAsset, MediaAssetFailure> {
+  if !fs.exists(asset.path) {
+    return Err(__media_failure("missing", "media asset is missing", {path: asset.path}))
+  }
+  const content = fs.read_bytes(asset.path)
+  const digest = sha256(content)
+  if digest != asset.sha256 || asset.id != "sha256:" + digest
+    || asset.uri
+    != "asset://sha256/"
+    + digest {
+    return Err(
+      __media_failure(
+        "digest_mismatch",
+        "media asset digest or identity does not match its bytes",
+        {path: asset.path, expected: asset.sha256, actual: digest},
+      ),
+    )
+  }
+  if bytes_len(content) != asset.size_bytes {
+    return Err(
+      __media_failure(
+        "digest_mismatch",
+        "media asset size does not match its descriptor",
+        {
+          path: asset.path,
+          expected: to_string(asset.size_bytes),
+          actual: to_string(bytes_len(content)),
+        },
+      ),
+    )
+  }
+  if !__media_magic_matches(content, asset.mime_type) {
+    return Err(
+      __media_failure(
+        "mime_mismatch",
+        "media asset bytes do not match " + asset.mime_type,
+        {path: asset.path, expected: asset.mime_type},
+      ),
+    )
+  }
+  return Ok(asset)
+}

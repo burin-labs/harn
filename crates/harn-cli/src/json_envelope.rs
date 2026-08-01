@@ -208,6 +208,24 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "skill list",
+            schema_version: crate::commands::skills::SKILLS_LIST_SCHEMA_VERSION,
+            description: "Canonical embedded or disk-backed Harn skill catalog.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "skill get",
+            schema_version: crate::commands::skills::SKILLS_GET_SCHEMA_VERSION,
+            description: "One canonical skill card with an optional full SKILL.md body.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "skill validate",
+            schema_version: crate::commands::skills::SKILLS_VALIDATE_SCHEMA_VERSION,
+            description: "Skill bundle validation result from the runtime's canonical parser.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "fmt",
             schema_version: crate::commands::check::FMT_SCHEMA_VERSION,
             description: "Per-file formatting result report for write and check modes.",
@@ -359,18 +377,6 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "fix apply",
             schema_version: crate::commands::fix::FIX_APPLY_SCHEMA_VERSION,
             description: "Apply clean repair edits at or below a declared safety ceiling.",
-            schema_json: None,
-        },
-        SchemaEntry {
-            command: "skills list",
-            schema_version: 1,
-            description: "Canonical Harn skill corpus, frontmatter only.",
-            schema_json: None,
-        },
-        SchemaEntry {
-            command: "skills get",
-            schema_version: 1,
-            description: "One canonical skill's frontmatter (and body with --full).",
             schema_json: None,
         },
         SchemaEntry {

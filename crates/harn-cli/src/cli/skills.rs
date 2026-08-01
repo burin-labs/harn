@@ -118,3 +118,16 @@ pub(crate) struct SkillsNewArgs {
     #[arg(long)]
     pub force: bool,
 }
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsValidateArgs {
+    /// Skill directory or SKILL.md path. Defaults to the current directory.
+    #[arg(default_value = ".", value_name = "PATH")]
+    pub path: String,
+    /// Treat forward-compatible unknown frontmatter fields as errors.
+    #[arg(long)]
+    pub strict: bool,
+    /// Emit a versioned JSON envelope instead of human-readable text.
+    #[arg(long)]
+    pub json: bool,
+}
