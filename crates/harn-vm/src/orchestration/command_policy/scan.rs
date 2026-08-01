@@ -13,13 +13,25 @@ pub(super) fn scan_command_risk_scan_json(
     // hard-deny that is enforced before any consent/approval routing (see
     // `run_command_policy_preflight_with_ctx`), so it is surfaced both as a
     // distinct `catastrophic` label and as a `catastrophic_reason` string the
-    // preflight reads to block the command with burin's verbatim rationale.
+    // preflight reads to block the command with the owning Harn rationale.
     // The floor is fed `floor_command_text` (argv boundaries preserved via
     // shell-quoting), NOT the lossy `command_text` space-join — otherwise the
     // canonical agent shape `argv:["sh","-c","<script>"]` would evade every
     // token-based rule. See `floor_command_text`.
-    let catastrophe =
-        super::catastrophic::reason(&floor_command_text(ctx), &scan_workspace_roots(ctx));
+    let active_cwd = ctx
+        .get("active_cwd")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            ctx.get("request")
+                .and_then(|request| request.get("cwd"))
+                .and_then(|value| value.as_str())
+        })
+        .map(Path::new);
+    let catastrophe = super::catastrophic::reason_at(
+        &floor_command_text(ctx),
+        &scan_workspace_roots(ctx),
+        active_cwd,
+    );
     if catastrophe.is_some() {
         labels.insert("catastrophic".to_string());
         rationale.push("catastrophic (never-approvable) command detected");
@@ -271,23 +283,18 @@ pub(super) fn floor_command_text(ctx: &JsonValue) -> String {
         .to_string()
 }
 
-/// Universal catastrophic-command floor for embedders and the hostlib
-/// command-execution chokepoint. Returns a blocking reason iff the given argv
-/// classifies as a catastrophe that is never legitimate as arbitrary process
-/// execution: fork bomb, `mkfs`, `dd of=<device>`, `rm -rf` escaping
-/// `workspace_roots`, `chmod -R 000`, `truncate -s 0` of a source file,
-/// redirect-over-source, project-root delete, or textual git-destructive
-/// commands (`git reset --hard`, `git clean -fd`, force-push).
+/// Universal command floor for Harn and its embedders. Returns a blocking
+/// reason for a fork bomb, `mkfs`, `dd of=<device>`, `rm -rf` outside the
+/// workspace, `chmod -R 000`, tracked-file truncation or redirection, project
+/// deletion, or destructive textual Git commands.
 ///
-/// This is the load-bearing UNIVERSAL backstop. It is meant to be enforced
-/// UNCONDITIONALLY (no `command_policy` on the stack required) at the point a
-/// process is about to be spawned, so a bare `run_command` / `process.exec` —
-/// on standalone Harn or under any embedder — can never spawn one of these.
-/// Embedders therefore do not (and must not) re-plumb the floor themselves.
+/// Every hostlib process path calls this function immediately before spawning,
+/// even when no command policy is installed. Embedders use the hostlib result
+/// instead of maintaining another classifier.
 ///
 /// Structured git builtins remain the reviewed path for legitimate
-/// force-with-lease flows; this chokepoint protects arbitrary textual process
-/// execution before any child can spawn.
+/// force-with-lease flows. This check protects textual process execution before
+/// any child can spawn.
 ///
 /// `program` is argv[0] and `args` the remaining argv elements. A shell-mode
 /// command reaches this as its resolved argv (e.g. `["sh", "-c", "<script>"]`),
@@ -300,12 +307,13 @@ pub(super) fn scan_universal_catastrophic_reason(
     program: &str,
     args: &[String],
     workspace_roots: &[String],
+    active_cwd: &Path,
 ) -> Option<String> {
     let mut parts = Vec::with_capacity(args.len() + 1);
     parts.push(shell_quote_arg(program));
     parts.extend(args.iter().map(|arg| shell_quote_arg(arg)));
     let command = parts.join(" ");
-    super::catastrophic::reason(&command, workspace_roots)
+    super::catastrophic::reason_at(&command, workspace_roots, Some(active_cwd))
 }
 
 /// Quote a single argv element so that re-joining the elements with spaces
