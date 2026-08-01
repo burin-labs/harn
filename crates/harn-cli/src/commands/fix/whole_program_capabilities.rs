@@ -43,7 +43,6 @@ struct ProgramFile {
 struct ProgramCallable {
     file_idx: usize,
     info: CallableInfo,
-    params: Vec<TypedParam>,
     body: Vec<SNode>,
     boundary: bool,
     carrier: Option<Carrier>,
@@ -84,7 +83,6 @@ pub(super) fn plan(
             callables.push(ProgramCallable {
                 file_idx,
                 info,
-                params,
                 body,
                 boundary,
                 carrier,
