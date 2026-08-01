@@ -855,7 +855,11 @@ capability_method!(
 capability_method!(
     agent_daemon_snapshot,
     "harness.agent.daemon_snapshot",
-    ["state.read@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_daemon_snapshot(session_id: string, options: dict) -> dict",
     "Read an agent daemon snapshot."
 );
@@ -917,21 +921,33 @@ capability_method!(
 capability_method!(
     agent_daemon_wait,
     "harness.agent.daemon_wait",
-    ["state.observe@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_daemon_wait(session_id: string, timeout_ms: int) -> dict",
     "Wait for agent daemon activity."
 );
 capability_method!(
     agent_capture_events,
     "harness.agent.capture_events",
-    ["state.observe@arg0"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_capture_events(session_id: string, body: closure) -> dict",
     "Capture typed events emitted while a session body runs."
 );
 capability_method!(
     agent_parse_tool_calls,
     "harness.agent.parse_tool_calls",
-    ["state.mutate@const=tool-call-sequence"],
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
     "__cap_agent_parse_tool_calls(text: string, tools?: {_type: \"tool_registry\", tools: list}?, tool_format?: string?) -> dict",
     "Parse textual tool calls and stamp session-unique call identifiers."
 );
