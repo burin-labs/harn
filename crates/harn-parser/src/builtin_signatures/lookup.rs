@@ -12,21 +12,18 @@ use harn_builtin_meta::{BuiltinExposure, CapabilityId};
 use super::signatures;
 use super::{BuiltinMetadata, BuiltinSignature, Ty, TyExt};
 
-/// Linear scan of the installed slice plus the static groups for a given
-/// name. Installed entries win when both sides carry the same name (the
-/// `#[harn_builtin]`-emitted signature shadows any legacy static
-/// duplicate). O(N+M) per call where N+M ≈ 600 — well below any
-/// typecheck hot path, and explicitly NOT cached so installs after the
-/// first call are picked up without leaking an old merged slice.
+/// Resolve the installed name index, then fall back to static signature groups.
+/// Installed entries win when both sides carry the same name (the
+/// `#[harn_builtin]`-emitted signature shadows any legacy static duplicate).
+/// Runtime validation calls this for every builtin invocation, so the owning
+/// registry lookup must not materialize or linearly scan its whole manifest.
 pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
-    for entry in harn_builtin_registry::installed_manifest() {
-        if entry.name == name {
-            return matches!(
-                entry.contract.exposure,
-                BuiltinExposure::PureGlobal | BuiltinExposure::CapabilityFunction { .. }
-            )
-            .then_some(entry.signature);
-        }
+    if let Some(entry) = harn_builtin_registry::builtin_entry(name) {
+        return matches!(
+            entry.contract.exposure,
+            BuiltinExposure::PureGlobal | BuiltinExposure::CapabilityFunction { .. }
+        )
+        .then_some(entry.signature);
     }
     for group in signatures::groups() {
         for sig in group {

@@ -38,16 +38,7 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         if let Some(capability) = handle.kind().capability_id() {
-            let declared = crate::stdlib::all_builtin_manifest().iter().any(|entry| {
-                matches!(
-                    entry.contract.exposure,
-                    harn_builtin_meta::BuiltinExposure::HarnessMethod {
-                        capability: candidate,
-                        method: candidate_method,
-                    } if candidate == capability && candidate_method == method
-                )
-            });
-            if !declared {
+            if crate::stdlib::capability_method_manifest_entry(capability, method).is_none() {
                 return Err(method_unsupported(handle, method));
             }
         }
@@ -112,7 +103,8 @@ impl crate::vm::Vm {
         if let Some(capability) = handle.kind().capability_id() {
             if let Some(dispatch) = self
                 .capability_methods
-                .get(&(capability, method.to_string()))
+                .get(&capability)
+                .and_then(|methods| methods.get(method))
                 .cloned()
             {
                 let qualified_name = format!("harness.{}.{method}", capability.field_name());
@@ -375,15 +367,7 @@ impl crate::vm::Vm {
             .capability_id()
             .expect("non-root harness kind has a capability id");
         Self::record_capability_effects_into(executed_effects, capability, method, args);
-        if !crate::stdlib::all_builtin_manifest().iter().any(|entry| {
-            matches!(
-                entry.contract.exposure,
-                harn_builtin_meta::BuiltinExposure::HarnessMethod {
-                    capability: candidate,
-                    method: candidate_method,
-                } if candidate == capability && candidate_method == method
-            )
-        }) {
+        if crate::stdlib::capability_method_manifest_entry(capability, method).is_none() {
             return Some(Err(method_unsupported(handle, method)));
         }
         if let HarnessMode::Null(state) = handle.inner().mode() {

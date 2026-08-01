@@ -92,6 +92,14 @@ pipeline test_scan_text_reports_all_issue_classes(harness: Harness, task) {
 }
 
 @test
+pipeline test_candidate_text_requires_a_detector_literal(harness: Harness, task) {
+  assert_eq(text_has_syntax_sensitive_candidate("fn unrelated() { return nil }"), false)
+  assert_eq(text_has_syntax_sensitive_candidate("const pattern = \"let\\\\s+name\""), true)
+  assert_eq(text_has_syntax_sensitive_candidate("let registry = tool_registry()"), true)
+  assert_eq(text_has_syntax_sensitive_candidate("{\"long_running\": true}"), true)
+}
+
+@test
 pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, task) {
   with_temp_dir(
     harness.fs,

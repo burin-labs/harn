@@ -1040,6 +1040,12 @@ jobs:
           ./scripts/tree-sitter-cli.sh build
       - name: Run Harn conformance and audit
         id: release-audit-harn
+        env:
+          # The repo-scale scan and contract lookup regressions are fixed, so
+          # restore the proven four-shard/four-gate topology. The two-plus-two
+          # default more than doubled this lane's hosted wall time.
+          AUDIT_GATES_CONCURRENCY: "4"
+          HARN_CONFORMANCE_SHARDS: "4"
         run: ./scripts/audit_gates.sh
       - name: Summarize rolling merge-group wall time
         if: github.event_name == 'merge_group' && steps.release-audit-harn.outcome == 'success'

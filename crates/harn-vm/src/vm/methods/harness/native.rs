@@ -856,15 +856,11 @@ impl crate::vm::Vm {
                             "HarnessTesting cannot fixture its own control methods".to_string(),
                         ));
                     }
-                    let declared = crate::stdlib::all_builtin_manifest().iter().any(|entry| {
-                        matches!(
-                            entry.contract.exposure,
-                            harn_builtin_meta::BuiltinExposure::HarnessMethod {
-                                capability: candidate,
-                                method: candidate_method,
-                            } if candidate == capability && candidate_method == target_method
-                        )
-                    });
+                    let declared = crate::stdlib::capability_method_manifest_entry(
+                        capability,
+                        target_method,
+                    )
+                    .is_some();
                     if !declared
                         && !crate::harness::is_capability_driver_fixture(capability, target_method)
                     {

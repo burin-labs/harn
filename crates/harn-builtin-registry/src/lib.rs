@@ -130,10 +130,11 @@ pub fn installed_manifest() -> Vec<&'static BuiltinManifestEntry> {
 
 /// Resolve one installed manifest entry.
 pub fn builtin_entry(name: &str) -> Option<&'static BuiltinManifestEntry> {
-    installed_manifest()
-        .iter()
+    installed()
+        .read()
+        .expect("builtin manifest lock poisoned")
+        .get(name)
         .copied()
-        .find(|entry| entry.name == name)
 }
 
 /// Resolve the typed contract for one installed source name.
