@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, VecDeque};
 
 use harn_glob::match_prose as mock_glob_match;
 
-use super::mock::{LlmMock, LlmMockFixture, MockConsumptionReceipt, DEFAULT_MOCK_SCOPE};
+use super::mock::{
+    LlmMock, LlmMockFixture, MockConsumptionReceipt, DEFAULT_MOCK_SCOPE, SHARED_MOCK_SCOPE,
+};
 
 /// A mutable fixture queue partitioned by the logical scope requested by an
 /// LLM call. The map retains empty buckets so snapshots can report a scope
@@ -95,7 +97,25 @@ impl MockQueue {
             });
         }
 
-        if requested_scope != DEFAULT_MOCK_SCOPE && !self.strict_scopes {
+        if requested_scope != DEFAULT_MOCK_SCOPE && requested_scope != SHARED_MOCK_SCOPE {
+            if let Some((mock, remaining)) = self.match_bucket(SHARED_MOCK_SCOPE, match_text) {
+                return Some(QueueMatch {
+                    receipt: MockConsumptionReceipt::hit(
+                        requested_scope,
+                        SHARED_MOCK_SCOPE,
+                        &mock,
+                        true,
+                        remaining,
+                    ),
+                    mock,
+                });
+            }
+        }
+
+        if requested_scope != DEFAULT_MOCK_SCOPE
+            && requested_scope != SHARED_MOCK_SCOPE
+            && !self.strict_scopes
+        {
             if let Some((mock, remaining)) = self.match_bucket(DEFAULT_MOCK_SCOPE, match_text) {
                 return Some(QueueMatch {
                     receipt: MockConsumptionReceipt::hit(

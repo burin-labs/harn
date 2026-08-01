@@ -357,6 +357,37 @@ harn playground --script pipeline.harn --llm-mock-record fixtures.jsonl
 harn playground --script pipeline.harn --llm-mock fixtures.jsonl
 ```
 
+### Scoped fixtures
+
+Adding `call_role` or `mock_scope` at a call site does not isolate a legacy
+headerless fixture by itself. Every legacy entry belongs to `default`, and a
+non-strict scoped call may consume that compatibility bucket. Move main-turn
+entries into `agent.main` when adopting scopes:
+
+```jsonl
+{"schemaVersion":1,"strictScopes":true}
+{"id":"main-1","scope":"agent.main","consume":"once","text":"MAIN"}
+{"id":"judge-1","scope":"completion.judge","consume":"sticky","match":"*","text":"PASS"}
+```
+
+Use the reserved `shared` scope for one deliberate auxiliary fallback. It is
+consulted after the requested scope even when `strictScopes` is true, while
+`default` remains the legacy compatibility fallback only for non-strict
+fixtures. This lets missing main or auxiliary scopes fail loudly without
+enumerating every optional classifier or judge:
+
+```jsonl
+{"schemaVersion":1,"strictScopes":true}
+{"id":"main-1","scope":"agent.main","consume":"once","text":"MAIN"}
+{"id":"aux","scope":"shared","consume":"sticky","match":"*","text":"AUX"}
+```
+
+Consumption receipts record `requested_scope`, `resolved_scope`, and
+`fell_through`, so a test can distinguish an exact match from either fallback.
+Application-owned roles should use a dotted namespace such as
+`app.classifier`; dotted scopes are open vocabulary and do not produce an
+unknown-Harn-purpose advisory.
+
 To import an external eval trace into the same fixture format:
 
 ```bash

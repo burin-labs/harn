@@ -495,6 +495,34 @@ fn strict_scopes_makes_unscoped_aux_a_hard_miss() {
 }
 
 #[test]
+fn strict_scopes_can_use_an_explicit_shared_absorber() {
+    reset_llm_mock_state();
+    install_cli_llm_mock_fixture(v1_fixture(
+        true,
+        &[
+            serde_json::json!({"scope": "agent.main", "text": "MAIN"}),
+            serde_json::json!({"scope": "shared", "consume": "sticky", "match": "*", "text": "SHARED"}),
+        ],
+    ));
+
+    let classifier = mock_llm_response(&request_with_scope("classify", Some("app.classifier")))
+        .expect("shared absorber serves an application-owned auxiliary role");
+    assert_eq!(classifier.text, "SHARED");
+    let judge =
+        mock_llm_response(&request_with_scope("verify", Some("completion.judge"))).expect("judge");
+    assert_eq!(judge.text, "SHARED");
+    let main = mock_llm_response(&request_with_scope("turn", Some("agent.main"))).expect("main");
+    assert_eq!(main.text, "MAIN");
+
+    let receipts = get_llm_mock_receipts();
+    assert_eq!(receipts[0].resolved_scope, "shared");
+    assert!(receipts[0].fell_through);
+    assert_eq!(receipts[1].resolved_scope, "shared");
+    assert_eq!(receipts[2].resolved_scope, "agent.main");
+    clear_cli_llm_mock_mode();
+}
+
+#[test]
 fn matched_receipt_emits_typed_checkpoint() {
     reset_llm_mock_state();
     let events = Arc::new(Mutex::new(Vec::new()));

@@ -10,7 +10,7 @@ fn fixture(lines: &[&str]) -> MockQueue {
 }
 
 #[test]
-fn scopes_are_isolated_and_default_is_the_only_fallback() {
+fn scopes_are_isolated_and_default_remains_the_legacy_fallback() {
     let mut queue = queue(
         r#"{"schemaVersion":1,"strictScopes":false}
 {"id":"main","scope":"agent.main","consume":"once","text":"MAIN"}
@@ -32,6 +32,33 @@ fn scopes_are_isolated_and_default_is_the_only_fallback() {
     assert!(!main.receipt.fell_through);
 
     assert!(queue.match_request("completion.judge", "again").is_none());
+}
+
+#[test]
+fn shared_absorber_works_with_strict_scopes_without_consuming_default() {
+    let mut queue = queue(
+        r#"{"schemaVersion":1,"strictScopes":true}
+{"id":"main","scope":"agent.main","consume":"once","text":"MAIN"}
+{"id":"shared","scope":"shared","consume":"sticky","match":"*","text":"SHARED"}
+{"id":"default","scope":"default","consume":"once","text":"DEFAULT"}"#,
+    );
+
+    let judge = queue
+        .match_request("completion.judge", "verify")
+        .expect("strict fixture deliberately falls through to shared");
+    assert_eq!(judge.mock.text, "SHARED");
+    assert_eq!(judge.receipt.resolved_scope, "shared");
+    assert!(judge.receipt.fell_through);
+
+    let classifier = queue
+        .match_request("app.classifier", "classify")
+        .expect("one shared entry absorbs another auxiliary purpose");
+    assert_eq!(classifier.mock.text, "SHARED");
+
+    let main = queue.match_request("agent.main", "turn").expect("main");
+    assert_eq!(main.mock.text, "MAIN");
+    let default = queue.match_request("default", "legacy").expect("default");
+    assert_eq!(default.mock.text, "DEFAULT");
 }
 
 #[test]

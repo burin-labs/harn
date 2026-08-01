@@ -193,9 +193,16 @@ fn default_mock_error_message(
 }
 
 /// The scope a fixture entry belongs to when no `scope` is authored, and the
-/// scope a call requests when it sets no `mock_scope`. The shared bucket every
-/// unscoped-aux call may fall through to.
+/// scope a call requests when it sets no `mock_scope`. V0 fixtures use this as
+/// their compatibility bucket; non-strict V1 fixtures retain its legacy
+/// fallback behavior.
 pub const DEFAULT_MOCK_SCOPE: &str = "default";
+
+/// An explicitly authored absorber for auxiliary calls that miss their own
+/// scope. Unlike [`DEFAULT_MOCK_SCOPE`], this fallback remains active when
+/// `strictScopes` is true, so a fixture can combine loud scope misses with one
+/// deliberate shared response.
+pub const SHARED_MOCK_SCOPE: &str = "shared";
 
 /// Advisory vocabulary for the purposes Harn itself assigns to LLM calls.
 /// Fixture scopes remain open strings so applications can add their own
@@ -203,6 +210,7 @@ pub const DEFAULT_MOCK_SCOPE: &str = "default";
 /// fixture gets linted against this producer-owned list.
 pub const KNOWN_MOCK_SCOPES: &[&str] = &[
     DEFAULT_MOCK_SCOPE,
+    SHARED_MOCK_SCOPE,
     "agent.main",
     "agent.input_guardrail",
     "agent.scope_classifier",
@@ -212,9 +220,9 @@ pub const KNOWN_MOCK_SCOPES: &[&str] = &[
 ];
 
 /// A typed consumption receipt emitted once per mock-provider dispatch when a
-/// fixture set is active. It records both sides of default fallback so a
-/// caller can prove that a response came from the requested purpose or the
-/// shared default bucket without inspecting queue internals.
+/// fixture set is active. It records both sides of fallback so a caller can
+/// prove that a response came from the requested purpose, an explicit shared
+/// absorber, or the legacy default bucket without inspecting queue internals.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockConsumptionReceipt {
     pub requested_scope: String,
