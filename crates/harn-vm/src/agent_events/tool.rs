@@ -188,6 +188,7 @@ impl ToolCallErrorCategory {
             | Internal::ServerError
             | Internal::TransientNetwork => Self::Network,
             Internal::ResourceBusy => Self::ResourceBusy,
+            Internal::SchemaIncompatible => Self::HostBridgeError,
             Internal::SchemaValidation | Internal::SchemaStreamAborted => Self::SchemaValidation,
             Internal::ToolError => Self::ToolError,
             Internal::ToolRejected => Self::PermissionDenied,

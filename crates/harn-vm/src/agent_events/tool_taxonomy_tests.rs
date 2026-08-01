@@ -178,6 +178,10 @@ fn tool_call_error_category_from_internal_is_decided_for_every_internal_category
         (Internal::TransientNetwork, ToolCallErrorCategory::Network),
         (Internal::ResourceBusy, ToolCallErrorCategory::ResourceBusy),
         (
+            Internal::SchemaIncompatible,
+            ToolCallErrorCategory::HostBridgeError,
+        ),
+        (
             Internal::SchemaValidation,
             ToolCallErrorCategory::SchemaValidation,
         ),

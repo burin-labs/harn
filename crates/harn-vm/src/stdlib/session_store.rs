@@ -953,32 +953,20 @@ fn store_error(error: StoreError) -> VmError {
     let message = format!("session_store: {error}");
     match error {
         StoreError::Contention { .. } => categorized_error(message, ErrorCategory::ResourceBusy),
+        StoreError::SchemaIncompatible { .. } => {
+            categorized_error(message, ErrorCategory::SchemaIncompatible)
+        }
         _ => VmError::Runtime(message),
     }
 }
 
 #[cfg(test)]
+#[path = "session_store_error_tests.rs"]
+mod error_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use harn_session_store::StoreContention;
-
-    #[test]
-    fn store_contention_maps_to_typed_transient_category() {
-        let error = store_error(StoreError::Contention {
-            kind: StoreContention::DatabaseBusy,
-            message: "database is locked".to_string(),
-        });
-
-        assert_eq!(
-            crate::value::error_to_category(&error),
-            ErrorCategory::ResourceBusy
-        );
-        assert!(ErrorCategory::ResourceBusy.is_transient());
-        assert_eq!(
-            error.to_string(),
-            "Error [resource_busy]: session_store: retryable backend contention (database_busy): database is locked"
-        );
-    }
 
     fn write_legacy_fixture(state_dir: &SessionStoreDir, session_id: &str) -> PathBuf {
         let path = legacy_session_path(state_dir, session_id).unwrap();

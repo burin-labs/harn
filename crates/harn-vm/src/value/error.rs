@@ -337,6 +337,9 @@ pub enum ErrorCategory {
     /// A shared local resource is temporarily unavailable, such as a
     /// contended database write lock.
     ResourceBusy,
+    /// A persistent store was written by a newer incompatible schema owner.
+    /// Retrying cannot help; the caller must upgrade or deliberately degrade.
+    SchemaIncompatible,
     /// LLM output failed schema validation. Retryable via `schema_retries`.
     SchemaValidation,
     /// LLM streaming response was aborted mid-stream because the partial
@@ -392,7 +395,7 @@ impl ErrorCategory {
     /// a round-trip guard — needs to enumerate them. While this list lived in
     /// one module's test scope, the tool-call wire projection could not consult
     /// it, and a category with no decided wire bucket went unnoticed (#5537).
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Timeout,
         Self::Auth,
         Self::RateLimit,
@@ -400,6 +403,7 @@ impl ErrorCategory {
         Self::ServerError,
         Self::TransientNetwork,
         Self::ResourceBusy,
+        Self::SchemaIncompatible,
         Self::SchemaValidation,
         Self::SchemaStreamAborted,
         Self::ToolError,
@@ -424,6 +428,7 @@ impl ErrorCategory {
             ErrorCategory::ServerError => "server_error",
             ErrorCategory::TransientNetwork => "transient_network",
             ErrorCategory::ResourceBusy => "resource_busy",
+            ErrorCategory::SchemaIncompatible => "schema_incompatible",
             ErrorCategory::SchemaValidation => "schema_validation",
             ErrorCategory::SchemaStreamAborted => "schema_stream_aborted",
             ErrorCategory::ToolError => "tool_error",
@@ -449,6 +454,7 @@ impl ErrorCategory {
             "server_error" => ErrorCategory::ServerError,
             "transient_network" => ErrorCategory::TransientNetwork,
             "resource_busy" => ErrorCategory::ResourceBusy,
+            "schema_incompatible" => ErrorCategory::SchemaIncompatible,
             "schema_validation" => ErrorCategory::SchemaValidation,
             "schema_stream_aborted" => ErrorCategory::SchemaStreamAborted,
             "tool_error" => ErrorCategory::ToolError,
@@ -753,6 +759,7 @@ mod tests {
                 | ErrorCategory::ServerError
                 | ErrorCategory::TransientNetwork
                 | ErrorCategory::ResourceBusy
+                | ErrorCategory::SchemaIncompatible
                 | ErrorCategory::SchemaValidation
                 | ErrorCategory::SchemaStreamAborted
                 | ErrorCategory::ToolError
@@ -770,7 +777,7 @@ mod tests {
         }
         assert_eq!(
             ErrorCategory::ALL.len(),
-            20,
+            21,
             "a category was added or removed — update `ErrorCategory::ALL` and the \
              `Error categories` table in docs/src/builtins.md"
         );

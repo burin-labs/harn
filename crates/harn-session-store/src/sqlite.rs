@@ -46,8 +46,9 @@ use super::store::{
 // recorded version already matches, so an unbumped column never reaches an
 // existing database.
 const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_NAME: &str = "session_store";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-const SQLITE_SCHEMA: SchemaVersion = SchemaVersion::new("session_store", SCHEMA_VERSION);
+const SQLITE_SCHEMA: SchemaVersion = SchemaVersion::new(SCHEMA_NAME, SCHEMA_VERSION);
 
 #[derive(Clone)]
 pub struct SqliteSessionStore {
@@ -98,7 +99,7 @@ impl SqliteSessionStore {
                 initialize_session_schema,
             )
         };
-        initialization.map_err(|error| StoreError::Backend(error.to_string()))?;
+        initialization.map_err(map_initialization)?;
         rebuild_search_index_if_needed(&mut conn, &hooks)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -137,9 +138,11 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
         0
     };
     if previous_schema_version > SCHEMA_VERSION {
-        return Err(StoreError::Backend(format!(
-            "session store schema version {previous_schema_version} is newer than supported version {SCHEMA_VERSION}"
-        )));
+        return Err(StoreError::SchemaIncompatible {
+            schema: SCHEMA_NAME.to_string(),
+            stored: previous_schema_version,
+            supported: SCHEMA_VERSION,
+        });
     }
 
     transaction
@@ -324,6 +327,22 @@ fn map_sql(error: rusqlite::Error) -> StoreError {
             message,
         },
         None => StoreError::Backend(message),
+    }
+}
+
+fn map_initialization(error: harn_sqlite::InitializationError<StoreError>) -> StoreError {
+    match error {
+        harn_sqlite::InitializationError::NewerSchemaVersion {
+            name,
+            stored,
+            supported,
+        } => StoreError::SchemaIncompatible {
+            schema: name.to_string(),
+            stored,
+            supported,
+        },
+        harn_sqlite::InitializationError::Initialize(error) => error,
+        other => StoreError::Backend(other.to_string()),
     }
 }
 

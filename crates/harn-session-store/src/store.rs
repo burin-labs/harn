@@ -352,6 +352,15 @@ pub enum StoreError {
         /// Backend diagnostic retained for operators.
         message: String,
     },
+    /// The persistent store was written by a newer incompatible schema owner.
+    SchemaIncompatible {
+        /// Machine-readable schema owner name.
+        schema: String,
+        /// Version recorded in the persistent store.
+        stored: i64,
+        /// Newest version this runtime can safely open.
+        supported: i64,
+    },
     Backend(String),
 }
 
@@ -366,6 +375,14 @@ impl std::fmt::Display for StoreError {
             Self::Contention { kind, message } => {
                 write!(f, "retryable backend contention ({kind}): {message}")
             }
+            Self::SchemaIncompatible {
+                schema,
+                stored,
+                supported,
+            } => write!(
+                f,
+                "schema incompatible: {schema} version {stored} is newer than supported version {supported}"
+            ),
             Self::Backend(message) => write!(f, "backend error: {message}"),
         }
     }

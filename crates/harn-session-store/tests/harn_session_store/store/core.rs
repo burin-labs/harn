@@ -729,10 +729,37 @@ fn sqlite_rejects_a_newer_schema_version() {
         .expect("reject future schema");
     assert_eq!(
         error,
-        StoreError::Backend(
-            "schema initialization failed: backend error: session store schema version 99 is newer than supported version 5"
-                .to_string()
-        )
+        StoreError::SchemaIncompatible {
+            schema: "session_store".to_string(),
+            stored: 99,
+            supported: 5,
+        }
+    );
+}
+
+#[test]
+fn sqlite_rejects_a_newer_shared_schema_marker_without_erasing_its_type() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("future-shared.sqlite");
+    drop(SqliteSessionStore::open(&path).expect("initialize sqlite"));
+    let conn = rusqlite::Connection::open(&path).expect("open raw sqlite");
+    conn.execute(
+        "UPDATE _harn_sqlite_schema_versions SET version = 99 WHERE name = 'session_store'",
+        [],
+    )
+    .expect("mark future shared schema");
+    drop(conn);
+
+    let error = SqliteSessionStore::open(path)
+        .err()
+        .expect("reject future shared schema");
+    assert_eq!(
+        error,
+        StoreError::SchemaIncompatible {
+            schema: "session_store".to_string(),
+            stored: 99,
+            supported: 5,
+        }
     );
 }
 

@@ -2144,6 +2144,7 @@ distinguish new failure modes.
 | `server_error` | Provider-side 5xx (500, 502) that is not specifically overload |
 | `transient_network` | Network-level transient failure — connection reset, DNS hiccup, partial stream. Retryable but not provider-status-coded |
 | `resource_busy` | A shared local resource is temporarily unavailable, such as a contended database write lock |
+| `schema_incompatible` | A persistent store uses a newer unsupported schema. Retrying cannot help; upgrade the runtime or deliberately degrade |
 | `schema_validation` | LLM output failed schema validation. Retryable via `schema_retries` |
 | `schema_stream_aborted` | A streaming response was aborted because the partial content could not satisfy the `output` schema. Consumes one `schema_retries` slot; configure with `output.stream_abort` |
 | `tool_error` | Tool execution failed |
