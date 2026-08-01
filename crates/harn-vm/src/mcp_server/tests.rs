@@ -7,6 +7,7 @@ use crate::value::{VmClosure, VmEnv, VmValue};
 use super::convert::{annotations_to_json, prompt_value_to_messages};
 use super::defs::{
     McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
+    McpToolDef,
 };
 use super::tool_registry_to_mcp_tools;
 use super::tools_schema::params_to_json_schema;
@@ -167,6 +168,16 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     );
     tool.insert("annotations".into(), VmValue::dict(annotations));
     tool.insert(
+        "meta".into(),
+        VmValue::dict({
+            let mut ui = crate::value::DictMap::new();
+            ui.put_str("resourceUri", "ui://example/editor");
+            let mut meta = crate::value::DictMap::new();
+            meta.insert("ui".into(), VmValue::dict(ui));
+            meta
+        }),
+    );
+    tool.insert(
         "icons".into(),
         VmValue::List(std::sync::Arc::new(vec![icon])),
     );
@@ -202,6 +213,76 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
         "https://example.com/tool.png"
     );
     assert_eq!(tools[0].output_schema.as_ref().unwrap()["type"], "string");
+    assert_eq!(
+        tools[0].meta.as_ref().unwrap()["ui"]["resourceUri"],
+        "ui://example/editor"
+    );
+}
+
+#[tokio::test]
+async fn server_projects_extension_metadata_on_tools_and_resource_content() {
+    let extension_meta = serde_json::json!({
+        "ui": {
+            "resourceUri": "ui://example/editor",
+            "visibility": ["model", "app"]
+        }
+    });
+    let server = McpServer::new(
+        "test".to_string(),
+        vec![McpToolDef {
+            name: "open_editor".to_string(),
+            title: None,
+            description: "Open the editor".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            output_schema: None,
+            annotations: None,
+            icons: None,
+            meta: Some(extension_meta.clone()),
+            handler: empty_closure("open_editor"),
+        }],
+        vec![McpResourceDef {
+            uri: "ui://example/editor".to_string(),
+            name: "Editor".to_string(),
+            title: None,
+            description: None,
+            mime_type: Some("text/html;profile=mcp-app".to_string()),
+            meta: Some(serde_json::json!({
+                "ui": {"csp": {"connectDomains": []}, "prefersBorder": false}
+            })),
+            text: "<!doctype html><html></html>".to_string(),
+        }],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+
+    let tools = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(1, "tools/list", serde_json::json!({})),
+            &mut vm,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tools["result"]["tools"][0]["_meta"]["ui"]["resourceUri"],
+        "ui://example/editor"
+    );
+
+    let content = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                2,
+                "resources/read",
+                serde_json::json!({"uri": "ui://example/editor"}),
+            ),
+            &mut vm,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        content["result"]["contents"][0]["_meta"]["ui"]["prefersBorder"],
+        false
+    );
 }
 
 #[test]
@@ -321,6 +402,7 @@ async fn server_advertises_resource_list_changed_capability() {
             title: None,
             description: None,
             mime_type: Some("text/plain".to_string()),
+            meta: None,
             text: "hello".to_string(),
         }],
         Vec::new(),
@@ -365,6 +447,7 @@ async fn server_accepts_resource_subscribe_and_unsubscribe_for_registered_uris()
             title: None,
             description: None,
             mime_type: Some("text/plain".to_string()),
+            meta: None,
             text: "hello".to_string(),
         }],
         Vec::new(),
@@ -682,6 +765,7 @@ async fn server_discover_returns_capabilities_and_supported_versions() {
             title: None,
             description: None,
             mime_type: Some("text/plain".to_string()),
+            meta: None,
             text: "hello".to_string(),
         }],
         Vec::new(),
@@ -771,6 +855,7 @@ async fn server_modern_tools_list_emits_result_type_and_cache_hint() {
             title: None,
             description: None,
             mime_type: Some("text/plain".to_string()),
+            meta: None,
             text: "hello".to_string(),
         }],
         Vec::new(),
@@ -900,6 +985,7 @@ async fn server_modern_resources_read_emits_cache_hint() {
             title: None,
             description: None,
             mime_type: Some("text/plain".to_string()),
+            meta: None,
             text: "hello".to_string(),
         }],
         Vec::new(),

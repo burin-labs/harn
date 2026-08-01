@@ -8,8 +8,11 @@ true
 2
 harn.ui_tool_meta.v1
 ui://harn-dashboard/kpis@v1
-app_only
-signups
+[app]
+text/html;profile=mcp-app
+[https://api.example.test]
+true
+true
 true
 true
 allow-scripts allow-same-origin
@@ -35,9 +38,8 @@ false
 tools/call
 dashboard.refresh
 7d
-context/update
-selection
-true
+ui/update-model-context
+signups
 true
 false
 true

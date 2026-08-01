@@ -63,6 +63,13 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
                     None
                 }
             });
+            let meta = entry.get("meta").and_then(|v| {
+                if let VmValue::Dict(_) = v {
+                    Some(vm_value_to_json(v))
+                } else {
+                    None
+                }
+            });
 
             mcp_tools.push(McpToolDef {
                 name,
@@ -72,6 +79,7 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
                 output_schema,
                 annotations,
                 icons,
+                meta,
                 handler,
             });
         }

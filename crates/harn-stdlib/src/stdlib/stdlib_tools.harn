@@ -18,6 +18,7 @@ type ToolDefinitionConfig = {
   defer_loading?: bool,
   namespace?: string,
   annotations?: dict,
+  meta?: dict,
   guidance?: string,
 }
 
@@ -45,6 +46,7 @@ pub type ToolDefinitionSpec = {
   defer_loading?: bool,
   namespace?: string,
   annotations?: dict,
+  meta?: dict,
   guidance?: string,
 }
 

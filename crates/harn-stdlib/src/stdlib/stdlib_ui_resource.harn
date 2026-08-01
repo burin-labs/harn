@@ -20,7 +20,7 @@
 import { web_artifact_text_fallback, web_artifact_validate } from "std/artifact/web"
 import { filter_nil } from "std/collections"
 
-type UiResourceVisibility = "app_only" | "model_visible" | "always_visible" | string
+type UiMcpToolAudience = "model" | "app"
 
 type UiResourceContentsEncoding = "utf8" | "base64"
 
@@ -72,19 +72,37 @@ type UiResourceOptions = {
   meta?: dict,
 }?
 
-type UiToolMetaUi = {
-  resource_uri: string,
-  resource_name: string,
-  profile: string,
-  visibility: UiResourceVisibility,
-  initial_view?: dict,
-  permissions: list<string>,
-  capabilities: list<string>,
-}
+type UiToolMetaUi = {resource_uri: string, visibility: list<UiMcpToolAudience>}
 
 type UiToolMeta = {schema: "harn.ui_tool_meta.v1", ui: UiToolMetaUi}
 
-type UiToolMetaOptions = {visibility?: UiResourceVisibility, initial_view?: dict}?
+type UiToolMetaOptions = {visibility?: list<UiMcpToolAudience>}?
+
+type UiMcpResourceCsp = {
+  connectDomains: list<string>,
+  resourceDomains: list<string>,
+  frameDomains: list<string>,
+  baseUriDomains: list<string>,
+}
+
+type UiMcpResourceOptions = {
+  connect_domains?: list<string>,
+  resource_domains?: list<string>,
+  frame_domains?: list<string>,
+  base_uri_domains?: list<string>,
+  permissions?: dict,
+  domain?: string,
+  prefers_border?: bool,
+}?
+
+type UiMcpResourceRegistration = {
+  uri: string,
+  name: string,
+  description?: string,
+  mime_type: string,
+  text: string,
+  meta: dict,
+}
 
 type UiTextFallback = {schema: "harn.ui_fallback.text.v1", content: string}
 
@@ -117,11 +135,11 @@ type UiContextUpdateEnvelope = {
   schema: "harn.ui_context_update.v1",
   jsonrpc: "2.0",
   id: string,
-  method: "context/update",
+  method: "ui/update-model-context",
   params: dict,
 }
 
-type UiContextUpdateOptions = {id?: string, model_visible?: bool}?
+type UiContextUpdateOptions = {id?: string}?
 
 type UiToolResult = {
   schema: "harn.ui_tool_result.v1",
@@ -332,21 +350,16 @@ pub fn ui_resource(
  * @errors: []
  */
 pub fn ui_tool_meta(resource: UiResource, options: UiToolMetaOptions = nil) -> UiToolMeta {
-  const visibility = options?.visibility ?? "app_only"
-  if !["app_only", "model_visible", "always_visible"].contains(visibility) {
-    throw "std/ui_resource: visibility must be app_only, model_visible, or always_visible"
+  const visibility = __ui_str_list(options?.visibility ?? ["model", "app"])
+  if len(visibility) == 0 {
+    throw "std/ui_resource: visibility must include model, app, or both"
   }
-  const ui = filter_nil(
-    {
-      resource_uri: resource.uri,
-      resource_name: resource.name,
-      profile: resource.profile ?? UI_MCP_APP_PROFILE,
-      visibility: visibility,
-      initial_view: options?.initial_view,
-      permissions: resource.permissions,
-      capabilities: resource.capabilities,
-    },
-  )
+  for audience in visibility {
+    if !["model", "app"].contains(audience) {
+      throw "std/ui_resource: visibility entries must be model or app"
+    }
+  }
+  const ui = {resource_uri: resource.uri, visibility: visibility}
   return {schema: UI_TOOL_META_SCHEMA, ui: ui}
 }
 
@@ -358,19 +371,53 @@ pub fn ui_tool_meta(resource: UiResource, options: UiToolMetaOptions = nil) -> U
  */
 pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> dict {
   const ui = meta.ui
-  return {
-    ui: filter_nil(
-      {
-        resourceUri: ui.resource_uri,
-        resourceName: ui.resource_name,
-        profile: ui.profile,
-        visibility: ui.visibility,
-        initialView: ui.initial_view,
-        permissions: ui.permissions,
-        capabilities: ui.capabilities,
-      },
-    ),
+  return {ui: filter_nil({resourceUri: ui.resource_uri, visibility: ui.visibility})}
+}
+
+/**
+ * Project a Harn UI resource into the exact config accepted by
+ * `harness.tools.mcp_resource`.
+ *
+ * Security metadata follows the stable MCP Apps resource-content contract.
+ * External domains and browser permissions are empty by default, so a host
+ * can enforce a restrictive sandbox without interpreting Harn-only fields.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_resource_to_mcp(
+  resource: UiResource,
+  options: UiMcpResourceOptions = nil,
+) -> UiMcpResourceRegistration {
+  const csp: UiMcpResourceCsp = {
+    connectDomains: __ui_str_list(options?.connect_domains ?? []),
+    resourceDomains: __ui_str_list(options?.resource_domains ?? []),
+    frameDomains: __ui_str_list(options?.frame_domains ?? []),
+    baseUriDomains: __ui_str_list(options?.base_uri_domains ?? []),
   }
+  const ui = filter_nil(
+    {
+      csp: csp,
+      permissions: options?.permissions,
+      domain: __ui_first([options?.domain]),
+      prefersBorder: options?.prefers_border,
+    },
+  )
+  const text = if resource.contents_encoding == "base64" {
+    bytes_to_string(bytes_from_base64(resource.contents))
+  } else {
+    resource.contents
+  }
+  return filter_nil(
+    {
+      uri: resource.uri,
+      name: resource.name,
+      description: resource.description,
+      mime_type: resource.mime_type,
+      text: text,
+      meta: {ui: ui},
+    },
+  )
 }
 
 /**
@@ -590,10 +637,8 @@ pub fn ui_context_update_envelope(
     schema: UI_CONTEXT_UPDATE_SCHEMA,
     jsonrpc: "2.0",
     id: id,
-    method: "context/update",
-    params: filter_nil(
-      {key: context_key, value: value, model_visible: options?.model_visible ?? true},
-    ),
+    method: "ui/update-model-context",
+    params: {structuredContent: {[context_key]: value}},
   }
 }
 

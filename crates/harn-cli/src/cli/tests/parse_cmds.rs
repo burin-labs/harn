@@ -2,6 +2,29 @@ use super::*;
 use crate::cli::TimeCommand;
 
 #[test]
+fn test_parses_app_run() {
+    let cli = Cli::parse_from([
+        "harn",
+        "app",
+        "run",
+        "logo.harn",
+        "--resource",
+        "ui://burin/logo",
+        "--bind",
+        "127.0.0.1:4321",
+        "--no-open",
+    ]);
+    let Command::App(args) = cli.command.unwrap() else {
+        panic!("expected app command");
+    };
+    let crate::cli::AppCommand::Run(args) = args.command;
+    assert_eq!(args.file, "logo.harn");
+    assert_eq!(args.resource.as_deref(), Some("ui://burin/logo"));
+    assert_eq!(args.bind.to_string(), "127.0.0.1:4321");
+    assert!(!args.open);
+}
+
+#[test]
 fn test_parses_agents_conformance_target_url() {
     let cli = Cli::parse_from([
         "harn",

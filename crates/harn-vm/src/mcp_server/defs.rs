@@ -19,6 +19,8 @@ pub struct McpToolDef {
     pub output_schema: Option<serde_json::Value>,
     pub annotations: Option<serde_json::Value>,
     pub icons: Option<serde_json::Value>,
+    /// Protocol extension metadata projected as the MCP `_meta` field.
+    pub meta: Option<serde_json::Value>,
     pub handler: VmClosure,
 }
 
@@ -29,6 +31,8 @@ pub struct McpResourceDef {
     pub title: Option<String>,
     pub description: Option<String>,
     pub mime_type: Option<String>,
+    /// Protocol extension metadata projected on both discovery and content.
+    pub meta: Option<serde_json::Value>,
     pub text: String,
 }
 

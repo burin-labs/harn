@@ -347,6 +347,9 @@ impl McpServer {
                 if let Some(ref icons) = t.icons {
                     entry["icons"] = icons.clone();
                 }
+                if let Some(ref meta) = t.meta {
+                    entry["_meta"] = meta.clone();
+                }
                 entry["execution"] =
                     mcp_protocol::tool_execution(mcp_protocol::McpToolTaskSupport::Forbidden);
                 entry
@@ -556,6 +559,9 @@ impl McpServer {
             if let Some(ref mime) = r.mime_type {
                 entry["mimeType"] = serde_json::json!(mime);
             }
+            if let Some(ref meta) = r.meta {
+                entry["_meta"] = meta.clone();
+            }
             entry
         }));
 
@@ -609,6 +615,9 @@ impl McpServer {
             let mut content = serde_json::json!({ "uri": resource.uri, "text": resource.text });
             if let Some(ref mime) = resource.mime_type {
                 content["mimeType"] = serde_json::json!(mime);
+            }
+            if let Some(ref meta) = resource.meta {
+                content["_meta"] = meta.clone();
             }
             return serde_json::json!({
                 "jsonrpc": "2.0",
