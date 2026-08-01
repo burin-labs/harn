@@ -534,6 +534,14 @@ fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
       "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must prune superseded release caches",
     ]
   }
+  const enforcing_reporters = reporters.filter(
+    { step -> trim(step?.env?.HARN_ENFORCE_CACHE_BUDGET ?? "") == "1" },
+  )
+    .to_list()
+  if len(enforcing_reporters) != 1 {
+    errors = errors
+      + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must enforce the cache budget"]
+  }
   return errors
 }
 

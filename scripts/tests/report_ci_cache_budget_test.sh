@@ -28,7 +28,13 @@ elif [[ "$args" == *'/actions/caches?ref=refs/heads/main&per_page=100'* ]]; then
     printf '%s\n' '[{"actions_caches":[{"id":10,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"},{"id":20,"ref":"refs/heads/main","key":"v0-rust-release-aarch64-apple-darwin-Darwin-arm64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"},{"id":30,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"}]},{"actions_caches":[{"id":11,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-22222222-bbbbbbbb","created_at":"2026-01-02T00:00:00Z"},{"id":12,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-33333333-cccccccc","created_at":"2026-01-02T00:00:00Z"},{"id":21,"ref":"refs/heads/main","key":"v0-rust-release-aarch64-apple-darwin-Darwin-arm64-22222222-bbbbbbbb","created_at":"2026-01-02T00:00:00Z"},{"id":13,"ref":"refs/pull/9/merge","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-44444444-dddddddd","created_at":"2026-01-03T00:00:00Z"},{"id":14,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-manual-backup","created_at":"2026-01-04T00:00:00Z"}]}]'
   fi
 elif [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
-  if [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
+  if [[ "${MOCK_BUDGET_INVENTORY:-0}" == "1" ]]; then
+    if grep -q '^cache delete 103 --repo burin-labs/harn$' "$MOCK_GH_LOG"; then
+      printf '%s\n' '[{"actions_caches":[{"id":101,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":419430400},{"id":102,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":524288000},{"id":104,"ref":"refs/heads/main","key":"node-tooling-current","size_in_bytes":104857600}]}]'
+    else
+      printf '%s\n' '[{"actions_caches":[{"id":101,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":419430400},{"id":102,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":524288000},{"id":103,"ref":"refs/heads/main","key":"v0-rust-workspace-macos-current","size_in_bytes":314572800},{"id":104,"ref":"refs/heads/main","key":"node-tooling-current","size_in_bytes":104857600}]}]'
+    fi
+  elif [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
     printf '[{"total_count":3,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-oldhash-oldlock","size_in_bytes":2000,"created_at":"2026-01-01T00:00:00Z"},{"id":3,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-newhash-newlock","size_in_bytes":2100,"created_at":"2026-01-02T00:00:00Z"},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000,"created_at":"2026-01-01T00:00:00Z"}]}]\n'
   else
     printf '[{"total_count":2,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-linux","size_in_bytes":%s},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000}]}]\n' "${MOCK_LISTED_RELEASE_BYTES:-2000}"
@@ -46,7 +52,7 @@ PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/gh.log" GITHUB_REPOSITORY=burin-labs/har
   GITHUB_STEP_SUMMARY="$tmp/summary.md" \
   "$repo_root/scripts/report_ci_cache_budget.sh" >"$tmp/report.json"
 jq -e '
-  .schema_version == "harn.ci_cache_budget.v2" and
+  .schema_version == "harn.ci_cache_budget.v3" and
   .configured_limit_bytes == 10737418240 and
   .active_bytes == 3000 and
   .listed_bytes == 3000 and
@@ -111,6 +117,30 @@ PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/prune-gh.log" MOCK_DUPLICATE_RELEASE=1 \
   HARN_PRUNE_SUPERSEDED_RELEASE_CACHES=1 GITHUB_REPOSITORY=burin-labs/harn \
   "$repo_root/scripts/report_ci_cache_budget.sh" >"$tmp/prune.json"
 grep -Fxq 'cache delete 1 --repo burin-labs/harn' "$tmp/prune-gh.log"
+
+printf '%s\n' '{"storage_limit_bytes":1073741824}' >"$tmp/budget-policy.json"
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/budget-prune-gh.log" MOCK_BUDGET_INVENTORY=1 \
+  HARN_PRUNE_SUPERSEDED_RELEASE_CACHES=1 HARN_ENFORCE_CACHE_BUDGET=1 \
+  HARN_CACHE_POLICY_PATH="$tmp/budget-policy.json" \
+  GITHUB_STEP_SUMMARY="$tmp/budget-summary.md" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/report_ci_cache_budget.sh" >"$tmp/budget-prune.json"
+jq -e '
+  .within_budget == true and
+  .listed_bytes == 1048576000 and
+  .budget_enforcement.schema_version == "harn.ci_cache_budget_prune.v1" and
+  .budget_enforcement.deficit_bytes == 289406976 and
+  .budget_enforcement.selected_bytes == 314572800 and
+  (.budget_enforcement.deleted | map(.id)) == [103]
+' "$tmp/budget-prune.json" >/dev/null
+grep -Fxq 'cache delete 103 --repo burin-labs/harn' "$tmp/budget-prune-gh.log"
+grep -q '^#### Budget enforcement$' "$tmp/budget-summary.md"
+grep -q 'v0-rust-workspace-macos-current' "$tmp/budget-summary.md"
+if grep -Eq '^cache delete (101|102) ' "$tmp/budget-prune-gh.log"; then
+  echo "budget enforcement must preserve release and larger high-value caches" >&2
+  cat "$tmp/budget-prune-gh.log" >&2
+  exit 1
+fi
 
 if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/error-gh.log" MOCK_API_ERROR=usage \
   GITHUB_REPOSITORY=burin-labs/harn \
