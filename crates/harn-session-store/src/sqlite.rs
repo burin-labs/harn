@@ -41,7 +41,11 @@ use super::store::{
     TruncateResult, UpdateSession, VerifyReport, MAX_READ_BATCH,
 };
 
-const SCHEMA_VERSION: i64 = 4;
+// v5 adds `sessions.title_pinned`. Adding a column has to move this number:
+// the shared initializer fast-paths out of schema setup entirely when the
+// recorded version already matches, so an unbumped column never reaches an
+// existing database.
+const SCHEMA_VERSION: i64 = 5;
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLITE_SCHEMA: SchemaVersion = SchemaVersion::new("session_store", SCHEMA_VERSION);
 
@@ -146,6 +150,7 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
                 persona             TEXT,
                 parent_session_id   TEXT,
                 title               TEXT,
+                title_pinned        INTEGER NOT NULL DEFAULT 0,
                 cwd                 TEXT,
                 model               TEXT,
                 session_type        TEXT,
@@ -238,6 +243,9 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
         )
         .map_err(map_sql)?;
     ensure_session_column(transaction, "title", "TEXT")?;
+    // Rows written before pinning existed carry no user choice, so 0 is the
+    // correct reading of their history rather than a placeholder.
+    ensure_session_column(transaction, "title_pinned", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_session_column(transaction, "cwd", "TEXT")?;
     ensure_session_column(transaction, "model", "TEXT")?;
     ensure_session_column(transaction, "session_type", "TEXT")?;
@@ -442,10 +450,11 @@ fn insert_session(
             usage_cost_usd_micros, created_at_ms, created_at, updated_at_ms,
             updated_at, status, event_count, last_event_id, chain_root_hash,
             closed_at_ms, closed_at, soft_deleted_at_ms, ttl_seconds, tags_json,
-            attributes_json, next_event_id
+            attributes_json, next_event_id, title_pinned
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
+            ?28
          )",
         params![
             meta.id,
@@ -475,6 +484,7 @@ fn insert_session(
             tags_json,
             attrs_json,
             next_event_id as i64,
+            meta.title_pinned,
         ],
     )
     .map_err(|error| map_create_sql(error, &meta.id))?;
@@ -490,7 +500,8 @@ fn read_session_meta(conn: &Connection, session_id: &str) -> StoreResult<(Sessio
                     usage_cost_usd_micros, created_at_ms, created_at,
                     updated_at_ms, updated_at, status, event_count, last_event_id,
                     chain_root_hash, closed_at_ms, closed_at, soft_deleted_at_ms,
-                    ttl_seconds, tags_json, attributes_json, next_event_id
+                    ttl_seconds, tags_json, attributes_json, next_event_id,
+                    title_pinned
              FROM sessions WHERE id = ?1",
             params![session_id],
             |row| {
@@ -521,6 +532,7 @@ fn read_session_meta(conn: &Connection, session_id: &str) -> StoreResult<(Sessio
                     row.get::<_, String>(23)?,
                     row.get::<_, String>(24)?,
                     row.get::<_, i64>(25)?,
+                    row.get::<_, bool>(26)?,
                 ))
             },
         )
@@ -554,6 +566,7 @@ fn read_session_meta(conn: &Connection, session_id: &str) -> StoreResult<(Sessio
         tags_json,
         attrs_json,
         next_event_id,
+        title_pinned,
     ) = row;
     let tags = serde_json::from_str(&tags_json).unwrap_or_default();
     let attributes = serde_json::from_str(&attrs_json).unwrap_or_default();
@@ -563,6 +576,7 @@ fn read_session_meta(conn: &Connection, session_id: &str) -> StoreResult<(Sessio
         persona,
         parent_session_id,
         title,
+        title_pinned,
         cwd,
         model,
         session_type: session_type

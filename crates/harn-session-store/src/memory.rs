@@ -207,9 +207,14 @@ impl SessionStore for MemorySessionStore {
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
-        if let Some(value) = request.title {
-            record.meta.title = Some(value);
-        }
+        let (title, title_pinned) = crate::memory_helpers::resolve_title_update(
+            record.meta.title.take(),
+            record.meta.title_pinned,
+            request.title,
+            request.title_pinned,
+        );
+        record.meta.title = title;
+        record.meta.title_pinned = title_pinned;
         if let Some(value) = request.cwd {
             record.meta.cwd = Some(value);
         }

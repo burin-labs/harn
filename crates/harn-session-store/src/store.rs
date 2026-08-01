@@ -57,6 +57,9 @@ pub struct SessionMeta {
     pub parent_session_id: Option<SessionId>,
     #[serde(default)]
     pub title: Option<String>,
+    /// True when a person chose this title. Derived titles never overwrite it.
+    #[serde(default)]
+    pub title_pinned: bool,
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
@@ -101,6 +104,10 @@ pub struct CreateSession {
     pub parent_session_id: Option<SessionId>,
     #[serde(default)]
     pub title: Option<String>,
+    /// Seed a session whose title is already a person's choice, so a rename
+    /// against a not-yet-persisted session survives its first derived write.
+    #[serde(default)]
+    pub title_pinned: bool,
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
@@ -131,6 +138,21 @@ pub struct CreateSession {
 pub struct UpdateSession {
     #[serde(default)]
     pub title: Option<String>,
+    /// Whether `title` is a person's choice, which decides who may overwrite
+    /// whom. Leaving this `None` marks the write as *derived* — a title
+    /// generated from session content — and derived writes never overwrite a
+    /// pinned title. That default is what makes an auto-titling caller
+    /// fail-safe without having to know pinning exists.
+    ///
+    /// | `title` | `title_pinned` | effect |
+    /// |---|---|---|
+    /// | `Some` | `Some(true)` | rename: set the title and pin it |
+    /// | `Some` | `Some(false)` | retitle and release the pin |
+    /// | `None` | `Some(_)` | change the pin state, keep the title |
+    /// | `Some` | `None` | derived: applied only while unpinned |
+    /// | `None` | `None` | no title change |
+    #[serde(default)]
+    pub title_pinned: Option<bool>,
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]

@@ -81,10 +81,22 @@ impl SessionStore for SqliteSessionStore {
         let mut conn = self.lock();
         let tx = write_transaction(&mut conn)?;
         let (updated_at_ms, updated_at) = now_ms_and_rfc3339();
+        // `BEGIN IMMEDIATE` already owns the writer lock, so reading the
+        // current title inside the transaction cannot race another writer.
+        // That lets both backends share one decision instead of restating it
+        // as SQL here and as Rust in the in-memory store.
+        let (current, _) = read_session_meta(&tx, session_id)?;
+        let (title, title_pinned) = crate::memory_helpers::resolve_title_update(
+            current.title,
+            current.title_pinned,
+            request.title,
+            request.title_pinned,
+        );
         let changed = tx
             .execute(
                 "UPDATE sessions SET
-                    title = COALESCE(?1, title),
+                    title = ?1,
+                    title_pinned = ?13,
                     cwd = COALESCE(?2, cwd),
                     model = COALESCE(?3, model),
                     parent_session_id = COALESCE(?4, parent_session_id),
@@ -97,7 +109,7 @@ impl SessionStore for SqliteSessionStore {
                     updated_at = ?11
                  WHERE id = ?12",
                 params![
-                    request.title,
+                    title,
                     request.cwd,
                     request.model,
                     request.parent_session_id,
@@ -109,6 +121,7 @@ impl SessionStore for SqliteSessionStore {
                     updated_at_ms,
                     updated_at,
                     session_id,
+                    title_pinned,
                 ],
             )
             .map_err(map_sql)?;
