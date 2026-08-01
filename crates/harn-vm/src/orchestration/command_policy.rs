@@ -1179,8 +1179,9 @@ pub fn universal_catastrophic_reason(
     program: &str,
     args: &[String],
     workspace_roots: &[String],
+    active_cwd: &Path,
 ) -> Option<String> {
-    scan::scan_universal_catastrophic_reason(program, args, workspace_roots)
+    scan::scan_universal_catastrophic_reason(program, args, workspace_roots, active_cwd)
 }
 
 #[cfg(test)]

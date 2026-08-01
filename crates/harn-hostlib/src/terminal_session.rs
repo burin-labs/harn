@@ -5,6 +5,7 @@
 //! environment custody, and VM value conversion.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -51,10 +52,12 @@ impl SessionManager {
                     .map(|path| vec![path.display().to_string()])
                     .unwrap_or_default()
             });
+        let active_cwd = cwd.as_deref().unwrap_or_else(|| Path::new("."));
         if let Some(reason) = harn_vm::orchestration::universal_catastrophic_reason(
             &request.argv[0],
             &request.argv[1..],
             &workspace_roots,
+            active_cwd,
         ) {
             return Err(HostlibError::CatastrophicFloor {
                 builtin: START,

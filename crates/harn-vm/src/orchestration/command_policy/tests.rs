@@ -433,12 +433,14 @@ fn windows_scoped_and_named_deletes_are_not_over_flagged() {
 const ROOT: &str = "/home/dev/project";
 
 fn cat_ctx(cmd: &str, roots: &[&str]) -> JsonValue {
+    let active_cwd = roots.first().copied().unwrap_or("/tmp/work");
     serde_json::json!({
         "request": {
             "mode": "shell",
             "command": cmd,
-            "cwd": roots.first().copied().unwrap_or("/tmp/work"),
+            "cwd": active_cwd,
         },
+        "active_cwd": active_cwd,
         "workspace_roots": roots,
     })
 }
@@ -491,10 +493,6 @@ fn floor_blocks_catastrophic_set() {
         "mkfs.ext4 /dev/sda1",
         "mkfs /dev/sda",
         "chmod -R 000 .",
-        "truncate -s 0 src/main.rs",
-        "printf 'x' > src/main.zig",
-        "echo broken > lib/foo.ts",
-        "cat /dev/null >> app/Server.swift",
         ":(){ :|:& };:",
         "bash -c 'git reset --hard'",
         "sh -lc \"rm -rf /\"",
@@ -535,7 +533,11 @@ fn floor_allows_normal_commands() {
             "dd if=/dev/zero bs=1M count=1 status=none",
             "swift build",
         ] {
-            assert!(!is_cat_root(cmd), "should NOT be catastrophic: {cmd}");
+            let reason = cat_reason(cmd, &[ROOT]);
+            assert!(
+                reason.is_none(),
+                "should NOT be catastrophic: {cmd}; reason: {reason:?}"
+            );
         }
 }
 
@@ -645,19 +647,6 @@ fn floor_ignores_mentions_and_scoped_deletes() {
     ] {
         assert!(!is_cat_root(cmd), "should NOT be catastrophic: {cmd}");
     }
-}
-
-#[test]
-fn floor_redirect_and_truncate_only_target_source_files() {
-    // Redirect / truncate onto a non-source file is allowed; onto a source
-    // file (by the 39-extension set) it is blocked.
-    assert!(!is_cat_root("echo x > notes.md"));
-    assert!(!is_cat_root("echo x > data.json"));
-    assert!(is_cat_root("echo x > mod.rs"));
-    assert!(is_cat_root("echo x >> query.sql"));
-    assert!(!is_cat_root("truncate -s 0 blob.bin"));
-    assert!(is_cat_root("truncate --size=0 main.go"));
-    assert!(is_cat_root("truncate -s0 main.py"));
 }
 
 #[test]
@@ -879,36 +868,43 @@ async fn no_policy_backstop_allows_benign_command() {
 #[test]
 fn universal_catastrophic_reason_blocks_full_floor() {
     let root = vec![ROOT.to_string()];
+    let cwd = Path::new(ROOT);
     let s = |parts: &[&str]| parts.iter().map(|p| p.to_string()).collect::<Vec<_>>();
-    assert!(universal_catastrophic_reason("rm", &s(&["-rf", "/"]), &root).is_some());
-    assert!(universal_catastrophic_reason("mkfs.ext4", &s(&["/dev/sda"]), &root).is_some());
+    assert!(universal_catastrophic_reason("rm", &s(&["-rf", "/"]), &root, cwd).is_some());
+    assert!(universal_catastrophic_reason("mkfs.ext4", &s(&["/dev/sda"]), &root, cwd).is_some());
     assert!(
-        universal_catastrophic_reason("dd", &s(&["of=/dev/sda", "if=/dev/zero"]), &root).is_some()
+        universal_catastrophic_reason("dd", &s(&["of=/dev/sda", "if=/dev/zero"]), &root, cwd)
+            .is_some()
     );
     // Fork bomb through the canonical sh -c argv wrapper.
-    assert!(universal_catastrophic_reason("sh", &s(&["-c", ":(){ :|:& };:"]), &root).is_some());
-    assert!(universal_catastrophic_reason("chmod", &s(&["-R", "000", "."]), &root).is_some());
     assert!(
-        universal_catastrophic_reason("truncate", &s(&["-s", "0", "src/main.rs"]), &root).is_some()
+        universal_catastrophic_reason("sh", &s(&["-c", ":(){ :|:& };:"]), &root, cwd).is_some()
     );
-    assert!(universal_catastrophic_reason("git", &s(&["reset", "--hard"]), &root).is_some());
-    assert!(universal_catastrophic_reason("git", &s(&["clean", "-fdx"]), &root).is_some());
+    assert!(universal_catastrophic_reason("chmod", &s(&["-R", "000", "."]), &root, cwd).is_some());
+    assert!(universal_catastrophic_reason("git", &s(&["reset", "--hard"]), &root, cwd).is_some());
+    assert!(universal_catastrophic_reason("git", &s(&["clean", "-fdx"]), &root, cwd).is_some());
     assert!(universal_catastrophic_reason(
         "git",
         &s(&["push", "--force-with-lease=main:abc123", "origin", "HEAD"]),
         &root,
+        cwd,
     )
     .is_some());
-    assert!(universal_catastrophic_reason("sh", &s(&["-c", "git reset --hard"]), &root).is_some());
+    assert!(
+        universal_catastrophic_reason("sh", &s(&["-c", "git reset --hard"]), &root, cwd).is_some()
+    );
     // Benign commands never fire.
-    assert!(universal_catastrophic_reason("ls", &s(&["-la"]), &root).is_none());
-    assert!(universal_catastrophic_reason("rm", &s(&["-rf", "build"]), &root).is_none());
-    assert!(universal_catastrophic_reason("git", &s(&["status"]), &root).is_none());
-    assert!(universal_catastrophic_reason("git", &s(&["push", "origin", "HEAD"]), &root).is_none());
+    assert!(universal_catastrophic_reason("ls", &s(&["-la"]), &root, cwd).is_none());
+    assert!(universal_catastrophic_reason("rm", &s(&["-rf", "build"]), &root, cwd).is_none());
+    assert!(universal_catastrophic_reason("git", &s(&["status"]), &root, cwd).is_none());
+    assert!(
+        universal_catastrophic_reason("git", &s(&["push", "origin", "HEAD"]), &root, cwd).is_none()
+    );
     let cmake_setup = universal_catastrophic_reason(
             "sh",
             &s(&["-c", "rm -rf build/burin-eval-setup && if command -v ninja >/dev/null 2>&1; then cmake -S . -B build/burin-eval-setup -G Ninja; else cmake -S . -B build/burin-eval-setup; fi"]),
             &root,
+            cwd,
         );
     assert!(cmake_setup.is_none(), "unexpected block: {cmake_setup:?}");
 }

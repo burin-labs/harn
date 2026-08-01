@@ -90,7 +90,7 @@
 3	pool/pool_unsettled_state_integration.harn	HARN-LNT-014
 1	pool_durability/stale_inflight_marked_failed.harn	HARN-LNT-014
 1	reminders/reminder_lifecycle_event_log.harn	HARN-LNT-014
-40	runtime/command_policy_hooks.harn	HARN-LNT-025
+38	runtime/command_policy_hooks.harn	HARN-LNT-025
 1	runtime/http_mock.harn	HARN-LNT-029
 2	scenarios/agent_loop_escalation_equivalent_failover.harn	HARN-LNT-018
 1	scenarios/agent_loop_escalation_equivalent_failover_partial_route_patch.harn	HARN-LNT-018

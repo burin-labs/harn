@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -358,8 +358,8 @@ pub fn current_spawner() -> Arc<dyn ProcessSpawner> {
 /// long-running background path). The UNIVERSAL catastrophic-command floor is
 /// enforced HERE, UNCONDITIONALLY — no `command_policy` on the stack is
 /// required — so a machine/disk/data-destroying command (`rm -rf /`, fork bomb,
-/// `mkfs`, `dd of=<device>`, `chmod -R 000`, `truncate -s 0` of a source file,
-/// redirect-over-source, project-root delete) and the textual git-destructive
+/// `mkfs`, `dd of=<device>`, `chmod -R 000`, tracked-file truncation or
+/// redirection, project-root delete) and the textual git-destructive
 /// family (`git reset --hard`, `git clean -fd`, force-push) is rejected before
 /// the child is ever created, on standalone Harn and under every embedder
 /// alike. Structured git builtins remain the reviewed path for legitimate
@@ -377,10 +377,12 @@ pub(crate) fn validate_process_spec(spec: &SpawnSpec) -> Result<(), ProcessError
         .as_ref()
         .map(|cwd| vec![cwd.display().to_string()])
         .unwrap_or_default();
+    let active_cwd = spec.cwd.as_deref().unwrap_or_else(|| Path::new("."));
     if let Some(reason) = harn_vm::orchestration::universal_catastrophic_reason(
         &spec.program,
         &spec.args,
         &workspace_roots,
+        active_cwd,
     ) {
         return Err(ProcessError::CatastrophicFloor(reason));
     }
