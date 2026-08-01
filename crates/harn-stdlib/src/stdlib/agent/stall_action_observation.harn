@@ -1,5 +1,5 @@
 import { AgentStallConfig, AgentStallState } from "std/agent/stall_types"
-import { verification_gate_input } from "std/verification"
+import { VerificationGateInput, verification_gate_input } from "std/verification"
 
 /**
  * Action-stream observation for stall diagnostics.
@@ -66,7 +66,7 @@ pub fn __agent_stall_result_error_signature(delta, result) -> string {
   return "err:" + sha256(fallback)
 }
 
-pub fn __agent_stall_current_hashes(result) {
+pub fn __agent_stall_current_hashes(result) -> dict? {
   if type_of(result) != "dict" {
     return nil
   }
@@ -76,7 +76,7 @@ pub fn __agent_stall_current_hashes(result) {
     ?? result?.fileHashes
 }
 
-pub fn __agent_stall_gate_input(agent: HarnessAgent, previous, result) {
+pub fn __agent_stall_gate_input(agent: HarnessAgent, previous, result) -> VerificationGateInput {
   return verification_gate_input(agent, previous, result, __agent_stall_current_hashes(result))
 }
 
@@ -98,7 +98,7 @@ pub fn __agent_stall_result_outcome(agent: HarnessAgent, result) -> dict {
 }
 
 /** Find the dispatch result for the action being folded. */
-pub fn __agent_stall_outcome_for(agent: HarnessAgent, prev_dispatch, tool_name: string) {
+pub fn __agent_stall_outcome_for(agent: HarnessAgent, prev_dispatch, tool_name: string) -> dict? {
   if prev_dispatch == nil {
     return nil
   }
@@ -284,7 +284,7 @@ pub fn __agent_stall_process_call(
 }
 
 /** Decide which stall condition owns this processed call. */
-pub fn __agent_stall_classify_trip(config: AgentStallConfig, s) {
+pub fn __agent_stall_classify_trip(config: AgentStallConfig, s) -> dict? {
   const repair_owns_repeat = config.repair_aware
   if s.context_streak >= config.repeat_context_window_error {
     return {
