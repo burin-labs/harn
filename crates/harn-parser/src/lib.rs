@@ -29,9 +29,52 @@ pub use typechecker::{
 
 pub use builtin_signatures::install_builtin_manifest;
 
+/// Explicit process-level bridge for downstream packages that have not yet
+/// completed the typed `Harness` capability migration.
+///
+/// The bridge is intentionally opt-in and keeps the strict source surface as
+/// the default. Callers must set the value to exactly `1`; merely defining the
+/// variable is not sufficient.
+pub const HARN_LEGACY_AMBIENT_CAPABILITIES_ENV: &str = "HARN_LEGACY_AMBIENT_CAPABILITIES";
+
+pub fn legacy_ambient_capabilities_enabled() -> bool {
+    std::env::var(HARN_LEGACY_AMBIENT_CAPABILITIES_ENV).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// Whether an old hostlib wire name projects a method from the authoritative
+/// typed host-capability registry. This keeps compatibility recognition exact:
+/// arbitrary `hostlib_*` spellings remain undefined.
+pub fn is_registered_legacy_hostlib_name(name: &str) -> bool {
+    if name == "hostlib_enable" {
+        return true;
+    }
+    harn_builtin_meta::host_capabilities::capability_binding_for_legacy_hostlib_name(name).is_some()
+}
+
+/// Exact behavior-preserving spellings removed during the typed-Harness
+/// cutover. The compiler lowers these to the canonical manifest name only in
+/// compatibility mode; strict source continues to reject them.
+pub fn legacy_builtin_alias_target(name: &str) -> Option<&'static str> {
+    match name {
+        "regex_replace_all" => Some("regex_replace"),
+        _ => None,
+    }
+}
+
 /// Returns `true` if `name` is a builtin recognized by the parser's static analyzer.
 pub fn is_known_builtin(name: &str) -> bool {
     builtin_signatures::is_builtin(name)
+}
+
+/// Opt-in ambient bridge: treat a registered builtin as known without a typed
+/// `Harness` capability import.
+pub fn is_legacy_ambient_builtin(name: &str) -> bool {
+    legacy_ambient_capabilities_enabled() && is_known_builtin(name)
 }
 
 /// Every builtin name known to the parser, alphabetically. Enables bidirectional
@@ -192,5 +235,20 @@ mod pipeline_tests {
             "PipelineError grew to {} bytes — consider boxing large variants",
             std::mem::size_of::<PipelineError>()
         );
+    }
+
+    #[test]
+    fn legacy_hostlib_names_must_resolve_through_the_typed_registry() {
+        assert!(is_registered_legacy_hostlib_name(
+            "hostlib_terminal_session_capture"
+        ));
+        assert!(is_registered_legacy_hostlib_name(
+            "hostlib_code_index_agent_heartbeat"
+        ));
+        assert!(is_registered_legacy_hostlib_name("hostlib_enable"));
+        assert!(!is_registered_legacy_hostlib_name(
+            "hostlib_terminal_session_not_registered"
+        ));
+        assert!(!is_registered_legacy_hostlib_name("hostlib_unknown_ping"));
     }
 }

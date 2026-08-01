@@ -23,7 +23,8 @@ mod selection_builtins;
 #[cfg(test)]
 mod tests;
 
-use crate::stdlib::macros::{register_builtin_defs, VmBuiltinDef};
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
+use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 use self::catalog_builtins::{
@@ -78,4 +79,23 @@ const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
     &LLM_EQUIVALENT_MODELS_BUILTIN_DEF,
     &LLM_RATE_LIMIT_BUILTIN_DEF,
     &LLM_HEALTHCHECK_BUILTIN_DEF,
+    &LLM_PROVIDER_STATUS_LEGACY_DEF,
 ];
+
+/// Exact compatibility surface for pre-typed-Harness packages. Strict source
+/// cannot call runtime-internal builtins; opted-in downstreams retain the old
+/// spelling while migrating to `harness.llm.providers()`.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "llm_provider_status() -> list",
+    category = "llm.config"
+)]
+fn llm_provider_status_legacy(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::TypeError(
+            "llm_provider_status expects no arguments".to_string(),
+        ));
+    }
+    Ok(provider_projection::llm_provider_status_value())
+}

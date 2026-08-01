@@ -1964,7 +1964,8 @@ impl<'a> Linter<'a> {
         }
 
         for (name, span, persona_name) in &self.persona_body_calls {
-            if self.builtin_functions.contains(name) {
+            if self.builtin_functions.contains(name) || harn_parser::is_legacy_ambient_builtin(name)
+            {
                 continue;
             }
             if self.step_functions.contains(name) {
@@ -2015,16 +2016,13 @@ impl<'a> Linter<'a> {
             return;
         }
         for (name, span) in &self.function_calls {
-            if self.known_functions.contains(name) {
+            if self.known_functions.contains(name) || harn_parser::is_legacy_ambient_builtin(name) {
                 continue;
             }
             if all_vars.contains(name) {
                 continue;
             }
-            if name.starts_with("__") {
-                continue;
-            }
-            if name.starts_with("hostlib_") {
+            if name.starts_with("__") || name.starts_with("hostlib_") {
                 continue;
             }
             let suggestion = if let Some(closest) =

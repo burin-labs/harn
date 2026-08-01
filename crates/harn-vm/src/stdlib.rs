@@ -268,6 +268,13 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     if vm.harness().is_none() {
         vm.set_harness(crate::harness::Harness::real());
     }
+    if harn_parser::legacy_ambient_capabilities_enabled() && vm.global("harness").is_none() {
+        let harness = vm
+            .root_harness_value()
+            .expect("register_vm_stdlib installs a root Harness");
+        vm.set_global("harness", harness);
+    }
+    vm.project_legacy_capability_globals();
     harn_builtin_registry::install_builtin_manifest(all_builtin_manifest());
 }
 

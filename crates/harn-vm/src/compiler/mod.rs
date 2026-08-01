@@ -80,6 +80,7 @@ pub const HARN_DISABLE_OPTIMIZATIONS_ENV: &str = "HARN_DISABLE_OPTIMIZATIONS";
 pub struct CompilerOptions {
     optimize: bool,
     privileged_wire_authority: bool,
+    legacy_ambient_capabilities: bool,
 }
 
 impl CompilerOptions {
@@ -87,6 +88,7 @@ impl CompilerOptions {
         Self {
             optimize: true,
             privileged_wire_authority: false,
+            legacy_ambient_capabilities: false,
         }
     }
 
@@ -94,6 +96,7 @@ impl CompilerOptions {
         Self {
             optimize: false,
             privileged_wire_authority: false,
+            legacy_ambient_capabilities: false,
         }
     }
 
@@ -106,15 +109,18 @@ impl CompilerOptions {
         Self {
             optimize: true,
             privileged_wire_authority: true,
+            legacy_ambient_capabilities: false,
         }
     }
 
     pub fn from_env() -> Self {
-        if std::env::var_os(HARN_DISABLE_OPTIMIZATIONS_ENV).is_some() {
+        let mut options = if std::env::var_os(HARN_DISABLE_OPTIMIZATIONS_ENV).is_some() {
             Self::without_optimizations()
         } else {
             Self::optimized()
-        }
+        };
+        options.legacy_ambient_capabilities = harn_parser::legacy_ambient_capabilities_enabled();
+        options
     }
 
     pub fn optimizations_enabled(self) -> bool {
@@ -123,6 +129,16 @@ impl CompilerOptions {
 
     pub(crate) fn privileged_wire_authority(self) -> bool {
         self.privileged_wire_authority
+    }
+
+    pub(crate) fn legacy_ambient_capabilities(self) -> bool {
+        self.legacy_ambient_capabilities
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_legacy_ambient_capabilities(mut self) -> Self {
+        self.legacy_ambient_capabilities = true;
+        self
     }
 }
 

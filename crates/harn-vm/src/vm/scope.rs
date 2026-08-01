@@ -4,6 +4,8 @@ use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 
 use super::{CallArgs, CallFrame, LocalSlot, Vm};
 
+type PreparedClosureLocals = (Vec<LocalSlot>, Option<Vec<LocalSlot>>, Option<Vec<VmValue>>);
+
 impl Vm {
     /// Build the call-time env for a closure invocation.
     ///
@@ -119,7 +121,7 @@ impl Vm {
         &self,
         closure: &VmClosure,
         args: &[VmValue],
-    ) -> Result<(Vec<LocalSlot>, Option<Vec<LocalSlot>>), VmError> {
+    ) -> Result<PreparedClosureLocals, VmError> {
         self.prepare_closure_local_slots_args(closure, &CallArgs::Slice(args))
     }
 
@@ -127,16 +129,87 @@ impl Vm {
         &self,
         closure: &VmClosure,
         args: &CallArgs<'_>,
-    ) -> Result<(Vec<LocalSlot>, Option<Vec<LocalSlot>>), VmError> {
-        crate::typecheck::validate_user_call_args(&closure.func, args, None)?;
+    ) -> Result<PreparedClosureLocals, VmError> {
+        let legacy_args = self.legacy_ambient_call_args(closure, args)?;
+        let adapted_args = legacy_args.as_deref().map(CallArgs::Slice);
+        let effective_args = adapted_args.as_ref().unwrap_or(args);
+        crate::typecheck::validate_user_call_args(&closure.func, effective_args, None)?;
         let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
-        Self::bind_param_slots_args(&mut local_slots, &closure.func, args, false);
+        Self::bind_param_slots_args(&mut local_slots, &closure.func, effective_args, false);
         let initial_local_slots = if self.debugger_attached() {
             Some(local_slots.clone())
         } else {
             None
         };
-        Ok((local_slots, initial_local_slots))
+        Ok((local_slots, initial_local_slots, legacy_args))
+    }
+
+    pub(crate) fn legacy_ambient_call_args(
+        &self,
+        closure: &VmClosure,
+        args: &CallArgs<'_>,
+    ) -> Result<Option<Vec<VmValue>>, VmError> {
+        if self.global("harness").is_none() {
+            return Ok(None);
+        }
+        let capability_types: Vec<&str> = closure
+            .func
+            .params
+            .iter()
+            .map_while(|param| match param.type_expr.as_ref() {
+                Some(harn_parser::TypeExpr::Named(name))
+                    if name == "Harness"
+                        || harn_builtin_meta::CapabilityId::from_type_name(name).is_some() =>
+                {
+                    Some(name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        if capability_types.is_empty() {
+            return Ok(None);
+        }
+        let first_type = capability_types[0];
+        if args.get(0).is_some_and(
+            |value| matches!(value, VmValue::Harness(handle) if handle.type_name() == first_type),
+        ) {
+            return Ok(None);
+        }
+        if !closure.func.has_rest_param
+            && args.len() + capability_types.len() > closure.func.params.len()
+        {
+            return Ok(None);
+        }
+
+        let root = self.root_harness_value().ok_or_else(|| {
+            VmError::Runtime(format!(
+                "legacy call to `{}` requires typed Harness capabilities, but no root Harness is installed",
+                closure.func.name
+            ))
+        })?;
+        let mut adapted = Vec::with_capacity(args.len() + capability_types.len());
+        for type_name in capability_types {
+            let authority = if type_name == "Harness" {
+                root.clone()
+            } else {
+                let capability = harn_builtin_meta::CapabilityId::from_type_name(type_name)
+                    .expect("capability prefix was validated above");
+                let VmValue::Harness(root) = &root else {
+                    unreachable!("root_harness_value returned a non-Harness value")
+                };
+                root.sub_handle(capability.field_name())
+                    .map(VmValue::harness)
+                    .ok_or_else(|| {
+                        VmError::Runtime(format!(
+                            "legacy call to `{}` requires unavailable `{type_name}`",
+                            closure.func.name
+                        ))
+                    })?
+            };
+            adapted.push(authority);
+        }
+        adapted.extend(args.iter().cloned());
+        Ok(Some(adapted))
     }
 
     fn enter_closure_frame(
@@ -235,9 +308,11 @@ impl Vm {
         if self.frames.len() >= self.runtime_limits.max_vm_frames {
             return Err(VmError::StackOverflow);
         }
-        let (local_slots, initial_local_slots) =
+        let (local_slots, initial_local_slots, legacy_args) =
             self.prepare_closure_local_slots_args(closure, args)?;
-        let callee_argc = closure.func.callee_arg_count(args.len());
+        let callee_argc = closure
+            .func
+            .callee_arg_count(legacy_args.as_ref().map_or_else(|| args.len(), Vec::len));
         let step_args =
             if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
                 args.to_vec_from(0)
@@ -270,7 +345,7 @@ impl Vm {
             return Err(VmError::StackOverflow);
         }
         let supplied_args_len = self.stack.len() - args_start;
-        let (local_slots, initial_local_slots) =
+        let (local_slots, initial_local_slots, legacy_args) =
             match self.prepare_closure_local_slots(closure, &self.stack[args_start..]) {
                 Ok(prepared) => prepared,
                 Err(error) => {
@@ -284,7 +359,9 @@ impl Vm {
             } else {
                 Vec::new()
             };
-        let callee_argc = closure.func.callee_arg_count(supplied_args_len);
+        let callee_argc = closure
+            .func
+            .callee_arg_count(legacy_args.as_ref().map_or(supplied_args_len, Vec::len));
         self.stack.truncate(stack_truncate_to);
         self.enter_closure_frame(
             closure,
@@ -304,6 +381,18 @@ impl Vm {
         // Buffer size of 1: the generator produces one value at a time.
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
 
+        let original_args = CallArgs::Slice(args);
+        let legacy_args = match self.legacy_ambient_call_args(closure, &original_args) {
+            Ok(args) => args,
+            Err(error) => {
+                let _ = tx.try_send(Err(error));
+                return VmValue::generator(VmGenerator {
+                    done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    receiver: Arc::new(tokio::sync::Mutex::new(rx)),
+                });
+            }
+        };
+        let args = legacy_args.as_deref().unwrap_or(args);
         if let Err(error) = crate::typecheck::validate_user_call(&closure.func, args, None) {
             let _ = tx.try_send(Err(error));
             return VmValue::generator(VmGenerator {

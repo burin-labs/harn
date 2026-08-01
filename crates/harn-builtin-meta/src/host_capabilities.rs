@@ -19,8 +19,8 @@ pub struct HostCapabilityGroup {
 /// persistence is deliberately owned by `HarnessAgent`, so its compact
 /// `session.*` hostlib schema is exposed as `harness.agent.session_*`.
 pub fn capability_binding_for_schema(
-    module: &'static str,
-    method: &'static str,
+    module: &str,
+    method: &str,
 ) -> Option<(CapabilityId, &'static str)> {
     let capability = match module {
         "ast" => CapabilityId::Ast,
@@ -41,7 +41,7 @@ pub fn capability_binding_for_schema(
         "verdict" => CapabilityId::Verdict,
         _ => return None,
     };
-    let capability_method = if module == "session" {
+    let requested_method = if module == "session" {
         match method {
             "open" => "session_open",
             "update" => "session_update",
@@ -58,10 +58,27 @@ pub fn capability_binding_for_schema(
     } else {
         method
     };
-    HOST_CAPABILITY_GROUPS
+    let capability_method = HOST_CAPABILITY_GROUPS
         .iter()
-        .any(|group| group.capability == capability && group.methods.contains(&capability_method))
-        .then_some((capability, capability_method))
+        .filter(|group| group.capability == capability)
+        .flat_map(|group| group.methods.iter().copied())
+        .find(|candidate| *candidate == requested_method)?;
+    Some((capability, capability_method))
+}
+
+/// Decode one historical `hostlib_<module>_<method>` spelling through the
+/// authoritative typed capability registry.
+///
+/// Module and method names may both contain underscores, so each boundary is
+/// tried against `capability_binding_for_schema` instead of maintaining a
+/// second module-name table in compatibility consumers.
+pub fn capability_binding_for_legacy_hostlib_name(
+    name: &str,
+) -> Option<(CapabilityId, &'static str)> {
+    let suffix = name.strip_prefix("hostlib_")?;
+    suffix.match_indices('_').find_map(|(boundary, _)| {
+        capability_binding_for_schema(&suffix[..boundary], &suffix[boundary + 1..])
+    })
 }
 
 const DYNAMIC: &[ResourceSelector] = &[ResourceSelector::Dynamic];

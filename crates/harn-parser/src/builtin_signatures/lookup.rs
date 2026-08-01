@@ -23,7 +23,25 @@ pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
             entry.contract.exposure,
             BuiltinExposure::PureGlobal | BuiltinExposure::CapabilityFunction { .. }
         )
-        .then_some(entry.signature);
+        .then_some(entry.signature)
+        .or_else(|| {
+            (crate::legacy_ambient_capabilities_enabled()
+                && matches!(
+                    entry.contract.exposure,
+                    BuiltinExposure::HarnessMethod { .. }
+                        | BuiltinExposure::PrivilegedWire
+                        | BuiltinExposure::RuntimeInternal
+                ))
+            .then_some(entry.signature)
+        });
+    }
+    if crate::legacy_ambient_capabilities_enabled() {
+        if let Some(entry) = legacy_capability_method_entry(name) {
+            return Some(entry.signature);
+        }
+        if let Some(canonical) = crate::legacy_builtin_alias_target(name) {
+            return lookup(canonical);
+        }
     }
     for group in signatures::groups() {
         for sig in group {
@@ -33,6 +51,24 @@ pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
         }
     }
     None
+}
+
+/// Resolve an unqualified legacy method name only when the typed manifest has
+/// exactly one owning Harness capability. Ambiguous method spellings remain
+/// unavailable rather than selecting authority by registration order.
+pub fn legacy_capability_method_entry(
+    name: &str,
+) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
+    let mut matches = harn_builtin_registry::installed_manifest()
+        .into_iter()
+        .filter(|entry| {
+            matches!(
+                entry.contract.exposure,
+                BuiltinExposure::HarnessMethod { method, .. } if method == name
+            )
+        });
+    let entry = matches.next()?;
+    matches.next().is_none().then_some(entry)
 }
 
 /// Resolve the signature paired with one capability method contract.
@@ -69,6 +105,8 @@ pub fn capability_method_entry(
 /// Is `name` a builtin known to the parser?
 pub fn is_builtin(name: &str) -> bool {
     lookup(name).is_some()
+        || (crate::legacy_ambient_capabilities_enabled()
+            && crate::is_registered_legacy_hostlib_name(name))
 }
 
 /// Every builtin name. Installed names come first, then any static-only

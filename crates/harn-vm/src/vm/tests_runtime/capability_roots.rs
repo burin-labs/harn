@@ -9,6 +9,43 @@ use crate::{VmError, VmValue};
 use super::harness::*;
 
 #[test]
+fn legacy_call_derives_the_declared_leading_sub_capability() {
+    let strict_source = r#"
+fn describe(env: HarnessEnv, fs: HarnessFs, value: string) -> string {
+  return type_of(env) + ":" + type_of(fs) + ":" + value
+}
+
+pipeline main(harness: Harness) {
+  return describe("ok")
+}
+"#;
+    let legacy_source = r#"
+fn describe(env: HarnessEnv, fs: HarnessFs, value: string) -> string {
+  return type_of(env) + ":" + type_of(fs) + ":" + value
+}
+
+pipeline main(harness: Harness) {
+  const span = trace_start("legacy-call")
+  trace_end(span)
+  const alias_result = regex_replace_all("x", "y", "x")
+  return describe("ok") + ":" + alias_result
+}
+"#;
+
+    let strict =
+        run_harn_result(strict_source).expect_err("strict runtime must reject omitted authority");
+    assert!(
+        strict
+            .to_string()
+            .contains("expects at least 3 arguments, got 1"),
+        "unexpected strict error: {strict}"
+    );
+
+    let (_, value) = run_harn_with_legacy_ambient_capabilities(legacy_source);
+    assert_eq!(value.display(), "HarnessEnv:HarnessFs:ok:y");
+}
+
+#[test]
 fn harness_fs_source_dir_tracks_the_owning_imported_module() {
     let project = tempfile::tempdir().unwrap();
     let library_dir = project.path().join("lib");

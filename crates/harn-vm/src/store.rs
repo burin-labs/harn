@@ -210,6 +210,8 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
             Ok(VmValue::Nil)
         },
     );
+
+    vm.project_legacy_capability_globals();
 }
 
 #[cfg(test)]

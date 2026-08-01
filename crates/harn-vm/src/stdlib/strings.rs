@@ -677,6 +677,7 @@ fn extname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    aliases = ["render_prompt"],
     sig = "render(path: string?, bindings?: dict) -> string",
     category = "strings"
 )]

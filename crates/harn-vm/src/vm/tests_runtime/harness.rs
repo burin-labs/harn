@@ -44,6 +44,37 @@ pub(super) fn run_harn_with_options(source: &str, options: CompilerOptions) -> (
     })
 }
 
+pub(super) fn run_harn_with_legacy_ambient_capabilities(source: &str) -> (String, VmValue) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut lexer = Lexer::new(source);
+                let tokens = lexer.tokenize().unwrap();
+                let mut parser = Parser::new(tokens);
+                let program = parser.parse().unwrap();
+                let chunk = Compiler::with_options(
+                    CompilerOptions::optimized().with_legacy_ambient_capabilities(),
+                )
+                .compile(&program)
+                .unwrap();
+
+                let mut vm = Vm::new();
+                vm.set_harness(crate::Harness::real());
+                let root = vm.root_harness_value().expect("test installs root Harness");
+                vm.set_global("harness", root);
+                register_vm_stdlib(&mut vm);
+                let result = vm.execute(&chunk).await.unwrap();
+                (vm.output().to_string(), result)
+            })
+            .await
+    })
+}
+
 pub(in crate::vm) fn run_harn_result_display_with_options(
     source: &str,
     options: CompilerOptions,

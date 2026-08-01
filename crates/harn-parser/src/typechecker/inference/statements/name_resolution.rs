@@ -12,7 +12,10 @@ impl TypeChecker {
         // Root authority is never ambient. Enforce this even in parser-only
         // checks that have no resolved import catalog; treating the canonical
         // spelling as a magical global would defeat capability attenuation.
-        if matches!(name, "harness" | "_harness") && scope.get_var(name).is_none() {
+        if matches!(name, "harness" | "_harness")
+            && scope.get_var(name).is_none()
+            && !self.legacy_ambient_capabilities
+        {
             self.error_at(
                 Code::UndefinedVariable,
                 format!("undefined value `{name}`; pass it explicitly as `Harness`"),
@@ -33,6 +36,7 @@ impl TypeChecker {
             || builtin_signatures::is_builtin(name)
             || imported.contains(name)
             || scope.is_generic_type_param(name)
+            || (self.legacy_ambient_capabilities && matches!(name, "harness" | "_harness"))
             || name.starts_with("__")
             || matches!(name, "Ok" | "Err" | "Some" | "None")
         {
