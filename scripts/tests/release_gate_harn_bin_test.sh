@@ -734,26 +734,20 @@ if [[ -z "$package_audit_line" || "$cli_aot_line" -ge "$package_audit_line" ]]; 
   cat "$audit_record" >&2
   exit 1
 fi
-for lane in rust-audit harn-audit harn-performance package-audit; do
+for lane in rust-audit harn-audit package-audit; do
   if ! grep -Eq "ok: +$lane " "$tmp_root/audit-source-only.txt"; then
     echo "source-only audit omitted contract-owned lane: $lane" >&2
     cat "$tmp_root/audit-source-only.txt" >&2
     exit 1
   fi
 done
-performance_line="$(grep -Fn "make check-test-case-performance " "$audit_record" | cut -d: -f1)"
-for completed_lane in \
-  "make test " \
-  "make fmt-harn " \
-  "package-audit HARN_BIN="
-do
-  completed_line="$(grep -Fn "$completed_lane" "$audit_record" | tail -1 | cut -d: -f1)"
-  if [[ -z "$completed_line" || -z "$performance_line" || "$completed_line" -ge "$performance_line" ]]; then
-    echo "source-only audit did not isolate performance after $completed_lane" >&2
-    cat "$audit_record" >&2
-    exit 1
-  fi
-done
+if grep -Fq "make check-test-case-performance " "$audit_record" ||
+  grep -Fq "harn-performance" "$tmp_root/audit-source-only.txt"; then
+  echo "source-only audit duplicated the hosted macOS performance proof" >&2
+  cat "$tmp_root/audit-source-only.txt" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
 for lane in generated-audit docs-audit grammar-audit security-audit smoke-audit; do
   if grep -Eq "ok: +$lane " "$tmp_root/audit-source-only.txt"; then
     echo "source-only audit ran residual lane: $lane" >&2
@@ -770,17 +764,17 @@ if PATH="$fake_tools:$PATH" \
   FAKE_AUDIT_RECORD="$audit_record" \
   FAIL_FAKE_MAKE_TARGET=check-test-case-performance \
   env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
-    "$release_gate" audit --source-only \
-      > "$tmp_root/audit-source-performance-failure.txt" 2>&1; then
+    "$release_gate" audit \
+      > "$tmp_root/audit-full-performance-failure.txt" 2>&1; then
   echo "injected isolated performance failure unexpectedly passed" >&2
   exit 1
 fi
 if ! grep -Fq ">>> harn-performance  <<<" \
-  "$tmp_root/audit-source-performance-failure.txt" ||
+  "$tmp_root/audit-full-performance-failure.txt" ||
   ! grep -Fq -- "-> parallel test-case performance" \
-    "$tmp_root/audit-source-performance-failure.txt"; then
+    "$tmp_root/audit-full-performance-failure.txt"; then
   echo "isolated performance failure did not name its step and command" >&2
-  cat "$tmp_root/audit-source-performance-failure.txt" >&2
+  cat "$tmp_root/audit-full-performance-failure.txt" >&2
   exit 1
 fi
 

@@ -7,6 +7,7 @@ import {
   parse_time_output,
   percentile,
   time_args,
+  validated_baseline_profile,
 } from "../check_test_case_performance.harn"
 
 fn sample_diag(name: string, setup: int, execute: int) -> string {
@@ -216,6 +217,18 @@ pipeline test_baseline_loader_is_platform_specific_and_versioned(harness: Harnes
     load_platform_baseline(text.replace("schema_version = 1", "schema_version = 2"), "macos").ok,
     false,
   )
+}
+
+@test
+pipeline test_baseline_profile_cannot_cross_platforms(harness: Harness, task) {
+  assert_eq(validated_baseline_profile("macos", nil), {ok: true, profile: "macos", error: ""})
+  assert_eq(
+    validated_baseline_profile("macos", "macos_hosted_arm64"),
+    {ok: true, profile: "macos_hosted_arm64", error: ""},
+  )
+  const rejected = validated_baseline_profile("macos", "linux")
+  assert_eq(rejected.ok, false)
+  assert(rejected.error.contains("not compatible with platform `macos`"))
 }
 
 @test

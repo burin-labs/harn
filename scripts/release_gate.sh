@@ -579,7 +579,13 @@ cmd_audit() {
 
   local lane_idx
   for lane_idx in "${!SELECTED_AUDIT_STEPS[@]}"; do
-    if [[ "${SELECTED_AUDIT_STEPS[$lane_idx]}" == "harn-audit" ]]; then
+    # Exact-candidate source certification (`--source-only`) runs alongside
+    # macos-nightly.yml at the same immutable SHA. That hosted job owns the
+    # wall-clock performance ratchet; running it again on a shared developer
+    # workstation measures unrelated worktree contention and can discard an
+    # otherwise-green release after every functional lane has completed.
+    # Full local audits retain the benchmark for direct diagnosis.
+    if [[ "$source_only" -eq 0 && "${SELECTED_AUDIT_STEPS[$lane_idx]}" == "harn-audit" ]]; then
       needs_harn_performance=1
     fi
     launch_step "${SELECTED_AUDIT_STEPS[$lane_idx]}" "${SELECTED_AUDIT_RUNNERS[$lane_idx]}"

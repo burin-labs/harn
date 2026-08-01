@@ -11,4 +11,20 @@ if ! grep -Fq \
   exit 1
 fi
 
+performance_id_line="$(grep -Fn 'id: release-test-case-performance' "$workflow" | cut -d: -f1)"
+performance_command_line="$(grep -Fn 'run: make check-test-case-performance' "$workflow" | cut -d: -f1)"
+performance_binary_line="$(grep -Fn 'HARN_BIN: ./target/debug/harn' "$workflow" | cut -d: -f1)"
+performance_profile_line="$(grep -Fn 'HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64' "$workflow" | cut -d: -f1)"
+nextest_line="$(grep -Fn 'scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci' "$workflow" | cut -d: -f1)"
+
+if [[ -z "$performance_id_line" || -z "$performance_command_line" || -z "$performance_binary_line" || -z "$performance_profile_line" ]]; then
+  echo "macOS nightly must own the exact release test-case performance proof" >&2
+  exit 1
+fi
+
+if [[ "$performance_id_line" -le "$nextest_line" || "$performance_command_line" -le "$nextest_line" ]]; then
+  echo "macOS nightly must measure release performance after workspace tests settle" >&2
+  exit 1
+fi
+
 echo "macos_nightly_test_env_test: ok"

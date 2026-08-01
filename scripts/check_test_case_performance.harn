@@ -2,6 +2,8 @@ import { shell_quote } from "std/runtime"
 
 const BASELINES = "bench/test-case-performance/baselines.toml"
 
+const BASELINE_PROFILE_ENV = "HARN_TEST_CASE_PERFORMANCE_PROFILE"
+
 const SUITE_COUNT = 4
 
 const CASES_PER_SUITE = 16
@@ -282,6 +284,26 @@ pub fn load_platform_baseline(text: string, platform: string) -> dict {
   return {ok: true, error: "", baseline: baseline}
 }
 
+/**
+ * Select a measured host profile without allowing a workflow to borrow the
+ * budget of another operating system. The bare platform remains the local
+ * default; hosted lanes opt into their observed machine class explicitly.
+ */
+pub fn validated_baseline_profile(platform: string, requested: string?) -> dict {
+  const profile = (requested ?? "").trim()
+  if profile == "" || profile == platform {
+    return {ok: true, profile: platform, error: ""}
+  }
+  if profile.starts_with(platform + "_") {
+    return {ok: true, profile: profile, error: ""}
+  }
+  return {
+    ok: false,
+    profile: "",
+    error: "baseline profile `${profile}` is not compatible with platform `${platform}`",
+  }
+}
+
 fn platform_name(process: HarnessProcess) -> string {
   const uname = process.run({program: "uname", args: ["-s"]})
   if !uname.success {
@@ -505,6 +527,15 @@ pipeline main(harness: Harness, task) {
     harness.stdio.eprintln("error: unsupported performance-check platform `${platform}`")
     return 1
   }
+  const selected_profile = validated_baseline_profile(
+    platform,
+    harness.env.get(BASELINE_PROFILE_ENV),
+  )
+  if !selected_profile.ok {
+    harness.stdio.eprintln("error: ${selected_profile.error}")
+    return 1
+  }
+  const baseline_profile = selected_profile.profile
   let baseline = {}
   let round_metrics = []
   let best = {}
@@ -516,6 +547,7 @@ pipeline main(harness: Harness, task) {
         schema_version: 1,
         workload_version: WORKLOAD_VERSION,
         platform: platform,
+        baseline_profile: baseline_profile,
         suite_count: SUITE_COUNT,
         cases_per_suite: CASES_PER_SUITE,
         metrics: measured.metrics,
@@ -530,7 +562,7 @@ pipeline main(harness: Harness, task) {
       return 1
     }
     if round == 0 {
-      const loaded = load_platform_baseline(harness.fs.read_text(BASELINES), platform)
+      const loaded = load_platform_baseline(harness.fs.read_text(BASELINES), baseline_profile)
       if !loaded.ok {
         harness.stdio.eprintln(
           "error: ${loaded.error}; use the JSON above to record an honest baseline",
@@ -561,7 +593,7 @@ pipeline main(harness: Harness, task) {
     return 1
   }
   harness.stdio.println(
-    "parallel test-case performance: OK platform=${platform} rounds=${round_metrics.count} tests=${best.test_count}",
+    "parallel test-case performance: OK platform=${platform} profile=${baseline_profile} rounds=${round_metrics.count} tests=${best.test_count}",
   )
   return 0
 }
