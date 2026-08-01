@@ -116,7 +116,7 @@ pub(super) async fn register_acp_builtins(
         Ok(harn_vm::VmValue::Nil)
     });
     let b = bridge.clone();
-    vm.register_capability_method(
+    vm.override_capability_method(
         harn_builtin_meta::CapabilityId::Stdio,
         "log",
         move |args, _out| {

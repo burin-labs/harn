@@ -514,7 +514,32 @@ impl Vm {
     ) where
         F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + Send + Sync + 'static,
     {
-        self.insert_capability_method(capability, method, VmBuiltinDispatch::Sync(Arc::new(f)));
+        self.insert_capability_method(
+            capability,
+            method,
+            VmBuiltinDispatch::Sync(Arc::new(f)),
+            false,
+        );
+    }
+
+    /// Replace a previously registered capability method (embedder override).
+    ///
+    /// Used by ACP to keep diagnostic `harness.stdio.log` off the assistant
+    /// message stream without panicking on the stdlib's initial registration.
+    pub fn override_capability_method<F>(
+        &mut self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        f: F,
+    ) where
+        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + Send + Sync + 'static,
+    {
+        self.insert_capability_method(
+            capability,
+            method,
+            VmBuiltinDispatch::Sync(Arc::new(f)),
+            true,
+        );
     }
 
     /// Async counterpart of [`Self::register_capability_method`].
@@ -531,6 +556,7 @@ impl Vm {
             capability,
             method,
             VmBuiltinDispatch::Async(Arc::new(move |ctx, args| Box::pin(f(ctx, args)))),
+            false,
         );
     }
 
@@ -539,13 +565,14 @@ impl Vm {
         capability: harn_builtin_meta::CapabilityId,
         method: &str,
         dispatch: VmBuiltinDispatch,
+        allow_override: bool,
     ) {
         let replaced = Arc::make_mut(&mut self.capability_methods)
             .entry(capability)
             .or_default()
             .insert(method.to_string(), dispatch);
         assert!(
-            replaced.is_none(),
+            allow_override || replaced.is_none(),
             "capability method harness.{}.{} registered twice",
             capability.field_name(),
             method
