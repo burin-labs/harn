@@ -727,16 +727,49 @@ fn floor_blocks_argv_sh_c_wrapper_seam() {
         ["sh", "-c", "chmod -R 000 ."],
         ["sh", "-c", "git push --force"],
         ["sh", "-c", "mkfs.ext4 /dev/sda1"],
-        ["sh", "-c", "truncate -s 0 src/main.rs"],
         ["bash", "-lc", "git clean -fdx"],
         ["sh", "-c", "rm -rf ~"],
-        ["sh", "-c", "echo pwned > lib/foo.ts"],
     ] {
         assert!(
             is_cat_argv(&argv, &[ROOT]),
             "expected catastrophic (argv sh -c seam): {argv:?}"
         );
     }
+
+    // Truncation and redirection depend on Git state rather than extensions.
+    // Exercise the wrapper seam against a real tracked-file fixture so this
+    // test does not smuggle the removed extension catalog back into policy.
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root)
+        .status()
+        .unwrap()
+        .success());
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(root.join("lib")).unwrap();
+    std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(root.join("lib/foo.ts"), "export {}\n").unwrap();
+    assert!(std::process::Command::new("git")
+        .args(["add", "src/main.rs", "lib/foo.ts"])
+        .current_dir(root)
+        .status()
+        .unwrap()
+        .success());
+    let root = root.to_str().unwrap();
+    assert!(is_cat_argv(
+        &["sh", "-c", "truncate -s 0 src/main.rs"],
+        &[root],
+    ));
+    assert!(is_cat_argv(
+        &["sh", "-c", "echo pwned > lib/foo.ts"],
+        &[root],
+    ));
+    assert!(!is_cat_argv(
+        &["sh", "-c", "truncate -s 0 generated.rs"],
+        &[root],
+    ));
     // Direct catastrophic argv (no shell wrapper) must also block, and the
     // argv seam must not over-flag benign commands.
     assert!(is_cat_argv(&["git", "reset", "--hard"], &[ROOT]));
