@@ -181,8 +181,7 @@ impl crate::vm::Vm {
             let _interrupt = self.sync_builtin_interrupt_guard();
             Self::call_harness_method_sync_fast(
                 &mut self.output,
-                &self.executed_effects,
-                &mut self.runtime_effect_call_cache,
+                &mut self.runtime_effects,
                 handle,
                 method,
                 args,
@@ -385,10 +384,7 @@ impl crate::vm::Vm {
 
     pub(in crate::vm) fn call_harness_method_sync_fast(
         output: &mut String,
-        executed_effects: &std::sync::Arc<
-            std::sync::Mutex<crate::orchestration::ExecutedEffectRecorder>,
-        >,
-        effect_call_cache: &mut crate::orchestration::RuntimeEffectCallCache,
+        runtime_effects: &mut crate::orchestration::RuntimeEffectState,
         handle: &VmHarness,
         method: &str,
         args: &[VmValue],
@@ -396,8 +392,7 @@ impl crate::vm::Vm {
         let started = crate::builtin_profile::is_enabled().then(std::time::Instant::now);
         let result = Self::call_harness_method_sync_fast_inner(
             output,
-            executed_effects,
-            effect_call_cache,
+            runtime_effects,
             handle,
             method,
             args,
@@ -415,10 +410,7 @@ impl crate::vm::Vm {
 
     fn call_harness_method_sync_fast_inner(
         output: &mut String,
-        executed_effects: &std::sync::Arc<
-            std::sync::Mutex<crate::orchestration::ExecutedEffectRecorder>,
-        >,
-        effect_call_cache: &mut crate::orchestration::RuntimeEffectCallCache,
+        runtime_effects: &mut crate::orchestration::RuntimeEffectState,
         handle: &VmHarness,
         method: &str,
         args: &[VmValue],
@@ -433,12 +425,7 @@ impl crate::vm::Vm {
         let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
             return Some(Err(method_unsupported(handle, method)));
         };
-        Self::record_effect_specs_into(
-            executed_effects,
-            effect_call_cache,
-            entry.contract.effects,
-            args,
-        );
+        runtime_effects.record_specs(entry.contract.effects, args);
         if let HarnessMode::Null(state) = handle.inner().mode() {
             state.record_deny(handle.kind(), method, args);
             return Some(Err(VmError::CategorizedError {

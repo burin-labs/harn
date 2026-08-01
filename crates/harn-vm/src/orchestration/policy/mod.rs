@@ -1,9 +1,11 @@
 //! Policy types and capability-ceiling enforcement.
 
 mod approval_rules;
+mod effect_call_cache;
 mod effects;
 mod nested_budget;
 mod operator_grant;
+mod runtime_effect_state;
 pub(crate) mod tool_enforcement;
 mod types;
 
@@ -26,13 +28,13 @@ pub use approval_rules::{
     PolicyAction, PolicyEvaluation, PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
     ToolApprovalRequest,
 };
+pub(crate) use effect_call_cache::RuntimeEffectCallCache;
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
     effects_from_metadata, EffectKind, EffectRecord, EffectScope,
 };
 pub(crate) use effects::{
     effect_allowed_by_ceiling, runtime_effects_from_contract, ExecutedEffectRecorder,
-    RuntimeEffectCallCache,
 };
 pub use nested_budget::{
     annotate_nested_execution_options, enter_nested_execution_policy, NestedExecutionGuard,
@@ -45,6 +47,7 @@ pub use operator_grant::{
     current_operator_approval_grant, install_operator_approval_grant, OperatorApprovalGrant,
     OperatorApprovalGrantGuard,
 };
+pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;
 pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant;
 pub use types::{

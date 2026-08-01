@@ -143,10 +143,7 @@ impl Vm {
 
     fn validate_sync_builtin_args(
         denied_builtins: &std::collections::HashSet<String>,
-        executed_effects: &std::sync::Arc<
-            std::sync::Mutex<crate::orchestration::ExecutedEffectRecorder>,
-        >,
-        effect_call_cache: &mut crate::orchestration::RuntimeEffectCallCache,
+        runtime_effects: &mut crate::orchestration::RuntimeEffectState,
         name: &str,
         args: &[VmValue],
         recorded_effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
@@ -159,7 +156,7 @@ impl Vm {
         }
         crate::orchestration::enforce_current_policy_for_builtin(name, args)?;
         if let Some(specs) = recorded_effects {
-            Self::record_effect_specs_into(executed_effects, effect_call_cache, specs, args);
+            runtime_effects.record_specs(specs, args);
         }
         crate::typecheck::validate_builtin_call(name, args, None)
     }
@@ -876,8 +873,7 @@ impl Vm {
         if let Err(error) = args.with_slice(|slice| {
             Self::validate_sync_builtin_args(
                 &self.denied_builtins,
-                &self.executed_effects,
-                &mut self.runtime_effect_call_cache,
+                &mut self.runtime_effects,
                 name,
                 slice,
                 resolved.recorded_effects,
@@ -915,8 +911,7 @@ impl Vm {
         let _observe = Self::observe_builtin_call(name);
         if let Err(error) = Self::validate_sync_builtin_args(
             &self.denied_builtins,
-            &self.executed_effects,
-            &mut self.runtime_effect_call_cache,
+            &mut self.runtime_effects,
             name,
             &self.stack[args_start..],
             resolved.recorded_effects,
