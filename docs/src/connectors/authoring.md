@@ -495,14 +495,17 @@ prefix. Packages assemble any provider-specific timestamped signed message
 before calling it. The core `webhook` transport separately owns its Standard
 Webhooks signature adapter.
 
-Harn-authored connector packages can import `std/connectors/shared` for the
-package-level equivalent helpers:
+Harn-authored connector packages import HTTP policy from
+[`std/connectors/http`](../modules.md#stdconnectorshttp) and the remaining
+package helpers from `std/connectors/shared`:
 
 ```harn
 import {
   connector_http_json,
   connector_http_rate_limit,
   connector_http_request,
+} from "std/connectors/http"
+import {
   git_forge_pull_request_event,
   git_forge_pull_request_topic,
   git_forge_writeback_request,
@@ -514,9 +517,9 @@ import {
 } from "std/connectors/shared"
 ```
 
-Use `std/connectors/shared` inside package exports for HMAC checks, JWT/JWKS
-verification, outbound HTTP policy, OAuth2 token refresh, package-local token
-buckets, and cursor pagination.
+Use `std/connectors/http` for outbound requests. Use
+`std/connectors/shared` for HMAC checks, JWT/JWKS verification, OAuth2 token
+refresh, package-local token buckets, cursor pagination, and forge events.
 Existing providers that still sign with HMAC-SHA1 must call
 `verify_hmac_signature(..., "sha1", {allow_legacy_sha1: true})`; new
 connectors should use SHA-256 or a provider-specific verifier.
@@ -582,7 +585,7 @@ need stable error categories, idempotency-aware retries, and rate-limit
 metadata.
 
 ```harn
-import { connector_http_json } from "std/connectors/shared"
+import { connector_http_json } from "std/connectors/http"
 
 fn api_json(clock: HarnessClock, net: HarnessNet, request) {
   return connector_http_json(
@@ -614,6 +617,13 @@ Failures contain `{ok: false, status?, retryable, retry_after_ms?, error}` where
 on (`"rate_limit"`, `"overloaded"`, `"server_error"`, `"auth"`,
 `"permission"`, `"not_found"`, `"timeout"`, `"invalid_json"`, and transport
 categories such as `"transient_network"` or `"egress_blocked"`).
+
+Failure envelopes bound accidental disclosure. Harn replaces secret-bearing
+response headers such as `Set-Cookie` and `X-Api-Key` with `[redacted]` and
+limits response bodies to 1,024 characters. Set `redact_error_body: true` when
+a provider error body may contain secrets or personal data. Successful
+responses are unchanged. Header handling uses Harn's
+[shared redaction policy](../redaction.md), including host overrides.
 
 The retry policy uses total-attempt semantics:
 `retry: {max_attempts, base_ms, cap_ms}`. Safe/idempotent methods (`GET`,

@@ -3290,10 +3290,10 @@ Import with `import { web_fetch, web_search, verify_imports, web_grounding_tools
 
 ### Connector HTTP policy
 
-Package authors should prefer `std/connectors/shared` for provider API calls:
+Import `std/connectors/http` for provider API calls:
 
 ```harn
-import { connector_http_json } from "std/connectors/shared"
+import { connector_http_json } from "std/connectors/http"
 
 const response = connector_http_json(harness.clock, harness.net, "POST", url, {
   headers: {Authorization: "Bearer " + token, Accept: "application/json"},

@@ -131,6 +131,7 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     &TOKEN_REDACTION_REGISTER_PATTERN_IMPL_DEF,
     &TOKEN_REDACTION_CLEAR_CUSTOM_PATTERNS_IMPL_DEF,
     &TOKEN_REDACTION_REDACT_IMPL_DEF,
+    &TOKEN_REDACTION_REDACT_HEADERS_IMPL_DEF,
     &TOKEN_REDACTION_DEFAULT_PATTERNS_IMPL_DEF,
     &TOKEN_REDACTION_CUSTOM_PATTERNS_IMPL_DEF,
     &TOKEN_REDACTION_DRAIN_AUDIT_IMPL_DEF,
@@ -189,6 +190,37 @@ fn token_redaction_redact_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
     let policy = redact::current_policy();
     let redacted = policy.redact_string(&text).into_owned();
     Ok(VmValue::String(arcstr::ArcStr::from(redacted.as_str())))
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__token_redaction_redact_headers(headers: dict<string, string>) -> dict<string, string>",
+    category = "token_redaction"
+)]
+fn token_redaction_redact_headers_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let headers = args.first().and_then(VmValue::as_dict).ok_or_else(|| {
+        VmError::TypeError(
+            "__token_redaction_redact_headers: `headers` must be a dict<string, string>"
+                .to_string(),
+        )
+    })?;
+    let policy = redact::current_policy();
+    let redacted = headers
+        .iter()
+        .map(|(name, value)| {
+            let value = if policy.header_is_sensitive(name) {
+                VmValue::String(arcstr::ArcStr::from(redact::REDACTED_HEADER_VALUE))
+            } else {
+                value.clone()
+            };
+            (name.clone(), value)
+        })
+        .collect::<crate::value::DictMap>();
+    Ok(VmValue::dict(redacted))
 }
 
 #[crate::stdlib::macros::harn_builtin(

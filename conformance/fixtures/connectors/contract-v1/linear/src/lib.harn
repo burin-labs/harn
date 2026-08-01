@@ -1,8 +1,5 @@
-import {
-  connector_http_header,
-  connector_http_json,
-  verify_hmac_signature,
-} from "std/connectors/shared"
+import { connector_http_header, connector_http_json } from "std/connectors/http"
+import { verify_hmac_signature } from "std/connectors/shared"
 import {
   graphql_auth_headers,
   graphql_extract,
