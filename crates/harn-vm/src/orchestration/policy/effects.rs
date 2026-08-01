@@ -12,7 +12,7 @@
 //! configs. The two extraction paths feed one canonicalization step so
 //! downstream consumers see a single deduped, deterministically ordered list.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -95,7 +95,7 @@ pub struct EffectRecord {
     pub kind: EffectKind,
     pub scope: EffectScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resource: Option<String>,
+    pub resource: Option<crate::value::HarnStr>,
 }
 
 impl EffectRecord {
@@ -107,7 +107,7 @@ impl EffectRecord {
         }
     }
 
-    pub fn with_resource(mut self, resource: impl Into<String>) -> Self {
+    pub fn with_resource(mut self, resource: impl Into<crate::value::HarnStr>) -> Self {
         let resource = resource.into();
         self.resource = if resource.is_empty() {
             None
@@ -115,6 +115,125 @@ impl EffectRecord {
             Some(resource)
         };
         self
+    }
+}
+
+const RUNTIME_EFFECT_CACHE_SETS: usize = 16;
+const RUNTIME_EFFECT_CACHE_WAYS: usize = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct EffectContractKey {
+    specs: usize,
+    len: usize,
+}
+
+impl EffectContractKey {
+    fn new(specs: &'static [harn_builtin_meta::EffectSpec]) -> Self {
+        Self {
+            specs: specs.as_ptr() as usize,
+            len: specs.len(),
+        }
+    }
+}
+
+struct CachedRuntimeEffectCall {
+    contract: EffectContractKey,
+    arguments: Vec<Vec<crate::value::HarnStr>>,
+}
+
+/// VM-local direct-mapped memo for receipt-equivalent effect calls.
+///
+/// The shared recorder remains the authority. This cache only avoids reaching
+/// its mutex when the immutable contract and every resource-bearing argument
+/// exactly match one of the two recent calls in the selected set. Collisions
+/// and evictions therefore cost work but cannot drop evidence.
+pub(crate) struct RuntimeEffectCallCache {
+    sets: Vec<[Option<CachedRuntimeEffectCall>; RUNTIME_EFFECT_CACHE_WAYS]>,
+    next_replacement: Vec<usize>,
+}
+
+impl Default for RuntimeEffectCallCache {
+    fn default() -> Self {
+        Self {
+            sets: (0..RUNTIME_EFFECT_CACHE_SETS)
+                .map(|_| std::array::from_fn(|_| None))
+                .collect(),
+            next_replacement: vec![0; RUNTIME_EFFECT_CACHE_SETS],
+        }
+    }
+}
+
+impl RuntimeEffectCallCache {
+    fn set_index(contract: EffectContractKey) -> usize {
+        ((contract.specs >> 4) ^ contract.len) & (RUNTIME_EFFECT_CACHE_SETS - 1)
+    }
+
+    pub(crate) fn contains(
+        &self,
+        specs: &'static [harn_builtin_meta::EffectSpec],
+        args: &[VmValue],
+    ) -> bool {
+        let contract = EffectContractKey::new(specs);
+        self.sets[Self::set_index(contract)]
+            .iter()
+            .flatten()
+            .any(|cached| {
+                cached.contract == contract
+                    && runtime_effect_arguments_match(&cached.arguments, specs, args)
+            })
+    }
+
+    pub(crate) fn remember(
+        &mut self,
+        specs: &'static [harn_builtin_meta::EffectSpec],
+        args: &[VmValue],
+    ) {
+        let contract = EffectContractKey::new(specs);
+        let set_index = Self::set_index(contract);
+        let way = self.sets[set_index]
+            .iter()
+            .position(Option::is_none)
+            .unwrap_or(self.next_replacement[set_index]);
+        self.sets[set_index][way] = Some(CachedRuntimeEffectCall {
+            contract,
+            arguments: runtime_effect_arguments(specs, args),
+        });
+        self.next_replacement[set_index] = (way + 1) % RUNTIME_EFFECT_CACHE_WAYS;
+    }
+
+    pub(crate) fn clear(&mut self) {
+        for set in &mut self.sets {
+            for entry in set {
+                *entry = None;
+            }
+        }
+        self.next_replacement.fill(0);
+    }
+}
+
+/// Execution-local, thread-safe-at-the-owner accumulator for runtime effects.
+///
+/// Effect evidence is a set. VM-local caches avoid repeated access to this
+/// shared execution-tree owner while child VMs still converge on one receipt.
+#[derive(Default)]
+pub(crate) struct ExecutedEffectRecorder {
+    effects: HashSet<EffectRecord>,
+}
+
+impl ExecutedEffectRecorder {
+    pub(crate) fn record(&mut self, specs: &[harn_builtin_meta::EffectSpec], args: &[VmValue]) {
+        self.effects
+            .extend(runtime_effects_from_contract(specs, args));
+    }
+
+    pub(crate) fn snapshot(&self) -> Vec<EffectRecord> {
+        let mut effects = self.effects.iter().cloned().collect::<Vec<_>>();
+        effects.sort();
+        effects
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.effects.clear();
     }
 }
 
@@ -214,8 +333,8 @@ pub(crate) fn runtime_effects_from_contract(
                     .into_iter()
                     .next();
                 match path.last().copied() {
-                    Some("provider") => provider = value,
-                    Some("model") => model = value,
+                    Some("provider") => provider = value.map(|value| value.to_string()),
+                    Some("model") => model = value.map(|value| value.to_string()),
                     _ => {}
                 }
             }
@@ -252,7 +371,7 @@ pub(crate) fn runtime_effects_from_contract(
 fn resolve_runtime_resources(
     selector: harn_builtin_meta::ResourceSelector,
     args: &[VmValue],
-) -> Vec<String> {
+) -> Vec<crate::value::HarnStr> {
     use harn_builtin_meta::ResourceSelector;
     match selector {
         ResourceSelector::Argument(index) => args
@@ -282,14 +401,119 @@ fn resolve_runtime_resources(
             .flatten()
             .filter_map(runtime_resource_string)
             .collect(),
-        ResourceSelector::Constant(value) => vec![value.to_string()],
+        ResourceSelector::Constant(value) => vec![crate::value::HarnStr::from(value)],
         ResourceSelector::Dynamic => Vec::new(),
     }
 }
 
-fn runtime_resource_string(value: &VmValue) -> Option<String> {
+fn runtime_effect_arguments(
+    specs: &[harn_builtin_meta::EffectSpec],
+    args: &[VmValue],
+) -> Vec<Vec<crate::value::HarnStr>> {
+    specs
+        .iter()
+        .flat_map(|spec| spec.resources)
+        .map(|selector| resolve_runtime_resources(*selector, args))
+        .collect()
+}
+
+fn runtime_effect_arguments_match(
+    cached: &[Vec<crate::value::HarnStr>],
+    specs: &[harn_builtin_meta::EffectSpec],
+    args: &[VmValue],
+) -> bool {
+    let mut cached = cached.iter();
+    for selector in specs.iter().flat_map(|spec| spec.resources) {
+        let Some(resources) = cached.next() else {
+            return false;
+        };
+        if !runtime_selector_resources_match(resources, *selector, args) {
+            return false;
+        }
+    }
+    cached.next().is_none()
+}
+
+fn runtime_selector_resources_match(
+    cached: &[crate::value::HarnStr],
+    selector: harn_builtin_meta::ResourceSelector,
+    args: &[VmValue],
+) -> bool {
+    use harn_builtin_meta::ResourceSelector;
+    match selector {
+        ResourceSelector::Argument(index) => {
+            runtime_scalar_resource_matches(cached, args.get(index as usize))
+        }
+        ResourceSelector::Field { argument, path } => {
+            let mut value = args.get(argument as usize);
+            for field in path {
+                value = value
+                    .and_then(VmValue::as_dict)
+                    .and_then(|map| map.get(*field));
+            }
+            runtime_scalar_resource_matches(cached, value)
+        }
+        ResourceSelector::EachArgument(index) => {
+            let values = args
+                .get(index as usize)
+                .and_then(|value| match value {
+                    VmValue::List(items) => Some(items.as_slice()),
+                    _ => None,
+                })
+                .into_iter()
+                .flatten()
+                .filter_map(|value| match value {
+                    VmValue::String(value) => Some(value.as_str()),
+                    _ => None,
+                });
+            let mut count = 0;
+            for (expected, actual) in cached.iter().map(|value| value.as_str()).zip(values) {
+                if expected != actual {
+                    return false;
+                }
+                count += 1;
+            }
+            count == cached.len()
+                && args
+                    .get(index as usize)
+                    .and_then(|value| match value {
+                        VmValue::List(items) => Some(items.as_slice()),
+                        _ => None,
+                    })
+                    .into_iter()
+                    .flatten()
+                    .filter(|value| matches!(value, VmValue::String(_)))
+                    .count()
+                    == cached.len()
+        }
+        ResourceSelector::Constant(value) => {
+            cached.len() == 1
+                && cached
+                    .first()
+                    .is_some_and(|cached| cached.as_str() == value)
+        }
+        ResourceSelector::Dynamic => cached.is_empty(),
+    }
+}
+
+fn runtime_scalar_resource_matches(
+    cached: &[crate::value::HarnStr],
+    value: Option<&VmValue>,
+) -> bool {
     match value {
-        VmValue::String(value) => Some(value.to_string()),
+        Some(VmValue::String(value)) => {
+            cached.len() == 1
+                && cached
+                    .first()
+                    .is_some_and(|cached| cached.as_str() == value.as_str())
+        }
+        _ => cached.is_empty(),
+    }
+}
+
+fn runtime_resource_string(value: &VmValue) -> Option<crate::value::HarnStr> {
+    match value {
+        VmValue::String(value) => Some(value.clone()),
         _ => None,
     }
 }
@@ -618,7 +842,7 @@ fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<Eff
         Capability::HumanApproval => return None,
         Capability::AutonomyPolicy => return None,
     };
-    let resource = effect.path.clone();
+    let resource = effect.path.as_deref().map(crate::value::HarnStr::from);
     Some(EffectRecord {
         kind,
         scope,
@@ -1468,5 +1692,27 @@ fn main(harness: Harness) {
             .filter(|effect| matches!(effect.kind, EffectKind::Net))
             .count();
         assert_eq!(net_count, 1, "expected dedup, got {effects:?}");
+    }
+
+    #[test]
+    fn runtime_effect_call_cache_hits_exact_calls_only() {
+        static SPECS: &[harn_builtin_meta::EffectSpec] = &[harn_builtin_meta::EffectSpec::new(
+            harn_builtin_meta::EffectKind::Fs,
+            harn_builtin_meta::EffectAccess::Read,
+            &[harn_builtin_meta::ResourceSelector::Argument(0)],
+        )];
+        let mut cache = RuntimeEffectCallCache::default();
+        let args_a = [VmValue::String("/tmp/a".into())];
+        let args_b = [VmValue::String("/tmp/b".into())];
+
+        assert!(!cache.contains(SPECS, &args_a));
+        cache.remember(SPECS, &args_a);
+        assert!(cache.contains(SPECS, &args_a));
+        assert!(
+            !cache.contains(SPECS, &args_b),
+            "distinct resource-bearing arguments must not share a cache hit"
+        );
+        cache.clear();
+        assert!(!cache.contains(SPECS, &args_a));
     }
 }

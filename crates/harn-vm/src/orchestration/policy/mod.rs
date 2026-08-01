@@ -30,7 +30,10 @@ pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
     effects_from_metadata, EffectKind, EffectRecord, EffectScope,
 };
-pub(crate) use effects::{effect_allowed_by_ceiling, runtime_effects_from_contract};
+pub(crate) use effects::{
+    effect_allowed_by_ceiling, runtime_effects_from_contract, ExecutedEffectRecorder,
+    RuntimeEffectCallCache,
+};
 pub use nested_budget::{
     annotate_nested_execution_options, enter_nested_execution_policy, NestedExecutionGuard,
     NestedExecutionKind, NESTED_KIND_OPTION_KEY, NESTED_LABEL_OPTION_KEY,

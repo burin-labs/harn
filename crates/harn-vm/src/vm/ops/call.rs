@@ -428,8 +428,9 @@ impl super::super::Vm {
     fn try_harness_method_sync_fast(
         output: &mut String,
         executed_effects: &std::sync::Arc<
-            std::sync::Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>,
+            std::sync::Mutex<crate::orchestration::ExecutedEffectRecorder>,
         >,
+        effect_call_cache: &mut crate::orchestration::RuntimeEffectCallCache,
         obj: &VmValue,
         method: &str,
         args: &[VmValue],
@@ -437,7 +438,14 @@ impl super::super::Vm {
         let VmValue::Harness(handle) = obj else {
             return None;
         };
-        Self::call_harness_method_sync_fast(output, executed_effects, handle, method, args)
+        Self::call_harness_method_sync_fast(
+            output,
+            executed_effects,
+            effect_call_cache,
+            handle,
+            method,
+            args,
+        )
     }
 
     fn method_cache_target(obj: &VmValue, method: &str, argc: usize) -> Option<MethodCacheTarget> {
@@ -1502,6 +1510,7 @@ impl super::super::Vm {
                 Self::call_harness_method_sync_fast(
                     &mut self.output,
                     &self.executed_effects,
+                    &mut self.runtime_effect_call_cache,
                     &handle,
                     method,
                     &args,
@@ -1522,6 +1531,7 @@ impl super::super::Vm {
                 Self::try_harness_method_sync_fast(
                     &mut self.output,
                     &self.executed_effects,
+                    &mut self.runtime_effect_call_cache,
                     &obj,
                     method,
                     args,
@@ -1633,6 +1643,7 @@ impl super::super::Vm {
                 Self::call_harness_method_sync_fast(
                     &mut self.output,
                     &self.executed_effects,
+                    &mut self.runtime_effect_call_cache,
                     &handle,
                     method,
                     &self.stack[args_start..],
@@ -1672,6 +1683,7 @@ impl super::super::Vm {
                 Self::try_harness_method_sync_fast(
                     &mut self.output,
                     &self.executed_effects,
+                    &mut self.runtime_effect_call_cache,
                     obj,
                     method,
                     args,
@@ -1769,6 +1781,7 @@ impl super::super::Vm {
                 Self::call_harness_method_sync_fast(
                     &mut self.output,
                     &self.executed_effects,
+                    &mut self.runtime_effect_call_cache,
                     &handle,
                     method,
                     &args,
@@ -1788,6 +1801,7 @@ impl super::super::Vm {
                 Self::try_harness_method_sync_fast(
                     &mut self.output,
                     &self.executed_effects,
+                    &mut self.runtime_effect_call_cache,
                     &obj,
                     method,
                     &args,

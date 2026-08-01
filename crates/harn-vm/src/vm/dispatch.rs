@@ -142,12 +142,16 @@ impl Vm {
     }
 
     fn validate_sync_builtin_args(
-        &self,
+        denied_builtins: &std::collections::HashSet<String>,
+        executed_effects: &std::sync::Arc<
+            std::sync::Mutex<crate::orchestration::ExecutedEffectRecorder>,
+        >,
+        effect_call_cache: &mut crate::orchestration::RuntimeEffectCallCache,
         name: &str,
         args: &[VmValue],
         recorded_effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
     ) -> Result<(), VmError> {
-        if self.denied_builtins.contains(name) {
+        if denied_builtins.contains(name) {
             return Err(VmError::CategorizedError {
                 message: format!("Tool '{name}' is not permitted."),
                 category: ErrorCategory::ToolRejected,
@@ -155,7 +159,7 @@ impl Vm {
         }
         crate::orchestration::enforce_current_policy_for_builtin(name, args)?;
         if let Some(specs) = recorded_effects {
-            self.record_builtin_effect_specs(specs, args);
+            Self::record_effect_specs_into(executed_effects, effect_call_cache, specs, args);
         }
         crate::typecheck::validate_builtin_call(name, args, None)
     }
@@ -870,7 +874,14 @@ impl Vm {
         };
         let _observe = Self::observe_builtin_call(name);
         if let Err(error) = args.with_slice(|slice| {
-            self.validate_sync_builtin_args(name, slice, resolved.recorded_effects)
+            Self::validate_sync_builtin_args(
+                &self.denied_builtins,
+                &self.executed_effects,
+                &mut self.runtime_effect_call_cache,
+                name,
+                slice,
+                resolved.recorded_effects,
+            )
         }) {
             return Some(Err(error));
         }
@@ -902,7 +913,10 @@ impl Vm {
         }
 
         let _observe = Self::observe_builtin_call(name);
-        if let Err(error) = self.validate_sync_builtin_args(
+        if let Err(error) = Self::validate_sync_builtin_args(
+            &self.denied_builtins,
+            &self.executed_effects,
+            &mut self.runtime_effect_call_cache,
             name,
             &self.stack[args_start..],
             resolved.recorded_effects,
