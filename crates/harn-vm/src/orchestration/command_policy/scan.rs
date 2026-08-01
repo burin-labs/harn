@@ -21,6 +21,11 @@ pub(super) fn scan_command_risk_scan_json(
     let active_cwd = ctx
         .get("active_cwd")
         .and_then(|value| value.as_str())
+        .or_else(|| {
+            ctx.get("request")
+                .and_then(|request| request.get("cwd"))
+                .and_then(|value| value.as_str())
+        })
         .map(Path::new);
     let catastrophe = super::catastrophic::reason_at(
         &floor_command_text(ctx),

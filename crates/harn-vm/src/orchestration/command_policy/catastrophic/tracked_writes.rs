@@ -121,7 +121,12 @@ fn is_protected_project_file(target: &str, active_cwd: Option<&Path>) -> bool {
         return true;
     };
     if target.contains(['$', '*', '?', '[', ']', '{', '}', '~']) {
-        return true;
+        // The floor is precision-first: without the shell's environment and
+        // expansion result we cannot prove that this word names reviewed
+        // project state. Sandboxed output mounts intentionally use variables
+        // such as `$HARN_OUTPUTS_DIR`; treating every expansion as tracked
+        // would make the supported output channel unusable.
+        return false;
     }
     let target = resolved_target(cwd, target);
     match git_tracks_file(cwd, &target) {
@@ -241,6 +246,19 @@ mod tests {
         init_git(cwd);
 
         assert!(redirect_over_tracked_reason("printf x > /dev/null", Some(cwd)).is_none());
+    }
+
+    #[test]
+    fn unresolved_shell_expansions_are_not_assumed_to_be_project_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path();
+        init_git(cwd);
+
+        assert!(redirect_over_tracked_reason(
+            "printf x > \"$HARN_OUTPUTS_DIR/result.txt\"",
+            Some(cwd),
+        )
+        .is_none());
     }
 
     #[test]
