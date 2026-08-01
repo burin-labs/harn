@@ -71,3 +71,14 @@ jobs:
         run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           ./target/debug/harn run smoke.harn
+      # Release certification dispatches this workflow at an immutable
+      # release-certify/<sha> ref. Keep the wall-clock ratchet on this hosted,
+      # otherwise-idle machine: a contributor workstation can be shared by
+      # unrelated worktrees whose builds make the same measurement meaningless.
+      - name: Verify release test-case performance
+        id: release-test-case-performance
+        shell: bash
+        env:
+          HARN_BIN: ./target/debug/harn
+          HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64
+        run: make check-test-case-performance
