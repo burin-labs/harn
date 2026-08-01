@@ -126,5 +126,11 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         registry = registry.with(computer::ComputerUseCapability::new());
     }
     registry.register_into_vm(vm);
+    // Compatibility stub: typed `HarnessTools` replaced the thread-local
+    // `hostlib_enable` gate. Legacy ambient callers still invoke
+    // `hostlib_enable("tools:deterministic")` before hostlib_* builtins; keep
+    // that spelling as a no-op so dispatch does not fall through to an
+    // embedder host bridge.
+    vm.register_builtin("hostlib_enable", |_args, _out| Ok(harn_vm::VmValue::Nil));
     registry
 }
