@@ -8,7 +8,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use harn_modules::DefKind;
 
 use crate::bytecode_cache;
-use crate::module_artifact::compile_module_artifact_from_source;
+use crate::module_artifact::{
+    compile_module_artifact_from_source, compile_trusted_host_dispatch_module_artifact_from_source,
+    ModuleProvenance,
+};
 use crate::module_source::{self, ModuleSource};
 use crate::prepared_module::PreparedModuleArtifact;
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
@@ -282,6 +285,26 @@ pub(crate) fn prepare_stdlib_module_artifact(
 }
 
 impl Vm {
+    /// Dedicate this fresh VM to a Rust embedder-owned host-dispatch graph.
+    ///
+    /// The transition is one-way and must happen before any module load. The
+    /// trusted graph bypasses ordinary prepared/on-disk bytecode caches and
+    /// only the embedder can select a callable from it.
+    pub fn enable_trusted_host_dispatch(&mut self) -> Result<(), VmError> {
+        self.ensure_execution_available()?;
+        if self.module_provenance == ModuleProvenance::TrustedHostDispatch {
+            return Ok(());
+        }
+        if !self.module_cache.is_empty() || !self.imported_paths.is_empty() {
+            return Err(VmError::Runtime(
+                "trusted host dispatch must be enabled before loading modules".to_string(),
+            ));
+        }
+        self.module_provenance = ModuleProvenance::TrustedHostDispatch;
+        self.graph_link_table = None;
+        Ok(())
+    }
+
     fn resolve_module_import_path(&self, base: &Path, path: &str) -> Result<PathBuf, VmError> {
         if let Some(guard) = &self.package_execution_guard {
             let synthetic_current_file = base.join("__harn_import_base__.harn");
@@ -436,7 +459,14 @@ impl Vm {
         Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), Arc::from(source));
 
         let mut compile_span = self.module_compile_span();
-        let compiled = compile_module_artifact_from_source(&synthetic, source)?;
+        let compiled = match self.module_provenance {
+            ModuleProvenance::TrustedHostDispatch => {
+                compile_trusted_host_dispatch_module_artifact_from_source(&synthetic, source)?
+            }
+            ModuleProvenance::User | ModuleProvenance::PrivilegedWire => {
+                compile_module_artifact_from_source(&synthetic, source)?
+            }
+        };
         if let Some(span) = &mut compile_span {
             span.mark_compile_succeeded();
         }
@@ -539,11 +569,19 @@ impl Vm {
 
         for import in &artifact.imports {
             if let Some(alias) = &import.namespace_alias {
-                self.execute_namespace_import_bind(&import.path, alias)
-                    .await?;
+                self.execute_import_with_projection(
+                    &import.path,
+                    ImportProjection::BindNamespace(alias),
+                    artifact.provenance,
+                )
+                .await?;
             } else {
-                self.execute_import(&import.path, import.selected_names.as_deref())
-                    .await?;
+                self.execute_import_with_projection(
+                    &import.path,
+                    ImportProjection::BindCaller(import.selected_names.as_deref()),
+                    artifact.provenance,
+                )
+                .await?;
             }
         }
 
@@ -816,7 +854,11 @@ impl Vm {
         path: &'a str,
         selected_names: Option<&'a [String]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
-        self.execute_import_with_projection(path, ImportProjection::BindCaller(selected_names))
+        self.execute_import_with_projection(
+            path,
+            ImportProjection::BindCaller(selected_names),
+            self.module_provenance,
+        )
     }
 
     /// Bind `import * as alias from path` as a closed namespace dict.
@@ -825,14 +867,22 @@ impl Vm {
         path: &'a str,
         alias: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
-        self.execute_import_with_projection(path, ImportProjection::BindNamespace(alias))
+        self.execute_import_with_projection(
+            path,
+            ImportProjection::BindNamespace(alias),
+            self.module_provenance,
+        )
     }
 
     fn materialize_import<'a>(
         &'a mut self,
         path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
-        self.execute_import_with_projection(path, ImportProjection::MaterializeOnly)
+        self.execute_import_with_projection(
+            path,
+            ImportProjection::MaterializeOnly,
+            self.module_provenance,
+        )
     }
 
     fn apply_import_projection(
@@ -856,6 +906,7 @@ impl Vm {
         &'a mut self,
         path: &'a str,
         projection: ImportProjection<'a>,
+        provenance: ModuleProvenance,
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
         Box::pin(async move {
             let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
@@ -974,8 +1025,7 @@ impl Vm {
             // file is never read. Guard-verified package bytes are excluded:
             // they are their own authority and deliberately bypass every memo,
             // and `verified_source` is `Some` exactly when a guard is active.
-            let linked = verified_source
-                .is_none()
+            let linked = (provenance == ModuleProvenance::User && verified_source.is_none())
                 .then(|| {
                     let content_hash = self
                         .graph_link_table
@@ -1014,13 +1064,28 @@ impl Vm {
                     source_cache.insert(file_path.clone(), Arc::clone(source.text()));
                 }
 
-                self.prepared_module_cache.prepare(
-                    &file_path,
-                    &canonical,
-                    &source,
-                    None,
-                    self.module_phase_recorder.as_ref(),
-                )?
+                match provenance {
+                    ModuleProvenance::TrustedHostDispatch => {
+                        let mut compile_span = self.module_compile_span();
+                        let compiled = compile_trusted_host_dispatch_module_artifact_from_source(
+                            &file_path,
+                            source.as_str(),
+                        )?;
+                        if let Some(span) = &mut compile_span {
+                            span.mark_compile_succeeded();
+                        }
+                        Arc::new(PreparedModuleArtifact::from_cached(compiled))
+                    }
+                    ModuleProvenance::User | ModuleProvenance::PrivilegedWire => {
+                        self.prepared_module_cache.prepare(
+                            &file_path,
+                            &canonical,
+                            &source,
+                            None,
+                            self.module_phase_recorder.as_ref(),
+                        )?
+                    }
+                }
             };
 
             let module_source_dir = file_path.parent().map(|p| p.to_path_buf());

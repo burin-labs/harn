@@ -33,7 +33,7 @@ impl TypeChecker {
             || scope.get_enum(name).is_some()
             || scope.get_struct(name).is_some()
             || scope.get_interface(name).is_some()
-            || builtin_signatures::is_builtin(name)
+            || self.is_builtin(name)
             || imported.contains(name)
             || scope.is_generic_type_param(name)
             || (self.legacy_ambient_capabilities && matches!(name, "harness" | "_harness"))

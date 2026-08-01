@@ -26,6 +26,10 @@ pub(crate) struct CheckArgs {
     /// Extra host capability schema for preflight validation.
     #[arg(long = "host-capabilities")]
     pub host_capabilities: Option<String>,
+    /// Check embedder-owned host-dispatch modules with privileged host
+    /// builtins available. This does not enable legacy ambient Harness APIs.
+    #[arg(long = "trusted-host-dispatch")]
+    pub trusted_host_dispatch: bool,
     /// Alternate root for render/template path checks.
     #[arg(long = "bundle-root")]
     pub bundle_root: Option<String>,

@@ -28,6 +28,14 @@ impl Compiler {
         Self::with_options(CompilerOptions::from_env())
     }
 
+    /// Compiler for an explicitly embedder-owned host-dispatch source.
+    ///
+    /// This grants only privileged-wire builtin exposure. Callers must keep
+    /// the resulting bytecode behind a provenance-separated runtime loader.
+    pub fn new_trusted_host_dispatch() -> Self {
+        Self::with_options(CompilerOptions::privileged_wire())
+    }
+
     /// Seed syntax-sensitive import metadata before compiling a source file.
     ///
     /// The parser intentionally keeps `Color.Ready(value)` ambiguous: it can

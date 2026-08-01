@@ -295,6 +295,8 @@ pub type CapabilityFixture = {
   error?: string,
   when?: dict,
   repeat?: bool,
+  /** Permit a test-local host operation that the embedding Rust host registers only at runtime. */
+  unregistered_ok?: bool,
 }
 
 /**
@@ -322,6 +324,7 @@ pub fn with_capability_fixtures(
           fixture.error,
           fixture?.when,
           fixture?.repeat,
+          fixture?.unregistered_ok,
         )
       } else {
         testing.respond(
@@ -330,6 +333,7 @@ pub fn with_capability_fixtures(
           fixture?.result,
           fixture?.when,
           fixture?.repeat,
+          fixture?.unregistered_ok,
         )
       }
     }

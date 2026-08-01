@@ -272,9 +272,13 @@ pub(crate) fn check_file_report_inner(
         let imported_enums = module_graph
             .imported_names_by_kind_for_file(path, harn_modules::DefKind::Enum)
             .unwrap_or_default();
-        if let Err(compile_err) =
-            crate::compiler_with_imported_enum_candidates(imported_enums).compile(&program)
-        {
+        let compiler = if config.trusted_host_dispatch {
+            harn_vm::Compiler::new_trusted_host_dispatch()
+                .with_imported_enum_candidates(imported_enums)
+        } else {
+            crate::compiler_with_imported_enum_candidates(imported_enums)
+        };
+        if let Err(compile_err) = compiler.compile(&program) {
             has_error = true;
             diagnostic_count += 1;
             let code = harn_parser::diagnostic_codes::Code::CompilerError;

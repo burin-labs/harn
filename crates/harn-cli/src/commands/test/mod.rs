@@ -279,6 +279,7 @@ async fn run_user_test_target(
         diagnose: args.diagnose,
         cli_skill_dirs,
         operator_approval_grant,
+        trusted_host_dispatch: args.trusted_host_dispatch,
     };
     if args.watch {
         watch::run(path, run_args).await;
@@ -368,6 +369,7 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub diagnose: bool,
     pub cli_skill_dirs: &'a [PathBuf],
     pub operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
+    pub trusted_host_dispatch: bool,
 }
 
 fn normalize_expected_output(text: &str) -> String {
@@ -516,6 +518,7 @@ async fn run_user_tests_once_with_session(
         cli_skill_dirs: args.cli_skill_dirs.to_vec(),
         progress: Some(user_test_progress(args.verbose)),
         diagnose: args.diagnose,
+        trusted_host_dispatch: args.trusted_host_dispatch,
     };
     let summary = test_runner::run_tests_with_session_and_operator_grant(
         path,

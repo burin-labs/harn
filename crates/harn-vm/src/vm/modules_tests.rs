@@ -16,6 +16,127 @@ fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
     stdlib_module_artifact_cache_ptr(module, source)
 }
 
+struct TrustedHostDispatchBridge;
+
+impl crate::HostCallBridge for TrustedHostDispatchBridge {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        _params: &'a crate::value::DictMap,
+    ) -> crate::stdlib::host::HostCallDispatchFuture<'a> {
+        assert_eq!(capability, "cloud");
+        assert_eq!(operation, "echo");
+        crate::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from("bridged")))))
+    }
+}
+
+#[test]
+fn trusted_host_dispatch_is_explicit_transitive_and_executable() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let helper = temp.path().join("helper.harn");
+    let entry = temp.path().join("entry.harn");
+    std::fs::write(
+        &helper,
+        "pub fn dispatch(payload) { return host_call(\"cloud.echo\", payload) }\n",
+    )
+    .expect("write helper");
+    std::fs::write(
+        &entry,
+        "import { dispatch } from \"./helper\"\npub fn route(payload) { return dispatch(payload) }\n",
+    )
+    .expect("write entry");
+
+    runtime.block_on(async {
+        let mut ordinary = Vm::new();
+        crate::stdlib::register_vm_stdlib(&mut ordinary);
+        let ordinary_exports = ordinary
+            .load_module_exports(&entry)
+            .await
+            .expect("ordinary graph may load until the unresolved call executes");
+        let ordinary_route = ordinary_exports.get("route").expect("route exported");
+        let error = ordinary
+            .call_closure_pub(
+                ordinary_route,
+                &[VmValue::dict(crate::value::DictMap::default())],
+            )
+            .await
+            .expect_err("ordinary module graph must reject host_call at execution");
+        assert!(error.to_string().contains("host_call"), "{error}");
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                crate::set_host_call_bridge(Arc::new(TrustedHostDispatchBridge));
+                let mut trusted = Vm::new();
+                crate::stdlib::register_vm_stdlib(&mut trusted);
+                trusted
+                    .enable_trusted_host_dispatch()
+                    .expect("fresh VM accepts explicit authority");
+                let exports = trusted
+                    .load_module_exports(&entry)
+                    .await
+                    .expect("trusted graph loads transitively");
+                let route = exports.get("route").expect("route exported");
+                let value = trusted
+                    .call_closure_pub(route, &[VmValue::dict(crate::value::DictMap::default())])
+                    .await
+                    .expect("host-selected callable executes");
+                crate::clear_host_call_bridge();
+                assert_eq!(value.display(), "bridged");
+            })
+            .await;
+    });
+}
+
+#[test]
+fn unregistered_host_fixtures_require_explicit_test_local_authority() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        let VmValue::Harness(root) = crate::Harness::real().into_vm_value() else {
+            panic!("real harness lowers to a VM handle");
+        };
+        let testing = root.sub_handle("testing").expect("testing sub-handle");
+        let mut args = vec![
+            VmValue::String(arcstr::ArcStr::from("cloud")),
+            VmValue::String(arcstr::ArcStr::from("echo")),
+            VmValue::String(arcstr::ArcStr::from("fixture")),
+            VmValue::Nil,
+            VmValue::Bool(false),
+        ];
+
+        let error = vm
+            .call_harness_method(&testing, "respond", &args)
+            .await
+            .expect_err("unknown host operation fails closed by default");
+        assert!(
+            error.to_string().contains("unregistered_ok=true"),
+            "{error}"
+        );
+
+        args.push(VmValue::Bool(true));
+        vm.call_harness_method(&testing, "respond", &args)
+            .await
+            .expect("explicit test-local host fixture is accepted");
+        let result = root
+            .inner()
+            .fixtures()
+            .dispatch_host("cloud", "echo", &crate::value::DictMap::default())
+            .expect("fixture matches")
+            .expect("fixture succeeds");
+        assert_eq!(result.display(), "fixture");
+    });
+}
+
 #[test]
 fn child_cow_module_cache_reuses_loaded_module_arcs_but_fresh_roots_do_not() {
     let runtime = tokio::runtime::Builder::new_current_thread()

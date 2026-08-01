@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
@@ -12,7 +12,7 @@ use harn_vm::event_log::{
 };
 use harn_vm::llm::vm_value_to_json;
 use harn_vm::mcp_progress::ProgressContext;
-use harn_vm::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
+use harn_vm::trust_graph::{append_trust_record, TrustOutcome, TrustRecord};
 use harn_vm::{ActorChain, TenantId, TraceId, Vm, VmValue};
 use tokio::task::LocalSet;
 use tracing::Instrument;
@@ -21,6 +21,9 @@ use crate::auth::{AuthPolicy, AuthRequest, AuthenticatedPrincipal, Authorization
 use crate::limits::{LimitContext, LimitDecision, LimitGuard, LimitRegistry};
 use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 use crate::{BudgetSpec, DispatchError, ExportCatalog, ExportedCallableKind};
+
+mod config;
+pub use config::DispatchCoreConfig;
 
 struct ActiveEventLogGuard {
     previous: Option<Arc<AnyEventLog>>,
@@ -291,44 +294,6 @@ pub struct NoopVmConfigurator;
 
 #[async_trait(?Send)]
 impl VmConfigurator for NoopVmConfigurator {}
-
-pub struct DispatchCoreConfig {
-    pub script_path: PathBuf,
-    pub base_dir: PathBuf,
-    pub service_name: String,
-    pub autonomy_tier: AutonomyTier,
-    pub auth_policy: AuthPolicy,
-    pub replay_cache: Arc<dyn ReplayCache>,
-    pub vm_configurator: Arc<dyn VmConfigurator>,
-    /// Rate-limit + backpressure orchestrator. `None` short-circuits
-    /// the limits check (every dispatch admitted unconditionally),
-    /// matching legacy `harn-serve` behaviour. Production deployments
-    /// install [`LimitRegistry::in_memory`] (single-node default) or a
-    /// cluster-aware impl that wraps a remote counter.
-    pub limit_registry: Option<Arc<LimitRegistry>>,
-}
-
-impl DispatchCoreConfig {
-    pub fn for_script(path: impl Into<PathBuf>) -> Self {
-        let script_path = path.into();
-        let base_dir = script_path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let service_name = script_path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("harn-serve")
-            .to_string();
-        Self {
-            script_path,
-            base_dir,
-            service_name,
-            autonomy_tier: AutonomyTier::ActAuto,
-            auth_policy: AuthPolicy::allow_all(),
-            replay_cache: Arc::new(InMemoryReplayCache::new()),
-            vm_configurator: Arc::new(NoopVmConfigurator),
-            limit_registry: None,
-        }
-    }
-}
 
 pub struct DispatchCore {
     config: DispatchCoreConfig,
@@ -629,6 +594,10 @@ impl DispatchCore {
                     let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
                     let mut vm = Vm::new();
+                    if self.config.trusted_host_dispatch {
+                        vm.enable_trusted_host_dispatch()
+                            .map_err(classify_vm_error)?;
+                    }
                     install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
                     self.config.vm_configurator.configure(&mut vm)?;
 
@@ -705,6 +674,10 @@ impl DispatchCore {
                     let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
                     let mut vm = Vm::new();
+                    if self.config.trusted_host_dispatch {
+                        vm.enable_trusted_host_dispatch()
+                            .map_err(classify_vm_error)?;
+                    }
                     install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
                     self.config.vm_configurator.configure(&mut vm)?;
                     let closure = vm
@@ -1711,6 +1684,8 @@ pub fn whoami(harness: Harness) -> string {
 
     #[path = "dispatch_error_tests.rs"]
     mod dispatch_error_tests;
+    #[path = "trusted_host_dispatch_tests.rs"]
+    mod trusted_host_dispatch_tests;
     #[path = "typed_pipeline_tests.rs"]
     mod typed_pipeline_tests;
 }

@@ -52,6 +52,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
+        trusted_host_dispatch: false,
         weight: 1,
         serial_group: None,
     };
@@ -96,6 +97,7 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
+        trusted_host_dispatch: false,
         weight: 1,
         serial_group: None,
     };
@@ -195,6 +197,7 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
+        trusted_host_dispatch: false,
         weight: 1,
         serial_group: None,
     };
@@ -738,6 +741,7 @@ fn sort_cases_longest_first_uses_historical_durations() {
         args: Vec::new(),
         fixture: None,
         file_fixture_value: None,
+        trusted_host_dispatch: false,
     };
     let mut cases = vec![mk("test_quick"), mk("test_slow"), mk("test_medium")];
     let mut timings = BTreeMap::new();
@@ -775,6 +779,7 @@ fn select_shard_cases_balances_by_historical_duration() {
         args: Vec::new(),
         fixture: None,
         file_fixture_value: None,
+        trusted_host_dispatch: false,
     };
     let mut timings = BTreeMap::new();
     timings.insert("tests/a.harn::test_big".to_string(), 100);

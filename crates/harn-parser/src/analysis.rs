@@ -97,6 +97,7 @@ impl AnalysisError {
 #[derive(Debug, Clone, Default)]
 pub struct TypeCheckConfig {
     pub strict_types: bool,
+    pub privileged_wire_builtins: bool,
     pub imported_names: Option<HashSet<String>>,
     pub imported_type_decls: Vec<SNode>,
     pub imported_callable_decls: Vec<SNode>,
@@ -110,6 +111,11 @@ impl TypeCheckConfig {
 
     pub fn with_strict_types(mut self, strict_types: bool) -> Self {
         self.strict_types = strict_types;
+        self
+    }
+
+    pub fn with_privileged_wire_builtins(mut self, enabled: bool) -> Self {
+        self.privileged_wire_builtins = enabled;
         self
     }
 
@@ -152,6 +158,7 @@ impl TypeCheckConfig {
         namespace_aliases.sort();
         TypeCheckCacheKey {
             strict_types: self.strict_types,
+            privileged_wire_builtins: self.privileged_wire_builtins,
             imported_names,
             imported_type_decls_digest: debug_digest(&self.imported_type_decls),
             imported_callable_decls_digest: debug_digest(&self.imported_callable_decls),
@@ -161,6 +168,7 @@ impl TypeCheckConfig {
 
     fn build_checker(&self) -> TypeChecker {
         let mut checker = TypeChecker::with_strict_types(self.strict_types);
+        checker = checker.with_privileged_wire_builtins(self.privileged_wire_builtins);
         if let Some(imported) = self.imported_names.clone() {
             checker = checker.with_imported_names(imported);
         }
@@ -180,6 +188,7 @@ impl TypeCheckConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TypeCheckCacheKey {
     strict_types: bool,
+    privileged_wire_builtins: bool,
     imported_names: Option<Vec<String>>,
     imported_type_decls_digest: u64,
     imported_callable_decls_digest: u64,

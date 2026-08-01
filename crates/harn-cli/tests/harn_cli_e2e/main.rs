@@ -97,6 +97,7 @@ mod supervisor_cli;
 mod test_worker_cli_e2e;
 mod time_cli;
 mod trace_import_dispatch;
+mod trusted_host_dispatch_cli;
 mod try_dispatch;
 mod usage_cli;
 mod user_test_cli;

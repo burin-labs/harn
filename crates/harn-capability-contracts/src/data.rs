@@ -23,14 +23,14 @@ capability_method!(
     testing_respond,
     "harness.testing.respond",
     ["state.write@arg0"],
-    "__cap_testing_respond(capability: string, method: string, value: any, when?: dict, repeat?: bool) -> nil",
+    "__cap_testing_respond(capability: string, method: string, value: any, when?: dict, repeat?: bool, unregistered_ok?: bool) -> nil",
     "Queue one successful response for a closed capability method."
 );
 capability_method!(
     testing_respond_error,
     "harness.testing.respond_error",
     ["state.write@arg0"],
-    "__cap_testing_respond_error(capability: string, method: string, message: string, when?: dict, repeat?: bool) -> nil",
+    "__cap_testing_respond_error(capability: string, method: string, message: string, when?: dict, repeat?: bool, unregistered_ok?: bool) -> nil",
     "Queue one error response for a closed capability method."
 );
 capability_method!(

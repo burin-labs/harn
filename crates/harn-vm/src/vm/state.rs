@@ -478,6 +478,9 @@ pub struct Vm {
     /// Immutable hydrated module bytecode shared across fresh VM isolates.
     /// Runtime closures, registries, state, and init execution are not cached.
     pub(crate) prepared_module_cache: crate::PreparedModuleCache,
+    /// Authority provenance used for the next root module graph. This can only
+    /// move from ordinary user code to trusted host dispatch before loading.
+    pub(crate) module_provenance: crate::module_artifact::ModuleProvenance,
     /// Optional timing recorder shared by this VM execution tree.
     pub(crate) module_phase_recorder: Option<super::ModulePhaseRecorder>,
     /// Lazy manifest modules initialized by any child in this execution tree.
@@ -570,6 +573,7 @@ pub struct VmBaseline {
     root_harness: Option<VmValue>,
     denied_builtins: Arc<HashSet<String>>,
     prepared_module_cache: crate::PreparedModuleCache,
+    module_provenance: crate::module_artifact::ModuleProvenance,
     /// Carried so a VM rebuilt from this baseline keeps resolving modules
     /// through the same link table the original spawn was handed.
     graph_link_table: Option<Arc<crate::context_manifest::GraphLinkTable>>,
@@ -593,6 +597,7 @@ impl VmBaseline {
             root_harness: vm.root_harness.clone(),
             denied_builtins: Arc::clone(&vm.denied_builtins),
             prepared_module_cache: vm.prepared_module_cache.clone(),
+            module_provenance: vm.module_provenance,
             graph_link_table: vm.graph_link_table.clone(),
             runtime_limits: vm.runtime_limits,
         }
@@ -652,6 +657,7 @@ impl VmBaseline {
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
             prepared_module_cache: self.prepared_module_cache.clone(),
+            module_provenance: self.module_provenance,
             module_phase_recorder: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(source_cache),
@@ -911,6 +917,7 @@ impl Vm {
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
             prepared_module_cache: crate::PreparedModuleCache::default(),
+            module_provenance: crate::module_artifact::ModuleProvenance::User,
             module_phase_recorder: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
@@ -1171,6 +1178,7 @@ impl Vm {
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::clone(&self.module_cache),
             prepared_module_cache: self.prepared_module_cache.clone(),
+            module_provenance: self.module_provenance,
             module_phase_recorder: self.module_phase_recorder.clone(),
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),

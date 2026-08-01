@@ -907,12 +907,6 @@ pub(super) fn builtin_return_type(name: &str) -> InferredType {
     builtin_signatures::builtin_return_type(name)
 }
 
-/// Check if a name is a known builtin. Delegates to the shared
-/// [`builtin_signatures`] registry.
-pub(super) fn is_builtin(name: &str) -> bool {
-    builtin_signatures::is_builtin(name)
-}
-
 /// Whether a canonical reference-path `key` is rooted at `base` — i.e. it is
 /// `base` itself or extends it through a path separator (`.` for a property,
 /// `[` for a constant subscript). `xs` roots `xs`, `xs.a`, and `xs[0]`, but
