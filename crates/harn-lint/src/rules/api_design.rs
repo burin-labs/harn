@@ -9,6 +9,8 @@
 
 use std::collections::BTreeSet;
 
+use harn_builtin_meta::CapabilityId;
+use harn_lexer::Span;
 use harn_parser::{visit, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 use harn_vm::HarnessKind;
 
@@ -18,7 +20,21 @@ const ATTENUATION_RULE: &str = "capability-attenuation";
 const POSITIONAL_RULE: &str = "homogeneous-positional-api";
 const POSITIONAL_THRESHOLD: usize = 4;
 
-pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
+/// A root `Harness` parameter that local syntax proves can be narrowed.
+///
+/// This is the semantic contract shared by the advisory lint and the
+/// whole-program fixer. Keeping boundary and escape analysis here prevents the
+/// fixer from inventing a broader attenuation policy than the diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityAttenuation {
+    pub declaration_span: Span,
+    pub parameter_name: String,
+    pub capabilities: BTreeSet<CapabilityId>,
+}
+
+/// Return every conservatively attenuable root parameter in a parsed module.
+#[must_use]
+pub fn capability_attenuations(program: &[SNode]) -> Vec<CapabilityAttenuation> {
     // A named function installed as a handler is entered by the runtime or a
     // host framework. That callback boundary receives the root Harness by
     // contract even when today's body happens to use one capability. Treat
@@ -52,6 +68,7 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
         .iter()
         .all(|name| public_functions.contains(*name));
 
+    let mut attenuations = Vec::new();
     for declaration in program {
         let (declaration, attributed_boundary) = match &declaration.node {
             Node::AttributedDecl { attributes, inner } => (
@@ -83,12 +100,47 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
         let connector_boundary = connector_module
             && *is_pub
             && harn_vm::connectors::harn_module::abi::is_runtime_export(name);
-        if !attributed_boundary
+        if name != "main"
+            && !attributed_boundary
             && !trigger_boundary
             && !connector_boundary
             && !boundary_callbacks.contains(name)
         {
-            check_capability_attenuation(name, params, body, declaration, diagnostics);
+            attenuations.extend(params.iter().filter_map(|parameter| {
+                capability_attenuation_for_parameter(params, body, parameter).map(|capabilities| {
+                    CapabilityAttenuation {
+                        declaration_span: declaration.span,
+                        parameter_name: parameter.name.clone(),
+                        capabilities,
+                    }
+                })
+            }));
+        }
+    }
+    attenuations
+}
+
+pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
+    let attenuations = capability_attenuations(program);
+    for declaration in program {
+        let declaration = match &declaration.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => declaration,
+        };
+        let Node::FnDecl {
+            name,
+            params,
+            is_pub,
+            ..
+        } = &declaration.node
+        else {
+            continue;
+        };
+        for attenuation in attenuations
+            .iter()
+            .filter(|candidate| candidate.declaration_span == declaration.span)
+        {
+            push_capability_attenuation_diagnostic(name, declaration, attenuation, diagnostics);
         }
         if *is_pub {
             check_homogeneous_positionals(name, params, declaration, diagnostics);
@@ -96,110 +148,114 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
     }
 }
 
-fn check_capability_attenuation(
-    function_name: &str,
+fn capability_attenuation_for_parameter(
     params: &[TypedParam],
     body: &[SNode],
+    parameter: &TypedParam,
+) -> Option<BTreeSet<CapabilityId>> {
+    if !matches!(
+        parameter.type_expr.as_ref(),
+        Some(TypeExpr::Named(name)) if name == HarnessKind::Root.type_name()
+    ) {
+        return None;
+    }
+
+    let mut identifier_uses = 0usize;
+    let mut direct_subhandle_uses = 0usize;
+    let mut unknown_member = false;
+    let mut capabilities = BTreeSet::new();
+    let mut shadowed_in_nested_callable = false;
+    let mut record_use = |node: &SNode| match &node.node {
+        Node::Identifier(name) if name == &parameter.name => identifier_uses += 1,
+        Node::PropertyAccess { object, property }
+        | Node::OptionalPropertyAccess { object, property }
+            if matches!(&object.node, Node::Identifier(name) if name == &parameter.name) =>
+        {
+            direct_subhandle_uses += 1;
+            if let Some(capability) = CapabilityId::from_field_name(property) {
+                capabilities.insert(capability);
+            } else {
+                unknown_member = true;
+            }
+        }
+        Node::FnDecl { params, .. } | Node::Closure { params, .. }
+            if params.iter().any(|nested| nested.name == parameter.name) =>
+        {
+            shadowed_in_nested_callable = true;
+        }
+        _ => {}
+    };
+    // Defaults execute in the callable's scope and may use authority just
+    // like the body. Ignoring them can falsely attenuate a root parameter,
+    // leaving the default with an unreachable grant.
+    for candidate in params {
+        if let Some(default) = &candidate.default_value {
+            visit::walk_node(default, &mut record_use);
+        }
+    }
+    visit::walk_program(body, &mut record_use);
+
+    // Suppress when the root escapes, is forwarded, or touches an unknown
+    // member: local syntax no longer proves attenuation is safe.
+    (identifier_uses != 0
+        && identifier_uses == direct_subhandle_uses
+        && !unknown_member
+        && !shadowed_in_nested_callable
+        && (1..=2).contains(&capabilities.len()))
+    .then_some(capabilities)
+}
+
+fn push_capability_attenuation_diagnostic(
+    function_name: &str,
     declaration: &SNode,
+    attenuation: &CapabilityAttenuation,
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
-    // `main` is an execution boundary. Pipelines are excluded structurally
-    // above because they are orchestration boundaries by definition.
-    if function_name == "main" {
-        return;
-    }
-    for parameter in params {
-        if !matches!(
-            parameter.type_expr.as_ref(),
-            Some(TypeExpr::Named(name)) if name == HarnessKind::Root.type_name()
-        ) {
-            continue;
-        }
-
-        let mut identifier_uses = 0usize;
-        let mut direct_subhandle_uses = 0usize;
-        let mut unknown_member = false;
-        let mut subhandles = BTreeSet::new();
-        let mut shadowed_in_nested_callable = false;
-        let mut record_use = |node: &SNode| match &node.node {
-            Node::Identifier(name) if name == &parameter.name => identifier_uses += 1,
-            Node::PropertyAccess { object, property }
-            | Node::OptionalPropertyAccess { object, property }
-                if matches!(&object.node, Node::Identifier(name) if name == &parameter.name) =>
-            {
-                direct_subhandle_uses += 1;
-                if let Some(kind) = HarnessKind::from_field_name(property) {
-                    subhandles.insert((property.clone(), kind.type_name()));
-                } else {
-                    unknown_member = true;
-                }
-            }
-            Node::FnDecl { params, .. } | Node::Closure { params, .. }
-                if params.iter().any(|nested| nested.name == parameter.name) =>
-            {
-                shadowed_in_nested_callable = true;
-            }
-            _ => {}
-        };
-        // Defaults execute in the callable's scope and may use authority just
-        // like the body. Ignoring them can falsely attenuate a root parameter,
-        // leaving the default with an unreachable grant.
-        for candidate in params {
-            if let Some(default) = &candidate.default_value {
-                visit::walk_node(default, &mut record_use);
-            }
-        }
-        visit::walk_program(body, &mut record_use);
-
-        // Suppress when the root escapes, is forwarded, or touches an unknown
-        // member: local syntax no longer proves attenuation is safe.
-        if identifier_uses == 0
-            || identifier_uses != direct_subhandle_uses
-            || unknown_member
-            || shadowed_in_nested_callable
-            || !(1..=2).contains(&subhandles.len())
-        {
-            continue;
-        }
-
-        let signature = subhandles
-            .iter()
-            .map(|(field, ty)| format!("{field}: {ty}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let capabilities = subhandles
-            .iter()
-            .map(|(field, _)| format!("`harness.{field}`"))
-            .collect::<Vec<_>>()
-            .join(" and ");
-        diagnostics.push(LintDiagnostic {
-            code: Code::LintBroadHarnessParameter,
-            rule: ATTENUATION_RULE.into(),
-            message: format!(
-                "helper `{function_name}` accepts root `Harness` but uses only {capabilities}"
-            ),
-            span: declaration.span,
-            severity: if subhandles.len() == 1 {
-                LintSeverity::Warning
-            } else {
-                LintSeverity::Info
-            },
-            suggestion: Some(if subhandles.len() == 1 {
-                format!(
-                    "accept the narrow capability parameter `{signature}` and pass the sub-handle at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration"
-                )
-            } else {
-                format!(
-                    "accept one closed capability record `{{{signature}}}` and construct it from the two sub-handles at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration"
-                )
-            }),
-            // Narrowing a signature is only safe when every call site moves
-            // with it, and a caller can live in a module this rule never sees.
-            // Until the fixer resolves capability requirements across module
-            // boundaries, this stays advisory.
-            fix: None,
-        });
-    }
+    let mut capabilities = attenuation.capabilities.iter().copied().collect::<Vec<_>>();
+    capabilities.sort_by_key(|capability| capability.field_name());
+    let signature = capabilities
+        .iter()
+        .map(|capability| format!("{}: {}", capability.field_name(), capability.type_name()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let capability_names = capabilities
+        .iter()
+        .map(|capability| {
+            format!(
+                "`{}.{}`",
+                attenuation.parameter_name,
+                capability.field_name()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" and ");
+    diagnostics.push(LintDiagnostic {
+        code: Code::LintBroadHarnessParameter,
+        rule: ATTENUATION_RULE.into(),
+        message: format!(
+            "helper `{function_name}` accepts root `Harness` but uses only {capability_names}"
+        ),
+        span: declaration.span,
+        severity: if capabilities.len() == 1 {
+            LintSeverity::Warning
+        } else {
+            LintSeverity::Info
+        },
+        suggestion: Some(if capabilities.len() == 1 {
+            format!(
+                "accept the narrow capability parameter `{signature}` and pass the sub-handle at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration"
+            )
+        } else {
+            format!(
+                "accept one closed capability record `{{{signature}}}` and construct it from the two sub-handles at call sites; keep root `Harness` for entrypoints and genuine multi-capability orchestration"
+            )
+        }),
+        // Narrowing a signature is only safe when every call site moves
+        // with it, and a caller can live in a module this rule never sees.
+        // Until the fixer resolves capability requirements across module
+        // boundaries, this stays advisory.
+        fix: None,
+    });
 }
 
 fn check_homogeneous_positionals(

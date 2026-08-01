@@ -22,6 +22,8 @@ mod capability_migrations;
 mod lint_context;
 #[path = "fix/signature_threading.rs"]
 mod signature_threading;
+#[path = "fix/whole_program_capabilities.rs"]
+mod whole_program_capabilities;
 use capability_migrations::{ambient_call_rewrite, ambient_capability_handle, ambient_replacement};
 use lint_context::FixLintContext;
 #[path = "fix/apply.rs"]
@@ -230,6 +232,7 @@ struct CallableInfo {
 struct CallSite {
     callee: String,
     span: Span,
+    args: Vec<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +418,47 @@ fn build_plan_with_options(
         ) {
             skipped_files.push(skipped);
         }
+    }
+
+    let skipped_paths = skipped_files
+        .iter()
+        .map(|skipped| {
+            std::fs::canonicalize(&skipped.path)
+                .unwrap_or_else(|_| Path::new(&skipped.path).to_path_buf())
+        })
+        .collect::<BTreeSet<_>>();
+    let valid_files = files
+        .iter()
+        .filter(|file| {
+            !skipped_paths
+                .contains(&std::fs::canonicalize(file).unwrap_or_else(|_| (*file).clone()))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let whole_program_repairs =
+        whole_program_capabilities::plan(&valid_files, &module_graph, &candidates)?;
+    if !whole_program_repairs.is_empty() {
+        let whole_program_files = whole_program_repairs
+            .iter()
+            .map(|repair| {
+                std::fs::canonicalize(&repair.file)
+                    .unwrap_or_else(|_| Path::new(&repair.file).to_path_buf())
+            })
+            .collect::<BTreeSet<_>>();
+        candidates.retain(|candidate| {
+            if is_whole_program_superseded_repair(&candidate.repair) {
+                return false;
+            }
+            // A binding that looked unused before the program plan may be the
+            // carrier used by its emitted call rewrites. Defer that cleanup to
+            // the next plan instead of renaming the binding in the same pass.
+            candidate.repair.id.as_str() != "bindings/rename-unused"
+                || !whole_program_files.contains(
+                    &std::fs::canonicalize(&candidate.file)
+                        .unwrap_or_else(|_| Path::new(&candidate.file).to_path_buf()),
+                )
+        });
+        candidates.extend(whole_program_repairs);
     }
 
     let conflicts = detect_conflicts(&candidates);
@@ -689,6 +733,17 @@ fn is_capability_migration_repair(repair: &Repair) -> bool {
                 | "bindings/attenuate-harness"
                 | "bindings/attenuate-capability-argument"
                 | "bindings/attenuate-capability-bundle-argument"
+        )
+}
+
+fn is_whole_program_superseded_repair(repair: &Repair) -> bool {
+    let id = repair.id.as_str();
+    id.starts_with("bindings/thread-harness")
+        || matches!(
+            id,
+            "bindings/thread-missing-harness"
+                | "bindings/thread-root-argument"
+                | "bindings/prepend-capability-argument"
         )
 }
 
@@ -1409,5 +1464,8 @@ impl From<&Repair> for RepairMetadataWire {
     }
 }
 
+#[cfg(test)]
+#[path = "fix/capability_apply_tests.rs"]
+mod capability_apply_tests;
 #[cfg(test)]
 mod tests;
