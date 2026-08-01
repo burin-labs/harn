@@ -1700,7 +1700,7 @@ impl TypeChecker {
             let harn_lexer::StringSegment::Expression(src, line, col) = seg else {
                 continue;
             };
-            let mut lexer = harn_lexer::Lexer::with_position(src, *line, *col);
+            let mut lexer = interpolation_lexer(self.source.as_deref(), src, *line, *col);
             let Ok(tokens) = lexer.tokenize() else {
                 continue;
             };

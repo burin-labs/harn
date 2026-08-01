@@ -402,7 +402,10 @@ fn missing_capability_argument_repair_uses_source_coordinates_over_stale_offsets
 fn source_coordinates_map_unicode_columns_to_byte_offsets() {
     let source = "αβ\n  call(\"value\")\n";
     let expected = source.find("\"value\"").expect("first argument");
-    assert_eq!(source_offset_for_line_column(source, 2, 8), Some(expected));
+    assert_eq!(
+        harn_lexer::byte_offset_for_position(source, 2, 8),
+        Some(expected)
+    );
 }
 
 #[test]

@@ -993,12 +993,7 @@ fn synthesize_missing_capability_argument_repair(
         let capability = harn_builtin_meta::CapabilityId::from_type_name(expected)?;
         format!("harness.{}", capability.field_name())
     };
-    // Type diagnostics produced while checking an interpolated expression can
-    // carry offsets relative to the re-lexed interpolation while retaining the
-    // correct file-level line/column. Repairs edit the full source, so resolve
-    // the insertion point from those canonical source coordinates instead of
-    // trusting a stale local byte offset (harn#5850).
-    let insertion = source_offset_for_line_column(source, span.line, span.column)?;
+    let insertion = harn_lexer::byte_offset_for_position(source, span.line, span.column)?;
     Some((
         Repair {
             id: harn_parser::RepairId::from_owned(
@@ -1015,30 +1010,6 @@ fn synthesize_missing_capability_argument_repair(
         }],
         RepairImpactWire::local_ambient("prepend-capability-argument"),
     ))
-}
-
-fn source_offset_for_line_column(source: &str, line: usize, column: usize) -> Option<usize> {
-    if line == 0 || column == 0 {
-        return None;
-    }
-    let line_start = if line == 1 {
-        0
-    } else {
-        source
-            .match_indices('\n')
-            .nth(line - 2)
-            .map(|(offset, _)| offset + 1)?
-    };
-    let line_source = source[line_start..]
-        .split_once('\n')
-        .map_or(&source[line_start..], |(before, _)| before);
-    let character_index = column - 1;
-    let within_line = if character_index == line_source.chars().count() {
-        line_source.len()
-    } else {
-        line_source.char_indices().nth(character_index)?.0
-    };
-    Some(line_start + within_line)
 }
 
 fn synthesize_missing_harness_repair(

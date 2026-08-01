@@ -32,6 +32,34 @@ pub struct Span {
     pub end_line: usize,
 }
 
+/// Resolve a one-based lexer line/column to an absolute UTF-8 byte offset.
+///
+/// Harn columns count Unicode scalar values, while edit spans use byte offsets.
+/// Keeping this conversion in the lexer prevents diagnostic and repair clients
+/// from maintaining subtly different source-coordinate projections.
+#[must_use]
+pub fn byte_offset_for_position(source: &str, line: usize, column: usize) -> Option<usize> {
+    if line == 0 || column == 0 {
+        return None;
+    }
+
+    let mut current_line = 1usize;
+    let mut current_column = 1usize;
+    for (offset, character) in source.char_indices() {
+        if current_line == line && current_column == column {
+            return Some(offset);
+        }
+        if character == '\n' {
+            current_line += 1;
+            current_column = 1;
+        } else {
+            current_column += 1;
+        }
+    }
+
+    (current_line == line && current_column == column).then_some(source.len())
+}
+
 impl Span {
     pub fn with_offsets(start: usize, end: usize, line: usize, column: usize) -> Self {
         Self {
@@ -456,5 +484,21 @@ pub struct Token {
 impl Token {
     pub fn with_span(kind: TokenKind, span: Span) -> Self {
         Self { kind, span }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::byte_offset_for_position;
+
+    #[test]
+    fn source_positions_map_unicode_columns_to_byte_offsets() {
+        let source = "αβ\n  call(\"value\")\n";
+        let expected = source.find("\"value\"").expect("first argument");
+
+        assert_eq!(byte_offset_for_position(source, 2, 8), Some(expected));
+        assert_eq!(byte_offset_for_position(source, 3, 1), Some(source.len()));
+        assert_eq!(byte_offset_for_position(source, 0, 1), None);
+        assert_eq!(byte_offset_for_position(source, 2, 99), None);
     }
 }
