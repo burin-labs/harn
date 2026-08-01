@@ -4,6 +4,19 @@ use crate::vm::Vm;
 fn vm_with_flow_builtins() -> Vm {
     let mut vm = Vm::new();
     register_flow_builtins(&mut vm);
+    // The VM crate cannot depend on harn-hostlib (hostlib already depends on
+    // the VM), so model the one read-only AST method this executor test needs.
+    // Hostlib's own tests cover the real tree-sitter implementation.
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Ast,
+        "search",
+        |_args, _output| {
+            Ok(json_to_vm_value(&serde_json::json!({
+                "status": "ok",
+                "matches": [{"captures": {"name": {"text": "typed"}}}],
+            })))
+        },
+    );
     vm.set_harness(crate::Harness::real());
     vm
 }
@@ -573,6 +586,70 @@ pub fn typed_block(_slice, _ctx, _repo_at_base) {
     assert_eq!(
         report["records"][0]["raw_result"]["verdict"]["kind"],
         "block"
+    );
+}
+
+#[tokio::test]
+async fn flow_evaluate_invariants_injects_only_opted_in_ast_capability() {
+    let report = eval_source(
+        r#"
+import { ast_search } from "std/ast"
+
+@invariant
+@deterministic
+@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-08-01")
+pub fn structural(ast: HarnessAst, slice, _ctx, _repo_at_base) {
+  const result = ast_search(ast, {
+    source: slice.files[0].text,
+    language: "rust",
+    query: "(function_item name: (identifier) @name)",
+  })
+  return {
+    verdict: "Allow",
+    rule: "structural",
+    findings: result.matches,
+    remediation: "",
+  }
+}
+"#,
+        serde_json::json!({
+            "files": [{"path": "src/lib.rs", "text": "fn typed() {}"}],
+        }),
+    )
+    .await;
+
+    assert_eq!(report["ok"], true, "{report:#}");
+    assert_eq!(
+        report["records"][0]["raw_result"]["findings"][0]["captures"]["name"]["text"],
+        "typed"
+    );
+}
+
+#[tokio::test]
+async fn flow_evaluate_invariants_does_not_inject_other_capabilities() {
+    let report = eval_source(
+        r#"
+@invariant
+@deterministic
+@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-08-01")
+pub fn filesystem(fs: HarnessFs, _slice, _ctx, _repo_at_base) {
+  return {verdict: "Allow", rule: "filesystem", findings: [], remediation: fs.cwd()}
+}
+"#,
+        serde_json::json!({"files": []}),
+    )
+    .await;
+
+    assert_eq!(report["ok"], false, "{report:#}");
+    assert_eq!(
+        report["records"][0]["result"]["verdict"]["error"]["code"],
+        "predicate_runtime_error"
+    );
+    assert!(
+        report["records"][0]["result"]["verdict"]["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("expects at least 4 arguments, got 3")),
+        "{report:#}"
     );
 }
 

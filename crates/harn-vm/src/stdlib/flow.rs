@@ -352,6 +352,10 @@ async fn flow_evaluate_invariants_impl(
             .await?
         }
     };
+    let predicate_ast = vm
+        .harness()
+        .and_then(|harness| harness.sub_handle("ast"))
+        .map(VmValue::harness);
     let vm = Arc::new(tokio::sync::Mutex::new(vm));
     let mut runners: Vec<Arc<dyn PredicateRunner>> = Vec::new();
     for predicate in predicates {
@@ -376,6 +380,15 @@ async fn flow_evaluate_invariants_impl(
                 Some(_) => None,
             }
         };
+        let args = flow_predicate_args(
+            predicate_ast.as_ref(),
+            closure.as_deref(),
+            [
+                request.slice.clone(),
+                request.predicate_ctx.clone(),
+                request.repo_at_base.clone(),
+            ],
+        )?;
         runners.push(Arc::new(HarnPredicateRunner {
             name: predicate.name.clone(),
             hash: predicate.source_hash.clone(),
@@ -385,11 +398,7 @@ async fn flow_evaluate_invariants_impl(
             fallback_diagnostic,
             vm: vm.clone(),
             closure,
-            args: [
-                request.slice.clone(),
-                request.predicate_ctx.clone(),
-                request.repo_at_base.clone(),
-            ],
+            args,
             raw_result: Mutex::new(None),
         }));
     }
@@ -455,8 +464,33 @@ struct HarnPredicateRunner {
     fallback_diagnostic: Option<InvariantBlockError>,
     vm: Arc<tokio::sync::Mutex<Vm>>,
     closure: Option<Arc<VmClosure>>,
-    args: [VmValue; 3],
+    args: Vec<VmValue>,
     raw_result: Mutex<Option<serde_json::Value>>,
+}
+
+fn flow_predicate_args(
+    ast: Option<&VmValue>,
+    closure: Option<&VmClosure>,
+    domain_args: [VmValue; 3],
+) -> Result<Vec<VmValue>, VmError> {
+    let requests_ast = closure
+        .and_then(|closure| closure.func.params.first())
+        .and_then(|param| param.type_expr.as_ref())
+        .is_some_and(|type_expr| {
+            matches!(type_expr, harn_parser::TypeExpr::Named(name) if name == "HarnessAst")
+        });
+    let mut args = Vec::with_capacity(domain_args.len() + usize::from(requests_ast));
+    if requests_ast {
+        let ast = ast.cloned().ok_or_else(|| {
+            VmError::Runtime(
+                "Flow invariant requested HarnessAst, but no AST capability is installed"
+                    .to_string(),
+            )
+        })?;
+        args.push(ast);
+    }
+    args.extend(domain_args);
+    Ok(args)
 }
 
 #[async_trait]
