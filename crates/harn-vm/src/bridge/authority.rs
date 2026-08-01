@@ -47,13 +47,18 @@ pub fn inject_leading_authority(
     args: &[VmValue],
     callable_label: &str,
 ) -> Result<Vec<VmValue>, VmError> {
-    let Some(type_name) = closure
-        .func
-        .params
-        .first()
-        .and_then(|param| param.type_expr.as_ref())
+    let Some(param) = closure.func.params.first() else {
+        return Ok(args.to_vec());
+    };
+    // Preserve the long-standing untyped `harness` entrypoint convention while
+    // making an explicit root or nominal Harness type independent of the
+    // parameter's local name.
+    let type_name = param
+        .type_expr
+        .as_ref()
         .and_then(named_type)
-    else {
+        .or_else(|| (param.name == "harness").then_some("Harness"));
+    let Some(type_name) = type_name else {
         return Ok(args.to_vec());
     };
 
