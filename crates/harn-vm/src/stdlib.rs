@@ -772,9 +772,66 @@ pub fn harness_migration_for_builtin(name: &str) -> Option<HarnessBuiltinMigrati
             return Some(forward(CapabilityId::Testing, "sse_server_mock_disconnect"));
         }
         "websocket_mock" => return Some(forward(CapabilityId::Testing, "websocket_mock")),
-        _ => return None,
+        // The connector runtime used to inject `secret_get` for the duration
+        // of an export call. Connector exports now receive a root Harness, so
+        // the same read is a plain capability method.
+        "secret_get" => return Some(forward(CapabilityId::Secrets, "read")),
+        _ => {
+            return registered_capability_owner(name)
+                .map(|(capability, method)| forward(capability, method));
+        }
     };
     Some(request_record(method, fields))
+}
+
+/// Capability owner for a method installed by `register_capability_method`
+/// rather than by `#[harn_builtin]` exposure.
+///
+/// Store, checkpoint, metadata, and host-injected methods are registered on
+/// the VM at startup, so they never reach the builtin manifest. Projecting the
+/// probe VM's dispatch table keeps the migration recipe — and with it the
+/// linter and `harn fix` — aware of them instead of relying on a second
+/// hand-maintained list that drifts every time a host adds a capability.
+///
+/// This mirrors the set the legacy ambient bridge restores, so a script that
+/// still runs under `HARN_LEGACY_AMBIENT_CAPABILITIES` gets a repair for every
+/// global that bridge is covering for. Two kinds of name stay out:
+///
+///   * A name owned by more than one capability, because the rewrite target
+///     would be ambiguous and guessing an owner would point callers at the
+///     wrong capability.
+///   * A name that is still a declared global builtin, because that call
+///     resolves on its own and has not moved anywhere.
+fn registered_capability_owner(
+    name: &str,
+) -> Option<(harn_builtin_meta::CapabilityId, &'static str)> {
+    static OWNERS: std::sync::OnceLock<
+        std::collections::BTreeMap<&'static str, Option<harn_builtin_meta::CapabilityId>>,
+    > = std::sync::OnceLock::new();
+    let owners = OWNERS.get_or_init(|| {
+        let declared: std::collections::BTreeSet<&'static str> = all_builtin_manifest()
+            .iter()
+            .map(|entry| entry.name)
+            .collect();
+        let mut owners = std::collections::BTreeMap::new();
+        for (capability, method) in stdlib_probe_vm().capability_method_names() {
+            if declared.contains(method.as_str()) {
+                continue;
+            }
+            let method: &'static str = Box::leak(method.into_boxed_str());
+            owners
+                .entry(method)
+                .and_modify(|owner: &mut Option<harn_builtin_meta::CapabilityId>| {
+                    if *owner != Some(capability) {
+                        *owner = None;
+                    }
+                })
+                .or_insert(Some(capability));
+        }
+        owners
+    });
+    let (method, owner) = owners.get_key_value(name)?;
+    Some(((*owner)?, method))
 }
 
 /// Register every `#[harn_builtin]`-emitted def on the given VM. Drivers
@@ -1173,5 +1230,83 @@ mod ambient_host_internal_projection_tests {
                 None => std::env::remove_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod registered_capability_migration_tests {
+    use super::{harness_migration_for_builtin, stdlib_probe_vm, HarnessBuiltinArgumentMigration};
+
+    /// Every capability method the legacy ambient bridge can restore as a
+    /// global needs a migration recipe, or a script running under the bridge
+    /// gets an error with nowhere to go.
+    #[test]
+    fn every_uniquely_owned_capability_method_has_a_migration() {
+        let vm = stdlib_probe_vm();
+        let declared: std::collections::BTreeSet<String> = super::all_builtin_manifest()
+            .iter()
+            .map(|entry| entry.name.to_string())
+            .collect();
+        let mut owners: std::collections::BTreeMap<String, std::collections::BTreeSet<_>> =
+            std::collections::BTreeMap::new();
+        for (capability, method) in vm.capability_method_names() {
+            owners.entry(method).or_default().insert(capability);
+        }
+
+        let missing: Vec<_> = owners
+            .iter()
+            .filter(|(method, capabilities)| {
+                capabilities.len() == 1
+                    && !declared.contains(*method)
+                    && harness_migration_for_builtin(method).is_none()
+            })
+            .map(|(method, _)| method.clone())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "capability methods without a migration recipe: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn runtime_registered_store_methods_migrate_to_their_owning_capability() {
+        for method in ["store_get", "store_set", "store_delete", "store_list"] {
+            let migration =
+                harness_migration_for_builtin(method).expect("store method has a migration");
+            assert_eq!(
+                migration.capability,
+                harn_builtin_meta::CapabilityId::Runtime
+            );
+            assert_eq!(migration.method, method);
+            assert_eq!(
+                migration.arguments,
+                HarnessBuiltinArgumentMigration::Forward
+            );
+        }
+    }
+
+    /// A name two capabilities both answer to has no single rewrite target,
+    /// so it must stay uncovered rather than pick an owner arbitrarily.
+    #[test]
+    fn ambiguously_owned_methods_have_no_migration() {
+        let vm = stdlib_probe_vm();
+        let mut owners: std::collections::BTreeMap<String, std::collections::BTreeSet<_>> =
+            std::collections::BTreeMap::new();
+        for (capability, method) in vm.capability_method_names() {
+            owners.entry(method).or_default().insert(capability);
+        }
+        let Some((method, _)) = owners
+            .iter()
+            .find(|(method, capabilities)| {
+                capabilities.len() > 1 && super::harness_method_for_builtin(method).is_none()
+            })
+            .map(|(method, capabilities)| (method.clone(), capabilities.clone()))
+        else {
+            return;
+        };
+        assert!(
+            super::registered_capability_owner(&method).is_none(),
+            "`{method}` is owned by several capabilities and must not resolve to one"
+        );
     }
 }

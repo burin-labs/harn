@@ -230,14 +230,14 @@ fn generate_file() -> String {
     );
     out.push_str("| `kinds() -> list<string>` | Yes | Trigger kinds such as `webhook`, `poll`, `cron`, `a2a-push`, or `stream`. |\n");
     out.push_str("| `payload_schema() -> dict` | Yes | `{ harn_schema_name, json_schema? }`; the contract check rejects `{ name = ... }` drift. |\n");
-    out.push_str("| `normalize_inbound(raw) -> dict` | Inbound | Returns `NormalizeResult` v1 for webhook-style input. |\n");
-    out.push_str("| `poll_tick(ctx) -> dict` | Poll | Required when `kinds()` includes `poll`; returns events plus optional `cursor`/`state`. |\n");
-    out.push_str("| `call(method, args) -> dict` | Outbound | Provider API escape hatch. Unknown probes may throw `method_not_found:<method>`. |\n");
-    out.push_str("| `init(ctx)` | No | Receives event log, secrets, metrics, inbox, and rate-limit handles. |\n");
-    out.push_str("| `activate(bindings)` | No | Runs on manifest activation/reload. |\n");
-    out.push_str("| `shutdown()` | No | Cleanup on reload or process shutdown. |\n\n");
-    out.push_str("`normalize_inbound(raw)` must return one of these tagged shapes: `{ type: \"event\", event }`, `{ type: \"batch\", events }`, `{ type: \"immediate_response\", immediate_response, event?, events? }`, or `{ type: \"reject\", status, body? }`. Direct legacy event dicts are rejected.\n\n");
-    out.push_str("Connector-only builtins available during connector export execution: `secret_get`, `event_log_emit`, and `metrics_inc`. The hot-path `normalize_inbound` effect policy rejects network calls, LLM calls, process execution, host calls, MCP calls, and ambient filesystem/project access.\n\n");
+    out.push_str("| `normalize_inbound(harness, raw) -> dict` | Inbound | Returns `NormalizeResult` v1 for webhook-style input. |\n");
+    out.push_str("| `poll_tick(harness, ctx) -> dict` | Poll | Required when `kinds()` includes `poll`; returns events plus optional `cursor`/`state`. |\n");
+    out.push_str("| `call(harness, method, args) -> dict` | Outbound | Provider API escape hatch. Unknown probes may throw `method_not_found:<method>`. |\n");
+    out.push_str("| `init(harness, ctx)` | No | Receives event log, secrets, metrics, inbox, and rate-limit handles. |\n");
+    out.push_str("| `activate(harness, bindings)` | No | Runs on manifest activation/reload. |\n");
+    out.push_str("| `shutdown(harness)` | No | Cleanup on reload or process shutdown. |\n\n");
+    out.push_str("`normalize_inbound(harness, raw)` must return one of these tagged shapes: `{ type: \"event\", event }`, `{ type: \"batch\", events }`, `{ type: \"immediate_response\", immediate_response, event?, events? }`, or `{ type: \"reject\", status, body? }`. Direct legacy event dicts are rejected.\n\n");
+    out.push_str("Every runtime export takes the root `Harness` first; the metadata exports (`provider_id`, `kinds`, `payload_schema`) stay pure and take nothing. Reach secrets, the event log, and metrics through that handle: `harness.secrets.read`, `harness.obs.event_log_emit`, and `harness.obs.metrics_inc`. The hot-path `normalize_inbound` effect policy rejects network calls, LLM calls, process execution, host calls, MCP calls, and ambient filesystem/project access.\n\n");
     out.push_str("Runtime scripts can observe EventLog topics directly with `event_log.subscribe({topic, from_cursor, kind_prefix?})`, which returns a `Stream<dict>` of `{id, cursor, topic, kind, payload, headers, occurred_at_ms}` records. Use `event_log.latest(topic)` before subscribing to tail new events only, pass `kind_prefix` to receive only matching event kinds, or persist the `cursor` field to resume after a reconnect.\n\n");
 
     out.push_str("## Package fixtures\n\n");
@@ -290,7 +290,7 @@ import \"std/triggers\"\n\n\
 const intake = webhook_intake_register({\n  \
 id: \"github\",\n  \
 path: \"/hooks/github\",\n  \
-secret: secret_get(\"github/webhook-secret\"),\n  \
+secret: harness.secrets.read(\"github/webhook-secret\"),\n  \
 signature_header: \"x-hub-signature-256\",\n  \
 delivery_id_header: \"x-github-delivery\",\n  \
 topic: \"github.events\",\n\

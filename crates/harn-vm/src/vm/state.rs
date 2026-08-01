@@ -1269,6 +1269,20 @@ impl Vm {
         names
     }
 
+    /// Return every installed capability method as a `(capability, method)`
+    /// pair, including those registered at runtime rather than declared
+    /// through `#[harn_builtin]` exposure.
+    pub fn capability_method_names(&self) -> Vec<(harn_builtin_meta::CapabilityId, String)> {
+        self.capability_methods
+            .iter()
+            .flat_map(|(capability, methods)| {
+                methods
+                    .keys()
+                    .map(move |method| (*capability, method.clone()))
+            })
+            .collect()
+    }
+
     /// Return discoverable metadata for registered builtins.
     pub fn builtin_metadata(&self) -> Vec<VmBuiltinMetadata> {
         self.builtin_metadata.values().cloned().collect()
