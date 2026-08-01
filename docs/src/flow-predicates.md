@@ -39,7 +39,7 @@ Every shipping predicate is a top-level Harn function marked with
   source_date: "2026-04-26",
   coverage_examples: ["crates/api/src/auth.rs"]
 )
-fn no_raw_tokens(slice) {
+fn no_raw_tokens(slice, _ctx, _repo_at_base) {
   return flow_invariant_allow()
 }
 
@@ -51,13 +51,17 @@ fn no_raw_tokens(slice) {
   source_date: "2026-04-26",
   coverage_examples: ["crates/api/src/auth.rs"]
 )
-fn no_raw_tokens_semantic_review(slice) {
+fn no_raw_tokens_semantic_review(slice, _ctx, _repo_at_base) {
   return flow_invariant_warn("semantic review found risky token-like text")
 }
 ```
 
 `@deterministic` predicates are pure Harn. They cannot use the network, shell,
 LLM calls, host tools, clocks, random sources, or mutable ambient state.
+The ordinary predicate contract is `(slice, ctx, repo_at_base)`. A predicate
+that needs a structural query may declare
+`(ast: HarnessAst, slice, ctx, repo_at_base)` instead. The executor injects only
+the AST handle; it does not make filesystem or other host authority available.
 
 `@semantic(fallback: name)` predicates may make one cheap judge call over
 pre-baked evidence captured in `@archivist(...)`. The fallback must name a
