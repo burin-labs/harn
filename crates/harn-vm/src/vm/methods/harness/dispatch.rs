@@ -181,7 +181,7 @@ impl crate::vm::Vm {
             let _interrupt = self.sync_builtin_interrupt_guard();
             Self::call_harness_method_sync_fast(
                 &mut self.output,
-                &self.executed_effects,
+                &mut self.runtime_effects,
                 handle,
                 method,
                 args,
@@ -384,16 +384,19 @@ impl crate::vm::Vm {
 
     pub(in crate::vm) fn call_harness_method_sync_fast(
         output: &mut String,
-        executed_effects: &std::sync::Arc<
-            std::sync::Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>,
-        >,
+        runtime_effects: &mut crate::orchestration::RuntimeEffectState,
         handle: &VmHarness,
         method: &str,
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
         let started = crate::builtin_profile::is_enabled().then(std::time::Instant::now);
-        let result =
-            Self::call_harness_method_sync_fast_inner(output, executed_effects, handle, method, args);
+        let result = Self::call_harness_method_sync_fast_inner(
+            output,
+            runtime_effects,
+            handle,
+            method,
+            args,
+        );
         if result.is_some() {
             if let Some(started) = started {
                 crate::builtin_profile::record(
@@ -407,9 +410,7 @@ impl crate::vm::Vm {
 
     fn call_harness_method_sync_fast_inner(
         output: &mut String,
-        executed_effects: &std::sync::Arc<
-            std::sync::Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>,
-        >,
+        runtime_effects: &mut crate::orchestration::RuntimeEffectState,
         handle: &VmHarness,
         method: &str,
         args: &[VmValue],
@@ -421,10 +422,10 @@ impl crate::vm::Vm {
             .kind()
             .capability_id()
             .expect("non-root harness kind has a capability id");
-        Self::record_capability_effects_into(executed_effects, capability, method, args);
-        if crate::stdlib::capability_method_manifest_entry(capability, method).is_none() {
+        let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
             return Some(Err(method_unsupported(handle, method)));
-        }
+        };
+        runtime_effects.record_specs(entry.contract.effects, args);
         if let HarnessMode::Null(state) = handle.inner().mode() {
             state.record_deny(handle.kind(), method, args);
             return Some(Err(VmError::CategorizedError {

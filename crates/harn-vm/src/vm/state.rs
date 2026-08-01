@@ -538,11 +538,8 @@ pub struct Vm {
     /// binding or global: user code can receive it only through an explicit
     /// parameter.
     pub(crate) root_harness: Option<VmValue>,
-    /// Runtime-resolved effects actually attempted by this execution tree.
-    /// Child VMs share the recorder; fresh roots and baseline instantiations
-    /// receive an empty set.
-    pub(crate) executed_effects:
-        Arc<Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>>,
+    /// Runtime effect receipt state (shared recorder + per-VM call memo).
+    pub(crate) runtime_effects: crate::orchestration::RuntimeEffectState,
     /// Optional debugger hook invoked when execution advances to a new source line.
     pub(crate) debug_hook: Option<parking_lot::Mutex<Box<DebugHook>>>,
     /// Effective runtime ceilings for this VM execution.
@@ -681,7 +678,7 @@ impl VmBaseline {
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
             root_harness: self.root_harness.clone(),
-            executed_effects: Arc::new(Mutex::new(Default::default())),
+            runtime_effects: crate::orchestration::RuntimeEffectState::fresh(),
             debug_hook: None,
             runtime_limits: self.runtime_limits,
         };
@@ -941,7 +938,7 @@ impl Vm {
             project_root: None,
             globals: Arc::new(crate::value::DictMap::new()),
             root_harness: None,
-            executed_effects: Arc::new(Mutex::new(Default::default())),
+            runtime_effects: crate::orchestration::RuntimeEffectState::fresh(),
             debug_hook: None,
             runtime_limits: RuntimeLimits::default(),
         }
@@ -953,50 +950,25 @@ impl Vm {
 
     /// Typed, runtime-resolved effects attempted by this VM execution tree.
     pub fn executed_effects(&self) -> Vec<crate::orchestration::EffectRecord> {
-        self.executed_effects
-            .lock()
-            .expect("executed effect recorder poisoned")
-            .iter()
-            .cloned()
-            .collect()
+        self.runtime_effects.snapshot()
     }
 
-    /// Clear the execution-local effect recorder.
-    pub fn clear_executed_effects(&self) {
-        self.executed_effects
-            .lock()
-            .expect("executed effect recorder poisoned")
-            .clear();
+    /// Clear the execution-local effect recorder and per-VM memo.
+    pub fn clear_executed_effects(&mut self) {
+        self.runtime_effects.clear();
     }
 
     pub(crate) fn record_capability_effects(
-        &self,
+        &mut self,
         capability: harn_builtin_meta::CapabilityId,
         method: &str,
         args: &[VmValue],
     ) {
-        Self::record_capability_effects_into(&self.executed_effects, capability, method, args);
+        self.runtime_effects
+            .record_capability(capability, method, args);
     }
 
-    pub(crate) fn record_capability_effects_into(
-        recorder: &Arc<Mutex<std::collections::BTreeSet<crate::orchestration::EffectRecord>>>,
-        capability: harn_builtin_meta::CapabilityId,
-        method: &str,
-        args: &[VmValue],
-    ) {
-        let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method)
-        else {
-            return;
-        };
-        let effects =
-            crate::orchestration::runtime_effects_from_contract(entry.contract.effects, args);
-        recorder
-            .lock()
-            .expect("executed effect recorder poisoned")
-            .extend(effects);
-    }
-
-    pub(crate) fn record_builtin_contract_effects(&self, name: &str, args: &[VmValue]) {
+    pub(crate) fn record_builtin_contract_effects(&mut self, name: &str, args: &[VmValue]) {
         let Some(entry) = crate::stdlib::recorded_effect_builtin_manifest_entry(name) else {
             return;
         };
@@ -1004,15 +976,11 @@ impl Vm {
     }
 
     pub(crate) fn record_builtin_effect_specs(
-        &self,
+        &mut self,
         specs: &'static [harn_builtin_meta::EffectSpec],
         args: &[VmValue],
     ) {
-        let effects = crate::orchestration::runtime_effects_from_contract(specs, args);
-        self.executed_effects
-            .lock()
-            .expect("executed effect recorder poisoned")
-            .extend(effects);
+        self.runtime_effects.record_specs(specs, args);
     }
 
     /// Replace the scoped immutable module-template cache used by this VM.
@@ -1202,7 +1170,9 @@ impl Vm {
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
             root_harness: self.root_harness.clone(),
-            executed_effects: Arc::clone(&self.executed_effects),
+            runtime_effects: crate::orchestration::RuntimeEffectState::with_shared_recorder(
+                Arc::clone(&self.runtime_effects.recorder),
+            ),
             debug_hook: None,
             runtime_limits: self.runtime_limits,
         }

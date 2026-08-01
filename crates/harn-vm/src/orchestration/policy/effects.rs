@@ -12,13 +12,14 @@
 //! configs. The two extraction paths feed one canonicalization step so
 //! downstream consumers see a single deduped, deterministically ordered list.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use harn_ir::{CallClassification, Capability, LiteralValue, NodeSemantics};
 use harn_parser::{Node, SNode};
 
+use super::effect_call_cache::resolve_runtime_resources;
 use super::CapabilityPolicy;
 use crate::VmValue;
 
@@ -95,7 +96,7 @@ pub struct EffectRecord {
     pub kind: EffectKind,
     pub scope: EffectScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resource: Option<String>,
+    pub resource: Option<crate::value::HarnStr>,
 }
 
 impl EffectRecord {
@@ -107,7 +108,7 @@ impl EffectRecord {
         }
     }
 
-    pub fn with_resource(mut self, resource: impl Into<String>) -> Self {
+    pub fn with_resource(mut self, resource: impl Into<crate::value::HarnStr>) -> Self {
         let resource = resource.into();
         self.resource = if resource.is_empty() {
             None
@@ -115,6 +116,32 @@ impl EffectRecord {
             Some(resource)
         };
         self
+    }
+}
+
+/// Execution-local, thread-safe-at-the-owner accumulator for runtime effects.
+///
+/// Effect evidence is a set. VM-local caches avoid repeated access to this
+/// shared execution-tree owner while child VMs still converge on one receipt.
+#[derive(Default)]
+pub(crate) struct ExecutedEffectRecorder {
+    effects: HashSet<EffectRecord>,
+}
+
+impl ExecutedEffectRecorder {
+    pub(crate) fn record(&mut self, specs: &[harn_builtin_meta::EffectSpec], args: &[VmValue]) {
+        self.effects
+            .extend(runtime_effects_from_contract(specs, args));
+    }
+
+    pub(crate) fn snapshot(&self) -> Vec<EffectRecord> {
+        let mut effects = self.effects.iter().cloned().collect::<Vec<_>>();
+        effects.sort();
+        effects
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.effects.clear();
     }
 }
 
@@ -214,8 +241,8 @@ pub(crate) fn runtime_effects_from_contract(
                     .into_iter()
                     .next();
                 match path.last().copied() {
-                    Some("provider") => provider = value,
-                    Some("model") => model = value,
+                    Some("provider") => provider = value.map(|value| value.to_string()),
+                    Some("model") => model = value.map(|value| value.to_string()),
                     _ => {}
                 }
             }
@@ -247,51 +274,6 @@ pub(crate) fn runtime_effects_from_contract(
         }
     }
     records
-}
-
-fn resolve_runtime_resources(
-    selector: harn_builtin_meta::ResourceSelector,
-    args: &[VmValue],
-) -> Vec<String> {
-    use harn_builtin_meta::ResourceSelector;
-    match selector {
-        ResourceSelector::Argument(index) => args
-            .get(index as usize)
-            .and_then(runtime_resource_string)
-            .into_iter()
-            .collect(),
-        ResourceSelector::Field { argument, path } => {
-            let mut value = args.get(argument as usize);
-            for field in path {
-                value = value
-                    .and_then(VmValue::as_dict)
-                    .and_then(|map| map.get(*field));
-            }
-            value
-                .and_then(runtime_resource_string)
-                .into_iter()
-                .collect()
-        }
-        ResourceSelector::EachArgument(index) => args
-            .get(index as usize)
-            .and_then(|value| match value {
-                VmValue::List(items) => Some(items.as_slice()),
-                _ => None,
-            })
-            .into_iter()
-            .flatten()
-            .filter_map(runtime_resource_string)
-            .collect(),
-        ResourceSelector::Constant(value) => vec![value.to_string()],
-        ResourceSelector::Dynamic => Vec::new(),
-    }
-}
-
-fn runtime_resource_string(value: &VmValue) -> Option<String> {
-    match value {
-        VmValue::String(value) => Some(value.to_string()),
-        _ => None,
-    }
 }
 
 fn effect_kind_from_contract(kind: harn_builtin_meta::EffectKind) -> EffectKind {
@@ -618,7 +600,7 @@ fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<Eff
         Capability::HumanApproval => return None,
         Capability::AutonomyPolicy => return None,
     };
-    let resource = effect.path.clone();
+    let resource = effect.path.as_deref().map(crate::value::HarnStr::from);
     Some(EffectRecord {
         kind,
         scope,

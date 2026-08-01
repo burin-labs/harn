@@ -1,9 +1,11 @@
 //! Policy types and capability-ceiling enforcement.
 
 mod approval_rules;
+mod effect_call_cache;
 mod effects;
 mod nested_budget;
 mod operator_grant;
+mod runtime_effect_state;
 pub(crate) mod tool_enforcement;
 mod types;
 
@@ -42,6 +44,7 @@ pub use operator_grant::{
     current_operator_approval_grant, install_operator_approval_grant, OperatorApprovalGrant,
     OperatorApprovalGrantGuard,
 };
+pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;
 pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant;
 pub use types::{

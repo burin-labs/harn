@@ -29,6 +29,7 @@ mod exception;
 mod imports;
 mod iter;
 mod logical;
+mod method_call;
 mod misc;
 mod parallel;
 mod stack;
