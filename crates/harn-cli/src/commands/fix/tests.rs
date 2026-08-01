@@ -672,6 +672,52 @@ fn plan_json_reports_cross_module_public_signature_impact() {
 }
 
 #[test]
+fn capability_apply_widens_an_existing_handle_for_an_imported_bundle() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let mode = temp.path().join("mode.harn");
+    let entry = temp.path().join("main.harn");
+    fs::write(
+        &mode,
+        "pub fn run_auto_mode(harness: {env: HarnessEnv, obs: HarnessObs}, setting: string = \"\") -> string {\n  harness.obs.llm_usage()\n  return harness.env.get_or(\"MODE\", setting)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        &entry,
+        "import { run_auto_mode } from \"./mode\"\n\nfn invoke(harness: HarnessObs, setting: string = \"\") -> string {\n  return run_auto_mode(harness, setting)\n}\n\nfn main(harness: Harness) {\n  invoke(harness.obs)\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
+    let updated = fs::read_to_string(&entry).unwrap();
+    assert!(
+        updated.contains("fn invoke(harness: {env: HarnessEnv, obs: HarnessObs}"),
+        "the existing capability carrier must be widened, not supplemented: {updated}"
+    );
+    assert!(
+        !updated.contains("fn invoke(_harness:"),
+        "the repair must not invent a second capability parameter: {updated}"
+    );
+    assert!(
+        updated.contains("invoke({env: harness.env, obs: harness.obs})"),
+        "the caller update must land with the widened signature: {updated}"
+    );
+    assert!(
+        updated.contains("run_auto_mode(harness, setting)"),
+        "the widened carrier should flow through unchanged: {updated}"
+    );
+}
+
+#[test]
 fn apply_thread_params_threads_harness_for_stdio_migration() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("stdio_apply.harn");

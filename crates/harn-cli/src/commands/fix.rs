@@ -22,6 +22,8 @@ mod capability_migrations;
 mod lint_context;
 #[path = "fix/signature_threading.rs"]
 mod signature_threading;
+#[path = "fix/whole_program_capabilities.rs"]
+mod whole_program_capabilities;
 use capability_migrations::{ambient_call_rewrite, ambient_capability_handle, ambient_replacement};
 use lint_context::FixLintContext;
 #[path = "fix/apply.rs"]
@@ -230,6 +232,7 @@ struct CallableInfo {
 struct CallSite {
     callee: String,
     span: Span,
+    args: Vec<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +418,13 @@ fn build_plan_with_options(
         ) {
             skipped_files.push(skipped);
         }
+    }
+
+    let whole_program_repairs =
+        whole_program_capabilities::plan(&files, &module_graph, &candidates)?;
+    if !whole_program_repairs.is_empty() {
+        candidates.retain(|candidate| !is_capability_migration_repair(&candidate.repair));
+        candidates.extend(whole_program_repairs);
     }
 
     let conflicts = detect_conflicts(&candidates);
