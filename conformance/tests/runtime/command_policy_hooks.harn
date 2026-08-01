@@ -36,7 +36,7 @@ pipeline default(harness: Harness) {
       cwd: root,
     },
   )
-  assert(denied?.status == "blocked", "deny decision returns blocked envelope")
+  assert(denied.status == "blocked", "deny decision returns blocked envelope")
   assert(!harness.fs.exists(marker), "blocked command must not spawn")
   const hostlib_marker = path_join(root, "hostlib_should_not_spawn")
   const hostlib_denied = harness.tools.run_command(
@@ -52,7 +52,7 @@ pipeline default(harness: Harness) {
   )
   assert(!harness.fs.exists(hostlib_marker), "blocked hostlib command must not spawn")
   const rewritten = harness.process.run({program: "printf", args: ["original"], cwd: root})
-  assert(rewritten?.stdout == "rewritten", "pre-hook rewrite updates argv")
+  assert(rewritten.stdout == "rewritten", "pre-hook rewrite updates argv")
   assert(
     rewritten?.command_policy?.annotation?.annotations?.checked,
     "post-hook annotation is recorded in command audit",
@@ -66,10 +66,10 @@ pipeline default(harness: Harness) {
   harness.fs.write_text(path_join(root, ".env"), "TOKEN=secret\n")
   const approval = harness.process.run({program: "cat", args: [path_join(root, ".env")], cwd: root})
   assert(
-    approval?.status == "blocked",
+    approval.status == "blocked",
     "approval risk blocks before spawn without a host approval grant",
   )
-  assert(contains(approval?.stderr ?? "", "requires approval"), "approval reason is surfaced")
+  assert(contains(approval.stderr ?? "", "requires approval"), "approval reason is surfaced")
   const hostlib_approval = harness.tools.run_command(
     {argv: ["cat", path_join(root, ".env")], cwd: root},
   )
@@ -102,9 +102,9 @@ pipeline default(harness: Harness) {
     harness.runtime.atomic_get(consent_asks) == 1,
     "consent ask fires for a require_approval command",
   )
-  assert(approved?.status != "blocked", "consented command is not blocked")
-  assert(approved?.status != "consent_denied", "consented command is not consent-denied")
-  assert(contains(approved?.stdout ?? "", "TOKEN=secret"), "consented command actually runs")
+  assert(approved.status != "blocked", "consented command is not blocked")
+  assert(approved.status != "consent_denied", "consented command is not consent-denied")
+  assert(contains(approved.stdout ?? "", "TOKEN=secret"), "consented command actually runs")
   harness.runtime.command_policy_pop()
   // Denial via the dict form blocks execution with a consent_denied status.
   const deny_marker = path_join(root, "consent_should_not_spawn")
@@ -123,9 +123,9 @@ pipeline default(harness: Harness) {
       cwd: root,
     },
   )
-  assert(refused?.status == "consent_denied", "denied consent yields a consent_denied disposition")
+  assert(refused.status == "consent_denied", "denied consent yields a consent_denied disposition")
   assert(!harness.fs.exists(deny_marker), "consent-denied command must not spawn")
-  assert(contains(refused?.stderr ?? "", "not this time"), "consent denial reason is surfaced")
+  assert(contains(refused.stderr ?? "", "not this time"), "consent denial reason is surfaced")
   const hostlib_refused = harness.tools.run_command(
     {argv: ["cat", path_join(root, ".env")], cwd: root},
   )
@@ -147,7 +147,7 @@ pipeline default(harness: Harness) {
   const bool_refused = harness.process.run(
     {program: "cat", args: [path_join(root, ".env")], cwd: root},
   )
-  assert(bool_refused?.status == "consent_denied", "bool-false consent blocks execution")
+  assert(bool_refused.status == "consent_denied", "bool-false consent blocks execution")
   harness.runtime.command_policy_pop()
   // ---- Catastrophic (never-approvable) command floor ----
   // A catastrophic command is HARD-DENIED before the child spawns and is NEVER
@@ -169,10 +169,10 @@ pipeline default(harness: Harness) {
   // argv-mode catastrophe: `git reset --hard` is blocked even though a consent
   // closure would approve it.
   const reset_blocked = harness.process.run({program: "git", args: ["reset", "--hard"], cwd: root})
-  assert(reset_blocked?.status == "blocked", "catastrophic git reset --hard is hard-denied")
-  assert(reset_blocked?.status != "consent_denied", "catastrophic is not a consent disposition")
+  assert(reset_blocked.status == "blocked", "catastrophic git reset --hard is hard-denied")
+  assert(reset_blocked.status != "consent_denied", "catastrophic is not a consent disposition")
   assert(
-    contains(reset_blocked?.stderr ?? "", "git reset --hard"),
+    contains(reset_blocked.stderr ?? "", "git reset --hard"),
     "catastrophic reason is surfaced",
   )
   // Redirection onto a source file is catastrophic and must not spawn.
@@ -180,7 +180,7 @@ pipeline default(harness: Harness) {
   const redirect_blocked = harness.process.run(
     {program: "sh", args: ["-c", "echo pwned > \"" + floor_marker + "\""], cwd: root},
   )
-  assert(redirect_blocked?.status == "blocked", "redirect onto a source file is hard-denied")
+  assert(redirect_blocked.status == "blocked", "redirect onto a source file is hard-denied")
   assert(!harness.fs.exists(floor_marker), "catastrophic command must not spawn")
   assert(
     harness.runtime.atomic_get(floor_asks) == 0,
@@ -197,10 +197,10 @@ pipeline default(harness: Harness) {
       cwd: root,
     },
   )
-  assert(wrapped_blocked?.status == "blocked", "argv sh -c wrapped catastrophe is hard-denied")
+  assert(wrapped_blocked.status == "blocked", "argv sh -c wrapped catastrophe is hard-denied")
   assert(!harness.fs.exists(wrapped_marker), "wrapped catastrophic command must not spawn")
   assert(
-    contains(wrapped_blocked?.stderr ?? "", "git reset --hard"),
+    contains(wrapped_blocked.stderr ?? "", "git reset --hard"),
     "wrapped catastrophic reason is surfaced",
   )
   assert(

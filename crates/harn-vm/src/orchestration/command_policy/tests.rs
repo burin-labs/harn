@@ -1,5 +1,7 @@
 use super::*;
 
+mod process_result;
+
 fn ctx(argv: &[&str]) -> JsonValue {
     serde_json::json!({
         "request": {

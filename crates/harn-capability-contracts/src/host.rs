@@ -442,7 +442,7 @@ capability_method!(
     process_run,
     "harness.process.run",
     ["process.write@arg0.program", "process.write@arg0.command"],
-    "__cap_process_run(command: dict) -> dict",
+    "__cap_process_run(command: dict) -> @PROCESS_RESULT",
     "Run a structured child process and capture its result."
 );
 capability_method!(
