@@ -62,6 +62,7 @@ usage() {
   cat <<'EOF'
 Usage:
   ./scripts/release_ship.sh --prepare --bump patch|minor|major [--audit-receipt path] [--skip-dry-run]  # release_harn.harn only
+  ./scripts/release_ship.sh --prepare --materialize-candidate --bump patch|minor|major                  # release_harn.harn only
   ./scripts/release_ship.sh --bump patch|minor|major [--skip-dry-run] [--base main]   # recovery
   ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--base main]
 
@@ -121,6 +122,12 @@ PREPARE MODE
   - Regenerates derived files (`docs/src/language-spec.md`,
     `docs/theme/harn-keywords.js`).
   - Stages everything; the human commits and pushes.
+
+  --materialize-candidate is the harness-only first half of this transaction.
+  It deterministically bumps and regenerates the candidate tree, stages it, and
+  returns without claiming certification. The release harness must commit and
+  publish that immutable candidate, then certify its exact OID before tagging.
+  It cannot be combined with --audit-receipt and is not a general audit bypass.
 
 ==============================================================================
 LEGACY BUMP MODE (recovery only)
@@ -642,6 +649,7 @@ EOF
 prepare_here() {
   local previous="$1"
   local next="$2"
+  local materialize_candidate="$3"
   local branch
   branch="$(git branch --show-current)"
 
@@ -663,7 +671,9 @@ prepare_here() {
   fi
   make gen-grammar-fitness
 
-  run_common_gates
+  if [[ "$materialize_candidate" -eq 0 ]]; then
+    run_common_gates
+  fi
 
   log_step "Stage release content"
   # Stage the version bump deterministically and then sweep tracked
@@ -674,15 +684,28 @@ prepare_here() {
   git add -u
   commit_prepare_transaction
 
-  log_step "Prepare-here ready"
+  if [[ "$materialize_candidate" -eq 1 ]]; then
+    log_step "Release candidate materialized"
+  else
+    log_step "Prepare-here ready"
+  fi
   TOTAL_NS=$(( $(_ship_now_ns) - SHIP_START_NS ))
   echo ""
-  echo "Release content staged on $branch:"
+  if [[ "$materialize_candidate" -eq 1 ]]; then
+    echo "Uncertified release candidate staged on $branch:"
+  else
+    echo "Release content staged on $branch:"
+  fi
   echo "  Previous version: $previous"
   echo "  Next version:     $next"
   echo "  Total wall time:  $(_ship_fmt_ns "$TOTAL_NS")"
   echo ""
   echo "Next steps:"
+  if [[ "$materialize_candidate" -eq 1 ]]; then
+    echo "  1. Commit and publish this candidate through release_harn.harn"
+    echo "  2. Certify the immutable candidate OID before creating its tag"
+    return 0
+  fi
   echo "  git status                                # review staged changes"
   echo "  git commit -m \"Release v$next\""
   echo "  git push -u origin $branch"
@@ -751,6 +774,7 @@ BUMP="patch"
 SKIP_DRY_RUN=0
 SKIP_AUDIT=0
 AUDIT_RECEIPT=""
+MATERIALIZE_CANDIDATE=0
 MODE="bump-pr"
 BASE_BRANCH="main"
 NOTES_OUTPUT=""
@@ -764,6 +788,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --prepare)
       MODE="prepare-here"
+      shift
+      ;;
+    --materialize-candidate)
+      MATERIALIZE_CANDIDATE=1
       shift
       ;;
     --finalize)
@@ -830,7 +858,15 @@ if [[ -n "$AUDIT_RECEIPT" && "$MODE" != "prepare-here" ]]; then
   echo "error: --audit-receipt is only valid with harness-driven --prepare" >&2
   exit 1
 fi
-if [[ "$MODE" == "prepare-here" && -z "$AUDIT_RECEIPT" ]]; then
+if [[ "$MATERIALIZE_CANDIDATE" -eq 1 && "$MODE" != "prepare-here" ]]; then
+  echo "error: --materialize-candidate is only valid with harness-driven --prepare" >&2
+  exit 1
+fi
+if [[ "$MATERIALIZE_CANDIDATE" -eq 1 && -n "$AUDIT_RECEIPT" ]]; then
+  echo "error: --materialize-candidate cannot be combined with --audit-receipt" >&2
+  exit 1
+fi
+if [[ "$MODE" == "prepare-here" && "$MATERIALIZE_CANDIDATE" -eq 0 && -z "$AUDIT_RECEIPT" ]]; then
   echo "error: harness-driven --prepare requires an exact-source hosted audit receipt" >&2
   exit 1
 fi
@@ -879,8 +915,10 @@ if [[ "$MODE" == "prepare-here" ]]; then
   require_changelog_top_matches "$NEXT_VERSION"
   require_no_unfolded_fragments
   export_warmed_harn_bin
-  validate_audit_plan
-  prepare_here "$PREVIOUS_VERSION" "$NEXT_VERSION"
+  if [[ "$MATERIALIZE_CANDIDATE" -eq 0 ]]; then
+    validate_audit_plan
+  fi
+  prepare_here "$PREVIOUS_VERSION" "$NEXT_VERSION" "$MATERIALIZE_CANDIDATE"
   exit 0
 fi
 
