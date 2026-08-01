@@ -164,7 +164,7 @@ fn workflows() {
           permissions: {actions: "write", contents: "read"},
           steps: [
             {
-              env: {HARN_PRUNE_SUPERSEDED_RELEASE_CACHES: "1"},
+              env: {HARN_PRUNE_SUPERSEDED_RELEASE_CACHES: "1", HARN_ENFORCE_CACHE_BUDGET: "1"},
               run: "./scripts/report_ci_cache_budget.sh",
             },
           ],
@@ -376,6 +376,7 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
   assert(
     errors.contains("build-release-binaries.yml:cache_budget must prune superseded release caches"),
   )
+  assert(errors.contains("build-release-binaries.yml:cache_budget must enforce the cache budget"))
   assert(
     errors.contains(
       "build-release-binaries.yml:cache_budget must run ./scripts/report_ci_cache_budget.sh exactly once",

@@ -1386,6 +1386,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HARN_PRUNE_SUPERSEDED_RELEASE_CACHES: "1"
+          HARN_ENFORCE_CACHE_BUDGET: "1"
         run: ./scripts/report_ci_cache_budget.sh
 
   container:
