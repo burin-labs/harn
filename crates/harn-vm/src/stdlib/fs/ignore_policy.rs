@@ -46,7 +46,6 @@
 //! globbing `.github/workflows/*.yml` must keep working.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use crate::stdlib::sandbox::workspace_env;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
@@ -267,9 +266,12 @@ pub fn matcher(base: &Path, policy: IgnorePolicy) -> Gitignore {
 ///
 /// Project ignore files are only meaningful inside a project. Harn writes a
 /// `.gitignore` containing `*` into its own scratch directories, so honoring
-/// project files under a scratch base would make
+/// that workspace projection under an ordinary scratch base would make
 /// `harness.fs.glob("*.json", harness.fs.workspace_temp_dir())` return `[]`;
 /// and a base outside any project has no project rules to honor at all.
+/// A nested VCS root is different: its own `.git` marker establishes a new,
+/// explicit project boundary, so its ignore files remain authoritative even
+/// when the repository happens to live below `.harn-tmp`.
 ///
 /// Both cases degrade to [`IgnorePolicy::Builtin`] rather than to a raw walk.
 /// The trap is caused by a project *file*, so dropping project files is enough
@@ -288,10 +290,11 @@ pub fn effective_policy(base: &Path, requested: IgnorePolicy) -> IgnorePolicy {
         return IgnorePolicy::None;
     }
     let resolved = absolutize(base);
-    if is_scratch_path(&resolved) || project_root_for(&resolved).is_none() {
-        return IgnorePolicy::Builtin;
+    match project_root_for(&resolved) {
+        Some((_, ProjectAnchor::Vcs)) => requested,
+        Some((_, ProjectAnchor::SandboxWorkspace)) if !is_scratch_path(&resolved) => requested,
+        Some((_, ProjectAnchor::SandboxWorkspace)) | None => IgnorePolicy::Builtin,
     }
-    requested
 }
 
 /// What marks the project a walk belongs to.
@@ -363,7 +366,7 @@ fn add_builtin_layer(builder: &mut WalkBuilder) -> Result<(), String> {
     // A partial error means one pattern failed to compile while the rest were
     // applied; the pattern list is a compile-time constant, so this is
     // unreachable in practice and would be a bug in the list, not user input.
-    if let Some(error) = builder.add_ignore(path) {
+    if let Some(error) = builder.add_ignore(&path) {
         return Err(format!(
             "ignore policy: built-in ignore layer at {} is invalid: {error}",
             path.display()
@@ -388,7 +391,7 @@ fn builtin_ignore_text() -> String {
     text
 }
 
-/// Path to the materialized built-in layer, created once per process.
+/// Path to the materialized built-in layer, cached while it remains valid.
 ///
 /// The `ignore` crate keeps `IgnoreBuilder::add_ignore(Gitignore)` — the
 /// in-memory injection point — `pub(crate)`; the only public way into the
@@ -406,15 +409,34 @@ fn builtin_ignore_text() -> String {
 /// patterns are depth- and root-independent. It would *not* be safe for
 /// anchored patterns, which is why arbitrary ignore files are never routed
 /// through this path.
-fn builtin_ignore_file() -> Result<&'static Path, String> {
-    static PATH: OnceLock<Result<PathBuf, String>> = OnceLock::new();
-    PATH.get_or_init(materialize_builtin_ignore_file)
-        .as_deref()
-        .map_err(Clone::clone)
+///
+/// Embedders may change their process temp root between isolated executions,
+/// and an execution may delete that root when it finishes. The cache therefore
+/// validates both existence and content on every projection and rematerializes
+/// the file when its owning temp root has gone away.
+fn builtin_ignore_file() -> Result<PathBuf, String> {
+    static PATH: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+    ensure_builtin_ignore_file(&PATH)
 }
 
-fn materialize_builtin_ignore_file() -> Result<PathBuf, String> {
+fn ensure_builtin_ignore_file(
+    cache: &std::sync::Mutex<Option<PathBuf>>,
+) -> Result<PathBuf, String> {
     let text = builtin_ignore_text();
+    let mut cached = cache
+        .lock()
+        .map_err(|_| "ignore policy: built-in ignore path cache is poisoned".to_string())?;
+    if let Some(path) = cached.as_ref() {
+        if std::fs::read_to_string(path).is_ok_and(|existing| existing == text) {
+            return Ok(path.clone());
+        }
+    }
+    let path = materialize_builtin_ignore_file(&text)?;
+    *cached = Some(path.clone());
+    Ok(path)
+}
+
+fn materialize_builtin_ignore_file(text: &str) -> Result<PathBuf, String> {
     let digest = hex16(Sha256::digest(text.as_bytes()).as_slice());
     let dir = std::env::temp_dir();
     // Content-addressed, so concurrent Harn processes converge on one file
@@ -428,7 +450,7 @@ fn materialize_builtin_ignore_file() -> Result<PathBuf, String> {
         std::process::id(),
         uuid::Uuid::now_v7().simple(),
     ));
-    std::fs::write(&scratch, &text).map_err(|error| {
+    std::fs::write(&scratch, text).map_err(|error| {
         format!(
             "ignore policy: cannot materialize the built-in ignore layer at {}: {error}",
             scratch.display()

@@ -3,18 +3,15 @@
 //! Capability/identity context — execution policy, approval policy, command
 //! policy, dynamic permissions, the current host bridge, the bridge-trust +
 //! command-hook depths, and the runtime-context overlay — is held in
-//! thread-local LIFO stacks or single slots. The same
-//! hazard applies to the single-slot `Option` contexts a worker installs for the
-//! whole agent loop: the VM execution context (cwd/env/source-dir + the
-//! capability path-scope root) and the mutation session (audit/run_id/approval/
-//! secret-scope). That model is sound for a single synchronous call stack, but a
-//! guard held across an `.await` is **not**: workers are spawned with
-//! [`tokio::task::spawn_local`], so several of them interleave on one thread
-//! (and, under a work-stealing multi-thread runtime, migrate between threads). A
-//! child that installs its policy/context, awaits its model call, and resumes
-//! would otherwise read whatever a *sibling* installed in the meantime —
-//! cross-wiring each child's file scoping, env, worktree root, tool ceiling,
-//! approval, secret scope, and event attribution.
+//! thread-local LIFO stacks or single slots. The same hazard applies to
+//! single-slot contexts a worker installs for the whole agent loop: the VM
+//! execution context (cwd/env/source-dir + capability root) and mutation
+//! session (audit/run_id/approval/secret-scope). That model is sound for a
+//! synchronous call stack, but a guard held across an `.await` is **not**:
+//! workers use [`tokio::task::spawn_local`] and can interleave or migrate. A
+//! child that installs context across an await would otherwise read a
+//! *sibling's* file scope, env, worktree, tool ceiling, approval, secret scope,
+//! or event attribution.
 //!
 //! [`AmbientExecutionScope`] gives every spawned worker its **own** copy of
 //! these stacks. [`scope_ambient`] wraps the worker future so the task's scope
@@ -353,6 +350,12 @@ pub(crate) fn scope_run_event_sink<F: Future>(
     scope.run_event_sink = Some(sink);
     scope_ambient(scope, inner)
 }
+
+mod policy_scope;
+pub use policy_scope::scope_execution_policy;
+pub(crate) use policy_scope::{
+    scope_approval_policy, scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions,
+};
 
 /// Run `inner` with the exact provider and capability overlays supplied by an
 /// embedding host.

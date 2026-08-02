@@ -209,13 +209,12 @@ fn conformance_options() -> ConformanceRunOptions<'static> {
 
 /// Run one conformance case under the process-global harn-state lock.
 ///
-/// `execute_conformance_source` points `HARN_STATE_DIR` at a fresh temp dir for
-/// the duration of a case. That variable is process-global, and the temp dir is
-/// deleted the moment the case ends — so without this lock a concurrently
-/// running persona, portal, or orchestrator-harness test resolves its event log
-/// into this case's directory and then fails to open it. Every conformance case
-/// evaluated from a test must go through here rather than calling
-/// `evaluate_conformance_case` directly.
+/// `execute_conformance_source` points `HARN_STATE_DIR` at a fresh case root.
+/// That variable is process-global, and the root is deleted the moment the case
+/// ends — so without this lock a concurrently running persona, portal, or
+/// orchestrator-harness test can resolve state into this case's directory and
+/// then fail to open it. Every conformance case evaluated from a test must go
+/// through here rather than calling `evaluate_conformance_case` directly.
 async fn evaluate_case_serialized(
     harn_file: &Path,
     rel_path: &str,

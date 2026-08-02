@@ -1,4 +1,5 @@
 use super::*;
+use crate::{execute_with_skill_dirs_and_options, SourceExecutionOptions};
 
 mod lint;
 mod write_root;
@@ -238,17 +239,18 @@ async fn execute_conformance_source(
     harn_vm::reset_thread_local_state();
     install_cli_llm_mock_mode(llm_mock_mode)
         .map_err(|error| format!("llm mock setup error: {error}"))?;
-    let state_temp_dir = tempfile::Builder::new()
-        .prefix("harn-conformance-state-")
+    let case_temp_dir = tempfile::Builder::new()
+        .prefix("harn-conformance-case-")
         .tempdir()
-        .map_err(|error| format!("tempdir for conformance state: {error}"))?;
-    let state_dir = state_temp_dir.path().join(".harn");
+        .map_err(|error| format!("tempdir for conformance case: {error}"))?;
+    let case_root = write_root::normalize_owned_root(case_temp_dir.path())
+        .map_err(|error| format!("normalize conformance case root: {error}"))?;
+    let state_dir = case_root.join(".harn");
     std::fs::create_dir_all(&state_dir)
         .map_err(|error| format!("create conformance state dir: {error}"))?;
     let state_dir = state_dir.to_string_lossy().into_owned();
     let _state_dir_guard =
         ScopedEnvVar::set(harn_vm::runtime_paths::HARN_STATE_DIR_ENV, &state_dir);
-    let _write_root_guard = write_root::ConformanceWriteRoot::install(Path::new(&state_dir));
     let harn_bin = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current harn executable: {error}"))?;
     let harn_bin = harn_bin.to_string_lossy().into_owned();
@@ -311,20 +313,18 @@ async fn execute_conformance_source(
     };
 
     let start = std::time::Instant::now();
-    let result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), async {
-        match harness {
-            Some(harness) => {
-                execute_with_skill_dirs_and_harness(
-                    source,
-                    Some(harn_file),
-                    cli_skill_dirs,
-                    harness,
-                )
-                .await
-            }
-            None => execute_with_skill_dirs(source, Some(harn_file), cli_skill_dirs).await,
-        }
-    })
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        execute_with_skill_dirs_and_options(
+            source,
+            Some(harn_file),
+            cli_skill_dirs,
+            SourceExecutionOptions {
+                harness,
+                execution_policy: Some(write_root::policy(&case_root)),
+            },
+        ),
+    )
     .await;
     let duration_ms = start.elapsed().as_millis() as u64;
     harn_vm::llm::clear_cli_llm_mock_mode();

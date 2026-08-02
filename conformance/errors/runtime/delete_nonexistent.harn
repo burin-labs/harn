@@ -1,7 +1,7 @@
 pipeline default(harness: Harness) {
-  // The point is the missing file, not where it is missing from. A literal
-  // `/tmp` sits outside the case's write root on macOS, where the system
-  // temp dir lives under `/var/folders`, so it would fail as a sandbox
-  // violation and never reach the delete.
-  harness.fs.delete(path_join(harness.fs.temp_dir(), "harn_this_file_does_not_exist_9999"))
+  // The point is the missing file, not its authority. Keep it under the
+  // case-owned scratch root so the delete reaches the missing-path branch.
+  harness.fs.delete(
+    path_join(harness.fs.workspace_temp_dir(), "harn_this_file_does_not_exist_9999"),
+  )
 }

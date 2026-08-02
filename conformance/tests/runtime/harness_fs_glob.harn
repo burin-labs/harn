@@ -1,5 +1,5 @@
 fn main(harness: Harness) {
-  const root = harness.fs.mkdtemp("harn-harness-glob-")
+  const root = harness.fs.mkdtemp_in_workspace("harn-harness-glob-")
   harness.fs.write_text(path_join(root, "alpha.toml"), "name = \"alpha\"\n")
   harness.fs.write_text(path_join(root, "beta.toml"), "name = \"beta\"\n")
   harness.fs.write_text(path_join(root, "notes.txt"), "ignored\n")

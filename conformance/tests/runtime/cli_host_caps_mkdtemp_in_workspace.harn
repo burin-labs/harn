@@ -1,7 +1,7 @@
 fn main(harness: Harness) {
-  const dir = harness.fs.mkdtemp("harn-cli-host-caps-")
+  const dir = harness.fs.mkdtemp_in_workspace("harn-cli-host-caps-")
   harness.stdio.println(harness.fs.exists(dir))
-  harness.stdio.println(dir.starts_with(harness.fs.temp_dir()))
+  harness.stdio.println(dir.starts_with(harness.fs.workspace_temp_dir()))
   harness.stdio.println(dir.contains("harn-cli-host-caps-"))
   harness.fs.delete(dir)
   harness.stdio.println(!harness.fs.exists(dir))
