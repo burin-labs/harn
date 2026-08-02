@@ -92,7 +92,7 @@ end-of-turn summary.
 - `docs/theme/harn-keywords.js`: regenerate with `make gen-highlight`.
 - `docs/src/language-spec.md`: regenerate via pre-commit hook (edit
   `spec/HARN_SPEC.md` instead).
-- `Cargo.lock`: take theirs, re-run `cargo check --workspace`.
+- `Cargo.lock`: resolve from the merged manifests, then run `make setup-rust`.
 - Both-sides reformatted file: take one side, run the formatter.
 
 ## Re-validation
@@ -100,14 +100,14 @@ end-of-turn summary.
 ```bash
 make fmt
 make lint-harn fmt-harn
-cargo nextest run -p <crates touched>
+make test-affected
 ```
 
 Wider:
 
 ```bash
 make test
-cargo run --bin harn -- test conformance --filter <relevant>
+./scripts/harn_bin.sh -- test conformance --filter <relevant>
 ```
 
 Then `git push --force-with-lease` (if history was rewritten) and let CI

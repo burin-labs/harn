@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::chunk::{Chunk, CompiledFunction};
 use crate::value::{VmClosure, VmEnv, VmValue};
 
-use super::convert::{annotations_to_json, prompt_value_to_messages};
+use super::convert::{annotations_to_json, prompt_value_to_messages, vm_value_to_json};
 use super::defs::{
     McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
     McpToolDef,
@@ -128,6 +128,31 @@ fn test_tool_registry_to_mcp_tools_empty() {
     );
     let result = tool_registry_to_mcp_tools(&VmValue::dict(registry));
     assert!(result.unwrap().is_empty());
+}
+
+#[test]
+fn structured_tool_values_project_as_json_objects() {
+    let value = VmValue::dict({
+        let mut update = crate::value::DictMap::new();
+        update.put_str("schema", "harn.ui_update.v1");
+        update.insert(
+            "effects".into(),
+            VmValue::List(Arc::new(vec![VmValue::dict({
+                let mut effect = crate::value::DictMap::new();
+                effect.put_str("kind", "capture_canvas");
+                effect
+            })])),
+        );
+        update
+    });
+
+    assert_eq!(
+        vm_value_to_json(&value),
+        serde_json::json!({
+            "schema": "harn.ui_update.v1",
+            "effects": [{"kind": "capture_canvas"}]
+        })
+    );
 }
 
 #[test]
@@ -255,6 +280,31 @@ async fn server_projects_extension_metadata_on_tools_and_resource_content() {
         Vec::new(),
     );
     let mut vm = crate::Vm::new();
+
+    let initialized = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                0,
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": crate::mcp_protocol::PROTOCOL_VERSION,
+                    "capabilities": {"extensions": {
+                        "io.modelcontextprotocol/ui": {
+                            "mimeTypes": ["text/html;profile=mcp-app"]
+                        }
+                    }},
+                    "clientInfo": {"name": "test", "version": "1"}
+                }),
+            ),
+            &mut vm,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        initialized["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/ui"]
+            ["mimeTypes"][0],
+        "text/html;profile=mcp-app"
+    );
 
     let tools = server
         .handle_json_rpc(

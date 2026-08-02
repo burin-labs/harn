@@ -4,4 +4,7 @@
 [harn] logo.png
 [harn] https://comfy.example.test/view?filename=logo.png&subfolder=harn&type=output
 [harn] canceled
-[harn] 6
+[harn] queued
+[harn] LoadImage
+[harn] ReferenceLatent
+[harn] 8

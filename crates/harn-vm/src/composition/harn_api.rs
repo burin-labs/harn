@@ -191,44 +191,9 @@ fn is_harn_identifier(name: &str) -> bool {
     if first != '_' && !first.is_ascii_alphabetic() {
         return false;
     }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) && !HARN_KEYWORDS.contains(&name)
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) && !harn_lexer::KEYWORDS.contains(&name)
 }
 
 fn harn_string_literal(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
-
-const HARN_KEYWORDS: &[&str] = &[
-    "agent",
-    "as",
-    "await",
-    "break",
-    "catch",
-    "continue",
-    "defer",
-    "else",
-    "enum",
-    "false",
-    "fn",
-    "for",
-    "if",
-    "impl",
-    "import",
-    "in",
-    "interface",
-    "let",
-    "match",
-    "nil",
-    "pipeline",
-    "pub",
-    "return",
-    "skill",
-    "spawn",
-    "struct",
-    "throw",
-    "true",
-    "try",
-    "type",
-    "var",
-    "while",
-];

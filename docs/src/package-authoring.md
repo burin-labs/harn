@@ -137,6 +137,7 @@ package-root-relative skill directories containing `SKILL.md`.
 harn new connector echo-connector
 cd echo-connector
 harn package verify .
+harn package verify . --strict
 harn package docs
 harn publish --dry-run
 harn publish
@@ -147,6 +148,10 @@ metadata validation, `harn check`, `harn lint`, `harn fmt --check`, connector
 contract fixtures, package-local fixture tests, install/import smoke tests, and
 standalone Harn doc examples. Use `harn connector check .` when you only need
 the lower-level pure-Harn connector contract check.
+
+Use `harn package verify . --strict` for warning-free release admission. It
+makes check and lint warnings fatal, enables strict boundary typing, and records
+the exact source-gate commands in the schema-v2 receipt.
 
 Connector packages should also declare package-facing capability coverage on
 their `[[providers]]` entry so `harn check --connector-matrix` can compare
@@ -221,7 +226,8 @@ gates, package tests, consumer install/import smoke coverage, documentation
 drift, package packing, and any applicable connector contract. Use
 `--receipt-out PATH` to persist the versioned JSON receipt; `--json` emits the
 same envelope on standard output. Individual commands remain useful for
-focused local iteration.
+focused local iteration. Add `--strict` in CI when warnings and unvalidated
+boundary types must fail the package contract.
 
 ## API docs
 
@@ -254,11 +260,12 @@ harn package docs --check
 
 ## Pack and publish dry run
 
-`harn package pack` validates the package and writes an inspectable artifact
-directory at `.harn/dist/<name>-<version>`. It excludes local build state such
-as Git administrative entries, `.harn/`, any `.harn-*` runtime directory,
-`target/`, and `node_modules/` at any depth. Files such as `.harn-version` are
-package content and remain included.
+Every `harn package verify` source, documentation, and packing gate uses the
+same package-input policy. It excludes Harn-owned `.harn/` and `.harn-*/`
+runtime directories at any depth, root `docs/dist/` output, Git administrative
+entries, `target/`, and `node_modules/`. Files such as `.harn-version` are
+package content and remain included. `harn package pack` validates those same
+inputs and writes an inspectable artifact at `.harn/dist/<name>-<version>`.
 
 ```bash
 harn package pack --dry-run

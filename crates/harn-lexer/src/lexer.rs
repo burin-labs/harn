@@ -781,57 +781,7 @@ impl Lexer {
             }
         }
 
-        let kind = match ident.as_str() {
-            "pipeline" => TokenKind::Pipeline,
-            "extends" => TokenKind::Extends,
-            "override" => TokenKind::Override,
-            "let" => TokenKind::Let,
-            "const" => TokenKind::Const,
-            "var" => TokenKind::Var,
-            "if" => TokenKind::If,
-            "else" => TokenKind::Else,
-            "for" => TokenKind::For,
-            "in" => TokenKind::In,
-            "match" => TokenKind::Match,
-            "retry" => TokenKind::Retry,
-            "parallel" => TokenKind::Parallel,
-            "return" => TokenKind::Return,
-            "import" => TokenKind::Import,
-            "true" => TokenKind::True,
-            "false" => TokenKind::False,
-            "nil" => TokenKind::Nil,
-            "try" => TokenKind::Try,
-            "catch" => TokenKind::Catch,
-            "throw" => TokenKind::Throw,
-            "throws" => TokenKind::Throws,
-            "finally" => TokenKind::Finally,
-            "fn" => TokenKind::Fn,
-            "spawn" => TokenKind::Spawn,
-            "while" => TokenKind::While,
-            "type" => TokenKind::TypeKw,
-            "enum" => TokenKind::Enum,
-            "eval_pack" => TokenKind::EvalPack,
-            "struct" => TokenKind::Struct,
-            "interface" => TokenKind::Interface,
-            "emit" => TokenKind::Emit,
-            "pub" => TokenKind::Pub,
-            "from" => TokenKind::From,
-            "to" => TokenKind::To,
-            "tool" => TokenKind::Tool,
-            "exclusive" => TokenKind::Exclusive,
-            "guard" => TokenKind::Guard,
-            "require" => TokenKind::Require,
-            "deadline" => TokenKind::Deadline,
-            "defer" => TokenKind::Defer,
-            "yield" => TokenKind::Yield,
-            "mutex" => TokenKind::Mutex,
-            "break" => TokenKind::Break,
-            "continue" => TokenKind::Continue,
-            "select" => TokenKind::Select,
-            "impl" => TokenKind::Impl,
-            "skill" => TokenKind::Skill,
-            _ => TokenKind::Identifier(ident),
-        };
+        let kind = keyword_token_kind(&ident).unwrap_or(TokenKind::Identifier(ident));
 
         Token::with_span(
             kind,
@@ -1090,7 +1040,7 @@ mod tests {
     }
 
     #[test]
-    fn test_keywords_const_covers_lexer() {
+    fn generated_keyword_vocabulary_tokenizes_every_entry() {
         // Every string in KEYWORDS must lex as a non-identifier token.
         // If this fails, either KEYWORDS has a stale entry or the lexer
         // match in `identifier_or_keyword` is missing an arm.
@@ -1100,7 +1050,7 @@ mod tests {
             let first = &tokens[0].kind;
             assert!(
                 !matches!(first, TokenKind::Identifier(_)),
-                "keyword `{kw}` lexes as Identifier — KEYWORDS const and lexer match are out of sync"
+                "keyword `{kw}` lexes as Identifier"
             );
         }
     }

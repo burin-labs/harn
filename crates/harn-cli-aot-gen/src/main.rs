@@ -326,7 +326,7 @@ mod tests {
         let before = checkout_contract(workspace.path()).expect("initial contract");
 
         fs::write(
-            workspace.path().join("crates/harn-vm/src/chunk.rs"),
+            workspace.path().join("crates/harn-kernel/src/lib.rs"),
             "after\n",
         )
         .expect("mutate compiler input");
@@ -349,12 +349,14 @@ mod tests {
         let workspace = tempfile::tempdir().expect("temp workspace");
         fs::create_dir_all(workspace.path().join("crates/harn-cli")).expect("create harn-cli");
         fs::create_dir_all(workspace.path().join("crates/harn-vm/src")).expect("create harn-vm");
+        fs::create_dir_all(workspace.path().join("crates/harn-kernel/src"))
+            .expect("create harn-kernel");
         let mut manifest = fs::File::create(workspace.path().join("Cargo.toml"))
             .expect("create workspace manifest");
         writeln!(manifest, "[workspace.package]\nversion = {version:?}")
             .expect("write workspace manifest");
         fs::write(
-            workspace.path().join("crates/harn-vm/src/chunk.rs"),
+            workspace.path().join("crates/harn-kernel/src/lib.rs"),
             compiler_source,
         )
         .expect("write compiler input");

@@ -7,11 +7,13 @@
 - [Start here](./concepts/index.md)
 - [Mental model](./concepts/mental-model.md)
 - [Glossary](./concepts/glossary.md)
+- [Portable execution](./concepts/portable-execution.md)
 - [Choosing an agent abstraction](./concepts/abstraction-ladder.md)
 - [The expressiveness spectrum](./concepts/expressiveness-spectrum.md)
 - [Steering seams](./concepts/steering-seams.md)
 - [Cross-session pattern knowledge](./concepts/cross-session-pattern-knowledge.md)
 - [Why Harn has model jobs](./concepts/model-jobs.md)
+- [Why Harn apps separate behavior from pixels](./concepts/interactive-apps.md)
 - [Coming from elsewhere](./concepts/sota-comparison.md)
 - [Why Harn?](./why-harn.md)
 - [Feature matrix](./feature-matrix.md)
@@ -45,10 +47,12 @@
 - [Replay time-travel cookbook](./cookbooks/replay-time-travel.md)
 - [Run a FLUX.2 Klein image job with ComfyUI](./cookbooks/run-comfyui-model-job.md)
 - [Run an OpenAI image job](./cookbooks/run-openai-image-job.md)
+- [Build an interactive Harn app](./cookbooks/build-interactive-app.md)
 - [OAuth client + provider cookbook](./oauth.md)
 - [Debugging agent runs](./debugging.md)
 - [Editor setup (VS Code, Neovim, Zed)](./editor-setup.md)
 - [Use Harn from ACP editor hosts](./acp-editor-hosts.md)
+- [Run a portable reducer in a browser](./portable-kernel-browser.md)
 
 # Reference
 
@@ -111,6 +115,7 @@
   - [Composable callers and middleware](./stdlib/llm-handlers.md)
   - [Composable tool middleware](./stdlib/tool-middleware.md)
   - [Model-job reference](./stdlib/model-jobs.md)
+  - [`std/ui` reference](./stdlib/ui.md)
   - [Tools, Tool Vault, and MCP](./llm/tools.md)
   - [LLM ensemble helpers](./llm/ensemble.md)
   - [Streaming and transcripts](./llm/streaming.md)
@@ -197,6 +202,7 @@
 - [MCP, ACP, and A2A integration](./mcp-and-acp.md)
 - [Outbound workflow server](./harn-serve.md)
 - [Embedding Harn in Rust](./embedding-rust.md)
+- [Portable kernel contract](./portable-kernel-reference.md)
 - [Bridge protocol](./bridge-protocol.md)
 - [Generated protocol artifacts](./protocol-artifacts.md)
 - [Host tools over the bridge](./bridge/host-tools.md)
@@ -263,6 +269,7 @@
 ## CLI and tooling
 
 - [CLI reference](./cli-reference.md)
+- [Benchmark the portable kernel](./portable-kernel-benchmarking.md)
 - [CLI `--json` contract](./cli-json-contract.md)
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
 - [`std/cli/argparse`](./cli-argparse-reference.md)
@@ -326,6 +333,7 @@
 - [Release runner policy](./dev/release-runner-policy.md)
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Bootstrap an exact Harn release](./dev/bootstrap-harn.md)
+- [Agent shell guard](./dev/agent-shell-guard.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
 - [Platform compatibility](./dev/platform-compatibility.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
@@ -336,10 +344,11 @@
 - [Annotation tape format](./dev/annotation-tape-format.md)
 - [DES runtime mode](./dev/des-mode.md)
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
-- [Native code generation (experimental)](./dev/native-codegen.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
 
 # Migrations
+
+- [Portable kernel v1](./migrations/portable-kernel-v1.md)
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
 - [Migrating to 0.10](./migrations/v0.10.md)

@@ -11,6 +11,8 @@ use crate::commands::run::{connect_mcp_servers, RunProfileOptions};
 use crate::package;
 use crate::parse_source_file;
 
+mod portable;
+
 #[derive(Debug, Clone, Serialize)]
 struct BenchRun {
     iteration: usize,
@@ -26,20 +28,16 @@ struct BenchRun {
     profile: Option<harn_vm::profile::RunProfile>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
-struct BenchStats {
-    iterations: usize,
-    min_ms: f64,
-    mean_ms: f64,
-    p50_ms: f64,
-    p95_ms: f64,
-    max_ms: f64,
-    stddev_ms: f64,
-    total_ms: f64,
-}
+type BenchStats = harn_kernel::BenchmarkStatistics;
 
 pub(crate) async fn run(args: BenchArgs) {
     match args.command {
+        Some(BenchCommand::Portable(portable)) => {
+            if let Err(error) = portable::run(portable, &args.profile) {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         Some(BenchCommand::Replay(replay)) => {
             if let Err(error) = run_replay_bench(replay) {
                 eprintln!("error: {error}");
@@ -260,44 +258,12 @@ Cost: total ${:.4} | avg ${:.4}/run
 }
 
 fn bench_stats(runs: &[BenchRun]) -> BenchStats {
-    let mut sorted = runs.iter().map(|run| run.wall_time_ms).collect::<Vec<_>>();
-    sorted.sort_by(f64::total_cmp);
-    let total_ms = sorted.iter().sum::<f64>();
-    let iterations = sorted.len();
-    let mean_ms = total_ms / iterations as f64;
-    let variance = sorted
-        .iter()
-        .map(|ms| {
-            let delta = ms - mean_ms;
-            delta * delta
-        })
-        .sum::<f64>()
-        / iterations as f64;
-    BenchStats {
-        iterations,
-        min_ms: sorted[0],
-        mean_ms,
-        p50_ms: percentile_sorted(&sorted, 0.50),
-        p95_ms: percentile_sorted(&sorted, 0.95),
-        max_ms: sorted[iterations - 1],
-        stddev_ms: variance.sqrt(),
-        total_ms,
-    }
+    stats_from_samples(runs.iter().map(|run| run.wall_time_ms).collect())
 }
 
-fn percentile_sorted(sorted: &[f64], percentile: f64) -> f64 {
-    if sorted.len() == 1 {
-        return sorted[0];
-    }
-    let rank = percentile.clamp(0.0, 1.0) * (sorted.len() - 1) as f64;
-    let lower = rank.floor() as usize;
-    let upper = rank.ceil() as usize;
-    if lower == upper {
-        sorted[lower]
-    } else {
-        let weight = rank - lower as f64;
-        sorted[lower] * (1.0 - weight) + sorted[upper] * weight
-    }
+fn stats_from_samples(samples: Vec<f64>) -> BenchStats {
+    harn_kernel::BenchmarkStatistics::from_samples(samples)
+        .expect("benchmark callers provide non-empty elapsed-time samples")
 }
 
 #[derive(Serialize)]
@@ -665,7 +631,7 @@ fn display_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        bench_stats, percentile_sorted, read_replay_trace_fixture, render_bench_report,
+        bench_stats, read_replay_trace_fixture, render_bench_report,
         render_replay_benchmark_report, resolve_replay_benchmark_selection,
         validate_protocol_fixture_refs, write_bench_profile_json, BenchRun,
     };
@@ -744,7 +710,6 @@ mod tests {
         assert_eq!(stats.mean_ms, 30.0);
         assert_eq!(stats.p50_ms, 30.0);
         assert_eq!(stats.p95_ms, 48.0);
-        assert_eq!(percentile_sorted(&[10.0, 20.0], 0.50), 15.0);
         assert!((stats.stddev_ms - 14.1421356237).abs() < 0.0001);
     }
 

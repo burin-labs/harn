@@ -255,6 +255,19 @@ impl McpServer {
         capabilities.insert("logging".into(), serde_json::json!({}));
         capabilities.insert("tasks".into(), mcp_protocol::tasks_capability());
         capabilities.insert("completions".into(), mcp_protocol::completions_capability());
+        if self.resources.iter().any(|resource| {
+            resource.uri.starts_with("ui://")
+                && resource.mime_type.as_deref() == Some("text/html;profile=mcp-app")
+        }) {
+            capabilities.insert(
+                "extensions".into(),
+                serde_json::json!({
+                    "io.modelcontextprotocol/ui": {
+                        "mimeTypes": ["text/html;profile=mcp-app"]
+                    }
+                }),
+            );
+        }
         // Always advertise elicitation: any registered tool may decide
         // at runtime whether to call `mcp_elicit(...)`, so capability
         // negotiation can't be tied to a static check.
@@ -442,12 +455,7 @@ impl McpServer {
                     "isError": false
                 });
                 if tool.output_schema.is_some() {
-                    let text = value.display();
-                    let structured = match serde_json::from_str::<serde_json::Value>(&text) {
-                        Ok(v) => v,
-                        _ => serde_json::json!(text),
-                    };
-                    call_result["structuredContent"] = structured;
+                    call_result["structuredContent"] = vm_value_to_json(&value);
                 }
                 serde_json::json!({
                     "jsonrpc": "2.0",

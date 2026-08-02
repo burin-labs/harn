@@ -103,7 +103,7 @@ pub(crate) fn collect_package_files_inner(
         let rel = path
             .strip_prefix(root)
             .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
-        if should_skip_package_entry(rel, file_type.is_dir()) {
+        if should_exclude_package_entry(rel, PathEntryKind::from_is_directory(file_type.is_dir())) {
             continue;
         }
         if file_type.is_dir() {
@@ -114,18 +114,6 @@ pub(crate) fn collect_package_files_inner(
         }
     }
     Ok(())
-}
-
-pub(crate) fn should_skip_package_entry(rel: &Path, is_dir: bool) -> bool {
-    if is_dir && rel == Path::new("docs").join("dist") {
-        return true;
-    }
-    let Some(name) = rel.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    name == ".git"
-        || name == ".harn"
-        || (is_dir && (name.starts_with(".harn-") || matches!(name, "target" | "node_modules")))
 }
 
 pub(crate) fn default_artifact_dir(ctx: &ManifestContext, report: &PackageCheckReport) -> PathBuf {

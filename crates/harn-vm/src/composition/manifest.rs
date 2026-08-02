@@ -404,44 +404,9 @@ fn sanitize_binding_identifier(name: &str) -> String {
     } else {
         out
     };
-    if HARN_KEYWORDS.contains(&out.as_str()) {
+    if harn_lexer::KEYWORDS.contains(&out.as_str()) {
         format!("tool_{out}")
     } else {
         out
     }
 }
-
-const HARN_KEYWORDS: &[&str] = &[
-    "agent",
-    "as",
-    "await",
-    "break",
-    "catch",
-    "continue",
-    "defer",
-    "else",
-    "enum",
-    "false",
-    "fn",
-    "for",
-    "if",
-    "impl",
-    "import",
-    "in",
-    "interface",
-    "let",
-    "match",
-    "nil",
-    "pipeline",
-    "pub",
-    "return",
-    "skill",
-    "spawn",
-    "struct",
-    "throw",
-    "true",
-    "try",
-    "type",
-    "var",
-    "while",
-];

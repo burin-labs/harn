@@ -148,15 +148,16 @@ function loadHarnKeywords(repoRoot: string): {
   literal: string
   built_in: string
 } {
-  const file = join(repoRoot, "docs/theme/harn-keywords.js")
-  const source = readFileSync(file, "utf8")
-  const start = source.indexOf("{")
-  const end = source.lastIndexOf("}")
-  const literal = source.slice(start, end + 1)
-  return new Function(`return (${literal});`)() as {
-    keyword: string
-    literal: string
-    built_in: string
+  const file = join(repoRoot, "spec/language-vocabulary.json")
+  const vocabulary = JSON.parse(readFileSync(file, "utf8")) as {
+    keywords: string[]
+    literals: string[]
+    builtins: string[]
+  }
+  return {
+    keyword: vocabulary.keywords.join(" "),
+    literal: vocabulary.literals.join(" "),
+    built_in: vocabulary.builtins.join(" "),
   }
 }
 

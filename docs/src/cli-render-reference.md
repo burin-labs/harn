@@ -10,7 +10,7 @@ already exist in the stdlib:
 | Color + tty detection | `std/ansi`: `ansi_color`, `ansi_bold`, `ansi_strip`, `ansi_enabled`. Honors `NO_COLOR` and `HARN_COLOR`. |
 | tty test | `std/io`: `is_tty(fd)`. |
 | Tables | `std/table`: `render_table`, `render_markdown_table`, `render_kv_table`. Column auto-width + alignment + per-cell truncation. |
-| Diff rendering | `std/diff` (Myers). |
+| Diff rendering | `std/diff` line comparison and unified output. |
 | Read stdin / passwords | `std/io`: `read_line`, `read_password`. |
 
 What `std/cli/render` adds on top:

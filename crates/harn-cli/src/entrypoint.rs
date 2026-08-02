@@ -937,6 +937,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         },
         // Hidden dev-only generators; see commands::generate.
         Command::DumpHighlightKeywords(_)
+        | Command::DumpPortableBenchmarkSchema(_)
         | Command::DumpPromptGrammar(_)
         | Command::DumpTriggerQuickref(_)
         | Command::DumpConnectorMatrix(_)

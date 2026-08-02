@@ -1,21 +1,24 @@
 [package]
 name = "harn-wasm"
-version = "0.7.31"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/burin-labs/harn"
-homepage = "https://harnlang.com/"
-description = "WebAssembly target for the Harn programming language playground"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Browser WebAssembly adapter for the Portable Harn Kernel"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "=0.10.50" }
-harn-parser = { path = "../harn-parser", version = "=0.10.50" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.50" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.50" }
 wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [lints]
 workspace = true

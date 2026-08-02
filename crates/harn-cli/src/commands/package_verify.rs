@@ -18,7 +18,7 @@ use crate::package::{self, ConnectorContractFixture, ResolvedProviderConnectorKi
 mod connector_contract;
 use connector_contract::check_one_connector;
 
-pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 1;
+pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 2;
 
 pub(crate) async fn handle_package_verify(args: PackageVerifyArgs) -> Result<(), String> {
     let report = verify_package(&args).await;
@@ -106,6 +106,10 @@ pub(crate) struct CheckedFixture {
 pub(crate) struct PackageVerifyReport {
     pub package: String,
     pub package_kinds: Vec<String>,
+    /// Whether this invocation requested the package-level strict policy.
+    /// Per-file manifest strictness remains visible in each recorded command's
+    /// outcome rather than being collapsed into one misleading package bit.
+    pub strict_requested: bool,
     pub status: String,
     pub summary: PackageVerifySummary,
     pub checks: Vec<PackageVerifyCheck>,
@@ -266,16 +270,16 @@ pub(crate) async fn verify_package(args: &PackageVerifyArgs) -> PackageVerifyRep
 
     let package_harn_files = package_harn_file_args(&package_dir);
     checks.push(run_package_harn_file_check(
-        "harn check",
+        PackageSourceGate::Check,
         &package_dir,
-        "check",
         &package_harn_files,
+        args.strict,
     ));
     checks.push(run_package_harn_file_check(
-        "harn lint",
+        PackageSourceGate::Lint,
         &package_dir,
-        "lint",
         &package_harn_files,
+        args.strict,
     ));
     let mut fmt_args = vec!["fmt".to_string(), "--check".to_string()];
     fmt_args.extend(package_harn_files.clone());
@@ -372,6 +376,7 @@ pub(crate) async fn verify_package(args: &PackageVerifyArgs) -> PackageVerifyRep
     PackageVerifyReport {
         package: package_label,
         package_kinds,
+        strict_requested: args.strict,
         status,
         summary,
         checks,
@@ -742,15 +747,43 @@ fn run_harn_subcommand_owned(name: &str, cwd: &Path, args: Vec<String>) -> Packa
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PackageSourceGate {
+    Check,
+    Lint,
+}
+
+impl PackageSourceGate {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Check => "harn check",
+            Self::Lint => "harn lint",
+        }
+    }
+
+    fn command(self, package_harn_files: &[String], strict: bool) -> Vec<String> {
+        let (subcommand, strict_flags): (&str, &[&str]) = match self {
+            Self::Check => ("check", &["--strict", "--strict-types"]),
+            Self::Lint => ("lint", &["--strict"]),
+        };
+        let mut args = vec![subcommand.to_string()];
+        if strict {
+            args.extend(strict_flags.iter().map(|flag| (*flag).to_string()));
+        }
+        args.extend(package_harn_files.iter().cloned());
+        args
+    }
+}
+
 fn run_package_harn_file_check(
-    name: &str,
+    gate: PackageSourceGate,
     package_dir: &Path,
-    subcommand: &str,
     package_harn_files: &[String],
+    strict: bool,
 ) -> PackageVerifyCheck {
     if package_harn_files.is_empty() {
         return PackageVerifyCheck {
-            name: name.to_string(),
+            name: gate.name().to_string(),
             applicable: true,
             reached: false,
             status: "fail".to_string(),
@@ -762,14 +795,16 @@ fn run_package_harn_file_check(
             details: Vec::new(),
         };
     }
-    let mut args = vec![subcommand.to_string()];
-    args.extend(package_harn_files.iter().cloned());
-    run_harn_subcommand_owned(name, package_dir, args)
+    run_harn_subcommand_owned(
+        gate.name(),
+        package_dir,
+        gate.command(package_harn_files, strict),
+    )
 }
 
 fn package_harn_file_args(package_dir: &Path) -> Vec<String> {
     let mut files = Vec::new();
-    collect_package_harn_files(package_dir, &mut files);
+    collect_package_harn_files(package_dir, package_dir, &mut files);
     files
         .into_iter()
         .filter_map(|path| {
@@ -780,7 +815,7 @@ fn package_harn_file_args(package_dir: &Path) -> Vec<String> {
         .collect()
 }
 
-fn collect_package_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_package_harn_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -789,18 +824,19 @@ fn collect_package_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| matches!(name, ".git" | ".harn" | "target" | "node_modules"))
-            {
+            if should_skip_package_input_directory(root, &path) {
                 continue;
             }
-            collect_package_harn_files(&path, out);
+            collect_package_harn_files(root, &path, out);
         } else if path.extension().is_some_and(|ext| ext == "harn") {
             out.push(path);
         }
     }
+}
+
+fn should_skip_package_input_directory(root: &Path, path: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    package::should_exclude_package_entry(relative, package::PathEntryKind::Directory)
 }
 
 fn run_package_tests(package_dir: &Path) -> PackageVerifyCheck {
@@ -1022,7 +1058,7 @@ fn validate_doc_examples(package_dir: &Path) -> PackageVerifyCheck {
     let mut details = Vec::new();
     let mut failures = Vec::new();
     let mut markdown_files = Vec::new();
-    collect_markdown_files(package_dir, &mut markdown_files);
+    collect_markdown_files(package_dir, package_dir, &mut markdown_files);
     for markdown in markdown_files {
         let Ok(source) = fs::read_to_string(&markdown) else {
             continue;
@@ -1077,7 +1113,7 @@ fn run_package_docs_check(package_dir: &Path) -> PackageVerifyCheck {
     )
 }
 
-fn collect_markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_markdown_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -1086,14 +1122,10 @@ fn collect_markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| matches!(name, ".git" | ".harn" | "target" | "node_modules"))
-            {
+            if should_skip_package_input_directory(root, &path) {
                 continue;
             }
-            collect_markdown_files(&path, out);
+            collect_markdown_files(root, &path, out);
         } else if path.extension().is_some_and(|ext| ext == "md") {
             out.push(path);
         }
@@ -1213,15 +1245,7 @@ pub(crate) fn print_connector_report(report: &ConnectorCheckReport) {
 }
 
 fn print_gate_report(report: &PackageVerifyReport) {
-    println!(
-        "Package verification {} for {} ({}): {} passed, {} failed, {} skipped.",
-        report.status,
-        report.package,
-        report.package_kinds.join(", "),
-        report.summary.passed,
-        report.summary.failed,
-        report.summary.skipped
-    );
+    println!("{}", gate_report_header(report));
     for check in &report.checks {
         println!(
             "- {}: {} (applicable={}, reached={})",
@@ -1239,6 +1263,19 @@ fn print_gate_report(report: &PackageVerifyReport) {
             );
         }
     }
+}
+
+fn gate_report_header(report: &PackageVerifyReport) -> String {
+    format!(
+        "Package verification {} for {} ({}, strict_requested={}): {} passed, {} failed, {} skipped.",
+        report.status,
+        report.package,
+        report.package_kinds.join(", "),
+        report.strict_requested,
+        report.summary.passed,
+        report.summary.failed,
+        report.summary.skipped
+    )
 }
 
 fn gate_stderr_label(check: &PackageVerifyCheck) -> &'static str {

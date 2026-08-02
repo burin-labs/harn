@@ -11,8 +11,9 @@
 //!
 //! We close that gap by hashing the source of every crate that determines the
 //! bytecode emitted for a given program — the lexer, parser, and IR
-//! (source → typed AST) plus this crate's code generator and bytecode/`Chunk`
-//! types — and baking the digest into the binary as `HARN_CODEGEN_FINGERPRINT`.
+//! (source → typed AST), the canonical `harn-kernel` compiler, and this
+//! crate's native bytecode/`Chunk` adapters — and baking the digest into the
+//! binary as `HARN_CODEGEN_FINGERPRINT`.
 //! The `cargo:rerun-if-changed` lines recompute it whenever any of those files
 //! change, so the cache invalidates itself with no manual wipe and no
 //! hand-maintained version constant. Over-inclusion only costs an occasional

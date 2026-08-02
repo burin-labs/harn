@@ -67,6 +67,7 @@ conformance/tests/**/.harn/test-timings.json
 # leaves them invisible to every ignore-aware tool that reads the rules rather
 # than the index.
 .codex/*
+!.codex/hooks.json
 !.codex/environments/
 .codex/environments/*
 !.codex/environments/environment.toml

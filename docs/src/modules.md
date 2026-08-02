@@ -204,6 +204,10 @@ Connector package helpers for common provider plumbing:
 | `rate_limit_token_bucket(state?, config?, now_ms?)` | Pure token-bucket transition for package-local quota decisions |
 | `paginate_cursor(initial_url, fetch_fn, cursor_path, options?)` | Collect cursor-paginated pages from a package-supplied fetch closure |
 
+The four `connector_http_*` helpers remain compatibility re-exports from this
+module. New code should import their single implementation from
+`std/connectors/http`.
+
 ### std/connectors/http
 
 HTTP transport policy for connector packages:
@@ -213,7 +217,7 @@ HTTP transport policy for connector packages:
 | `connector_http_request(clock, net, method, url, options?)` | Capability-attenuated, non-throwing request wrapper with normalized retry, idempotency, error categories, and bounded failure envelopes |
 | `connector_http_json(clock, net, method, url, options?)` | `connector_http_request` plus response JSON parsing; invalid JSON returns `error.category == "invalid_json"` |
 | `connector_http_header(headers_or_response, name)` | Case-insensitive header lookup for response envelopes or raw header dicts |
-| `connector_http_rate_limit(headers_or_response)` | Extract `Retry-After`, `RateLimit-*`, and `X-RateLimit-*` metadata, including `retry_after_ms` when parseable |
+| `connector_http_rate_limit(clock, headers_or_response)` | Extract `Retry-After`, `RateLimit-*`, and `X-RateLimit-*` metadata, including `retry_after_ms` when parseable |
 
 ### std/oauth/providers
 
@@ -340,20 +344,20 @@ MCP Apps UI resource that uses `parent.postMessage` to talk to the host;
 
 ### std/ui_resource
 
-MCP Apps-compatible UI resource envelopes with text and structured fallbacks:
+MCP Apps-compatible UI resource records with text and structured fallbacks:
 
 | Function | Description |
 |---|---|
-| `ui_resource(uri, name, html, options?: UiResourceOptions)` | Build a `UiResource` (`harn.ui_resource.v1`) envelope, validate HTML through `std/artifact/web`, and capture a content hash, size, requested permissions, and a CSP/sandbox policy |
+| `ui_resource(uri, name, html, options?: UiResourceOptions)` | Build a `UiResource` (`harn.ui_resource.v1`) record, validate HTML through `std/artifact/web`, and capture a content hash, size, requested permissions, and a CSP/sandbox policy |
 | `ui_tool_meta(resource, options?: UiToolMetaOptions)` | Build a `_meta.ui` tool-declaration block (`UiToolMeta`, `harn.ui_tool_meta.v1`) with visibility, initial view, and permission/capability lists |
 | `ui_tool_meta_to_mcp(meta)` | Serialize a tool-meta into the MCP Apps `_meta.ui` dict (`resourceUri`, `visibility`, etc.) for direct inclusion in `tools/list` payloads |
-| `ui_text_fallback(content)` / `ui_structured_fallback(data, options?: UiStructuredFallbackOptions)` | Build `UiTextFallback` and `UiStructuredFallback` envelopes for hosts without UI support |
-| `ui_tool_result(resource, options?: UiToolResultOptions)` | Wrap a resource with mandatory text and optional `UiStructuredFallback`, defaulting the text to a `web_artifact_text_fallback` projection |
+| `ui_text_fallback(content)` / `ui_structured_fallback(data, options?: UiStructuredFallbackOptions)` | Build `UiTextFallback` and `UiStructuredFallback` records for hosts without UI support |
+| `ui_tool_result(resource, options?: UiToolResultOptions)` | Wrap a resource with mandatory text and optional `UiStructuredFallback`, using `web_artifact_text_fallback` for the default text |
 | `ui_select_for_host(result, capabilities?: UiHostCapabilityInput)` | Choose between `ui_resource`, `structured_fallback`, and `text_fallback` for a host based on advertised MCP Apps capability |
 | `ui_host_supports_apps(capabilities?: UiHostCapabilityInput)` / `ui_host_capabilities(input?: UiHostCapabilityInput)` | Detect whether an MCP, MCP Apps, or OpenAI Apps SDK host advertises support for the `mcp-app` profile |
-| `ui_tool_call_envelope(name, params?, options?: UiToolCallOptions)` | Build the host→guest JSON-RPC `tools/call` envelope a sandboxed iframe receives over `postMessage` |
-| `ui_context_update_envelope(key, value, options?: UiContextUpdateOptions)` | Build the guest→host JSON-RPC `context/update` envelope used to update model-visible context |
-| `ui_resource_csp_header(csp)` / `ui_resource_sandbox_attr(csp)` | Project the resource CSP into header value and `<iframe sandbox>` attribute strings |
+| `ui_tool_call_envelope(name, params?, options?: UiToolCallOptions)` | Build the JSON-RPC `tools/call` request a sandboxed view receives from its host |
+| `ui_context_update_envelope(key, value, options?: UiContextUpdateOptions)` | Build the JSON-RPC `context/update` request a view sends to its host |
+| `ui_resource_csp_header(csp)` / `ui_resource_sandbox_attr(csp)` | Turn resource security settings into a header value and `<iframe sandbox>` attributes |
 | `ui_tool_result_validate(result)` | Reject tool results that are missing required fields or ship a UI resource whose HTML failed validation |
 
 Tool results always carry a non-empty text fallback so plain-text hosts
@@ -362,9 +366,32 @@ still see useful output. UI resources fail closed: `ui_tool_result` omits
 navigation, embedded secrets, etc.) unless the caller opts in with
 `allow_invalid_resource: true` for preview-only use. Pass structured fallback
 data through `ui_structured_fallback(...)`; `UiToolResultOptions` expects the
-typed fallback envelope instead of an anonymous raw payload. See
+typed fallback record instead of an anonymous raw payload. See
 [examples/ui_resource](https://github.com/burin-labs/harn/tree/main/examples/ui_resource)
 for a dashboard widget and a multi-step review form.
+
+### std/ui
+
+Build interactive apps over `std/ui_resource` with checked Harn records:
+
+```harn
+import * as ui from "std/ui"
+```
+
+| Function | Description |
+|---|---|
+| `ui.document(title, revision, elements)` | Check ordered elements and return `harn.ui_document.v1` |
+| `ui.event(raw)` | Check browser input, including canvas coordinates from `0.0` to `1.0` and snapshots |
+| `ui.update(document, effects?)` | Return the structured document and optional scheduled, capture, or download effects |
+| `ui.renderer_html(tool_name)` | Configure the shared browser and canvas view for one Harn event tool |
+| `ui.app_resource(uri, name, tool_name, options?)` | Package the renderer as a validated MCP Apps resource |
+| `ui.tool_metadata(resource, options?)` | Return the MCP tool metadata that opens the app |
+| `ui.mcp_resource(resource, options?)` | Return the config accepted by `harness.tools.mcp_resource` |
+| `ui.test.run(handle, events, options?)` | Drive event handling and scheduled effects in process without waiting for real time |
+
+Application code owns state and decisions in Harn. Browser JavaScript exists
+once inside the shared renderer. See the [`std/ui` reference](./stdlib/ui.md)
+and [interactive app guide](./cookbooks/build-interactive-app.md).
 
 ### std/llm/budget
 
@@ -921,6 +948,7 @@ syntax-aware source review:
 | Function | Description |
 |---|---|
 | `diff_lines(before, after)` | Return `{changed, insertions, deletions, old_lines, new_lines, ops}` |
+| `diff_artifact(before, after, options?)` | Compute change counts and a unified diff together |
 | `unified_diff(before, after, options?)` | Render a unified diff with optional `{path, from_label, to_label, context, color, color_mode}` |
 | `colorize_diff(diff_text, options?)` | Apply ANSI coloring to an existing unified diff |
 | `diff_summary(before, after)` | Return compact changed/insertions/deletions counts |
@@ -928,8 +956,9 @@ syntax-aware source review:
 | `structural_diff(ast, path_a, path_b, options?)` | Host-backed tree-sitter review diff with line-diff fallback |
 | `changeset_summary(ast, files)` | Symbol-level review summary over `{path, before?, after?}` file images |
 
-The line helpers favor predictable, dependency-free rendering over competing
-with `git diff` for large repository diffs. For large file sets, call
+The line helpers share Harn's native Histogram engine; see the
+[`std/diff` reference](stdlib/diff.md) for behavior and algorithm details. For
+large file sets, call
 `git diff` through `std/git` or `std/command` and use `colorize_diff` or
 `render_diff_stat` for presentation.
 

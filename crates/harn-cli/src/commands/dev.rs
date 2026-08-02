@@ -326,10 +326,12 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
             continue;
         };
         if path.is_dir() {
-            if matches!(
-                name,
-                "target" | "node_modules" | ".git" | ".harn" | ".harn-runs" | ".harn-cache"
-            ) {
+            if matches!(name, "target" | "node_modules" | ".git")
+                || crate::path_policy::is_harn_internal_entry(
+                    name,
+                    crate::path_policy::PathEntryKind::Directory,
+                )
+            {
                 continue;
             }
             walk(&path, out);

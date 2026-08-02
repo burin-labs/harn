@@ -75,9 +75,10 @@ autonomy, cross-surface convergence, and operationally complete launches.
   `scripts/claude-dev-setup-once.sh`.
 - Keep installed hooks on. Use `HARN_HOOKS_FULL_LOCAL=1` for build-backed local
   gates and `HARN_PREPUSH_FULL_TESTS=1` for the broader pre-push suite.
-- The Claude Bash guard rejects raw Cargo build/test commands and build output
-  piped directly into filters. Use Make targets; redirect output to a file
-  before filtering. `HARN_ALLOW_RAW_CARGO=1` is the explicit one-off escape.
+- The shared Codex and Claude shell guard rejects raw Cargo build/test commands
+  and build output piped directly into filters. Use Make targets; redirect
+  output to a file before filtering. `HARN_ALLOW_RAW_CARGO=1` is the explicit
+  one-off escape. See [Agent shell guard](docs/src/dev/agent-shell-guard.md).
 
 ## Repository map
 
@@ -93,8 +94,10 @@ autonomy, cross-surface convergence, and operationally complete launches.
 - `spec/chapters/*.md`: canonical spec sources.
 - `docs/src/`, `website/`: documentation sources and harnlang.com.
 - `tree-sitter-harn/`, `editors/vscode/`: grammar and VS Code extension.
-- `crates/harn-wasm` is outside the workspace; build it with
-  `(cd crates/harn-wasm && wasm-pack build)`.
+- `crates/harn-kernel`: canonical compiler, versioned program artifact,
+  deterministic portable runtime, and runtime type contract.
+- `crates/harn-wasm`: workspace-owned browser adapter; verify its generated
+  bindings, authority imports, and real worker path with `make wasm-check`.
 
 ## Source ownership and generated files
 

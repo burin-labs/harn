@@ -727,59 +727,8 @@ pub(crate) fn is_builtin(name: &str) -> bool {
     builtin_signature(name).is_some()
 }
 
-/// Known keywords for completion.
-pub(crate) const KEYWORDS: &[&str] = &[
-    "pipeline",
-    "extends",
-    "override",
-    "let",
-    "const",
-    "if",
-    "else",
-    "for",
-    "in",
-    "match",
-    "retry",
-    "parallel",
-    "defer",
-    "return",
-    "import",
-    "true",
-    "false",
-    "nil",
-    "try",
-    "catch",
-    "throw",
-    "finally",
-    "fn",
-    "spawn",
-    "while",
-    "break",
-    "continue",
-    "interface",
-    "pub",
-    "from",
-    "to",
-    "struct",
-    "enum",
-    "eval_pack",
-    "type",
-    "tool",
-    "skill",
-    "exclusive",
-    "guard",
-    "require",
-    "deadline",
-    "yield",
-    "emit",
-    "mutex",
-    "select",
-    "impl",
-    "ask_user",
-    "dual_control",
-    "escalate_to",
-    "request_approval",
-];
+/// Known keywords for completion, owned by the lexer token table.
+pub(crate) use harn_lexer::KEYWORDS;
 
 /// String methods offered after `.` on a string value.
 pub(crate) const STRING_METHODS: &[&str] = &[

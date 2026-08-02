@@ -75,6 +75,9 @@ pipeline default(harness: Harness) {
   )
   const custom_only = ui_host_supports_apps({apps: true, profiles: ["custom-app"]})
   const null_caps = ui_host_supports_apps(nil)
+  const extension_caps = ui_host_supports_apps(
+    {extensions: {"io.modelcontextprotocol/ui": {mimeTypes: ["text/html;profile=mcp-app"]}}},
+  )
   const normalized: UiHostCapabilities = ui_host_capabilities(
     {apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}},
   )
@@ -83,6 +86,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(mcp_caps)
   harness.stdio.println(custom_only)
   harness.stdio.println(null_caps)
+  harness.stdio.println(extension_caps)
   harness.stdio.println(normalized.profiles)
   harness.stdio.println(normalized.bridges)
   const call: UiToolCallEnvelope = ui_tool_call_envelope(

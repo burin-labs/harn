@@ -52,6 +52,7 @@ exempt_checks = [
   "check-docs-cli-flags",           # validates docs bash/sh harn flags, not a mirror
   "check-docs-links",               # validates docs/src local links resolve, not a mirror
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
+  "check-app-host",                 # validates readable browser-host sources with Prettier, ESLint, TypeScript, and Node
   "check-crate-sibling-versions",   # validates publish-time intra-workspace crate pins, not a mirror
   "check-dependabot-groups",        # validates Cargo compatibility-family update policy, not a mirror
   "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
@@ -86,10 +87,12 @@ sources = [
   "crates/harn-lexer/src/",
   "crates/harn-parser/src/",
   "crates/harn-ir/src/",
+  "crates/harn-kernel/src/",
   "crates/harn-vm/build_support/codegen_fingerprint.rs",
-  "crates/harn-vm/src/compiler/",
+  "crates/harn-vm/src/compiler.rs",
   "crates/harn-vm/src/bytecode_cache.rs",
   "crates/harn-vm/src/chunk.rs",
+  "crates/harn-vm/src/chunk/",
   "crates/harn-vm/src/module_artifact.rs",
 ]
 ci = true
@@ -97,11 +100,43 @@ make_all = false
 
 [[artifact]]
 id = "highlight"
-description = "Harn syntax-highlight keyword list, from the live lexer + stdlib builtin names. Consumed by the docs site highlighter."
+description = "Versioned Harn language vocabulary plus the legacy docs adapter, generated from the live lexer and stdlib builtin registry."
 gen = "gen-highlight"
 check = "check-highlight"
-outputs = ["docs/theme/harn-keywords.js"]
+outputs = [
+  "spec/language-vocabulary.json",
+  "docs/theme/harn-keywords.js",
+  "crates/harn-wasm/demo/language-vocabulary.json",
+]
 sources = ["crates/harn-lexer/src/", "crates/harn-stdlib/src/stdlib/", "crates/harn-vm/src/stdlib.rs", "crates/harn-vm/src/lib.rs", "crates/harn-modules/"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "wasm-wit-contract"
+description = "Canonical JSON projection of the Portable Harn Kernel WIT package, resolved and validated by pinned Bytecode Alliance wasm-tools."
+gen = "gen-wasm-wit"
+check = "check-wasm-wit"
+outputs = ["crates/harn-wasm/wit/harn-kernel.json"]
+sources = [
+  "crates/harn-wasm/wit/harn-kernel.wit",
+  "Makefile",
+  ".github/workflows/portable-kernel-wasm.yml",
+]
+ci = true
+make_all = false
+
+[[artifact]]
+id = "portable-benchmark-schema"
+description = "Public JSON Schema generated from the Portable Kernel benchmark receipt type, validation constants, and serialization contract."
+gen = "gen-portable-benchmark-schema"
+check = "check-portable-benchmark-schema"
+outputs = ["spec/schemas/portable-kernel-benchmark.v1.schema.json"]
+sources = [
+  "crates/harn-kernel/src/benchmark.rs",
+  "crates/harn-kernel/src/benchmark/schema.rs",
+  "crates/harn-cli/src/commands/dump_portable_benchmark_schema.rs",
+]
 ci = true
 make_all = true
 
@@ -447,6 +482,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-openapi-snapshot" = "source"
 "check-docs-model-refs" = "source"
 "check-docs-links" = "source"
+"check-app-host" = "source"
 "check-receipt-structs" = "source"
 "check-ported-handler-loc" = "source"
 "check-source-file-lengths" = "source"
@@ -467,6 +503,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "lint-agent-path-normalization" = "source"
 # --- binary: verdict depends on current executable semantics (check-drift-binary) ---
 "check-highlight" = "binary"
+"check-portable-benchmark-schema" = "binary"
 "check-prompt-grammar" = "binary"
 "check-protocol-artifacts" = "binary"
 "check-connector-schemas" = "binary"
@@ -493,6 +530,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-run-view-fixtures" = "excluded"        # cargo test -p harn-vm (build + test)
 "check-bindings" = "excluded"                 # go vet/test round-trip (external toolchain)
 "check-tree-sitter-parser" = "excluded"       # pinned npm tree-sitter CLI generation (external toolchain)
+"check-wasm-wit" = "excluded"                 # pinned Bytecode Alliance wasm-tools validation (external toolchain)
 "check-burin-protocol-artifacts" = "excluded" # needs a sibling burin-code checkout (ci = false)
 "check-docs-workflow-quickstart" = "excluded" # executes workflow fixtures (behavioural runtime guard)
 "check-vm-rss-soak" = "excluded"              # RSS perf soak (build + run)

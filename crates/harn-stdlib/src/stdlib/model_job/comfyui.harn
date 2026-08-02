@@ -1,3 +1,4 @@
+import { media_asset_verify_result } from "std/media/asset"
 import {
   ModelBackend,
   ModelJob,
@@ -11,7 +12,14 @@ import {
 
 pub type ComfyWorkflowBuilder = fn(ModelJobRequest) -> dict
 
-pub type ComfyBackendOptions = {timeout_ms?: int, max_response_bytes?: int, client_id?: string}
+type ComfyIo = {fs: HarnessFs, net: HarnessNet}
+
+pub type ComfyBackendOptions = {
+  timeout_ms?: int,
+  max_response_bytes?: int,
+  client_id?: string,
+  upload_subfolder?: string,
+}
 
 fn __comfy_endpoint(endpoint: string) -> string {
   const clean = trim(endpoint)
@@ -58,6 +66,71 @@ fn __comfy_request_options(options: ComfyBackendOptions) -> dict {
     timeout_ms: options.timeout_ms ?? 30000,
     max_response_bytes: options.max_response_bytes ?? 16777216,
   }
+}
+
+fn __comfy_upload_inputs_result(
+  io: ComfyIo,
+  endpoint: string,
+  backend: string,
+  request: ModelJobRequest,
+  options: ComfyBackendOptions,
+) -> Result<ModelJobRequest, ModelJobError> {
+  if len(request.inputs ?? []) == 0 {
+    return Ok(request)
+  }
+  const subfolder = trim(options.upload_subfolder ?? "harn")
+  let names = []
+  for asset in request.inputs ?? [] {
+    const verified = media_asset_verify_result(io.fs, asset)
+    if !is_ok(verified) {
+      return Err(
+        model_job_error(
+          "asset_mismatch",
+          "ComfyUI input failed asset verification",
+          {backend: backend, detail: unwrap_err(verified)},
+        ),
+      )
+    }
+    const response = io.net.request(
+      "POST",
+      endpoint + "/upload/image",
+      {
+        multipart: [
+          {
+            name: "image",
+            path: asset.path,
+            filename: basename(asset.path),
+            content_type: asset.mime_type,
+          },
+          {name: "overwrite", value: "true"},
+          {name: "type", value: "input"},
+          {name: "subfolder", value: subfolder},
+        ],
+        timeout_ms: options.timeout_ms ?? 30000,
+        max_response_bytes: options.max_response_bytes ?? 16777216,
+      },
+    )
+    const decoded = __comfy_json(response, backend, "input upload")
+    if !is_ok(decoded) {
+      return Err(unwrap_err(decoded))
+    }
+    const uploaded = unwrap(decoded)
+    const name = trim(to_string(uploaded?.name ?? ""))
+    if name == "" {
+      return Err(
+        model_job_error(
+          "malformed_output",
+          "ComfyUI upload response is missing name",
+          {backend: backend, detail: uploaded},
+        ),
+      )
+    }
+    const uploaded_subfolder = trim(to_string(uploaded?.subfolder ?? subfolder))
+    names = names + [uploaded_subfolder == "" ? name : uploaded_subfolder + "/" + name]
+  }
+  let prepared = request
+  prepared.params = (request.params ?? {}).merging({comfy_input_names: names})
+  return Ok(prepared)
 }
 
 fn __comfy_output_url(endpoint: string, image) -> string {
@@ -114,11 +187,11 @@ fn __comfy_history_observation(
   } else {
     "running"
   }
-  const normalized = model_job_state_result(raw_state, backend, job.id)
-  if !is_ok(normalized) {
-    return Err(unwrap_err(normalized))
+  const checked_state = model_job_state_result(raw_state, backend, job.id)
+  if !is_ok(checked_state) {
+    return Err(unwrap_err(checked_state))
   }
-  const state = unwrap(normalized)
+  const state = unwrap(checked_state)
   if state == "failed" {
     return Ok(
       {
@@ -160,8 +233,8 @@ fn __comfy_history_observation(
 /**
  * Build a model-job backend over ComfyUI's stable HTTP queue API.
  *
- * The caller owns the workflow graph; this adapter owns submit, status,
- * cancellation, output discovery, and error normalization.
+ * The caller owns the workflow graph; this backend owns submit, status,
+ * cancellation, output discovery, and typed errors.
  *
  * @effects: []
  * @errors: [validation]
@@ -177,7 +250,17 @@ pub fn comfyui_backend(
   return {
     id: backend_id,
     submit: fn(harness, request) {
-      const workflow = build_workflow(request)
+      const prepared = __comfy_upload_inputs_result(
+        {fs: harness.fs, net: harness.net},
+        base,
+        backend_id,
+        request,
+        options,
+      )
+      if !is_ok(prepared) {
+        return Err(unwrap_err(prepared))
+      }
+      const workflow = build_workflow(unwrap(prepared))
       const response = harness.net.post(
         base + "/prompt",
         json_stringify({prompt: workflow, client_id: options.client_id ?? request.id}),
@@ -291,5 +374,77 @@ pub fn comfyui_flux2_klein_workflow(request: ModelJobRequest) -> dict {
     },
     "12": {class_type: "VAEDecode", inputs: {samples: ["11", 0], vae: ["3", 0]}},
     "13": {class_type: "SaveImage", inputs: {images: ["12", 0], filename_prefix: prefix}},
+  }
+}
+
+/**
+ * Ready-to-run FLUX.2 Klein 4B distilled image-edit graph.
+ *
+ * `comfyui_backend` uploads the first verified request input and gives this
+ * builder its server-side name. The graph follows ComfyUI's official image
+ * edit template: the sketch is encoded as reference conditioning while an
+ * empty latent preserves the requested canvas shape.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn comfyui_flux2_klein_edit_workflow(request: ModelJobRequest) -> dict {
+  const input_name = request.params?.comfy_input_names?.[0]
+  if request.task != "image.edit" || trim(to_string(input_name ?? "")) == "" {
+    throw "std/model_job/comfyui: FLUX.2 image edit requires one uploaded input"
+  }
+  const width = request.output.width ?? 1024
+  const height = request.output.height ?? 1024
+  const megapixels = to_float(width * height) / 1000000.0
+  const prefix = to_string(request.params?.filename_prefix ?? "harn/flux2-klein-edit")
+  return {
+    "1": {
+      class_type: "UNETLoader",
+      inputs: {unet_name: "flux-2-klein-4b-fp8.safetensors", weight_dtype: "default"},
+    },
+    "2": {
+      class_type: "CLIPLoader",
+      inputs: {clip_name: "qwen_3_4b.safetensors", type: "flux2", device: "default"},
+    },
+    "3": {class_type: "VAELoader", inputs: {vae_name: "flux2-vae.safetensors"}},
+    "4": {class_type: "CLIPTextEncode", inputs: {text: request.prompt, clip: ["2", 0]}},
+    "5": {class_type: "ConditioningZeroOut", inputs: {conditioning: ["4", 0]}},
+    "6": {class_type: "LoadImage", inputs: {image: input_name}},
+    "7": {
+      class_type: "ImageScaleToTotalPixels",
+      inputs: {
+        image: ["6", 0],
+        upscale_method: "nearest-exact",
+        megapixels: megapixels,
+        resolution_steps: 1,
+      },
+    },
+    "8": {class_type: "GetImageSize", inputs: {image: ["7", 0]}},
+    "9": {class_type: "VAEEncode", inputs: {pixels: ["7", 0], vae: ["3", 0]}},
+    "10": {class_type: "ReferenceLatent", inputs: {conditioning: ["4", 0], latent: ["9", 0]}},
+    "11": {class_type: "ReferenceLatent", inputs: {conditioning: ["5", 0], latent: ["9", 0]}},
+    "12": {class_type: "RandomNoise", inputs: {noise_seed: request.seed ?? 0}},
+    "13": {
+      class_type: "CFGGuider",
+      inputs: {model: ["1", 0], positive: ["10", 0], negative: ["11", 0], cfg: 1.0},
+    },
+    "14": {class_type: "KSamplerSelect", inputs: {sampler_name: "euler"}},
+    "15": {class_type: "Flux2Scheduler", inputs: {steps: 4, width: ["8", 0], height: ["8", 1]}},
+    "16": {
+      class_type: "EmptyFlux2LatentImage",
+      inputs: {width: ["8", 0], height: ["8", 1], batch_size: request.output.count ?? 1},
+    },
+    "17": {
+      class_type: "SamplerCustomAdvanced",
+      inputs: {
+        noise: ["12", 0],
+        guider: ["13", 0],
+        sampler: ["14", 0],
+        sigmas: ["15", 0],
+        latent_image: ["16", 0],
+      },
+    },
+    "18": {class_type: "VAEDecode", inputs: {samples: ["17", 0], vae: ["3", 0]}},
+    "19": {class_type: "SaveImage", inputs: {images: ["18", 0], filename_prefix: prefix}},
   }
 }

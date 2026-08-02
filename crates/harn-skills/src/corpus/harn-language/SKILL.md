@@ -72,12 +72,37 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Watch for strict-types behavior when changing boundary APIs.
 - Update examples when public type syntax changes.
 
+## Portable execution
+
+- Treat portable execution as a deployment contract, not a second Harn
+  language. Source must use the canonical parser, typechecker, and compiler.
+- Passing `harn check` is necessary but does not prove Portable Kernel v1
+  support. Compile the intended entry through the portable interface so
+  unsupported opcodes, builtins, and capability methods fail explicitly.
+- Keep entry inputs and terminal values JSON-shaped: null, booleans, signed
+  integers, finite or tagged floats, strings, bytes, lists, and named records.
+- Preserve explicit type annotations at the entry and reusable function
+  boundaries. The portable kernel enforces declared call contracts rather than
+  treating browser JSON as `any`.
+- Route privileged operations through typed `harness` capabilities. Do not add
+  target-specific browser builtins or read ambient file, network, process,
+  clock, random, or model authority.
+- Keep DOM, canvas, and presentation state in the browser host. Run CPU-heavy
+  portable behavior in a Web Worker and exchange typed values.
+- Do not add a parser, evaluator, opcode table, builtin registry, or keyword
+  list to an adapter. Generate projections or test parity against the owning
+  language/runtime registry.
+- Use `harn bench portable` for compiler, artifact decode, and dispatch
+  measurements. Use `std/timing` only for hostful application spans.
+
 ## Modules and imports
 
 - Keep import paths explicit and readable.
 - Prefer `import * as alias from "module"` when a module publishes short
   member names under a collision-safe alias; do not invent receiver-method
   APIs for that case.
+- When callers use a namespace alias, export `event` rather than repeating the
+  module name in `ui_event`; the call site already reads `ui.event`.
 - `pub import * as alias from "module"` re-exports the alias namespace object,
   not the target's flattened members (contrast `pub import "module"`).
 - Avoid relying on the current working directory in examples.

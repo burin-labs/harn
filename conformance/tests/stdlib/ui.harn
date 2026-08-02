@@ -1,0 +1,132 @@
+import * as ui from "std/ui"
+import { UiEffectKind, UiEvent } from "std/ui/contracts"
+import { UiTestOptions } from "std/ui/testing"
+
+pipeline test(harness: Harness, task) {
+  const elements = [
+    {id: "root", kind: "column"},
+    {id: "title", kind: "heading", parent: "root", text: "Paint"},
+    {id: "canvas", kind: "canvas", parent: "root", width: 800, height: 450, strokes: []},
+  ]
+  const document = ui.document("Paint", 2, elements)
+  harness.stdio.println(document.schema)
+  harness.stdio.println(document.elements[2].kind)
+  const event = ui.event(
+    {
+      schema: "harn.ui_event.v1",
+      kind: "canvas.stroke",
+      target: "canvas",
+      points: [{x: 0.1, y: 0.2}, {x: 0.3, y: 0.4}],
+    },
+  )
+  harness.stdio.println(event.kind)
+  harness.stdio.println(len(event.points))
+  const update = ui.update(
+    document,
+    [{kind: "capture_canvas", target: "canvas", event_target: "snapshot"}],
+  )
+  harness.stdio.println(update.schema)
+  harness.stdio.println(update.effects[0].kind)
+  const resource = ui.app_resource("ui://test/paint", "Paint", "paint.handle_event")
+  harness.stdio.println(resource.validation.ok)
+  harness.stdio.println(resource.contents.contains("harn.ui_update.v1"))
+  harness.stdio.println(resource.contents.contains("paint.handle_event"))
+  const escaped_renderer = ui.renderer_html("</script><script>alert(1)</script>")
+  harness.stdio.println(!escaped_renderer.contains("</script><script>alert(1)</script>"))
+  harness.stdio.println(escaped_renderer.contains("\\u003c/script"))
+  const duplicate = try {
+    ui.document("Bad", 0, [{id: "same", kind: "text"}, {id: "same", kind: "text"}])
+  }
+  harness.stdio.println(is_err(duplicate))
+  const bad_point = try {
+    ui.event(
+      {
+        schema: "harn.ui_event.v1",
+        kind: "canvas.stroke",
+        target: "canvas",
+        points: [{x: -1.0, y: 0.0}, {x: 0.0, y: 0.0}],
+      },
+    )
+  }
+  harness.stdio.println(is_err(bad_point))
+  const non_finite_point = try {
+    ui.event(
+      {
+        schema: "harn.ui_event.v1",
+        kind: "canvas.stroke",
+        target: "canvas",
+        points: [{x: sqrt(-1.0), y: 0.0}, {x: 0.0, y: 0.0}],
+      },
+    )
+  }
+  harness.stdio.println(is_err(non_finite_point))
+  const oversized_canvas = try {
+    ui.document("Bad", 0, [{id: "canvas", kind: "canvas", width: 8193, height: 10}])
+  }
+  harness.stdio.println(is_err(oversized_canvas))
+  const invalid_stroke = try {
+    ui.document(
+      "Bad",
+      0,
+      [
+        {
+          id: "canvas",
+          kind: "canvas",
+          width: 100,
+          height: 100,
+          strokes: [{id: "stroke", points: [{x: 0.0, y: 0.0}, {x: 1.0, y: 1.0}], width: 0.0}],
+        },
+      ],
+    )
+  }
+  harness.stdio.println(is_err(invalid_stroke))
+  const bad_heading = try {
+    ui.document("Bad", 0, [{id: "title", kind: "heading", text: "Bad", level: 7}])
+  }
+  harness.stdio.println(is_err(bad_heading))
+  const bad_parent = try {
+    ui.document(
+      "Bad",
+      0,
+      [
+        {id: "label", kind: "text", text: "Not a container"},
+        {id: "child", kind: "text", parent: "label", text: "Child"},
+      ],
+    )
+  }
+  harness.stdio.println(is_err(bad_parent))
+  const bad_delay = try {
+    ui.update(document, [{kind: "send_event", after_ms: -1, event: event}])
+  }
+  harness.stdio.println(is_err(bad_delay))
+  let revision = 0
+  fn reduce(raw) {
+    const incoming = ui.event(raw.event)
+    revision = revision + 1
+    let effects = []
+    if incoming.target == "start" {
+      effects = [
+        {
+          kind: "send_event",
+          after_ms: 500,
+          event: {schema: "harn.ui_event.v1", kind: "click", target: "finish"},
+        },
+      ]
+    }
+    return ui.update(
+      ui.document("Test", revision, [{id: "state", kind: "status", text: incoming.target}]),
+      effects,
+    )
+  }
+  const first_event: UiEvent = ui.event(
+    {schema: "harn.ui_event.v1", kind: "click", target: "start"},
+  )
+  const test_options: UiTestOptions = {follow_scheduled: true, max_steps: 4}
+  const trace = ui.test.run(reduce, [first_event], test_options)
+  const send_event_kind: UiEffectKind = "send_event"
+  harness.stdio.println(trace.schema)
+  harness.stdio.println(len(trace.events))
+  harness.stdio.println(trace.events[1].target)
+  harness.stdio.println(ui.test.effect_count(trace, send_event_kind))
+  harness.stdio.println(ui.test.element(trace.updates[1].document, "state")?.text ?? "missing")
+}

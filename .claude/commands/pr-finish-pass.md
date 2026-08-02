@@ -33,9 +33,9 @@ Conflict rules in this repo:
 - `docs/theme/harn-keywords.js`: regenerate with `make gen-highlight`.
 - `docs/src/language-spec.md`: regenerate via the pre-commit hook (edit
   `spec/HARN_SPEC.md` instead).
-- `Cargo.lock`: take theirs and re-run `cargo check --workspace`.
+- `Cargo.lock`: resolve from the merged manifests, then run `make setup-rust`.
 - Any file where both sides reformatted: take one side then run the
-  appropriate formatter (`cargo fmt`, `make fmt-harn`, portal lint).
+  appropriate formatter (`make fmt`, `make fmt-harn`, portal lint).
 
 Then `git push --force-with-lease`. Never bare `--force`.
 
@@ -52,9 +52,10 @@ silenced asserts. Common categories:
 
 - **Format / clippy / lint:** `make fmt`, `make lint`, `make lint-harn`,
   `make fmt-harn`. Commit the fixes.
-- **Test failure:** reproduce locally with the narrowest command
-  (`cargo nextest run -p <crate> <test>`), then fix the root cause.
-- **Conformance:** `cargo run --bin harn -- test conformance --filter <name>`.
+- **Test failure:** reproduce locally with `make test-one` and the
+  `HARN_TEST_ONE_NAME` and `HARN_TEST_ONE_PACKAGE` variables, then fix the root
+  cause. Use `make test-affected` when the failure spans a changed crate.
+- **Conformance:** `./scripts/harn_bin.sh -- test conformance --filter <name>`.
   If `.expected` needs an update for an intentional behavior change, do it
   explicitly.
 - **Portal / VS Code / tree-sitter:** run the relevant
@@ -235,14 +236,14 @@ here" rabbit hole that doubles the PR scope.
 ```bash
 make fmt
 make lint-harn fmt-harn
-cargo nextest run -p <crates touched by the diff>
+make test-affected
 ```
 
 For wider changes:
 
 ```bash
 make test
-cargo run --bin harn -- test conformance --filter <relevant>
+./scripts/harn_bin.sh -- test conformance --filter <relevant>
 ```
 
 Then push (`--force-with-lease` if you rewrote history, plain push otherwise)

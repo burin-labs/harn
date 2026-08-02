@@ -3494,7 +3494,42 @@ for event in feed.events {
 - Non-navigation action intents must set `requires_approval: true`; hosts own
   write execution for dismiss, snooze, and convert-to-task actions.
 
-### MCP apps UI resource stdlib
+### Interactive app stdlib
+
+Use `std/ui` for new interactive apps whose behavior stays in Harn:
+
+```harn
+import * as ui from "std/ui"
+
+const resource = ui.app_resource(
+  "ui://example/decision-card",
+  "Decision Card",
+  "decision.handle_event",
+)
+
+fn handle_event(raw) {
+  const event = ui.event(raw.event)
+  // Change Harn-owned state from the checked event.
+  return ui.update(ui.document("Decision Card", revision, elements))
+}
+```
+
+- `ui.document` checks element IDs, parent order, heading levels, and canvas
+  sizes before a browser sees the document.
+- `ui.event` checks browser input and canvas coordinates once at the Harn
+  boundary.
+- `ui.update` returns the next document plus `send_event`, `capture_canvas`, or
+  `download` actions for the shared renderer.
+- `ui.tool_metadata` and `ui.mcp_resource` return the exact records needed by
+  `tool_define` and `harness.tools.mcp_resource`.
+- `ui.test.run` drives an event handler and follows scheduled events in process
+  without sleeping.
+
+See `examples/apps/decision-card.harn` for a small form and
+`examples/apps/logo-studio.harn` for drawing, model jobs, restart recovery, and
+writing result files.
+
+### MCP Apps UI resource stdlib
 
 Use `std/ui_resource` to package interactive widgets as `ui://` resources for
 MCP Apps hosts while keeping text/structured fallbacks first-class:
@@ -3529,10 +3564,10 @@ const rendered = ui_select_for_host(result, host_capabilities)
   Invalid resources are stripped automatically unless the caller passes
   `allow_invalid_resource: true`.
 - `ui_select_for_host(result, capabilities?)` picks `ui_resource`,
-  `structured_fallback`, or `text_fallback` from the same envelope based on
-  host capability advertisements. `ui_host_capabilities` accepts the MCP
-  `client_capabilities.apps`, OpenAI Apps SDK `ui.apps`, or bare `{apps:
-  true}` shapes through `UiHostCapabilityInput`.
+  `structured_fallback`, or `text_fallback` from the same record based on host
+  capability advertisements. `ui_host_capabilities` accepts the current MCP
+  extension entry, older `client_capabilities.apps` shapes, OpenAI Apps SDK
+  `ui.apps`, or bare `{apps: true}` records through `UiHostCapabilityInput`.
 - `ui_tool_call_envelope(name, params?, options?)` and
   `ui_context_update_envelope(key, value, options?)` build the JSON-RPC
   envelopes a sandboxed iframe sends through `window.parent.postMessage`.

@@ -92,6 +92,29 @@ terminal `failed` event before `model_job_run_result` returns the typed error.
 This gives transcript and UI consumers a terminal state even when no receipt is
 created.
 
+## Run a job from an interactive app
+
+`model_job_run_result` is convenient for a CLI or batch step that can wait. An
+interactive app should retain a `ModelJobRun` and advance the job one step
+at a time:
+
+| Function | Work performed |
+|---|---|
+| `model_job_submit_result` | Validate and submit once; return the first job and event. |
+| `model_job_step_result` | Inspect once and append the checked state or progress event. |
+| `model_job_finish_result` | Store a finished run's outputs as verified assets. |
+| `model_job_cancel_run_result` | Cancel a non-terminal run and append its event. |
+
+`ModelJobRun` can be encoded as JSON. It contains the current job, ordered events,
+start time, and inspection count. Calling `model_job_step_result` on a finished
+run returns it unchanged. That makes a scheduled check safe when it crosses
+with a cancel or final response. Each step also enforces `timeout_ms` and
+`max_attempts`, so remembered jobs settle instead of polling indefinitely after
+a provider loses their remote state.
+
+The synchronous `model_job_run_result` uses these same functions, so Harn has
+one implementation for both waiting and interactive callers.
+
 ## Receipt and media asset
 
 A successful `ModelJobReceipt` contains the final job, ordered events, request
@@ -110,15 +133,20 @@ changed digest, size, MIME type, or identity.
 ## Test and replay backends
 
 `model_job_fake_backend(id, observations)` consumes a fixed observation list.
-It has no network effects. Use it for lifecycle and UI tests.
+It has no network effects. Use it for job-state and UI tests.
 
 `model_job_replay_backend(receipt)` replays recorded states and asset paths. It
 rejects a different request digest and never falls back to the live provider.
 
 `comfyui_backend(endpoint, build_workflow, options)` implements the same
 interface over ComfyUI. Its graph builder is separate, so any API-format ComfyUI
-workflow can use the adapter. `comfyui_flux2_klein_workflow` is the included
-text-to-image graph.
+workflow can use the backend. `comfyui_flux2_klein_workflow` is the included
+text-to-image graph. When a request has input assets, the backend verifies and
+uploads them before building the graph; their ComfyUI names are available in
+`request.params.comfy_input_names`. Use
+`comfyui_flux2_klein_edit_workflow` for a one-image FLUX.2 Klein edit. Its graph
+follows ComfyUI's
+[official Klein image-edit template](https://docs.comfy.org/tutorials/flux/flux-2-klein).
 
 `openai_responses_image_backend(options)` completes generation or editing in
 its `submit` call. It uses the OpenAI Responses API image-generation tool,

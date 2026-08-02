@@ -17,7 +17,7 @@ previews as a unified diff, and commits atomically through the staged-fs overlay
 | `edit_reorder_parameters` | Permute parameters and every call's arguments together. |
 | `edit_change_return_type` | Rewrite a function's declared return type. |
 | `edit_inline` | Inline a zero-parameter, single-return function and delete it. |
-| `edit_move_decl` | Move a top-level declaration into another file. |
+| `edit_move_decl` | Move a named top-level declaration or Harn binding into another file. |
 
 ## Shared contract
 
@@ -48,6 +48,37 @@ Three knobs are common to all of them:
 - **Capability matrix** — when a language lacks the structure a refactoring
   needs, the call returns `result: "unsupported"` with a reason instead of
   guessing. These all require the `tools:deterministic` capability.
+
+## Recipe — move a Harn setting into a config module
+
+Use `edit_move_decl` when a top-level Harn `const`, `let`, or `var` belongs in
+another module. The move is structural: Harn selects the named binding from the
+syntax tree, stages both file changes, and then commits them together. Local
+bindings and destructuring patterns are not selected by name.
+
+```harn,ignore
+import { edit_move_decl } from "std/edit"
+
+pipeline default(harness: Harness) {
+  const preview = edit_move_decl(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {
+      path: "src/github.harn",
+      symbol: { name: "GITHUB_API_URL" },
+      target_file: "src/config.harn",
+      dry_run: true,
+    },
+  )
+
+  harness.stdio.log(preview.unified_diff[0].diff)
+}
+```
+
+Review the preview, then repeat the call without `dry_run` to commit the move.
+See the [`std/edit` structured-refactoring reference](../stdlib/edit.md#structured-refactorings)
+for parameters, result fields, and language coverage.
 
 ## Recipe — extract a function
 

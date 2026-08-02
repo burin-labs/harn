@@ -7,7 +7,6 @@ use harn_parser::TypeExpr;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-use crate::harness::HarnessKind;
 use crate::runtime_guards::RuntimeParamGuard;
 
 /// Sentinel value stored in [`Chunk::inline_cache_index`] for code offsets
@@ -32,6 +31,11 @@ fn next_chunk_cache_id() -> u64 {
 /// awareness of the macro layout.
 pub use crate::vm::ops::Op;
 pub(crate) use crate::vm::ops::{is_adaptive_binary_op, op_reads_outer_name};
+
+mod disassembly;
+pub(crate) use disassembly::*;
+mod inline_cache;
+pub(crate) use inline_cache::*;
 
 /// A constant value in the constant pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -95,187 +99,6 @@ fn build_constant_index(constants: &[Constant]) -> HashMap<ConstantKey, u16> {
         }
     }
     index
-}
-
-/// Runtime-only inline-cache state for bytecode instructions that repeatedly
-/// see the same dynamic shape. Lookup caches stay monomorphic on a name and
-/// receiver shape. Adaptive caches warm on a stable operand or call target,
-/// then fall back through the generic opcode and replace or reset state when
-/// the observed shape changes.
-///
-/// This vector is intentionally excluded from [`CachedChunk`]: bytecode cache
-/// artifacts keep the slot layout but start with empty runtime feedback in each
-/// process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum InlineCacheEntry {
-    Empty,
-    Property {
-        name_idx: u16,
-        target: PropertyCacheTarget,
-    },
-    Method {
-        name_idx: u16,
-        argc: usize,
-        target: MethodCacheTarget,
-    },
-    AdaptiveBinary {
-        op: AdaptiveBinaryOp,
-        state: AdaptiveBinaryState,
-    },
-    DirectCall {
-        state: DirectCallState,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AdaptiveBinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    Equal,
-    NotEqual,
-    Less,
-    Greater,
-    LessEqual,
-    GreaterEqual,
-}
-
-/// Adaptive-binary IC state. All fields are scalar `Copy` (shape is a
-/// `Copy` enum, hit/miss counters are integers), so the struct as a whole
-/// is `Copy`. This lets `execute_adaptive_binary` extract the cached state
-/// by value for the specialization check without cloning the wrapping
-/// `InlineCacheEntry` on every dispatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AdaptiveBinaryState {
-    Warmup {
-        shape: BinaryShape,
-        hits: u8,
-    },
-    Specialized {
-        shape: BinaryShape,
-        hits: u64,
-        misses: u64,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BinaryShape {
-    Int,
-    Float,
-    Bool,
-    String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum DirectCallState {
-    Warmup {
-        argc: usize,
-        target: DirectCallTarget,
-        hits: u8,
-    },
-    Specialized {
-        argc: usize,
-        target: DirectCallTarget,
-        hits: u64,
-        misses: u64,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum DirectCallTarget {
-    Closure(Arc<crate::value::VmClosure>),
-}
-
-impl PartialEq for DirectCallTarget {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Closure(left), Self::Closure(right)) => Arc::ptr_eq(left, right),
-        }
-    }
-}
-
-impl Eq for DirectCallTarget {}
-
-impl PartialEq for DirectCallState {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Warmup {
-                    argc: left_argc,
-                    target: left_target,
-                    hits: left_hits,
-                },
-                Self::Warmup {
-                    argc: right_argc,
-                    target: right_target,
-                    hits: right_hits,
-                },
-            ) => left_argc == right_argc && left_target == right_target && left_hits == right_hits,
-            (
-                Self::Specialized {
-                    argc: left_argc,
-                    target: left_target,
-                    hits: left_hits,
-                    misses: left_misses,
-                },
-                Self::Specialized {
-                    argc: right_argc,
-                    target: right_target,
-                    hits: right_hits,
-                    misses: right_misses,
-                },
-            ) => {
-                left_argc == right_argc
-                    && left_target == right_target
-                    && left_hits == right_hits
-                    && left_misses == right_misses
-            }
-            _ => false,
-        }
-    }
-}
-
-impl Eq for DirectCallState {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PropertyCacheTarget {
-    DictField(Arc<str>),
-    StructField { field_name: Arc<str>, index: usize },
-    HarnessSubHandle(HarnessKind),
-    ListCount,
-    ListEmpty,
-    ListFirst,
-    ListLast,
-    StringCount,
-    StringEmpty,
-    PairFirst,
-    PairSecond,
-    EnumVariant,
-    EnumFields,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MethodCacheTarget {
-    Harness(HarnessKind),
-    ListCount,
-    ListEmpty,
-    ListContains,
-    StringCount,
-    StringEmpty,
-    StringContains,
-    DictCount,
-    DictHas,
-    RangeCount,
-    RangeLen,
-    RangeEmpty,
-    RangeFirst,
-    RangeLast,
-    SetCount,
-    SetLen,
-    SetEmpty,
-    SetContains,
 }
 
 /// Debug metadata for a slot-indexed local in a compiled chunk.
@@ -567,6 +390,37 @@ pub struct CompiledFunction {
 }
 
 impl CompiledFunction {
+    pub(crate) fn from_portable(portable: harn_kernel::CompiledFunction) -> Self {
+        Self {
+            name: portable.name,
+            type_params: portable.type_params,
+            nominal_type_names: portable.nominal_type_names,
+            params: portable
+                .params
+                .into_iter()
+                .map(|param| {
+                    let runtime_guard = param
+                        .type_expr
+                        .as_ref()
+                        .map(RuntimeParamGuard::from_type_expr);
+                    ParamSlot {
+                        name: param.name,
+                        type_expr: param.type_expr,
+                        runtime_guard,
+                        has_default: param.has_default,
+                    }
+                })
+                .collect(),
+            default_start: portable.default_start,
+            chunk: Arc::new(Chunk::from_portable((*portable.chunk).clone())),
+            is_generator: portable.is_generator,
+            is_stream: portable.is_stream,
+            has_rest_param: portable.has_rest_param,
+            has_runtime_type_checks: portable.has_runtime_type_checks,
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn has_runtime_type_checks_for_params(params: &[ParamSlot]) -> bool {
         params.iter().any(|param| param.type_expr.is_some())
     }
@@ -648,15 +502,6 @@ impl CompiledFunction {
     }
 }
 
-/// A snapshot of [`Chunk`]'s compile-time balance model, returned by
-/// [`Chunk::balance_probe`] and consumed by [`Chunk::balance_delta_since`].
-#[cfg(debug_assertions)]
-#[derive(Clone, Copy)]
-pub(crate) struct BalanceProbe {
-    depth: i32,
-    nonlinear: u32,
-}
-
 /// Net operand-stack effect (`pushes - pops`) of one emitted opcode, for
 /// the debug-build balance assertion (issue #2622). `count` is the opcode's
 /// variadic arity when that arity is the emit-call argument (`BuildList`
@@ -720,6 +565,98 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
 }
 
 impl Chunk {
+    /// Attach native-only caches and runtime guards to a portable program
+    /// image. The compiler never constructs these process-local structures.
+    pub fn from_portable(portable: harn_kernel::Chunk) -> Self {
+        let mut inline_cache_slots = BTreeMap::new();
+        let mut offset = 0usize;
+        while offset < portable.code.len() {
+            let Some(op) = Op::from_byte(portable.code[offset]) else {
+                break;
+            };
+            if is_adaptive_binary_op(op)
+                || matches!(
+                    op,
+                    Op::GetProperty
+                        | Op::GetPropertyOpt
+                        | Op::MethodCall
+                        | Op::MethodCallOpt
+                        | Op::MethodCallSpread
+                        | Op::ConcatAssignLocal
+                        | Op::Call
+                        | Op::CallBuiltin
+                )
+            {
+                let slot = inline_cache_slots.len();
+                inline_cache_slots.insert(offset, slot);
+            }
+            let Some(width) = harn_kernel::program::instruction_len(op, &portable.code[offset..])
+            else {
+                break;
+            };
+            offset = offset.saturating_add(width);
+        }
+
+        let code = portable.code;
+        let constants = portable
+            .constants
+            .into_iter()
+            .map(|constant| match constant {
+                harn_kernel::Constant::Int(value) => Constant::Int(value),
+                harn_kernel::Constant::Float(value) => Constant::Float(value),
+                harn_kernel::Constant::String(value) => Constant::String(value),
+                harn_kernel::Constant::Bool(value) => Constant::Bool(value),
+                harn_kernel::Constant::Nil => Constant::Nil,
+                harn_kernel::Constant::Duration(value) => Constant::Duration(value),
+            })
+            .collect::<Vec<_>>();
+        let constant_count = constants.len();
+        let inline_cache_count = inline_cache_slots.len();
+        let mut inline_cache_index = vec![NO_INLINE_CACHE_SLOT; code.len()];
+        for (&op_offset, &slot) in &inline_cache_slots {
+            inline_cache_index[op_offset] = slot as u32;
+        }
+
+        Self {
+            cache_id: next_chunk_cache_id(),
+            code,
+            constants,
+            constant_index: None,
+            lines: portable.lines,
+            columns: portable.columns,
+            source_file: portable.source_file,
+            current_col: portable.current_col,
+            functions: portable
+                .functions
+                .into_iter()
+                .map(|function| {
+                    Arc::new(CompiledFunction::from_portable(function.as_ref().clone()))
+                })
+                .collect(),
+            inline_cache_slots,
+            inline_cache_index,
+            inline_caches: Arc::new(Mutex::new(vec![
+                InlineCacheEntry::Empty;
+                inline_cache_count
+            ])),
+            constant_strings: Arc::new(Mutex::new(vec![None; constant_count])),
+            local_slots: portable
+                .local_slots
+                .into_iter()
+                .map(|slot| LocalSlotInfo {
+                    name: slot.name,
+                    mutable: slot.mutable,
+                    scope_depth: slot.scope_depth,
+                })
+                .collect(),
+            references_outer_names: portable.references_outer_names,
+            #[cfg(debug_assertions)]
+            balance_depth: 0,
+            #[cfg(debug_assertions)]
+            balance_nonlinear: 0,
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             cache_id: next_chunk_cache_id(),
@@ -983,30 +920,6 @@ impl Chunk {
         }
     }
 
-    /// Snapshot the balance model before compiling a statement; pair with
-    /// [`Chunk::balance_delta_since`].
-    #[cfg(debug_assertions)]
-    pub(crate) fn balance_probe(&self) -> BalanceProbe {
-        BalanceProbe {
-            depth: self.balance_depth,
-            nonlinear: self.balance_nonlinear,
-        }
-    }
-
-    /// Net operand-stack effect emitted since `probe`, or `None` when any
-    /// non-linearly-modeled opcode was emitted in that span (which makes
-    /// the running sum untrustworthy, so callers must not assert on it).
-    /// The absolute `balance_depth` may be meaningless after a non-exact
-    /// span — only deltas over a fully-exact span are valid.
-    #[cfg(debug_assertions)]
-    pub(crate) fn balance_delta_since(&self, probe: BalanceProbe) -> Option<i32> {
-        if self.balance_nonlinear == probe.nonlinear {
-            Some(self.balance_depth - probe.depth)
-        } else {
-            None
-        }
-    }
-
     fn register_inline_cache(&mut self, op_offset: usize) {
         if self.inline_cache_slots.contains_key(&op_offset) {
             return;
@@ -1223,6 +1136,7 @@ impl Chunk {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn add_local_slot(
         &mut self,
         name: String,
@@ -1272,167 +1186,6 @@ impl Chunk {
         }
         out
     }
-}
-
-/// Disassembly helpers consumed by the macro-generated
-/// [`Chunk::disassemble_op`]. Each helper takes the current code position
-/// (already advanced past the opcode byte), advances it over the operand
-/// bytes the opcode carries, and renders one human-readable line without
-/// a trailing newline (the dispatcher appends it).
-///
-/// Defining one helper per operand layout — and not one per opcode —
-/// keeps adding an opcode a one-line edit in the `define_opcodes!` table
-/// rather than a paired edit here. New layouts live with the helpers;
-/// new opcodes live with the dispatch.
-pub(crate) fn disasm_bare(_chunk: &Chunk, _ip: &mut usize, label: &str) -> String {
-    label.to_string()
-}
-
-pub(crate) fn disasm_u8(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let arg = chunk.code[*ip];
-    *ip += 1;
-    format!("{label} {arg:>4}")
-}
-
-pub(crate) fn disasm_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let arg = chunk.read_u16(*ip);
-    *ip += 2;
-    format!("{label} {arg:>4}")
-}
-
-pub(crate) fn disasm_try_catch_setup(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let catch_offset = chunk.read_u16(*ip);
-    *ip += 2;
-    let type_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    if let Some(type_name) = chunk.constants.get(type_idx as usize) {
-        format!("{label} {catch_offset:>4} type {type_idx:>4} ({type_name})")
-    } else {
-        format!("{label} {catch_offset:>4} type {type_idx:>4}")
-    }
-}
-
-pub(crate) fn disasm_const_pool_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let idx = chunk.read_u16(*ip);
-    *ip += 2;
-    format!("{label} {idx:>4} ({})", chunk.constants[idx as usize])
-}
-
-pub(crate) fn disasm_local_slot_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let slot = chunk.read_u16(*ip);
-    *ip += 2;
-    let mut out = format!("{label} {slot:>4}");
-    if let Some(info) = chunk.local_slots.get(slot as usize) {
-        out.push_str(&format!(" ({})", info.name));
-    }
-    out
-}
-
-pub(crate) fn disasm_const_pool_local_slot(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let prop = chunk.read_u16(*ip);
-    *ip += 2;
-    let slot = chunk.read_u16(*ip);
-    *ip += 2;
-    let mut out = format!(
-        "{label} prop {prop:>4} ({}) slot {slot:>4}",
-        chunk.constants[prop as usize]
-    );
-    if let Some(info) = chunk.local_slots.get(slot as usize) {
-        out.push_str(&format!(" ({})", info.name));
-    }
-    out
-}
-
-pub(crate) fn disasm_method_call(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let idx = chunk.read_u16(*ip);
-    *ip += 2;
-    let argc = chunk.code[*ip];
-    *ip += 1;
-    format!(
-        "{label} {idx:>4} ({}) argc={argc}",
-        chunk.constants[idx as usize]
-    )
-}
-
-pub(crate) fn disasm_match_enum(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let enum_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    let var_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    format!(
-        "{label} {enum_idx:>4} ({}) {var_idx:>4} ({})",
-        chunk.constants[enum_idx as usize], chunk.constants[var_idx as usize],
-    )
-}
-
-pub(crate) fn disasm_build_enum(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let enum_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    let var_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    let field_count = chunk.read_u16(*ip);
-    *ip += 2;
-    format!(
-        "{label} {enum_idx:>4} ({}) {var_idx:>4} ({}) fields={field_count}",
-        chunk.constants[enum_idx as usize], chunk.constants[var_idx as usize],
-    )
-}
-
-pub(crate) fn disasm_selective_import(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let path_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    let names_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    format!(
-        "{label} {path_idx:>4} ({}) names: {names_idx:>4} ({})",
-        chunk.constants[path_idx as usize], chunk.constants[names_idx as usize],
-    )
-}
-
-pub(crate) fn disasm_check_type(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let var_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    let type_idx = chunk.read_u16(*ip);
-    *ip += 2;
-    format!(
-        "{label} {var_idx:>4} ({}) -> {type_idx:>4} ({})",
-        chunk.constants[var_idx as usize], chunk.constants[type_idx as usize],
-    )
-}
-
-pub(crate) fn disasm_call_builtin(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let id = chunk.read_u64(*ip);
-    *ip += 8;
-    let idx = chunk.read_u16(*ip);
-    *ip += 2;
-    let argc = chunk.code[*ip];
-    *ip += 1;
-    format!(
-        "{label} {id:#018x} {idx:>4} ({}) argc={argc}",
-        chunk.constants[idx as usize],
-    )
-}
-
-pub(crate) fn disasm_call_builtin_spread(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    let id = chunk.read_u64(*ip);
-    *ip += 8;
-    let idx = chunk.read_u16(*ip);
-    *ip += 2;
-    format!(
-        "{label} {id:#018x} {idx:>4} ({})",
-        chunk.constants[idx as usize],
-    )
-}
-
-pub(crate) fn disasm_method_call_spread(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
-    // emit_u16(Op::MethodCallSpread, name_idx, ...) writes opcode + 2
-    // bytes of u16 name_idx, so the operand is read at *ip with the
-    // usual `read_u16`. The previous hand-written disasm read at
-    // `ip + 1`, which displayed the wrong constant index — silently
-    // corrupting any disassembly that hit a `MethodCallSpread` opcode.
-    let idx = chunk.read_u16(*ip);
-    *ip += 2;
-    format!("{label} {idx:>4} ({})", chunk.constants[idx as usize])
 }
 
 impl Default for Chunk {

@@ -2,13 +2,43 @@
 import { ansi_dim, ansi_error, ansi_info, ansi_success } from "std/ansi"
 import { render_table } from "std/table"
 
-type DiffOptions = {
+pub type DiffOptions = {
   path?: string,
   from_label?: string,
   to_label?: string,
   context?: int,
   color?: bool,
-  color_mode?: string,
+  color_mode?: "auto" | "always" | "never",
+}
+
+pub type DiffLineKind = "equal" | "delete" | "insert"
+
+pub type DiffLineOp = {kind: DiffLineKind, line: string, old_line: int, new_line: int}
+
+pub type DiffLines = {
+  changed: bool,
+  insertions: int,
+  deletions: int,
+  old_lines: int,
+  new_lines: int,
+  ops: list<DiffLineOp>,
+}
+
+pub type DiffSummary = {
+  changed: bool,
+  insertions: int,
+  deletions: int,
+  old_lines: int,
+  new_lines: int,
+}
+
+pub type DiffArtifact = {
+  changed: bool,
+  insertions: int,
+  deletions: int,
+  old_lines: int,
+  new_lines: int,
+  diff: string,
 }
 
 pub type ChangesetFileImage = {path: string, before?: string, after?: string}
@@ -72,123 +102,6 @@ pub type ChangesetSummary = {
   warnings: list<ChangesetWarning>,
 }
 
-fn __diff_lines_of(text) {
-  return split(text ?? "", "\n")
-}
-
-fn __diff_op(kind, line, old_line, new_line) {
-  return {kind: kind, line: line, old_line: old_line, new_line: new_line}
-}
-
-fn __diff_key(i, j) -> string {
-  return to_string(i) + "," + to_string(j)
-}
-
-fn __diff_matrix(a, b) {
-  const n = len(a)
-  const m = len(b)
-  let dp = {}
-  let i = n - 1
-  while i >= 0 {
-    let j = m - 1
-    while j >= 0 {
-      if a[i] == b[j] {
-        const next = dp[__diff_key(i + 1, j + 1)] ?? 0
-        dp = dp + {[__diff_key(i, j)]: next + 1}
-      } else {
-        const down = dp[__diff_key(i + 1, j)] ?? 0
-        const right = dp[__diff_key(i, j + 1)] ?? 0
-        dp = dp + {[__diff_key(i, j)]: max(down, right)}
-      }
-      j -= 1
-    }
-    i -= 1
-  }
-  return dp
-}
-
-fn __diff_ops(a, b) {
-  const dp = __diff_matrix(a, b)
-  let ops = []
-  let i = 0
-  let j = 0
-  while i < len(a) && j < len(b) {
-    if a[i] == b[j] {
-      ops = ops.appending(__diff_op("equal", a[i], i + 1, j + 1))
-      i += 1
-      j += 1
-    } else {
-      const delete_score = dp[__diff_key(i + 1, j)] ?? 0
-      const insert_score = dp[__diff_key(i, j + 1)] ?? 0
-      if delete_score >= insert_score {
-        ops = ops.appending(__diff_op("delete", a[i], i + 1, j + 1))
-        i += 1
-      } else {
-        ops = ops.appending(__diff_op("insert", b[j], i + 1, j + 1))
-        j += 1
-      }
-    }
-  }
-  while i < len(a) {
-    ops = ops.appending(__diff_op("delete", a[i], i + 1, j + 1))
-    i += 1
-  }
-  while j < len(b) {
-    ops = ops.appending(__diff_op("insert", b[j], i + 1, j + 1))
-    j += 1
-  }
-  return ops
-}
-
-fn __diff_stats(ops) {
-  let insertions = 0
-  let deletions = 0
-  for op in ops {
-    if op.kind == "insert" {
-      insertions += 1
-    } else if op.kind == "delete" {
-      deletions += 1
-    }
-  }
-  return {insertions: insertions, deletions: deletions, changed: insertions > 0 || deletions > 0}
-}
-
-fn __diff_compact_ops(ops, context) {
-  if context == nil || context < 0 {
-    return ops
-  }
-  let keep = {}
-  let idx = 0
-  while idx < len(ops) {
-    if ops[idx].kind != "equal" {
-      const start = max(0, idx - context)
-      const end = min(len(ops), idx + context + 1)
-      let cursor = start
-      while cursor < end {
-        keep = keep + {[to_string(cursor)]: true}
-        cursor += 1
-      }
-    }
-    idx += 1
-  }
-  let out = []
-  let skipped = false
-  idx = 0
-  while idx < len(ops) {
-    if keep[to_string(idx)] {
-      if skipped {
-        out = out.appending({kind: "skip"})
-        skipped = false
-      }
-      out = out.appending(ops[idx])
-    } else {
-      skipped = true
-    }
-    idx += 1
-  }
-  return out
-}
-
 fn __diff_label(prefix, path, fallback) {
   if path == nil || trim(path) == "" {
     return fallback
@@ -226,12 +139,66 @@ fn __diff_color_line(line, options) {
  * @effects: []
  * @errors: []
  */
-pub fn diff_lines(before: string, after: string) -> dict {
-  const old_lines = __diff_lines_of(before)
-  const new_lines = __diff_lines_of(after)
-  const ops = __diff_ops(old_lines, new_lines)
-  return __diff_stats(ops)
-    + {ops: ops, old_lines: len(old_lines), new_lines: len(new_lines)}
+pub fn diff_lines(before: string, after: string) -> DiffLines {
+  const result = __diff_line_artifact(before, after, {include_body: false, include_ops: true})
+  return {
+    changed: result.changed,
+    insertions: result.insertions,
+    deletions: result.deletions,
+    old_lines: result.old_lines,
+    new_lines: result.new_lines,
+    ops: result.ops,
+  }
+}
+
+fn __diff_without_final_newline(text) -> string {
+  const value = text ?? ""
+  if value.ends_with("\n") {
+    return value.substring(0, len(value) - 1)
+  }
+  return value
+}
+
+fn __render_unified_diff(body, changed, options) -> string {
+  const opts = options ?? {}
+  const path = opts.path
+  const old_label = opts.from_label ?? __diff_label("a/", path, "before")
+  const new_label = opts.to_label ?? __diff_label("b/", path, "after")
+  if !changed {
+    return ""
+  }
+  const lines = ["--- " + old_label, "+++ " + new_label]
+    + split(
+    __diff_without_final_newline(body),
+    "\n",
+  )
+  return join(lines.map({ line -> __diff_color_line(line, opts) }), "\n")
+}
+
+/**
+ * Compute line-change counts and a unified diff in one pass.
+ *
+ * Use this when a caller needs both forms. It avoids constructing the
+ * line-diff graph twice for the same inputs.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn diff_artifact(before: string, after: string, options: DiffOptions = {}) -> DiffArtifact {
+  const opts = options ?? {}
+  const result = __diff_line_artifact(
+    before,
+    after,
+    {context: opts.context, include_body: true, include_ops: false},
+  )
+  return {
+    changed: result.changed,
+    insertions: result.insertions,
+    deletions: result.deletions,
+    old_lines: result.old_lines,
+    new_lines: result.new_lines,
+    diff: __render_unified_diff(result.body, result.changed, opts),
+  }
 }
 
 /**
@@ -241,33 +208,7 @@ pub fn diff_lines(before: string, after: string) -> dict {
  * @errors: []
  */
 pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) -> string {
-  const opts = options ?? {}
-  const path = opts.path
-  const old_label = opts.from_label ?? __diff_label("a/", path, "before")
-  const new_label = opts.to_label ?? __diff_label("b/", path, "after")
-  const result = diff_lines(before, after)
-  if !result.changed {
-    return ""
-  }
-  const context = opts.context
-  const ops = __diff_compact_ops(result.ops, context)
-  let lines = [
-    "--- " + old_label,
-    "+++ " + new_label,
-    "@@ -1," + to_string(result.old_lines) + " +1," + to_string(result.new_lines) + " @@",
-  ]
-  for op in ops {
-    if op.kind == "skip" {
-      lines = lines.appending("...")
-    } else if op.kind == "equal" {
-      lines = lines.appending(" " + op.line)
-    } else if op.kind == "delete" {
-      lines = lines.appending("-" + op.line)
-    } else if op.kind == "insert" {
-      lines = lines.appending("+" + op.line)
-    }
-  }
-  return join(lines.map({ line -> __diff_color_line(line, opts) }), "\n")
+  return diff_artifact(before, after, options).diff
 }
 
 /**
@@ -288,8 +229,8 @@ pub fn colorize_diff(diff_text: string, options: DiffOptions = {}) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn diff_summary(before: string, after: string) -> dict {
-  const result = diff_lines(before, after)
+pub fn diff_summary(before: string, after: string) -> DiffSummary {
+  const result = __diff_line_artifact(before, after, {include_body: false, include_ops: false})
   return {
     changed: result.changed,
     insertions: result.insertions,

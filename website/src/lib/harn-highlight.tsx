@@ -1,13 +1,14 @@
 import type { ReactNode } from "react"
 import type { Mode } from "highlight.js"
 import { createLowlight, type LanguageFn } from "lowlight"
+import vocabulary from "../../../spec/language-vocabulary.json"
 import { KEYWORD_DOCS } from "./keyword-docs"
 
 const harnLanguage: LanguageFn = (hljs) => {
   const keywords = {
-    keyword: "break continue each else fn for if in let parallel pipeline retry return spawn while",
-    literal: "false nil true",
-    built_in: "llm_call log read_file read_text tool_select",
+    keyword: vocabulary.keywords.join(" "),
+    literal: vocabulary.literals.join(" "),
+    built_in: vocabulary.builtins.join(" "),
   }
   const interpolation: Mode = {
     className: "subst",

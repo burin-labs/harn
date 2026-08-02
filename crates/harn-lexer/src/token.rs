@@ -200,60 +200,86 @@ mod fix_edit_tests {
     }
 }
 
-/// Canonical list of Harn language keywords. Single source of truth; the lexer's
-/// identifier-to-keyword match must stay in sync (enforced by
-/// `test_keywords_const_covers_lexer`). External tooling should consume this
-/// rather than duplicate it.
-pub const KEYWORDS: &[&str] = &[
-    "break",
-    "catch",
-    "const",
-    "continue",
-    "deadline",
-    "defer",
-    "else",
-    "emit",
-    "enum",
-    "eval_pack",
-    "exclusive",
-    "extends",
-    "false",
-    "finally",
-    "fn",
-    "for",
-    "from",
-    "guard",
-    "if",
-    "impl",
-    "import",
-    "in",
-    "interface",
-    "let",
-    "match",
-    "mutex",
-    "nil",
-    "override",
-    "parallel",
-    "pipeline",
-    "pub",
-    "require",
-    "retry",
-    "return",
-    "select",
-    "skill",
-    "spawn",
-    "struct",
-    "throw",
-    "throws",
-    "to",
-    "tool",
-    "true",
-    "try",
-    "type",
-    "var",
-    "while",
-    "yield",
-];
+macro_rules! define_keyword_vocabulary {
+    (
+        keywords { $( $keyword:literal => $token:ident ),* $(,)? }
+        literals { $( $literal:literal => $literal_token:ident ),* $(,)? }
+    ) => {
+        /// Canonical Harn keyword vocabulary consumed by parser and tooling.
+        pub const KEYWORDS: &[&str] = &[$($keyword,)* $($literal,)*];
+
+        /// Keyword-shaped literal values for syntax-highlighting projections.
+        pub const LITERAL_KEYWORDS: &[&str] = &[$($literal,)*];
+
+        /// Tokenize a canonical keyword with a compile-time match table.
+        ///
+        /// This function and both public vocabulary projections are generated
+        /// by the same declaration, so adding syntax cannot update one surface
+        /// while leaving another stale.
+        pub fn keyword_token_kind(value: &str) -> Option<TokenKind> {
+            match value {
+                $($keyword => Some(TokenKind::$token),)*
+                $($literal => Some(TokenKind::$literal_token),)*
+                _ => None,
+            }
+        }
+    };
+}
+
+define_keyword_vocabulary! {
+    keywords {
+        "break" => Break,
+        "catch" => Catch,
+        "const" => Const,
+        "continue" => Continue,
+        "deadline" => Deadline,
+        "defer" => Defer,
+        "else" => Else,
+        "emit" => Emit,
+        "enum" => Enum,
+        "eval_pack" => EvalPack,
+        "exclusive" => Exclusive,
+        "extends" => Extends,
+        "finally" => Finally,
+        "fn" => Fn,
+        "for" => For,
+        "from" => From,
+        "guard" => Guard,
+        "if" => If,
+        "impl" => Impl,
+        "import" => Import,
+        "in" => In,
+        "interface" => Interface,
+        "let" => Let,
+        "match" => Match,
+        "mutex" => Mutex,
+        "override" => Override,
+        "parallel" => Parallel,
+        "pipeline" => Pipeline,
+        "pub" => Pub,
+        "require" => Require,
+        "retry" => Retry,
+        "return" => Return,
+        "select" => Select,
+        "skill" => Skill,
+        "spawn" => Spawn,
+        "struct" => Struct,
+        "throw" => Throw,
+        "throws" => Throws,
+        "to" => To,
+        "tool" => Tool,
+        "try" => Try,
+        "type" => TypeKw,
+        "var" => Var,
+        "while" => While,
+        "yield" => Yield,
+    }
+    literals {
+        "false" => False,
+        "nil" => Nil,
+        "true" => True,
+    }
+}
 
 /// Token kinds produced by the lexer.
 #[derive(Debug, Clone, PartialEq)]

@@ -156,11 +156,11 @@ pub(crate) fn needs_parens_as_unary_operand(node: &Node) -> bool {
 /// a parent BinaryOp.  Covers both correctness (semantics-preserving) and
 /// clarity (`&&` / `||` mixing).
 pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) -> bool {
-    // A range (`a to b`) binds looser than every binary operator, so as an
-    // operand of one it must be parenthesized — both to preserve grouping and
-    // to stay parseable, since the parser only accepts a bare range at the top
-    // of an expression (`parse_range` sits just above `|>`).
-    if matches!(child, Node::RangeExpr { .. }) {
+    // A range (`a to b`) and ternary (`condition ? yes : no`) bind looser than
+    // every binary operator, so they must be parenthesized as operands. A bare
+    // range may also fail to re-parse because the parser only accepts it at the
+    // top of an expression (`parse_range` sits just above `|>`).
+    if matches!(child, Node::RangeExpr { .. } | Node::Ternary { .. }) {
         return true;
     }
     if let Node::BinaryOp { op: child_op, .. } = child {

@@ -112,6 +112,15 @@ pub type ModelJobReceipt = {
   events: list<ModelJobEvent>,
 }
 
+/** Progress record for interactive views and long-running work. */
+pub type ModelJobRun = {
+  schema: "harn.model_job_run.v1",
+  job: ModelJob,
+  events: list<ModelJobEvent>,
+  started_at_ms: int,
+  attempts: int,
+}
+
 pub type ModelBackend = {
   id: string,
   submit: fn(Harness, ModelJobRequest) -> Result<ModelJobObservation, ModelJobError>,
@@ -120,7 +129,7 @@ pub type ModelBackend = {
 }
 
 /**
- * Build a stable error envelope for adapters and callers.
+ * Build a stable error record for backends and callers.
  *
  * @effects: []
  * @errors: []
