@@ -305,8 +305,17 @@ cat > "$fake_tools/cargo" <<'SH'
 set -euo pipefail
 printf 'cargo %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
 if [[ "${1:-}" == "build" ]]; then
+  binary=harn
+  previous=""
+  for argument in "$@"; do
+    if [[ "$previous" == "--bin" ]]; then
+      binary="$argument"
+      break
+    fi
+    previous="$argument"
+  done
   mkdir -p "$CARGO_TARGET_DIR/debug"
-  cat > "$CARGO_TARGET_DIR/debug/harn" <<'HARN'
+  cat > "$CARGO_TARGET_DIR/debug/$binary" <<'HARN'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'harn argv=%s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s self=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" "$0" >> "$FAKE_AUDIT_RECORD"
@@ -323,7 +332,7 @@ if [[ "${FAIL_FULL_PREPARE:-0}" == "1" && "${1:-}" == "dump-protocol-artifacts" 
 fi
 exit 0
 HARN
-  chmod +x "$CARGO_TARGET_DIR/debug/harn"
+  chmod +x "$CARGO_TARGET_DIR/debug/$binary"
   exit 0
 fi
 if [[ "${1:-}" == "clippy" ]]; then
@@ -341,7 +350,7 @@ chmod +x "$fake_tools/cargo"
 cat > "$fake_tools/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'make %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+printf 'make %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s HARN_CLI_AOT_GEN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" "${HARN_CLI_AOT_GEN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
 if [[ -n "${FAIL_FAKE_MAKE_TARGET:-}" && "$*" == "$FAIL_FAKE_MAKE_TARGET" ]]; then
   echo "injected make failure: $*" >&2
   exit 17
@@ -801,6 +810,11 @@ if ! grep -Fq "dump-protocol-artifacts --artifact-version 1.2.4" "$audit_record"
 fi
 if ! grep -Fq "make gen-cli-aot" "$audit_record"; then
   echo "release_gate full did not regenerate CLI AOT artifacts during prepare" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if ! grep -Eq 'make gen-cli-aot .*HARN_CLI_AOT_GEN_BIN=.*/harn-cli-aot-gen' "$audit_record"; then
+  echo "release_gate full did not route CLI AOT generation through the stable generator snapshot" >&2
   cat "$audit_record" >&2
   exit 1
 fi

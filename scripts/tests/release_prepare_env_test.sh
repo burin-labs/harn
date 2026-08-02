@@ -98,6 +98,15 @@ exit 0
 SH
 chmod +x "$fake_bin/harn"
 
+cat > "$fake_bin/harn-cli-aot-gen" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'aot-version=%s\n' "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)" \
+  >> "$FAKE_AOT_RECORD"
+printf 'aot-argv=%s\n' "$*" >> "$FAKE_AOT_RECORD"
+SH
+chmod +x "$fake_bin/harn-cli-aot-gen"
+
 cat > "$fake_bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -154,6 +163,7 @@ fi
   printf 'target=%s\n' "$*"
   printf 'version=%s\n' "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
   printf 'HARN_BIN=%s\n' "${HARN_BIN-__unset__}"
+  printf 'HARN_CLI_AOT_GEN_BIN=%s\n' "${HARN_CLI_AOT_GEN_BIN-__unset__}"
   printf 'CARGO_INCREMENTAL=%s\n' "${CARGO_INCREMENTAL-__unset__}"
   printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
   printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
@@ -166,10 +176,22 @@ chmod +x "$fake_bin/make"
 record_harn="$tmp_root/harn-record.txt"
 record_cargo="$tmp_root/cargo-record.txt"
 record_make="$tmp_root/make-record.txt"
+record_aot="$tmp_root/aot-record.txt"
+
+FAKE_AOT_RECORD="$record_aot" \
+HARN_CLI_AOT_GEN_BIN="$fake_bin/harn-cli-aot-gen" \
+  make -s -C "$repo_root" gen-cli-aot
+if ! grep -Fxq "aot-argv=--workspace-root $repo_root" "$record_aot"; then
+  echo "gen-cli-aot did not execute the supplied generator directly" >&2
+  cat "$record_aot" >&2
+  exit 1
+fi
 
 HARN_RELEASE_ROOT="$release_root" \
 HARN_BIN="$fake_bin/harn" \
+HARN_RELEASE_CLI_AOT_GEN_BIN="$fake_bin/harn-cli-aot-gen" \
 FAKE_HARN_RECORD="$record_harn" \
+FAKE_AOT_RECORD="$record_aot" \
 FAKE_CARGO_RECORD="$record_cargo" \
 FAKE_MAKE_RECORD="$record_make" \
 PATH="$fake_bin:$PATH" \
@@ -209,6 +231,12 @@ if [[ "$(grep -Fxc 'target=gen-cli-aot' "$record_make")" -ne 1 ]]; then
 fi
 if ! grep -A1 -Fx 'target=gen-cli-aot' "$record_make" | grep -Fxq 'version=1.3.0'; then
   echo "release_gate prepare did not regenerate CLI AOT artifacts after the version bump" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+if ! grep -A3 -Fx 'target=gen-cli-aot' "$record_make" \
+  | grep -Eq '^HARN_CLI_AOT_GEN_BIN=.+/harn-cli-aot-gen$'; then
+  echo "release_gate prepare did not route a stable AOT generator snapshot through Make" >&2
   cat "$record_make" >&2
   exit 1
 fi
@@ -291,7 +319,9 @@ ln -s "$fake_bin/make" "$fake_make_only/make"
 
 HARN_RELEASE_ROOT="$real_release_root" \
 HARN_BIN="$fake_bin/harn" \
+HARN_RELEASE_CLI_AOT_GEN_BIN="$fake_bin/harn-cli-aot-gen" \
 FAKE_HARN_RECORD="$record_harn" \
+FAKE_AOT_RECORD="$record_aot" \
 FAKE_MAKE_RECORD="$record_make" \
 CARGO_TARGET_DIR="$tmp_root/real-target" \
 PATH="$fake_make_only:$real_path" \
