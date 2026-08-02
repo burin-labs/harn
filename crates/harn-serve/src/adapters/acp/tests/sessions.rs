@@ -1,14 +1,8 @@
+use super::event_log_barrier::ResetActiveEventLog;
 use super::*;
 use harn_vm::event_log::EventLog as _;
 use harn_vm::orchestration::{save_run_record, RunRecord, RunTraceSpanRecord};
-
-struct ResetActiveEventLog;
-
-impl Drop for ResetActiveEventLog {
-    fn drop(&mut self) {
-        harn_vm::event_log::reset_active_event_log();
-    }
-}
+use harn_vm::session_timeline::SESSION_TIMELINE_SCHEMA_VERSION;
 
 async fn run_prompt_with_project_capability(
     request_tx: &mpsc::UnboundedSender<serde_json::Value>,
@@ -184,16 +178,11 @@ async fn acp_session_timeline_query_and_subscribe_use_event_log() {
             assert_eq!(snapshot["id"], 20);
             assert_eq!(
                 snapshot["result"]["schemaVersion"],
-                harn_vm::session_timeline::SESSION_TIMELINE_SCHEMA_VERSION
+                SESSION_TIMELINE_SCHEMA_VERSION
             );
-            assert_eq!(
-                snapshot["result"]["coverage"],
-                serde_json::json!({
-                    "returned": 1,
-                    "available": 1,
-                    "truncated": false
-                })
-            );
+            let expected_coverage =
+                serde_json::json!({"returned": 1, "available": 1, "truncated": false});
+            assert_eq!(snapshot["result"]["coverage"], expected_coverage);
             assert_eq!(snapshot["result"]["nodes"][0]["category"], "agent_event");
             assert_eq!(
                 snapshot["result"]["nodes"][0]["attributes"]["event"]["raw_input"]["authorization"],
