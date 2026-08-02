@@ -134,7 +134,8 @@ fn __write_version(fs: HarnessFs?, path: string, version: string) -> dict {
   if fs == nil {
     return {
       ok: false,
-      detail: "std/bump/live: HarnessFs is required to update ${path}; pass harness.fs to live_bump_adapter",
+      detail:
+        "std/bump/live: HarnessFs is required to update ${path}; pass harness.fs to live_bump_adapter",
     }
   }
   const result = try {
