@@ -190,15 +190,22 @@ async fn run_drain(
     let mut acked = 0usize;
     let mut deferred = 0usize;
     let mut deferred_heartbeats = Vec::new();
+    let mut attempted_job_event_ids = BTreeSet::new();
 
     loop {
         let Some(claimed) = queue
-            .claim_next(&args.queue, &consumer_id, args.claim_ttl)
+            .claim_next_excluding(
+                &args.queue,
+                &consumer_id,
+                args.claim_ttl,
+                &attempted_job_event_ids,
+            )
             .await
             .map_err(|error| format!("failed to claim worker job: {error}"))?
         else {
             break;
         };
+        attempted_job_event_ids.insert(claimed.handle.job_event_id);
 
         let heartbeat =
             start_claim_heartbeat(queue.clone(), claimed.handle.clone(), args.claim_ttl);
