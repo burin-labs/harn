@@ -1248,16 +1248,7 @@ pub(crate) fn print_connector_report(report: &ConnectorCheckReport) {
 }
 
 fn print_gate_report(report: &PackageVerifyReport) {
-    println!(
-        "Package verification {} for {} ({}, strict_requested={}): {} passed, {} failed, {} skipped.",
-        report.status,
-        report.package,
-        report.package_kinds.join(", "),
-        report.strict_requested,
-        report.summary.passed,
-        report.summary.failed,
-        report.summary.skipped
-    );
+    println!("{}", gate_report_header(report));
     for check in &report.checks {
         println!(
             "- {}: {} (applicable={}, reached={})",
@@ -1275,6 +1266,19 @@ fn print_gate_report(report: &PackageVerifyReport) {
             );
         }
     }
+}
+
+fn gate_report_header(report: &PackageVerifyReport) -> String {
+    format!(
+        "Package verification {} for {} ({}, strict_requested={}): {} passed, {} failed, {} skipped.",
+        report.status,
+        report.package,
+        report.package_kinds.join(", "),
+        report.strict_requested,
+        report.summary.passed,
+        report.summary.failed,
+        report.summary.skipped
+    )
 }
 
 fn gate_stderr_label(check: &PackageVerifyCheck) -> &'static str {
