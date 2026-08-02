@@ -329,6 +329,7 @@
 - [Release runner policy](./dev/release-runner-policy.md)
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Bootstrap an exact Harn release](./dev/bootstrap-harn.md)
+- [Agent shell guard](./dev/agent-shell-guard.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
 - [Platform compatibility](./dev/platform-compatibility.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)

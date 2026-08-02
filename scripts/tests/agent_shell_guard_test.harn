@@ -1,8 +1,22 @@
-// Tests for scripts/claude_bash_guard.harn — the PreToolUse Bash guard.
-import "../claude_bash_guard.harn"
+// Tests for the shared Codex and Claude shell guard.
+import "../agent_shell_guard.harn"
 
-fn payload(command: string) -> string {
+fn claude_payload(command: string) -> string {
   return json_stringify({tool_name: "Bash", tool_input: {command: command}})
+}
+
+fn codex_payload(command: string) -> string {
+  return json_stringify(
+    {
+      session_id: "thread-1",
+      turn_id: "turn-1",
+      cwd: "/workspace",
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_use_id: "call-1",
+      tool_input: {command: command},
+    },
+  )
 }
 
 @test
@@ -10,7 +24,10 @@ pipeline test_program_of_sees_through_env_prefixes(harness: Harness, task) {
   assert_eq(program_of("cargo test"), "cargo")
   assert_eq(program_of("  cargo   test  "), "cargo")
   assert_eq(program_of("env -u HARN_EGRESS_BLOCK_PRIVATE cargo test"), "cargo")
+  assert_eq(program_of("env -i -- cargo test"), "cargo")
   assert_eq(program_of("RUST_MIN_STACK=16777216 cargo build"), "cargo")
+  assert_eq(program_of("command cargo test"), "cargo")
+  assert_eq(program_of("exec cargo test"), "cargo")
   assert_eq(program_of("./target/release/harn run x.harn"), "harn")
   assert_eq(program_of("/usr/bin/make test"), "make")
   assert_eq(program_of(""), "")
@@ -26,7 +43,9 @@ pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(harness: Harness, tas
   }
   // The message names the replacement so the caller does not have to guess.
   assert(cargo_violation("cargo test -p harn-vm").contains("make test"))
+  assert(cargo_violation("cargo +nightly test -p harn-vm").contains("make test"))
   assert(cargo_violation("cargo clippy").contains("make lint"))
+  assert(cargo_violation("cargo bench").contains("make bench"))
 }
 
 @test
@@ -69,6 +88,16 @@ pipeline test_redirecting_first_is_allowed(harness: Harness, task) {
   ] {
     assert_eq(discarded_output_violation(command), "", command + " keeps the full output")
   }
+  assert(
+    discarded_output_violation("cargo test | grep FAILED > /tmp/filtered.log") != "",
+    "redirecting a filter does not preserve the full test run",
+  )
+  assert(
+    discarded_output_violation("cargo test 2>&1 | tee -a | grep FAILED") != "",
+    "tee options without a destination do not preserve the test run",
+  )
+  assert_eq(discarded_output_violation("cargo test 2>&1 | tee /tmp/full.log | grep FAILED"), "")
+  assert_eq(discarded_output_violation("cargo test 2>&1 | tee -a /tmp/full.log | grep FAILED"), "")
 }
 
 @test
@@ -79,10 +108,13 @@ pipeline test_fast_commands_may_pipe_freely(harness: Harness, task) {
 }
 
 @test
-pipeline test_decision_only_gates_bash_and_honors_the_escape_hatch(harness: Harness, task) {
-  assert(!decision(payload("cargo test")).allow)
-  assert(decision(payload("HARN_ALLOW_RAW_CARGO=1 cargo test")).allow)
-  assert(decision(payload("make test")).allow)
+pipeline test_codex_and_claude_share_one_decision(harness: Harness, task) {
+  for encode in [claude_payload, codex_payload] {
+    assert(!decision(encode("cargo test")).allow)
+    assert(decision(encode("HARN_ALLOW_RAW_CARGO=1 cargo test")).allow)
+    assert(decision(encode("make test")).allow)
+    assert(decision(encode("cargo tree -p harn-vm")).allow)
+  }
   // Non-Bash tools and unparseable payloads never deny — a broken guard must
   // not read as a rejection.
   assert(decision(json_stringify({tool_name: "Read", tool_input: {}})).allow)

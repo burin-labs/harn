@@ -94,9 +94,9 @@ or `continue-on-error`. Common categories:
 
 - **Format / clippy / lint failures:** run `make fmt`, `make lint`,
   `make lint-harn`, `make fmt-harn` and commit the fixes.
-- **Test failures:** reproduce locally with the narrowest possible command
-  through `./scripts/cargo_with_worktree_build_dir.sh nextest run -p <crate>
-  -E 'test(<test_name>)'` before fixing.
+- **Test failures:** reproduce locally with `make test-one` and the
+  `HARN_TEST_ONE_NAME` and `HARN_TEST_ONE_PACKAGE` variables. Use
+  `make test-affected` when the failure spans a changed crate.
   Read the test, read the code under test, and fix the root cause.
 - **Conformance failures:** `./scripts/harn_bin.sh -- test conformance
   --filter <name>` reproduces a single case. If a `.expected` file
