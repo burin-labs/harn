@@ -65,7 +65,7 @@ available GPU memory.
 Use `model_job_fake_backend` with an exact list of observations. The normal run
 loop still emits progress and stores output, but it makes no HTTP request.
 
-Use `harness.testing.http_mock` to test a ComfyUI adapter response. This crosses
+Use `harness.testing.http_mock` to test a ComfyUI backend response. This crosses
 the real submit, history, and output-decoding path without starting ComfyUI.
 The conformance fixture at
 `conformance/tests/stdlib/model_job_comfyui.harn` is a complete example.

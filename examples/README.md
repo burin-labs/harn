@@ -45,6 +45,10 @@ when a provider is configured (e.g. `ANTHROPIC_API_KEY`, or a local model via
   `context-maintenance-demo.harn`, `persona-hooks.harn`.
 - **Workflows & integration** — `eval-workflow.harn`, `mcp_server.harn`,
   `mcp-client.harn`, `sqlite-event-log-inspect.harn`, `portal-demo.harn`.
+- **Interactive apps** — `apps/decision-card.harn` is the small Harn-only
+  starting point; `apps/logo-studio.harn` adds canvas drawing, restores work
+  after restart, runs image models, replays recorded results, cancels work,
+  previews images, and writes results to a chosen file.
 
 Subdirectories (`evals/`, `ui_resource/`, `triage/`, `dashboard_jobs/`,
 `task_plan/`, `skill-packs/`, …) hold feature-specific and fixture-backed

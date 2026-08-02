@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "lib": ["ES2023", "DOM"],
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2023"
+  },
+  "include": ["*.js", "*.d.ts"]
+}

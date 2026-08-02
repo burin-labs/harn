@@ -52,6 +52,7 @@ exempt_checks = [
   "check-docs-cli-flags",           # validates docs bash/sh harn flags, not a mirror
   "check-docs-links",               # validates docs/src local links resolve, not a mirror
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
+  "check-app-host",                 # validates readable browser-host sources with Prettier, ESLint, TypeScript, and Node
   "check-crate-sibling-versions",   # validates publish-time intra-workspace crate pins, not a mirror
   "check-dependabot-groups",        # validates Cargo compatibility-family update policy, not a mirror
   "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
@@ -447,6 +448,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-openapi-snapshot" = "source"
 "check-docs-model-refs" = "source"
 "check-docs-links" = "source"
+"check-app-host" = "source"
 "check-receipt-structs" = "source"
 "check-ported-handler-loc" = "source"
 "check-source-file-lengths" = "source"

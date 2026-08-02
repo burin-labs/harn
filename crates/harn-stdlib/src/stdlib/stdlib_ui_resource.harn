@@ -20,11 +20,11 @@
 import { web_artifact_text_fallback, web_artifact_validate } from "std/artifact/web"
 import { filter_nil } from "std/collections"
 
-type UiMcpToolAudience = "model" | "app"
+pub type UiMcpToolAudience = "model" | "app"
 
-type UiResourceContentsEncoding = "utf8" | "base64"
+pub type UiResourceContentsEncoding = "utf8" | "base64"
 
-type UiResourceCsp = {
+pub type UiResourceCsp = {
   default_src: list<string>,
   script_src: list<string>,
   style_src: list<string>,
@@ -34,13 +34,13 @@ type UiResourceCsp = {
   sandbox: list<string>,
 }
 
-type UiResourceValidationSummary = {
+pub type UiResourceValidationSummary = {
   ok: bool,
   error_codes: list<string>,
   warning_codes: list<string>,
 }
 
-type UiResource = {
+pub type UiResource = {
   schema: "harn.ui_resource.v1",
   uri: string,
   name: string,
@@ -59,7 +59,7 @@ type UiResource = {
   meta: dict,
 }
 
-type UiResourceOptions = {
+pub type UiResourceOptions = {
   description?: string,
   mime_type?: string,
   profile?: string,
@@ -72,20 +72,24 @@ type UiResourceOptions = {
   meta?: dict,
 }?
 
-type UiToolMetaUi = {resource_uri: string, visibility: list<UiMcpToolAudience>}
+pub type UiToolMetaUi = {resource_uri: string, visibility: list<UiMcpToolAudience>}
 
-type UiToolMeta = {schema: "harn.ui_tool_meta.v1", ui: UiToolMetaUi}
+pub type UiToolMeta = {schema: "harn.ui_tool_meta.v1", ui: UiToolMetaUi}
 
-type UiToolMetaOptions = {visibility?: list<UiMcpToolAudience>}?
+pub type UiToolMetaOptions = {visibility?: list<UiMcpToolAudience>}?
 
-type UiMcpResourceCsp = {
+pub type UiMcpToolMetadataUi = {resourceUri: string, visibility: list<UiMcpToolAudience>}
+
+pub type UiMcpToolMetadata = {ui: UiMcpToolMetadataUi}
+
+pub type UiMcpResourceCsp = {
   connectDomains: list<string>,
   resourceDomains: list<string>,
   frameDomains: list<string>,
   baseUriDomains: list<string>,
 }
 
-type UiMcpResourceOptions = {
+pub type UiMcpResourceOptions = {
   connect_domains?: list<string>,
   resource_domains?: list<string>,
   frame_domains?: list<string>,
@@ -95,7 +99,7 @@ type UiMcpResourceOptions = {
   prefers_border?: bool,
 }?
 
-type UiMcpResourceRegistration = {
+pub type UiMcpResourceRegistration = {
   uri: string,
   name: string,
   description?: string,
@@ -104,24 +108,28 @@ type UiMcpResourceRegistration = {
   meta: dict,
 }
 
-type UiTextFallback = {schema: "harn.ui_fallback.text.v1", content: string}
+pub type UiTextFallback = {schema: "harn.ui_fallback.text.v1", content: string}
 
-type UiStructuredFallback = {schema: "harn.ui_fallback.structured.v1", data: dict, text?: string}
+pub type UiStructuredFallback = {
+  schema: "harn.ui_fallback.structured.v1",
+  data: dict,
+  text?: string,
+}
 
-type UiStructuredFallbackOptions = {text?: string}?
+pub type UiStructuredFallbackOptions = {text?: string}?
 
-type UiDefaultTextFallbackOptions = {max_chars?: int}?
+pub type UiDefaultTextFallbackOptions = {max_chars?: int}?
 
-type UiHostCapabilities = {
+pub type UiHostCapabilities = {
   apps: bool,
   profiles: list<string>,
   permissions: list<string>,
   bridges: list<string>,
 }
 
-type UiHostCapabilityInput = dict?
+pub type UiHostCapabilityInput = dict?
 
-type UiToolCallEnvelope = {
+pub type UiToolCallEnvelope = {
   schema: "harn.ui_tool_call.v1",
   jsonrpc: "2.0",
   id: string,
@@ -129,9 +137,9 @@ type UiToolCallEnvelope = {
   params: dict,
 }
 
-type UiToolCallOptions = {id?: string, meta?: dict}?
+pub type UiToolCallOptions = {id?: string, meta?: dict}?
 
-type UiContextUpdateEnvelope = {
+pub type UiContextUpdateEnvelope = {
   schema: "harn.ui_context_update.v1",
   jsonrpc: "2.0",
   id: string,
@@ -139,9 +147,9 @@ type UiContextUpdateEnvelope = {
   params: dict,
 }
 
-type UiContextUpdateOptions = {id?: string}?
+pub type UiContextUpdateOptions = {id?: string}?
 
-type UiToolResult = {
+pub type UiToolResult = {
   schema: "harn.ui_tool_result.v1",
   ui_resource?: UiResource,
   meta: UiToolMeta,
@@ -151,7 +159,7 @@ type UiToolResult = {
   selected: string,
 }
 
-type UiToolResultOptions = {
+pub type UiToolResultOptions = {
   tool_meta?: UiToolMeta,
   tool_meta_options?: UiToolMetaOptions,
   text_fallback?: UiTextFallback | string,
@@ -369,7 +377,7 @@ pub fn ui_tool_meta(resource: UiResource, options: UiToolMetaOptions = nil) -> U
  * @effects: []
  * @errors: []
  */
-pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> dict {
+pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> UiMcpToolMetadata {
   const ui = meta.ui
   return {ui: filter_nil({resourceUri: ui.resource_uri, visibility: ui.visibility})}
 }
@@ -515,18 +523,29 @@ pub fn ui_tool_result(resource: UiResource, options: UiToolResultOptions = nil) 
  */
 pub fn ui_host_capabilities(input: UiHostCapabilityInput = nil) -> UiHostCapabilities {
   const value = input ?? {}
-  const apps_flag = value?.apps?.enabled ?? value?.ui?.apps ?? value?.apps ?? false
+  const extension = value?.extensions?.["io.modelcontextprotocol/ui"]
+  const extension_mimes = __ui_str_list(extension?.mimeTypes ?? [])
+  const extension_apps = extension_mimes.contains(UI_MCP_APP_MIME_TYPE)
+  const apps_flag = value?.apps?.enabled ?? value?.ui?.apps ?? value?.apps ?? extension_apps
   const apps = type_of(apps_flag) == "bool" ? apps_flag : false
-  const declared_profiles = __ui_str_list(
-    value?.apps?.profiles ?? value?.ui?.profiles ?? value?.profiles ?? [],
-  )
+  let profile_source = value?.apps?.profiles
+  if profile_source == nil {
+    profile_source = value?.ui?.profiles
+  }
+  if profile_source == nil {
+    profile_source = value?.profiles
+  }
+  if profile_source == nil && extension_apps {
+    profile_source = [UI_MCP_APP_PROFILE]
+  }
+  const declared_profiles = __ui_str_list(profile_source ?? [])
   const profiles = if len(declared_profiles) > 0 {
     declared_profiles
   } else {
     apps ? [UI_MCP_APP_PROFILE] : []
   }
   return {
-    apps: apps || len(declared_profiles) > 0,
+    apps: apps || extension_apps || len(declared_profiles) > 0,
     profiles: profiles,
     permissions: __ui_str_list(
       value?.apps?.permissions ?? value?.ui?.permissions ?? value?.permissions,

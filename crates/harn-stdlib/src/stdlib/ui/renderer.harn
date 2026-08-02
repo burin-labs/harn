@@ -1,0 +1,399 @@
+import { UiAppOptions } from "std/ui/contracts"
+import {
+  UiMcpResourceOptions,
+  UiMcpResourceRegistration,
+  UiMcpToolMetadata,
+  UiResource,
+  UiToolMetaOptions,
+  ui_resource,
+  ui_resource_to_mcp,
+  ui_tool_meta,
+  ui_tool_meta_to_mcp,
+} from "std/ui_resource"
+
+const UI_RENDERER_HTML = """
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root {
+  color-scheme: light dark;
+  font: 14px Inter, ui-sans-serif, system-ui, sans-serif;
+  --bg: #f4f1e9;
+  --paper: #fffdf7;
+  --ink: #20251f;
+  --muted: #62665e;
+  --line: #c8c3b7;
+  --accent: #385943;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 680px; min-height: 480px; background: var(--bg); color: var(--ink); }
+#app { height: 100vh; display: flex; flex-direction: column; }
+.column { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; align-items: center; gap: 8px; }
+.workspace { height: 100%; display: grid; grid-template-columns: minmax(440px, 1fr) 320px; gap: 0; }
+.work { padding: 24px; min-width: 0; }
+.panel { padding: 24px 20px; border-left: 1px solid var(--line); background: var(--paper); overflow: auto; }
+.toolbar { min-height: 38px; }
+.toolbar h1 { margin-right: auto; }
+.canvas-area { flex: 1; min-height: 360px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 12px; background: #ded9cb; overflow: hidden; }
+h1, h2, h3, h4, h5, h6 { margin: 0; font-family: Georgia, serif; font-weight: 500; }
+h1 { font-size: 20px; }
+h2 { font-size: 16px; }
+p { margin: 0; line-height: 1.45; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+button, select, textarea, input { font: inherit; border: 1px solid #b9b5a9; border-radius: 7px; background: #fff; color: #20251f; padding: 8px 10px; }
+button { cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { border: 0; color: #fff; background: var(--accent); font-weight: 650; padding: 11px 14px; }
+.annotation { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 13px; }
+.status { min-height: 32px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+textarea { width: 100%; resize: vertical; line-height: 1.45; }
+canvas { width: 100%; aspect-ratio: 16 / 9; background: #fffef9; box-shadow: 0 8px 35px #56513e30; touch-action: none; cursor: crosshair; }
+img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }
+hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
+.grow { flex: 1; }
+.hidden { display: none !important; }
+@media (max-width: 760px) {
+  body { min-width: 0; }
+  .workspace { grid-template-columns: 1fr; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); }
+  .work { min-height: 520px; }
+}
+</style>
+</head>
+<body>
+<main id="app" aria-live="polite"></main>
+<script>
+(() => {
+  'use strict';
+
+  const TOOL = __HARN_UI_TOOL__;
+  const MAX_STROKE_POINTS = 4096;
+  const root = document.getElementById('app');
+  const pending = new Map();
+  let nextRequestId = 1;
+  let currentDocument = null;
+  let eventChain = Promise.resolve();
+
+  function request(method, params) {
+    const id = nextRequestId++;
+    parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+  }
+
+  addEventListener('message', messageEvent => {
+    if (messageEvent.source !== parent) return;
+    const message = messageEvent.data;
+    if (!message || message.jsonrpc !== '2.0') return;
+    if (message.method === 'ui/resource-teardown') {
+      if (message.id !== undefined) {
+        parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*');
+      }
+      return;
+    }
+    if (message.id === undefined) return;
+    const call = pending.get(message.id);
+    if (!call) return;
+    pending.delete(message.id);
+    if (message.error) call.reject(new Error(message.error.message));
+    else call.resolve(message.result);
+  });
+
+  function uiEvent(kind, target, extra = {}) {
+    return { schema: 'harn.ui_event.v1', kind, target, ...extra };
+  }
+
+  function readUpdate(result) {
+    const value = result?.structuredContent;
+    if (value?.schema === 'harn.ui_update.v1') return value;
+    const text = result?.content?.find(item => item.type === 'text')?.text;
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed?.schema === 'harn.ui_update.v1') return parsed;
+      } catch {}
+    }
+    throw new Error('Harn UI tool returned no harn.ui_update.v1 result');
+  }
+
+  function showError(error) {
+    let node = document.getElementById('harn-ui-error');
+    if (!node) {
+      node = create('p', 'status');
+      node.id = 'harn-ui-error';
+      root.prepend(node);
+    }
+    node.textContent = 'Could not update app: ' + String(error.message || error);
+  }
+
+  function clearError() {
+    document.getElementById('harn-ui-error')?.remove();
+  }
+
+  function sendEvent(event) {
+    eventChain = eventChain.then(async () => {
+      root.dataset.busy = 'true';
+      try {
+        const result = await request('tools/call', { name: TOOL, arguments: { event } });
+        applyUpdate(readUpdate(result));
+        clearError();
+      } catch (error) {
+        showError(error);
+      } finally {
+        delete root.dataset.busy;
+      }
+    });
+    return eventChain;
+  }
+
+  function create(tag, className) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function render(nextDocument) {
+    currentDocument = nextDocument;
+    document.title = currentDocument.title + ' — Harn App';
+    root.replaceChildren();
+    const nodes = new Map([['', root]]);
+
+    for (const spec of currentDocument.elements) {
+      let node;
+      if (spec.kind === 'column' || spec.kind === 'row') {
+        node = create('section', spec.kind + ' ' + (spec.variant || ''));
+      } else if (spec.kind === 'heading') {
+        const level = Number.isInteger(spec.level) && spec.level >= 1 && spec.level <= 6
+          ? spec.level : 2;
+        node = create('h' + level, spec.variant);
+        node.textContent = spec.text || spec.label || '';
+      } else if (spec.kind === 'text' || spec.kind === 'status') {
+        node = create('p', spec.kind === 'status' ? 'status ' + (spec.variant || '') : spec.variant);
+        node.textContent = spec.text || '';
+      } else if (spec.kind === 'button') {
+        node = create('button', spec.variant);
+        node.type = 'button';
+        node.textContent = spec.label || spec.text || spec.id;
+        node.disabled = Boolean(spec.disabled);
+        node.onclick = () => sendEvent(uiEvent('click', spec.id));
+      } else if (spec.kind === 'field' || spec.kind === 'text_area' || spec.kind === 'select') {
+        const wrapper = create('label', spec.variant);
+        const caption = create('span');
+        caption.textContent = spec.label || spec.id;
+        wrapper.append(caption);
+        let control;
+        if (spec.kind === 'text_area') {
+          control = create('textarea');
+          control.rows = spec.rows || 4;
+        } else if (spec.kind === 'select') {
+          control = create('select');
+          for (const option of spec.options || []) {
+            const item = create('option');
+            item.value = option.value;
+            item.textContent = option.label;
+            control.append(item);
+          }
+        } else {
+          control = create('input');
+          control.type = 'text';
+        }
+        control.id = spec.id;
+        control.value = spec.value || '';
+        control.placeholder = spec.placeholder || '';
+        control.disabled = Boolean(spec.disabled);
+        control.onchange = () => sendEvent(uiEvent('input', spec.id, { value: control.value }));
+        wrapper.append(control);
+        node = wrapper;
+      } else if (spec.kind === 'canvas') {
+        node = create('canvas', spec.variant);
+        node.width = spec.width;
+        node.height = spec.height;
+        node.setAttribute('aria-label', spec.label || 'Drawing canvas');
+        paint(node, spec.strokes || []);
+        connectCanvas(node, spec);
+      } else if (spec.kind === 'image') {
+        node = create('img', spec.variant);
+        node.src = spec.image_src || '';
+        node.alt = spec.image_alt || spec.label || '';
+      } else if (spec.kind === 'divider') {
+        node = create('hr');
+      } else {
+        continue;
+      }
+
+      node.dataset.uiId = spec.id;
+      if (spec.hidden) node.classList.add('hidden');
+      const parentNode = nodes.get(spec.parent || '') || root;
+      parentNode.append(node);
+      nodes.set(spec.id, node);
+    }
+  }
+
+  function paint(canvas, strokes) {
+    const context = canvas.getContext('2d');
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    for (const stroke of strokes) {
+      if (!stroke.points?.length) continue;
+      context.beginPath();
+      context.strokeStyle = stroke.color || '#486449';
+      context.lineWidth = stroke.width || 7;
+      stroke.points.forEach((point, index) => {
+        const x = point.x * canvas.width;
+        const y = point.y * canvas.height;
+        if (index) context.lineTo(x, y);
+        else context.moveTo(x, y);
+      });
+      context.stroke();
+    }
+  }
+
+  function connectCanvas(canvas, spec) {
+    let points = null;
+    const pointFrom = pointerEvent => {
+      const bounds = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(1, (pointerEvent.clientX - bounds.left) / bounds.width)),
+        y: Math.max(0, Math.min(1, (pointerEvent.clientY - bounds.top) / bounds.height)),
+      };
+    };
+    canvas.onpointerdown = pointerEvent => {
+      points = [pointFrom(pointerEvent)];
+      canvas.setPointerCapture(pointerEvent.pointerId);
+    };
+    canvas.onpointermove = pointerEvent => {
+      if (!points) return;
+      if (points.length < MAX_STROKE_POINTS) points.push(pointFrom(pointerEvent));
+      paint(canvas, [...(spec.strokes || []), { points, color: '#486449', width: 7 }]);
+    };
+    canvas.onpointerup = () => {
+      const finished = points;
+      points = null;
+      if (!finished?.length) return;
+      if (finished.length === 1) finished.push(finished[0]);
+      sendEvent(uiEvent('canvas.stroke', spec.id, { points: finished }));
+    };
+    canvas.onpointercancel = () => {
+      points = null;
+      paint(canvas, spec.strokes || []);
+    };
+  }
+
+  function applyUpdate(update) {
+    if (update?.schema !== 'harn.ui_update.v1') {
+      throw new Error('unsupported Harn UI update');
+    }
+    render(update.document);
+    for (const effect of update.effects || []) {
+      const delay = Math.max(0, effect.after_ms || 0);
+      if (effect.kind === 'send_event') {
+        setTimeout(() => sendEvent(effect.event), delay);
+      } else if (effect.kind === 'capture_canvas') {
+        const canvas = [...root.querySelectorAll('canvas')]
+          .find(item => item.dataset.uiId === effect.target);
+        if (!canvas) throw new Error('canvas not found: ' + effect.target);
+        setTimeout(() => {
+          try {
+            sendEvent(uiEvent('canvas.snapshot', effect.event_target || effect.target, {
+              value: canvas.toDataURL('image/png'),
+            }));
+          } catch (error) {
+            showError(error);
+          }
+        }, delay);
+      } else if (effect.kind === 'download') {
+        const link = create('a');
+        link.href = 'data:' + (effect.mime_type || 'application/octet-stream')
+          + ';base64,' + effect.data_base64;
+        link.download = effect.name || 'download';
+        link.click();
+      }
+    }
+  }
+
+  async function start() {
+    await request('ui/initialize', {
+      protocolVersion: '2026-01-26',
+      capabilities: {},
+      clientInfo: { name: 'harn-ui-renderer', version: '1' },
+    });
+    parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} }, '*');
+    await sendEvent(uiEvent('ready', 'app'));
+  }
+
+  start().catch(showError);
+})();
+</script>
+</body>
+</html>
+"""
+
+/**
+ * Return the shared renderer HTML configured for one Harn event tool.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn renderer_html(tool_name: string) -> string {
+  const name = trim(tool_name)
+  if name == "" {
+    throw "std/ui: event tool name is required"
+  }
+  let encoded = json_stringify(name)
+  encoded = replace(encoded, "<", "\\u003c")
+  encoded = replace(encoded, ">", "\\u003e")
+  encoded = replace(encoded, "&", "\\u0026")
+  return replace(UI_RENDERER_HTML, "__HARN_UI_TOOL__", encoded)
+}
+
+/**
+ * Build an MCP Apps resource backed by the shared Harn view.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn app_resource(
+  uri: string,
+  name: string,
+  tool_name: string,
+  options: UiAppOptions = nil,
+) -> UiResource {
+  return ui_resource(
+    uri,
+    name,
+    renderer_html(tool_name),
+    {
+      description: options?.description,
+      version: options?.version ?? "1",
+      capabilities: ["tools/call", "ui/update-model-context"],
+      validation: {allow_network: false}.merging(options?.validation ?? {}),
+    },
+  )
+}
+
+/**
+ * Return the MCP tool metadata that opens an app resource.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn tool_metadata(resource: UiResource, options: UiToolMetaOptions = nil) -> UiMcpToolMetadata {
+  return ui_tool_meta_to_mcp(ui_tool_meta(resource, options))
+}
+
+/**
+ * Return the config accepted by `harness.tools.mcp_resource`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn mcp_resource(
+  resource: UiResource,
+  options: UiMcpResourceOptions = nil,
+) -> UiMcpResourceRegistration {
+  return ui_resource_to_mcp(resource, options)
+}

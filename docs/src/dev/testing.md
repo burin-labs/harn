@@ -329,6 +329,16 @@ when loaded-machine evidence shows false attribution at the current ceiling;
 use a narrowly filtered override with `result = "pass"` only when a specific
 test keeps false-firing after the shared window is already generous.
 
+## Checking the embedded app host
+
+The shared app host keeps its HTML, CSS, and JavaScript in
+`crates/harn-cli/src/commands/app_host/`. Rust embeds those readable source
+files directly; there is no generated browser copy.
+
+Run `make fmt-app-host` after editing them. Run `make check-app-host` to check
+formatting, lint rules, JavaScript contracts, and JavaScript syntax. The full
+`make all` gate runs the same check.
+
 ## Using `tokio::time::pause()` — common mistakes
 
 ### Multi-thread flavor
