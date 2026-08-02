@@ -34,6 +34,17 @@ therefore enforced at the protocol boundary rather than by UI convention. RPC
 requests must also carry the exact host origin, which blocks another browser
 origin or a DNS-rebinding page from driving tools through the loopback server.
 
+For each View-initiated `tools/call`, the standalone host sends
+`ui/notifications/tool-input` before it calls the server. It returns the
+matching JSON-RPC response, then sends `ui/notifications/tool-result` after a
+successful `CallToolResult`. A server or transport error returns an error and
+does not send a successful-result notification. Calls such as `resources/read`
+receive their response without tool lifecycle notifications. These messages
+follow the stable [MCP Apps communication protocol][mcp-apps-spec], including
+for Views that do not use Harn's shared renderer.
+
+[mcp-apps-spec]: https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx#communication-protocol
+
 ```harn
 import {
   ui_resource,
