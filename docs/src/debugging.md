@@ -94,6 +94,22 @@ harn runs view --json .harn-runs/<run-id>.json
 The view command shows a structured summary: stages executed, tools called,
 token usage, timing, and final output.
 
+## Correlating delegated runs
+
+Build one report from the root run when several agents participated:
+
+```bash
+harn runs report .harn-runs/<root-run-id>.json > run-report.json
+jq '.agents[] | {agent_id, status, usage, visible_output}' run-report.json
+jq '.delegations, [.checks[] | select(.status != "passed")]' run-report.json
+```
+
+The report follows each typed `child_runs[].run_path`, checks the child's
+back-pointer, and keeps the source hash beside the projected evidence. Add
+`--events-db <path>` when the run used a SQLite event log. A `null` wait or
+join duration means that the source artifacts did not record it; the report
+does not turn missing timing into zero.
+
 ## Comparing runs
 
 Compare two stable views with your normal JSON diff tool to identify

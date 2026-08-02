@@ -303,6 +303,12 @@ Transcript events emitted along the way: `skill_mcp_bound`,
 
 ### MCP tools in the tool-search index
 
+The read-only `harn.run.report` tool accepts a root run-record path and an
+optional SQLite event-log path. The server resolves relative paths from its
+project root and rejects files outside the canonical project and state roots,
+including `..` and symlink escapes. Report text and event timelines pass
+through Harn's redaction policy before they are returned.
+
 When an LLM uses `tool_search` (progressive tool disclosure), MCP tools
 are auto-tagged with both `mcp:<server>` and `<server>` in the BM25
 corpus. That means a query like `"github"` or `"mcp:github"` surfaces

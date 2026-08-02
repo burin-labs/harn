@@ -205,6 +205,30 @@ fn test_parses_runs_view_json_session() {
 }
 
 #[test]
+fn test_parses_runs_report_sources() {
+    let cli = Cli::parse_from([
+        "harn",
+        "runs",
+        "report",
+        "root.json",
+        "--events-db",
+        "events.sqlite",
+    ]);
+
+    let Command::Runs(args) = cli.command.unwrap() else {
+        panic!("expected runs command");
+    };
+    let RunsCommand::Report(report) = args.command else {
+        panic!("expected runs report command");
+    };
+    assert_eq!(report.path, "root.json");
+    assert_eq!(
+        report.events_db.as_deref(),
+        Some(std::path::Path::new("events.sqlite"))
+    );
+}
+
+#[test]
 fn test_parses_replay_sources_and_runs() {
     let cli = Cli::parse_from(["harn", "replay", "run.json", "--json"]);
     let Command::Replay(replay) = cli.command.unwrap() else {

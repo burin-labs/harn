@@ -1,6 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs;
-use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -9,18 +7,8 @@ use serde_json::{json, Value as JsonValue};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-use harn_vm::event_log::{AnyEventLog, EventLog, SqliteEventLog};
 use harn_vm::mcp_protocol;
 use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
-
-use crate::commands::orchestrator::common::{
-    load_local_runtime, read_topic, synthetic_event_for_binding, trigger_fire, trigger_inspect_dlq,
-    trigger_list, trigger_replay, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
-    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
-    TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OUTBOX_TOPIC,
-};
-use crate::commands::orchestrator::inspect_data::collect_orchestrator_inspect_data;
-use crate::format::shell_quote_path;
 
 use super::protocol::paginated_list_response;
 use super::types::{
@@ -34,6 +22,13 @@ use super::util::{
     trigger_replay_steering_from_request,
 };
 use super::{DEFAULT_TASK_TTL_MS, MAX_TASK_TTL_MS};
+use crate::commands::orchestrator::common::{
+    load_local_runtime, read_topic, synthetic_event_for_binding, trigger_fire, trigger_inspect_dlq,
+    trigger_list, trigger_replay, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OUTBOX_TOPIC,
+};
+use crate::commands::orchestrator::inspect_data::collect_orchestrator_inspect_data;
 
 impl McpOrchestratorService {
     pub(super) fn handle_tools_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
@@ -192,42 +187,10 @@ impl McpOrchestratorService {
                 None,
                 mcp_protocol::McpToolTaskSupport::Forbidden,
             ),
-            tool_def(
-                "harn.eval.inspect_run",
-                "Build a read-only chain-of-custody dossier for a Harn/Burin eval run bundle, summary JSON, or event log.",
-                json!({
-                    "title": "Inspect Eval Run",
-                    "readOnlyHint": true,
-                    "destructiveHint": false,
-                    "idempotentHint": true,
-                    "openWorldHint": true,
-                }),
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "output_dir": { "type": "string" },
-                        "summary_json": { "type": "string" },
-                        "per_run_jsonl": { "type": "string" },
-                        "run_record": { "type": "string" },
-                        "events_dir": { "type": "string" },
-                        "events_db": { "type": "string" },
-                        "include_payloads": { "type": "boolean" },
-                        "limit": { "type": "integer", "minimum": 1 },
-                    },
-                    "additionalProperties": false,
-                }),
-                Some(json!({
-                    "type": "object",
-                    "required": ["artifact_inventory", "event_topics", "verdict", "gaps", "next_commands"],
-                    "properties": {
-                        "artifact_inventory": { "type": "array" },
-                        "event_topics": { "type": "array" },
-                        "verdict": { "type": "object" },
-                        "gaps": { "type": "array" },
-                        "next_commands": { "type": "array" },
-                    },
-                })),
-                mcp_protocol::McpToolTaskSupport::Forbidden,
+            run_report_tool_def(
+                "harn.run.report",
+                "Run Report",
+                "Build a versioned, read-only report from a root run record and its delegated children.",
             ),
             tool_def(
                 "harn.trust.query",
@@ -366,7 +329,7 @@ impl McpOrchestratorService {
             "harn.orchestrator.dlq.list" => self.tool_orchestrator_dlq_list(arguments).await,
             "harn.orchestrator.dlq.retry" => self.tool_orchestrator_dlq_retry(arguments).await,
             "harn.orchestrator.inspect" => self.tool_orchestrator_inspect(arguments).await,
-            "harn.eval.inspect_run" => self.tool_eval_inspect_run(arguments).await,
+            "harn.run.report" => self.tool_run_report(arguments).await,
             "harn.trust.query" => self.tool_trust_query(arguments).await,
             _ => Err(format!("unknown tool '{name}'")),
         }
@@ -847,13 +810,24 @@ impl McpOrchestratorService {
         serde_json::to_value(payload).map_err(|error| error.to_string())
     }
 
-    pub(super) async fn tool_eval_inspect_run(
-        &self,
-        arguments: JsonValue,
-    ) -> Result<JsonValue, String> {
-        let request: EvalInspectRunRequest =
+    pub(super) async fn tool_run_report(&self, arguments: JsonValue) -> Result<JsonValue, String> {
+        let request: McpRunReportRequest =
             serde_json::from_value(arguments).map_err(|error| error.to_string())?;
-        inspect_eval_run(request).await
+        let project_root = self.project_root();
+        let run_record_path = resolve_report_path(&project_root, request.path);
+        let events_db = request
+            .events_db
+            .map(|path| resolve_report_path(&project_root, path));
+        let report =
+            harn_vm::orchestration::build_run_report(harn_vm::orchestration::RunReportRequest {
+                run_record_path,
+                events_db,
+                allowed_roots: vec![project_root.clone(), self.effective_state_dir()],
+                source_root: Some(project_root),
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(report).map_err(|error| error.to_string())
     }
 
     pub(super) async fn tool_trust_query(&self, arguments: JsonValue) -> Result<JsonValue, String> {
@@ -895,539 +869,17 @@ impl McpOrchestratorService {
 }
 
 #[derive(Debug, Deserialize)]
-struct EvalInspectRunRequest {
-    output_dir: Option<PathBuf>,
-    summary_json: Option<PathBuf>,
-    per_run_jsonl: Option<PathBuf>,
-    run_record: Option<PathBuf>,
-    events_dir: Option<PathBuf>,
+struct McpRunReportRequest {
+    path: PathBuf,
     events_db: Option<PathBuf>,
-    include_payloads: Option<bool>,
-    limit: Option<usize>,
 }
 
-async fn inspect_eval_run(request: EvalInspectRunRequest) -> Result<JsonValue, String> {
-    let limit = request.limit.unwrap_or(250).clamp(1, 5_000);
-    let include_payloads = request.include_payloads.unwrap_or(false);
-    let output_dir = request.output_dir.or_else(|| {
-        request
-            .summary_json
-            .as_ref()
-            .and_then(|path| path.parent().map(Path::to_path_buf))
-    });
-    let summary_path = request
-        .summary_json
-        .or_else(|| existing_child(output_dir.as_deref(), "summary.json"));
-    let summary = summary_path
-        .as_ref()
-        .and_then(|path| load_json_file(path).ok());
-
-    let events_dir = request
-        .events_dir
-        .or_else(|| path_from_summary(&summary, "event_log_dir"))
-        .or_else(|| existing_child(output_dir.as_deref(), "events"));
-    let events_db = request
-        .events_db
-        .or_else(|| existing_child(output_dir.as_deref(), "events.sqlite"));
-    let per_run_jsonl = request
-        .per_run_jsonl
-        .or_else(|| existing_child(output_dir.as_deref(), "per_run.jsonl"));
-    let run_record = request
-        .run_record
-        .or_else(|| path_from_summary(&summary, "run_record_path"));
-    let llm_transcript_dir = path_from_summary(&summary, "llm_transcript_dir")
-        .or_else(|| existing_child(output_dir.as_deref(), "llm"));
-    let final_diff = existing_child(output_dir.as_deref(), "artifacts/final.diff");
-
-    let artifact_inventory = vec![
-        artifact_report("output_dir", output_dir.as_deref())?,
-        artifact_report("summary_json", summary_path.as_deref())?,
-        artifact_report("per_run_jsonl", per_run_jsonl.as_deref())?,
-        artifact_report("run_record", run_record.as_deref())?,
-        artifact_report("events_dir", events_dir.as_deref())?,
-        artifact_report("events_db", events_db.as_deref())?,
-        artifact_report("llm_transcript_dir", llm_transcript_dir.as_deref())?,
-        artifact_report("final_diff", final_diff.as_deref())?,
-    ];
-
-    let mut event_topics = Vec::new();
-    if let Some(dir) = events_dir.as_deref() {
-        event_topics.extend(scan_event_dir(dir, limit, include_payloads)?);
-    }
-    if let Some(db) = events_db.as_deref() {
-        event_topics.extend(scan_sqlite_event_log(db, limit, include_payloads).await?);
-    }
-
-    let topic_names: Vec<String> = event_topics
-        .iter()
-        .filter_map(|topic| topic.get("topic").and_then(JsonValue::as_str))
-        .map(str::to_string)
-        .collect();
-    let mut gaps = eval_artifact_gaps(
-        &summary,
-        summary_path.as_deref(),
-        run_record.as_deref(),
-        &event_topics,
-        &topic_names,
-    );
-    if summary
-        .as_ref()
-        .and_then(|value| value.get("cross_check"))
-        .and_then(|value| value.get("e2_reason"))
-        .is_some()
-        && summary
-            .as_ref()
-            .and_then(|value| value.pointer("/cross_check/e2_evidence"))
-            .is_none()
-    {
-        gaps.push("summary has E2 text but no structured cross_check.e2_evidence".to_string());
-    }
-
-    Ok(json!({
-        "artifact_inventory": artifact_inventory,
-        "verdict": summary_verdict(summary.as_ref()),
-        "event_topics": event_topics,
-        "event_chain": event_chain_summary(&topic_names, &event_topics),
-        "gaps": gaps,
-        "next_commands": next_debug_commands(summary_path.as_deref(), run_record.as_deref(), events_db.as_deref()),
-    }))
-}
-
-fn load_json_file(path: &Path) -> Result<JsonValue, String> {
-    let content =
-        fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
-    serde_json::from_str(&content).map_err(|error| format!("parse {}: {error}", path.display()))
-}
-
-/// `output_dir/<name>` when it exists on disk, else `None` — the conventional
-/// eval-bundle artifact layout fallback used when a path isn't given explicitly
-/// or named in the summary.
-fn existing_child(output_dir: Option<&Path>, name: &str) -> Option<PathBuf> {
-    output_dir
-        .map(|dir| dir.join(name))
-        .filter(|path| path.exists())
-}
-
-fn path_from_summary(summary: &Option<JsonValue>, key: &str) -> Option<PathBuf> {
-    summary
-        .as_ref()
-        .and_then(|value| value.get(key))
-        .and_then(JsonValue::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-}
-
-fn artifact_report(label: &str, path: Option<&Path>) -> Result<JsonValue, String> {
-    let Some(path) = path else {
-        return Ok(json!({
-            "label": label,
-            "present": false,
-            "reason": "not_provided",
-        }));
-    };
-    let exists = path.exists();
-    let metadata = fs::metadata(path).ok();
-    let hash = if exists && metadata.as_ref().is_some_and(|meta| meta.is_file()) {
-        Some(file_blake3(path)?)
+fn resolve_report_path(project_root: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
     } else {
-        None
-    };
-    Ok(json!({
-        "label": label,
-        "path": path.to_string_lossy(),
-        "present": exists,
-        "kind": metadata.as_ref().map(|meta| if meta.is_dir() { "dir" } else { "file" }),
-        "bytes": metadata.as_ref().filter(|meta| meta.is_file()).map(std::fs::Metadata::len),
-        "blake3": hash,
-    }))
-}
-
-fn file_blake3(path: &Path) -> Result<String, String> {
-    let mut file =
-        fs::File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
-    loop {
-        let n = file
-            .read(&mut buffer)
-            .map_err(|error| format!("read {}: {error}", path.display()))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
+        project_root.join(path)
     }
-    Ok(hasher.finalize().to_hex().to_string())
-}
-
-fn scan_event_dir(
-    dir: &Path,
-    limit: usize,
-    include_payloads: bool,
-) -> Result<Vec<JsonValue>, String> {
-    let mut topics = Vec::new();
-    let topic_dir = dir.join("topics");
-    if topic_dir.is_dir() {
-        let mut entries: Vec<_> = fs::read_dir(&topic_dir)
-            .map_err(|error| format!("read {}: {error}", topic_dir.display()))?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
-            .collect();
-        entries.sort();
-        for path in entries {
-            let topic = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .and_then(|name| name.strip_suffix(".jsonl"))
-                .unwrap_or("unknown");
-            topics.push(scan_jsonl_topic(
-                "file",
-                topic,
-                &path,
-                limit,
-                include_payloads,
-            )?);
-        }
-    }
-
-    let mut roots: Vec<_> = fs::read_dir(dir)
-        .map_err(|error| format!("read {}: {error}", dir.display()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("event_log-") && name.ends_with(".jsonl"))
-        })
-        .collect();
-    roots.sort();
-    for path in roots {
-        let topic = path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or("event_log");
-        topics.push(scan_jsonl_topic(
-            "file",
-            topic,
-            &path,
-            limit,
-            include_payloads,
-        )?);
-    }
-    Ok(topics)
-}
-
-async fn scan_sqlite_event_log(
-    path: &Path,
-    limit: usize,
-    include_payloads: bool,
-) -> Result<Vec<JsonValue>, String> {
-    let log = AnyEventLog::Sqlite(
-        SqliteEventLog::open_read_only(path.to_path_buf(), 16)
-            .map_err(|error| error.to_string())?,
-    );
-    let topics = log.topics().await.map_err(|error| error.to_string())?;
-    let mut reports = Vec::new();
-    for topic in topics {
-        let latest = log
-            .latest(&topic)
-            .await
-            .map_err(|error| error.to_string())?;
-        let events = log
-            .read_range(&topic, None, limit)
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut stats = EventTopicStats::default();
-        for (id, event) in events {
-            let value = json!({
-                "id": id,
-                "event": {
-                    "kind": event.kind,
-                    "payload": event.payload,
-                    "headers": event.headers,
-                    "occurred_at_ms": event.occurred_at_ms,
-                }
-            });
-            stats.observe(&value, limit, include_payloads);
-        }
-        let counts_complete = latest.is_none_or(|latest_id| stats.last_id == Some(latest_id));
-        reports.push(event_records_report(
-            "sqlite",
-            topic.as_str(),
-            Some(path),
-            latest,
-            stats,
-            counts_complete,
-        ));
-    }
-    Ok(reports)
-}
-
-fn scan_jsonl_topic(
-    backend: &str,
-    topic: &str,
-    path: &Path,
-    limit: usize,
-    include_payloads: bool,
-) -> Result<JsonValue, String> {
-    let file = fs::File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
-    let reader = BufReader::new(file);
-    let mut stats = EventTopicStats::default();
-    let mut invalid_lines = 0_u64;
-    let mut total_lines = 0_u64;
-    for line in reader.lines() {
-        total_lines += 1;
-        let line = line.map_err(|error| format!("read {}: {error}", path.display()))?;
-        match serde_json::from_str::<JsonValue>(&line) {
-            Ok(value) => stats.observe(&value, limit, include_payloads),
-            Err(_) => invalid_lines += 1,
-        }
-    }
-    let mut report = event_records_report(backend, topic, Some(path), None, stats, true);
-    report["line_count"] = json!(total_lines);
-    report["invalid_line_count"] = json!(invalid_lines);
-    report["blake3"] = json!(file_blake3(path)?);
-    Ok(report)
-}
-
-#[derive(Default)]
-struct EventTopicStats {
-    records_scanned: u64,
-    sampled_event_count: u64,
-    kinds: BTreeMap<String, u64>,
-    payload_types: BTreeMap<String, u64>,
-    roles: BTreeMap<String, u64>,
-    first_id: Option<u64>,
-    last_id: Option<u64>,
-    first_sampled_id: Option<u64>,
-    last_sampled_id: Option<u64>,
-    previous_record_hash: Option<String>,
-    provenance_breaks: u64,
-    sample_provenance_breaks: u64,
-    provenance_records: u64,
-    samples: Vec<JsonValue>,
-}
-
-impl EventTopicStats {
-    fn observe(&mut self, value: &JsonValue, sample_limit: usize, include_payloads: bool) {
-        self.records_scanned += 1;
-        let id = value.get("id").and_then(JsonValue::as_u64);
-        self.first_id = self.first_id.or(id);
-        self.last_id = id.or(self.last_id);
-
-        // The sample is the first `sample_limit` records, so the sample-scoped
-        // fields describe exactly that prefix window — distinct from the
-        // full-scan `first_id`/`last_id` whenever a backend scans past the
-        // limit (the JSONL reader walks every line; sqlite is already bounded).
-        let is_sampled = self.sampled_event_count < sample_limit as u64;
-        if is_sampled {
-            self.sampled_event_count += 1;
-            self.first_sampled_id = self.first_sampled_id.or(id);
-            self.last_sampled_id = id.or(self.last_sampled_id);
-            if include_payloads && self.samples.len() < 5 {
-                self.samples.push(value.clone());
-            }
-        }
-
-        let event = value.get("event").unwrap_or(value);
-        if let Some(kind) = event.get("kind").and_then(JsonValue::as_str) {
-            *self.kinds.entry(kind.to_string()).or_default() += 1;
-        }
-        if let Some(kind) = event
-            .pointer("/payload/event/type")
-            .or_else(|| event.pointer("/payload/type"))
-            .and_then(JsonValue::as_str)
-        {
-            *self.payload_types.entry(kind.to_string()).or_default() += 1;
-        }
-        if let Some(role) = event
-            .pointer("/payload/role")
-            .or_else(|| event.pointer("/payload/message/role"))
-            .and_then(JsonValue::as_str)
-        {
-            *self.roles.entry(role.to_string()).or_default() += 1;
-        }
-        let headers = event.get("headers").or_else(|| value.get("headers"));
-        let record_hash = headers
-            .and_then(|headers| headers.get("harn.provenance.record_hash"))
-            .and_then(JsonValue::as_str);
-        let prev_hash = headers
-            .and_then(|headers| headers.get("harn.provenance.prev_hash"))
-            .and_then(JsonValue::as_str);
-        if let Some(record_hash) = record_hash {
-            self.provenance_records += 1;
-            if let Some(previous) = self.previous_record_hash.as_deref() {
-                if prev_hash != Some(previous) {
-                    self.provenance_breaks += 1;
-                    if is_sampled {
-                        self.sample_provenance_breaks += 1;
-                    }
-                }
-            }
-            self.previous_record_hash = Some(record_hash.to_string());
-        }
-    }
-}
-
-fn event_records_report(
-    backend: &str,
-    topic: &str,
-    path: Option<&Path>,
-    latest_id: Option<u64>,
-    stats: EventTopicStats,
-    counts_complete: bool,
-) -> JsonValue {
-    json!({
-        "backend": backend,
-        "topic": topic,
-        "path": path.map(|path| path.to_string_lossy().into_owned()),
-        "record_count": stats.records_scanned,
-        "sampled_event_count": stats.sampled_event_count,
-        "counts_complete": counts_complete,
-        "latest_id": latest_id,
-        "first_event_id": stats.first_id,
-        "last_event_id": stats.last_id,
-        "first_sampled_id": stats.first_sampled_id,
-        "last_sampled_id": stats.last_sampled_id,
-        "kinds": stats.kinds,
-        "payload_event_types": stats.payload_types,
-        "roles": stats.roles,
-        "provenance": {
-            "records_with_hash": stats.provenance_records,
-            "chain_breaks": stats.provenance_breaks,
-            "chain_ok": stats.provenance_breaks == 0,
-            "chain_breaks_in_sample": stats.sample_provenance_breaks,
-            "sample_chain_ok": stats.sample_provenance_breaks == 0,
-        },
-        "samples": stats.samples,
-    })
-}
-
-fn summary_verdict(summary: Option<&JsonValue>) -> JsonValue {
-    let Some(summary) = summary else {
-        return json!({"summary_present": false});
-    };
-    json!({
-        "summary_present": true,
-        "task": summary.get("task"),
-        "model": summary.get("model"),
-        "result": summary.get("result"),
-        "outcome_kind": summary.get("outcome_kind"),
-        "verification_passed": summary.get("verification_passed"),
-        "verify_timed_out": summary.get("verify_timed_out"),
-        "verify_failure_excerpt": summary.get("verify_failure_excerpt"),
-        "cross_check": {
-            "e1_verdict": summary.pointer("/cross_check/e1_verdict"),
-            "e2_verdict": summary.pointer("/cross_check/e2_verdict"),
-            "e1_e2_aligned": summary.pointer("/cross_check/e1_e2_aligned"),
-            "e2_reason": summary.pointer("/cross_check/e2_reason"),
-            "judge_dead": summary.pointer("/cross_check/judge_dead"),
-        },
-        "completion_contract": {
-            "contract_passed": summary.pointer("/completion_contract/contract_passed"),
-            "run_ready_for_final": summary.pointer("/completion_contract/run_ready_for_final"),
-            "verification_passed": summary.pointer("/completion_contract/verification_passed"),
-            "warnings": summary.pointer("/completion_contract/completion_warnings"),
-        },
-    })
-}
-
-fn eval_artifact_gaps(
-    summary: &Option<JsonValue>,
-    summary_path: Option<&Path>,
-    run_record: Option<&Path>,
-    event_topics: &[JsonValue],
-    topic_names: &[String],
-) -> Vec<String> {
-    let mut gaps = Vec::new();
-    if summary_path.is_none_or(|path| !path.exists()) {
-        gaps.push("missing summary_json".to_string());
-    }
-    if run_record.is_none_or(|path| !path.exists()) {
-        gaps.push("missing run_record or run_record_path is null".to_string());
-    }
-    if event_topics.is_empty() {
-        gaps.push("no event-log topics found".to_string());
-    }
-    if !topic_names
-        .iter()
-        .any(|name| name == "agent.transcript.llm")
-    {
-        gaps.push("missing agent.transcript.llm topic".to_string());
-    }
-    if !topic_names
-        .iter()
-        .any(|name| name.starts_with("observability.agent_events."))
-    {
-        gaps.push("missing observability.agent_events.<session-id> topic".to_string());
-    }
-    if summary
-        .as_ref()
-        .and_then(|value| value.get("verification"))
-        .is_none()
-    {
-        gaps.push("summary lacks structured verification object".to_string());
-    }
-    gaps
-}
-
-fn event_chain_summary(topic_names: &[String], event_topics: &[JsonValue]) -> JsonValue {
-    let mut aggregate_payload_types: BTreeMap<String, u64> = BTreeMap::new();
-    for topic in event_topics {
-        if let Some(map) = topic
-            .get("payload_event_types")
-            .and_then(JsonValue::as_object)
-        {
-            for (key, value) in map {
-                if let Some(count) = value.as_u64() {
-                    *aggregate_payload_types.entry(key.clone()).or_default() += count;
-                }
-            }
-        }
-    }
-    // A topic can surface from both the JSONL dir and the sqlite db, so dedup
-    // (and sort, for deterministic output) before reporting.
-    let mut agent_event_topics: Vec<String> = topic_names
-        .iter()
-        .filter(|name| name.starts_with("observability.agent_events."))
-        .cloned()
-        .collect();
-    agent_event_topics.sort();
-    agent_event_topics.dedup();
-    json!({
-        "has_agent_transcript": topic_names.iter().any(|name| name == "agent.transcript.llm"),
-        "agent_event_topics": agent_event_topics,
-        "payload_event_types": aggregate_payload_types,
-        "tool_call_events": aggregate_payload_types.get("tool_call").copied().unwrap_or(0),
-        "tool_call_update_events": aggregate_payload_types
-            .get("tool_call_update")
-            .copied()
-            .unwrap_or(0),
-    })
-}
-
-fn next_debug_commands(
-    summary_path: Option<&Path>,
-    run_record: Option<&Path>,
-    events_db: Option<&Path>,
-) -> Vec<String> {
-    let mut commands = Vec::new();
-    if let Some(path) = summary_path {
-        commands.push(format!(
-            "jq '.cross_check,.verification,.completion_contract' {}",
-            shell_quote_path(path)
-        ));
-    }
-    if let Some(path) = run_record {
-        commands.push(format!("harn runs view --json {}", shell_quote_path(path)));
-    }
-    if let Some(path) = events_db {
-        commands.push(format!(
-            "harn replay --events-db {} --json <add --session-id>",
-            shell_quote_path(path)
-        ));
-    }
-    commands
 }
 
 pub(super) fn tool_def(
@@ -1452,6 +904,56 @@ pub(super) fn tool_def(
         value["outputSchema"] = output_schema;
     }
     value
+}
+
+fn run_report_tool_def(name: &str, title: &str, description: &str) -> JsonValue {
+    tool_def(
+        name,
+        description,
+        read_only_tool_annotations(title),
+        json!({
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+                "path": { "type": "string" },
+                "events_db": { "type": "string" },
+            },
+            "additionalProperties": false,
+        }),
+        Some(json!({
+            "type": "object",
+            "required": [
+                "schema",
+                "schema_version",
+                "producer",
+                "projection",
+                "root_run_id",
+                "agents",
+                "delegations",
+                "llm_calls",
+                "coordination",
+                "timelines",
+                "sources",
+                "checks"
+            ],
+            "properties": {
+                "schema": { "const": "harn.run_report.v1" },
+                "schema_version": { "const": 1 },
+                "producer": { "type": "object" },
+                "projection": { "type": "object" },
+                "root_run_id": { "type": "string" },
+                "agents": { "type": "array" },
+                "delegations": { "type": "array" },
+                "llm_calls": { "type": "array" },
+                "coordination": { "type": "object" },
+                "timelines": { "type": "array" },
+                "sources": { "type": "array" },
+                "checks": { "type": "array" },
+            },
+            "additionalProperties": false,
+        })),
+        mcp_protocol::McpToolTaskSupport::Forbidden,
+    )
 }
 
 pub(super) fn read_only_tool_annotations(title: &str) -> JsonValue {
@@ -1485,7 +987,7 @@ pub(super) fn task_support_for_tool(name: &str) -> Option<mcp_protocol::McpToolT
         | "harn.orchestrator.queue"
         | "harn.orchestrator.dlq.list"
         | "harn.orchestrator.inspect"
-        | "harn.eval.inspect_run"
+        | "harn.run.report"
         | "harn.trust.query" => Some(mcp_protocol::McpToolTaskSupport::Forbidden),
         _ => None,
     }

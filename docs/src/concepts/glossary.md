@@ -107,6 +107,11 @@ audit trail; `assets` are large or non-text payloads.
 **Transcript event.** One entry in the `events` log. Includes `iteration_start`,
 `iteration_end`, tool dispatch events, reminder events, and lifecycle events.
 
+**Run report.** The versioned JSON view produced by
+`harn runs report` or the `harn.run.report` MCP tool. It correlates a root run
+with delegated child runs, timelines, trace spans, and verified transcript
+pointers, then reports structural checks without changing the source data.
+
 **Snapshot.** A frozen, serializable copy of a session or worker state, used for
 resume-after-suspend and for replay.
 

@@ -217,7 +217,9 @@ pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;
 pub(crate) use rule::{RuleArgs, RuleCommand, RuleTestArgs};
 pub(crate) use run::RunArgs;
-pub(crate) use runs::{run_runs_command, ReplayArgs, RunsArgs, RunsExportTrainingArgs};
+pub(crate) use runs::{
+    run_runs_command, ReplayArgs, RunsArgs, RunsExportTrainingArgs, RunsReportArgs,
+};
 pub(crate) use sandbox::SandboxArgs;
 pub(crate) use scan::ScanArgs;
 pub(crate) use serve::{

@@ -3,8 +3,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 
 use crate::event_log::{AnyEventLog, EventId, EventLog, LogError};
 use crate::provenance::event_record_hash_from_headers;
@@ -1009,24 +1007,7 @@ fn stage_duration_ms(stage: &RunStageRecord) -> Option<u64> {
         })
 }
 
-fn timestamp_delta_ms(started_at: &str, finished_at: &str) -> Option<u64> {
-    let start = parse_timestamp_ms(started_at)?;
-    let end = parse_timestamp_ms(finished_at)?;
-    u64::try_from(end.saturating_sub(start)).ok()
-}
-
-fn parse_timestamp_ms(value: &str) -> Option<i128> {
-    if value.trim().is_empty() {
-        return None;
-    }
-    if let Ok(seconds) = value.parse::<i128>() {
-        return Some(seconds.saturating_mul(1000));
-    }
-    let parsed = OffsetDateTime::parse(value, &Rfc3339).ok()?;
-    Some(
-        i128::from(parsed.unix_timestamp()).saturating_mul(1000) + i128::from(parsed.millisecond()),
-    )
-}
+use super::time::timestamp_delta_ms;
 
 fn trace_span_end_ms(span: &RunTraceSpanRecord) -> u64 {
     span.start_ms.saturating_add(span.duration_ms)

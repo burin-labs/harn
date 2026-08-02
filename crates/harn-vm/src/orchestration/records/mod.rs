@@ -8,6 +8,8 @@ mod diff;
 mod eval_pack;
 mod json;
 mod persistence;
+mod report;
+mod time;
 mod transcript_descriptor;
 mod types;
 mod view;
@@ -29,6 +31,11 @@ pub use eval_pack::{
 pub use persistence::{
     load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,
     normalize_run_record, save_run_record, AgentSessionReplayEvent,
+};
+pub use report::{
+    build_run_report, RunReport, RunReportAgent, RunReportCheck, RunReportCoordination,
+    RunReportDelegation, RunReportError, RunReportExecution, RunReportLlmCall, RunReportProjection,
+    RunReportRequest, RunReportSource, RUN_REPORT_SCHEMA, RUN_REPORT_SCHEMA_VERSION,
 };
 pub use transcript_descriptor::{
     describe_llm_transcript_sidecar, verified_llm_transcript_pointer_path,

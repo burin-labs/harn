@@ -113,4 +113,25 @@ impl WorkerEvent {
                 | Self::WorkerCancelled
         )
     }
+
+    /// Interpret a persisted worker status through the lifecycle owner.
+    /// `running` is represented by the spawn variant because both spawn and
+    /// resume intentionally project to the same non-terminal wire state.
+    pub fn from_status(status: &str) -> Option<Self> {
+        match status {
+            "running" => Some(Self::WorkerSpawned),
+            "progressed" => Some(Self::WorkerProgressed),
+            "awaiting_input" => Some(Self::WorkerWaitingForInput),
+            "suspended" => Some(Self::WorkerSuspended),
+            "completed" => Some(Self::WorkerCompleted),
+            "failed" => Some(Self::WorkerFailed),
+            "stopped" => Some(Self::WorkerStopped),
+            "cancelled" | "canceled" => Some(Self::WorkerCancelled),
+            _ => None,
+        }
+    }
+
+    pub fn status_is_terminal(status: &str) -> bool {
+        Self::from_status(status).is_some_and(Self::is_terminal)
+    }
 }
