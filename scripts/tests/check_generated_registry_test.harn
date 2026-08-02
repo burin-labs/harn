@@ -18,6 +18,12 @@ pipeline test_whole_target_not_a_prefix(harness: Harness, task) {
 }
 
 @test
+pipeline test_whole_target_not_a_suffix(harness: Harness, task) {
+  assert_eq(whole_target_search("all", "make install\n"), false)
+  assert_eq(whole_target_search("check-x", "make precheck-x\n"), false)
+}
+
+@test
 pipeline test_whole_target_full_name_hit(harness: Harness, task) {
   assert_eq(
     whole_target_search("check-provider-catalog-drift", "make check-provider-catalog-drift\n"),
@@ -77,6 +83,65 @@ pipeline test_makefile_targets_empty(harness: Harness, task) {
   assert_eq(makefile_targets(""), [])
 }
 
+// --- expand_make_target_references ---------------------------------------
+@test
+pipeline test_make_invocation_targets_require_a_make_command(harness: Harness, task) {
+  const targets = ["all", "check-leaf", "install"]
+  const text = "# make all\nrun: make check-leaf\ninstall dependencies\n"
+  assert_eq(make_invocation_targets(targets, text), ["check-leaf"])
+}
+
+@test
+pipeline test_make_invocation_targets_follow_continuations(harness: Harness, task) {
+  const targets = ["check-a", "check-b"]
+  const text = """
+run: make \
+    check-a \
+    check-b
+"""
+  assert_eq(make_invocation_targets(targets, text), ["check-a", "check-b"])
+}
+
+@test
+pipeline test_make_invocation_targets_reject_make_substrings_and_comments(harness: Harness, task) {
+  const targets = ["all", "check-a"]
+  const text = "# make all\nrun: cmake check-a\n"
+  assert_eq(make_invocation_targets(targets, text), [])
+  assert_eq(whole_target_search("all", expand_make_target_references("all:\n", text)), false)
+}
+
+@test
+pipeline test_make_target_references_expand_prerequisites_transitively(harness: Harness, task) {
+  const mk =
+    "check-leaf:\n\techo checked\nwasm-build:\n\techo built\nwasm-check: check-leaf wasm-build\n"
+  const expanded = expand_make_target_references(mk, "make wasm-check\n")
+  assert_eq(whole_target_search("check-leaf", expanded), true)
+  assert_eq(whole_target_search("wasm-build", expanded), true)
+}
+
+@test
+pipeline test_make_target_references_expand_recursive_make_recipes(harness: Harness, task) {
+  const mk =
+    "all:\n\t$(MAKE) aggregate\naggregate:\n\t$(MAKE) check-leaf\ncheck-leaf:\n\techo checked\n"
+  const expanded = expand_make_target_references(mk, "make all\n")
+  assert_eq(whole_target_search("check-leaf", expanded), true)
+}
+
+@test
+pipeline test_make_target_references_do_not_include_unreachable_rules(harness: Harness, task) {
+  const mk = "wasm-check: check-wasm\ncheck-wasm:\n\techo checked\ncheck-unrelated:\n\techo no\n"
+  const expanded = expand_make_target_references(mk, "make wasm-check\n")
+  assert_eq(whole_target_search("check-wasm", expanded), true)
+  assert_eq(whole_target_search("check-unrelated", expanded), false)
+}
+
+@test
+pipeline test_make_target_references_terminate_on_cycles(harness: Harness, task) {
+  const mk = "a: b\nb: a check-leaf\ncheck-leaf:\n\techo checked\n"
+  const expanded = expand_make_target_references(mk, "make a\n")
+  assert_eq(whole_target_search("check-leaf", expanded), true)
+}
+
 // --- make_all_recipe ------------------------------------------------------
 @test
 pipeline test_make_all_recipe_basic(harness: Harness, task) {
@@ -102,7 +167,7 @@ pipeline test_flag_errors_ci_true_not_in_workflow(harness: Harness, task) {
   const art = {id: "a", ci: true}
   const errs = artifact_flag_errors(art, "check-a", "", "", [])
   assert_eq(errs.count, 1)
-  assert_eq(errs[0].contains("ci = true but `check-a` is not referenced"), true)
+  assert_eq(errs[0].contains("ci = true but `check-a` is not reachable"), true)
 }
 
 @test
