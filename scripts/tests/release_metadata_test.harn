@@ -164,6 +164,59 @@ pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, tas
 }
 
 @test
+pipeline test_apply_advances_install_projection_from_withdrawn_version(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      write_fixture(
+        harness.fs,
+        root,
+        ".github/release-withdrawals.json",
+        json_stringify(
+          {
+            schema_version: 1,
+            releases: [
+              {
+                version: "1.2.3",
+                tag_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                distribution_version: "1.2.2",
+                replacement: "1.2.4",
+                reason: "invalid_tagged_candidate",
+              },
+            ],
+          },
+        ),
+      )
+      write_fixture(
+        harness.fs,
+        root,
+        "spec/acp-registry/harn/agent.json",
+        """
+{
+  "id": "harn",
+  "version": "1.2.2",
+  "distribution": {
+    "binary": {
+      "linux": {
+        "archive": "https://example.test/releases/download/v1.2.2/harn.tar.gz"
+      }
+    }
+  }
+}
+""",
+      )
+      apply_release_metadata(harness.fs, root, "1.2.4")
+      const agent = json_parse(
+        harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
+      )
+      assert_eq(agent.version, "1.2.4")
+      assert(agent.distribution.binary.linux.archive.contains("/v1.2.4/"))
+    },
+  )
+}
+
+@test
 pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harness, task) {
   with_temp_dir(
     harness.fs,

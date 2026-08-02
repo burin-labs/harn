@@ -1,5 +1,8 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import * as semver from "std/semver"
+import { release_distribution_version } from "./release_withdrawals.harn"
+
+const RELEASE_WITHDRAWALS_PATH = ".github/release-withdrawals.json"
 
 pub type ReleaseMetadataPlan = {
   current_version: string,
@@ -24,6 +27,14 @@ fn normalized_rel(path: string, root: string) -> string {
     return normalized[len(prefix):]
   }
   return normalized
+}
+
+fn current_distribution_version(fs: HarnessFs, root: string, current: string) -> string {
+  const path = path_join(root, RELEASE_WITHDRAWALS_PATH)
+  if !fs.exists(path) {
+    return current
+  }
+  return release_distribution_version(fs.read_text(path), current)
 }
 
 pub fn workspace_version_from_doc(doc) -> string {
@@ -241,7 +252,7 @@ pub fn apply_release_metadata(fs: HarnessFs, root: string, version: string) -> R
     text = rewrite_local_dependency_versions(text, plan.package_names, version)
     fs.write_text(manifest, text)
   }
-  rewrite_agent_manifest(fs, root, current, version)
+  rewrite_agent_manifest(fs, root, current_distribution_version(fs, root, current), version)
   rewrite_embedding_tags(fs, root, version)
   return plan
 }

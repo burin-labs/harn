@@ -94,7 +94,7 @@ pipeline test_check_acp_agent_manifest_rejects_stale_version(harness: Harness, t
   }
   assert_eq(
     r,
-    "error: spec/acp-registry/harn/agent.json version 0.8.70 does not match Cargo.toml version 0.8.71",
+    "error: spec/acp-registry/harn/agent.json version 0.8.70 does not match expected release projection version 0.8.71",
   )
 }
 
@@ -114,7 +114,7 @@ pipeline test_check_acp_agent_manifest_rejects_stale_archive(harness: Harness, t
     r,
     "error: spec/acp-registry/harn/agent.json archive "
       + "https://github.com/burin-labs/harn/releases/download/v0.8.70/harn-x86_64-unknown-linux-gnu.tar.gz "
-      + "points at v0.8.70 instead of Cargo.toml version v0.8.71",
+      + "points at v0.8.70 instead of expected release projection v0.8.71",
   )
 }
 

@@ -4,7 +4,7 @@
 import Foundation
 
 public enum HarnProtocolConstants {
-    public static let artifactVersion = "0.10.50"
+    public static let artifactVersion = "0.10.51"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let harnAgentEventMethod = "_harn/agentEvent"
     public static let harnProviderCatalogMethod = "_harn/providerCatalog"
@@ -109,7 +109,6 @@ public enum HarnProtocolConstants {
         "mcp_auth_required",
         "mcp_catalog_changed",
         "mcp_notification",
-        "model_job",
         "orchestration_decision",
         "pack_thinking_stripped",
         "progress_reported",

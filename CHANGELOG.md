@@ -9,6 +9,15 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.51
+
+### Changed
+
+- This version was withdrawn before crate publication. Its immutable tag is
+  retained for auditability, but its tagged tree contains unfolded changelog
+  fragments and its x86_64 Linux binary exceeds the policy embedded in that
+  tag. Use v0.10.50 until v0.10.52 or newer is available.
+
 ## v0.10.50
 
 ### Added

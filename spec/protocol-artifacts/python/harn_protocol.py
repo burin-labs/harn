@@ -134,7 +134,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.50"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.51"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
@@ -276,7 +276,6 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
-    "model_job",
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
