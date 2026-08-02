@@ -551,17 +551,11 @@ fn collect_file_candidates(
     let ambient_context = AmbientRepairContext {
         cross_module_importer_count: module_graph.importers_of(file).len(),
     };
-    let deferred_capability_mismatches = options
-        .capability_migrations_only
-        .then(|| {
-            deferred_capability_mismatch_spans(
-                &output.diagnostics,
-                &program,
-                &source,
-                &exported_names,
-            )
-        })
-        .unwrap_or_default();
+    let deferred_capability_mismatches = if options.capability_migrations_only {
+        deferred_capability_mismatch_spans(&output.diagnostics, &program, &source, &exported_names)
+    } else {
+        BTreeSet::new()
+    };
 
     for diag in &output.diagnostics {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {

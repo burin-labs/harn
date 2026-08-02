@@ -696,6 +696,78 @@ fn capability_apply_repairs_imported_capability_helpers_inside_closures() {
 }
 
 #[test]
+fn capability_plan_repairs_imported_helpers_without_type_diagnostics() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "import { agent_capture_events } from \"std/agent/events\"\nimport { agent_parse_tool_calls } from \"std/agent/primitives\"\nimport { agent_session_finalize, agent_session_messages, agent_reminder_providers_fire } from \"std/agent/state\"\n\nfn custom_agent(harness: Harness) -> HarnessAgent {\n  return harness.agent\n}\n\npipeline main(harness: Harness, task) {\n  const session = \"session\"\n  const messages = agent_session_messages(session)\n  agent_session_finalize(session, \"done\")\n  agent_session_finalize(custom_agent(harness), session, \"already explicit\")\n  const captured = agent_capture_events(session, fn() { nil })\n  const parsed = agent_parse_tool_calls(\"<tool_call>x({})</tool_call>\", [], \"text\")\n  const report = agent_reminder_providers_fire(session, \"session_idle\", {}, {})\n  return {messages: messages, captured: captured, parsed: parsed, report: report}\n}\n",
+    )
+    .unwrap();
+    let files = vec![script.clone()];
+    let graph = commands::check::build_module_graph(&files);
+
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+
+    assert_eq!(
+        repairs
+            .iter()
+            .flat_map(|repair| &repair.edits)
+            .filter(|edit| {
+                edit.span.start == edit.span.end && edit.replacement == "harness.agent, "
+            })
+            .count(),
+        5,
+        "every imported Agent helper must derive its prefix from the module signature: {repairs:#?}"
+    );
+
+    let mut updated = fs::read_to_string(&script).unwrap();
+    let mut edits = repairs
+        .iter()
+        .flat_map(|repair| repair.edits.iter().cloned())
+        .collect::<Vec<_>>();
+    edits.sort_by_key(|edit| std::cmp::Reverse((edit.span.start, edit.span.end)));
+    for edit in edits {
+        updated.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    fs::write(&script, updated).unwrap();
+    let repaired_graph = commands::check::build_module_graph(&files);
+    let fixed_point = whole_program_capabilities::plan(&files, &repaired_graph, &[]).unwrap();
+    assert!(
+        fixed_point.is_empty(),
+        "already-migrated imported calls must be a planner fixed point: {fixed_point:#?}"
+    );
+}
+
+#[test]
+fn capability_plan_resolves_private_imported_capability_aliases() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let library = temp.path().join("library.harn");
+    let entrypoint = temp.path().join("main.harn");
+    fs::write(
+        &library,
+        "type AgentHandle = HarnessAgent\n\npub fn imported_helper(agent: AgentHandle, session: string) {\n  return agent.snapshot(session)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        &entrypoint,
+        "import { imported_helper } from \"./library\"\n\npipeline main(harness: Harness, task) {\n  return imported_helper(\"session\")\n}\n",
+    )
+    .unwrap();
+    let files = vec![entrypoint, library];
+    let graph = commands::check::build_module_graph(&files);
+
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+
+    assert!(
+        repairs.iter().flat_map(|repair| &repair.edits).any(|edit| {
+            edit.span.start == edit.span.end && edit.replacement == "harness.agent, "
+        }),
+        "a private signature alias must resolve through the module graph: {repairs:#?}"
+    );
+}
+
+#[test]
 fn capability_apply_projects_retired_host_call_count_through_testing() {
     let (result, updated) = apply_single(
         "import { host_call_count, with_temp_dir } from \"std/testing\"\n\npipeline test_main(harness: Harness, task) {\n  assert(host_call_count() == 0)\n  return with_temp_dir(harness.fs, { dir -> dir })\n}\n",
