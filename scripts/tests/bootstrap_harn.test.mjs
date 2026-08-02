@@ -422,6 +422,30 @@ test("interrupted temporary files never become cache or install state", async (c
   assert.equal(result.checksum, sha256(archive));
 });
 
+test("an abandoned install lock is reclaimed before publication", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = path.join(root, "install.lock");
+  fs.mkdirSync(lockRoot);
+  fs.writeFileSync(
+    path.join(lockRoot, "owner.json"),
+    `${JSON.stringify({
+      schema_version: "harn-bootstrap-install-lock-v1",
+      hostname: os.hostname(),
+      pid: 2_147_483_647,
+      token: "abandoned",
+    })}\n`,
+  );
+
+  const result = await bootstrap(bootstrapOptions(root, release.fetchImpl));
+  assert.equal(fs.existsSync(lockRoot), false);
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
 test("independent processes safely converge on one atomic install", async (context) => {
   const root = temporaryRoot(context);
   const archive = makeArchive(root);
@@ -460,12 +484,16 @@ test("independent processes safely converge on one atomic install", async (conte
     path.join(root, "cache"),
     path.join(root, "install"),
   ];
-  const [left, right] = await Promise.all([
-    runChild(childScript, childArguments),
-    runChild(childScript, childArguments),
-  ]);
-  const receipts = [JSON.parse(left), JSON.parse(right)];
-  assert.equal(receipts[0].binary_path, receipts[1].binary_path);
+  const installRoot = path.join(root, "install");
+  fs.mkdirSync(installRoot);
+  fs.writeFileSync(path.join(installRoot, "install-manifest.json"), "corrupt\n");
+  const outputs = await Promise.all(
+    Array.from({ length: 8 }, () => runChild(childScript, childArguments)),
+  );
+  const receipts = outputs.map((output) => JSON.parse(output));
+  for (const receipt of receipts.slice(1)) {
+    assert.equal(receipt.binary_path, receipts[0].binary_path);
+  }
   assert.equal(
     fs.readFileSync(receipts[0].binary_path, "utf8"),
     "fake harn binary\n",

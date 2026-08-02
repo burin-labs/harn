@@ -8,6 +8,10 @@ import { fileURLToPath } from "node:url";
 export const RECEIPT_SCHEMA = "harn-bootstrap-v1";
 
 const INSTALL_MANIFEST_SCHEMA = "harn-bootstrap-install-v1";
+const INSTALL_LOCK_SCHEMA = "harn-bootstrap-install-lock-v1";
+const INSTALL_LOCK_POLL_MS = 10;
+const INSTALL_LOCK_TIMEOUT_MS = 30_000;
+const INSTALL_LOCK_STALE_MS = 5 * 60_000;
 const SEMVER = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const CHECKSUM_LINE = /^([0-9a-fA-F]{64})[ \t]+\*?([^/\\\0]+)$/;
@@ -349,29 +353,103 @@ function readValidInstall(installRoot, expected) {
   }
 }
 
-function commitInstall(temporary, installRoot, expected) {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+function processIsRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== "ESRCH";
+  }
+}
+
+function reclaimAbandonedInstallLock(lockPath) {
+  let owner = null;
+  let ageMs;
+  try {
+    const ownerPath = path.join(lockPath, "owner.json");
+    owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+    ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
+  } catch {
+    try {
+      ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
+    } catch {
+      return true;
+    }
+  }
+  const localOwner =
+    owner?.schema_version === INSTALL_LOCK_SCHEMA &&
+    owner.hostname === os.hostname() &&
+    Number.isSafeInteger(owner.pid) &&
+    owner.pid > 0;
+  const abandoned =
+    ageMs >= INSTALL_LOCK_STALE_MS ||
+    (localOwner && !processIsRunning(owner.pid));
+  if (!abandoned) return false;
+  discardInvalid(lockPath);
+  return true;
+}
+
+async function withInstallLock(installRoot, callback) {
+  const lockPath = `${installRoot}.lock`;
+  const deadline = Date.now() + INSTALL_LOCK_TIMEOUT_MS;
+  const token = crypto.randomUUID();
+  for (;;) {
+    try {
+      fs.mkdirSync(lockPath);
+      try {
+        fs.writeFileSync(
+          path.join(lockPath, "owner.json"),
+          `${JSON.stringify({
+            schema_version: INSTALL_LOCK_SCHEMA,
+            hostname: os.hostname(),
+            pid: process.pid,
+            token,
+          })}\n`,
+        );
+      } catch (error) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+        throw error;
+      }
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      if (reclaimAbandonedInstallLock(lockPath)) continue;
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for Harn installation at ${installRoot}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_LOCK_POLL_MS));
+    }
+  }
+  try {
+    return callback();
+  } finally {
+    try {
+      const owner = JSON.parse(
+        fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"),
+      );
+      if (owner.token === token) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+      }
+    } catch {
+      // A stale-lock recovery may already have replaced this ownership token.
+    }
+  }
+}
+
+async function commitInstall(temporary, installRoot, expected) {
+  return withInstallLock(installRoot, () => {
     const current = readValidInstall(installRoot, expected);
     if (current) {
       fs.rmSync(temporary, { recursive: true, force: true });
       return current;
     }
     discardInvalid(installRoot);
-    try {
-      fs.renameSync(temporary, installRoot);
-      return readValidInstall(installRoot, expected);
-    } catch (error) {
-      if (!["EEXIST", "ENOTEMPTY", "ENOENT", "EPERM"].includes(error.code)) {
-        throw error;
-      }
-    }
-  }
-  throw new Error(
-    `could not atomically publish Harn installation at ${installRoot}`,
-  );
+    fs.renameSync(temporary, installRoot);
+    return readValidInstall(installRoot, expected);
+  });
 }
 
-function installVerifiedArchive(options) {
+async function installVerifiedArchive(options) {
   const expected = {
     version: options.version,
     target: options.target,
@@ -380,7 +458,6 @@ function installVerifiedArchive(options) {
   };
   const existing = readValidInstall(options.installRoot, expected);
   if (existing) return existing;
-  discardInvalid(options.installRoot);
 
   const parent = path.dirname(options.installRoot);
   fs.mkdirSync(parent, { recursive: true });
@@ -413,7 +490,11 @@ function installVerifiedArchive(options) {
       path.join(temporary, "install-manifest.json"),
       `${JSON.stringify(installManifest, null, 2)}\n`,
     );
-    const committed = commitInstall(temporary, options.installRoot, expected);
+    const committed = await commitInstall(
+      temporary,
+      options.installRoot,
+      expected,
+    );
     if (!committed) {
       throw new Error(
         `installed manifest failed validation at ${manifestPath}`,
@@ -510,7 +591,7 @@ export async function bootstrap(options = {}) {
     delay: options.delay,
     fetchImpl: options.fetchImpl,
   });
-  const installed = installVerifiedArchive({
+  const installed = await installVerifiedArchive({
     archivePath,
     installRoot: resolved.install_dir,
     version: resolved.version,
