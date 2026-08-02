@@ -60,10 +60,16 @@ The repository already carries both host adapters:
 Both adapters call `scripts/agent-shell-guard.sh`. That small adapter locates an
 existing Harn executable and passes the host payload to
 `scripts/agent_shell_guard.harn`, which owns every decision. The adapter never
-starts a build or allows model calls. It also defers unrelated project handlers,
-so a broken trigger cannot disable command checks. It allows the command when
-no Harn executable is available, so a fresh checkout cannot lock the agent out
-of setup.
+starts a build. Its empty builtin allow list denies registered non-core
+builtins and the typed Harness methods backed by them.
+`HARN_LLM_CALLS_DISABLED=1` independently prevents a real model request.
+
+The adapter loads project trigger and hook handler code only if a handler runs.
+A top-level handler initialization failure therefore cannot disable command
+checks. Harn still parses `harn.toml` and validates handler declarations. If
+that validation fails, or no Harn executable is available, the adapter allows
+the command so a broken project or fresh checkout cannot lock the agent out of
+setup.
 
 See the current [Codex hooks reference](https://developers.openai.com/codex/config-advanced#hooks)
 and [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) for the
@@ -87,8 +93,16 @@ harn test scripts/tests/agent_shell_guard_test.harn
 ```
 
 If the adapter stays silent unexpectedly, confirm that `harn` is installed or
-set `HARN_BIN` to an existing executable. The adapter deliberately ignores an
-invalid path and remains fail-open.
+set `HARN_BIN` to an existing executable. Then repeat the probe with diagnostics
+enabled:
+
+```bash
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cargo test"}}' \
+  | HARN_SHELL_GUARD_DEBUG=1 scripts/agent-shell-guard.sh
+```
+
+The adapter deliberately ignores an invalid executable path and remains
+fail-open. Debug mode preserves Harn startup and policy errors on stderr.
 
 ## Reuse the policy in another repository
 
@@ -101,5 +115,7 @@ is blocked. Then project these files from Harn without editing their copies:
 
 Add host settings that call the projected adapter. Keep repository-specific
 startup hooks in the host settings rather than putting them in the shared
-policy. The Harn fleet manifest checks projected files byte for byte, so a
-policy change has one owner and downstream drift becomes a failed check.
+policy. The deferred handler startup matters most in these downstream projects,
+where the command policy sits beside application triggers and hooks. The Harn
+fleet manifest checks projected files byte for byte, so a policy change has one
+owner and downstream drift becomes a failed check.

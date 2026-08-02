@@ -44,7 +44,7 @@ if printf '%s' "$payload" \
   echo "broken neighboring trigger unexpectedly initialized successfully" >&2
   exit 1
 fi
-if ! rg -Fq "failed to install manifest triggers" "$fixture_root/eager.err"; then
+if ! grep -Fq "failed to install manifest triggers" "$fixture_root/eager.err"; then
   echo "fixture did not prove the eager project-handler failure" >&2
   cat "$fixture_root/eager.err" >&2
   exit 1
@@ -68,6 +68,28 @@ allowed="$(
 if [[ -n "$allowed" ]]; then
   echo "adapter emitted a decision for the supported Make target" >&2
   printf '%s\n' "$allowed" >&2
+  exit 1
+fi
+
+mkdir -p "$fixture_root/model-probe"
+cp "$repo_root/scripts/agent-shell-guard.sh" "$fixture_root/model-probe/"
+cat >"$fixture_root/model-probe/agent_shell_guard.harn" <<'HARN'
+fn main(harness: Harness) {
+  const response = harness.llm.call("guard capability probe", nil, {
+    provider: "ollama",
+    model: "guard-never-runs",
+  })
+  harness.stdio.println(response)
+}
+HARN
+
+printf '%s' '{}' \
+  | HARN_BIN="$HARN_BIN" HARN_SHELL_GUARD_DEBUG=1 \
+    "$fixture_root/model-probe/agent-shell-guard.sh" \
+    >"$fixture_root/model-probe.out" 2>"$fixture_root/model-probe.err"
+if ! grep -Fq "llm_call' is not permitted" "$fixture_root/model-probe.err"; then
+  echo "adapter capability policy did not reject a model call" >&2
+  cat "$fixture_root/model-probe.err" >&2
   exit 1
 fi
 

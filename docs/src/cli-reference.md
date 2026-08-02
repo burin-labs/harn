@@ -46,6 +46,7 @@ harn run --resume .harn/workers/worker_...json
 | `--resume <handle-or-snapshot>` | Cold-restore a suspended top-level agent from its persisted worker snapshot |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
+| `--defer-project-handlers` | Parse and validate project triggers and hooks now, but load their handler code only if a handler runs |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--allow-process-network` | Allow network access for the Harn run and its child processes. Filesystem and process confinement remain active. See [Network grants](./sandboxing.md#network-grants-are-coarser-than-they-look). |
