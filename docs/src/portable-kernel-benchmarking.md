@@ -145,3 +145,52 @@ timings.
 
 Keeping these surfaces separate prevents host observation policy from becoming
 part of portable execution semantics.
+
+## Measured cutover snapshot
+
+These measurements are evidence for this implementation boundary, not a
+performance promise. They were collected on 2026-08-01 on an Apple M5 Pro
+(18 logical CPUs, 48 GiB), macOS 26.5.1, Chrome 150.0.7871.187, and
+`wasm-pack 0.15.0`. Both modules used the release profile and `wasm-opt`.
+
+The repository state immediately before the cutover (`49773b492`) could not
+produce the documented browser artifact: the excluded crate could not inherit
+workspace lints, and its transitive linker-section capability registry was not
+implemented for `wasm32-unknown-unknown`. For a useful size reference, the
+legacy module below is the last revision before that linker-section dependency
+(`4c1655014`), with only the invalid inherited-lints stanza removed. Its
+942-line interpreter is otherwise unchanged.
+
+| Release module | Raw Wasm | gzip -9 | Scope |
+|---|---:|---:|---|
+| Legacy subset interpreter | 755,233 bytes | 254,183 bytes | Lexer, parser, formatter, and separate AST interpreter |
+| Portable Kernel v1 | 2,267,799 bytes | 784,917 bytes | Canonical strict frontend, compiler, artifact verifier, and resumable execution kernel |
+
+The portable artifact is about 3.0 times the legacy module size. That cost is
+currently the canonical compiler and hardened artifact/runtime contract, not a
+second language implementation. Size remains a deployment constraint: future
+work should profile code-size ownership and split compilation from execution
+only behind the same artifact interface. Removing validation or restoring a
+subset compiler would invalidate the architectural result.
+
+Five fresh dedicated-worker trials produced these medians:
+
+| Browser measurement | Legacy | Portable Kernel v1 |
+|---|---:|---:|
+| Wasm initialization | 5.8 ms | 11.6 ms |
+| First compile | Included in first execute | 50.2 ms |
+| Repeated compile p50 / p95 | Included in every execute | 3.95 / 12.83 ms |
+| First execute/start | 9.3 ms | 6.5 ms |
+| Repeated execute/start p50 / p95 | 0.0 / 0.10 ms | 1.30 / 2.70 ms |
+| 500-call batch wall time | 47.1 ms | 845.1 ms |
+| Batch throughput | 10,616 calls/s | 592 starts/s |
+
+The timing columns are not equivalent workloads. The legacy number uses a
+small arithmetic pipeline and its combined parse-plus-subset-interpreter
+`execute(source)` call; sub-millisecond samples also fall below Chrome's timer
+resolution. The v1 number uses the typed reducer and public
+`start(artifactBytes, inputJson, grantsJson)` adapter, so every start includes
+artifact decoding, validation, JSON conversion, grant adaptation, execution,
+and result projection. The separated v1 receipt is the useful baseline for
+subsequent optimization. Its Wasm SHA-256 for this snapshot is
+`c4b28f2d20416d8f2f6ca183bef7fd6225a1c57f9d6f5e4d29d958279d5b1a4f`.
