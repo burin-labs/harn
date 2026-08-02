@@ -2224,6 +2224,13 @@ or when a re-exported name collides with a local `pub` declaration.
 Editor go-to-definition follows re-export chains to the originating
 declaration.
 
+Re-exported functions keep their full parameter and return-type contracts.
+Callers can pass a structurally valid record without importing the function's
+signature-only aliases. A private alias remains private; the checker uses it
+without adding its name to the facade's public API. See
+[Type annotations](spec/language/19-type-annotations.md) for closed-record
+argument rules.
+
 Plain `import` (without `pub`) remains private — the imported names are
 visible only inside the importing file.
 

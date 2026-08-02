@@ -1,0 +1,7 @@
+import { Request } from "pub_import_typed_facade_contracts"
+
+type Response = {owner: string}
+
+pub fn run(request: Request) -> Response {
+  return {owner: request.owner}
+}

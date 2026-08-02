@@ -18,6 +18,7 @@ pub mod package_snapshot;
 pub mod personas;
 pub mod project_config;
 mod stdlib;
+mod type_dependencies;
 
 use declarations::pattern_names;
 pub use declarations::{public_declarations, DefKind, PublicDeclaration};
@@ -681,6 +682,7 @@ impl ModuleGraph {
         }
 
         let mut decls = Vec::new();
+        let mut seen = HashSet::new();
         for import in &module.imports {
             // Namespace imports do not flatten type names into the caller.
             if import.namespace_alias.is_some() {
@@ -699,14 +701,18 @@ impl ModuleGraph {
             if imported.load_error.is_some() {
                 return None;
             }
-            let names_to_collect: Vec<String> = match &import.selective_names {
+            let mut names_to_collect: Vec<String> = match &import.selective_names {
                 None => imported.exports.iter().cloned().collect(),
                 Some(selective) => selective.iter().cloned().collect(),
             };
+            names_to_collect.sort();
             for name in &names_to_collect {
                 let mut visited = HashSet::new();
                 if let Some(decl) = self.find_exported_type_decl(import_path, name, &mut visited) {
-                    decls.push(decl);
+                    let origin = self
+                        .export_definition_of(import_path, name)
+                        .map_or_else(|| import_path.clone(), |definition| definition.file);
+                    self.extend_type_dependency(&origin, &decl, &mut decls, &mut seen);
                 }
             }
             // Every type alias / struct / enum / interface declared in the
@@ -720,8 +726,21 @@ impl ModuleGraph {
             // type by name.
             for ty_decl in &imported.type_declarations {
                 if type_decl_name(ty_decl).is_some() {
-                    decls.push(ty_decl.clone());
+                    self.extend_type_dependency(import_path, ty_decl, &mut decls, &mut seen);
                 }
+            }
+
+            for name in &names_to_collect {
+                let mut visited = HashSet::new();
+                let Some(callable) =
+                    self.find_exported_callable_decl(import_path, name, &mut visited)
+                else {
+                    continue;
+                };
+                let origin = self
+                    .export_definition_of(import_path, name)
+                    .map_or_else(|| import_path.clone(), |definition| definition.file);
+                self.extend_callable_type_dependencies(&origin, &callable, &mut decls, &mut seen);
             }
         }
         Some(decls)
