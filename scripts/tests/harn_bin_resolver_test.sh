@@ -358,6 +358,11 @@ if [[ "$(grep -Fc 'hint: to reuse a binary you already built:' "$tmp_root/retry-
   cat "$tmp_root/retry-timeout.err" >&2
   exit 1
 fi
+if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 2 ]]; then
+  echo "wrapper-disabled retry timeout did not run exactly two probes" >&2
+  cat "$record" >&2
+  exit 1
+fi
 while IFS= read -r timed_out_child_pid; do
   if kill -0 "$timed_out_child_pid" 2>/dev/null; then
     echo "wrapper-disabled retry timeout left a descendant alive: $timed_out_child_pid" >&2
@@ -467,12 +472,17 @@ if [[ -s "$record" ]]; then
 fi
 
 registry="$repo_root/crates/harn-vm/src/environment_registry_names.txt"
-for name in $(rg --no-filename -o 'HARN_[A-Z0-9_]+' \
-  "$repo_root/scripts/harn_bin.sh" "$repo_root/scripts/lib/harn_bin.sh" | sort -u); do
+resolver_names="$(rg --no-filename -o 'HARN_[A-Z0-9_]+' \
+  "$repo_root/scripts/harn_bin.sh" "$repo_root/scripts/lib/harn_bin.sh" | sort -u)"
+if [[ "$(wc -l <<<"$resolver_names" | tr -d ' ')" -lt 4 ]]; then
+  echo "registry guard discovered too few harn_bin environment controls" >&2
+  exit 1
+fi
+while IFS= read -r name; do
   if ! grep -Fxq "$name" "$registry"; then
     echo "harn_bin environment control is absent from the registry: $name" >&2
     exit 1
   fi
-done
+done <<<"$resolver_names"
 
 echo "harn_bin_resolver_test: ok"
