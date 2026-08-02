@@ -98,7 +98,7 @@ enabled:
 
 ```bash
 printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cargo test"}}' \
-  | HARN_SHELL_GUARD_DEBUG=1 scripts/agent-shell-guard.sh
+  | AGENT_SHELL_GUARD_DEBUG=1 scripts/agent-shell-guard.sh
 ```
 
 The adapter deliberately ignores an invalid executable path and remains
