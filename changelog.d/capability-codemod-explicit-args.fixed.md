@@ -3,4 +3,5 @@
   orchestration on root `Harness`, recognizes local and imported named
   capability bundles, rewrites newly split accesses to their explicit
   bindings, and replaces existing imported carrier arguments in place instead
-  of shifting ordinary arguments.
+  of shifting ordinary arguments. Multiline declarations and calls retain
+  clean line endings when the migration inserts a leading capability.

@@ -300,7 +300,7 @@ pub(super) fn repair_for_ambient_capability_plan(
     }
 }
 
-pub(super) fn add_harness_param_edit(info: &CallableInfo) -> Option<FixEdit> {
+pub(super) fn add_harness_param_edit(source: &str, info: &CallableInfo) -> Option<FixEdit> {
     let name = harness_param_name_for_insert(info)?;
     Some(FixEdit {
         span: Span::with_offsets(
@@ -309,11 +309,12 @@ pub(super) fn add_harness_param_edit(info: &CallableInfo) -> Option<FixEdit> {
             info.span.line,
             info.span.column,
         ),
-        replacement: if info.has_params {
-            format!("{name}: Harness, ")
-        } else {
-            format!("{name}: Harness")
-        },
+        replacement: prepend_list_item(
+            source,
+            info.insert_offset,
+            &format!("{name}: Harness"),
+            info.has_params,
+        ),
     })
 }
 
@@ -335,10 +336,69 @@ pub(super) fn add_call_argument_edit(source: &str, span: &Span, arg_name: &str) 
     let insert_at = span.start + open_paren + 1;
     Some(FixEdit {
         span: Span::with_offsets(insert_at, insert_at, span.line, span.column),
-        replacement: if has_args {
-            format!("{arg_name}, ")
-        } else {
-            arg_name.to_string()
-        },
+        replacement: prepend_list_item(source, insert_at, arg_name, has_args),
     })
+}
+
+/// Render an item inserted immediately after an opening delimiter.
+///
+/// Multiline lists already own the newline following the delimiter. Adding a
+/// horizontal separator before that newline creates trailing whitespace in
+/// every migrated declaration or call.
+pub(super) fn prepend_list_item(
+    source: &str,
+    insert_at: usize,
+    item: &str,
+    has_following_items: bool,
+) -> String {
+    if !has_following_items {
+        return item.to_string();
+    }
+    let separator = match source.as_bytes().get(insert_at) {
+        Some(b'\n' | b'\r') => ",",
+        _ => ", ",
+    };
+    format!("{item}{separator}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multiline_parameter_insertion_has_no_trailing_whitespace() {
+        let source = "fn load(\n  path: string,\n) {}\n";
+        let span = Span::with_offsets(0, source.len(), 1, 1);
+        let (insert_at, has_params) = callable_param_insert(source, span).unwrap();
+        let replacement = prepend_list_item(source, insert_at, "harness: HarnessFs", has_params);
+
+        assert_eq!(replacement, "harness: HarnessFs,");
+        assert_eq!(
+            format!(
+                "{}{}{}",
+                &source[..insert_at],
+                replacement,
+                &source[insert_at..]
+            ),
+            "fn load(harness: HarnessFs,\n  path: string,\n) {}\n"
+        );
+    }
+
+    #[test]
+    fn multiline_call_insertion_has_no_trailing_whitespace() {
+        let source = "load(\n  \"config.json\",\n)";
+        let span = Span::with_offsets(0, source.len(), 1, 1);
+        let edit = add_call_argument_edit(source, &span, "harness.fs").unwrap();
+
+        assert_eq!(edit.replacement, "harness.fs,");
+        assert_eq!(
+            format!(
+                "{}{}{}",
+                &source[..edit.span.start],
+                edit.replacement,
+                &source[edit.span.end..]
+            ),
+            "load(harness.fs,\n  \"config.json\",\n)"
+        );
+    }
 }

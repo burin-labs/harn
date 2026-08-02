@@ -872,7 +872,7 @@ fn synthesize_ambient_capability_repair(
 
     for &idx in &needed {
         let info = &infos[idx];
-        edits.push(add_harness_param_edit(info)?);
+        edits.push(add_harness_param_edit(source, info)?);
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {
         if !needed.contains(&callee_idx) {
@@ -1109,7 +1109,7 @@ fn synthesize_missing_harness_repair(
     let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
     let mut edits = Vec::new();
     for &idx in &needed {
-        edits.push(add_harness_param_edit(&infos[idx])?);
+        edits.push(add_harness_param_edit(source, &infos[idx])?);
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {
         if !needed.contains(&callee_idx) {
@@ -1179,7 +1179,7 @@ fn synthesize_missing_root_argument_repair(
     )?];
     for &idx in &needed {
         if infos[idx].harness_binding.is_none() {
-            edits.push(add_harness_param_edit(&infos[idx])?);
+            edits.push(add_harness_param_edit(source, &infos[idx])?);
         }
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {

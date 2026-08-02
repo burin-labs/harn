@@ -7,7 +7,7 @@ use harn_lexer::{FixEdit, Span};
 use harn_parser::TypedParam;
 
 use super::super::capability_migrations::{ambient_call_rewrite, ambient_replacement};
-use super::super::signature_threading::add_call_argument_edit;
+use super::super::signature_threading::{add_call_argument_edit, prepend_list_item};
 use super::super::CallSite;
 use super::{
     ambient_call_capability, diagnostic_capability, CarrierKind, FileDiagnostics, ProgramCallable,
@@ -234,11 +234,12 @@ pub(super) fn signature_edit(
             callable.info.span.line,
             callable.info.span.column,
         ),
-        replacement: if callable.info.has_params {
-            format!("{name}: {replacement_type}, ")
-        } else {
-            format!("{name}: {replacement_type}")
-        },
+        replacement: prepend_list_item(
+            source,
+            callable.info.insert_offset,
+            &format!("{name}: {replacement_type}"),
+            callable.info.has_params,
+        ),
     })
 }
 

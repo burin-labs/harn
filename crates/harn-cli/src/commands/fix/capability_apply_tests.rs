@@ -232,6 +232,29 @@ fn capability_apply_converges_transitive_repairs_in_one_invocation() {
 }
 
 #[test]
+fn capability_apply_preserves_multiline_declaration_and_call_whitespace() {
+    let (result, updated) = apply_single(
+        "fn load(\n  path: string,\n) -> string {\n  return read_file(path)\n}\n\nfn main(harness: Harness) {\n  load(\n    \"config.json\",\n  )\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "load"),
+        vec![param("harness", "HarnessFs"), param("path", "string")]
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "load")[0][0],
+        Some("harness.fs".to_string())
+    );
+    assert!(
+        !updated.lines().any(|line| line.ends_with([' ', '\t'])),
+        "migration introduced trailing whitespace:\n{updated}"
+    );
+}
+
+#[test]
 fn capability_apply_preserves_an_existing_handle_for_an_imported_bundle() {
     let temp = tempfile::TempDir::new().unwrap();
     let mode = temp.path().join("mode.harn");
