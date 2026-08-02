@@ -944,6 +944,7 @@ syntax-aware source review:
 | Function | Description |
 |---|---|
 | `diff_lines(before, after)` | Return `{changed, insertions, deletions, old_lines, new_lines, ops}` |
+| `diff_artifact(before, after, options?)` | Compute change counts and a unified diff together |
 | `unified_diff(before, after, options?)` | Render a unified diff with optional `{path, from_label, to_label, context, color, color_mode}` |
 | `colorize_diff(diff_text, options?)` | Apply ANSI coloring to an existing unified diff |
 | `diff_summary(before, after)` | Return compact changed/insertions/deletions counts |
@@ -951,8 +952,9 @@ syntax-aware source review:
 | `structural_diff(ast, path_a, path_b, options?)` | Host-backed tree-sitter review diff with line-diff fallback |
 | `changeset_summary(ast, files)` | Symbol-level review summary over `{path, before?, after?}` file images |
 
-The line helpers favor predictable, dependency-free rendering over competing
-with `git diff` for large repository diffs. For large file sets, call
+The line helpers share Harn's native Histogram engine; see the
+[`std/diff` reference](stdlib/diff.md) for behavior and algorithm details. For
+large file sets, call
 `git diff` through `std/git` or `std/command` and use `colorize_diff` or
 `render_diff_stat` for presentation.
 

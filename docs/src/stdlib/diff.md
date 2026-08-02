@@ -68,8 +68,21 @@ degrade predictably without switching to a mutation-oriented patch path.
 ## Line helpers
 
 - `diff_lines(before, after)` returns line-level operations and counts.
+- `diff_artifact(before, after, options?)` returns change counts and a
+  rendered unified diff from one comparison.
 - `unified_diff(before, after, options?)` renders a unified diff string.
 - `colorize_diff(diff_text, options?)` applies ANSI color to unified
   diff text.
 - `diff_summary(before, after)` returns compact line-change counts.
 - `render_diff_stat(entries, options?)` renders a small per-file stat table.
+
+All line helpers use Harn's native Histogram diff engine. Histogram diff keeps
+structural edits responsive on large or repetitive source files while
+producing readable hunks. See the [`similar` algorithm
+guide](https://docs.rs/similar/latest/similar/algorithms/index.html) for the
+algorithm tradeoffs. Use `diff_artifact` when you need both counts and rendered
+output so Harn compares the input once.
+
+Line endings are part of the comparison. If either input lacks its final
+newline, the rendered diff includes Git's standard missing-final-newline marker
+and the change counts include the affected line.
