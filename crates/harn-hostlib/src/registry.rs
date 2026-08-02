@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use harn_vm::{Vm, VmError, VmValue};
@@ -32,6 +33,20 @@ pub type AsyncHandler = Arc<
         + Send
         + Sync,
 >;
+
+/// A dropped async host call must still interrupt the synchronous operation
+/// that was moved to Tokio's blocking pool. `JoinHandle::abort` cannot stop a
+/// blocking closure, so the owning VM's cancellation token is the explicit
+/// handoff to the process wait loop.
+struct CancelOnDrop(Option<Arc<AtomicBool>>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        if let Some(token) = self.0.take() {
+            token.store(true, Ordering::SeqCst);
+        }
+    }
+}
 
 #[derive(Clone)]
 /// One registered async builtin and its schema coordinates.
@@ -323,7 +338,28 @@ impl HostlibRegistry {
                                         &[rewritten],
                                     )
                                     .map_err(VmError::from)?;
-                                    let result = handler(&[validated]).map_err(VmError::from)?;
+                                    let (parent_cancel, deadline) = ctx.interrupt_sources();
+                                    let cancel = parent_cancel.unwrap_or_else(|| {
+                                        Arc::new(AtomicBool::new(false))
+                                    });
+                                    let mut cancel_on_drop = CancelOnDrop(Some(Arc::clone(&cancel)));
+                                    let handler_for_blocking = handler.clone();
+                                    let result = harn_vm::orchestration::run_blocking_with_ambient(
+                                        move || {
+                                            let _interrupt = harn_vm::op_interrupt::install(
+                                                Some(cancel),
+                                                deadline,
+                                            );
+                                            handler_for_blocking(&[validated]).map_err(VmError::from)
+                                        },
+                                    )
+                                    .await
+                                    .map_err(|error| {
+                                        VmError::Runtime(format!(
+                                            "{ambient_name} blocking host operation failed: {error}"
+                                        ))
+                                    })??;
+                                    cancel_on_drop.0 = None;
                                     if crate::tools::run_command_request_is_background(&params) {
                                         return crate::schemas::validate_response(
                                             ambient_name,
