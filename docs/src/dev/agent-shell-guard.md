@@ -60,8 +60,10 @@ The repository already carries both host adapters:
 Both adapters call `scripts/agent-shell-guard.sh`. That small adapter locates an
 existing Harn executable and passes the host payload to
 `scripts/agent_shell_guard.harn`, which owns every decision. The adapter never
-starts a build. It allows the command when no Harn executable is available, so
-a fresh checkout cannot lock the agent out of setup.
+starts a build or allows model calls. It also defers unrelated project handlers,
+so a broken trigger cannot disable command checks. It allows the command when
+no Harn executable is available, so a fresh checkout cannot lock the agent out
+of setup.
 
 See the current [Codex hooks reference](https://developers.openai.com/codex/config-advanced#hooks)
 and [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) for the

@@ -38,7 +38,11 @@ resolve_harn() {
 harn_runner="$(resolve_harn)"
 [[ -n "$harn_runner" && -x "$harn_runner" ]] || exit 0
 
+# The policy needs no model access. A non-empty builtin policy also makes Harn
+# defer unrelated project handlers, so their initialization cannot disable this
+# command check.
 printf '%s' "$input" \
-  | BURIN_HARNW_AUTO_FETCH=0 "$harn_runner" run "$script_dir/agent_shell_guard.harn" 2>/dev/null \
+  | BURIN_HARNW_AUTO_FETCH=0 "$harn_runner" run --deny llm_call \
+    "$script_dir/agent_shell_guard.harn" 2>/dev/null \
   || true
 exit 0
