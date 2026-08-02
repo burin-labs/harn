@@ -218,7 +218,7 @@ pub(crate) use routes::RoutesArgs;
 pub(crate) use rule::{RuleArgs, RuleCommand, RuleTestArgs};
 pub(crate) use run::RunArgs;
 pub(crate) use runs::{
-    run_runs_command, ReplayArgs, RunsArgs, RunsExportTrainingArgs, RunsReportArgs,
+    run_runs_command, ReplayArgs, RunsArgs, RunsExportTrainingArgs, RunsReportArgs, RunsReviewArgs,
 };
 pub(crate) use sandbox::SandboxArgs;
 pub(crate) use scan::ScanArgs;

@@ -34,4 +34,5 @@ mod parse_provider_dispatch_audit;
 mod parse_provider_tool_calibrate;
 mod parse_provider_tool_probe_audit;
 mod parse_providers;
+mod parse_runs;
 mod parse_serve;

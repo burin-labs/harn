@@ -180,6 +180,13 @@ pub enum RunReportError {
     Encode(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunReportValidationError {
+    Schema(String),
+    Hash(String),
+    Encode(String),
+}
+
 #[derive(Debug)]
 struct LoadedRunTree {
     records: Vec<RunRecord>,
@@ -198,6 +205,52 @@ impl std::fmt::Display for RunReportError {
 }
 
 impl std::error::Error for RunReportError {}
+
+impl std::fmt::Display for RunReportValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Schema(message) | Self::Hash(message) | Self::Encode(message) => {
+                formatter.write_str(message)
+            }
+        }
+    }
+}
+
+impl std::error::Error for RunReportValidationError {}
+
+/// Validate that a report is the supported typed projection and that its
+/// content still matches the producer-owned projection hash.
+pub fn validate_run_report(report: &RunReport) -> Result<(), RunReportValidationError> {
+    if report.schema != RUN_REPORT_SCHEMA || report.schema_version != RUN_REPORT_SCHEMA_VERSION {
+        return Err(RunReportValidationError::Schema(format!(
+            "expected {RUN_REPORT_SCHEMA} schema version {RUN_REPORT_SCHEMA_VERSION}, got {:?} version {}",
+            report.schema, report.schema_version
+        )));
+    }
+    let expected = run_report_projection_hash(report)?;
+    if report.projection.hash != expected {
+        return Err(RunReportValidationError::Hash(format!(
+            "run report projection hash mismatch: expected {expected}, got {:?}",
+            report.projection.hash
+        )));
+    }
+    Ok(())
+}
+
+/// Recompute the logical report hash using the same canonical contract as the
+/// report producer. The hash field itself is cleared before canonicalization.
+pub fn run_report_projection_hash(report: &RunReport) -> Result<String, RunReportValidationError> {
+    let value = serde_json::to_value(report)
+        .map_err(|error| RunReportValidationError::Encode(error.to_string()))?;
+    Ok(run_report_projection_hash_value(&value))
+}
+
+fn run_report_projection_hash_value(value: &Value) -> String {
+    let mut value = value.clone();
+    value["projection"]["hash"] = Value::String(String::new());
+    let digest = Sha256::digest(crate::canonical_json::to_vec(&value));
+    format!("sha256:{}", hex::encode(digest))
+}
 
 pub async fn build_run_report(request: RunReportRequest) -> Result<RunReport, RunReportError> {
     let allowed_roots = canonical_allowed_roots(&request.allowed_roots)?;
@@ -263,8 +316,7 @@ pub async fn build_run_report(request: RunReportRequest) -> Result<RunReport, Ru
         serde_json::to_value(&report).map_err(|error| RunReportError::Encode(error.to_string()))?;
     value["projection"]["hash"] = Value::String(String::new());
     current_policy().redact_json_in_place(&mut value);
-    let digest = Sha256::digest(crate::canonical_json::to_vec(&value));
-    value["projection"]["hash"] = Value::String(format!("sha256:{}", hex::encode(digest)));
+    value["projection"]["hash"] = Value::String(run_report_projection_hash_value(&value));
     serde_json::from_value(value).map_err(|error| RunReportError::Encode(error.to_string()))
 }
 

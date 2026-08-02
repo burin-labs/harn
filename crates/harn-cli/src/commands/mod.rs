@@ -86,6 +86,7 @@ pub(crate) mod rule;
 pub(crate) mod rules_cli;
 pub mod run;
 pub(crate) mod run_report;
+pub(crate) mod run_review;
 pub(crate) mod runs_export_training;
 pub(crate) mod scaffold_common;
 pub(crate) mod scan;
