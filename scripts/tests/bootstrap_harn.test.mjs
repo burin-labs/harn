@@ -77,6 +77,20 @@ function bootstrapOptions(root, fetchImpl) {
   };
 }
 
+function writeInstallLock(root, owner) {
+  const lockRoot = path.join(root, "install.lock");
+  fs.mkdirSync(lockRoot);
+  fs.writeFileSync(
+    path.join(lockRoot, "owner.json"),
+    `${JSON.stringify({
+      schema_version: "harn-bootstrap-install-lock-v1",
+      token: crypto.randomUUID(),
+      ...owner,
+    })}\n`,
+  );
+  return lockRoot;
+}
+
 function runChild(script, arguments_) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -426,19 +440,54 @@ test("an abandoned install lock is reclaimed before publication", async (context
   const root = temporaryRoot(context);
   const archive = makeArchive(root);
   const release = fakeRelease(archive);
-  const lockRoot = path.join(root, "install.lock");
-  fs.mkdirSync(lockRoot);
-  fs.writeFileSync(
-    path.join(lockRoot, "owner.json"),
-    `${JSON.stringify({
-      schema_version: "harn-bootstrap-install-lock-v1",
-      hostname: os.hostname(),
-      pid: 2_147_483_647,
-      token: "abandoned",
-    })}\n`,
-  );
+  const lockRoot = writeInstallLock(root, {
+    hostname: os.hostname(),
+    pid: 2_147_483_647,
+  });
 
   const result = await bootstrap(bootstrapOptions(root, release.fetchImpl));
+  assert.equal(fs.existsSync(lockRoot), false);
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
+test("a live install owner holds the publication boundary", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: os.hostname(),
+    pid: process.pid,
+  });
+  const startedAt = Date.now();
+  const pending = bootstrap(bootstrapOptions(root, release.fetchImpl));
+  setTimeout(() => fs.rmSync(lockRoot, { recursive: true, force: true }), 150);
+
+  const result = await pending;
+  assert.ok(Date.now() - startedAt >= 100);
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
+test("the wait deadline recovers a foreign abandoned lock", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: "foreign-bootstrap-host",
+    pid: 1,
+  });
+  const startedAt = Date.now();
+  const result = await bootstrap({
+    ...bootstrapOptions(root, release.fetchImpl),
+    installLockTimeoutMs: 50,
+  });
+
+  assert.ok(Date.now() - startedAt >= 40);
   assert.equal(fs.existsSync(lockRoot), false);
   assert.equal(
     fs.readFileSync(result.binary_path, "utf8"),
@@ -486,7 +535,10 @@ test("independent processes safely converge on one atomic install", async (conte
   ];
   const installRoot = path.join(root, "install");
   fs.mkdirSync(installRoot);
-  fs.writeFileSync(path.join(installRoot, "install-manifest.json"), "corrupt\n");
+  fs.writeFileSync(
+    path.join(installRoot, "install-manifest.json"),
+    "corrupt\n",
+  );
   const outputs = await Promise.all(
     Array.from({ length: 8 }, () => runChild(childScript, childArguments)),
   );

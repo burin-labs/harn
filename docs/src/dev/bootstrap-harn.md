@@ -55,9 +55,17 @@ differs from newly published metadata, the run fails closed.
 Archive files and install directories are prepared beside their destinations
 and published atomically only after verification. Interrupted temporary paths
 never become cache or install state. Concurrent processes installing the same
-version may both do work, but they converge on one complete, validated
-installation; a process that loses publication validates the winner before
-returning.
+version may both extract work, but a `<install-dir>.lock` ownership record
+serializes validation, corrupt-state quarantine, and final publication. A
+process that loses publication validates the winner before returning.
+
+The publication lock records its host, process, and a unique ownership token.
+Waiters poll for at most 30 seconds before evicting one wedged or foreign owner,
+then acquire the boundary and revalidate any installation that owner may have
+published. A dead same-host process or a lock older than five minutes is
+reclaimed immediately. Filesystem mutations retry transient Windows sharing
+and antivirus errors while the boundary remains owned. Token-checked cleanup
+prevents an evicted process from later deleting its replacement's lock.
 
 The default cache is under the runner tool cache, `$XDG_CACHE_HOME`, Windows
 `%LOCALAPPDATA%`, or the user's `.cache` directory. The default installation
@@ -92,9 +100,11 @@ exact cache on a connected machine and run with `--offline`.
 
 Rerun the same command after a network interruption. Unique
 `.harn-bootstrap-*` leftovers are ignored and can be deleted after no bootstrap
-processes are active. If an operator must rebuild one entry, remove only that
-version's metadata/archive directory and its versioned install directory, then
-rerun online.
+processes are active. An `<install-dir>.lock` directory can likewise be removed
+after confirming no bootstrap process is active; normal runs reclaim dead,
+stale, or timed-out owners automatically. If an operator must rebuild one
+entry, remove only that version's metadata/archive directory and its versioned
+install directory, then rerun online.
 
 The bootstrapper does not silently build from source. A source build has
 different provenance, prerequisites, and cache semantics, so it must be an

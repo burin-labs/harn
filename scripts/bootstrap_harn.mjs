@@ -12,6 +12,8 @@ const INSTALL_LOCK_SCHEMA = "harn-bootstrap-install-lock-v1";
 const INSTALL_LOCK_POLL_MS = 10;
 const INSTALL_LOCK_TIMEOUT_MS = 30_000;
 const INSTALL_LOCK_STALE_MS = 5 * 60_000;
+const INSTALL_MUTATION_ATTEMPTS = 4;
+const INSTALL_MUTATION_RETRY_MS = 25;
 const SEMVER = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const CHECKSUM_LINE = /^([0-9a-fA-F]{64})[ \t]+\*?([^/\\\0]+)$/;
@@ -362,7 +364,32 @@ function processIsRunning(pid) {
   }
 }
 
-function reclaimAbandonedInstallLock(lockPath) {
+function retryableInstallMutation(error) {
+  return ["EACCES", "EBUSY", "EEXIST", "ENOTEMPTY", "ENOENT", "EPERM"].includes(
+    error.code,
+  );
+}
+
+async function discardInvalidWithRetries(candidate) {
+  for (let attempt = 1; attempt <= INSTALL_MUTATION_ATTEMPTS; attempt += 1) {
+    try {
+      discardInvalid(candidate);
+      return;
+    } catch (error) {
+      if (
+        !retryableInstallMutation(error) ||
+        attempt === INSTALL_MUTATION_ATTEMPTS
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, INSTALL_MUTATION_RETRY_MS),
+      );
+    }
+  }
+}
+
+async function reclaimAbandonedInstallLock(lockPath, force = false) {
   let owner = null;
   let ageMs;
   try {
@@ -381,17 +408,28 @@ function reclaimAbandonedInstallLock(lockPath) {
     owner.hostname === os.hostname() &&
     Number.isSafeInteger(owner.pid) &&
     owner.pid > 0;
+  // Hostname equality is useful evidence only for ordinary host processes;
+  // the age ceiling remains authoritative for shared container mounts where
+  // PID namespaces can differ despite equal configured hostnames.
   const abandoned =
     ageMs >= INSTALL_LOCK_STALE_MS ||
     (localOwner && !processIsRunning(owner.pid));
-  if (!abandoned) return false;
-  discardInvalid(lockPath);
+  if (!force && !abandoned) return false;
+  await discardInvalidWithRetries(lockPath);
   return true;
 }
 
-async function withInstallLock(installRoot, callback) {
+async function withInstallLock(
+  installRoot,
+  callback,
+  timeoutMs = INSTALL_LOCK_TIMEOUT_MS,
+) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("install lock timeout must be a positive number");
+  }
   const lockPath = `${installRoot}.lock`;
-  const deadline = Date.now() + INSTALL_LOCK_TIMEOUT_MS;
+  let deadline = Date.now() + timeoutMs;
+  let deadlineEvictions = 0;
   const token = crypto.randomUUID();
   for (;;) {
     try {
@@ -413,15 +451,26 @@ async function withInstallLock(installRoot, callback) {
       break;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      if (reclaimAbandonedInstallLock(lockPath)) continue;
       if (Date.now() >= deadline) {
-        throw new Error(`timed out waiting for Harn installation at ${installRoot}`);
+        if (deadlineEvictions >= 1) {
+          throw new Error(
+            `timed out waiting for Harn installation at ${installRoot}`,
+          );
+        }
+        // A critical section should finish in milliseconds. At the deadline,
+        // evict a wedged or foreign owner once, then acquire the lock and
+        // revalidate any installation it may already have published.
+        await reclaimAbandonedInstallLock(lockPath, true);
+        deadlineEvictions += 1;
+        deadline = Date.now() + timeoutMs;
+        continue;
       }
+      if (await reclaimAbandonedInstallLock(lockPath)) continue;
       await new Promise((resolve) => setTimeout(resolve, INSTALL_LOCK_POLL_MS));
     }
   }
   try {
-    return callback();
+    return await callback();
   } finally {
     try {
       const owner = JSON.parse(
@@ -436,17 +485,37 @@ async function withInstallLock(installRoot, callback) {
   }
 }
 
-async function commitInstall(temporary, installRoot, expected) {
-  return withInstallLock(installRoot, () => {
-    const current = readValidInstall(installRoot, expected);
-    if (current) {
-      fs.rmSync(temporary, { recursive: true, force: true });
-      return current;
-    }
-    discardInvalid(installRoot);
-    fs.renameSync(temporary, installRoot);
-    return readValidInstall(installRoot, expected);
-  });
+async function commitInstall(temporary, installRoot, expected, lockTimeoutMs) {
+  return withInstallLock(
+    installRoot,
+    async () => {
+      const current = readValidInstall(installRoot, expected);
+      if (current) return current;
+      for (
+        let attempt = 1;
+        attempt <= INSTALL_MUTATION_ATTEMPTS;
+        attempt += 1
+      ) {
+        try {
+          await discardInvalidWithRetries(installRoot);
+          fs.renameSync(temporary, installRoot);
+          return readValidInstall(installRoot, expected);
+        } catch (error) {
+          if (
+            !retryableInstallMutation(error) ||
+            attempt === INSTALL_MUTATION_ATTEMPTS
+          ) {
+            throw error;
+          }
+          await new Promise((resolve) =>
+            setTimeout(resolve, INSTALL_MUTATION_RETRY_MS),
+          );
+        }
+      }
+      return null;
+    },
+    lockTimeoutMs,
+  );
 }
 
 async function installVerifiedArchive(options) {
@@ -494,6 +563,7 @@ async function installVerifiedArchive(options) {
       temporary,
       options.installRoot,
       expected,
+      options.lockTimeoutMs,
     );
     if (!committed) {
       throw new Error(
@@ -501,9 +571,8 @@ async function installVerifiedArchive(options) {
       );
     }
     return committed;
-  } catch (error) {
+  } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
-    throw error;
   }
 }
 
@@ -598,6 +667,7 @@ export async function bootstrap(options = {}) {
     target: resolved.target,
     checksum: expectedChecksum,
     source: sourceUrl,
+    lockTimeoutMs: options.installLockTimeoutMs,
   });
   return {
     schema_version: RECEIPT_SCHEMA,
