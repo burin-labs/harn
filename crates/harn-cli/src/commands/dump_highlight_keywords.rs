@@ -44,7 +44,7 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
                 process::exit(1);
             }
         };
-        if normalize_line_endings(&existing) != normalize_line_endings(&generated) {
+        if normalize_line_endings(&existing) != normalize_line_endings(generated) {
             eprintln!(
                 "error: {} is stale relative to the lexer/stdlib.",
                 path.display()
@@ -61,7 +61,7 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
             process::exit(1);
         }
     }
-    if let Err(e) = fs::write(path, &generated) {
+    if let Err(e) = fs::write(path, generated) {
         eprintln!("error: cannot write {}: {e}", path.display());
         process::exit(1);
     }
