@@ -472,7 +472,7 @@ if [[ -s "$record" ]]; then
 fi
 
 registry="$repo_root/crates/harn-vm/src/environment_registry_names.txt"
-resolver_names="$(rg --no-filename -o 'HARN_[A-Z0-9_]+' \
+resolver_names="$(grep -Eho 'HARN_[A-Z0-9_]+' \
   "$repo_root/scripts/harn_bin.sh" "$repo_root/scripts/lib/harn_bin.sh" | sort -u)"
 if [[ "$(wc -l <<<"$resolver_names" | tr -d ' ')" -lt 4 ]]; then
   echo "registry guard discovered too few harn_bin environment controls" >&2
