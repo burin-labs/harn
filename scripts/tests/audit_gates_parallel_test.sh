@@ -34,12 +34,14 @@ if [[ -z "${HARN_SESSION_STORE_ROOT-}" || ! -d "$HARN_SESSION_STORE_ROOT" ]]; th
   echo "conformance shard did not receive an isolated session store" >&2
   exit 46
 fi
-# Opening the FIFO blocks until the audit fanout has reached its own barrier;
-# this proves ordering without a wall-clock polling loop.
-printf 'conformance-started\n' > "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-$shard_index"
-if [[ ! -f "$FAKE_AUDIT_ROOT/audit.started" ]]; then
-  echo "audit gates were not started before conformance completed" >&2
-  exit 41
+if [[ "${FAKE_SPLIT_PHASE-0}" != "1" ]]; then
+  # Opening the FIFO blocks until the audit fanout has reached its own barrier;
+  # this proves ordering without a wall-clock polling loop.
+  printf 'conformance-started\n' > "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-$shard_index"
+  if [[ ! -f "$FAKE_AUDIT_ROOT/audit.started" ]]; then
+    echo "audit gates were not started before conformance completed" >&2
+    exit 41
+  fi
 fi
 if [[ -n "${FAKE_CONFORMANCE_FAIL_SHARD-}" && "$shard_index" == "$FAKE_CONFORMANCE_FAIL_SHARD" ]]; then
   echo "fake conformance shard $shard_index failed" >&2
@@ -75,15 +77,17 @@ case "$*" in
     ;;
   -j3\ -k\ -Otarget\ *|-j1\ -k\ -Otarget\ *)
     touch "$FAKE_AUDIT_ROOT/audit.started"
-    exec 3< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-1"
-    exec 4< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-2"
-    exec 5< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-3"
-    IFS= read -r <&3
-    IFS= read -r <&4
-    IFS= read -r <&5
-    exec 3<&-
-    exec 4<&-
-    exec 5<&-
+    if [[ "${FAKE_SPLIT_PHASE-0}" != "1" ]]; then
+      exec 3< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-1"
+      exec 4< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-2"
+      exec 5< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-3"
+      IFS= read -r <&3
+      IFS= read -r <&4
+      IFS= read -r <&5
+      exec 3<&-
+      exec 4<&-
+      exec 5<&-
+    fi
     if [[ "${FAKE_AUDIT_FAIL-0}" == "1" ]]; then
       # Exactly how GNU make reports a failing target under `-k`, because the
       # failure summary parses these lines to name the gates.
@@ -174,6 +178,68 @@ fi
 if ! grep -Fq $'invocation\tcheck-test-case-performance' "$record"; then
   echo "performance gate did not run as an isolated phase" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+# CI consumes the same warm binary from two independent matrix workers. Each
+# phase must be complete by itself and must not quietly execute its sibling's
+# workload (which would restore the CPU contention this split removes).
+split_conformance_record="$tmp_root/split-conformance-record.txt"
+split_conformance_make_record="$tmp_root/split-conformance-make-record.txt"
+FAKE_SPLIT_PHASE=1 \
+  AUDIT_GATES_CONCURRENCY=3 \
+  HARN_CONFORMANCE_SHARDS=3 \
+  HARN_BIN="$fake_harn" \
+  FAKE_AUDIT_RECORD="$split_conformance_make_record" \
+  FAKE_CONFORMANCE_RECORD="$split_conformance_record" \
+  FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/audit_gates.sh" --phase conformance > "$tmp_root/split-conformance.out"
+if [[ "$(wc -l < "$split_conformance_record" | tr -d ' ')" != "3" ]]; then
+  echo "conformance worker did not run exactly three shards" >&2
+  exit 1
+fi
+if ! grep -Fq $'invocation\tcheck-test-case-performance' "$split_conformance_make_record"; then
+  echo "conformance worker omitted its isolated performance ratchet" >&2
+  exit 1
+fi
+if grep -Fq $'\t-j3 -k -Otarget ' "$split_conformance_make_record"; then
+  echo "conformance worker also ran the audit fanout" >&2
+  exit 1
+fi
+if ! grep -Fxq "=== conformance and performance gates passed ===" "$tmp_root/split-conformance.out"; then
+  echo "conformance worker omitted its terminal marker" >&2
+  exit 1
+fi
+
+split_audit_record="$tmp_root/split-audit-record.txt"
+split_audit_conformance_record="$tmp_root/split-audit-conformance-record.txt"
+: > "$split_audit_conformance_record"
+FAKE_SPLIT_PHASE=1 \
+  AUDIT_GATES_CONCURRENCY=3 \
+  HARN_CONFORMANCE_SHARDS=3 \
+  HARN_BIN="$fake_harn" \
+  FAKE_AUDIT_RECORD="$split_audit_record" \
+  FAKE_CONFORMANCE_RECORD="$split_audit_conformance_record" \
+  FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/audit_gates.sh" --phase audit > "$tmp_root/split-audit.out"
+if [[ -s "$split_audit_conformance_record" ]]; then
+  echo "audit worker also ran conformance" >&2
+  exit 1
+fi
+if ! grep -Fq $'\t-j3 -k -Otarget ' "$split_audit_record"; then
+  echo "audit worker omitted its independent fanout" >&2
+  exit 1
+fi
+if grep -Fq $'invocation\tcheck-test-case-performance' "$split_audit_record"; then
+  echo "audit worker also ran the performance ratchet" >&2
+  exit 1
+fi
+if ! grep -Fxq "=== audit gates passed ===" "$tmp_root/split-audit.out"; then
+  echo "audit worker omitted its terminal marker" >&2
   exit 1
 fi
 
