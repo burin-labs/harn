@@ -57,6 +57,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "edit/capabilities" => "stdlib/edit/capabilities.harn",
     "edit/internal" => "stdlib/edit/internal.harn",
     "edit/patch" => "stdlib/edit/patch.harn",
+    "edit/refactor_runtime" => "stdlib/edit/refactor_runtime.harn",
     "edit/safe_patch" => "stdlib/edit/safe_patch.harn",
     "edit/fast_apply" => "stdlib/edit/fast_apply.harn",
     "ast" => "stdlib/stdlib_ast.harn",
