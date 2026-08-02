@@ -358,6 +358,7 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
 struct RealProcess {
     pid: u32,
     pgid: Option<u32>,
+    #[cfg(not(target_os = "windows"))]
     cleanup_token: String,
     killer: Arc<dyn ProcessKiller>,
     child: Option<Child>,
@@ -391,6 +392,7 @@ fn real_process(
     Box::new(RealProcess {
         pid,
         pgid,
+        #[cfg(not(target_os = "windows"))]
         cleanup_token,
         killer,
         child: Some(child),
