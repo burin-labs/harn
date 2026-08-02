@@ -106,9 +106,13 @@ jq '.delegations, [.checks[] | select(.status != "passed")]' run-report.json
 
 The report follows each typed `child_runs[].run_path`, checks the child's
 back-pointer, and keeps the source hash beside the projected evidence. Add
-`--events-db <path>` when the run used a SQLite event log. A `null` wait or
-join duration means that the source artifacts did not record it; the report
-does not turn missing timing into zero.
+`--events-db <path>` when the run used a SQLite event log. Canonical join
+receipts make `coordination.unjoined` exact for terminal children and let
+`observed_join_ms` report the worst terminal-to-collection lag. Both remain
+`null` when event evidence is absent, malformed, or truncated. Parent wait and
+result-processing time remain unknown because a join receipt does not record a
+wait-start or processing boundary; the report never turns missing timing into
+zero.
 
 Each timeline includes `coverage.returned`, `coverage.available`, and
 `coverage.truncated`. Treat a missing event as evidence only when `truncated`
