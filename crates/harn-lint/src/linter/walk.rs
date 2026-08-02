@@ -1,9 +1,12 @@
 //! The main AST dispatch, isolated so `lint_node` does not dominate the
 //! surrounding state-tracking plumbing.
 
+mod casts;
+
 use harn_lexer::{FixEdit, Span, StringSegment};
 use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode};
 
+use self::casts::unnecessary_cast_target;
 use super::Linter;
 use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -1354,6 +1357,11 @@ impl<'a> Linter<'a> {
                                 && matches!(&arg.value.node, Node::Identifier(s) if s == "allow")
                         })
                 });
+                for attribute in attributes {
+                    for argument in &attribute.args {
+                        self.record_attribute_argument_references(&argument.value);
+                    }
+                }
                 if suppresses_complexity {
                     self.complexity_suppression_depth += 1;
                 }
@@ -1368,6 +1376,41 @@ impl<'a> Linter<'a> {
                     self.lint_node(alt);
                 }
             }
+        }
+    }
+
+    /// Attribute values are compile-time metadata, not runtime expressions.
+    /// Bare identifiers can name source bindings (for example, an evidence
+    /// constant) or schema-owned symbolic values. Without an attribute schema
+    /// those cases are intentionally indistinguishable, so record every bare
+    /// identifier for unused-declaration analysis while keeping runtime lints
+    /// off this surface.
+    fn record_attribute_argument_references(&mut self, value: &SNode) {
+        match &value.node {
+            Node::Identifier(name) => {
+                self.references.insert(name.clone());
+                self.function_references.insert(name.clone());
+            }
+            // Call heads are schema-owned sentinels such as `schedule`, not
+            // runtime bindings. Their arguments may still contain bindings.
+            Node::FunctionCall { args, .. } => {
+                for argument in args {
+                    self.record_attribute_argument_references(argument);
+                }
+            }
+            Node::ListLiteral(items) => {
+                for item in items {
+                    self.record_attribute_argument_references(item);
+                }
+            }
+            Node::DictLiteral(entries) => {
+                for entry in entries {
+                    // Dict keys name metadata fields; only values can refer
+                    // to source bindings.
+                    self.record_attribute_argument_references(&entry.value);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1443,58 +1486,4 @@ impl<'a> Linter<'a> {
             BindingPattern::Identifier(_) | BindingPattern::Pair(_, _) => {}
         }
     }
-}
-
-/// If `name` is one of the conversion builtins (`to_string`, `to_int`,
-/// `to_float`, `to_list`, `to_dict`) and `args` is exactly one expression
-/// already syntactically known to be of the target type, return the
-/// human-readable target name (`"string"`, `"int"`, ...). Returns `None`
-/// otherwise — including for valid conversions like `to_int("42")` and for
-/// calls with the wrong arity, both of which the lint must leave alone.
-fn unnecessary_cast_target(name: &str, args: &[SNode]) -> Option<&'static str> {
-    if args.len() != 1 {
-        return None;
-    }
-    let arg = &args[0].node;
-    let target = match name {
-        "to_string" => "string",
-        "to_int" => "int",
-        "to_float" => "float",
-        "to_list" => "list",
-        "to_dict" => "dict",
-        _ => return None,
-    };
-    if expr_has_known_type(arg, name) {
-        Some(target)
-    } else {
-        None
-    }
-}
-
-/// Static-shape check: does `node` already produce a value of the type
-/// that `cast` would yield? Conservative — only literals of matching shape
-/// and a chained call to the same conversion builtin count.
-fn expr_has_known_type(node: &Node, cast: &str) -> bool {
-    // Chained `to_X(to_X(...))` — outer is always redundant regardless of
-    // what the inner expression is.
-    if let Node::FunctionCall {
-        name: inner_name,
-        args: inner_args,
-        ..
-    } = node
-    {
-        if inner_name == cast && inner_args.len() == 1 {
-            return true;
-        }
-    }
-    matches!(
-        (cast, node),
-        (
-            "to_string",
-            Node::StringLiteral(_) | Node::RawStringLiteral(_) | Node::InterpolatedString(_),
-        ) | ("to_int", Node::IntLiteral(_))
-            | ("to_float", Node::FloatLiteral(_))
-            | ("to_list", Node::ListLiteral(_))
-            | ("to_dict", Node::DictLiteral(_))
-    )
 }

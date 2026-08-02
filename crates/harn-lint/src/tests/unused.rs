@@ -266,6 +266,49 @@ mutex(key) {
 }
 
 #[test]
+fn test_attribute_arguments_mark_nested_identifiers_used() {
+    let diags = lint_source(
+        r#"const evidence_used = ["https://example.com/spec"]
+const metadata_used = "fixture-a"
+const genuinely_unused = ["https://example.com/unused"]
+const id = "dict keys are not source references"
+
+fn attribute_only_fallback() -> bool { return true }
+
+@invariant
+@deterministic
+@archivist(evidence: evidence_used, confidence: 0.9, source_date: "2026-08-01", coverage_examples: [{id: metadata_used}], fallback: attribute_only_fallback, trigger: schedule("*/30 * * * *"), autonomy: act_with_approval)
+pub fn inspect(_slice, _ctx, _repo) -> bool { return true }
+"#,
+    );
+    let unused: Vec<_> = diags
+        .iter()
+        .filter(|diagnostic| diagnostic.code == Code::LintUnusedVariable)
+        .collect();
+    assert_eq!(unused.len(), 2, "only genuine source references count");
+    assert_eq!(
+        unused
+            .iter()
+            .map(|diagnostic| diagnostic.span.line)
+            .collect::<Vec<_>>(),
+        vec![3, 4],
+        "diagnostics must target the unused declaration and colliding dict key"
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == Code::LintUndefinedFunction),
+        "call-shaped attribute sentinels are metadata, not runtime calls"
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == Code::LintUnusedFunction),
+        "an attribute-only function reference must count as a real use"
+    );
+}
+
+#[test]
 fn test_multiple_rules() {
     let diags = lint_source(
         r#"
