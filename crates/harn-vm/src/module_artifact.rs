@@ -70,7 +70,7 @@ pub struct ModuleArtifact {
     pub imports: Vec<ModuleImportSpec>,
     /// Cached bytecode that materializes exported type aliases after imports
     /// are bound and before value initialization runs.
-    pub type_schema_init_chunk: Option<CachedChunk>,
+    pub type_schema_init_chunks: Vec<CachedChunk>,
     pub init_chunk: Option<CachedChunk>,
     pub functions: BTreeMap<String, CachedCompiledFunction>,
     /// The public declaration contract shared with `harn-modules`. Each name
@@ -98,7 +98,7 @@ impl ModuleArtifact {
     /// the load boundary instead of duplicating otherwise-identical artifacts.
     pub(crate) fn bind_source_file(&mut self, source_path: &Path) {
         let source_file = source_path.display().to_string();
-        if let Some(chunk) = &mut self.type_schema_init_chunk {
+        for chunk in &mut self.type_schema_init_chunks {
             bind_chunk_source_file(chunk, &source_file);
         }
         if let Some(chunk) = &mut self.init_chunk {
@@ -321,15 +321,17 @@ fn compile_module_artifact_with_provenance(
         functions.insert(name.clone(), func_chunk.freeze_for_cache());
     }
 
-    let type_schema_init_chunk =
+    let type_schema_init_chunks =
         crate::Compiler::compile_public_type_schema_initializers(program, module_source_file)
             .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
-            .map(|chunk| chunk.freeze_for_cache());
+            .into_iter()
+            .map(|chunk| chunk.freeze_for_cache())
+            .collect();
 
     Ok(ModuleArtifact {
         provenance,
         imports,
-        type_schema_init_chunk,
+        type_schema_init_chunks,
         init_chunk,
         functions,
         public_exports,
@@ -599,7 +601,7 @@ pub type UserList = list<UserShape>
         );
         assert!(artifact.public_type_names.contains("UserShape"));
         assert!(artifact.public_type_names.contains("UserList"));
-        assert!(artifact.type_schema_init_chunk.is_some());
+        assert_eq!(artifact.type_schema_init_chunks.len(), 2);
     }
 
     #[test]
@@ -664,7 +666,11 @@ pub type Wrapped = {value: External}
         let source_path = Path::new("<test>/wrapped.harn");
         let artifact =
             compile_module_artifact_from_source(source_path, source).expect("module compiles");
-        let chunk = artifact.type_schema_init_chunk.expect("schema initializer");
+        let chunk = artifact
+            .type_schema_init_chunks
+            .into_iter()
+            .next()
+            .expect("schema initializer");
         assert_eq!(chunk.source_file.as_deref(), Some("<test>/wrapped.harn"));
         assert!(chunk
             .constants

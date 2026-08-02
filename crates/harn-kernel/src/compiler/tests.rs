@@ -66,12 +66,11 @@ pub type Open = {name: string, ...dict<string, int>}
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
-    let chunk = Compiler::compile_public_type_schema_initializers(&program, None)
-        .unwrap()
-        .expect("schema initializer");
-    let strings = chunk
-        .constants
+    let chunks = Compiler::compile_public_type_schema_initializers(&program, None).unwrap();
+    assert_eq!(chunks.len(), 2, "one initializer per public alias");
+    let strings = chunks
         .iter()
+        .flat_map(|chunk| &chunk.constants)
         .filter_map(|constant| match constant {
             Constant::String(value) => Some(value.as_str()),
             _ => None,
@@ -106,12 +105,11 @@ pub type Doc = {headers?: dict<string, RefOr<Header>>}
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
-    let chunk = Compiler::compile_public_type_schema_initializers(&program, None)
-        .unwrap()
-        .expect("schema initializer");
-    let strings = chunk
-        .constants
+    let chunks = Compiler::compile_public_type_schema_initializers(&program, None).unwrap();
+    assert_eq!(chunks.len(), 1, "one public alias");
+    let strings = chunks
         .iter()
+        .flat_map(|chunk| &chunk.constants)
         .filter_map(|constant| match constant {
             Constant::String(value) => Some(value.as_str()),
             _ => None,
@@ -156,12 +154,15 @@ pub type OpenRow = {id: string, score?: float, ...rest}
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
-    let chunk = Compiler::compile_public_type_schema_initializers(&program, None)
-        .unwrap()
-        .expect("open-row alias materializes a schema initializer");
-    let strings = chunk
-        .constants
+    let chunks = Compiler::compile_public_type_schema_initializers(&program, None).unwrap();
+    assert_eq!(
+        chunks.len(),
+        1,
+        "open-row alias materializes an initializer"
+    );
+    let strings = chunks
         .iter()
+        .flat_map(|chunk| &chunk.constants)
         .filter_map(|constant| match constant {
             Constant::String(value) => Some(value.as_str()),
             _ => None,

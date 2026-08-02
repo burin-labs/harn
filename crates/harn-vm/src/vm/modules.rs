@@ -591,7 +591,7 @@ impl Vm {
 
         let module_state: crate::value::ModuleState = {
             let mut init_env = self.env.clone();
-            if artifact.type_schema_init_chunk.is_some() || artifact.init_chunk.is_some() {
+            if !artifact.type_schema_init_chunks.is_empty() || artifact.init_chunk.is_some() {
                 let saved_env = std::mem::replace(&mut self.env, init_env);
                 let saved_frames = std::mem::take(&mut self.frames);
                 let saved_handlers = std::mem::take(&mut self.exception_handlers);
@@ -609,7 +609,7 @@ impl Vm {
                 // surface.
                 let active_context = crate::step_runtime::suspend_active_context();
                 let init_result: Result<(), VmError> = async {
-                    if let Some(chunk) = &artifact.type_schema_init_chunk {
+                    for chunk in &artifact.type_schema_init_chunks {
                         self.run_chunk(Arc::clone(chunk)).await?;
                     }
                     if let Some(chunk) = &artifact.init_chunk {

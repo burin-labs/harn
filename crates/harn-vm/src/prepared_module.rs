@@ -25,7 +25,7 @@ const DEFAULT_MAX_ENTRIES: usize = 512;
 pub(crate) struct PreparedModuleArtifact {
     pub(crate) provenance: ModuleProvenance,
     pub(crate) imports: Vec<ModuleImportSpec>,
-    pub(crate) type_schema_init_chunk: Option<Arc<Chunk>>,
+    pub(crate) type_schema_init_chunks: Vec<Arc<Chunk>>,
     pub(crate) init_chunk: Option<Arc<Chunk>>,
     pub(crate) functions: BTreeMap<String, Arc<CompiledFunction>>,
     pub(crate) public_exports: BTreeMap<String, DefKind>,
@@ -38,15 +38,17 @@ impl PreparedModuleArtifact {
         let ModuleArtifact {
             provenance,
             imports,
-            type_schema_init_chunk,
+            type_schema_init_chunks,
             init_chunk,
             functions,
             public_exports,
             public_value_names,
             public_type_names,
         } = artifact;
-        let type_schema_init_chunk =
-            type_schema_init_chunk.map(|chunk| Arc::new(Chunk::from_cached(chunk)));
+        let type_schema_init_chunks = type_schema_init_chunks
+            .into_iter()
+            .map(|chunk| Arc::new(Chunk::from_cached(chunk)))
+            .collect();
         let init_chunk = init_chunk.map(|chunk| Arc::new(Chunk::from_cached(chunk)));
         let functions = functions
             .into_iter()
@@ -55,7 +57,7 @@ impl PreparedModuleArtifact {
         Self {
             provenance,
             imports,
-            type_schema_init_chunk,
+            type_schema_init_chunks,
             init_chunk,
             functions,
             public_exports,
@@ -328,7 +330,7 @@ mod tests {
         Arc::new(PreparedModuleArtifact::from_cached(ModuleArtifact {
             provenance,
             imports: Vec::new(),
-            type_schema_init_chunk: None,
+            type_schema_init_chunks: Vec::new(),
             init_chunk: None,
             functions: BTreeMap::new(),
             public_exports: BTreeMap::new(),
@@ -432,12 +434,11 @@ pub fn answer(items: list<string>) {
             .as_ptr();
         let selected_name = artifact.imports[0].selected_names.as_ref().unwrap()[0].as_ptr();
         let init_code = artifact.init_chunk.as_ref().unwrap().code.as_ptr();
-        let schema_init_code = artifact
-            .type_schema_init_chunk
-            .as_ref()
-            .unwrap()
-            .code
-            .as_ptr();
+        let schema_init_codes = artifact
+            .type_schema_init_chunks
+            .iter()
+            .map(|chunk| chunk.code.as_ptr())
+            .collect::<Vec<_>>();
         let (function_key, function) = artifact.functions.first_key_value().unwrap();
         let function_key = function_key.as_ptr();
         let function_name = function.name.as_ptr();
@@ -477,12 +478,11 @@ pub fn answer(items: list<string>) {
         );
         assert_eq!(
             hydrated
-                .type_schema_init_chunk
-                .as_ref()
-                .unwrap()
-                .code
-                .as_ptr(),
-            schema_init_code
+                .type_schema_init_chunks
+                .iter()
+                .map(|chunk| chunk.code.as_ptr())
+                .collect::<Vec<_>>(),
+            schema_init_codes
         );
         let (hydrated_function_key, hydrated_function) =
             hydrated.functions.first_key_value().unwrap();
