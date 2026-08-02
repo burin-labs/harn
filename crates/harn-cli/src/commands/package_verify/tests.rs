@@ -117,6 +117,51 @@ fn package_gates_share_exact_input_exclusions() {
 }
 
 #[test]
+fn package_test_discovery_recurses_through_owned_test_lanes() {
+    let dir = tempfile::tempdir().unwrap();
+    for relative in [
+        "tests/unit/parse.harn",
+        "tests/contract/provider.harn",
+        "tests/integration/workflow.harn",
+    ] {
+        let path = dir.path().join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "pipeline test_case(harness: Harness, task) {}\n").unwrap();
+    }
+    fs::write(
+        dir.path().join("tests/unit/helpers.harn"),
+        "fn helper() { return true }\n",
+    )
+    .unwrap();
+    for relative in [
+        "tests/.harn/generated.harn",
+        "tests/.harn-runs/session/generated.harn",
+    ] {
+        let path = dir.path().join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "pipeline test_generated(harness: Harness, task) {}\n",
+        )
+        .unwrap();
+    }
+
+    let files = package_test_files(dir.path())
+        .into_iter()
+        .map(|path| path.strip_prefix(dir.path()).unwrap().to_path_buf())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        files,
+        [
+            PathBuf::from("tests/contract/provider.harn"),
+            PathBuf::from("tests/integration/workflow.harn"),
+            PathBuf::from("tests/unit/parse.harn"),
+        ]
+    );
+}
+
+#[test]
 fn package_gate_stderr_label_matches_gate_status() {
     let mut check = PackageVerifyCheck {
         status: "pass".to_string(),
