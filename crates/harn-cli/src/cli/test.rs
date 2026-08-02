@@ -1,4 +1,10 @@
-use clap::{ArgAction, Args};
+use clap::{ArgAction, Args, ValueEnum};
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum InternalConformanceWorkerMode {
+    ExecuteXfail,
+    SkipXfail,
+}
 
 #[derive(Debug, Args)]
 pub(crate) struct TestArgs {
@@ -55,7 +61,7 @@ pub(crate) struct TestArgs {
         env = "HARN_TEST_MAX_EXECUTE_MS"
     )]
     pub max_execute_ms: Option<u64>,
-    /// Run user tests concurrently where supported.
+    /// Run user tests concurrently, or conformance tests in isolated processes.
     #[arg(long)]
     pub parallel: bool,
     /// Stop scheduling new user tests after the first failure. Tests already
@@ -77,6 +83,9 @@ pub(crate) struct TestArgs {
     /// Total number of user or conformance test shards. Pair with `--shard-index`.
     #[arg(long = "shard-total", value_name = "N", env = "HARN_TEST_SHARD_TOTAL")]
     pub shard_total: Option<usize>,
+    /// Internal transport for the process-isolated conformance worker.
+    #[arg(long = "internal-conformance-worker", value_name = "MODE", hide = true)]
+    pub internal_conformance_worker: Option<InternalConformanceWorkerMode>,
     /// Re-run user tests when watched files change.
     #[arg(long)]
     pub watch: bool,

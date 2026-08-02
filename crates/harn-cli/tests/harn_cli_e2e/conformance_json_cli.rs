@@ -5,7 +5,7 @@ use std::process::{Command, Output};
 use harn_cli::tests::common::json_envelope::assert_envelope;
 use serde_json::Value;
 
-const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 2;
+const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 3;
 
 fn binary_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
@@ -27,6 +27,24 @@ fn run_conformance_json(root: &std::path::Path) -> Output {
         .env("HARN_EVENT_LOG_BACKEND", "memory")
         .output()
         .expect("spawn harn test conformance --json")
+}
+
+fn run_parallel_conformance_json(root: &std::path::Path) -> Output {
+    Command::new(binary_path())
+        .args([
+            "test",
+            "conformance",
+            "--json",
+            "--parallel",
+            "--jobs",
+            "2",
+            "--timeout",
+            "10000",
+        ])
+        .current_dir(root)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn parallel harn test conformance --json")
 }
 
 fn parse_stdout(output: &Output) -> Value {
@@ -89,6 +107,92 @@ fn conformance_json_reports_pass_and_expected_xfail() {
     let second_parsed = parse_stdout(&second);
     let second_data = assert_envelope(&second_parsed, CONFORMANCE_TEST_SCHEMA_VERSION);
     assert_eq!(second_data["snapshotKey"], data["snapshotKey"]);
+}
+
+#[test]
+fn parallel_conformance_json_matches_sequential_results() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    for index in 0..6 {
+        write_fixture(
+            temp.path(),
+            &format!("group/case-{index}.harn"),
+            &format!(
+                "pipeline test(harness: Harness, task) {{\n  harness.stdio.println({index})\n}}\n"
+            ),
+            &format!("{index}\n"),
+        );
+    }
+
+    let sequential = run_conformance_json(temp.path());
+    let parallel = run_parallel_conformance_json(temp.path());
+    assert!(
+        sequential.status.success() && parallel.status.success(),
+        "sequential stderr={}\nparallel stderr={}",
+        String::from_utf8_lossy(&sequential.stderr),
+        String::from_utf8_lossy(&parallel.stderr),
+    );
+    let sequential = parse_stdout(&sequential);
+    let parallel = parse_stdout(&parallel);
+    let sequential_data = assert_envelope(&sequential, CONFORMANCE_TEST_SCHEMA_VERSION);
+    let parallel_data = assert_envelope(&parallel, CONFORMANCE_TEST_SCHEMA_VERSION);
+
+    assert_eq!(parallel_data["snapshotKey"], sequential_data["snapshotKey"]);
+    assert_eq!(parallel_data["summary"], sequential_data["summary"]);
+    let stable_results = |data: &Value| {
+        data["results"]
+            .as_array()
+            .expect("results array")
+            .iter()
+            .map(|result| {
+                serde_json::json!({
+                    "name": result["name"],
+                    "outcome": result["outcome"],
+                    "message": result["message"],
+                    "diagnostic_codes": result["diagnostic_codes"],
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        stable_results(parallel_data),
+        stable_results(sequential_data)
+    );
+}
+
+#[test]
+fn parallel_text_conformance_skips_xfail_cases_without_executing_them() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    write_fixture(
+        temp.path(),
+        "xfail.harn",
+        "// @xfail: tracked in #999\npipeline test(harness: Harness, task) {\n  harness.stdio.println(true)\n}\n",
+        "true\n",
+    );
+
+    let output = Command::new(binary_path())
+        .args([
+            "test",
+            "conformance",
+            "--parallel",
+            "--jobs",
+            "2",
+            "--timeout",
+            "10000",
+        ])
+        .current_dir(temp.path())
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn parallel text conformance runner");
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("xfail.harn  (tracked in #999)"));
+    assert!(stdout.contains("0 passed, 0 failed, 1 skipped, 1 total"));
 }
 
 #[test]

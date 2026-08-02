@@ -53,8 +53,8 @@ impl Drop for RunnerCleanup {
 #[test]
 fn completed_case_reaps_a_surviving_helper_before_success() {
     let fixture = LifetimeFixture::new(false);
-    let mut runner = RunnerCleanup::new(fixture.spawn_runner());
-    let helper_pid = fixture.read_helper_pid();
+    let mut runner = RunnerCleanup::new(fixture.spawn_runner(false));
+    let helper_pid = fixture.read_helper_pid(runner.child_mut());
     let mut cleanup = HelperCleanup(helper_pid);
     let output = runner
         .take()
@@ -80,10 +80,19 @@ fn completed_case_reaps_a_surviving_helper_before_success() {
 
 #[test]
 fn sigint_and_sigkill_of_runner_do_not_strand_helpers() {
+    assert_signals_do_not_strand_helpers(false);
+}
+
+#[test]
+fn sigint_and_sigkill_of_parallel_runner_do_not_strand_workers_or_helpers() {
+    assert_signals_do_not_strand_helpers(true);
+}
+
+fn assert_signals_do_not_strand_helpers(parallel: bool) {
     for signal in [libc::SIGINT, libc::SIGKILL] {
         let fixture = LifetimeFixture::new(true);
-        let mut runner = RunnerCleanup::new(fixture.spawn_runner());
-        let helper_pid = fixture.read_helper_pid();
+        let mut runner = RunnerCleanup::new(fixture.spawn_runner(parallel));
+        let helper_pid = fixture.read_helper_pid(runner.child_mut());
         let mut cleanup = HelperCleanup(helper_pid);
 
         assert_eq!(
@@ -149,7 +158,7 @@ impl LifetimeFixture {
         }
     }
 
-    fn spawn_runner(&self) -> std::process::Child {
+    fn spawn_runner(&self, parallel: bool) -> std::process::Child {
         let mut command = harn_e2e_command();
         command
             .current_dir(&self.root_path)
@@ -158,6 +167,9 @@ impl LifetimeFixture {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .process_group(0);
+        if parallel {
+            command.args(["--parallel", "--jobs", "2"]);
+        }
         let runner = command.spawn().expect("spawn conformance runner");
         unsafe {
             libc::close(self.report_write);
@@ -165,17 +177,32 @@ impl LifetimeFixture {
         runner
     }
 
-    fn read_helper_pid(&self) -> i32 {
+    fn read_helper_pid(&self, runner: &mut std::process::Child) -> i32 {
         let mut line = String::new();
         let mut report = self.report.lock().expect("lock helper report");
         wait_for_report_event(report.get_ref().as_raw_fd(), "helper pid");
         report.read_line(&mut line).expect("read helper pid");
         let mut fields = line.split_whitespace();
-        let pid = fields
-            .next()
-            .expect("helper pid field")
-            .parse()
-            .expect("parse helper pid");
+        let pid = fields.next().unwrap_or_else(|| {
+            let status = runner.try_wait().expect("inspect conformance runner");
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            if let Some(stream) = runner.stdout.as_mut() {
+                stream
+                    .read_to_string(&mut stdout)
+                    .expect("read runner stdout");
+            }
+            if let Some(stream) = runner.stderr.as_mut() {
+                stream
+                    .read_to_string(&mut stderr)
+                    .expect("read runner stderr");
+            }
+            panic!(
+                "helper report closed before a pid was written; runner status: {status:?}\n\
+                 stdout:\n{stdout}\nstderr:\n{stderr}"
+            )
+        });
+        let pid = pid.parse().expect("parse helper pid");
         assert!(
             fields
                 .next()

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::test_report::{TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
@@ -12,7 +12,7 @@ use crate::test_timing::DurationSummary;
 
 use super::{logical_path, UserTestOutputOptions};
 
-pub(crate) const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 2;
+pub(crate) const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 3;
 
 pub(super) fn extract_diagnostic_codes(message: &str) -> Vec<String> {
     let re = Regex::new(r"\bHARN-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b")
@@ -24,16 +24,17 @@ pub(super) fn extract_diagnostic_codes(message: &str) -> Vec<String> {
     codes.into_iter().collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum ConformanceJsonOutcome {
     Pass,
     Fail,
     XfailExpected,
     XfailUnexpectedPass,
+    Skipped,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(super) struct ConformanceJsonResult {
     pub(super) name: String,
     pub(super) outcome: ConformanceJsonOutcome,
@@ -42,7 +43,7 @@ pub(super) struct ConformanceJsonResult {
     pub(super) diagnostic_codes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub(super) struct ConformanceJsonSummary {
     pub(super) pass: u64,
     pub(super) fail: u64,
@@ -58,6 +59,7 @@ impl ConformanceJsonSummary {
             ConformanceJsonOutcome::Fail => self.fail += 1,
             ConformanceJsonOutcome::XfailExpected => self.xfail_expected += 1,
             ConformanceJsonOutcome::XfailUnexpectedPass => self.xfail_unexpected_pass += 1,
+            ConformanceJsonOutcome::Skipped => self.skipped += 1,
         }
     }
 
@@ -66,13 +68,13 @@ impl ConformanceJsonSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(super) struct ConformanceJsonReport {
     #[serde(rename = "snapshotKey")]
-    snapshot_key: String,
-    results: Vec<ConformanceJsonResult>,
-    summary: ConformanceJsonSummary,
-    timing: DurationSummary,
+    pub(super) snapshot_key: String,
+    pub(super) results: Vec<ConformanceJsonResult>,
+    pub(super) summary: ConformanceJsonSummary,
+    pub(super) timing: DurationSummary,
 }
 
 impl ConformanceJsonReport {

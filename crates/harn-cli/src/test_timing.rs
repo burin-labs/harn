@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Aggregate wall-clock durations for a population of test samples.
 ///
 /// Metrics are `None` when the population is empty so a serialized summary
 /// distinguishes "not measured" from an observed zero-millisecond duration.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DurationSummary {
     /// Number of measured samples.
     pub sample_count: u64,

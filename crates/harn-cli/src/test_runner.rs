@@ -566,6 +566,14 @@ fn resolve_workers(options: &RunOptions) -> usize {
     apply_memory_cap(core_cap)
 }
 
+pub(crate) fn resolve_parallel_workers(jobs: Option<usize>) -> usize {
+    resolve_workers(&RunOptions {
+        parallel: true,
+        jobs,
+        ..RunOptions::default()
+    })
+}
+
 /// Lower `core_cap` to what currently-available system memory can hold, so an
 /// auto-sized parallel suite backs off on a loaded or small host instead of
 /// overcommitting RAM. Returns `core_cap` unchanged when memory is plentiful

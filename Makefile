@@ -268,7 +268,7 @@ test-fast:
 
 # Run Harn conformance test suite
 conformance:
-	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance --parallel
 
 # Mechanism-contract onramp tier: the manufactured mini-evals that prove a new
 # termination/escalation/judge/guard/routing mechanism ENGAGES correctly (fires
