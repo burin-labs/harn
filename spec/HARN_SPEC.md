@@ -1204,6 +1204,11 @@ the same name from different sources — or a re-export that shadows a
 local `pub` declaration — are reported by `harn check` as a re-export
 conflict naming every contributing module.
 
+A re-exported callable keeps its complete parameter and return-type
+contract. Callers do not need separate imports for aliases used only by
+that signature. Those aliases remain type-checking dependencies; they do
+not become public names unless the module also exports them.
+
 Imported pipelines are registered for later invocation.
 Non-pipeline top-level statements (fn declarations, let bindings) are executed immediately.
 
