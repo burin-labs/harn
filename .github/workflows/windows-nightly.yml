@@ -74,6 +74,11 @@ jobs:
             CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/rust-cache
+        # A release commit changes every workspace package version. Restoring
+        # the main target generation then retains old and new artifacts side by
+        # side until the fixed 25 GB Dev Drive fills. Exact-candidate runs are
+        # deliberately cold; dependency downloads still use Cargo's registry.
+        if: ${{ !startsWith(github.ref_name, 'release-certify/') }}
         continue-on-error: true
         with:
           # This scheduled default-branch run is the sole writer for the
@@ -89,6 +94,14 @@ jobs:
           cache-on-failure: true
           cache-bin: false
           save: true
+      - name: Report Windows build storage
+        shell: pwsh
+        run: |
+          $target = $env:CARGO_TARGET_DIR
+          if (-not $target) { $target = Join-Path $env:GITHUB_WORKSPACE "target" }
+          $root = [System.IO.Path]::GetPathRoot($target)
+          $drive = Get-PSDrive -Name $root.TrimEnd('\').TrimEnd(':')
+          "target=$target target_present=$(Test-Path $target) drive_free_bytes=$($drive.Free) drive_used_bytes=$($drive.Used)"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
         with:

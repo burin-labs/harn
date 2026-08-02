@@ -301,7 +301,11 @@ fn workflows() {
             {uses: "actions/checkout@exact-pin"},
             {uses: "samypr100/setup-dev-drive@exact-pin"},
             {uses: "./.github/actions/rust-toolchain"},
-            {uses: "./.github/actions/rust-cache", with: windows_cache_inputs(true)},
+            {
+              uses: "./.github/actions/rust-cache",
+              if: gha_expression("!startsWith(github.ref_name, 'release-certify/')"),
+              with: windows_cache_inputs(true),
+            },
           ],
         },
       },
@@ -526,6 +530,25 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
 ) {
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
+}
+
+pipeline test_windows_shared_cache_requires_release_certification_bypass(harness: Harness, task) {
+  const declared = workflows()
+  const producer = declared["windows-nightly.yml"].jobs.nextest
+  const cache = producer.steps[3]
+  const invalid = {
+    jobs: {
+      nextest: {
+        ...producer,
+        steps: producer.steps.slice(0, 3) + [{...cache, if: nil}] + producer.steps.slice(4),
+      },
+    },
+  }
+  assert(
+    windows_shared_cache_errors(declared["ci.yml"], invalid).contains(
+      "windows-nightly.yml:nextest must skip the shared target cache for release-certify refs",
+    ),
+  )
 }
 
 pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_target_mapping(

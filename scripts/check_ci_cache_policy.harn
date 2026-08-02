@@ -183,6 +183,9 @@ const WINDOWS_CACHE_KEY = "workspace-windows"
 
 const WINDOWS_CACHE_TARGET_DIR = "$" + "{{ env.CARGO_TARGET_DIR }}"
 
+const WINDOWS_RELEASE_CERTIFY_CACHE_GUARD = "$"
+  + "{{ !startsWith(github.ref_name, 'release-certify/') }}"
+
 const MACOS_CACHE_KEY = "workspace-macos"
 
 const NATIVE_SOURCE_FINGERPRINT_BODY =
@@ -1013,6 +1016,12 @@ pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string
       errors = errors
         + [
         "${WINDOWS_CACHE_KEY} producer and consumer must use one stable native restore namespace",
+      ]
+    }
+    if trim(producer_caches[0]?.if ?? "") != WINDOWS_RELEASE_CERTIFY_CACHE_GUARD {
+      errors = errors
+        + [
+        "windows-nightly.yml:nextest must skip the shared target cache for release-certify refs",
       ]
     }
   }
