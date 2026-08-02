@@ -767,13 +767,11 @@ jobs:
       # avoidably missing archives.
       fail-fast: false
       matrix:
-        # release_codegen_units: 16 across the board. A higher unit count
-        # parallelizes codegen, cuts wall-clock, AND lowers peak linker
-        # memory during the LTO final link — the latter is what was OOM-
-        # killing the aarch64 leg mid-link. The binary-size cost vs cgu=1
-        # is a few percent and is more than offset by `strip = symbols`
-        # (set in the Build step env below). Release-recovery dispatches a
-        # subset of this matrix when only one target archive is missing.
+        # release_codegen_units is target policy. Keep 16 where parallel
+        # codegen and lower peak linker memory prevent aarch64 OOMs; x86_64
+        # Linux uses 8 to recover binary-size headroom without serializing the
+        # link at cgu=1. Release-recovery dispatches a subset of this matrix
+        # when only one target archive is missing.
         include: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
 
     steps:

@@ -32,7 +32,7 @@
     },
     {
       "target": "x86_64-unknown-linux-gnu",
-      "release_codegen_units": 16,
+      "release_codegen_units": 8,
       "use_sccache": "true",
       "runners": {
         "warm": "ubuntu-latest",
