@@ -3,11 +3,11 @@ use serde_json::json;
 use crate::agent_events::AgentEvent;
 
 use super::{
-    assistant_message_from_llm_result, canonical_acp_stop_reason, canonical_provider_stop_reason,
-    dict_get, initial_user_content, is_length_truncation, json_to_vm, last_assistant_text,
-    list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
-    screenshots_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
-    text_has_tool_call_prefix, tool_result_message_for_provider,
+    agent_init_control, assistant_message_from_llm_result, canonical_acp_stop_reason,
+    canonical_provider_stop_reason, dict_get, initial_user_content, is_length_truncation,
+    json_to_vm, last_assistant_text, list_items, pair_orphaned_tool_use,
+    reset_agent_session_host_state, screenshots_from_tool_result, seed_host_session_provider_model,
+    synthesize_orphan_tool_results, text_has_tool_call_prefix, tool_result_message_for_provider,
     truncated_tool_call_should_continue, vm_to_json,
 };
 
@@ -15,6 +15,44 @@ use super::{
 mod mock_dispatch;
 #[path = "agent_session_host_record_tool_data_tests.rs"]
 mod record_tool_data;
+
+#[test]
+fn agent_init_control_has_the_declared_runtime_shape() {
+    let active = vm_to_json(&agent_init_control(
+        "session-1",
+        "repair parser",
+        Some("system prompt"),
+        12,
+        3,
+        false,
+        None,
+    ));
+    assert_eq!(
+        active,
+        json!({
+            "session_id": "session-1",
+            "task": "repair parser",
+            "system": "system prompt",
+            "max_iterations": 12,
+            "max_verify_attempts": 3,
+            "done": false,
+        })
+    );
+
+    let terminal = vm_to_json(&agent_init_control(
+        "session-2",
+        "blocked task",
+        None,
+        0,
+        0,
+        true,
+        Some(json_to_vm(&json!({"status": "blocked"}))),
+    ));
+    assert_eq!(terminal["session_id"], "session-2");
+    assert_eq!(terminal["system"], serde_json::Value::Null);
+    assert_eq!(terminal["done"], true);
+    assert_eq!(terminal["result"], json!({"status": "blocked"}));
+}
 
 /// Execution policy that annotates the file-provenance test vocabulary so
 /// `current_tool_annotations` resolves `kind` / side effects the way the live

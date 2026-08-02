@@ -388,7 +388,7 @@ fn now_id() -> String {
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> string",
+    sig = "__host_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> {session_id: string, task: string, system: string|nil, max_iterations: int, max_verify_attempts: int, done: bool, result: any?}",
     kind = "async",
     category = "agent.host",
     runtime_only = true
@@ -608,13 +608,33 @@ async fn host_agent_session_init(
     .await?;
     crate::agent_session_journal::flush(&resolved).await?;
 
+    Ok(agent_init_control(
+        &resolved,
+        &message,
+        system.as_deref(),
+        max_iterations,
+        max_verify_attempts,
+        false,
+        None,
+    ))
+}
+
+fn agent_init_control(
+    session_id: &str,
+    task: &str,
+    system: Option<&str>,
+    max_iterations: i64,
+    max_verify_attempts: i64,
+    done: bool,
+    result: Option<VmValue>,
+) -> VmValue {
     let mut control = crate::value::DictMap::new();
-    control.put_str("session_id", resolved);
-    control.put_str("task", message);
+    control.put_str("session_id", session_id);
+    control.put_str("task", task);
     control.insert(
         crate::value::intern_key("system"),
         system
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     control.insert(
@@ -625,8 +645,11 @@ async fn host_agent_session_init(
         crate::value::intern_key("max_verify_attempts"),
         VmValue::Int(max_verify_attempts),
     );
-    control.insert(crate::value::intern_key("done"), VmValue::Bool(false));
-    Ok(VmValue::dict(control))
+    control.insert(crate::value::intern_key("done"), VmValue::Bool(done));
+    if let Some(result) = result {
+        control.insert(crate::value::intern_key("result"), result);
+    }
+    VmValue::dict(control)
 }
 
 enum AutonomyCheck {
@@ -695,23 +718,7 @@ fn agent_init_control_done(
     system: Option<&str>,
     result: VmValue,
 ) -> VmValue {
-    let mut control = crate::value::DictMap::new();
-    control.put_str("session_id", session_id);
-    control.put_str("task", task);
-    control.insert(
-        crate::value::intern_key("system"),
-        system
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s.to_string())))
-            .unwrap_or(VmValue::Nil),
-    );
-    control.insert(crate::value::intern_key("max_iterations"), VmValue::Int(0));
-    control.insert(
-        crate::value::intern_key("max_verify_attempts"),
-        VmValue::Int(0),
-    );
-    control.insert(crate::value::intern_key("done"), VmValue::Bool(true));
-    control.insert(crate::value::intern_key("result"), result);
-    VmValue::dict(control)
+    agent_init_control(session_id, task, system, 0, 0, true, Some(result))
 }
 
 /// Tear down a Harn-driven agent session and emit the final result dict.

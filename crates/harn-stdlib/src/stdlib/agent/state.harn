@@ -8,7 +8,20 @@
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_init(agent: HarnessAgent, message, system_prompt, opts) {
+pub fn agent_session_init(
+  agent: HarnessAgent,
+  message,
+  system_prompt,
+  opts,
+) -> {
+  session_id: string,
+  task: string,
+  system: string | nil,
+  max_iterations: int,
+  max_verify_attempts: int,
+  done: bool,
+  result?: any,
+} {
   return agent.session_init(message, system_prompt, opts)
 }
 

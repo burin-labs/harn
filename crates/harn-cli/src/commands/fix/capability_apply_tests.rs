@@ -837,9 +837,9 @@ fn capability_plan_disambiguates_shadowed_inferred_bindings_by_declaration() {
 }
 
 #[test]
-fn capability_apply_repairs_session_ids_returned_by_legacy_agent_open() {
+fn capability_apply_repairs_session_ids_from_agent_session_producers() {
     let (result, updated) = apply_single(
-        "import { agent_capture_events } from \"std/agent/events\"\nimport { agent_session_finalize, agent_session_messages } from \"std/agent/state\"\n\npipeline main(task) {\n  const session = agent_session_open(\"session-id\")\n  const before = agent_session_messages(session)\n  const captured = agent_capture_events(session, fn() {\n    return agent_session_messages(session)\n  })\n  agent_session_finalize(session, \"done\")\n  return {before: before, captured: captured}\n}\n",
+        "import { agent_capture_events } from \"std/agent/events\"\nimport { agent_session_finalize, agent_session_init, agent_session_messages } from \"std/agent/state\"\n\npipeline main(task) {\n  const session = agent_session_open(\"session-id\")\n  const before = agent_session_messages(session)\n  const captured = agent_capture_events(session, fn() {\n    return agent_session_messages(session)\n  })\n  agent_session_finalize(session, {})\n  const control = agent_session_init(\"task\", nil, {})\n  const initialized_session = control?.session_id ?? \"\"\n  agent_session_finalize(initialized_session, {})\n  return {before: before, captured: captured}\n}\n",
     );
 
     assert_eq!(
@@ -851,9 +851,18 @@ fn capability_apply_repairs_session_ids_returned_by_legacy_agent_open() {
         "session IDs returned by the legacy open call are ordinary arguments: {result:#?}\n{updated}"
     );
     assert_eq!(
-        call_argument_paths(&updated, "agent_session_finalize")[0][..2],
-        [Some("harness.agent".into()), Some("session".into())],
-        "finalize must receive its Agent carrier: {result:#?}\n{updated}"
+        call_argument_paths(&updated, "agent_session_finalize")
+            .into_iter()
+            .map(|arguments| arguments[..2].to_vec())
+            .collect::<Vec<_>>(),
+        vec![
+            vec![Some("harness.agent".into()), Some("session".into())],
+            vec![
+                Some("harness.agent".into()),
+                Some("initialized_session".into()),
+            ],
+        ],
+        "finalize must receive its Agent carrier for open and init session IDs: {result:#?}\n{updated}"
     );
     assert_eq!(
         call_argument_paths(&updated, "agent_capture_events")[0][..2],
