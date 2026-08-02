@@ -86,9 +86,7 @@ git -C "$fixture_repo" -c commit.gpgsign=false commit -q -m "Record v0.10.51 wit
 
 # Prove the standalone publish-tools layout resolves the new sibling module.
 release_tools="$tmp_root/release-tools"
-mkdir -p "$release_tools"
-cp "$repo_root/scripts/release_metadata.harn" "$release_tools/release_metadata.harn"
-cp "$repo_root/scripts/release_withdrawals.harn" "$release_tools/release_withdrawals.harn"
+"$repo_root/scripts/stage_release_tools.sh" "$release_tools"
 (
   cd "$fixture_repo"
   "$harn_bin" run \

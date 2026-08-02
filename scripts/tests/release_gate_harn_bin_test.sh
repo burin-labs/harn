@@ -83,14 +83,7 @@ git -C "$release_root" commit -qm init
 # Match publish-release.yml's standalone release-tools layout. release_gate.sh
 # intentionally requires its shared Cargo helper relative to its own location.
 release_tools="$tmp_root/release-tools"
-mkdir -p "$release_tools"
-cp "$repo_root/scripts/release_ship.sh" "$release_tools/release_ship.sh"
-cp "$repo_root/scripts/release_gate.sh" "$release_tools/release_gate.sh"
-cp "$repo_root/scripts/release_metadata.harn" "$release_tools/release_metadata.harn"
-cp "$repo_root/scripts/release_withdrawals.harn" "$release_tools/release_withdrawals.harn"
-cp "$repo_root/scripts/publish.sh" "$release_tools/publish.sh"
-cp "$repo_root/scripts/harn_bin.sh" "$release_tools/harn_bin.sh"
-cp -R "$repo_root/scripts/lib" "$release_tools/lib"
+"$repo_root/scripts/stage_release_tools.sh" "$release_tools"
 release_gate="$release_tools/release_gate.sh"
 
 fake_harn_dir="$tmp_root/fake bin"
