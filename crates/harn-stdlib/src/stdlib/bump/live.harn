@@ -126,6 +126,30 @@ fn __shell(tools: HarnessTools, command: string) {
 }
 
 /**
+ * Update the pin through the typed filesystem capability. A shell redirect is
+ * intentionally not used here: command policy must reject arbitrary tracked
+ * writes, while this adapter owns the one deliberate version-file mutation.
+ */
+fn __write_version(fs: HarnessFs?, path: string, version: string) -> dict {
+  if fs == nil {
+    return {
+      ok: false,
+      detail:
+        "std/bump/live: HarnessFs is required to update ${path}; pass harness.fs to live_bump_adapter",
+    }
+  }
+  const result = try {
+    fs.write_text(path, "${version}\n")
+    nil
+  }
+  return if is_ok(result) {
+    {ok: true, detail: ""}
+  } else {
+    {ok: false, detail: to_string(unwrap_err(result))}
+  }
+}
+
+/**
  * One REST call through the `gh` CLI, authenticated by the App token in
  * GH_TOKEN. Returns the parsed JSON body, or nil on any non-zero exit —
  * preserving the previous adapter's fail-soft contract. Unlike
@@ -235,6 +259,7 @@ pub fn live_bump_adapter(
   clock: HarnessClock,
   tools: HarnessTools,
   config: dict = {},
+  fs: HarnessFs? = nil,
 ) -> BumpAdapter {
   const cfg = live_bump_config(config)
   const owner = split(cfg.repo, "/")[0] ?? ""
@@ -299,9 +324,9 @@ pub fn live_bump_adapter(
       // Release tags carry the conventional `v`; .harn-version stores the
       // bare semver accepted by both old and new Harn installers.
       const version = strip_v(target)
-      const write = __shell(tools, "printf '%s\\n' '${version}' > ${cfg.version_file}")
+      const write = __write_version(fs, cfg.version_file, version)
       const refresh = __shell(tools, cfg.refresh_command)
-      const ok = (write.success ?? false) && (refresh.success ?? false)
+      const ok = (write.ok ?? false) && (refresh.success ?? false)
       const changed = !(__git(tools, ["git", "diff", "--quiet"]).success ?? false)
       const names = trim(__git(tools, ["git", "diff", "--name-only"]).stdout ?? "")
       const refreshed = if names == "" {
