@@ -449,6 +449,10 @@ async function reclaimAbandonedInstallLock(lockPath, expectedIdentity = null) {
   return discardInstallLock(lockPath, identity);
 }
 
+// Lock invariants: identity changes reset only the per-owner eviction deadline;
+// the total wait remains bounded; token checks fence every destructive install
+// mutation; and a waiter accepts a peer publication only after full manifest
+// and binary validation.
 async function withInstallLock(
   installRoot,
   callback,

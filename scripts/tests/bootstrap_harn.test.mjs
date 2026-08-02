@@ -599,17 +599,32 @@ test("a peer install published at the total deadline wins", async (context) => {
   const root = temporaryRoot(context);
   const archive = makeArchive(root);
   const release = fakeRelease(archive);
-  writeInstallLock(root, {
+  const lockRoot = writeInstallLock(root, {
     hostname: os.hostname(),
     pid: process.pid,
   });
+  const rotation = setInterval(() => {
+    replaceInstallLockOwner(lockRoot, {
+      hostname: os.hostname(),
+      pid: process.pid,
+    });
+  }, 8);
+  context.after(() => clearInterval(rotation));
   setTimeout(() => publishValidInstall(root, archive), 50);
 
+  const startedAt = Date.now();
   const result = await bootstrap({
     ...bootstrapOptions(root, release.fetchImpl),
     installLockTimeoutMs: 50,
   });
+  clearInterval(rotation);
 
+  assert.ok(Date.now() - startedAt >= 150);
+  assert.equal(
+    fs.existsSync(lockRoot),
+    true,
+    "the waiter must accept the peer install without evicting or acquiring its lock",
+  );
   assert.equal(
     fs.readFileSync(result.binary_path, "utf8"),
     "fake harn binary\n",
