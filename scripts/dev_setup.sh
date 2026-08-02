@@ -20,7 +20,8 @@ derive_target_dir() {
     worktree_path="${CODEX_WORKTREE_PATH:-}"
   fi
   if [[ -z "${worktree_path}" ]]; then
-    return 1
+    worktree_var="current checkout"
+    worktree_path="${ROOT_DIR}"
   fi
 
   # The configured path names the worktree this target dir belongs to. When it
@@ -49,10 +50,12 @@ derive_target_dir() {
 derive_storage_root() {
   if [[ -n "${HARN_DEV_SETUP_STORAGE_ROOT:-}" ]]; then
     printf '%s\n' "${HARN_DEV_SETUP_STORAGE_ROOT}"
-  elif [[ "${SETUP_PROFILE}" == "rust" || "${SETUP_PROFILE}" == "bootstrap" ]]; then
-    printf '%s/harn/dev-setup\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
   else
-    printf '%s\n' "${TMPDIR:-/tmp}"
+    # Every setup profile is a different amount of work over the same
+    # worktree-owned build state. Keeping one durable root means the expected
+    # bootstrap -> full transition reuses its Cargo target instead of deleting
+    # the managed setting and paying a second cold workspace build.
+    printf '%s/harn/dev-setup\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
   fi
 }
 
@@ -69,6 +72,7 @@ write_build_config() {
   local rustc_wrapper="${1:-}"
   local target_dir="${2:-}"
   local build_dir="${3:-}"
+  local force_target_dir="${4:-0}"
   local config_path=".cargo/config.toml"
   local drop_generated_target_dir=0
   local drop_generated_build_dir=0
@@ -100,6 +104,7 @@ write_build_config() {
     -v managed_marker="${MANAGED_CARGO_CONFIG_MARKER}" \
     -v drop_generated_target_dir="${drop_generated_target_dir}" \
     -v drop_generated_build_dir="${drop_generated_build_dir}" \
+    -v force_target_dir="${force_target_dir}" \
     '
     function extract_toml_string(line, value) {
       value = line
@@ -173,7 +178,13 @@ write_build_config() {
         next
       }
       if (in_build && target_dir != "" && $0 ~ /^[[:space:]]*target-dir[[:space:]]*=/) {
-        print managed_value_line("target-dir", target_dir)
+        if (force_target_dir || is_managed_line($0) || is_generated_target_dir(extract_toml_string($0))) {
+          print managed_value_line("target-dir", target_dir)
+        } else {
+          # A user-owned Cargo target remains authoritative unless the caller
+          # explicitly supplied HARN_DEV_TARGET_DIR.
+          print
+        }
         saw_target_dir = 1
         next
       }
@@ -338,9 +349,10 @@ git config core.hooksPath .githooks
 echo "Configured git hooks path -> .githooks"
 ./scripts/configure_merge_drivers.sh
 
-target_dir="${HARN_DEV_TARGET_DIR:-}"
+explicit_target_dir="${HARN_DEV_TARGET_DIR:-}"
+target_dir="${explicit_target_dir}"
 if [[ -z "${target_dir}" ]]; then
-  target_dir="$(derive_target_dir || true)"
+  target_dir="$(derive_target_dir)"
 fi
 
 build_dir="${HARN_DEV_BUILD_DIR:-}"
@@ -350,7 +362,9 @@ if command -v sccache >/dev/null 2>&1; then
   rustc_wrapper="sccache"
 fi
 
-write_build_config "${rustc_wrapper}" "${target_dir}" "${build_dir}"
+force_target_dir=0
+[[ -n "${explicit_target_dir}" ]] && force_target_dir=1
+write_build_config "${rustc_wrapper}" "${target_dir}" "${build_dir}" "${force_target_dir}"
 if [[ -n "${rustc_wrapper}" ]]; then
   write_sccache_env_config 1
 else
@@ -359,9 +373,13 @@ fi
 if [[ -n "${rustc_wrapper}" ]]; then
   echo "Configured sccache as rustc wrapper in .cargo/config.toml"
 fi
-if [[ -n "${target_dir}" ]]; then
+if [[ -n "${target_dir}" ]] && grep -Fxq \
+  "target-dir = \"${target_dir}\" # ${MANAGED_CARGO_CONFIG_MARKER}" \
+  .cargo/config.toml; then
   mkdir -p "${target_dir}"
   echo "Configured Cargo target dir -> ${target_dir}"
+elif [[ -n "${target_dir}" ]]; then
+  echo "Preserved user-owned Cargo target dir from .cargo/config.toml"
 fi
 if [[ -n "${build_dir}" ]]; then
   mkdir -p "${build_dir}"
