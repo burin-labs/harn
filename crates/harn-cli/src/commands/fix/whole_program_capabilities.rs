@@ -470,8 +470,12 @@ fn direct_requirements(
     {
         return required;
     }
-    if let Some(attenuation) = root_attenuation {
-        required.extend(attenuation);
+    if matches!(&carrier.kind, CarrierKind::Root) {
+        required.extend(
+            root_attenuation
+                .iter()
+                .flat_map(|capabilities| capabilities.iter().copied()),
+        );
     }
     let mut observe = |node: &SNode| {
         let (Node::PropertyAccess { object, property }
