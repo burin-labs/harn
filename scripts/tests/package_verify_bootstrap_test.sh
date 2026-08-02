@@ -17,15 +17,7 @@ harn_cargo_metadata_target_dir() {
 }
 SH
 
-cat > "$fixture/scripts/lib/harn_bin.sh" <<'SH'
-#!/bin/sh
-harn_debug_bin_suffix() {
-  case "${OS:-$(uname -s)}" in
-    Windows_NT | MINGW* | MSYS* | CYGWIN*) printf '.exe' ;;
-    *) printf '' ;;
-  esac
-}
-SH
+cp "$repo_root/scripts/lib/harn_bin.sh" "$fixture/scripts/lib/harn_bin.sh"
 
 fake_harn="$fixture/target/debug/harn"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_harn"
@@ -153,6 +145,8 @@ if [[ "$actual" != "$expected" ]]; then
     "$expected" "$actual" >&2
   exit 1
 fi
+rm "$fixture/target/debug/harn-cli-aot-gen.exe"
+mv "$AOT_GENERATOR_TEMPLATE" "$fixture/target/debug/harn-cli-aot-gen"
 
 workflow="$repo_root/.github/workflows/ci.yml"
 if ! grep -Fq -- "- 'scripts/lib/package_verify_bootstrap.sh'" "$workflow"; then
