@@ -327,6 +327,14 @@ if ! grep -Fq "find scripts -type d -name '.harn*' -prune -o -type f -name '*.ha
   exit 1
 fi
 
+make_all="$tmp_root/make-all.txt"
+make -C "$repo_root" -n all HARN_BIN="$fake_harn" > "$make_all"
+if ! grep -Fq 'make HARN_BIN="$harn_bin" lint lint-md lint-actions' "$make_all"; then
+  echo "all did not pass one resolved Harn binary to the parallel child gate" >&2
+  cat "$make_all" >&2
+  exit 1
+fi
+
 make_provider_targets="$tmp_root/make-provider-targets.txt"
 make -C "$repo_root" -n \
   gen-provider-catalog check-provider-catalog \
