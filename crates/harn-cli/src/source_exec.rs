@@ -301,8 +301,10 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
                 }?,
             };
             vm.set_harness(runtime_harness);
-            if let Some(path) = source_path {
-                let extensions = package::load_runtime_extensions(path);
+            let extensions = source_path
+                .map(package::load_runtime_extensions)
+                .unwrap_or_default();
+            if source_path.is_some() {
                 package::install_runtime_extensions(&extensions);
                 package::install_manifest_triggers(&mut vm, &extensions)
                     .await
@@ -323,26 +325,26 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
             }
             let _event_log = harn_vm::event_log::active_event_log()
                 .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
-            let connector_clients_installed =
-                should_install_default_connector_clients(source, source_path);
-            if connector_clients_installed {
-                install_default_connector_clients(store_base)
-                    .await
-                    .map_err(|error| {
-                        ExecError::new(
-                            ExecStage::Runtime,
-                            format!("failed to initialize connector clients: {error}"),
-                        )
-                    })?;
-            }
+            let _connector_clients =
+                if should_install_default_connector_clients(source, source_path) {
+                    Some(
+                        install_connector_clients(store_base, &extensions.provider_connectors)
+                            .await
+                            .map_err(|error| {
+                                ExecError::new(
+                                    ExecStage::Runtime,
+                                    format!("failed to initialize connector clients: {error}"),
+                                )
+                            })?,
+                    )
+                } else {
+                    None
+                };
             let execution_result = vm
                 .execute(&chunk)
                 .await
                 .map_err(|e| ExecError::new(ExecStage::Runtime, e.to_string()));
             harn_vm::egress::reset_egress_policy_for_host();
-            if connector_clients_installed {
-                harn_vm::clear_active_connector_clients();
-            }
             harn_vm::stdlib::process::set_thread_execution_context(None);
             execution_result?;
             let mut output = String::new();
@@ -373,7 +375,18 @@ pub(crate) fn is_conformance_path(path: &Path) -> bool {
         .any(|component| component.as_os_str() == "conformance")
 }
 
-pub(crate) async fn install_default_connector_clients(base_dir: &Path) -> Result<(), String> {
+pub(crate) struct ActiveConnectorClientsGuard;
+
+impl Drop for ActiveConnectorClientsGuard {
+    fn drop(&mut self) {
+        harn_vm::clear_active_connector_clients();
+    }
+}
+
+pub(crate) async fn install_connector_clients(
+    base_dir: &Path,
+    provider_connectors: &[package::ResolvedProviderConnectorConfig],
+) -> Result<ActiveConnectorClientsGuard, String> {
     let event_log = harn_vm::event_log::active_event_log()
         .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
     let secret_namespace = connector_secret_namespace(base_dir);
@@ -382,7 +395,18 @@ pub(crate) async fn install_default_connector_clients(base_dir: &Path) -> Result
             .map_err(|error| format!("failed to configure secret providers: {error}"))?,
     );
 
-    let registry = harn_vm::ConnectorRegistry::default();
+    let mut registry = harn_vm::ConnectorRegistry::default();
+    for config in provider_connectors {
+        if let Some(connector) = package::load_provider_connector(config)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            registry.remove(&config.id);
+            registry
+                .register(connector)
+                .map_err(|error| error.to_string())?;
+        }
+    }
     let metrics = Arc::new(harn_vm::MetricsRegistry::default());
     let inbox = Arc::new(
         harn_vm::InboxIndex::new(event_log.clone(), metrics.clone())
@@ -401,7 +425,7 @@ pub(crate) async fn install_default_connector_clients(base_dir: &Path) -> Result
         .map_err(|error| error.to_string())?;
     let clients = registry.client_map().await;
     harn_vm::install_active_connector_clients(clients);
-    Ok(())
+    Ok(ActiveConnectorClientsGuard)
 }
 
 pub(crate) fn connector_secret_namespace(base_dir: &Path) -> String {

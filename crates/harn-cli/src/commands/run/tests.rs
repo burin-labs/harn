@@ -1167,6 +1167,63 @@ length: 20,
     assert_eq!(outcome.stdout.trim(), "true\n8\n2000\n10\ntrue");
 }
 
+fn install_dependency_connector_fixture(
+    project: &Path,
+    root_manifest: &str,
+    dependency_alias: &str,
+    provider_id: &str,
+    connector_module: &str,
+) {
+    let dependency = project.join("vendor").join(dependency_alias);
+    std::fs::create_dir_all(dependency.join("src")).expect("dependency src dir");
+    std::fs::write(
+        dependency.join("harn.toml"),
+        format!(
+            "[package]\nname = {dependency_alias:?}\nversion = \"0.1.0\"\n\n\
+             [[providers]]\nid = {provider_id:?}\n\
+             connector = {{ harn = \"src/lib.harn\" }}\n"
+        ),
+    )
+    .expect("write dependency manifest");
+    std::fs::write(dependency.join("src").join("lib.harn"), connector_module)
+        .expect("write dependency connector module");
+
+    let installed = crate::package::test_support::create_test_package_generation(project)
+        .join(dependency_alias);
+    std::fs::create_dir_all(installed.join("src")).expect("installed dependency src dir");
+    std::fs::copy(dependency.join("harn.toml"), installed.join("harn.toml"))
+        .expect("install dependency manifest");
+    std::fs::copy(
+        dependency.join("src").join("lib.harn"),
+        installed.join("src").join("lib.harn"),
+    )
+    .expect("install dependency connector module");
+
+    let dependency_path = dependency
+        .canonicalize()
+        .expect("canonical dependency path");
+    let dependency_literal =
+        crate::format::toml_basic_string_literal(&dependency_path.to_string_lossy());
+    std::fs::write(
+        project.join("harn.toml"),
+        format!(
+            "{root_manifest}\n[dependencies]\n\
+             {dependency_alias} = {{ path = {dependency_literal} }}\n"
+        ),
+    )
+    .expect("write project manifest");
+
+    let source = crate::package::path_source_uri(&dependency_path).expect("dependency source URI");
+    let lock = format!(
+        "version = 5\ngenerator_version = \"test\"\n\
+         protocol_artifact_version = \"test\"\n\n\
+         [[package]]\nname = {dependency_alias:?}\nsource = {}\n",
+        crate::format::toml_basic_string_literal(&source)
+    );
+    std::fs::write(project.join("harn.lock"), &lock).expect("write lockfile");
+    crate::package::test_support::write_test_generation_lock(project, &lock);
+}
+
 /// End-to-end regression for the dependency-package source-dir leak.
 ///
 /// A project whose entry pipeline renders a top-level `@alias/...` asset, WITH
@@ -1191,12 +1248,16 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path();
 
-    // Project manifest declares the asset alias the entry render depends on.
-    std::fs::write(
-        project.join("harn.toml"),
-        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[asset_roots]\npromptdir = \"prompts\"\n",
-    )
-    .expect("write project manifest");
+    install_dependency_connector_fixture(
+        project,
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [asset_roots]\npromptdir = \"prompts\"\n",
+        "dep_connector",
+        "depwebhook",
+        "pub fn provider_id() { return \"depwebhook\" }\n\
+         pub fn kinds() { return [\"webhook\"] }\n\
+         pub fn payload_schema() { return \"GenericWebhookPayload\" }\n",
+    );
 
     // The asset the entry pipeline renders.
     std::fs::create_dir_all(project.join("prompts")).expect("prompts dir");
@@ -1206,36 +1267,24 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
     )
     .expect("write prompt");
 
-    // Materialized path-dependency provider connector. Its own manifest does
-    // NOT define the `promptdir` alias, so a leaked source dir surfaces as an
-    // asset-alias error anchored on this package's harn.toml.
-    let dep =
-        crate::package::test_support::create_test_package_generation(project).join("dep-connector");
-    std::fs::create_dir_all(dep.join("src")).expect("dep src dir");
-    std::fs::write(
-        dep.join("harn.toml"),
-        "[package]\nname = \"dep-connector\"\nversion = \"0.1.0\"\n\n[[providers]]\nid = \"depwebhook\"\nconnector = { harn = \"src/lib.harn\" }\n",
-    )
-    .expect("write dep manifest");
-    std::fs::write(
-        dep.join("src").join("lib.harn"),
-        "pub fn provider_id() { return \"depwebhook\" }\npub fn kinds() { return [\"webhook\"] }\npub fn payload_schema() { return \"GenericWebhookPayload\" }\n",
-    )
-    .expect("write connector module");
-
-    // Lockfile so `harn run` startup loads the installed provider connector.
-    std::fs::write(
-        project.join("harn.lock"),
-        "version = 4\n\n[[package]]\nname = \"dep-connector\"\nsource = \"path+file:///tmp/dep-connector\"\n",
-    )
-    .expect("write lockfile");
-
     // Entry pipeline at the PROJECT ROOT, rendering a top-level `@alias`.
     std::fs::write(
         project.join("main.harn"),
         "pipeline main(harness: Harness) {\n  let _ = harness.fs.render_prompt(\"@promptdir/greeting.harn.prompt\", {})\n}\n",
     )
     .expect("write entry");
+
+    let extensions =
+        crate::package::try_load_runtime_extensions(project.join("main.harn").as_path())
+            .expect("dependency package must resolve before source-dir regression");
+    assert_eq!(
+        extensions
+            .provider_connectors
+            .iter()
+            .map(|connector| connector.id.as_str())
+            .collect::<Vec<_>>(),
+        ["depwebhook"]
+    );
 
     // Run it exactly like `cd project && harn run main.harn`: a bare filename
     // whose parent is empty is what left the resting source dir unestablished.
@@ -1268,4 +1317,76 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
          dependency provider connector present; stderr:\n{}",
         outcome.stderr
     );
+}
+
+/// `harn run` must expose installed package connectors to the script's
+/// `harness.net.connector_call` boundary, not only load their metadata.
+#[tokio::test]
+async fn execute_run_installs_dependency_package_connector_client() {
+    let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path();
+
+    install_dependency_connector_fixture(
+        project,
+        "[package]\nname = \"connector-consumer\"\nversion = \"0.1.0\"\n",
+        "dep_connector",
+        "depwebhook",
+        r#"
+pub fn provider_id() { return "depwebhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "DependencyEventPayload" }
+pub fn call(_harness: Harness, method, args) {
+  return {method: method, value: args.value}
+}
+"#,
+    );
+    std::fs::write(
+        project.join("main.harn"),
+        r#"
+pipeline main(harness: Harness) {
+  const response = harness.net.connector_call("depwebhook", "ping", {value: "active"})
+  harness.stdio.log(response.method + ":" + response.value)
+}
+"#,
+    )
+    .expect("write entry");
+
+    let extensions =
+        crate::package::try_load_runtime_extensions(project.join("main.harn").as_path())
+            .expect("dependency package must resolve before runtime activation");
+    assert_eq!(
+        extensions
+            .provider_connectors
+            .iter()
+            .map(|connector| connector.id.as_str())
+            .collect::<Vec<_>>(),
+        ["depwebhook"]
+    );
+
+    let original_cwd = std::env::current_dir().expect("cwd");
+    std::env::set_current_dir(project).expect("chdir into project");
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        "main.harn",
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::disabled(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+    std::env::set_current_dir(&original_cwd).expect("restore cwd");
+    harn_vm::reset_thread_local_state();
+
+    assert_eq!(
+        outcome.exit_code, 0,
+        "dependency package connector must be active during plain `harn run`; stderr:\n{}",
+        outcome.stderr
+    );
+    assert_eq!(outcome.stdout.trim(), "[harn] ping:active");
 }
