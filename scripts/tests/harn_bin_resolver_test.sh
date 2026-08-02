@@ -236,13 +236,52 @@ if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$
 fi
 
 : > "$record"
-child_pid_file="$tmp_root/timeout-child.pid"
+child_pid_file="$tmp_root/default-timeout-child.pid"
+if RUSTC_WRAPPER=sccache \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=wrapper-timeout \
+  FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/default-timeout.out" \
+  2> "$tmp_root/default-timeout.err"; then
+  echo "harn_bin resolver retried a compiler-wrapper timeout by default" >&2
+  exit 1
+else
+  exit_code=$?
+fi
+if [[ "$exit_code" -ne 124 ]]; then
+  echo "compiler-wrapper timeout status changed: expected 124, got $exit_code" >&2
+  cat "$tmp_root/default-timeout.err" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 1 ]]; then
+  echo "compiler-wrapper timeout amplified contention with another Cargo probe" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq "HARN_BIN_RETRY_WITHOUT_WRAPPER=1" "$tmp_root/default-timeout.err"; then
+  echo "compiler-wrapper timeout did not offer the explicit recovery control" >&2
+  cat "$tmp_root/default-timeout.err" >&2
+  exit 1
+fi
+timed_out_child_pid=$(cat "$child_pid_file")
+if kill -0 "$timed_out_child_pid" 2>/dev/null; then
+  echo "compiler-wrapper timeout left a descendant process alive: $timed_out_child_pid" >&2
+  exit 1
+fi
+
+: > "$record"
+child_pid_file="$tmp_root/explicit-retry-child.pid"
 RUSTC_WRAPPER=sccache \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   FAKE_CARGO_MODE=wrapper-timeout \
   FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
   HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  HARN_BIN_RETRY_WITHOUT_WRAPPER=1 \
   PATH="$fake_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --print \
   > "$tmp_root/timeout-recovery.out" \
@@ -281,6 +320,7 @@ if RUSTC_WRAPPER=sccache \
   FAKE_CARGO_MODE=wrapper-timeout-retry-failure \
   FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
   HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  HARN_BIN_RETRY_WITHOUT_WRAPPER=1 \
   PATH="$fake_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --print \
   > "$tmp_root/retry-failure.out" \
@@ -346,6 +386,24 @@ fi
 if [[ "$status" -ne 2 ]] || ! grep -Fq "must be a positive number" "$tmp_root/invalid-timeout.err"; then
   echo "invalid Cargo probe timeout was not reported with status 2" >&2
   cat "$tmp_root/invalid-timeout.err" >&2
+  exit 1
+fi
+
+if HARN_BIN_RETRY_WITHOUT_WRAPPER=invalid \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/invalid-retry.out" \
+  2> "$tmp_root/invalid-retry.err"; then
+  echo "harn_bin resolver accepted an invalid wrapper retry policy" >&2
+  exit 1
+else
+  exit_code=$?
+fi
+if [[ "$exit_code" -ne 2 ]] || ! grep -Fq "must be 0 or 1" "$tmp_root/invalid-retry.err"; then
+  echo "invalid wrapper retry policy was not reported with status 2" >&2
+  cat "$tmp_root/invalid-retry.err" >&2
   exit 1
 fi
 
