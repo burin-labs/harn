@@ -24,7 +24,7 @@ use edits::{
     add_call_argument_at_index_edit, add_call_arguments_at_index_edit, ambient_edits,
     argument_for_kind, carrier_supplies, explicit_capability_argument_edits,
     receiver_projection_edits, signature_edit, split_call_extension,
-    split_capability_signature_edit, undefined_harness_edits,
+    split_capability_receiver_edits, split_capability_signature_edit, undefined_harness_edits,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,6 +288,9 @@ pub(super) fn plan(
         if !added_capabilities[idx].is_empty() {
             edits_by_file.entry(callable.file_idx).or_default().push(
                 split_capability_signature_edit(callable, &added_capabilities[idx])?,
+            );
+            edits_by_file.entry(callable.file_idx).or_default().extend(
+                split_capability_receiver_edits(callable, &added_capabilities[idx]),
             );
         }
         edits_by_file

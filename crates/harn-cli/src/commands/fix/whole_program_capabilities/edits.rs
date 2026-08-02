@@ -306,6 +306,24 @@ pub(super) fn receiver_projection_edits(
     edits
 }
 
+pub(super) fn split_capability_receiver_edits(
+    callable: &ProgramCallable,
+    additions: &BTreeMap<CapabilityId, String>,
+) -> Vec<FixEdit> {
+    callable
+        .receiver_accesses
+        .iter()
+        .filter_map(|access| {
+            let capability = CapabilityId::from_field_name(&access.property)?;
+            let binding = additions.get(&capability)?;
+            Some(FixEdit {
+                span: access.access_span,
+                replacement: binding.clone(),
+            })
+        })
+        .collect()
+}
+
 pub(super) fn undefined_harness_edits(
     callable: &ProgramCallable,
     desired: &CarrierKind,
@@ -415,6 +433,21 @@ pub(super) fn explicit_capability_argument_edits(
             // Argument indexes describe the pre-edit call. Apply at most one
             // insertion to each call per fixed-point pass, then let the next
             // typecheck locate the remaining mismatch in the updated call.
+            continue;
+        }
+        let existing_argument = source
+            .get(call.args[argument_index].start..call.args[argument_index].end)
+            .map(str::trim);
+        if existing_argument == final_binding(callable) {
+            // Imported callees are outside the local call graph. When a
+            // callable's implicit or explicit root is attenuated, project an
+            // existing `callee(harness, ...)` carrier in place. Prepending the
+            // projection would shift every ordinary argument and make the old
+            // carrier the callback/value at runtime.
+            edits.push(FixEdit {
+                span: call.args[argument_index],
+                replacement: argument,
+            });
             continue;
         }
         if let Some(edit) = add_call_argument_at_index_edit(source, call, argument_index, &argument)

@@ -640,6 +640,68 @@ fn capability_apply_preserves_root_values_that_escape() {
 }
 
 #[test]
+fn capability_apply_projects_accesses_to_added_split_capabilities() {
+    let (result, updated) = apply_single(
+        "import { with_temp_dir } from \"std/testing\"\n\nfn with_probe(harness: HarnessFs, body) {\n  return with_temp_dir(harness, { dir ->\n    harness.write_text(path_join(dir, \"probe.txt\"), \"ok\")\n    harness.testing.calls()\n    return body(dir)\n  })\n}\n\nfn main(harness: Harness) {\n  with_probe(harness.fs, { _ -> nil })\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "with_probe"),
+        vec![
+            param("harness", "HarnessFs"),
+            param("testing", "HarnessTesting"),
+            ParamContract {
+                name: "body".to_string(),
+                type_expr: None,
+            },
+        ]
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "with_temp_dir")[0],
+        [Some("harness".to_string()), None],
+    );
+    assert_eq!(
+        method_receiver_paths(&updated, "write_text"),
+        vec!["harness"]
+    );
+    assert_eq!(
+        method_receiver_paths(&updated, "calls"),
+        vec!["testing"],
+        "an added split capability must replace its stale root access"
+    );
+}
+
+#[test]
+fn capability_apply_replaces_an_existing_imported_carrier_in_place() {
+    let (result, updated) = apply_single(
+        "import { with_temp_dir } from \"std/testing\"\n\nfn with_probe(body) {\n  return with_temp_dir(harness, { dir ->\n    harness.testing.calls()\n    return body(dir)\n  })\n}\n\nfn main(harness: Harness) {\n  with_probe({ _ -> nil })\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "with_probe"),
+        vec![
+            param("harness", "HarnessTesting"),
+            param("fs", "HarnessFs"),
+            ParamContract {
+                name: "body".to_string(),
+                type_expr: None,
+            },
+        ]
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "with_temp_dir")[0],
+        [Some("fs".to_string()), None],
+        "the existing carrier must be projected in place, not prepended as a third argument:\n{updated}"
+    );
+}
+
+#[test]
 fn capability_apply_follows_selective_re_exports_to_the_definition() {
     let temp = tempfile::TempDir::new().unwrap();
     fs::write(
