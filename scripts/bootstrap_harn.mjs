@@ -12,7 +12,7 @@ const INSTALL_LOCK_SCHEMA = "harn-bootstrap-install-lock-v1";
 const INSTALL_LOCK_POLL_MS = 10;
 const INSTALL_LOCK_TIMEOUT_MS = 30_000;
 const INSTALL_LOCK_STALE_MS = 5 * 60_000;
-const INSTALL_MUTATION_ATTEMPTS = 4;
+const INSTALL_MUTATION_ATTEMPTS = 6;
 const INSTALL_MUTATION_RETRY_MS = 25;
 const SEMVER = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -370,11 +370,43 @@ function retryableInstallMutation(error) {
   );
 }
 
-async function discardInvalidWithRetries(candidate) {
+function inspectInstallLock(lockPath) {
+  let owner = null;
+  try {
+    const ownerPath = path.join(lockPath, "owner.json");
+    owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+  } catch {
+    // A creator can be between mkdir and owner publication. The directory's
+    // filesystem identity still lets waiters distinguish that owner from a
+    // later one without treating an incomplete record as abandoned.
+  }
+  try {
+    const stat = fs.statSync(lockPath);
+    const token =
+      owner?.schema_version === INSTALL_LOCK_SCHEMA &&
+      typeof owner.token === "string" &&
+      owner.token.length > 0
+        ? owner.token
+        : null;
+    return {
+      ageMs: Date.now() - stat.mtimeMs,
+      identity: token ?? `${stat.dev}:${stat.ino}:${stat.mtimeMs}`,
+      owner,
+      token,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function discardInstallLock(lockPath, expectedIdentity) {
   for (let attempt = 1; attempt <= INSTALL_MUTATION_ATTEMPTS; attempt += 1) {
+    const current = inspectInstallLock(lockPath);
+    if (!current) return true;
+    if (current.identity !== expectedIdentity) return false;
     try {
-      discardInvalid(candidate);
-      return;
+      discardInvalid(lockPath);
+      return true;
     } catch (error) {
       if (
         !retryableInstallMutation(error) ||
@@ -383,26 +415,17 @@ async function discardInvalidWithRetries(candidate) {
         throw error;
       }
       await new Promise((resolve) =>
-        setTimeout(resolve, INSTALL_MUTATION_RETRY_MS),
+        setTimeout(resolve, INSTALL_MUTATION_RETRY_MS * 2 ** (attempt - 1)),
       );
     }
   }
+  return false;
 }
 
-async function reclaimAbandonedInstallLock(lockPath, force = false) {
-  let owner = null;
-  let ageMs;
-  try {
-    const ownerPath = path.join(lockPath, "owner.json");
-    owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
-    ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
-  } catch {
-    try {
-      ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
-    } catch {
-      return true;
-    }
-  }
+async function reclaimAbandonedInstallLock(lockPath, expectedIdentity = null) {
+  const inspected = inspectInstallLock(lockPath);
+  if (!inspected) return true;
+  const { ageMs, identity, owner } = inspected;
   const localOwner =
     owner?.schema_version === INSTALL_LOCK_SCHEMA &&
     owner.hostname === os.hostname() &&
@@ -414,9 +437,8 @@ async function reclaimAbandonedInstallLock(lockPath, force = false) {
   const abandoned =
     ageMs >= INSTALL_LOCK_STALE_MS ||
     (localOwner && !processIsRunning(owner.pid));
-  if (!force && !abandoned) return false;
-  await discardInvalidWithRetries(lockPath);
-  return true;
+  if (!abandoned && identity !== expectedIdentity) return false;
+  return discardInstallLock(lockPath, identity);
 }
 
 async function withInstallLock(
@@ -429,7 +451,7 @@ async function withInstallLock(
   }
   const lockPath = `${installRoot}.lock`;
   let deadline = Date.now() + timeoutMs;
-  let deadlineEvictions = 0;
+  let observedIdentity = null;
   const token = crypto.randomUUID();
   for (;;) {
     try {
@@ -451,26 +473,30 @@ async function withInstallLock(
       break;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      if (Date.now() >= deadline) {
-        if (deadlineEvictions >= 1) {
-          throw new Error(
-            `timed out waiting for Harn installation at ${installRoot}`,
-          );
-        }
-        // A critical section should finish in milliseconds. At the deadline,
-        // evict a wedged or foreign owner once, then acquire the lock and
-        // revalidate any installation it may already have published.
-        await reclaimAbandonedInstallLock(lockPath, true);
-        deadlineEvictions += 1;
+      const inspected = inspectInstallLock(lockPath);
+      if (!inspected) continue;
+      if (inspected.identity !== observedIdentity) {
+        observedIdentity = inspected.identity;
         deadline = Date.now() + timeoutMs;
+      }
+      if (Date.now() >= deadline) {
+        // A critical section should finish in milliseconds. At the deadline,
+        // evict only the exact owner observed for the whole wait. A rotating
+        // owner gets its own deadline rather than inheriting stale wait time.
+        await reclaimAbandonedInstallLock(lockPath, observedIdentity);
         continue;
       }
       if (await reclaimAbandonedInstallLock(lockPath)) continue;
       await new Promise((resolve) => setTimeout(resolve, INSTALL_LOCK_POLL_MS));
     }
   }
+  const assertOwned = () => {
+    if (inspectInstallLock(lockPath)?.token !== token) {
+      throw new Error(`lost Harn installation lock at ${installRoot}`);
+    }
+  };
   try {
-    return await callback();
+    return await callback(assertOwned);
   } finally {
     try {
       const owner = JSON.parse(
@@ -488,7 +514,7 @@ async function withInstallLock(
 async function commitInstall(temporary, installRoot, expected, lockTimeoutMs) {
   return withInstallLock(
     installRoot,
-    async () => {
+    async (assertOwned) => {
       const current = readValidInstall(installRoot, expected);
       if (current) return current;
       for (
@@ -497,7 +523,9 @@ async function commitInstall(temporary, installRoot, expected, lockTimeoutMs) {
         attempt += 1
       ) {
         try {
-          await discardInvalidWithRetries(installRoot);
+          assertOwned();
+          discardInvalid(installRoot);
+          assertOwned();
           fs.renameSync(temporary, installRoot);
           return readValidInstall(installRoot, expected);
         } catch (error) {
@@ -508,7 +536,7 @@ async function commitInstall(temporary, installRoot, expected, lockTimeoutMs) {
             throw error;
           }
           await new Promise((resolve) =>
-            setTimeout(resolve, INSTALL_MUTATION_RETRY_MS),
+            setTimeout(resolve, INSTALL_MUTATION_RETRY_MS * 2 ** (attempt - 1)),
           );
         }
       }

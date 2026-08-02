@@ -60,12 +60,14 @@ serializes validation, corrupt-state quarantine, and final publication. A
 process that loses publication validates the winner before returning.
 
 The publication lock records its host, process, and a unique ownership token.
-Waiters poll for at most 30 seconds before evicting one wedged or foreign owner,
-then acquire the boundary and revalidate any installation that owner may have
-published. A dead same-host process or a lock older than five minutes is
-reclaimed immediately. Filesystem mutations retry transient Windows sharing
-and antivirus errors while the boundary remains owned. Token-checked cleanup
-prevents an evicted process from later deleting its replacement's lock.
+Waiters give each unchanged owner 30 seconds before evicting it; an ownership
+change starts a fresh deadline rather than transferring stale wait time to the
+new owner. After acquiring the boundary, a waiter revalidates any installation
+the prior owner may have published. A dead same-host process or a lock older
+than five minutes is reclaimed immediately. Filesystem mutations retry
+transient Windows sharing and antivirus errors while the boundary remains
+owned. Token checks fence publication and cleanup so an evicted process cannot
+later mutate state or delete its replacement's lock.
 
 The default cache is under the runner tool cache, `$XDG_CACHE_HOME`, Windows
 `%LOCALAPPDATA%`, or the user's `.cache` directory. The default installation

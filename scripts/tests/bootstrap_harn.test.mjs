@@ -495,6 +495,43 @@ test("the wait deadline recovers a foreign abandoned lock", async (context) => {
   );
 });
 
+test("a wait deadline does not evict a newly rotated owner", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: "foreign-bootstrap-host",
+    pid: 1,
+    token: "foreign-owner",
+  });
+  let rotatedOwnerSurvived = false;
+  const startedAt = Date.now();
+  const pending = bootstrap({
+    ...bootstrapOptions(root, release.fetchImpl),
+    installLockTimeoutMs: 50,
+  });
+  setTimeout(() => {
+    fs.rmSync(lockRoot, { recursive: true, force: true });
+    writeInstallLock(root, {
+      hostname: os.hostname(),
+      pid: process.pid,
+      token: "rotated-live-owner",
+    });
+  }, 35);
+  setTimeout(() => {
+    rotatedOwnerSurvived = fs.existsSync(lockRoot);
+    fs.rmSync(lockRoot, { recursive: true, force: true });
+  }, 70);
+
+  const result = await pending;
+  assert.equal(rotatedOwnerSurvived, true);
+  assert.ok(Date.now() - startedAt >= 60);
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
 test("independent processes safely converge on one atomic install", async (context) => {
   const root = temporaryRoot(context);
   const archive = makeArchive(root);
