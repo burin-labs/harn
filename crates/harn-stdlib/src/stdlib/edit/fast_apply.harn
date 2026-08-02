@@ -1,4 +1,4 @@
-import { diff_summary, unified_diff } from "std/diff"
+import { diff_artifact } from "std/diff"
 import { edit_fast_apply_content_hash } from "std/edit/internal"
 import { edit_check_lazy_truncation } from "std/edit/patch"
 import {
@@ -121,7 +121,7 @@ fn __edit_fast_apply_preview(ast: HarnessAst, path, before, after) {
   if before != "" && before != after {
     return dry
   }
-  const stat = diff_summary(before, after)
+  const artifact = diff_artifact(before, after, {path: path})
   return {
     ok: true,
     result: "ok",
@@ -129,15 +129,15 @@ fn __edit_fast_apply_preview(ast: HarnessAst, path, before, after) {
     per_file_unified_diff: [
       {
         path: path,
-        diff: unified_diff(before, after, {path: path}),
-        lines_added: stat.insertions,
-        lines_removed: stat.deletions,
+        diff: artifact.diff,
+        lines_added: artifact.insertions,
+        lines_removed: artifact.deletions,
       },
     ],
     summary: {
       files_touched: 1,
-      lines_added: stat.insertions,
-      lines_removed: stat.deletions,
+      lines_added: artifact.insertions,
+      lines_removed: artifact.deletions,
       ops_applied: 1,
       ops_rejected: 0,
     },

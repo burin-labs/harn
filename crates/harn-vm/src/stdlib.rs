@@ -40,6 +40,7 @@ mod cron;
 mod crypto;
 mod csv;
 mod datetime;
+mod diff;
 pub(crate) use datetime::date_dict_from_millis;
 mod document;
 mod durable_step;
@@ -144,6 +145,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     json_stream::register_json_stream_builtins(vm);
     xml::register_xml_builtins(vm);
     datetime::register_datetime_builtins(vm);
+    diff::register_diff_builtins(vm);
     document::register_document_builtins(vm);
     calendar::register_calendar_builtins(vm);
     cron::register_cron_builtins(vm);

@@ -1,4 +1,4 @@
-import { diff_summary, unified_diff } from "std/diff"
+import { diff_artifact } from "std/diff"
 pub import { edit_capabilities } from "std/edit/capabilities"
 pub import { edit_fast_apply, fast_apply } from "std/edit/fast_apply"
 import { edit_refactor_content_hash } from "std/edit/internal"
@@ -322,17 +322,17 @@ fn __refactor_run(
       const after_read = fs.staged_read_text({path: path, session_id: session_id})
       const after = after_read?.content ?? before
       if after != before {
-        const stat = diff_summary(before, after)
+        const artifact = diff_artifact(before, after, {path: path})
         changed = changed + [path]
-        added = added + stat.insertions
-        removed = removed + stat.deletions
+        added = added + artifact.insertions
+        removed = removed + artifact.deletions
         diffs = diffs
           + [
           {
             path: path,
-            diff: unified_diff(before, after, {path: path}),
-            lines_added: stat.insertions,
-            lines_removed: stat.deletions,
+            diff: artifact.diff,
+            lines_added: artifact.insertions,
+            lines_removed: artifact.deletions,
           },
         ]
       }
