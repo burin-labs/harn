@@ -16,6 +16,8 @@ pub(crate) enum RunsCommand {
     View(RunsViewArgs),
     /// Build one versioned, evidence-backed report for a run or run bundle.
     Report(RunsReportArgs),
+    /// Assess one run report with a provenance-bound model review.
+    Review(RunsReviewArgs),
     /// Project one authoritative run into a harn.agent_training_example.v1 example.
     ExportTraining(RunsExportTrainingArgs),
 }
@@ -70,6 +72,18 @@ pub(crate) struct RunsReportArgs {
     pub events_db: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct RunsReviewArgs {
+    /// Path to a harn.run_report.v1 JSON file.
+    pub path: PathBuf,
+    /// Read the review rubric from this UTF-8 file.
+    #[arg(long, value_name = "PATH")]
+    pub rubric: Option<PathBuf>,
+    /// Use this model alias or provider/model selector instead of the small/value route.
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+}
+
 /// Dispatch a `harn runs` subcommand.
 ///
 /// Lives beside the argument definitions rather than in the top-level command
@@ -82,6 +96,12 @@ pub(crate) async fn run_runs_command(args: RunsArgs) {
         RunsCommand::View(view) => print_view(&view.path, view.session, view.json),
         RunsCommand::Report(report) => {
             let code = crate::commands::run_report::run(report).await;
+            if code != 0 {
+                process::exit(code);
+            }
+        }
+        RunsCommand::Review(review) => {
+            let code = crate::commands::run_review::run(review).await;
             if code != 0 {
                 process::exit(code);
             }
