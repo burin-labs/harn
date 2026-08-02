@@ -84,7 +84,7 @@ impl Default for LineDiffOptions {
 
 /// Diff `before` against `after` line by line.
 ///
-/// `from`/`to` are compared with trailing terminators intact, so a file that
+/// `before` and `after` are compared with trailing terminators intact, so a file that
 /// only gains or loses its final newline still diffs as a change (and earns
 /// the `\ No newline at end of file` marker) rather than collapsing to a no-op.
 pub fn render_line_diff(before: &str, after: &str) -> LineDiff {

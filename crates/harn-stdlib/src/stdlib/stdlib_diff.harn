@@ -8,10 +8,12 @@ pub type DiffOptions = {
   to_label?: string,
   context?: int,
   color?: bool,
-  color_mode?: string,
+  color_mode?: "auto" | "always" | "never",
 }
 
-pub type DiffLineOp = {kind: string, line: string, old_line: int, new_line: int}
+pub type DiffLineKind = "equal" | "delete" | "insert"
+
+pub type DiffLineOp = {kind: DiffLineKind, line: string, old_line: int, new_line: int}
 
 pub type DiffLines = {
   changed: bool,
@@ -22,7 +24,13 @@ pub type DiffLines = {
   ops: list<DiffLineOp>,
 }
 
-pub type DiffSummary = {changed: bool, insertions: int, deletions: int}
+pub type DiffSummary = {
+  changed: bool,
+  insertions: int,
+  deletions: int,
+  old_lines: int,
+  new_lines: int,
+}
 
 pub type DiffArtifact = {
   changed: bool,
