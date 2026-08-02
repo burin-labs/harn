@@ -3,7 +3,7 @@ import {
   connector_http_json,
   connector_http_rate_limit,
   connector_http_request,
-} from "std/connectors/shared"
+} from "std/connectors/http"
 
 pipeline test(harness: Harness, task) {
   harness.testing.http_mock_clear()
@@ -181,11 +181,71 @@ pipeline test(harness: Harness, task) {
     "rate_limit:"
       + to_string(rate.retry_after_ms)
       + ":"
-      + rate.limit
+      + (rate.limit ?? "")
       + ":"
-      + rate.remaining
+      + (rate.remaining ?? "")
       + ":"
       + to_string(http_date_rate.retry_after_ms),
+  )
+  harness.testing.http_mock_clear()
+  const oversized_error_body = "x".repeat(1030)
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/connector/full-success-envelope",
+    {status: 200, body: oversized_error_body, headers: {"Set-Cookie": "session=response-value"}},
+  )
+  const full_success = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://api.example.com/connector/full-success-envelope",
+  )
+  assert_eq(full_success.ok, true)
+  const full_success_headers = full_success.headers ?? {}
+  assert_eq(full_success_headers["Set-Cookie"], "session=response-value")
+  assert_eq(full_success.body, oversized_error_body)
+  harness.stdio.println(
+    "full_success:"
+      + full_success_headers["Set-Cookie"]
+      + ":"
+      + to_string(len(full_success.body)),
+  )
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/connector/safe-error-envelope",
+    {
+      status: 500,
+      body: oversized_error_body,
+      headers: {
+        Authorization: "Bearer response-secret",
+        "Set-Cookie": "session=response-secret",
+        "X-Provider-Secret": "provider-response-secret",
+        "X-Request-Id": "request-123",
+      },
+    },
+  )
+  const safe_error = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://api.example.com/connector/safe-error-envelope",
+  )
+  assert_eq(safe_error.ok, false)
+  const safe_error_headers = safe_error.headers ?? {}
+  assert_eq(safe_error_headers["Authorization"], "[redacted]")
+  assert_eq(safe_error_headers["Set-Cookie"], "[redacted]")
+  assert_eq(safe_error_headers["X-Provider-Secret"], "[redacted]")
+  assert_eq(safe_error_headers["X-Request-Id"], "request-123")
+  assert_eq(safe_error.body, "x".repeat(1024) + "…[truncated 6 chars]")
+  assert_eq(safe_error.error.body, safe_error.body)
+  harness.stdio.println(
+    "safe_error:"
+      + safe_error_headers["Authorization"]
+      + ":"
+      + safe_error_headers["X-Request-Id"]
+      + ":"
+      + to_string(len(safe_error.body)),
   )
   harness.testing.http_mock_clear()
   harness.testing.http_mock(

@@ -1,4 +1,4 @@
-import { connector_http_json } from "std/connectors/shared"
+import { connector_http_json } from "std/connectors/http"
 import "std/eval/stats"
 import "std/triggers"
 
@@ -166,15 +166,15 @@ fn post_eval_verdict(clock: HarnessClock, net: HarnessNet, verdict, options) {
       redact_error_body: true,
     },
   )
-  if !(response?.ok ?? false) {
+  if !response.ok {
     return Err(
       "Slack chat.postMessage failed: "
         + to_string(
-        response?.error?.message ?? response?.error?.category ?? response?.status ?? "unknown",
+        response.error?.message ?? response.error?.category ?? response.status ?? "unknown",
       ),
     )
   }
-  const body = response?.json ?? {}
+  const body = response.json ?? {}
   if body?.ok == false {
     return Err("Slack chat.postMessage rejected: " + to_string(body?.error ?? "unknown"))
   }

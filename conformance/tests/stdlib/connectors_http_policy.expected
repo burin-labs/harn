@@ -6,4 +6,6 @@ retry_after_cap:5000:1
 invalid_json:invalid_json:example
 empty_json:204:true
 rate_limit:2000:100:0:3000
+full_success:session=response-value:1030
+safe_error:[redacted]:request-123:1044
 redacted:example:list:500:true

@@ -91,7 +91,8 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`, `std/cha
 `std/net_policy`,
 `std/oauth/providers`, `std/triage`, `std/worktree`, `std/checkpoint`,
 `std/personas/prelude`, `std/personas/bulletins`,
-`std/connectors/shared`, and provider-specific `std/connectors/...` modules).
+`std/connectors/http`, `std/connectors/shared`, and provider-specific
+`std/connectors/...` modules).
 These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
@@ -109,6 +110,7 @@ import { retry_predicate_with_backoff } from "std/async"
 import "std/cache"
 import "std/changelog"
 import "std/collections"
+import "std/connectors/http"
 import "std/connectors/shared"
 import "std/context"
 import "std/disclosure"
@@ -196,15 +198,22 @@ Connector package helpers for common provider plumbing:
 
 | Function | Description |
 |---|---|
-| `connector_http_request(clock, net, method, url, options?)` | Capability-attenuated, non-throwing HTTP policy wrapper returning `{ok, status, headers, body, retry_after_ms?, error?}` with normalized retry, idempotency, and error categories |
-| `connector_http_json(clock, net, method, url, options?)` | `connector_http_request` plus response JSON parsing; invalid JSON returns `error.category == "invalid_json"` |
-| `connector_http_header(headers_or_response, name)` | Case-insensitive header lookup for response envelopes or raw header dicts |
-| `connector_http_rate_limit(headers_or_response)` | Extract `Retry-After`, `RateLimit-*`, and `X-RateLimit-*` metadata, including `retry_after_ms` when parseable |
 | `verify_hmac_signature(body, signature, secret, algorithm?, options?)` | Constant-time check for bare or `sha256=` signatures; legacy `sha1=` requires `options.allow_legacy_sha1` |
 | `verify_jwt(token, jwks_url, options?)` | Verify a compact JWT against a JWKS URL, or `options.inline_jwks`, returning `{ok, claims, error}` |
 | `oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options?)` | Refresh an OAuth2 access token with form-encoded `grant_type=refresh_token` |
 | `rate_limit_token_bucket(state?, config?, now_ms?)` | Pure token-bucket transition for package-local quota decisions |
 | `paginate_cursor(initial_url, fetch_fn, cursor_path, options?)` | Collect cursor-paginated pages from a package-supplied fetch closure |
+
+### std/connectors/http
+
+HTTP transport policy for connector packages:
+
+| Function | Description |
+|---|---|
+| `connector_http_request(clock, net, method, url, options?)` | Capability-attenuated, non-throwing request wrapper with normalized retry, idempotency, error categories, and bounded failure envelopes |
+| `connector_http_json(clock, net, method, url, options?)` | `connector_http_request` plus response JSON parsing; invalid JSON returns `error.category == "invalid_json"` |
+| `connector_http_header(headers_or_response, name)` | Case-insensitive header lookup for response envelopes or raw header dicts |
+| `connector_http_rate_limit(headers_or_response)` | Extract `Retry-After`, `RateLimit-*`, and `X-RateLimit-*` metadata, including `retry_after_ms` when parseable |
 
 ### std/oauth/providers
 
