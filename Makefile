@@ -1,4 +1,4 @@
-.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn spec-lint gen-openapi-snapshot check-openapi-snapshot test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-binary-size-policy check-all-features
+.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn spec-lint gen-openapi-snapshot check-openapi-snapshot test test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache
 
 HARN_BIN ?=
@@ -120,6 +120,15 @@ test:
 		echo "hint: run 'make setup' or 'cargo install cargo-nextest --locked'"; \
 		$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace; \
 	fi
+
+# Run exactly one library test without making nextest enumerate every test
+# binary in the package first. The environment-variable boundary keeps the
+# fully-qualified test name opaque to Make and the shell parser.
+test-one:
+	@ : "$${HARN_TEST_ONE_NAME:?set HARN_TEST_ONE_NAME to the fully-qualified test name}"
+	$(HARN_RUST_TEST_ENV) ./scripts/test_one.sh \
+		--package "$${HARN_TEST_ONE_PACKAGE:-harn-cli}" \
+		--lib "$${HARN_TEST_ONE_NAME}"
 
 # Run only the tests in crates affected by the changes vs AFFECTED_BASE
 # (default origin/main), expanded by the reverse-dependency closure. Used on
@@ -419,6 +428,7 @@ test-pr-gate-scripts:
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/check_all_features_test.sh
+	./scripts/tests/test_one_test.sh
 
 # Rust/Harn-backed shell integration tests run only after CI restores the Rust
 # toolchain/caches and exports the one warmed binary. Pure Harn semantics remain
