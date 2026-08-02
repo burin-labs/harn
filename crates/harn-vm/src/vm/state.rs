@@ -1040,7 +1040,23 @@ impl Vm {
 
     /// Set builtins that are denied in sandbox mode.
     /// When called, the given builtin names will produce a permission error.
-    pub fn set_denied_builtins(&mut self, denied: HashSet<String>) {
+    pub fn set_denied_builtins(&mut self, mut denied: HashSet<String>) {
+        // A builtin may have a private registry name plus one or more public
+        // aliases. Normalize the whole family once so no dispatch path can
+        // escape policy merely by using another name for the same handler.
+        let denied_canonical_names = denied
+            .iter()
+            .filter_map(|name| crate::stdlib::builtin_manifest_entry(name))
+            .map(|entry| entry.canonical_name)
+            .collect::<HashSet<_>>();
+        if !denied_canonical_names.is_empty() {
+            denied.extend(
+                crate::stdlib::all_builtin_manifest()
+                    .iter()
+                    .filter(|entry| denied_canonical_names.contains(entry.canonical_name))
+                    .map(|entry| entry.name.to_string()),
+            );
+        }
         self.denied_builtins = Arc::new(denied);
     }
 
