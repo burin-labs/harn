@@ -105,7 +105,7 @@ fn package_docs_render_complete_multiline_declarations() {
     write_publishable_package(tmp.path());
     fs::write(
         tmp.path().join("lib/main.harn"),
-        r#"/** A workflow run returned by GitHub. */
+        r"/** A workflow run returned by GitHub. */
 pub type GithubWorkflowRun =
   {
     id: int,
@@ -118,7 +118,7 @@ pub fn call_typed<T>(
 ) -> T {
   return value
 }
-"#,
+",
     )
     .unwrap();
 
@@ -355,6 +355,21 @@ pub gen fn streamed<T>(
 ) -> T {
   yield value
 }
+
+pub struct Config {
+  id: int,
+  name: string,
+}
+
+pub enum Color {
+  Red
+  Green(int)
+}
+
+pub skill deploy {
+  description "Ship it"
+  prompt "Follow the runbook."
+}
 "#,
     );
 
@@ -363,11 +378,18 @@ pub gen fn streamed<T>(
             .iter()
             .map(|symbol| symbol.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["shaped", "streamed"]
+        vec!["shaped", "streamed", "Config", "Color", "deploy"]
     );
     assert!(symbols[0].signature.contains("{value: string}"));
     assert!(!symbols[0].signature.contains("return"));
     assert!(symbols[1].signature.starts_with("pub gen fn streamed<T>("));
+    assert!(symbols[2].signature.contains("id: int"));
+    assert!(symbols[2].signature.contains("name: string"));
+    assert!(symbols[3].signature.contains("Green(int)"));
+    assert!(symbols[4].signature.contains("description \"Ship it\""));
+    assert!(symbols[4]
+        .signature
+        .contains("prompt \"Follow the runbook.\""));
     for symbol in symbols {
         parse_harn_source(&symbol.signature).unwrap();
     }

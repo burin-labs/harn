@@ -7,7 +7,7 @@ struct PublicDeclaration<'a> {
     kind: &'static str,
     name: &'a str,
     inner: &'a SNode,
-    has_body: bool,
+    strip_body: bool,
 }
 
 /// Extract public declarations from the parser's top-level declaration spans.
@@ -39,7 +39,7 @@ pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
                 matches!(&token.kind, TokenKind::Pub)
                     && token.span.end <= declaration.inner.span.start
             })?;
-            let signature_end = if declaration.has_body {
+            let signature_end = if declaration.strip_body {
                 outer_body_start(&parser_tokens, declaration.inner)?
             } else {
                 declaration.inner.span.end
@@ -48,7 +48,7 @@ pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
                 .get(pub_token.span.start..signature_end)?
                 .trim()
                 .replace("\r\n", "\n");
-            let signature_source = if declaration.has_body {
+            let signature_source = if declaration.strip_body {
                 format!("{raw_signature} {{}}\n")
             } else {
                 format!("{raw_signature}\n")
@@ -120,13 +120,13 @@ pub(crate) fn extract_api_symbols_for_module(
 
 fn public_declaration<'a>(node: &'a SNode) -> Option<PublicDeclaration<'a>> {
     let (_, inner) = peel_attributes(node);
-    let (kind, name, is_pub, has_body) = match &inner.node {
+    let (kind, name, is_pub, strip_body) = match &inner.node {
         Node::FnDecl { name, is_pub, .. } => ("fn", name.as_str(), *is_pub, true),
         Node::Pipeline { name, is_pub, .. } => ("pipeline", name.as_str(), *is_pub, true),
         Node::ToolDecl { name, is_pub, .. } => ("tool", name.as_str(), *is_pub, true),
-        Node::SkillDecl { name, is_pub, .. } => ("skill", name.as_str(), *is_pub, true),
-        Node::StructDecl { name, is_pub, .. } => ("struct", name.as_str(), *is_pub, true),
-        Node::EnumDecl { name, is_pub, .. } => ("enum", name.as_str(), *is_pub, true),
+        Node::SkillDecl { name, is_pub, .. } => ("skill", name.as_str(), *is_pub, false),
+        Node::StructDecl { name, is_pub, .. } => ("struct", name.as_str(), *is_pub, false),
+        Node::EnumDecl { name, is_pub, .. } => ("enum", name.as_str(), *is_pub, false),
         Node::TypeDecl { name, is_pub, .. } => ("type", name.as_str(), *is_pub, false),
         Node::ConstBinding {
             pattern: BindingPattern::Identifier(name),
@@ -139,7 +139,7 @@ fn public_declaration<'a>(node: &'a SNode) -> Option<PublicDeclaration<'a>> {
         kind,
         name,
         inner,
-        has_body,
+        strip_body,
     })
 }
 
