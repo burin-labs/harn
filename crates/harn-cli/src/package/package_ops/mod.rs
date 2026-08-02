@@ -1,6 +1,7 @@
 pub(crate) use super::errors::PackageError;
 pub(crate) use super::*;
 
+mod api_symbols;
 mod check;
 mod entry;
 mod listing;
@@ -13,6 +14,7 @@ mod support;
 mod validate;
 mod workspace;
 
+pub(crate) use api_symbols::*;
 pub(crate) use check::*;
 pub use entry::*;
 pub(crate) use listing::*;
