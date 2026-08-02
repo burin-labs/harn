@@ -185,7 +185,11 @@ fn windows_cache_pair() {
           steps: [
             checkout,
             toolchain,
-            {uses: "./.github/actions/rust-cache", with: {...cache_inputs, save: true}},
+            {
+              uses: "./.github/actions/rust-cache",
+              if: gha_expression("!startsWith(github.ref_name, 'release-certify/')"),
+              with: {...cache_inputs, save: true},
+            },
           ],
         },
       },
