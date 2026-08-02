@@ -102,9 +102,11 @@ impl ProcessSpawner for RealSpawner {
 
         let (mut command, cleanup_token) = prepare_command(&spec, None)?;
         #[cfg(target_os = "windows")]
-        let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment {
+        let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment
+            || spec.configure_process_group
+        {
             let job = super::windows::KillOnCloseJob::new().map_err(|error| {
-                ProcessError::Spawn(format!("create owner Job Object: {error}"))
+                ProcessError::Spawn(format!("create process-tree Job Object: {error}"))
             })?;
             super::windows::configure_suspended(&mut command);
             Some(Arc::new(job))
@@ -476,14 +478,28 @@ impl ProcessHandle for RealProcess {
                             let _ = child.wait();
                             return Ok(WaitOutcome::Interrupted(report));
                         }
+                        #[cfg(target_os = "windows")]
+                        {
+                            // Ordinary Windows command trees are enrolled in
+                            // a Job Object before their first instruction. A
+                            // cooperative interrupt must terminate that job;
+                            // `Child::kill` reaches only the direct process.
+                            let mut report = killer.kill();
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            report.refresh_survivor_status();
+                            return Ok(WaitOutcome::Interrupted(report));
+                        }
                         // Scope cancellation / deadline expiry: graceful
                         // group termination (SIGTERM, grace, SIGKILL) shared
                         // with the VM-side `process.*` builtins.
+                        #[cfg(not(target_os = "windows"))]
                         let (_, report) =
                             harn_vm::op_interrupt::terminate_child_group_with_cleanup_token_report(
                                 child,
                                 Some(&self.cleanup_token),
                             );
+                        #[cfg(not(target_os = "windows"))]
                         return Ok(WaitOutcome::Interrupted(report));
                     }
                     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
