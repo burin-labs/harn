@@ -124,11 +124,18 @@ catches misuse statically against the declared contract:
 error: function `pick_keys` parameter `d`: expected dict<string, V>, found string
 ```
 
-For option-bag parameters, direct dict literals also reject unknown keys:
+Every closed-record parameter rejects unknown keys in a direct record literal.
+The record type owns this rule, so it applies to user functions and builtins
+without relying on names such as `options` or `config`:
 
 ```text
-error: argument 3 `options`: unknown option `dropnil`; expected one of `drop_nil` — did you mean `drop_nil`?
+error: argument 3 `options`: unknown field `dropnil` in closed record; expected one of `drop_nil` — did you mean `drop_nil`?
 ```
+
+An existing inferred value may carry extra fields because the callee can read
+only the fields in its contract. Use an open record when a direct literal may
+also contain fields that the callee does not name. See [Open records in the
+language specification](./spec/language/19-type-annotations.md#open-records).
 
 When a value flows in dynamically (e.g. via `unknown` or a boundary
 source), the runtime parameter guard catches it with the parameter name

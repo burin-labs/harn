@@ -163,10 +163,10 @@ call-return, or any non-identifier expression. The ambient dict-literal
 idiom (`let d = {a: 1}; d.missing`) stays loose and returns `nil` at
 runtime, matching the gradual-typing affordance for one-off glue.
 
-### Open records and row polymorphism
+### Open records
 
-A shape type may end with one or more **row tails** — `...` followed by a type.
-A row tail stands for "any other fields," so the shape is **open**:
+A shape type may end with `...` followed by a type. This **row tail** describes
+fields that the type does not list by name, so the shape is open:
 
 ```harn,ignore
 // `x` is any record that has at least a string `id`; `rest` captures the
@@ -179,11 +179,10 @@ needs_id({id: "u1", name: "Ann", age: 3})   // ok — extra fields allowed
 needs_id({name: "Ann"})                      // error — required `id` missing
 ```
 
-`rest` is a **row variable**: an ordinary generic type parameter that happens
-to appear in tail position. A function generic over rows types record **merge**
-precisely — the result carries every field of both inputs, with the right-hand
-fields overriding the left on overlap (matching the runtime of `merge` /
-`{...a, ...b}` / `a + b`):
+`rest` is a **row variable**: a generic type parameter in tail position. A
+function that uses row variables can preserve the fields added by a record
+merge. When both records contain the same field, the right record wins. This
+matches `merge`, `{...a, ...b}`, and `a + b` at runtime:
 
 ```harn,ignore
 fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
@@ -196,12 +195,12 @@ const m = merge({a: 1, b: 2}, {b: "x", c: true})
 
 Rules:
 
-- **Subtyping** checks only the *explicit* fields of the expected side against
-  the actual's known fields (Harn shapes are width-subtyped, so extra actual
-  fields are always allowed and the row tail absorbs them). A required field
-  absent from the actual's known fields is accepted only when the actual has a
-  **gradual** tail (`dict`, `any`); an abstract row variable is not assumed to
-  supply it.
+- **Field compatibility** checks the fields named by the expected type. An
+  existing value may carry extra fields. A literal written directly in a call
+  to a closed-record parameter may contain only the declared fields; this
+  catches misspelled keys at the call site. Use an open record when callers may
+  add fields. A missing required field is accepted only when the value has a
+  dynamic tail (`dict` or `any`); a row variable does not promise that field.
 - **Binding** is one-sided: a row variable binds to the actual record's
   *leftover* fields (the fields not matched by the explicit ones). With no
   explicit fields, `{...R}` binds `R` to the whole record.
@@ -415,19 +414,18 @@ Optional fields use `?` and need not be present:
 const config: {host: string, port?: int} = {host: "localhost"}
 ```
 
-Width subtyping: a dict with extra fields satisfies a shape that requires fewer fields.
+Width subtyping lets an existing value carry more fields than a parameter reads:
 
 ```harn
 fn greet(u: {name: string}) -> string {
   return "hi ${u["name"]}"
 }
-greet({name: "Bob", age: 25})  // OK — extra field allowed
+const user = {name: "Bob", age: 25}
+greet(user)  // OK — `user` may carry fields that `greet` does not read
 ```
 
-Option-bag parameters are stricter for literal calls. When a parameter is
-named like `opts`, `options`, or `config`, or its annotation is a type alias
-ending in `Options` or `Config`, a direct dict literal argument may only use
-fields declared by the option shape:
+Fresh literals are checked exactly at closed-record parameters. This catches a
+misspelled request or option key where it is written, without a naming rule:
 
 ```harn
 type PickOptions = {drop_nil?: bool}
@@ -435,13 +433,11 @@ type PickOptions = {drop_nil?: bool}
 fn pick(_options: PickOptions = {}) {}
 
 pick({drop_nil: true})  // OK
+pick({dropnil: true})   // type error — unknown field `dropnil`
 ```
 
-A typo in a direct option literal is a type error:
-
-```harn,ignore
-pick({dropnil: true})   // type error — unknown option `dropnil`
-```
+Use an open record such as `{name: string, ...dict}` when a direct literal may
+include other fields.
 
 Nested shapes:
 

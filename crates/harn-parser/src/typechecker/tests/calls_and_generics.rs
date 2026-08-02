@@ -28,7 +28,7 @@ pipeline t(task) {
     );
     assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
     assert!(
-        errs[0].contains("argument 1 `options`: unknown option `dropnil`"),
+        errs[0].contains("argument 1 `options`: unknown field `dropnil` in closed record"),
         "unexpected error: {}",
         errs[0]
     );
@@ -40,14 +40,15 @@ pipeline t(task) {
 }
 
 #[test]
-fn test_non_option_shape_call_keeps_width_subtyping() {
+fn test_inferred_record_call_keeps_width_subtyping() {
     let errs = errors(
         r#"fn greet(u: {name: string}) -> string {
   return "hi " + u.name
 }
 
 pipeline t(task) {
-  greet({name: "Bob", age: 25})
+  const person = {name: "Bob", age: 25}
+  greet(person)
 }"#,
     );
     assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
@@ -510,21 +511,6 @@ fn test_llm_call_option_literal_checks_known_field_types() {
     assert!(errs[0].contains("argument 3 `options`"), "{errs:?}");
     assert!(errs[0].contains("max_tokens?: int"), "{errs:?}");
     assert!(errs[0].contains("max_tokens: string"), "{errs:?}");
-}
-
-#[test]
-fn test_llm_call_option_literal_flags_probable_typos() {
-    let warns = warnings(
-        r#"pipeline t(task) {
-  llm_call("prompt", nil, {provider: "mock", max_toknes: 256})
-}"#,
-    );
-    assert_eq!(warns.len(), 1, "got warnings: {warns:?}");
-    assert!(
-        warns[0].contains("unknown `llm_call` option `max_toknes`"),
-        "{warns:?}"
-    );
-    assert!(warns[0].contains("max_tokens"), "{warns:?}");
 }
 
 #[test]
