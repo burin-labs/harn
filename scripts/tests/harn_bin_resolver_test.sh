@@ -204,6 +204,19 @@ if HARN_BIN_NO_BUILD=typo "$repo_root/scripts/harn_bin.sh" --print \
   echo "harn_bin accepted an invalid HARN_BIN_NO_BUILD value" >&2
   exit 1
 fi
+
+if HARN_BIN_RETRY_WITHOUT_WRAPPER=typo "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/retry-policy-invalid.out" \
+  2> "$tmp_root/retry-policy-invalid.err"; then
+  echo "harn_bin accepted an invalid HARN_BIN_RETRY_WITHOUT_WRAPPER value" >&2
+  exit 1
+fi
+if ! grep -Fq "HARN_BIN_RETRY_WITHOUT_WRAPPER must be 0 or 1" \
+  "$tmp_root/retry-policy-invalid.err"; then
+  echo "invalid wrapper-retry policy error was not attributable" >&2
+  cat "$tmp_root/retry-policy-invalid.err" >&2
+  exit 1
+fi
 if ! grep -Fq "HARN_BIN_NO_BUILD must be 0 or 1" "$tmp_root/env-no-build-invalid.err"; then
   echo "invalid HARN_BIN_NO_BUILD error was not attributable" >&2
   cat "$tmp_root/env-no-build-invalid.err" >&2
@@ -237,7 +250,7 @@ fi
 
 : > "$record"
 child_pid_file="$tmp_root/timeout-child.pid"
-RUSTC_WRAPPER=sccache \
+if RUSTC_WRAPPER=sccache \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   FAKE_CARGO_MODE=wrapper-timeout \
@@ -245,31 +258,72 @@ RUSTC_WRAPPER=sccache \
   HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
   PATH="$fake_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --print \
-  > "$tmp_root/timeout-recovery.out" \
-  2> "$tmp_root/timeout-recovery.err"
-if ! grep -Fxq "$expected_bin" "$tmp_root/timeout-recovery.out"; then
-  echo "harn_bin resolver did not recover from a compiler-wrapper timeout" >&2
-  cat "$tmp_root/timeout-recovery.err" >&2
+  > "$tmp_root/wrapper-timeout.out" \
+  2> "$tmp_root/wrapper-timeout.err"; then
+  echo "harn_bin resolver accepted a wrapper-backed timeout by default" >&2
+  exit 1
+else
+  status=$?
+fi
+if [[ "$status" -ne 124 ]]; then
+  echo "wrapper-backed timeout status changed: expected 124, got $status" >&2
+  cat "$tmp_root/wrapper-timeout.err" >&2
   exit 1
 fi
-if ! grep -Fq "retrying Cargo harn binary probe with the compiler wrapper disabled" "$tmp_root/timeout-recovery.err"; then
-  echo "compiler-wrapper timeout recovery was not attributable" >&2
-  cat "$tmp_root/timeout-recovery.err" >&2
+if ! grep -Fq "did not start a" "$tmp_root/wrapper-timeout.err" || \
+   ! grep -Fq "HARN_BIN_RETRY_WITHOUT_WRAPPER=1" "$tmp_root/wrapper-timeout.err"; then
+  echo "compiler-wrapper timeout did not explain the no-retry policy and escape hatch" >&2
+  cat "$tmp_root/wrapper-timeout.err" >&2
   exit 1
 fi
-if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 2 ]]; then
-  echo "compiler-wrapper timeout did not run exactly one retry" >&2
+if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 1 ]]; then
+  echo "compiler-wrapper timeout started a duplicate Cargo build by default" >&2
   cat "$record" >&2
   exit 1
 fi
-if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
-  echo "compiler-wrapper timeout retry did not clear RUSTC_WRAPPER" >&2
+if grep -Fxq "RUSTC_WRAPPER=" "$record"; then
+  echo "compiler-wrapper timeout silently retried without RUSTC_WRAPPER" >&2
   cat "$record" >&2
   exit 1
 fi
 timed_out_child_pid=$(cat "$child_pid_file")
 if kill -0 "$timed_out_child_pid" 2>/dev/null; then
   echo "compiler-wrapper timeout left a descendant process alive: $timed_out_child_pid" >&2
+  exit 1
+fi
+
+: > "$record"
+child_pid_file="$tmp_root/timeout-recovery-child.pid"
+RUSTC_WRAPPER=sccache \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=wrapper-timeout \
+  FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  HARN_BIN_RETRY_WITHOUT_WRAPPER=1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/timeout-recovery.out" \
+  2> "$tmp_root/timeout-recovery.err"
+if ! grep -Fxq "$expected_bin" "$tmp_root/timeout-recovery.out"; then
+  echo "harn_bin resolver did not honor explicit wrapper-disabled recovery" >&2
+  cat "$tmp_root/timeout-recovery.err" >&2
+  exit 1
+fi
+if ! grep -Fq "explicitly retrying Cargo harn binary probe with the compiler wrapper disabled" \
+  "$tmp_root/timeout-recovery.err"; then
+  echo "explicit compiler-wrapper timeout recovery was not attributable" >&2
+  cat "$tmp_root/timeout-recovery.err" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 2 ]]; then
+  echo "explicit compiler-wrapper recovery did not run exactly one retry" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
+  echo "explicit compiler-wrapper recovery did not clear RUSTC_WRAPPER" >&2
+  cat "$record" >&2
   exit 1
 fi
 
@@ -281,6 +335,7 @@ if RUSTC_WRAPPER=sccache \
   FAKE_CARGO_MODE=wrapper-timeout-retry-failure \
   FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
   HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  HARN_BIN_RETRY_WITHOUT_WRAPPER=1 \
   PATH="$fake_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --print \
   > "$tmp_root/retry-failure.out" \

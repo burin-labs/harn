@@ -15,6 +15,13 @@ case "${HARN_BIN_NO_BUILD:-0}" in
     exit 2
     ;;
 esac
+case "${HARN_BIN_RETRY_WITHOUT_WRAPPER:-0}" in
+  0|1) ;;
+  *)
+    echo "error: HARN_BIN_RETRY_WITHOUT_WRAPPER must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
 print_only=0
 
 usage() {
@@ -29,6 +36,7 @@ Environment:
   HARN_BIN_NO_BUILD  set to 1 to forbid implicit Cargo builds
   CARGO_TARGET_DIR                 target directory for --no-build worktree lookup
   HARN_BIN_CARGO_TIMEOUT_SECONDS   Cargo probe deadline in seconds (default: 600)
+  HARN_BIN_RETRY_WITHOUT_WRAPPER   retry a timed-out compiler-wrapper build (default: 0)
 EOF
 }
 

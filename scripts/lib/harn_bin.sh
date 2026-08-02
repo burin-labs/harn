@@ -138,7 +138,7 @@ harn_worktree_unconfigured() {
 # What to do about a probe that ran out of time. A cold build of the whole
 # workspace does not fit in the default deadline, so in a fresh worktree the
 # deadline is reached for a legitimate reason and the bare timeout reads like a
-# hang. Name the likely cause and the two ways out.
+# hang. Name the likely cause and the bounded ways out.
 harn_print_probe_timeout_hints() {
   if harn_worktree_unconfigured; then
     echo "hint: $(harn_repo_root) has no .cargo/config.toml, so this build had no" >&2
@@ -148,6 +148,13 @@ harn_print_probe_timeout_hints() {
   echo "hint:   HARN_BIN=<path-to-harn> HARN_BIN_NO_BUILD=1 <command>" >&2
   echo "hint: to allow a longer cold build:" >&2
   echo "hint:   HARN_BIN_CARGO_TIMEOUT_SECONDS=3600 <command>" >&2
+}
+
+harn_print_wrapper_retry_hint() {
+  echo "hint: a compiler wrapper was configured; the resolver did not start a" >&2
+  echo "hint: duplicate cold build because the wrapper may be waiting behind active work." >&2
+  echo "hint: to retry once with compiler wrappers disabled:" >&2
+  echo "hint:   HARN_BIN_RETRY_WITHOUT_WRAPPER=1 <command>" >&2
 }
 
 harn_compiler_wrapper_configured() {
@@ -193,13 +200,19 @@ harn_resolve_binary() {
   fi
   bin="$(harn_run_cargo_probe_with_deadline)" || status=$?
   if [[ "$status" -ne 0 ]]; then
-    if [[ "$status" -ne 124 ]] || ! harn_compiler_wrapper_configured; then
-      if [[ "$status" -eq 124 ]]; then
-        harn_print_probe_timeout_hints
-      fi
+    if [[ "$status" -ne 124 ]]; then
       return "$status"
     fi
-    echo "warning: retrying Cargo harn binary probe with the compiler wrapper disabled" >&2
+    if ! harn_compiler_wrapper_configured; then
+      harn_print_probe_timeout_hints
+      return "$status"
+    fi
+    if [[ "${HARN_BIN_RETRY_WITHOUT_WRAPPER:-0}" != "1" ]]; then
+      harn_print_wrapper_retry_hint
+      harn_print_probe_timeout_hints
+      return "$status"
+    fi
+    echo "warning: explicitly retrying Cargo harn binary probe with the compiler wrapper disabled" >&2
     status=0
     bin="$(
       RUSTC_WRAPPER='' \
