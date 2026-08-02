@@ -2526,6 +2526,15 @@ trace spans, source hashes, redacted visible output, and structural checks.
 Missing timing is `null`, not zero; until Harn records a join receipt, the
 report marks wait and result-collapse timing unavailable.
 
+Timeline snapshots use schema version 2 and carry a `coverage` object with
+`returned`, `available`, and `truncated`. `available` is exact when Harn read
+every selected source and `null` when it stopped after proving truncation. A
+run report with incomplete timeline evidence adds a `timeline_truncated`
+warning; consumers must not infer that an event is absent from a truncated
+snapshot. Increase the timeline query's `limit` to recover more nodes. The
+topic cursor remains a subscription watermark, not a continuation token for a
+snapshot that combines sorted run spans and event topics.
+
 Agents can request the same projection through the read-only
 `harn.run.report` MCP tool. MCP paths are confined to the server's project and
 state roots; the local CLI accepts an explicit local path.

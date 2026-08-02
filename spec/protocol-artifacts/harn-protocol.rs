@@ -448,7 +448,7 @@ pub struct HarnSessionTimelineCursor {
     pub topics: std::collections::BTreeMap<String, u64>,
 }
 
-/// Filters and pagination for Harn's canonical semantic session timeline.
+/// Filters and bounds Harn's canonical semantic session timeline.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct HarnSessionTimelineQuery {
@@ -520,6 +520,15 @@ pub struct HarnSessionTimelineNode {
     pub order: u64,
 }
 
+/// States whether a bounded session-timeline snapshot is complete.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HarnSessionTimelineCoverage {
+    pub returned: usize,
+    pub available: Option<usize>,
+    pub truncated: bool,
+}
+
 /// Point-in-time result of a canonical session-timeline query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -527,6 +536,8 @@ pub struct HarnSessionTimelineSnapshot {
     pub schema_version: u32,
     pub query: HarnSessionTimelineQuery,
     pub cursor: HarnSessionTimelineCursor,
+    #[serde(default)]
+    pub coverage: HarnSessionTimelineCoverage,
     pub nodes: Vec<HarnSessionTimelineNode>,
 }
 
