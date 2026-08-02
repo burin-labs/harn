@@ -324,6 +324,7 @@
 - [Maintainer release workflow](./maintainer-release.md)
 - [Release assets manifest](./dev/release-assets-manifest.md)
 - [Release runner policy](./dev/release-runner-policy.md)
+- [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Bootstrap an exact Harn release](./dev/bootstrap-harn.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
 - [Platform compatibility](./dev/platform-compatibility.md)

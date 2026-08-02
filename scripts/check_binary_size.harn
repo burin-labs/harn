@@ -1,10 +1,10 @@
-// Build-oharness.fs, r-check the shipped harn release binary against a size budget and,
+// Build or check the shipped harn release binary against a size budget and,
 // unless disabled, write a cargo-bloat report for follow-up analysis.
 //
-// Ported from scripts/check_binary_size.sh — same flags, env vars, report
-// files, output shape, and exit codes (2 = usage/tooling error, 1 = missing
-// binary or budget breach). The one intentional tightening: --budget-mb
-// must be a fully numeric value (awk silently accepted trailing garbage).
+// Explicit CLI and environment overrides remain available for recovery, while
+// normal checks read the same exact-byte policy as the hosted release gate.
+// Exit codes are 2 for usage/tooling errors and 1 for a missing binary or a
+// budget breach.
 //
 // Usage:
 //   harn run scripts/check_binary_size.harn -- [options]
@@ -12,14 +12,144 @@
 // Note: the `harn run` sandbox scopes filesystem access to the workspace
 // root. When HARN_BIN / CARGO_TARGET_DIR / --report-dir point outside the
 // repo, run with `harn run --no-sandbox` (CI keeps everything in-tree).
-// Keep local/standalone checks on the same release ratchet as the binary
-// workflow. Durable session search and subsequent release content raised the
-// v0.10.48 Linux candidate to 217.33 MiB; the workflow's 218 MiB limit is
-// authoritative.
-const DEFAULT_BINARY_SIZE_BUDGET_MB: string = "218.00"
+import { TypedReadResult, read_json_typed_result } from "std/fs"
+import "std/schema"
 
-pub fn default_binary_size_budget_mb() -> string {
-  return DEFAULT_BINARY_SIZE_BUDGET_MB
+pub type ReleaseBinarySizeBaseline = {
+  version: string,
+  source_sha: string,
+  bytes: int,
+  observed_at: string,
+}
+
+pub type ReleaseBinarySizeTargetPolicy = {
+  target: string,
+  budget_bytes: int,
+  baseline: ReleaseBinarySizeBaseline,
+}
+
+pub type ReleaseBinarySizePolicy = {
+  schema_version: int,
+  default_target: string,
+  targets: list<ReleaseBinarySizeTargetPolicy>,
+}
+
+pub type BinarySizeBudgetOverrides = {
+  budget_mb: string,
+  budget_mb_explicit: bool,
+  budget_bytes: string,
+}
+
+const RELEASE_BINARY_SIZE_POLICY: string = ".github/release-binary-size-policy.json"
+
+const MIN_BINARY_SIZE_HEADROOM_BYTES: int = 1048576
+
+const MAX_BINARY_SIZE_HEADROOM_BYTES: int = 4194304
+
+fn release_binary_size_baseline_schema() -> any {
+  return schema_closed_object(
+    {
+      version: schema_string(),
+      source_sha: schema_string(),
+      bytes: schema_int(),
+      observed_at: schema_string(),
+    },
+  )
+}
+
+fn release_binary_size_policy_schema() -> any {
+  return schema_closed_object(
+    {
+      schema_version: schema_int(),
+      default_target: schema_string(),
+      targets: schema_list(
+        schema_closed_object(
+          {
+            target: schema_string(),
+            budget_bytes: schema_int(),
+            baseline: release_binary_size_baseline_schema(),
+          },
+        ),
+      ),
+    },
+  )
+}
+
+pub fn read_release_binary_size_policy_result(
+  fs: HarnessFs,
+  path: string,
+) -> TypedReadResult<ReleaseBinarySizePolicy> {
+  return read_json_typed_result<ReleaseBinarySizePolicy>(
+    fs,
+    path,
+    release_binary_size_policy_schema(),
+  )
+}
+
+pub fn release_binary_size_policy_errors(policy: ReleaseBinarySizePolicy) -> list<string> {
+  let errors = []
+  if policy.schema_version != 1 {
+    errors = errors + ["schema_version must be 1"]
+  }
+  if policy.targets.count == 0 {
+    errors = errors + ["targets must not be empty"]
+  }
+  let seen_targets = []
+  for entry in policy.targets {
+    if entry.target == "" {
+      errors = errors + ["target must not be empty"]
+    } else if seen_targets.contains(entry.target) {
+      errors = errors + ["target must be unique: ${entry.target}"]
+    }
+    seen_targets = seen_targets + [entry.target]
+    if entry.budget_bytes <= 0 {
+      errors = errors + ["${entry.target}: budget_bytes must be positive"]
+    }
+    if entry.baseline.bytes <= 0 {
+      errors = errors + ["${entry.target}: baseline.bytes must be positive"]
+    }
+    const headroom = entry.budget_bytes - entry.baseline.bytes
+    if headroom < MIN_BINARY_SIZE_HEADROOM_BYTES {
+      errors = errors + ["${entry.target}: binary-size headroom must be at least 1048576 bytes"]
+    }
+    if headroom > MAX_BINARY_SIZE_HEADROOM_BYTES {
+      errors = errors + ["${entry.target}: binary-size headroom must be at most 4194304 bytes"]
+    }
+    if len(regex_captures("^[0-9]+[.][0-9]+[.][0-9]+$", entry.baseline.version)) == 0 {
+      errors = errors + ["${entry.target}: baseline.version must be a semantic release version"]
+    }
+    if len(regex_captures("^[0-9a-f]{40}$", entry.baseline.source_sha)) == 0 {
+      errors = errors + ["${entry.target}: baseline.source_sha must be a full lowercase Git commit"]
+    }
+    if len(
+      regex_captures(
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+        entry.baseline.observed_at,
+      ),
+    )
+      == 0 {
+      errors = errors
+        + [
+        "${entry.target}: baseline.observed_at must be a UTC second-resolution timestamp",
+      ]
+    }
+  }
+  if !seen_targets.contains(policy.default_target) {
+    errors = errors + ["default_target must name one target policy"]
+  }
+  return errors
+}
+
+pub fn release_binary_size_target_policy(
+  policy: ReleaseBinarySizePolicy,
+  target: string,
+) -> ReleaseBinarySizeTargetPolicy? {
+  for entry in policy.targets {
+    if entry.target == target {
+      return entry
+    }
+  }
+  return nil
 }
 
 /** The --help text (bash `usage()` heredoc, invocation line updated). */
@@ -34,17 +164,18 @@ Options:
   --no-build           Check an already-built release binary
   --target TARGET      Cargo target triple to build/check
   --bin PATH           Override the harn binary path
-  --budget-mb MB       Maximum binary size in MiB (default: ${DEFAULT_BINARY_SIZE_BUDGET_MB})
+  --budget-mb MB       Override the policy budget in MiB
   --report-dir DIR     Directory for binary-size and cargo-bloat reports
   --skip-bloat         Only write binary-size.txt; do not run cargo-bloat
   -h, --help           Show this help
 
 Environment:
-  BINARY_SIZE_BUDGET_MB   Default budget in MiB
-  BINARY_SIZE_REPORT_DIR  Default report directory
-  CARGO_TARGET_DIR        Cargo target directory
-  HARN_BIN                Default harn binary path
-  HARN_RELEASE_TARGET     Default Cargo target triple
+  BINARY_SIZE_BUDGET_MB    MiB budget override
+  BINARY_SIZE_BUDGET_BYTES Exact-byte budget override
+  BINARY_SIZE_REPORT_DIR   Default report directory
+  CARGO_TARGET_DIR         Cargo target directory
+  HARN_BIN                 Default harn binary path
+  HARN_RELEASE_TARGET      Default Cargo target triple
 """
     .trim()
 }
@@ -62,6 +193,8 @@ pub fn parse_args(args: list<string>, defaults) {
     target: defaults.target,
     harn_bin: defaults.harn_bin,
     budget_mb: defaults.budget_mb,
+    budget_mb_explicit: false,
+    budget_bytes: defaults.budget_bytes,
     report_dir: defaults.report_dir,
     help: false,
   }
@@ -98,7 +231,7 @@ pub fn parse_args(args: list<string>, defaults) {
       } else if a == "--bin" {
         opts = {...opts, harn_bin: value}
       } else if a == "--budget-mb" {
-        opts = {...opts, budget_mb: value}
+        opts = {...opts, budget_mb: value, budget_mb_explicit: true}
       } else {
         opts = {...opts, report_dir: value}
       }
@@ -123,9 +256,67 @@ pub fn parse_budget_mb(raw: string) -> float? {
   return mb
 }
 
+/** Parse a positive decimal integer without accepting fractional or signed values. */
+pub fn parse_positive_int(raw: string) -> int? {
+  if len(regex_captures("^[0-9]+$", raw)) == 0 {
+    return nil
+  }
+  const value = to_int(raw)
+  return if value != nil && value > 0 {
+    value
+  } else {
+    nil
+  }
+}
+
 /** MiB budget to bytes: awk `printf "%.0f", mb * 1024 * 1024`. */
 pub fn budget_bytes_of(mb: float) -> int {
   return to_int(round(mb * 1024.0 * 1024.0)) ?? 0
+}
+
+/** Resolve explicit overrides before the exact-byte policy default. */
+pub fn resolve_binary_size_budget_bytes(
+  policy: ReleaseBinarySizePolicy,
+  target: string,
+  overrides: BinarySizeBudgetOverrides,
+) -> Result<int, string> {
+  if overrides.budget_mb_explicit {
+    const budget_mb = parse_budget_mb(overrides.budget_mb)
+    return if budget_mb == nil {
+      Err("--budget-mb must be a positive number, got '${overrides.budget_mb}'")
+    } else {
+      Ok(budget_bytes_of(budget_mb))
+    }
+  }
+  if overrides.budget_bytes != "" {
+    const budget_bytes = parse_positive_int(overrides.budget_bytes)
+    return if budget_bytes == nil {
+      Err("BINARY_SIZE_BUDGET_BYTES must be a positive integer, got '${overrides.budget_bytes}'")
+    } else {
+      Ok(budget_bytes)
+    }
+  }
+  if overrides.budget_mb != "" {
+    const budget_mb = parse_budget_mb(overrides.budget_mb)
+    return if budget_mb == nil {
+      Err("BINARY_SIZE_BUDGET_MB must be a positive number, got '${overrides.budget_mb}'")
+    } else {
+      Ok(budget_bytes_of(budget_mb))
+    }
+  }
+  const policy_target = if target != "" {
+    target
+  } else {
+    policy.default_target
+  }
+  const target_policy = release_binary_size_target_policy(policy, policy_target)
+  return if target_policy == nil {
+    Err(
+      "release binary-size policy has no target '${policy_target}'; add a target entry or pass an explicit budget override",
+    )
+  } else {
+    Ok(target_policy.budget_bytes)
+  }
 }
 
 /** Bytes to MiB with two decimals: awk `printf "%.2f", bytes / 1024 / 1024`. */
@@ -210,11 +401,8 @@ pipeline main(harness: Harness, task) {
   const defaults = {
     target: binary_size_env_or(harness.env, "HARN_RELEASE_TARGET", ""),
     harn_bin: binary_size_env_or(harness.env, "HARN_BIN", ""),
-    budget_mb: binary_size_env_or(
-      harness.env,
-      "BINARY_SIZE_BUDGET_MB",
-      DEFAULT_BINARY_SIZE_BUDGET_MB,
-    ),
+    budget_mb: binary_size_env_or(harness.env, "BINARY_SIZE_BUDGET_MB", ""),
+    budget_bytes: binary_size_env_or(harness.env, "BINARY_SIZE_BUDGET_BYTES", ""),
     report_dir: binary_size_env_or(harness.env, "BINARY_SIZE_REPORT_DIR", ""),
   }
   const parsed = parse_args(argv, defaults)
@@ -230,11 +418,34 @@ pipeline main(harness: Harness, task) {
     harness.stdio.println(usage_text())
     return 0
   }
-  const budget_mb = parse_budget_mb(opts.budget_mb)
-  if budget_mb == nil {
-    harness.stdio.eprintln("error: --budget-mb must be a positive number, got '${opts.budget_mb}'")
+  const policy_path = path_join(repo_root(harness.fs), RELEASE_BINARY_SIZE_POLICY)
+  const policy_result = read_release_binary_size_policy_result(harness.fs, policy_path)
+  if !is_ok(policy_result) {
+    harness.stdio.eprintln(
+      "error: invalid release binary-size policy: " + json_stringify(unwrap_err(policy_result)),
+    )
     return 2
   }
+  const policy = unwrap(policy_result)
+  const policy_errors = release_binary_size_policy_errors(policy)
+  if policy_errors.count > 0 {
+    harness.stdio.eprintln("error: invalid release binary-size policy: " + policy_errors.join("; "))
+    return 2
+  }
+  const budget_result = resolve_binary_size_budget_bytes(
+    policy,
+    opts.target,
+    {
+      budget_mb: opts.budget_mb,
+      budget_mb_explicit: opts.budget_mb_explicit,
+      budget_bytes: opts.budget_bytes,
+    },
+  )
+  if !is_ok(budget_result) {
+    harness.stdio.eprintln("error: " + unwrap_err(budget_result))
+    return 2
+  }
+  const budget_bytes = unwrap(budget_result)
   const cargo_target_dir = binary_size_env_or(harness.env, "CARGO_TARGET_DIR", "")
   const target_dir = if cargo_target_dir != "" {
     cargo_target_dir
@@ -254,7 +465,6 @@ pipeline main(harness: Harness, task) {
   if report_dir == "" {
     report_dir = "${target_dir}/binary-size/${if target != "" { target } else { "host" }}"
   }
-  const budget_bytes = budget_bytes_of(budget_mb)
   if opts.build_release {
     const strip = binary_size_env_or(harness.env, "CARGO_PROFILE_RELEASE_STRIP", "symbols")
     const build = harness.process.run(
