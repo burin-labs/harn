@@ -1082,7 +1082,7 @@ capability_method!(
     agent_open,
     "harness.agent.open",
     ["state.mutate@const=agent-sessions"],
-    "__cap_agent_open(id?: string, opts?: dict) -> any",
+    "__cap_agent_open(id?: string, opts?: dict) -> string",
     "Open or create an agent session."
 );
 capability_method!(

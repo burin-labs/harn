@@ -837,6 +837,32 @@ fn capability_plan_disambiguates_shadowed_inferred_bindings_by_declaration() {
 }
 
 #[test]
+fn capability_apply_repairs_session_ids_returned_by_legacy_agent_open() {
+    let (result, updated) = apply_single(
+        "import { agent_capture_events } from \"std/agent/events\"\nimport { agent_session_finalize, agent_session_messages } from \"std/agent/state\"\n\npipeline main(task) {\n  const session = agent_session_open(\"session-id\")\n  const before = agent_session_messages(session)\n  const captured = agent_capture_events(session, fn() {\n    return agent_session_messages(session)\n  })\n  agent_session_finalize(session, \"done\")\n  return {before: before, captured: captured}\n}\n",
+    );
+
+    assert_eq!(
+        call_argument_paths(&updated, "agent_session_messages"),
+        vec![
+            vec![Some("harness.agent".into()), Some("session".into())],
+            vec![Some("harness.agent".into()), Some("session".into())],
+        ],
+        "session IDs returned by the legacy open call are ordinary arguments: {result:#?}\n{updated}"
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "agent_session_finalize")[0][..2],
+        [Some("harness.agent".into()), Some("session".into())],
+        "finalize must receive its Agent carrier: {result:#?}\n{updated}"
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "agent_capture_events")[0][..2],
+        [Some("harness.agent".into()), Some("session".into())],
+        "event capture must receive its Agent carrier: {result:#?}\n{updated}"
+    );
+}
+
+#[test]
 fn capability_plan_completes_a_partial_imported_capability_prefix() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("main.harn");
