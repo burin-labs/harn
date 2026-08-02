@@ -123,11 +123,7 @@ if command -v gh >/dev/null 2>&1; then
       echo "  more commits now silently drops them from the merged state."
       echo ""
       echo "  Fix:"
-      echo "    1. gh pr merge $branch --disable-auto      # dequeue"
-      echo "       (if --disable-auto says 'already queued',"
-      echo "        use the GraphQL dequeuePullRequest mutation)"
-      echo "    2. git push                                  # push again"
-      echo "    3. gh pr merge $branch --auto                # re-enqueue"
+      echo "    scripts/update_queued_pr.sh                  # dequeue, push, prove CI, re-enqueue"
       echo ""
       echo "  Or bypass: git push --no-verify"
       exit 1

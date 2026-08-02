@@ -1,3 +1,4 @@
+import "std/schema"
 import { with_temp_dir } from "std/testing"
 import {
   apply_release_metadata,
@@ -9,7 +10,65 @@ import {
   workspace_package_manifests,
 } from "../release_metadata.harn"
 
-fn assert_throws_contains(body, fragment: string) -> nil {
+type DependencyProjection = {path: string, version: string}
+
+type RootManifestProjection = {workspace: {dependencies: dict<string, DependencyProjection>}}
+
+type MemberManifestProjection = {dependencies: dict<string, DependencyProjection>}
+
+type AgentProjection = {version: string, distribution: {binary: {linux: {archive: string}}}}
+
+fn dependency_schema() -> Schema<DependencyProjection> {
+  return schema_object(
+    {path: schema_field(schema_string()), version: schema_field(schema_string())},
+    {additional_properties: true},
+  )
+}
+
+fn root_manifest_projection(text: string) -> RootManifestProjection {
+  const schema: Schema<RootManifestProjection> = schema_object(
+    {
+      workspace: schema_field(
+        schema_object(
+          {dependencies: schema_field(schema_dict(dependency_schema()))},
+          {additional_properties: true},
+        ),
+      ),
+    },
+    {additional_properties: true},
+  )
+  return schema_expect(toml_parse(text), schema)
+}
+
+fn member_manifest_projection(text: string) -> MemberManifestProjection {
+  const schema: Schema<MemberManifestProjection> = schema_object(
+    {dependencies: schema_field(schema_dict(dependency_schema()))},
+    {additional_properties: true},
+  )
+  return schema_expect(toml_parse(text), schema)
+}
+
+fn agent_projection(text: string) -> AgentProjection {
+  const schema: Schema<AgentProjection> = schema_object(
+    {
+      version: schema_field(schema_string()),
+      distribution: schema_field(
+        schema_object(
+          {
+            binary: schema_field(
+              schema_object(
+                {linux: schema_field(schema_object({archive: schema_field(schema_string())}))},
+              ),
+            ),
+          },
+        ),
+      ),
+    },
+  )
+  return schema_expect(json_parse(text), schema)
+}
+
+fn assert_throws_eq(body, expected: string) -> nil {
   let error_text = ""
   try {
     body()
@@ -17,8 +76,8 @@ fn assert_throws_contains(body, fragment: string) -> nil {
     error_text = to_string(e)
   }
   require error_text != "", "expected closure to throw"
-  require error_text.contains(fragment),
-    "expected error to contain " + fragment + ", got: "
+  require error_text == expected,
+    "expected error " + expected + ", got: "
     + error_text
   return nil
 }
@@ -46,6 +105,12 @@ fn write_fixture(fs: HarnessFs, root: string, rel: string, text: string) -> nil 
 }
 
 fn workspace(fs: HarnessFs, root: string) -> nil {
+  write_fixture(
+    fs,
+    root,
+    ".github/release-withdrawals.json",
+    "{\"schema_version\":1,\"releases\":[]}",
+  )
   write_fixture(
     fs,
     root,
@@ -144,20 +209,131 @@ pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, tas
       workspace(harness.fs, root)
       apply_release_metadata(harness.fs, root, "1.3.0")
       assert_eq(current_version(harness.fs, root), "1.3.0")
-      const root_text = harness.fs.read_text(path_join(root, "Cargo.toml"))
-      assert(root_text.contains("member-a = { version = \"=1.3.0\", path ="))
-      const member_text = harness.fs.read_text(path_join(root, "crates/member-a/Cargo.toml"))
-      assert(member_text.contains("tree-sitter-harn = { path ="))
-      assert(member_text.contains("version = \"=1.3.0\""))
-      assert(member_text.contains("foreign = { path = \"../foreign\", version = \"9\" }"))
-      const agent = json_parse(
+      const root_manifest = root_manifest_projection(
+        harness.fs.read_text(path_join(root, "Cargo.toml")),
+      )
+      assert_eq(
+        root_manifest.workspace.dependencies.get("member-a"),
+        {path: "crates/member-a", version: "=1.3.0"},
+      )
+      const member = member_manifest_projection(
+        harness.fs.read_text(path_join(root, "crates/member-a/Cargo.toml")),
+      )
+      assert_eq(
+        member.dependencies.get("tree-sitter-harn"),
+        {path: "../../tree-sitter-harn", version: "=1.3.0"},
+      )
+      assert_eq(member.dependencies.get("foreign"), {path: "../foreign", version: "9"})
+      const agent = agent_projection(
         harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
       )
       assert_eq(agent.version, "1.3.0")
-      assert(agent.distribution.binary.linux.archive.contains("/v1.3.0/"))
+      assert_eq(
+        agent.distribution.binary.linux.archive,
+        "https://example.test/releases/download/v1.3.0/harn.tar.gz",
+      )
       assert_eq(
         harness.fs.read_text(path_join(root, "docs/src/embedding-rust.md")),
         "tag = \"v1.3.0\"\n",
+      )
+    },
+  )
+}
+
+@test
+pipeline test_apply_withdrawn_version_keeps_last_distribution_projection(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      write_fixture(
+        harness.fs,
+        root,
+        ".github/release-withdrawals.json",
+        json_stringify(
+          {
+            schema_version: 1,
+            releases: [
+              {
+                version: "1.2.4",
+                tag_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                distribution_version: "1.2.3",
+                replacement: "1.2.5",
+                reason: "invalid_tagged_candidate",
+              },
+            ],
+          },
+        ),
+      )
+      apply_release_metadata(harness.fs, root, "1.2.4")
+      assert_eq(current_version(harness.fs, root), "1.2.4")
+      const agent = agent_projection(
+        harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
+      )
+      assert_eq(agent.version, "1.2.3")
+      assert_eq(
+        agent.distribution.binary.linux.archive,
+        "https://example.test/releases/download/v1.2.3/harn.tar.gz",
+      )
+      assert_eq(
+        harness.fs.read_text(path_join(root, "docs/src/embedding-rust.md")),
+        "tag = \"v1.2.3\"\n",
+      )
+    },
+  )
+}
+
+@test
+pipeline test_apply_advances_install_projection_from_withdrawn_version(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      write_fixture(
+        harness.fs,
+        root,
+        ".github/release-withdrawals.json",
+        json_stringify(
+          {
+            schema_version: 1,
+            releases: [
+              {
+                version: "1.2.3",
+                tag_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                distribution_version: "1.2.2",
+                replacement: "1.2.4",
+                reason: "invalid_tagged_candidate",
+              },
+            ],
+          },
+        ),
+      )
+      write_fixture(
+        harness.fs,
+        root,
+        "spec/acp-registry/harn/agent.json",
+        """
+{
+  "id": "harn",
+  "version": "1.2.2",
+  "distribution": {
+    "binary": {
+      "linux": {
+        "archive": "https://example.test/releases/download/v1.2.2/harn.tar.gz"
+      }
+    }
+  }
+}
+""",
+      )
+      apply_release_metadata(harness.fs, root, "1.2.4")
+      const agent = agent_projection(
+        harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
+      )
+      assert_eq(agent.version, "1.2.4")
+      assert_eq(
+        agent.distribution.binary.linux.archive,
+        "https://example.test/releases/download/v1.2.4/harn.tar.gz",
       )
     },
   )
@@ -174,9 +350,9 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harn
         "Cargo.toml",
         "[workspace]\nmembers = [\"missing\"]\nexclude = []\n[workspace.package]\nversion = \"bad\"\n",
       )
-      assert_throws_contains(
+      assert_throws_eq(
         { -> current_version(harness.fs, root) },
-        "workspace version is not MAJOR.MINOR.PATCH",
+        "workspace version is not MAJOR.MINOR.PATCH: bad",
       )
     },
   )
@@ -189,9 +365,9 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harn
         "Cargo.toml",
         "[workspace]\nmembers = [\"missing\"]\nexclude = []\n[workspace.package]\nversion = \"1.2.3\"\n",
       )
-      assert_throws_contains(
+      assert_throws_eq(
         { -> workspace_package_manifests(harness.fs, root) },
-        "workspace.members entry matched no package manifest",
+        "workspace.members entry matched no package manifest: missing",
       )
     },
   )
@@ -210,14 +386,14 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harn
         "b/Cargo.toml",
         "[package]\nname = \"same\"\nversion = \"1.0.0\"\n",
       )
-      assert_throws_contains(
+      assert_throws_eq(
         { ->
           package_names_for_manifests(
             harness.fs,
             [path_join(root, "a/Cargo.toml"), path_join(root, "b/Cargo.toml")],
           )
         },
-        "duplicate workspace package name",
+        "duplicate workspace package name: same",
       )
     },
   )
@@ -238,12 +414,12 @@ pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, 
 @test
 pipeline test_changelog_top_validation(harness: Harness, task) {
   verify_changelog_top("# Changelog\n\n## v1.2.4\n\n- notes\n", "1.2.4")
-  assert_throws_contains(
+  assert_throws_eq(
     { -> verify_changelog_top("# Changelog\n\n## v1.2.3\n", "1.2.4") },
-    "top heading is v1.2.3",
+    "CHANGELOG.md top heading is v1.2.3 but --bump implies v1.2.4\nhint: edit CHANGELOG.md to add '## v1.2.4' as the new top entry, then re-run",
   )
-  assert_throws_contains(
+  assert_throws_eq(
     { -> verify_changelog_top("# Changelog\n", "1.2.4") },
-    "has no '## vX.Y.Z' heading",
+    "CHANGELOG.md has no '## vX.Y.Z' heading",
   )
 }

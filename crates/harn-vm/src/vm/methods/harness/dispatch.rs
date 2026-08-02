@@ -38,11 +38,10 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         if let Some(capability) = handle.kind().capability_id() {
-            let declared = crate::stdlib::capability_method_manifest_entry(capability, method)
-                .is_some();
+            let declared = crate::stdlib::capability_method_manifest_entry(capability, method);
             let host_method =
                 harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method);
-            if !declared && !host_method {
+            if declared.is_none() && !host_method {
                 if capability != harn_builtin_meta::CapabilityId::Testing {
                     if let Some(response) =
                         handle.inner().fixtures().dispatch(capability, method, args)
@@ -51,6 +50,14 @@ impl crate::vm::Vm {
                     }
                 }
                 return Err(method_unsupported(handle, method));
+            }
+            if let Some(entry) = declared {
+                if self.denied_builtins.contains(entry.canonical_name) {
+                    return Err(VmError::CategorizedError {
+                        message: format!("Tool '{}' is not permitted.", entry.canonical_name),
+                        category: ErrorCategory::ToolRejected,
+                    });
+                }
             }
         }
         // Capability-handle methods that adjust the harness itself

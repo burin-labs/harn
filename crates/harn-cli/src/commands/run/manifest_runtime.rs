@@ -44,8 +44,9 @@ impl fmt::Display for ManifestRuntimeSetupError {
 
 /// Install runtime extensions declared by the entry package.
 ///
-/// An explicit builtin policy targets the entry pipeline, so callers can defer
-/// unrelated manifest handler module initialization until those handlers fire.
+/// Callers can defer manifest handler module initialization until those
+/// handlers fire. An explicit builtin policy continues to imply that mode for
+/// compatibility.
 pub(crate) async fn install_manifest_runtime(
     path: &Path,
     vm: &mut harn_vm::Vm,

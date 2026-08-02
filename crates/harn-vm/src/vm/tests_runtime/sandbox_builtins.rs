@@ -52,6 +52,27 @@ fn test_sandbox_empty_denied_set() {
 }
 
 #[test]
+fn test_sandbox_deny_alias_blocks_typed_harness_method() {
+    let denied: HashSet<String> = std::iter::once("llm_call".to_string()).collect();
+    let result = run_harn_with_denied(
+        r#"pipeline main(harness: Harness) {
+const response = harness.llm.call("policy probe", nil, {
+  provider: "mock",
+  model: "mock",
+})
+harness.stdio.println(response)
+}"#,
+        denied,
+    );
+    let error = result.expect_err("the public alias must deny its typed Harness method");
+    let message = error.to_string();
+    assert!(
+        message.contains("llm_call") && message.contains("not permitted"),
+        "expected an llm_call permission error, got: {message}"
+    );
+}
+
+#[test]
 fn test_sandbox_propagates_to_spawn() {
     // Denied builtins should propagate to spawned VMs.
     let denied: HashSet<String> = std::iter::once("push".to_string()).collect();

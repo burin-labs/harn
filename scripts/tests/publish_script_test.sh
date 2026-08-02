@@ -56,13 +56,8 @@ cp "$repo_root/scripts/harn_bin.sh" "$release_root/scripts/harn_bin.sh"
 cp -R "$repo_root/scripts/lib/." "$release_root/scripts/lib/"
 
 release_tools="$tmp_root/release-tools"
-mkdir -p "$release_tools/lib"
+"$repo_root/scripts/stage_release_tools.sh" "$release_tools"
 release_tools=$(cd "$release_tools" && pwd -P)
-cp "$publish_script" "$release_tools/publish.sh"
-cp "$repo_root/scripts/publish.harn" "$release_tools/publish.harn"
-cp "$repo_root/scripts/publish_plan.harn" "$release_tools/publish_plan.harn"
-cp "$repo_root/scripts/harn_bin.sh" "$release_tools/harn_bin.sh"
-cp -R "$repo_root/scripts/lib/." "$release_tools/lib/"
 
 release_gate_record="$tmp_root/release-gate-record.txt"
 HARN_RELEASE_ROOT="$release_root" \
