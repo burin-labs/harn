@@ -804,7 +804,7 @@ fn run_package_harn_file_check(
 
 fn package_harn_file_args(package_dir: &Path) -> Vec<String> {
     let mut files = Vec::new();
-    collect_package_harn_files(package_dir, &mut files);
+    collect_package_harn_files(package_dir, package_dir, &mut files);
     files
         .into_iter()
         .filter_map(|path| {
@@ -815,7 +815,7 @@ fn package_harn_file_args(package_dir: &Path) -> Vec<String> {
         .collect()
 }
 
-fn collect_package_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_package_harn_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -824,18 +824,19 @@ fn collect_package_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| matches!(name, ".git" | ".harn" | "target" | "node_modules"))
-            {
+            if should_skip_package_input_directory(root, &path) {
                 continue;
             }
-            collect_package_harn_files(&path, out);
+            collect_package_harn_files(root, &path, out);
         } else if path.extension().is_some_and(|ext| ext == "harn") {
             out.push(path);
         }
     }
+}
+
+fn should_skip_package_input_directory(root: &Path, path: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    package::should_exclude_package_entry(relative, package::PathEntryKind::Directory)
 }
 
 fn run_package_tests(package_dir: &Path) -> PackageVerifyCheck {
@@ -1057,7 +1058,7 @@ fn validate_doc_examples(package_dir: &Path) -> PackageVerifyCheck {
     let mut details = Vec::new();
     let mut failures = Vec::new();
     let mut markdown_files = Vec::new();
-    collect_markdown_files(package_dir, &mut markdown_files);
+    collect_markdown_files(package_dir, package_dir, &mut markdown_files);
     for markdown in markdown_files {
         let Ok(source) = fs::read_to_string(&markdown) else {
             continue;
@@ -1112,7 +1113,7 @@ fn run_package_docs_check(package_dir: &Path) -> PackageVerifyCheck {
     )
 }
 
-fn collect_markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_markdown_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -1121,14 +1122,10 @@ fn collect_markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| matches!(name, ".git" | ".harn" | "target" | "node_modules"))
-            {
+            if should_skip_package_input_directory(root, &path) {
                 continue;
             }
-            collect_markdown_files(&path, out);
+            collect_markdown_files(root, &path, out);
         } else if path.extension().is_some_and(|ext| ext == "md") {
             out.push(path);
         }

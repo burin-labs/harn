@@ -32,6 +32,7 @@ pub(crate) mod errors;
 mod extensions;
 mod generations;
 mod git_cwd;
+mod input_policy;
 mod lockfile;
 mod manifest;
 mod manifest_search;
@@ -47,9 +48,11 @@ mod validation;
 #[allow(unused_imports)]
 pub use errors::{PackageError, PackageResult};
 
+pub(crate) use crate::path_policy::PathEntryKind;
 pub use extensions::*;
 pub(crate) use generations::*;
 pub(crate) use git_cwd::Cwd;
+pub(crate) use input_policy::should_exclude_package_entry;
 #[cfg(test)]
 pub use lockfile::add_package;
 pub(crate) use lockfile::*;
