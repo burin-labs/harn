@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use crate::path_policy::{is_harn_internal_entry, PathEntryKind};
+use crate::path_policy::{is_generated_docs_output, is_harn_internal_entry, PathEntryKind};
 
 pub(crate) fn should_exclude_package_entry(relative: &Path, kind: PathEntryKind) -> bool {
-    if kind == PathEntryKind::Directory && relative == Path::new("docs").join("dist") {
+    if is_generated_docs_output(relative, kind) {
         return true;
     }
     let Some(name) = relative.file_name().and_then(|name| name.to_str()) else {

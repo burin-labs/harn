@@ -1120,7 +1120,12 @@ fn collect_repo_files(root: &Path, dir: &Path, limit: usize, out: &mut Vec<PathB
 }
 
 fn should_skip_scan_dir(root: &Path, path: &Path) -> bool {
-    if path.strip_prefix(root).ok() == Some(Path::new("docs").join("dist").as_path()) {
+    if path.strip_prefix(root).is_ok_and(|relative| {
+        crate::path_policy::is_generated_docs_output(
+            relative,
+            crate::path_policy::PathEntryKind::Directory,
+        )
+    }) {
         return true;
     }
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
