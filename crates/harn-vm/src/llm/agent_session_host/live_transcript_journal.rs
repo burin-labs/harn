@@ -9,6 +9,7 @@ const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
 
 pub(super) struct InitializedSession {
     pub(super) session_id: String,
+    pub(super) run_id: String,
     pub(super) has_canonical_history: bool,
 }
 
@@ -21,10 +22,17 @@ pub(super) async fn initialize(
     system_prompt: Option<String>,
 ) -> Result<InitializedSession, VmError> {
     let has_live_session = crate::agent_sessions::exists(session_id);
+    let run_id = options
+        .get("run_id")
+        .and_then(|value| match value {
+            VmValue::String(value) if !value.trim().is_empty() => Some(value.to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| format!("agent_run_{}", uuid::Uuid::now_v7()));
     let prepared = crate::agent_session_journal::prepare(
         session_id,
         options,
-        format!("agent_run_{}", uuid::Uuid::now_v7()),
+        run_id.clone(),
         format!("agent_turn_{}", uuid::Uuid::now_v7()),
     )
     .await?;
@@ -50,6 +58,7 @@ pub(super) async fn initialize(
     crate::agent_sessions::install_journal(&session_id, prepared.state)?;
     Ok(InitializedSession {
         session_id,
+        run_id,
         has_canonical_history,
     })
 }

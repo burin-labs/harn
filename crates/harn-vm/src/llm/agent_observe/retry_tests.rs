@@ -645,6 +645,58 @@ fn transcript_event_is_appended_synchronously_under_run_until() {
     reset_active_event_log();
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn transcript_event_carries_canonical_session_run_association() {
+    use crate::event_log::{
+        install_memory_for_current_thread, reset_active_event_log, EventLog, Topic,
+    };
+    use crate::value::VmDictExt;
+
+    crate::agent_sessions::reset_session_store();
+    reset_active_event_log();
+    let log = install_memory_for_current_thread(16);
+    let root = tempfile::tempdir().expect("state root");
+    let mut options = crate::value::DictMap::new();
+    options.put_str("root", root.path().to_string_lossy());
+    let prepared = crate::agent_session_journal::prepare(
+        "correlated-session",
+        &options,
+        "correlated-run".to_string(),
+        "correlated-turn".to_string(),
+    )
+    .await
+    .expect("prepare journal");
+    crate::agent_sessions::open_or_create(Some("correlated-session".to_string()));
+    crate::agent_sessions::install_journal("correlated-session", prepared.state)
+        .expect("install journal");
+    crate::agent_sessions::push_current_session("correlated-session".to_string());
+
+    append_llm_transcript_entry(&serde_json::json!({
+        "type": "provider_call_request",
+        "call_id": "correlated-call",
+    }));
+
+    crate::agent_sessions::pop_current_session();
+    let topic = Topic::new("agent.transcript.llm").expect("static topic");
+    let events = log.read_range(&topic, None, 4).await.expect("read event");
+    assert_eq!(events.len(), 1);
+    let event = &events[0].1;
+    assert_eq!(event.payload["session_id"], "correlated-session");
+    assert_eq!(event.payload["run_id"], "correlated-run");
+    assert_eq!(
+        event.headers.get("session_id").map(String::as_str),
+        Some("correlated-session")
+    );
+    assert_eq!(
+        event.headers.get("run_id").map(String::as_str),
+        Some("correlated-run")
+    );
+
+    crate::agent_sessions::clear_journal("correlated-session");
+    crate::agent_sessions::reset_session_store();
+    reset_active_event_log();
+}
+
 #[test]
 fn dump_llm_request_emits_context_breakdown_typed_checkpoint_for_agent_dispatch() {
     use crate::agent_events::{register_sink, reset_all_sinks, AgentEvent, AgentEventSink};

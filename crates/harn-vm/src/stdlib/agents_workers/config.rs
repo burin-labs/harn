@@ -106,7 +106,9 @@ fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> Result<serde_json::Value, V
         "options": options,
         "returns_schema": returns_schema,
         "session_id": &spec.session_id,
+        "run_id": &spec.run_id,
         "parent_session_id": &spec.parent_session_id,
+        "parent_run_id": &spec.parent_run_id,
         "reminder_propagation": &spec.reminder_propagation,
         "workspace_anchor": spec
             .workspace_anchor
@@ -158,8 +160,18 @@ fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .to_string(),
+        run_id: dict
+            .get("run_id")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("agent_run_{}", uuid::Uuid::now_v7())),
         parent_session_id: dict
             .get("parent_session_id")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        parent_run_id: dict
+            .get("parent_run_id")
             .and_then(|value| value.as_str())
             .map(|value| value.to_string()),
         reminder_propagation: dict
@@ -284,6 +296,7 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
+        "joined_at_ms": state.joined_at_ms,
         "awaiting_started_at": state.awaiting_started_at,
         "mode": state.mode,
         "history": state.history,
@@ -426,6 +439,9 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
             .get("finished_at")
             .and_then(|value| value.as_str())
             .map(|value| value.to_string()),
+        joined_at_ms: payload
+            .get("joined_at_ms")
+            .and_then(serde_json::Value::as_i64),
         awaiting_started_at: payload
             .get("awaiting_started_at")
             .and_then(|value| value.as_str())

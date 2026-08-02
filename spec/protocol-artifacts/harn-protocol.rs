@@ -298,6 +298,7 @@ pub enum HarnAgentEventKind {
     SelfConsistencyTie,
     SessionClosed,
     StructuralValidatorDecision,
+    SubagentJoin,
     SubagentStop,
     StepJudgeDecision,
     ToolBatchDisposition,
@@ -345,6 +346,7 @@ impl HarnAgentEventKind {
             Self::SelfConsistencyTie => "self_consistency_tie",
             Self::SessionClosed => "session_closed",
             Self::StructuralValidatorDecision => "structural_validator_decision",
+            Self::SubagentJoin => "subagent_join",
             Self::SubagentStop => "subagent_stop",
             Self::StepJudgeDecision => "step_judge_decision",
             Self::ToolBatchDisposition => "tool_batch_disposition",
@@ -407,6 +409,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "self_consistency_tie" => Self::SelfConsistencyTie,
             "session_closed" => Self::SessionClosed,
             "structural_validator_decision" => Self::StructuralValidatorDecision,
+            "subagent_join" => Self::SubagentJoin,
             "subagent_stop" => Self::SubagentStop,
             "step_judge_decision" => Self::StepJudgeDecision,
             "tool_batch_disposition" => Self::ToolBatchDisposition,
@@ -1044,6 +1047,7 @@ pub const HARN_AGENT_EVENT_KIND_SCOPE_CLASSIFIER_VERDICT: &str = "scope_classifi
 pub const HARN_AGENT_EVENT_KIND_SELF_CONSISTENCY_TIE: &str = "self_consistency_tie";
 pub const HARN_AGENT_EVENT_KIND_SESSION_CLOSED: &str = "session_closed";
 pub const HARN_AGENT_EVENT_KIND_STRUCTURAL_VALIDATOR_DECISION: &str = "structural_validator_decision";
+pub const HARN_AGENT_EVENT_KIND_SUBAGENT_JOIN: &str = "subagent_join";
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_STOP: &str = "subagent_stop";
 pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision";
 pub const HARN_AGENT_EVENT_KIND_TOOL_BATCH_DISPOSITION: &str = "tool_batch_disposition";
@@ -1088,6 +1092,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "self_consistency_tie",
     "session_closed",
     "structural_validator_decision",
+    "subagent_join",
     "subagent_stop",
     "step_judge_decision",
     "tool_batch_disposition",

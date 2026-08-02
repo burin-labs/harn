@@ -18,6 +18,13 @@ pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
 
 pub(super) fn append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option<&str>) {
     let mut redacted = entry.clone();
+    if let (Some(object), Some(run)) = (
+        redacted.as_object_mut(),
+        crate::runtime_context::current_agent_run_ref(),
+    ) {
+        object.insert("session_id".to_string(), serde_json::json!(run.session_id));
+        object.insert("run_id".to_string(), serde_json::json!(run.run_id));
+    }
     crate::redact::current_policy().redact_json_in_place(&mut redacted);
     forward_transcript_run_events(&redacted);
     append_llm_transcript_event_log(&redacted);
@@ -144,6 +151,11 @@ pub(super) fn append_llm_transcript_event_log(entry: &serde_json::Value) {
     let mut headers = std::collections::BTreeMap::new();
     if let Some(span_id) = entry.get("span_id").and_then(|value| value.as_u64()) {
         headers.insert("span_id".to_string(), span_id.to_string());
+    }
+    for field in ["session_id", "run_id"] {
+        if let Some(value) = entry.get(field).and_then(serde_json::Value::as_str) {
+            headers.insert(field.to_string(), value.to_string());
+        }
     }
     if let Some(context) = crate::triggers::dispatcher::current_dispatch_context() {
         headers.insert("trigger_id".to_string(), context.binding_id.clone());

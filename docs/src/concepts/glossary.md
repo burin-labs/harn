@@ -98,7 +98,9 @@ current local path. See the [model-job reference](../stdlib/model-jobs.md).
 
 **Session.** The first-class VM resource that owns a transcript, subscribers,
 parent/child lineage, a pinned system prompt, and a pinned model. Created by
-`agent_session_open`. Outlives any single agent loop.
+`agent_session_open`. Outlives any single agent loop. Its `session_id`
+identifies the transcript owner; a `run_id` identifies one exact invocation
+within that history.
 
 **Transcript.** The structured `{messages, events, assets}` document that hangs
 off a session. `messages` are durable conversational turns; `events` are an
@@ -179,7 +181,9 @@ filled by **session** here. If you arrive from those systems, read `thread` as
 of completed handler results.
 
 **Run.** Used colloquially for "one invocation of a pipeline or workflow." Not a
-first-class noun in the language.
+first-class noun in the language. Persisted runtime records still use a
+`run_id` as the stable identity of one exact invocation; do not substitute a
+session ID for it.
 
 **Phase.** Appears around pipeline lifecycle callbacks but is not a
 conversational-unit noun.

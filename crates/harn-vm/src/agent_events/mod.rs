@@ -68,4 +68,6 @@ pub use tool::{
     DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, ToolCallErrorCategory,
     ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
-pub use worker::{FsWatchEvent, SubagentTerminalStatus, WorkerEvent};
+pub use worker::{
+    AgentRunRef, DelegatedRunLineage, FsWatchEvent, SubagentTerminalStatus, WorkerEvent,
+};
