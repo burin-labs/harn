@@ -182,7 +182,18 @@ async fn acp_session_timeline_query_and_subscribe_use_event_log() {
                 .expect("send timeline query");
             let snapshot = recv_json(&mut response_rx).await;
             assert_eq!(snapshot["id"], 20);
-            assert_eq!(snapshot["result"]["schemaVersion"], 1);
+            assert_eq!(
+                snapshot["result"]["schemaVersion"],
+                harn_vm::session_timeline::SESSION_TIMELINE_SCHEMA_VERSION
+            );
+            assert_eq!(
+                snapshot["result"]["coverage"],
+                serde_json::json!({
+                    "returned": 1,
+                    "available": 1,
+                    "truncated": false
+                })
+            );
             assert_eq!(snapshot["result"]["nodes"][0]["category"], "agent_event");
             assert_eq!(
                 snapshot["result"]["nodes"][0]["attributes"]["event"]["raw_input"]["authorization"],
