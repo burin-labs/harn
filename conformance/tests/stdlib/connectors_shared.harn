@@ -23,6 +23,14 @@ pipeline test(harness: Harness, task) {
     verify_hmac_signature("payload", legacy_signature, "secret", "sha1", {allow_legacy_sha1: true}),
   )
   const root = harness.fs.workspace_root()
+  const shared_source = harness.fs.read_text(
+    path_join(root, "crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn"),
+  )
+  assert_eq(
+    contains(shared_source, "pub fn connector_http_"),
+    false,
+    "shared projects connector HTTP policy instead of duplicating it",
+  )
   const private_key = harness.fs.read_text(
     path_join(root, "conformance/helpers/github_app_test_key.pem"),
   )
