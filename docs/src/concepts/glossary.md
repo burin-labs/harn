@@ -51,6 +51,18 @@ child task. Most user-facing docs say "interpreter instance" or "child task";
 runtime and ADR pages often use VM because they describe implementation
 boundaries.
 
+**Portable kernel.** The authority-free Harn compiler and deterministic
+execution state machine shared by native and browser hosts. It accepts a
+versioned program artifact and returns completed, suspended, or failed.
+
+**Program artifact.** An immutable, versioned encoding of checked Harn
+bytecode plus the metadata needed by the portable kernel. It is data, not a
+serialized Rust object or a grant of host authority.
+
+**Capability request.** A typed request emitted when portable execution needs
+host-owned authority. The host may deny it or resume the authenticated
+snapshot with a matching typed result.
+
 **Child VM.** The isolated interpreter instance created for a `spawn` or
 `parallel` child task. Captured values are copied into it. Explicit shared
 handles such as channels, shared cells/maps, mailboxes, and sync permits are
@@ -179,6 +191,7 @@ conversational-unit noun.
 | Workers, suspend, resume, self-park | [Agent lifecycle](../agent-lifecycle.md) |
 | Workflows, graphs, stages | [Workflow runtime](../workflow-runtime.md) |
 | Pipelines, harness, lifecycle callbacks | [Pipeline lifecycle](../pipeline-lifecycle.md) |
+| Portable artifacts, capability requests, execute/resume | [Portable kernel contract](../portable-kernel-reference.md) |
 | System reminders, inject modes | [System reminders](../system-reminders.md) |
 | Skills | [Skills](../skills.md) |
 | Model jobs, receipts, media assets | [Model-job reference](../stdlib/model-jobs.md) |

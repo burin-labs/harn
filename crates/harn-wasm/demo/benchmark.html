@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Portable Harn Kernel benchmark</title>
+  </head>
+  <body>
+    <pre id="receipt">running</pre>
+    <script type="module">
+      const output = document.querySelector("#receipt");
+      let settleBenchmark;
+      window.__HARN_BENCHMARK_PROMISE__ = new Promise((resolve) => {
+        settleBenchmark = resolve;
+      });
+      const worker = new Worker(new URL("./benchmark-worker.js", import.meta.url), {
+        type: "module",
+      });
+      worker.onmessage = ({ data }) => {
+        if (data.kind === "receipt") {
+          window.__HARN_BENCHMARK__ = data.receipt;
+          output.textContent = JSON.stringify(data.receipt, null, 2);
+          document.documentElement.dataset.complete = "true";
+          settleBenchmark({ status: "completed", receipt: data.receipt });
+          worker.terminate();
+          return;
+        }
+        output.textContent = `error: ${data.message}`;
+        document.documentElement.dataset.complete = "error";
+        settleBenchmark({ status: "failed", message: data.message });
+        worker.terminate();
+      };
+      worker.onerror = ({ message }) => {
+        output.textContent = `error: ${message}`;
+        document.documentElement.dataset.complete = "error";
+        settleBenchmark({ status: "failed", message });
+        worker.terminate();
+      };
+    </script>
+  </body>
+</html>

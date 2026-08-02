@@ -121,6 +121,14 @@ attributes. Stable exact keys include `harn.kind`, `harn.status`,
 Other timing metadata is preserved as JSON under `harn.meta_json` so dynamic
 keys such as UUIDs or file paths do not create unbounded OTel attribute names.
 
+`std/timing` observes application phases in the full hostful VM. It is not the
+clock for Portable Kernel benchmarks: `harn bench portable` measures compile,
+artifact decode, and dispatch at the host boundary without granting clock
+authority to the program. Use the
+[portable benchmark guide](../portable-kernel-benchmarking.md) when comparing
+native and browser kernel paths; use `std/timing` when the named phase belongs
+to application or orchestration behavior.
+
 ## When to skip a timing span
 
 - Tight inner loops (per-iteration spans are pure overhead).

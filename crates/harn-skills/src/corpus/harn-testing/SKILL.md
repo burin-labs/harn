@@ -89,6 +89,32 @@ launch behavior.
 - Verify accessibility for interactive surfaces.
 - Preserve receipts and support-ready diagnostics.
 
+## Portable kernel claims
+
+- Compile the same source through the canonical frontend; never test an
+  adapter-owned parser or evaluator.
+- Compare exact native and Wasm terminal values and exact invalid-program
+  diagnostics over the same corpus.
+- Exercise the browser adapter in a real dedicated worker. Node-only execution
+  does not prove the browser path.
+- Prove identical input produces identical artifact bytes, then reject version
+  mismatch, corruption, trailing data, excessive size, excessive nesting, and
+  unsupported semantic contracts.
+- Trigger capability suspension through a registered, exactly granted method.
+  Also prove denial, wrong request id, wrong snapshot key, changed grants,
+  stale snapshots, and incompatible results fail deterministically.
+- Compare snapshot/resume with the equivalent uninterrupted terminal result.
+- Audit the built Wasm imports for ambient file, process, network, clock,
+  randomness, model, thread, and shared-memory authority.
+- For native parallelism, share only the immutable artifact across threads and
+  assert isolated executions retain terminal parity. For browsers, use
+  independent workers rather than assuming Wasm threads.
+- Measure compile, decode, first dispatch, steady-state dispatch,
+  initialization, and bundle size separately. Preserve machine, browser, build
+  mode, sample count, receipt, and revision with the observation.
+- Do not use timing thresholds as semantic assertions. Functional worker tests
+  should signal completion structurally, without sleeps or wall-clock polling.
+
 ## Stochastic quality
 
 - Define the population, metric, threshold, and maximum spend before running.

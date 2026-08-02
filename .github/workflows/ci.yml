@@ -1146,6 +1146,7 @@ jobs:
       # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
       # warm HARN_BIN; pure shell/Python guards stay cheap either way.
       - run: make check-receipt-structs
+      - run: make check-portable-benchmark-schema
       - run: make check-docs-links
       - run: make check-agent-guidance
       - run: make check-tree-sitter-keywords

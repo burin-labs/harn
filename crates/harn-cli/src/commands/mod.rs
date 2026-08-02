@@ -20,6 +20,7 @@ pub(crate) mod dispatch_explain;
 pub(crate) mod doc;
 pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
+pub(crate) mod dump_portable_benchmark_schema;
 pub(crate) mod dump_prompt_grammar;
 pub(crate) mod dump_protocol_artifacts;
 pub(crate) mod dump_trigger_quickref;

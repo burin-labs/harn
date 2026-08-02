@@ -1,0 +1,17 @@
+type ReducerState = {count: int, history: list<int>, label: string}
+
+type ReducerEvent = {kind: string, amount: int}
+
+type ReducerInput = {state: ReducerState, event: ReducerEvent}
+
+pub fn reduce(input: ReducerInput) -> ReducerState {
+  if input.event.kind == "reset" {
+    return {count: 0, history: input.state.history + [0], label: input.state.label}
+  }
+  if input.event.kind == "decrement" {
+    const next = input.state.count - input.event.amount
+    return {count: next, history: input.state.history + [next], label: input.state.label}
+  }
+  const next = input.state.count + input.event.amount
+  return {count: next, history: input.state.history + [next], label: input.state.label}
+}

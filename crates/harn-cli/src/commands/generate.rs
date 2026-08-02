@@ -20,7 +20,15 @@ use crate::commands;
 pub(crate) fn dispatch(command: Command) {
     match command {
         Command::DumpHighlightKeywords(args) => {
-            commands::dump_highlight_keywords::run(&args.output, args.check);
+            commands::dump_highlight_keywords::run(
+                &args.output,
+                &args.json_output,
+                &args.wasm_json_output,
+                args.check,
+            );
+        }
+        Command::DumpPortableBenchmarkSchema(args) => {
+            commands::dump_portable_benchmark_schema::run(&args.output, args.check);
         }
         Command::DumpPromptGrammar(args) => {
             commands::dump_prompt_grammar::run(&args.output, args.check);

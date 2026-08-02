@@ -1,20 +1,16 @@
 // Keep the tree-sitter-harn keyword list in sync with the lexer.
 //
-// `crates/harn-lexer/src/token.rs` defines `pub const KEYWORDS: &[&str]`,
-// the authoritative set of reserved words the runtime parser recognises.
-// `tree-sitter-harn/grammar/keywords.js` re-declares the same set so the
-// editor grammar (highlighting, structural editing, the LSP fallback
-// parser) agrees with the runtime. Nothing previously checked that the
-// two lists stayed equal, so a keyword added to the language could
-// silently never reach tree-sitter.
+// `crates/harn-lexer/src/token.rs` declares the authoritative vocabulary that
+// generates runtime tokenization and public keyword/literal projections.
+// This script generates tree-sitter's sorted JavaScript projection from that
+// declaration so editor parsing cannot become a second vocabulary owner.
 //
 // Usage:
 //   harn run scripts/sync_tree_sitter_keywords.harn            # drift check (default); exit 1 on mismatch
 //   harn run scripts/sync_tree_sitter_keywords.harn -- --write # rewrite keywords.js from the lexer
 //
-// The check is intentionally a *set* comparison: the grammar file keeps
-// its own hand-curated comments and ordering (keywords are grouped by
-// feature there, not alphabetised), so only membership must match.
+// The check compares membership because formatting is already deterministic
+// and membership is the semantic contract consumed by tree-sitter.
 //
 // Ported from scripts/sync_tree_sitter_keywords.py — behavior-identical
 // (same regexes, same set comparison, same generated file shape).
@@ -63,15 +59,19 @@ pub fn difference(a: list<string>, b: list<string>) -> list<string> {
 }
 
 /**
- * Pull the keyword set out of the lexer's `pub const KEYWORDS` slice.
- * The capture spans newlines, so it needs the `s` (DOTALL) flag.
+ * Pull the keyword set out of the lexer's declarative vocabulary. The legacy
+ * const form remains supported for isolated script fixtures.
  */
 pub fn lexer_keywords(text: string) -> list<string>? {
-  const m = regex_captures(r"pub const KEYWORDS:\s*&\[&str\]\s*=\s*&\[(.*?)\];", text, "s")
-  if m.count == 0 {
+  const table = regex_captures(r"define_keyword_vocabulary!\s*\{(.*?)\n\}", text, "s")
+  if table.count > 0 {
+    return dedup(quoted_strings(table[0].groups[0]))
+  }
+  const legacy = regex_captures(r"pub const KEYWORDS:\s*&\[&str\]\s*=\s*&\[(.*?)\];", text, "s")
+  if legacy.count == 0 {
     return nil
   }
-  return dedup(quoted_strings(m[0].groups[0]))
+  return dedup(quoted_strings(legacy[0].groups[0]))
 }
 
 /**
@@ -115,7 +115,7 @@ pipeline main(harness: Harness, task) {
   }
   const lexer = lexer_keywords(harness.fs.read_text(TOKEN_RS))
   if lexer == nil {
-    harness.stdio.eprintln("error: could not find `pub const KEYWORDS` in ${TOKEN_RS}")
+    harness.stdio.eprintln("error: could not find the lexer keyword vocabulary in ${TOKEN_RS}")
     return 1
   }
   if argv.contains("--write") {

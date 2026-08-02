@@ -1,0 +1,91 @@
+name: Portable kernel browser Wasm
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/portable-kernel-wasm.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "Makefile"
+      - "crates/harn-builtin-meta/**"
+      - "crates/harn-builtin-registry/**"
+      - "crates/harn-capability-contracts/**"
+      - "crates/harn-kernel/**"
+      - "crates/harn-lexer/**"
+      - "crates/harn-parser/**"
+      - "crates/harn-wasm/**"
+      - "rust-toolchain.toml"
+      - "scripts/check_wasm_imports.mjs"
+      - "scripts/generated_artifacts.toml"
+      - "scripts/resolve_chromedriver.sh"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/portable-kernel-wasm.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "Makefile"
+      - "crates/harn-builtin-meta/**"
+      - "crates/harn-builtin-registry/**"
+      - "crates/harn-capability-contracts/**"
+      - "crates/harn-kernel/**"
+      - "crates/harn-lexer/**"
+      - "crates/harn-parser/**"
+      - "crates/harn-wasm/**"
+      - "rust-toolchain.toml"
+      - "scripts/check_wasm_imports.mjs"
+      - "scripts/generated_artifacts.toml"
+      - "scripts/resolve_chromedriver.sh"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-kernel-wasm-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  browser-wasm:
+    name: WIT, authority audit, and Chrome worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          # Consume the canonical workspace build cache. Cache ownership stays
+          # with ci.yml:rust-checks so this focused lane cannot mint a parallel,
+          # drift-prone cache generation.
+          shared-key: workspace-tests
+          cache-bin: false
+          save: false
+      - name: Install pinned browser and Component Model tools
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          # wasm-tools is an actively maintained Bytecode Alliance project,
+          # Apache-2.0 WITH LLVM-exception, and is CI-only: it adds no runtime
+          # dependency or browser bundle weight.
+          tool: wasm-pack@0.15.0,wasm-tools@1.255.0
+          fallback: none
+      - name: Build, audit imports, and execute in a real Chrome worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome-stable || command -v google-chrome)"
+          export HARN_CHROME_BIN="$chrome_bin"
+          make check-wasm-wit HARN_WASM_TOOLS="$(command -v wasm-tools)"
+          make wasm-build wasm-audit-imports wasm-test-browser \
+            HARN_WASM_PACK="$(command -v wasm-pack)" \
+            HARN_WASM_TOOLS="$(command -v wasm-tools)"

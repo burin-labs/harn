@@ -12,7 +12,7 @@ fn codegen_fingerprint_is_checkout_path_stable() {
     let right = tempfile::tempdir().unwrap();
     seed_compiler_sources(left.path(), "return 1;");
     seed_compiler_sources(right.path(), "return 1;");
-    assert_eq!(watch_roots(&left.path().join("harn-vm")).len(), 4);
+    assert_eq!(watch_roots(&left.path().join("harn-vm")).len(), 5);
 
     let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm")));
     let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm")));
@@ -81,8 +81,10 @@ fn seed_compiler_sources(root: &Path, compiler_body: &str) {
         ("harn-lexer/src/lib.rs", "pub fn lex() {}"),
         ("harn-parser/src/lib.rs", "pub fn parse() {}"),
         ("harn-ir/src/lib.rs", "pub fn lower() {}"),
-        ("harn-vm/src/compiler/state.rs", compiler_body),
+        ("harn-kernel/src/compiler/state.rs", compiler_body),
+        ("harn-vm/src/compiler.rs", "pub struct Compiler;"),
         ("harn-vm/src/chunk.rs", "pub struct Chunk;"),
+        ("harn-vm/src/chunk/portable.rs", "pub fn adapt() {}"),
         (
             "harn-vm/src/module_artifact.rs",
             "pub fn compile_artifact() {}",

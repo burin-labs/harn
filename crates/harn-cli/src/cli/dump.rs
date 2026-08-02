@@ -5,6 +5,12 @@ pub(crate) struct DumpHighlightKeywordsArgs {
     /// Path to the generated keyword file (relative to the repo root).
     #[arg(long, default_value = "docs/theme/harn-keywords.js")]
     pub output: String,
+    /// Path to the portable machine-readable vocabulary manifest.
+    #[arg(long, default_value = "spec/language-vocabulary.json")]
+    pub json_output: String,
+    /// Package-local projection used by the standalone browser demo.
+    #[arg(long, default_value = "crates/harn-wasm/demo/language-vocabulary.json")]
+    pub wasm_json_output: String,
     /// Verify the on-disk file matches what would be generated; exit non-zero
     /// if stale. Used by CI to prevent drift between the highlighter and the
     /// lexer/stdlib.
@@ -23,6 +29,19 @@ pub(crate) struct DumpPromptGrammarArgs {
     /// Verify the on-disk grammar matches what would be generated; exit
     /// non-zero if stale. Used by CI to prevent drift between the editor
     /// grammar and the prompt-template engine.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DumpPortableBenchmarkSchemaArgs {
+    /// Path to the generated Portable Kernel benchmark receipt schema.
+    #[arg(
+        long,
+        default_value = "spec/schemas/portable-kernel-benchmark.v1.schema.json"
+    )]
+    pub output: String,
+    /// Verify the committed schema matches the kernel-owned receipt contract.
     #[arg(long)]
     pub check: bool,
 }

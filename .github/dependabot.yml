@@ -4,7 +4,6 @@ updates:
   - package-ecosystem: "cargo"
     directories:
       - "/"
-      - "/crates/harn-wasm"
     schedule:
       interval: "weekly"
       day: "monday"

@@ -861,6 +861,97 @@ fn test_parses_bench_replay_args() {
 }
 
 #[test]
+fn test_parses_bench_portable_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "bench",
+        "portable",
+        "reducer.harn",
+        "--entry",
+        "reduce",
+        "--entry-kind",
+        "function",
+        "--input",
+        "event.json",
+        "--iterations",
+        "500",
+        "--threads",
+        "4",
+        "--compile-iterations",
+        "30",
+        "--json",
+        "--output",
+        "portable-benchmark.json",
+    ]);
+
+    let Command::Bench(args) = cli.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    let Some(crate::cli::BenchCommand::Portable(portable)) = args.command else {
+        panic!("expected bench portable command");
+    };
+    assert_eq!(portable.source, std::path::Path::new("reducer.harn"));
+    assert_eq!(portable.entry, "reduce");
+    assert!(matches!(
+        portable.entry_kind,
+        crate::cli::PortableEntryKindArg::Function
+    ));
+    assert_eq!(portable.input, std::path::Path::new("event.json"));
+    assert_eq!(portable.iterations, 500);
+    assert_eq!(portable.threads, 4);
+    assert_eq!(portable.compile_iterations, 30);
+    assert!(portable.json);
+    assert_eq!(
+        portable.output.as_deref(),
+        Some(std::path::Path::new("portable-benchmark.json"))
+    );
+}
+
+#[test]
+fn test_bench_portable_rejects_out_of_range_counts_during_parsing() {
+    for (flag, value) in [
+        ("--iterations", "0"),
+        ("--iterations", "1000001"),
+        ("--threads", "257"),
+        ("--compile-iterations", "100001"),
+    ] {
+        let error = Cli::try_parse_from([
+            "harn",
+            "bench",
+            "portable",
+            "reducer.harn",
+            "--input",
+            "event.json",
+            flag,
+            value,
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+}
+
+#[test]
+fn test_bench_portable_preserves_parent_profile_flag_for_explicit_rejection() {
+    let cli = Cli::parse_from([
+        "harn",
+        "bench",
+        "--profile",
+        "portable",
+        "reducer.harn",
+        "--input",
+        "event.json",
+    ]);
+    let Command::Bench(args) = cli.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    assert!(matches!(
+        args.command,
+        Some(crate::cli::BenchCommand::Portable(_))
+    ));
+    assert!(args.profile.text);
+}
+
+#[test]
 fn test_profile_env_aliases_apply_to_supported_commands() {
     let _env = crate::tests::common::harn_state_lock::lock_harn_state();
     struct EnvRestore {

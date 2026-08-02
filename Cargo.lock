@@ -2015,38 +2015,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "932eb4a8a2cc24c55c4f11829a102254e9edf7f44dc7764b232c80494628c50c"
 
 [[package]]
-name = "cranelift-jit"
-version = "0.134.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "318f3e5589916d2bed9d937953d544d6750d248414f92351d932020abc6231ec"
-dependencies = [
- "anyhow",
- "cranelift-codegen",
- "cranelift-control",
- "cranelift-entity",
- "cranelift-module",
- "cranelift-native",
- "libc",
- "log",
- "memmap2",
- "region",
- "target-lexicon",
- "wasmtime-internal-jit-icache-coherence",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "cranelift-module"
-version = "0.134.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06fc56e8037687a4e74b9747e9f77d004646e5b06c52c30ace6bc00544be2adb"
-dependencies = [
- "anyhow",
- "cranelift-codegen",
- "cranelift-control",
-]
-
-[[package]]
 name = "cranelift-native"
 version = "0.134.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2054,22 +2022,6 @@ checksum = "f757e7af29533480f8e662faaadf8c491c0c7c3c6b27d80c95a17c0f54712895"
 dependencies = [
  "cranelift-codegen",
  "libc",
- "target-lexicon",
-]
-
-[[package]]
-name = "cranelift-object"
-version = "0.134.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b509dc0fc9948dd77693b6cd29c6f730ed2806cc8176a3d04471daebff11ad0"
-dependencies = [
- "anyhow",
- "cranelift-codegen",
- "cranelift-control",
- "cranelift-module",
- "gimli",
- "log",
- "object 0.39.1",
  "target-lexicon",
 ]
 
@@ -3445,7 +3397,8 @@ dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
  "harn-builtin-registry",
- "linkme",
+ "proc-macro2",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -3473,6 +3426,7 @@ dependencies = [
  "harn-guard",
  "harn-hostlib",
  "harn-ir",
+ "harn-kernel",
  "harn-lexer",
  "harn-lint",
  "harn-lsp",
@@ -3551,21 +3505,6 @@ dependencies = [
  "parking_lot",
  "serde",
  "time",
- "tokio",
-]
-
-[[package]]
-name = "harn-codegen"
-version = "0.10.50"
-dependencies = [
- "cranelift-codegen",
- "cranelift-frontend",
- "cranelift-jit",
- "cranelift-module",
- "cranelift-native",
- "cranelift-object",
- "harn-parser",
- "harn-vm",
  "tokio",
 ]
 
@@ -3706,6 +3645,21 @@ dependencies = [
  "harn-glob",
  "harn-lexer",
  "harn-parser",
+]
+
+[[package]]
+name = "harn-kernel"
+version = "0.10.50"
+dependencies = [
+ "arcstr",
+ "blake3",
+ "harn-builtin-meta",
+ "harn-builtin-registry",
+ "harn-capability-contracts",
+ "harn-lexer",
+ "harn-parser",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4006,6 +3960,7 @@ dependencies = [
  "harn-flock",
  "harn-glob",
  "harn-ir",
+ "harn-kernel",
  "harn-lexer",
  "harn-modules",
  "harn-opcode-macros",
@@ -4105,6 +4060,17 @@ dependencies = [
  "harn-vm",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "harn-wasm"
+version = "0.10.50"
+dependencies = [
+ "harn-kernel",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -5194,15 +5160,6 @@ checksum = "e20f57f9918e5bd7bc58c22cdd70a6afc7375d4dd9683af5f2b34bd3d2bba619"
 
 [[package]]
 name = "mach2"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "mach2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
@@ -5337,6 +5294,16 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
+]
+
+[[package]]
+name = "minicov"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4869b6a491569605d66d3952bcdf03df789e5b536e5f0cf7758a7f08a55ae24d"
+dependencies = [
+ "cc",
+ "walkdir",
 ]
 
 [[package]]
@@ -5631,6 +5598,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -7095,18 +7063,6 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
-
-[[package]]
-name = "region"
-version = "3.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6b6ebd13bc009aef9cd476c1310d49ac354d36e240cf1bd753290f3dc7199a7"
-dependencies = [
- "bitflags 1.3.2",
- "libc",
- "mach2 0.4.3",
- "windows-sys 0.52.0",
-]
 
 [[package]]
 name = "rend"
@@ -9589,6 +9545,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-bindgen-test"
+version = "0.3.76"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a0d555ca874445df8d314f94f5c948a4e74e5418f332c89f660a3d8310a96f4"
+dependencies = [
+ "async-trait",
+ "cast",
+ "js-sys",
+ "libm",
+ "minicov",
+ "nu-ansi-term",
+ "num-traits",
+ "oorandom",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test-macro",
+ "wasm-bindgen-test-shared",
+]
+
+[[package]]
+name = "wasm-bindgen-test-macro"
+version = "0.3.76"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94eb68555b95bcea5e8cf4abe280b529049479fa995bfc23734af96a6aedc120"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "wasm-bindgen-test-shared"
+version = "0.2.126"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c31d56021e873866c968588ed85ccdf56db5c426e44afdb4618c39895104b920"
+
+[[package]]
 name = "wasm-encoder"
 version = "0.252.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9672,7 +9667,7 @@ dependencies = [
  "futures",
  "libc",
  "log",
- "mach2 0.6.0",
+ "mach2",
  "memfd",
  "object 0.39.1",
  "once_cell",
