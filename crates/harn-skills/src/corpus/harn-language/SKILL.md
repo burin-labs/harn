@@ -78,6 +78,8 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Prefer `import * as alias from "module"` when a module publishes short
   member names under a collision-safe alias; do not invent receiver-method
   APIs for that case.
+- When callers use a namespace alias, export `event` rather than repeating the
+  module name in `ui_event`; the call site already reads `ui.event`.
 - `pub import * as alias from "module"` re-exports the alias namespace object,
   not the target's flattened members (contrast `pub import "module"`).
 - Avoid relying on the current working directory in examples.

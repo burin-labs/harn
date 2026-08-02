@@ -1106,6 +1106,9 @@ jobs:
           node-version: "22"
           cache-dependency-path: package-lock.json
       - run: npm ci
+      # The embedded MCP Apps host is checked as readable source in place;
+      # there is no generated frontend bundle to validate elsewhere.
+      - run: make check-app-host
       # Pure-shell grep gate: agent-facing hostlib paths must be
       # forward-slash-normalized on every platform (see
       # scripts/check_agent_path_normalization.sh). Kept with the other

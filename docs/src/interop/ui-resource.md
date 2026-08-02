@@ -1,10 +1,10 @@
-# MCP apps UI resource envelopes
+# MCP Apps UI resources
 
 `std/ui_resource` packages interactive HTML widgets as portable UI resource
-envelopes that follow the [MCP Apps overview][mcp-apps] and degrade cleanly
-to text or structured tool output when a host does not advertise UI support.
+records that follow the [MCP Apps overview][mcp-apps] and fall back to text or
+structured tool output when a host does not advertise UI support.
 
-[mcp-apps]: https://modelcontextprotocol.io/extensions/apps/overview
+[mcp-apps]: https://apps.extensions.modelcontextprotocol.io/api/documents/overview.html
 
 ## Run an app locally
 
@@ -23,8 +23,12 @@ apps through an authenticated host instead.
 
 ![The logo studio canvas after a live tool round trip](assets/logo-studio-e2e.png)
 
+For new applications, use [`std/ui`](../stdlib/ui.md) so product state and
+behavior stay in Harn. Use `std/ui_resource` directly when you already have a
+portable HTML view.
+
 The app view speaks standard MCP JSON-RPC over `postMessage`. Calls to
-`tools/call` and `resources/read` are checked by the host and dispatched to the
+`tools/call` and `resources/read` are checked by the host and sent to the
 same in-process MCP server used by `harn serve mcp`; app-only tool visibility is
 therefore enforced at the protocol boundary rather than by UI convention. RPC
 requests must also carry the exact host origin, which blocks another browser
@@ -58,7 +62,7 @@ ui_tool_result_validate(result)
 const rendered = ui_select_for_host(result, host_capabilities)
 ```
 
-## Resource envelope
+## Resource record
 
 `ui_resource(uri, name, html, options?: UiResourceOptions)` returns
 `UiResource` (`harn.ui_resource.v1`):
@@ -85,7 +89,7 @@ rules used by safe artifact patching. The validator defaults to
 ## Tool-declaration metadata
 
 `ui_tool_meta(resource, options?: UiToolMetaOptions)` returns a
-`UiToolMeta` (`harn.ui_tool_meta.v1`) envelope and
+`UiToolMeta` (`harn.ui_tool_meta.v1`) record and
 `ui_tool_meta_to_mcp(meta)` serializes it into the stable MCP Apps shape
 served from a tool's `_meta.ui`:
 
@@ -107,7 +111,7 @@ Harn's MCP server projects it as `_meta.ui` on both resource discovery and
 
 `ui_tool_result(resource, options?: UiToolResultOptions)` wraps a resource
 with a mandatory text fallback (defaulting to a `web_artifact_text_fallback`
-projection of the resource HTML) and an optional `UiStructuredFallback`.
+text copy of the resource HTML) and an optional `UiStructuredFallback`.
 Wrap raw structured data with
 `ui_structured_fallback(data, options?: UiStructuredFallbackOptions)`.
 Hosts without UI support receive both fallbacks instead of the
@@ -119,12 +123,14 @@ resource:
 | Otherwise, structured fallback present | `structured_fallback` |
 | Otherwise | `text_fallback` |
 
-`ui_host_capabilities(input?: UiHostCapabilityInput)` accepts the MCP
-`client_capabilities.apps` shape, the OpenAI Apps SDK `ui.apps` shape,
-or a bare `{apps: true}` record. `ui_host_supports_apps(caps)` returns
+`ui_host_capabilities(input?: UiHostCapabilityInput)` accepts the current MCP
+extension shape at
+`capabilities.extensions["io.modelcontextprotocol/ui"].mimeTypes`, older
+`client_capabilities.apps` shapes, the OpenAI Apps SDK `ui.apps` shape, or a
+bare `{apps: true}` record. `ui_host_supports_apps(caps)` returns
 whether the host can render the `mcp-app` profile.
 
-## Message envelopes
+## Message records
 
 `ui_tool_call_envelope(name, params?, options?)` produces the
 host→guest JSON-RPC `tools/call` payload a sandboxed iframe receives
@@ -152,6 +158,13 @@ host needs to surface validation errors without shipping the resource;
 `ui_tool_result_validate` still refuses that record so previews stay
 explicit.
 
-See [`examples/ui_resource/dashboard-widget.harn`](https://github.com/burin-labs/harn/blob/main/examples/ui_resource/dashboard-widget.harn)
+The standalone host advertises the current extension during startup and sends
+`serverTools`, `serverResources`, `logging`, and enforced sandbox settings to
+the view. It reads the current `_meta.ui.resourceUri` tool link and the
+deprecated flat `_meta["ui/resourceUri"]` link for compatibility.
+
+Start with the shared renderer in
+[`examples/apps/decision-card.harn`](https://github.com/burin-labs/harn/blob/main/examples/apps/decision-card.harn).
+Use [`examples/ui_resource/dashboard-widget.harn`](https://github.com/burin-labs/harn/blob/main/examples/ui_resource/dashboard-widget.harn)
 and [`examples/ui_resource/review-form.harn`](https://github.com/burin-labs/harn/blob/main/examples/ui_resource/review-form.harn)
-for end-to-end vanilla-JS examples.
+when the app needs its own portable HTML and JavaScript.

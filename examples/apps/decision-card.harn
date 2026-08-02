@@ -1,0 +1,70 @@
+/** A second Harn-only app proving the renderer is not logo-specific. */
+import * as ui from "std/ui"
+
+pipeline main(harness: Harness, task) {
+  const resource = ui.app_resource(
+    "ui://harn/examples/decision-card",
+    "Decision Card",
+    "decision.handle_event",
+    {description: "Collect a small decision and its reason"},
+  )
+  const meta = ui.tool_metadata(resource, {visibility: ["app"]})
+  let choice = "approve"
+  let reason = ""
+  let recorded = false
+  let revision = 0
+  fn render() {
+    const elements = [
+      {id: "card", kind: "column", variant: "panel"},
+      {id: "title", kind: "heading", parent: "card", text: "Review decision", level: 1},
+      {
+        id: "choice",
+        kind: "select",
+        parent: "card",
+        label: "Decision",
+        value: choice,
+        options: [
+          {value: "approve", label: "Approve"},
+          {value: "revise", label: "Request changes"},
+        ],
+      },
+      {id: "reason", kind: "text_area", parent: "card", label: "Reason", value: reason},
+      {id: "record", kind: "button", parent: "card", label: "Record decision", variant: "primary"},
+      {
+        id: "status",
+        kind: "status",
+        parent: "card",
+        text: recorded ? "Recorded " + choice + ": " + reason : "No decision recorded yet.",
+      },
+    ]
+    revision = revision + 1
+    return ui.update(ui.document("Decision Card", revision, elements))
+  }
+  fn handle_event(raw) {
+    const event = ui.event(raw.event)
+    if event.kind == "input" && event.target == "choice" {
+      choice = event.value ?? "approve"
+      recorded = false
+    } else if event.kind == "input" && event.target == "reason" {
+      reason = event.value ?? ""
+      recorded = false
+    } else if event.kind == "click" && event.target == "record" {
+      recorded = true
+    }
+    return render()
+  }
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "decision.handle_event",
+    "Apply one typed event to the decision card",
+    {
+      parameters: {event: {type: "object", required: true}},
+      returns: {type: "object"},
+      handler: handle_event,
+      meta: meta,
+    },
+  )
+  harness.tools.mcp_tools(tools)
+  harness.tools.mcp_resource(ui.mcp_resource(resource, {prefers_border: true}))
+}

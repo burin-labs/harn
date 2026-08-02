@@ -16,8 +16,10 @@ use crate::commands::run::{RunFileAppServe, RunFileMcpServeMode};
 use crate::commands::serve::ScriptMcpRuntime;
 
 const MCP_APP_MIME: &str = "text/html;profile=mcp-app";
+const MCP_APP_EXTENSION: &str = "io.modelcontextprotocol/ui";
 const MAX_APP_HTML_BYTES: usize = 2 * 1024 * 1024;
 const MAX_APP_RPC_BYTES: usize = 16 * 1024 * 1024;
+const SANDBOX_DOCUMENT_CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; frame-src 'self'; style-src 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; base-uri 'none'; form-action 'none'";
 
 pub(crate) async fn run(args: AppArgs) {
     match args.command {
@@ -125,7 +127,28 @@ async fn discover_app(
     runtime: &ScriptMcpRuntime,
     requested_resource: Option<&str>,
 ) -> Result<(AppDescriptor, BTreeSet<String>), String> {
-    let tools_response = rpc(runtime, 1, "tools/list", json!({})).await?;
+    rpc(
+        runtime,
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": harn_vm::mcp_protocol::PROTOCOL_VERSION,
+            "capabilities": {
+                "extensions": {
+                    MCP_APP_EXTENSION: {"mimeTypes": [MCP_APP_MIME]}
+                }
+            },
+            "clientInfo": {"name": "harn-app", "version": env!("CARGO_PKG_VERSION")}
+        }),
+    )
+    .await?;
+    runtime
+        .call(
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}),
+            None,
+        )
+        .await?;
+    let tools_response = rpc(runtime, 2, "tools/list", json!({})).await?;
     let tools = tools_response
         .pointer("/result/tools")
         .and_then(JsonValue::as_array)
@@ -136,24 +159,18 @@ async fn discover_app(
         let Some(name) = tool.get("name").and_then(JsonValue::as_str) else {
             continue;
         };
-        let ui = tool.pointer("/_meta/ui");
-        let visibility = ui
-            .and_then(|value| value.get("visibility"))
-            .and_then(JsonValue::as_array);
+        let visibility = tool_ui_visibility(tool);
         let callable_by_app = visibility
             .is_none_or(|entries| entries.iter().any(|entry| entry.as_str() == Some("app")));
         if callable_by_app {
             app_tools.insert(name.to_string());
         }
-        if let Some(uri) = ui
-            .and_then(|value| value.get("resourceUri"))
-            .and_then(JsonValue::as_str)
-        {
+        if let Some(uri) = tool_ui_resource_uri(tool) {
             linked_resources.push(uri.to_string());
         }
     }
 
-    let resources_response = rpc(runtime, 2, "resources/list", json!({})).await?;
+    let resources_response = rpc(runtime, 3, "resources/list", json!({})).await?;
     let resources = resources_response
         .pointer("/result/resources")
         .and_then(JsonValue::as_array)
@@ -180,7 +197,7 @@ async fn discover_app(
         return Err(format!("app resource must use ui://, got {uri}"));
     }
 
-    let content_response = rpc(runtime, 3, "resources/read", json!({"uri": uri})).await?;
+    let content_response = rpc(runtime, 4, "resources/read", json!({"uri": uri})).await?;
     let content = content_response
         .pointer("/result/contents/0")
         .ok_or_else(|| format!("resources/read returned no content for {uri}"))?;
@@ -217,6 +234,25 @@ async fn discover_app(
         },
         app_tools,
     ))
+}
+
+fn tool_ui_resource_uri(tool: &JsonValue) -> Option<&str> {
+    tool.pointer("/_meta/ui/resourceUri")
+        .and_then(JsonValue::as_str)
+        .or_else(|| {
+            tool.pointer("/_meta/ui~1resourceUri")
+                .and_then(JsonValue::as_str)
+        })
+}
+
+fn tool_ui_visibility(tool: &JsonValue) -> Option<&[JsonValue]> {
+    tool.pointer("/_meta/ui/visibility")
+        .and_then(JsonValue::as_array)
+        .or_else(|| {
+            tool.pointer("/_meta/ui~1visibility")
+                .and_then(JsonValue::as_array)
+        })
+        .map(Vec::as_slice)
 }
 
 fn validate_resource_meta(meta: &JsonValue) -> Result<(), String> {
@@ -311,9 +347,7 @@ async fn sandbox_page() -> Response {
     let mut response = Html(sandbox_document()).into_response();
     response.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'none'; script-src 'unsafe-inline'; frame-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
-        ),
+        HeaderValue::from_static(SANDBOX_DOCUMENT_CSP),
     );
     add_document_headers(&mut response);
     response
@@ -425,5 +459,34 @@ mod tests {
             HeaderValue::from_static("http://127.0.0.1:4321"),
         );
         assert!(has_expected_origin(&headers, "http://127.0.0.1:4321"));
+    }
+
+    #[test]
+    fn tool_link_accepts_current_and_legacy_mcp_apps_metadata() {
+        let current = json!({"_meta": {"ui": {
+            "resourceUri": "ui://current",
+            "visibility": ["app"]
+        }}});
+        let legacy = json!({"_meta": {
+            "ui/resourceUri": "ui://legacy",
+            "ui/visibility": ["model"]
+        }});
+        assert_eq!(tool_ui_resource_uri(&current), Some("ui://current"));
+        assert_eq!(tool_ui_resource_uri(&legacy), Some("ui://legacy"));
+        assert_eq!(
+            tool_ui_visibility(&current),
+            Some([json!("app")].as_slice())
+        );
+        assert_eq!(
+            tool_ui_visibility(&legacy),
+            Some([json!("model")].as_slice())
+        );
+    }
+
+    #[test]
+    fn sandbox_outer_policy_leaves_media_control_to_the_inner_policy() {
+        assert!(SANDBOX_DOCUMENT_CSP.contains("img-src 'self' data: blob:"));
+        assert!(SANDBOX_DOCUMENT_CSP.contains("media-src 'self' data: blob:"));
+        assert!(!SANDBOX_DOCUMENT_CSP.contains("connect-src"));
     }
 }

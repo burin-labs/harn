@@ -1,5 +1,6 @@
 mod comments;
 mod layout;
+mod precedence_regressions;
 mod roundtrip;
 mod scoped_blocks;
 mod semantic_tokens;
@@ -574,24 +575,6 @@ fn test_nil_coalescing_with_logical_ops() {
         "Expected parens preserved for (?? over || rhs), got:\n{result2}"
     );
     assert_roundtrip(source2);
-}
-
-#[test]
-fn test_nil_coalescing_with_comparison_gets_clarifying_parens() {
-    let source = r"pipeline default(task) {
-  let x = classified == fixture?.expect_missing_dep ?? false
-  let y = value ?? 0 > 0
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("classified == (fixture?.expect_missing_dep ?? false)"),
-        "Expected comparison rhs nil-coalescing to be parenthesized, got:\n{result}"
-    );
-    assert!(
-        result.contains("(value ?? 0) > 0"),
-        "Expected comparison lhs nil-coalescing to be parenthesized, got:\n{result}"
-    );
-    assert_roundtrip(source);
 }
 
 #[test]
