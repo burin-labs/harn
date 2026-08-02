@@ -320,7 +320,7 @@ pub(super) fn plan(
         );
     }
     for edge in &edges {
-        if !signature_changed[edge.callee] {
+        if !signature_changed[edge.callee] && !signature_changed[edge.caller] {
             continue;
         }
         let callee = &callables[edge.callee];
@@ -370,6 +370,34 @@ pub(super) fn plan(
                 .ok_or_else(|| format!("failed to update call to {}", callee.info.name))?
             };
             edits_by_file.entry(caller.file_idx).or_default().push(edit);
+        } else if signature_changed[edge.caller] {
+            if let Some(carrier) = &callee.carrier {
+                if let Some(argument_span) = call.args.get(carrier.param_index).copied() {
+                    let source = &program_files[caller.file_idx].source;
+                    let existing_argument = source
+                        .get(argument_span.start..argument_span.end)
+                        .map(str::trim);
+                    let projects_caller_carrier =
+                        caller.carrier.as_ref().is_some_and(|caller_carrier| {
+                            existing_argument == Some(caller_carrier.name.as_str())
+                        });
+                    if projects_caller_carrier {
+                        let argument = argument_for_kind(
+                            caller,
+                            caller_desired,
+                            &added_capabilities[edge.caller],
+                            &carrier.kind,
+                        )?;
+                        edits_by_file
+                            .entry(caller.file_idx)
+                            .or_default()
+                            .push(FixEdit {
+                                span: argument_span,
+                                replacement: argument,
+                            });
+                    }
+                }
+            }
         }
         if !added_capabilities[edge.callee].is_empty() {
             let Some((index, arguments)) = split_call_extension(
