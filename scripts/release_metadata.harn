@@ -1,6 +1,7 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
+import "std/schema"
 import * as semver from "std/semver"
-import { release_distribution_version } from "./release_withdrawals.harn"
+import { load_release_withdrawals, release_distribution_version } from "./release_withdrawals.harn"
 
 const RELEASE_WITHDRAWALS_PATH = ".github/release-withdrawals.json"
 
@@ -9,6 +10,42 @@ pub type ReleaseMetadataPlan = {
   next_version: string,
   manifests: list<string>,
   package_names: list<string>,
+}
+
+type PackageManifestProjection = {package: {name: string}}
+
+type AgentArchiveProjection = {archive: string}
+
+type AgentManifestProjection = {
+  version: string,
+  distribution: {binary: dict<string, AgentArchiveProjection>},
+}
+
+fn package_manifest_projection_schema() -> Schema<PackageManifestProjection> {
+  return schema_object(
+    {
+      package: schema_field(
+        schema_object({name: schema_field(schema_string())}, {additional_properties: true}),
+      ),
+    },
+    {additional_properties: true},
+  )
+}
+
+fn agent_manifest_projection_schema() -> Schema<AgentManifestProjection> {
+  const archive = schema_object(
+    {archive: schema_field(schema_string())},
+    {additional_properties: true},
+  )
+  return schema_object(
+    {
+      version: schema_field(schema_string()),
+      distribution: schema_field(
+        schema_object({binary: schema_field(schema_dict(archive))}, {additional_properties: true}),
+      ),
+    },
+    {additional_properties: true},
+  )
 }
 
 fn default_root(fs: HarnessFs) -> string {
@@ -31,10 +68,7 @@ fn normalized_rel(path: string, root: string) -> string {
 
 fn current_distribution_version(fs: HarnessFs, root: string, current: string) -> string {
   const path = path_join(root, RELEASE_WITHDRAWALS_PATH)
-  if !fs.exists(path) {
-    return current
-  }
-  return release_distribution_version(fs.read_text(path), current)
+  return release_distribution_version(load_release_withdrawals(fs, path), current)
 }
 
 pub fn workspace_version_from_doc(doc) -> string {
@@ -102,12 +136,15 @@ pub fn workspace_package_manifests(fs: HarnessFs, root: string) -> list<string> 
 pub fn package_names_for_manifests(fs: HarnessFs, manifests: list<string>) -> list<string> {
   let names: list<string> = []
   for manifest in manifests {
-    const doc = toml_parse(fs.read_text(manifest))
-    const raw = doc?.package?.name
-    if type_of(raw) != "string" || to_string(raw) == "" {
+    const doc: PackageManifestProjection = schema_expect(
+      toml_parse(fs.read_text(manifest)),
+      package_manifest_projection_schema(),
+    )
+    const raw = doc.package.name
+    if raw == "" {
       throw "missing package.name in " + manifest
     }
-    const name = to_string(raw)
+    const name = raw
     if names.contains(name) {
       throw "duplicate workspace package name: " + name
     }
@@ -164,18 +201,22 @@ fn rewrite_agent_manifest(fs: HarnessFs, root: string, current: string, next: st
     return nil
   }
   const original = fs.read_text(path)
-  const doc = json_parse(original)
-  if to_string(doc?.version ?? "") != current {
+  const doc: AgentManifestProjection = schema_expect(
+    json_parse(original),
+    agent_manifest_projection_schema(),
+  )
+  if doc.version != current {
     throw "agent manifest version does not match workspace version"
   }
-  const binary = doc?.distribution?.binary
-  if type_of(binary) != "dict" || binary.entries().count == 0 {
+  const binary = doc.distribution.binary
+  if binary.entries().count == 0 {
     throw "agent manifest is missing distribution.binary entries"
   }
   for {key, value} in binary.entries() {
+    const archive_key = to_string(key ?? "")
     const archive = to_string(value?.archive ?? "")
     if archive == "" || !archive.contains("/v" + current + "/") {
-      throw "agent manifest archive for " + key + " does not target v" + current
+      throw "agent manifest archive for " + archive_key + " does not target v" + current
     }
   }
   if regex_captures("\"version\": \"" + replace(current, ".", "\\.") + "\"", original).count
@@ -188,13 +229,17 @@ fn rewrite_agent_manifest(fs: HarnessFs, root: string, current: string, next: st
     "\"version\": \"" + next + "\"",
   )
   updated = replace(updated, "/v" + current + "/", "/v" + next + "/")
-  const check = json_parse(updated)
-  if to_string(check?.version ?? "") != next {
+  const check: AgentManifestProjection = schema_expect(
+    json_parse(updated),
+    agent_manifest_projection_schema(),
+  )
+  if check.version != next {
     throw "failed to update agent manifest version"
   }
   for {key, value} in check.distribution.binary.entries() {
+    const archive_key = to_string(key ?? "")
     if !to_string(value.archive).contains("/v" + next + "/") {
-      throw "failed to update agent manifest archive for " + key
+      throw "failed to update agent manifest archive for " + archive_key
     }
   }
   fs.write_text(path, updated)

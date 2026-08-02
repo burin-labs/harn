@@ -499,6 +499,7 @@ test-pr-gate-scripts:
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_tag_push_idempotent_test.sh
+	./scripts/tests/release_withdrawal_lineage_test.sh
 	./scripts/tests/verify_release_archive_provenance_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/affected_crate_args_test.sh

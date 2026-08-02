@@ -10,8 +10,10 @@
 // exits non-zero with an `error: ...` message on any failed check.
 import { parse } from "std/semver"
 import {
+  ReleaseWithdrawal,
+  load_release_withdrawals,
   release_distribution_version,
-  release_withdrawal_matches_tag,
+  release_withdrawal_for_tag,
 } from "./release_withdrawals.harn"
 import {
   extract_section,
@@ -327,7 +329,29 @@ fn verify_release_notes(fs: HarnessFs, stdio: HarnessStdio, version: string) {
  * commit, HEAD carries an equivalent `Release vX.Y.Z` commit, or the closed
  * withdrawal registry binds the immutable tag to this version exactly.
  */
-fn verify_tag_state(process: HarnessProcess, withdrawal_registry: string, version: string) {
+fn head_contains_release_commit(process: HarnessProcess, version: string) -> bool {
+  const release = process.run(
+    {
+      program: "git",
+      args: [
+        "log",
+        "--format=%H",
+        "--grep=^Release v" + version + "( |$|\\()",
+        "--extended-regexp",
+        "-n",
+        "1",
+        "HEAD",
+      ],
+    },
+  )
+  return release.success && release.stdout.trim() != ""
+}
+
+fn verify_tag_state(
+  process: HarnessProcess,
+  withdrawals: list<ReleaseWithdrawal>,
+  version: string,
+) -> nil {
   const tag = "v" + version
   const tag_lookup = process.run(
     {program: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]},
@@ -346,25 +370,20 @@ fn verify_tag_state(process: HarnessProcess, withdrawal_registry: string, versio
   if is_descendant.success {
     return
   }
-  const rebrand = process.run(
-    {
-      program: "git",
-      args: [
-        "log",
-        "--format=%H",
-        "--grep=^Release " + tag + "( |$|\\()",
-        "--extended-regexp",
-        "-n",
-        "1",
-        "HEAD",
-      ],
-    },
-  )
-  if rebrand.success && rebrand.stdout.trim() != "" {
+  if head_contains_release_commit(process, version) {
     return
   }
-  if release_withdrawal_matches_tag(withdrawal_registry, version, tag_commit) {
-    return
+  const withdrawal = release_withdrawal_for_tag(withdrawals, version, tag_commit)
+  if withdrawal != nil {
+    if head_contains_release_commit(process, withdrawal.distribution_version) {
+      return
+    }
+    throw "error: withdrawal for v" + version
+      + " matches immutable tag commit "
+      + tag_commit
+      + ", but HEAD has no `Release v"
+      + withdrawal.distribution_version
+      + "` lineage commit"
   }
   throw "error: current version " + version + " is already tagged at " + tag_commit
     + ", but HEAD ("
@@ -394,12 +413,12 @@ pipeline main(harness: Harness, task) {
         + "; run `make gen-protocol-artifacts` (and "
         + "scripts/sync_protocol_fixture_runtime_versions.harn) after bumping the version"
     }
-    const withdrawal_registry = harness.fs.read_text(RELEASE_WITHDRAWALS_PATH)
-    const distribution_version = release_distribution_version(withdrawal_registry, version)
+    const withdrawals = load_release_withdrawals(harness.fs, RELEASE_WITHDRAWALS_PATH)
+    const distribution_version = release_distribution_version(withdrawals, version)
     const acp_manifest_text = harness.fs.read_text(ACP_AGENT_MANIFEST_PATH)
     check_acp_agent_manifest(acp_manifest_text, distribution_version)
     verify_release_notes(harness.fs, harness.stdio, effective_version)
-    verify_tag_state(harness.process, withdrawal_registry, effective_version)
+    verify_tag_state(harness.process, withdrawals, effective_version)
     harness.stdio.println(success_message(version, effective_version))
     return 0
   } catch (e) {

@@ -1,3 +1,4 @@
+import "std/schema"
 import * as semver from "std/semver"
 
 pub type ReleaseWithdrawal = {
@@ -8,89 +9,101 @@ pub type ReleaseWithdrawal = {
   reason: "invalid_tagged_candidate",
 }
 
-fn require_exact_keys(value, allowed: list<string>, context: string) {
-  for key in value.keys() {
-    if !allowed.contains(key) {
-      throw context + " contains unsupported field: " + key
-    }
-  }
+type ReleaseWithdrawalDocument = {schema_version: int, releases: list<ReleaseWithdrawal>}
+
+fn release_withdrawal_registry_schema() -> Schema<ReleaseWithdrawalDocument> {
+  const withdrawal = schema_closed_object(
+    {
+      version: schema_string(),
+      tag_commit: schema_string(),
+      distribution_version: schema_string(),
+      replacement: schema_string(),
+      reason: schema_literal("invalid_tagged_candidate"),
+    },
+  )
+  return schema_closed_object(
+    {schema_version: schema_literal(1), releases: schema_list(withdrawal)},
+  )
+}
+
+fn version_is_before(
+  left: {major: int, minor: int, patch: int},
+  right: {major: int, minor: int, patch: int},
+) -> bool {
+  return left.major < right.major
+    || (left.major == right.major && left.minor < right.minor)
+    || (left.major == right.major
+    && left.minor
+    == right
+    .minor
+    && left.patch < right.patch)
 }
 
 /** Parse and validate the closed registry of immutable release withdrawals. */
 pub fn parse_release_withdrawals(text: string) -> list<ReleaseWithdrawal> {
-  const doc = json_parse(text)
-  if type_of(doc) != "dict" {
-    throw "release withdrawal registry must be an object"
-  }
-  require_exact_keys(doc, ["schema_version", "releases"], "release withdrawal registry")
-  if doc?.schema_version != 1 {
-    throw "release withdrawal registry schema_version must be 1"
-  }
-  const raw_releases = doc?.releases
-  if type_of(raw_releases) != "list" {
-    throw "release withdrawal registry releases must be a list"
-  }
+  const doc: ReleaseWithdrawalDocument = schema_expect(
+    json_parse(text),
+    release_withdrawal_registry_schema(),
+  )
   let releases: list<ReleaseWithdrawal> = []
   let seen: list<string> = []
-  for raw in raw_releases {
-    if type_of(raw) != "dict" {
-      throw "release withdrawal registry entries must be objects"
+  for raw in doc.releases {
+    const parsed_version = semver.parse(raw.version)
+    const parsed_distribution = semver.parse(raw.distribution_version)
+    if parsed_version == nil {
+      throw "release withdrawal has invalid version: " + raw.version
     }
-    require_exact_keys(
-      raw,
-      ["version", "tag_commit", "distribution_version", "replacement", "reason"],
-      "release withdrawal entry",
-    )
-    const version = to_string(raw?.version ?? "")
-    const tag_commit = to_string(raw?.tag_commit ?? "")
-    const distribution_version = to_string(raw?.distribution_version ?? "")
-    const replacement = to_string(raw?.replacement ?? "")
-    const reason = to_string(raw?.reason ?? "")
-    if semver.parse(version) == nil {
-      throw "release withdrawal has invalid version: " + version
+    if parsed_distribution == nil {
+      throw "release withdrawal v" + raw.version + " has invalid distribution_version"
     }
-    if regex_captures(r"^[0-9a-f]{40}$", tag_commit).count != 1 {
-      throw "release withdrawal v" + version + " has invalid tag_commit"
+    if regex_captures(r"^[0-9a-f]{40}$", raw.tag_commit).count != 1 {
+      throw "release withdrawal v" + raw.version + " has invalid tag_commit"
     }
-    if semver.next(distribution_version, "patch") != version {
-      throw "release withdrawal v" + version
-        + " distribution_version must be the prior patch version"
+    if !version_is_before(parsed_distribution, parsed_version) {
+      throw "release withdrawal v" + raw.version
+        + " distribution_version must precede the withdrawn version"
     }
-    if replacement != semver.next(version, "patch") {
-      throw "release withdrawal v" + version + " replacement must be the next patch version"
+    if raw.replacement != semver.next(raw.version, "patch") {
+      throw "release withdrawal v" + raw.version + " replacement must be the next patch version"
     }
-    if reason != "invalid_tagged_candidate" {
-      throw "release withdrawal v" + version + " has unsupported reason: " + reason
+    if seen.contains(raw.version) {
+      throw "release withdrawal registry contains duplicate version: " + raw.version
     }
-    if seen.contains(version) {
-      throw "release withdrawal registry contains duplicate version: " + version
+    seen = seen + [raw.version]
+    releases = releases + [raw]
+  }
+  for withdrawal in releases {
+    if seen.contains(withdrawal.distribution_version) {
+      throw "release withdrawal v" + withdrawal.version
+        + " distribution_version names another withdrawn release: v"
+        + withdrawal.distribution_version
     }
-    seen = seen + [version]
-    releases = releases
-      + [
-      {
-        version: version,
-        tag_commit: tag_commit,
-        distribution_version: distribution_version,
-        replacement: replacement,
-        reason: "invalid_tagged_candidate",
-      },
-    ]
   }
   return releases
 }
 
+/** Read and validate the one canonical registry file at its owning boundary. */
+pub fn load_release_withdrawals(fs: HarnessFs, path: string) -> list<ReleaseWithdrawal> {
+  if !fs.exists(path) {
+    throw "release withdrawal registry is missing: " + path
+  }
+  return parse_release_withdrawals(fs.read_text(path))
+}
+
 /** Keep install-facing projections on the last published release while withdrawn. */
-pub fn release_distribution_version(registry_text: string, version: string) -> string {
-  return release_withdrawal_for_version(registry_text, version)?.distribution_version ?? version
+pub fn release_distribution_version(
+  withdrawals: list<ReleaseWithdrawal>,
+  version: string,
+) -> string {
+  return release_withdrawal_for_version(withdrawals, version)?.distribution_version ?? version
 }
 
 /** Return the withdrawal for one version, if the registry names it. */
 pub fn release_withdrawal_for_version(
-  registry_text: string,
+  withdrawals: list<ReleaseWithdrawal>,
   version: string,
 ) -> ReleaseWithdrawal? {
-  for withdrawal in parse_release_withdrawals(registry_text) {
+  for withdrawal in withdrawals {
     if withdrawal.version == version {
       return withdrawal
     }
@@ -98,12 +111,15 @@ pub fn release_withdrawal_for_version(
   return nil
 }
 
-/** Authorize divergence only for the exact commit of a recorded immutable tag. */
-pub fn release_withdrawal_matches_tag(
-  registry_text: string,
+/** Return the withdrawal only when it binds the exact immutable tag commit. */
+pub fn release_withdrawal_for_tag(
+  withdrawals: list<ReleaseWithdrawal>,
   version: string,
   tag_commit: string,
-) -> bool {
-  const withdrawal = release_withdrawal_for_version(registry_text, version)
-  return withdrawal != nil && withdrawal.tag_commit == lowercase(trim(tag_commit))
+) -> ReleaseWithdrawal? {
+  const withdrawal = release_withdrawal_for_version(withdrawals, version)
+  if withdrawal != nil && withdrawal.tag_commit == lowercase(trim(tag_commit)) {
+    return withdrawal
+  }
+  return nil
 }

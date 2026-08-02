@@ -1,8 +1,8 @@
 import {
   parse_release_withdrawals,
   release_distribution_version,
+  release_withdrawal_for_tag,
   release_withdrawal_for_version,
-  release_withdrawal_matches_tag,
 } from "../release_withdrawals.harn"
 
 const TAG_COMMIT = "d55201f77f196de7c311d69d6d9fee122ab620fe"
@@ -24,6 +24,17 @@ fn registry(version: string, replacement: string, tag_commit: string, reason: st
   )
 }
 
+fn assert_rejected(body) -> nil {
+  let rejected = false
+  try {
+    body()
+  } catch (_) {
+    rejected = true
+  }
+  require rejected, "expected invalid withdrawal registry to be rejected"
+  return nil
+}
+
 @test
 pipeline test_parse_release_withdrawals(harness: Harness, task) {
   const parsed = parse_release_withdrawals(
@@ -37,25 +48,31 @@ pipeline test_parse_release_withdrawals(harness: Harness, task) {
 
 @test
 pipeline test_release_distribution_version(harness: Harness, task) {
-  const text = registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate")
-  assert_eq(release_distribution_version(text, "0.10.50"), "0.10.50")
-  assert_eq(release_distribution_version(text, "0.10.51"), "0.10.50")
+  const withdrawals = parse_release_withdrawals(
+    registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate"),
+  )
+  assert_eq(release_distribution_version(withdrawals, "0.10.50"), "0.10.50")
+  assert_eq(release_distribution_version(withdrawals, "0.10.51"), "0.10.50")
 }
 
 @test
 pipeline test_release_withdrawal_for_version(harness: Harness, task) {
-  const text = registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate")
-  assert_eq(release_withdrawal_for_version(text, "0.10.50"), nil)
-  assert_eq(release_withdrawal_for_version(text, "0.10.51")?.tag_commit, TAG_COMMIT)
+  const withdrawals = parse_release_withdrawals(
+    registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate"),
+  )
+  assert_eq(release_withdrawal_for_version(withdrawals, "0.10.50"), nil)
+  assert_eq(release_withdrawal_for_version(withdrawals, "0.10.51")?.tag_commit, TAG_COMMIT)
 }
 
 @test
 pipeline test_release_withdrawal_matches_only_exact_tag(harness: Harness, task) {
-  const text = registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate")
-  assert_eq(release_withdrawal_matches_tag(text, "0.10.51", TAG_COMMIT), true)
+  const withdrawals = parse_release_withdrawals(
+    registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate"),
+  )
+  assert_eq(release_withdrawal_for_tag(withdrawals, "0.10.51", TAG_COMMIT)?.version, "0.10.51")
   assert_eq(
-    release_withdrawal_matches_tag(text, "0.10.51", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-    false,
+    release_withdrawal_for_tag(withdrawals, "0.10.51", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+    nil,
   )
 }
 
@@ -71,12 +88,9 @@ pipeline test_release_withdrawal_rejects_non_patch_replacement(harness: Harness,
 
 @test
 pipeline test_release_withdrawal_rejects_unknown_reason(harness: Harness, task) {
-  const result = try {
-    parse_release_withdrawals(registry("0.10.51", "0.10.52", TAG_COMMIT, "flaky_ci"))
-  } catch (e) {
-    e
-  }
-  assert_eq(result, "release withdrawal v0.10.51 has unsupported reason: flaky_ci")
+  assert_rejected(
+    { -> parse_release_withdrawals(registry("0.10.51", "0.10.52", TAG_COMMIT, "flaky_ci")) },
+  )
 }
 
 @test
@@ -97,7 +111,7 @@ pipeline test_release_withdrawal_rejects_duplicate_version(harness: Harness, tas
 }
 
 @test
-pipeline test_release_withdrawal_rejects_nonprior_distribution(harness: Harness, task) {
+pipeline test_release_withdrawal_rejects_nonpreceding_distribution(harness: Harness, task) {
   const result = try {
     parse_release_withdrawals(
       json_stringify(
@@ -107,7 +121,7 @@ pipeline test_release_withdrawal_rejects_nonprior_distribution(harness: Harness,
             {
               version: "0.10.51",
               tag_commit: TAG_COMMIT,
-              distribution_version: "0.10.49",
+              distribution_version: "0.10.51",
               replacement: "0.10.52",
               reason: "invalid_tagged_candidate",
             },
@@ -120,18 +134,69 @@ pipeline test_release_withdrawal_rejects_nonprior_distribution(harness: Harness,
   }
   assert_eq(
     result,
-    "release withdrawal v0.10.51 distribution_version must be the prior patch version",
+    "release withdrawal v0.10.51 distribution_version must precede the withdrawn version",
   )
 }
 
 @test
 pipeline test_release_withdrawal_rejects_unknown_fields(harness: Harness, task) {
-  const result = try {
-    parse_release_withdrawals(
-      json_stringify({schema_version: 1, releases: [], compatibility_escape: true}),
-    )
-  } catch (e) {
-    e
-  }
-  assert_eq(result, "release withdrawal registry contains unsupported field: compatibility_escape")
+  assert_rejected(
+    { ->
+      parse_release_withdrawals(
+        json_stringify({schema_version: 1, releases: [], compatibility_escape: true}),
+      )
+    },
+  )
+}
+
+@test
+pipeline test_release_withdrawal_supports_minor_or_major_candidate(harness: Harness, task) {
+  const parsed = parse_release_withdrawals(
+    json_stringify(
+      {
+        schema_version: 1,
+        releases: [
+          {
+            version: "1.0.0",
+            tag_commit: TAG_COMMIT,
+            distribution_version: "0.9.7",
+            replacement: "1.0.1",
+            reason: "invalid_tagged_candidate",
+          },
+        ],
+      },
+    ),
+  )
+  assert_eq(parsed[0]?.distribution_version, "0.9.7")
+}
+
+@test
+pipeline test_release_withdrawal_rejects_withdrawn_distribution(harness: Harness, task) {
+  assert_rejected(
+    { ->
+      parse_release_withdrawals(
+        json_stringify(
+          {
+            schema_version: 1,
+            releases: [
+              {
+                version: "0.10.51",
+                tag_commit: TAG_COMMIT,
+                distribution_version: "0.10.50",
+                replacement: "0.10.52",
+                reason: "invalid_tagged_candidate",
+              },
+              {
+                version: "0.10.52",
+                tag_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                distribution_version: "0.10.51",
+                replacement: "0.10.53",
+                reason: "invalid_tagged_candidate",
+              },
+            ],
+          },
+        ),
+      )
+    },
+  )
 }
