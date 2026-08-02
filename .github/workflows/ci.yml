@@ -1060,7 +1060,7 @@ jobs:
         id: release-audit-harn
         env:
           AUDIT_GATES_CONCURRENCY: "4"
-          HARN_CONFORMANCE_SHARDS: "4"
+          HARN_CONFORMANCE_JOBS: "4"
         run: ./scripts/audit_gates.sh --phase "${{ matrix.kind }}"
       - name: Summarize rolling merge-group wall time
         if: >-

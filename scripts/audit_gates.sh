@@ -11,7 +11,7 @@
 # serial conformance-then-audit tail:
 #   1. Build the harn CLI ONCE up front.
 #   2. Export HARN_BIN so conformance and every downstream gate reuse it.
-#   3. Run process-isolated conformance shards and the independent `make -j`
+#   3. Run the process-isolated conformance worker pool and independent `make -j`
 #      audit gates in parallel. GNU make already IS a bounded worker pool with
 #      failure collection; `-k` keeps going after a failing gate so the run
 #      reports EVERY gate's verdict, not just the first.
@@ -27,16 +27,16 @@
 #
 # Usage: scripts/audit_gates.sh [--phase all|conformance|audit]
 #   --phase all             run both worker pools together (default; local use)
-#   --phase conformance     run conformance shards, then the performance ratchet
+#   --phase conformance     run conformance workers, then the performance ratchet
 #   --phase audit           run only the independent audit gate fanout
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
 #   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc minus conformance
-#                            shards; see headroom note below). Explicit values
+#                            workers; see headroom note below). Explicit values
 #                            are honored unchanged.
-#   HARN_CONFORMANCE_SHARDS  process shard count (default: half of nproc,
+#   HARN_CONFORMANCE_JOBS    process worker count (default: half of nproc,
 #                            capped at 4; the other half runs audit gates)
 #   HARN_CONFORMANCE_TIMEOUT_MS
-#                            per-case timeout for conformance shards
+#                            per-case timeout for conformance workers
 #                            (default: 60000 under this parallel fanout)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -131,25 +131,25 @@ esac
 [ "$concurrency" -lt 1 ] && concurrency=1
 
 processor_count="$(nproc_count)"
-default_shards=$((processor_count / 2))
-[ "$default_shards" -lt 1 ] && default_shards=1
-[ "$default_shards" -gt 4 ] && default_shards=4
-conformance_shards="${HARN_CONFORMANCE_SHARDS:-$default_shards}"
-case "$conformance_shards" in
-  ''|*[!0-9]*) conformance_shards="$default_shards" ;;
+default_conformance_jobs=$((processor_count / 2))
+[ "$default_conformance_jobs" -lt 1 ] && default_conformance_jobs=1
+[ "$default_conformance_jobs" -gt 4 ] && default_conformance_jobs=4
+conformance_jobs="${HARN_CONFORMANCE_JOBS:-$default_conformance_jobs}"
+case "$conformance_jobs" in
+  ''|*[!0-9]*) conformance_jobs="$default_conformance_jobs" ;;
 esac
-[ "$conformance_shards" -lt 1 ] && conformance_shards=1
+[ "$conformance_jobs" -lt 1 ] && conformance_jobs=1
 
-# Conformance shards and the audit `make -j` fanout share one runner. Process-
+# Conformance workers and the audit `make -j` fanout share one runner. Process-
 # heavy cases (agent_state_resume_process, autonomy_*, trust_graph_*, trigger_*)
 # already budget ~30s of internal polling for scheduling starvation; when the
 # audit fanout also claims every core, those cases still hit the outer 30s
-# per-case timeout while passing in isolation. The default shard count claims
+# per-case timeout while passing in isolation. The default worker count claims
 # at most half the cores, and the default audit fanout receives the remainder,
-# so the two worker pools never oversubscribe the runner. Explicit shard and
+# so the two worker pools never oversubscribe the runner. Explicit worker and
 # concurrency values remain absolute so local scripts/tests keep their knobs.
 if [ "$phase" = "all" ] && [ -z "$explicit_audit_concurrency" ] && [ "$concurrency" -gt 1 ]; then
-  reserved="$conformance_shards"
+  reserved="$conformance_jobs"
   if [ "$concurrency" -gt "$reserved" ]; then
     concurrency=$((concurrency - reserved))
   else
@@ -205,12 +205,12 @@ fi
 # would read as a pass.
 audit_log="$(mktemp)"
 performance_log="$(mktemp)"
-conformance_log_dir="$(mktemp -d)"
+conformance_log="$(mktemp)"
 child_pids=()
 cleanup_files() {
   rm -f "$audit_log"
   rm -f "$performance_log"
-  rm -rf "$conformance_log_dir"
+  rm -f "$conformance_log"
 }
 terminate_children() {
   local status="$1"
@@ -259,43 +259,29 @@ if [ "$phase" != "conformance" ]; then
 fi
 
 conformance_status=0
-conformance_pids=()
-conformance_failures=()
 if [ "$phase" != "audit" ]; then
   conformance_started="$(date +%s)"
-  echo "=== conformance ($conformance_shards process-isolated shards, HARN_BIN warm) ==="
-  for shard_index in $(seq 1 "$conformance_shards"); do
-    shard_log="$conformance_log_dir/shard-$shard_index.log"
-    (
-      "$SCRIPT_DIR/harn_test_env.sh" "$HARN_BIN" test conformance \
-        --timeout "$conformance_timeout_ms" \
-        --shard-index "$shard_index" \
-        --shard-total "$conformance_shards"
-    ) >"$shard_log" 2>&1 &
-    shard_pid=$!
-    conformance_pids+=("$shard_pid")
-    child_pids+=("$shard_pid")
-  done
-
-  for offset in "${!conformance_pids[@]}"; do
-    shard_index=$((offset + 1))
-    shard_pid="${conformance_pids[$offset]}"
-    if wait "$shard_pid"; then
-      shard_status=0
-    else
-      shard_status=$?
-      conformance_status="$shard_status"
-      conformance_failures+=("$shard_index:$shard_status")
-    fi
-    forget_child "$shard_pid"
-    echo "=== conformance shard $shard_index/$conformance_shards ==="
-    cat "$conformance_log_dir/shard-$shard_index.log"
-  done
+  echo "=== conformance ($conformance_jobs process-isolated workers, HARN_BIN warm) ==="
+  (
+    "$SCRIPT_DIR/harn_test_env.sh" "$HARN_BIN" test conformance \
+      --parallel \
+      --jobs "$conformance_jobs" \
+      --timeout "$conformance_timeout_ms"
+  ) >"$conformance_log" 2>&1 &
+  conformance_pid=$!
+  child_pids+=("$conformance_pid")
+  if wait "$conformance_pid"; then
+    conformance_status=0
+  else
+    conformance_status=$?
+  fi
+  forget_child "$conformance_pid"
+  cat "$conformance_log"
 
   if [ "$conformance_status" -eq 0 ]; then
-    echo "ok: conformance ($conformance_shards shards, $(( $(date +%s) - conformance_started ))s)"
+    echo "ok: conformance ($conformance_jobs workers, $(( $(date +%s) - conformance_started ))s)"
   else
-    echo "FAIL: conformance shard(s) ${conformance_failures[*]} failed ($(( $(date +%s) - conformance_started ))s)" >&2
+    echo "FAIL: conformance runner exited $conformance_status ($(( $(date +%s) - conformance_started ))s)" >&2
   fi
 fi
 
@@ -309,7 +295,7 @@ if [ -n "$audit_pid" ]; then
 fi
 
 # The performance gate is a benchmark, not a source or artifact consistency
-# check. Run it only after the conformance shards and audit fanout have settled
+# check. Run it only after the conformance workers and audit fanout have settled
 # so its resource measurements are comparable to the platform baseline.
 performance_status=0
 if [ "$phase" != "audit" ]; then
