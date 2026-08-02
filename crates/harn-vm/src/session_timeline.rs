@@ -20,7 +20,7 @@ use crate::event_log::{AnyEventLog, EventId, EventLog, LogError, LogEvent, Topic
 use crate::orchestration::{load_run_record, RunRecord, RunTraceSpanRecord};
 use crate::redact::{current_policy, RedactionPolicy};
 
-pub const SESSION_TIMELINE_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_TIMELINE_SCHEMA_VERSION: u32 = 2;
 pub const SESSION_TIMELINE_QUERY_METHOD: &str = "harn.session_timeline.query";
 pub const SESSION_TIMELINE_SUBSCRIBE_METHOD: &str = "harn.session_timeline.subscribe";
 pub const SESSION_TIMELINE_UNSUBSCRIBE_METHOD: &str = "harn.session_timeline.unsubscribe";
@@ -93,7 +93,21 @@ pub struct SessionTimelineSnapshot {
     pub schema_version: u32,
     pub query: SessionTimelineQuery,
     pub cursor: SessionTimelineCursor,
+    #[serde(default)]
+    pub coverage: SessionTimelineCoverage,
     pub nodes: Vec<SessionTimelineNode>,
+}
+
+/// States whether a bounded snapshot covers every matching semantic node.
+///
+/// `available` is exact when Harn exhausted every selected source. It is `None`
+/// when Harn stopped after proving that the requested limit omitted evidence.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SessionTimelineCoverage {
+    pub returned: usize,
+    pub available: Option<usize>,
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -288,7 +302,11 @@ pub async fn query_session_store_timeline(
         for event in page.events {
             builder.add_stored_event(&topic, event);
         }
-        if page.next_cursor.is_none() || builder.nodes.len() >= query.limit() {
+        if page.next_cursor.is_none() {
+            break;
+        }
+        if builder.nodes.len() >= query.limit() {
+            builder.exhaustive = false;
             break;
         }
         from = page.next_cursor;
@@ -364,6 +382,7 @@ struct TimelineBuilder {
     query: SessionTimelineQuery,
     cursor: SessionTimelineCursor,
     nodes: Vec<TimelineDraft>,
+    exhaustive: bool,
     tool_positions: HashMap<u64, usize>,
     collided_tool_positions: HashMap<String, usize>,
 }
@@ -375,6 +394,7 @@ impl TimelineBuilder {
             cursor: query.from_cursor.clone(),
             query,
             nodes: Vec::with_capacity(capacity),
+            exhaustive: true,
             tool_positions: HashMap::with_capacity(capacity / 2),
             collided_tool_positions: HashMap::new(),
         }
@@ -467,6 +487,10 @@ impl TimelineBuilder {
         log: &AnyEventLog,
         policy: &RedactionPolicy,
     ) -> Result<(), SessionTimelineError> {
+        if self.nodes.len() > self.query.limit() {
+            self.exhaustive = false;
+            return Ok(());
+        }
         for topic in self.query.topics() {
             let topic_name = topic.as_str().to_string();
             let mut from = self.query.from_cursor.event_id_for(&topic);
@@ -489,9 +513,13 @@ impl TimelineBuilder {
                             sequence: event_id,
                             node,
                         });
+                        if self.nodes.len() > self.query.limit() {
+                            self.exhaustive = false;
+                            return Ok(());
+                        }
                     }
                 }
-                if batch_len < READ_BATCH_SIZE || self.nodes.len() >= self.query.limit() {
+                if batch_len < READ_BATCH_SIZE {
                     break;
                 }
             }
@@ -516,6 +544,8 @@ impl TimelineBuilder {
                     .then_with(|| left.node.id.cmp(&right.node.id))
             });
         }
+        let available = self.exhaustive.then_some(self.nodes.len());
+        let truncated = !self.exhaustive || self.nodes.len() > self.query.limit();
         self.nodes.truncate(self.query.limit());
 
         let mut children_by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -542,7 +572,7 @@ impl TimelineBuilder {
             }
         }
 
-        let nodes = self
+        let nodes: Vec<_> = self
             .nodes
             .into_iter()
             .enumerate()
@@ -559,6 +589,11 @@ impl TimelineBuilder {
             schema_version: SESSION_TIMELINE_SCHEMA_VERSION,
             query: self.query,
             cursor: self.cursor,
+            coverage: SessionTimelineCoverage {
+                returned: nodes.len(),
+                available,
+                truncated,
+            },
             nodes,
         }
     }

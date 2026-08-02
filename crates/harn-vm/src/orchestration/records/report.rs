@@ -506,6 +506,32 @@ fn assemble_report(
         }
     }
 
+    for timeline in &timelines {
+        if !timeline.coverage.truncated {
+            continue;
+        }
+        let agent_id = timeline
+            .query
+            .run_id
+            .as_deref()
+            .map(|run_id| format!("run:{run_id}"))
+            .unwrap_or_else(|| format!("run:{root_run_id}"));
+        let availability = timeline
+            .coverage
+            .available
+            .map(|available| format!(" of {available} available"))
+            .unwrap_or_else(|| ", with the total available count unknown".to_string());
+        checks.push(check(
+            "timeline_truncated",
+            "warning",
+            &agent_id,
+            format!(
+                "timeline returned {}{}; later evidence may be omitted, so absence must not be inferred",
+                timeline.coverage.returned, availability
+            ),
+        ));
+    }
+
     agents.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
     agents.dedup_by(|left, right| left.agent_id == right.agent_id);
     delegations.sort_by(|left, right| {
@@ -867,7 +893,7 @@ fn nonempty(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::{save_run_record, RunChildRecord};
+    use crate::orchestration::{save_run_record, RunChildRecord, RunTraceSpanRecord};
     use std::fs;
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -1094,6 +1120,67 @@ mod tests {
             .checks
             .iter()
             .any(|check| check.code == "child_status_mismatch"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn report_flags_timeline_truncation_before_a_late_llm_call() {
+        let dir = temp_dir("run-report-timeline-truncation");
+        let run_path = dir.join("run.json");
+        let mut trace_spans = (1..=1025)
+            .map(|span_id| RunTraceSpanRecord {
+                trace_id: "trace-root".to_string(),
+                span_id,
+                kind: "import".to_string(),
+                name: format!("import-{span_id}"),
+                start_ms: span_id,
+                duration_ms: 1,
+                ..RunTraceSpanRecord::default()
+            })
+            .collect::<Vec<_>>();
+        trace_spans.push(RunTraceSpanRecord {
+            trace_id: "trace-root".to_string(),
+            span_id: 1026,
+            kind: "llm_call".to_string(),
+            name: "late-llm-call".to_string(),
+            start_ms: 1026,
+            duration_ms: 2,
+            ..RunTraceSpanRecord::default()
+        });
+        let run = RunRecord {
+            type_name: "workflow_run".to_string(),
+            id: "root".to_string(),
+            status: "completed".to_string(),
+            trace_spans,
+            ..RunRecord::default()
+        };
+        save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+
+        let report = build_run_report(RunReportRequest {
+            run_record_path: run_path,
+            allowed_roots: vec![dir.clone()],
+            source_root: Some(dir.clone()),
+            ..RunReportRequest::default()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(report.timelines.len(), 1);
+        let timeline = &report.timelines[0];
+        assert_eq!(timeline.coverage.returned, 1024);
+        assert_eq!(timeline.coverage.available, Some(1026));
+        assert!(timeline.coverage.truncated);
+        assert!(!timeline.nodes.iter().any(|node| node.kind == "llm_call"));
+        assert_eq!(report.llm_calls.len(), 1);
+        let check = report
+            .checks
+            .iter()
+            .find(|check| check.code == "timeline_truncated")
+            .expect("explicit truncation check");
+        assert_eq!(check.severity, "warning");
+        assert!(check.message.contains("1024 of 1026 available"));
+        assert!(check.message.contains("absence must not be inferred"));
 
         fs::remove_dir_all(dir).unwrap();
     }

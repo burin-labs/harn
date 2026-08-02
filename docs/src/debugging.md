@@ -110,6 +110,13 @@ back-pointer, and keeps the source hash beside the projected evidence. Add
 join duration means that the source artifacts did not record it; the report
 does not turn missing timing into zero.
 
+Each timeline includes `coverage.returned`, `coverage.available`, and
+`coverage.truncated`. Treat a missing event as evidence only when `truncated`
+is `false`. A truncated run report also contains a `timeline_truncated` warning.
+Query `harn.session_timeline.query` with a higher `limit` when you need more
+nodes. `available: null` means Harn stopped after proving truncation, before it
+could count every matching node.
+
 ## Comparing runs
 
 Compare two stable views with your normal JSON diff tool to identify

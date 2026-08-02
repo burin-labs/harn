@@ -127,6 +127,7 @@ __all__ = [
     "HarnSessionTimelineReference",
     "HarnSessionTimelineLink",
     "HarnSessionTimelineNode",
+    "HarnSessionTimelineCoverage",
     "HarnSessionTimelineSnapshot",
     "HarnSessionTimelineUpdate",
     "is_request",
@@ -763,10 +764,17 @@ class HarnSessionTimelineNode:
     links: List[HarnSessionTimelineLink] = field(default_factory=list)
 
 @dataclass
+class HarnSessionTimelineCoverage:
+    returned: int
+    available: Optional[int]
+    truncated: bool
+
+@dataclass
 class HarnSessionTimelineSnapshot:
     schemaVersion: int
     query: HarnSessionTimelineQuery
     cursor: HarnSessionTimelineCursor
+    coverage: HarnSessionTimelineCoverage
     nodes: List[HarnSessionTimelineNode]
 
 @dataclass
