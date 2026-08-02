@@ -166,6 +166,7 @@ jobs:
               - 'Cargo.toml'
               - 'crates/**'
               - 'scripts/harn_bin.sh'
+              - 'scripts/lib/package_verify_bootstrap.sh'
               - 'scripts/release_audit_contract.harn'
               - 'scripts/release_audit_contract.json'
               - 'scripts/tests/release_audit_contract_test.harn'

@@ -54,4 +54,11 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
+workflow="$repo_root/.github/workflows/ci.yml"
+grep -Fq -- "- 'scripts/lib/package_verify_bootstrap.sh'" "$workflow"
+if grep -Fq 'Generate release/package CLI AOT payload' "$workflow"; then
+  echo 'package audit must not restore a separate pre-verifier AOT build' >&2
+  exit 1
+fi
+
 echo "package_verify_bootstrap_test: ok"
