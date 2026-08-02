@@ -7,11 +7,37 @@
 package_verify_prepare_tools() {
   local root_dir="$1"
   local aot_generator
+  local explicit_harn="${HARN_BIN:-}"
   local generated_dir="$root_dir/crates/harn-cli/generated"
+  local no_build="${HARN_BIN_NO_BUILD:-0}"
   local resolved
   local target_dir
 
-  if [[ -n "${HARN_BIN:-}" ]]; then
+  case "$no_build" in
+  0 | 1) ;;
+  *)
+    echo "error: HARN_BIN_NO_BUILD must be 0 or 1, got: $no_build" >&2
+    return 1
+    ;;
+  esac
+
+  # shellcheck source=scripts/lib/cargo_env.sh
+  source "$root_dir/scripts/lib/cargo_env.sh"
+  target_dir="${CARGO_TARGET_DIR:-}"
+  if [[ -z "$target_dir" ]]; then
+    target_dir="$(cd "$root_dir" && harn_cargo_metadata_target_dir)"
+  fi
+  aot_generator="$target_dir/debug/harn-cli-aot-gen"
+  if [[ ! -x "$aot_generator" && -x "$aot_generator.exe" ]]; then
+    aot_generator+=".exe"
+  fi
+
+  if [[ "$no_build" == "1" ]]; then
+    if [[ ! -x "$aot_generator" ]]; then
+      echo "error: HARN_BIN_NO_BUILD=1 but the package verification AOT generator is not built: $aot_generator" >&2
+      return 1
+    fi
+  elif [[ -n "$explicit_harn" ]]; then
     # Release orchestration supplies a stable exact-tree Harn copy so parallel
     # Rust builds cannot relink the executable while package scripts use it.
     # Preserve that boundary and build only the generator it does not supply.
@@ -29,16 +55,6 @@ package_verify_prepare_tools() {
   if [[ ! -x "$resolved" ]]; then
     echo "error: package verification Harn binary is not executable: $resolved" >&2
     return 1
-  fi
-  # shellcheck source=scripts/lib/cargo_env.sh
-  source "$root_dir/scripts/lib/cargo_env.sh"
-  target_dir="${CARGO_TARGET_DIR:-}"
-  if [[ -z "$target_dir" ]]; then
-    target_dir="$(cd "$root_dir" && harn_cargo_metadata_target_dir)"
-  fi
-  aot_generator="$target_dir/debug/harn-cli-aot-gen"
-  if [[ ! -x "$aot_generator" && -x "$aot_generator.exe" ]]; then
-    aot_generator+=".exe"
   fi
   if [[ ! -x "$aot_generator" ]]; then
     echo "error: package verification AOT generator is not executable: $aot_generator" >&2

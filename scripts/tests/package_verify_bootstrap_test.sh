@@ -88,6 +88,39 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
+# The documented no-build boundary covers every executable this helper needs,
+# not only Harn itself.
+: > "$CALLS_FILE"
+HARN_BIN="$stable_harn" HARN_BIN_NO_BUILD=1 \
+  package_verify_prepare_tools "$fixture"
+expected="resolve cwd=$fixture no_build=1 explicit=$stable_harn args=--print
+aot --workspace-root $fixture --check"
+actual="$(<"$CALLS_FILE")"
+if [[ "$actual" != "$expected" ]]; then
+  printf 'no-build package bootstrap contract drifted\nexpected:\n%s\nactual:\n%s\n' \
+    "$expected" "$actual" >&2
+  exit 1
+fi
+
+mv "$fixture/target/debug/harn-cli-aot-gen" \
+  "$fixture/target/debug/harn-cli-aot-gen.not-built"
+: > "$CALLS_FILE"
+if HARN_BIN="$stable_harn" HARN_BIN_NO_BUILD=1 \
+  package_verify_prepare_tools "$fixture" 2>"$tmp_root/no-build.err"; then
+  echo 'no-build package bootstrap accepted a missing AOT generator' >&2
+  exit 1
+fi
+if [[ -s "$CALLS_FILE" ]]; then
+  echo 'no-build package bootstrap invoked a tool before failing' >&2
+  exit 1
+fi
+if ! grep -Fq 'HARN_BIN_NO_BUILD=1' "$tmp_root/no-build.err"; then
+  echo 'missing AOT generator error did not explain the no-build boundary' >&2
+  exit 1
+fi
+mv "$fixture/target/debug/harn-cli-aot-gen.not-built" \
+  "$fixture/target/debug/harn-cli-aot-gen"
+
 workflow="$repo_root/.github/workflows/ci.yml"
 if ! grep -Fq -- "- 'scripts/lib/package_verify_bootstrap.sh'" "$workflow"; then
   echo 'package bootstrap changes must route to the package-audit lane' >&2
@@ -95,6 +128,11 @@ if ! grep -Fq -- "- 'scripts/lib/package_verify_bootstrap.sh'" "$workflow"; then
 fi
 if grep -Fq 'Generate release/package CLI AOT payload' "$workflow"; then
   echo 'package audit must not restore a separate pre-verifier AOT build' >&2
+  exit 1
+fi
+package_audit_job="$(sed -n '/^  package-audit:/,/^  lint-md:/p' "$workflow")"
+if ! grep -Fq 'HARN_BIN: ""' <<<"$package_audit_job"; then
+  echo 'cold package-audit CI must keep the combined Harn/generator build path' >&2
   exit 1
 fi
 
