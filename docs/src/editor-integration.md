@@ -172,7 +172,8 @@ harn lint --fix file.harn   # automatically apply safe fixes
 
 **What it flags:**
 
-- Unused variables, pattern bindings, types, and imports
+- Unused private variables, pattern bindings, types, and imports. Public module
+  bindings are API for importers, so the linter does not treat them as unused.
 - Shadowed variables and naming-convention drift
 - Undefined functions and dead code after a `return`, `break`, or `continue`
 - Pointless comparisons and redundant clones
