@@ -20,7 +20,51 @@ pub type CiCachePolicy = {
   writers: list<CiCacheWriter>,
 }
 
+pub type ReleaseWarmCachePathPolicy = {release_build_inputs: list<string>}
+
 const POLICY_PATH = ".github/cache-policy.json"
+
+const RELEASE_WARM_CACHE_PATH_POLICY = ".github/release-warm-cache-paths.yml"
+
+const RELEASE_BINARY_WORKFLOW = "build-release-binaries.yml"
+
+const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706"
+
+const RELEASE_PATH_FILTER_ID = "release-build-inputs"
+
+const RELEASE_PATH_FILTER_IF = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+
+const RELEASE_PATH_FILTER_OUTPUT = "$"
+  + "{{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}"
+
+const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
+
+const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && github.ref_type == 'branch' && format('branch-{0}', github.run_id)) || inputs.tag || github.ref_name }}"
+
+const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
+  + "{{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}"
+
+const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
+  + "{{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}"
+
+const RELEASE_BUILD_CANCEL_POLICY = "$"
+  + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}"
+
+const REQUIRED_RELEASE_BUILD_INPUTS = [
+  ".github/actions/rust-cache/**",
+  ".github/actions/rust-toolchain/**",
+  ".github/actions/sccache-install/**",
+  ".github/release-runner-policy.json",
+  ".github/release-warm-cache-paths.yml",
+  ".github/workflows/build-release-binaries.yml",
+  "**/Cargo.toml",
+  "Cargo.lock",
+  "Cargo.toml",
+  "rust-toolchain.toml",
+  "scripts/prune_ci_cache_generations.sh",
+  "scripts/release_runner_matrix.sh",
+]
 
 const ACTION_PATH = ".github/actions/rust-cache/action.yml"
 
@@ -165,6 +209,179 @@ fn policy_schema() {
       ),
     },
   )
+}
+
+fn release_warm_cache_path_policy_schema() {
+  return schema_closed_object(
+    {
+      release_build_inputs: schema_list(
+        schema_string() + {min_length: 1, pattern: "^[*./A-Za-z0-9_-]+$"},
+      ),
+    },
+  )
+}
+
+fn supported_release_path_pattern(pattern: string) -> bool {
+  // This intentionally tiny subset is where the local table-test matcher and
+  // dorny/paths-filter's picomatch engine have equivalent file-path behavior.
+  // Widening it requires re-proving that equivalence before the tests remain a
+  // valid model of the hosted classifier.
+  if !pattern.contains("*") {
+    return true
+  }
+  return len(regex_captures(r"^\*\*/[^*/]+$", pattern)) == 1
+    || len(
+    regex_captures(r"^[^*]+/\*\*$", pattern),
+  )
+    == 1
+}
+
+/** Parse the one path policy consumed by the release workflow. */
+pub fn release_warm_cache_path_policy_parse(value) -> ReleaseWarmCachePathPolicy? {
+  const report = schema_validator(release_warm_cache_path_policy_schema()).report(value)
+  if !report.ok {
+    return nil
+  }
+  const paths = report.value.release_build_inputs.map({ path -> trim(path) }).to_list()
+  if len(paths) == 0
+    || len(paths) != len(paths.unique())
+    || paths.any(
+    { path -> path.starts_with("/") || path.contains("..") || path.ends_with("/") },
+  )
+    || paths.any({ path -> !supported_release_path_pattern(path) }) {
+    return nil
+  }
+  return {release_build_inputs: paths}
+}
+
+/** Match the deliberately small GitHub path-filter subset allowed by the policy schema. */
+pub fn release_warm_cache_path_matches(policy: ReleaseWarmCachePathPolicy, path: string) -> bool {
+  for pattern in policy.release_build_inputs {
+    const recursive_filename = regex_captures(r"^\*\*/([^*/]+)$", pattern)
+    if len(recursive_filename) == 1 {
+      const filename = recursive_filename[0].groups[0]
+      if path == filename || path.ends_with("/" + filename) {
+        return true
+      }
+      continue
+    }
+    const recursive_directory = regex_captures(r"^([^*]+)/\*\*$", pattern)
+    if len(recursive_directory) == 1 {
+      if path.starts_with(recursive_directory[0].groups[0] + "/") {
+        return true
+      }
+      continue
+    }
+    if path == pattern {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Keep warm-cache classification tied to compile/build topology, and prove the
+ * workflow consumes the typed path policy rather than maintaining a second
+ * embedded path list.
+ */
+pub fn release_warm_cache_path_policy_errors(
+  policy: ReleaseWarmCachePathPolicy,
+  workflow,
+) -> list<string> {
+  let errors: list<string> = []
+  for required in REQUIRED_RELEASE_BUILD_INPUTS {
+    if !policy.release_build_inputs.contains(required) {
+      errors = errors + ["release warm-cache policy is missing required input: ${required}"]
+    }
+  }
+  for declared in policy.release_build_inputs {
+    if !REQUIRED_RELEASE_BUILD_INPUTS.contains(declared) {
+      errors = errors + ["release warm-cache policy contains unclassified input: ${declared}"]
+    }
+  }
+  const steps = workflow?.jobs?.setup?.steps ?? []
+  const filter_steps = steps.filter({ step -> trim(step?.id ?? "") == RELEASE_PATH_FILTER_ID })
+    .to_list()
+  if len(filter_steps) != 1 {
+    return errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must contain exactly one ${RELEASE_PATH_FILTER_ID} step",
+    ]
+  }
+  const filter_step = filter_steps[0]
+  if step_uses(filter_step) != RELEASE_PATH_FILTER_ACTION {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must use the pinned release path-filter action",
+    ]
+  }
+  if trim(filter_step?.if ?? "") != RELEASE_PATH_FILTER_IF {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must restrict release path filtering to main-branch pushes",
+    ]
+  }
+  if trim(filter_step?.with?.filters ?? "") != RELEASE_WARM_CACHE_PATH_POLICY {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must consume ${RELEASE_WARM_CACHE_PATH_POLICY} directly",
+    ]
+  }
+  const resolve_steps = steps.filter({ step -> trim(step?.id ?? "") == "resolve" }).to_list()
+  if len(resolve_steps) != 1 {
+    errors = errors
+      + ["${RELEASE_BINARY_WORKFLOW}:setup must contain exactly one resolve step"]
+    return errors
+  }
+  const resolve_step = resolve_steps[0]
+  if trim(resolve_step?.env?.RELEASE_BUILD_INPUTS_CHANGED ?? "") != RELEASE_PATH_FILTER_OUTPUT {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup resolve step must receive the typed release-build-input filter output",
+    ]
+  }
+  if !contains(resolve_step?.run ?? "", RELEASE_PATH_FILTER_BRANCH) {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup resolve step must branch on the release-build-input filter result",
+    ]
+  }
+  return errors
+}
+
+/**
+ * Let only real warm builds supersede real warm builds. Setup-only branch
+ * pushes must never enter the preemptible per-target lanes.
+ */
+pub fn release_warm_cache_concurrency_errors(workflow) -> list<string> {
+  let errors: list<string> = []
+  if trim(workflow?.concurrency?.group ?? "") != RELEASE_WORKFLOW_CONCURRENCY_GROUP {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW} must give branch pushes run-qualified workflow lanes",
+    ]
+  }
+  if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "")
+    != RELEASE_WORKFLOW_CANCEL_POLICY {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for full scheduled/manual warms",
+    ]
+  }
+  const build_concurrency = workflow?.jobs?.build?.concurrency
+  if trim(build_concurrency?.group ?? "") != RELEASE_BUILD_CONCURRENCY_GROUP {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:build must share one warm lane per target and qualify every other run",
+    ]
+  }
+  if trim(build_concurrency?.["cancel-in-progress"] ?? "") != RELEASE_BUILD_CANCEL_POLICY {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
+    ]
+  }
+  return errors
 }
 
 fn policy_from_validated(value) -> CiCachePolicy {
@@ -1250,6 +1467,15 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("invalid CI cache policy: " + POLICY_PATH)
     harness.runtime.exit(1)
   }
+  const release_warm_cache_path_policy = release_warm_cache_path_policy_parse(
+    read_yaml(harness.fs, RELEASE_WARM_CACHE_PATH_POLICY, nil),
+  )
+  guard release_warm_cache_path_policy != nil else {
+    harness.stdio.eprintln(
+      "invalid release warm-cache path policy: " + RELEASE_WARM_CACHE_PATH_POLICY,
+    )
+    harness.runtime.exit(1)
+  }
   const action = read_yaml(harness.fs, ACTION_PATH, nil)
   const node_action = read_yaml(harness.fs, NODE_ACTION_PATH, nil)
   const setup_harn_action = read_yaml(harness.fs, SETUP_HARN_ACTION_PATH, nil)
@@ -1260,6 +1486,11 @@ fn main(harness: Harness) {
     workflows[workflow_name(path)] = read_yaml(harness.fs, path, nil)
   }
   const errors = ci_cache_policy_errors(policy, action, node_action, workflows)
+    + release_warm_cache_path_policy_errors(
+    release_warm_cache_path_policy,
+    workflows[RELEASE_BINARY_WORKFLOW],
+  )
+    + release_warm_cache_concurrency_errors(workflows[RELEASE_BINARY_WORKFLOW])
     + setup_harn_cache_action_errors(
     setup_harn_action,
   )

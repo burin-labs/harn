@@ -2,6 +2,10 @@ import {
   ci_cache_policy_errors,
   ci_cache_policy_parse,
   macos_shared_cache_errors,
+  release_warm_cache_concurrency_errors,
+  release_warm_cache_path_matches,
+  release_warm_cache_path_policy_errors,
+  release_warm_cache_path_policy_parse,
   setup_harn_cache_action_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
@@ -45,6 +49,71 @@ fn policy() -> CiCachePolicy {
       {workflow: "windows-nightly.yml", job: "nextest", shared_key: "workspace-windows"},
       {workflow: "macos-nightly.yml", job: "nextest", shared_key: "workspace-macos"},
     ],
+  }
+}
+
+fn release_warm_cache_path_policy() -> ReleaseWarmCachePathPolicy {
+  return {
+    release_build_inputs: [
+      ".github/actions/rust-cache/**",
+      ".github/actions/rust-toolchain/**",
+      ".github/actions/sccache-install/**",
+      ".github/release-runner-policy.json",
+      ".github/release-warm-cache-paths.yml",
+      ".github/workflows/build-release-binaries.yml",
+      "**/Cargo.toml",
+      "Cargo.lock",
+      "Cargo.toml",
+      "rust-toolchain.toml",
+      "scripts/prune_ci_cache_generations.sh",
+      "scripts/release_runner_matrix.sh",
+    ],
+  }
+}
+
+fn release_binary_workflow() {
+  return {
+    concurrency: {
+      group: "build-release-binaries-"
+        + gha_expression(
+        "(github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && github.ref_type == 'branch' && format('branch-{0}', github.run_id)) || inputs.tag || github.ref_name",
+      ),
+      "cancel-in-progress": gha_expression(
+        "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)",
+      ),
+    },
+    jobs: {
+      setup: {
+        steps: [
+          {
+            id: "release-build-inputs",
+            if: "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+            uses: "dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706",
+            with: {filters: ".github/release-warm-cache-paths.yml"},
+          },
+          {
+            id: "resolve",
+            env: {
+              RELEASE_BUILD_INPUTS_CHANGED: gha_expression(
+                "steps.release-build-inputs.outputs.release_build_inputs || 'false'",
+              ),
+            },
+            run: "if [[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]; then\n  :\nfi",
+          },
+        ],
+      },
+      build: {
+        concurrency: {
+          group: "build-release-binaries-build-"
+            + gha_expression(
+            "(github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target)",
+          ),
+          "cancel-in-progress": gha_expression(
+            "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm'",
+          ),
+        },
+      },
+    },
   }
 }
 
@@ -251,6 +320,162 @@ fn workflows() {
       },
     },
   }
+}
+
+pipeline test_release_warm_cache_policy_accepts_build_inputs_and_typed_workflow_wiring(
+  harness: Harness,
+  task,
+) {
+  const policy = release_warm_cache_path_policy()
+  assert_eq(release_warm_cache_path_policy_parse(policy), policy)
+  const workflow = release_binary_workflow()
+  assert_eq(release_warm_cache_path_policy_errors(policy, workflow), [])
+  assert_eq(release_warm_cache_concurrency_errors(workflow), [])
+}
+
+pipeline test_release_warm_cache_policy_classifies_representative_paths(harness: Harness, task) {
+  const policy = release_warm_cache_path_policy()
+  const cases = [
+    {path: "Cargo.lock", expected: true},
+    {path: "Cargo.toml", expected: true},
+    {path: "crates/harn-vm/Cargo.toml", expected: true},
+    {path: "rust-toolchain.toml", expected: true},
+    {path: ".github/actions/rust-cache/action.yml", expected: true},
+    {path: ".github/actions/rust-toolchain/action.yml", expected: true},
+    {path: ".github/actions/sccache-install/action.yml", expected: true},
+    {path: ".github/actions/apt-install/action.yml", expected: false},
+    {path: "scripts/prune_ci_cache_generations.sh", expected: true},
+    {path: "scripts/check_binary_size.harn", expected: false},
+    {path: ".github/release-binary-size-policy.json", expected: false},
+    {path: ".github/actions/node-cache/action.yml", expected: false},
+  ]
+  for case in cases {
+    assert_eq(
+      release_warm_cache_path_matches(policy, case.path),
+      case.expected,
+      "unexpected release warm-cache classification for " + case.path,
+    )
+  }
+}
+
+pipeline test_release_warm_cache_policy_rejects_invalid_or_duplicate_paths(harness: Harness, task) {
+  const policy = release_warm_cache_path_policy()
+  assert_eq(release_warm_cache_path_policy_parse({...policy, unexpected: true}), nil)
+  assert_eq(
+    release_warm_cache_path_policy_parse(
+      {...policy, release_build_inputs: policy.release_build_inputs + ["Cargo.lock"]},
+    ),
+    nil,
+  )
+  assert_eq(
+    release_warm_cache_path_policy_parse(
+      {...policy, release_build_inputs: policy.release_build_inputs + ["../Cargo.lock"]},
+    ),
+    nil,
+  )
+  assert_eq(
+    release_warm_cache_path_policy_parse(
+      {...policy, release_build_inputs: policy.release_build_inputs + ["crates/*/Cargo.toml"]},
+    ),
+    nil,
+  )
+}
+
+pipeline test_release_warm_cache_policy_rejects_post_build_gates_and_missing_compile_inputs(
+  harness: Harness,
+  task,
+) {
+  const policy = release_warm_cache_path_policy()
+  const invalid: ReleaseWarmCachePathPolicy = {
+    release_build_inputs: policy.release_build_inputs.filter({ path -> path != "Cargo.lock" })
+      .to_list()
+      + ["scripts/check_binary_size.harn"],
+  }
+  assert_eq(
+    release_warm_cache_path_policy_errors(invalid, release_binary_workflow()),
+    [
+      "release warm-cache policy is missing required input: Cargo.lock",
+      "release warm-cache policy contains unclassified input: scripts/check_binary_size.harn",
+    ],
+  )
+}
+
+pipeline test_release_warm_cache_policy_rejects_parallel_embedded_workflow_policy(
+  harness: Harness,
+  task,
+) {
+  const workflow = release_binary_workflow()
+  const filter_step = workflow.jobs.setup.steps[0]
+  const invalid = {
+    concurrency: workflow.concurrency,
+    jobs: {
+      setup: {
+        steps: [
+          {...filter_step, with: {filters: "release_build_inputs:\n  - Cargo.lock"}},
+          workflow.jobs.setup.steps[1],
+        ],
+      },
+    },
+  }
+  assert_eq(
+    release_warm_cache_path_policy_errors(release_warm_cache_path_policy(), invalid),
+    ["build-release-binaries.yml:setup must consume .github/release-warm-cache-paths.yml directly"],
+  )
+}
+
+pipeline test_release_warm_cache_policy_requires_guarded_and_consumed_filter_output(
+  harness: Harness,
+  task,
+) {
+  const workflow = release_binary_workflow()
+  const filter_step = workflow.jobs.setup.steps[0]
+  const resolve_step = workflow.jobs.setup.steps[1]
+  const invalid = {
+    jobs: {
+      setup: {
+        steps: [
+          {...filter_step, if: "github.event_name == 'push'"},
+          {...resolve_step, run: "SHOULD_BUILD_BINARIES=true"},
+        ],
+      },
+    },
+  }
+  assert_eq(
+    release_warm_cache_path_policy_errors(release_warm_cache_path_policy(), invalid),
+    [
+      "build-release-binaries.yml:setup must restrict release path filtering to main-branch pushes",
+      "build-release-binaries.yml:setup resolve step must branch on the release-build-input filter result",
+    ],
+  )
+}
+
+pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(harness: Harness, task) {
+  const workflow = release_binary_workflow()
+  const invalid = {
+    ...workflow,
+    concurrency: {
+      group: "build-release-binaries-main",
+      "cancel-in-progress": gha_expression("github.event_name == 'push'"),
+    },
+    jobs: {
+      ...workflow.jobs,
+      build: {
+        concurrency: {
+          group: "build-release-binaries-build-main",
+          "cancel-in-progress": gha_expression("true"),
+        },
+      },
+    },
+  }
+  assert_eq(
+    release_warm_cache_concurrency_errors(invalid),
+    [
+      "build-release-binaries.yml must give branch pushes run-qualified workflow lanes",
+      "build-release-binaries.yml must reserve workflow cancellation for full scheduled/manual warms",
+      "build-release-binaries.yml:build must share one warm lane per target and qualify every other run",
+      "build-release-binaries.yml:build must let only real main-branch warms supersede a target warm",
+    ],
+  )
 }
 
 pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Harness, task) {
