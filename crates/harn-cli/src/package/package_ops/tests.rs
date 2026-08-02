@@ -60,7 +60,10 @@ pub fn greet(name: Config) -> string { return "hi " + name }
         symbols[2].docs.as_deref(),
         Some("Return a greeting from the implementation module.")
     );
-    assert_eq!(symbols[2].signature, "pub fn greet(name: Config) -> string");
+    assert_eq!(
+        symbols[2].signature,
+        "pub fn greet(name: Config) -> string {\n}"
+    );
     assert!(!report
         .warnings
         .iter()
@@ -94,6 +97,56 @@ fn package_docs_render_forwarded_origin_metadata() {
         docs.contains("pub fn greet(name: string) -> string"),
         "{docs}"
     );
+}
+
+#[test]
+fn package_docs_render_complete_multiline_declarations() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_publishable_package(tmp.path());
+    fs::write(
+        tmp.path().join("lib/main.harn"),
+        r#"/** A workflow run returned by GitHub. */
+pub type GithubWorkflowRun =
+  {
+    id: int,
+    status: string,
+  }
+
+/** Decode a typed response. */
+pub fn call_typed<T>(
+  value: T,
+) -> T {
+  return value
+}
+"#,
+    )
+    .unwrap();
+
+    let report = check_package_impl(Some(tmp.path())).unwrap();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    let workflow_run = report.exports[0]
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "GithubWorkflowRun")
+        .unwrap();
+    let call_typed = report.exports[0]
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "call_typed")
+        .unwrap();
+    assert!(workflow_run.signature.contains("id: int"));
+    assert!(workflow_run.signature.contains("status: string"));
+    assert!(call_typed.signature.contains("value: T"));
+    assert!(call_typed.signature.contains(") -> T"));
+    assert!(!call_typed.signature.contains("return value"));
+    parse_harn_source(&workflow_run.signature).unwrap();
+    parse_harn_source(&call_typed.signature).unwrap();
+
+    let docs_path = generate_package_docs_impl(Some(tmp.path()), None, false).unwrap();
+    let docs = fs::read_to_string(&docs_path).unwrap();
+    assert!(docs.contains(&workflow_run.signature), "{docs}");
+    assert!(docs.contains(&call_typed.signature), "{docs}");
+    generate_package_docs_impl(Some(tmp.path()), None, true).unwrap();
 }
 
 #[test]
@@ -286,6 +339,38 @@ pub fn generated() {}
     assert_eq!(symbols.len(), 1);
     assert_eq!(symbols[0].name, "real");
     assert_eq!(symbols[0].docs.as_deref(), Some("Real export."));
+}
+
+#[test]
+fn extract_api_symbols_uses_parsed_body_boundaries() {
+    let symbols = extract_api_symbols(
+        r#"/** A shaped response. */
+pub fn shaped() -> {value: string} {
+  return {value: "ok"}
+}
+
+/** A streamed value. */
+pub gen fn streamed<T>(
+  value: T,
+) -> T {
+  yield value
+}
+"#,
+    );
+
+    assert_eq!(
+        symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["shaped", "streamed"]
+    );
+    assert!(symbols[0].signature.contains("{value: string}"));
+    assert!(!symbols[0].signature.contains("return"));
+    assert!(symbols[1].signature.starts_with("pub gen fn streamed<T>("));
+    for symbol in symbols {
+        parse_harn_source(&symbol.signature).unwrap();
+    }
 }
 
 #[test]
