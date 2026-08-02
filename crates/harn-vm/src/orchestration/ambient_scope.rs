@@ -4,9 +4,7 @@
 //! policy, dynamic permissions, the current host bridge, the bridge-trust +
 //! command-hook depths, and the runtime-context overlay — is held in
 //! thread-local LIFO stacks or single slots. The same hazard applies to
-//! single-slot contexts a worker installs for the whole agent loop: the VM
-//! execution context (cwd/env/source-dir + capability root) and mutation
-//! session (audit/run_id/approval/secret-scope). That model is sound for a
+//! single-slot contexts installed for the whole agent loop. That model is sound for a
 //! synchronous call stack, but a guard held across an `.await` is **not**:
 //! workers use [`tokio::task::spawn_local`] and can interleave or migrate. A
 //! child that installs context across an await would otherwise read a
@@ -60,6 +58,8 @@ use crate::stdlib::process::{
     swap_session_environment, swap_source_dir, swap_thread_execution_context,
 };
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
+
+pub(crate) mod blocking;
 
 /// An isolated snapshot of every ambient capability/identity stack a worker
 /// task owns while it runs. `Default` is the empty scope (no policies, depth 0).
@@ -623,31 +623,6 @@ pub(crate) fn scope_ambient_transaction<F: Future>(inner: F) -> Scoped<F> {
 /// Preserve the caller's complete logical execution scope in a spawned task.
 pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
     scope_ambient(AmbientExecutionScope::capture_for_inline_subtask(), inner)
-}
-
-/// Run a blocking host operation on Tokio's blocking pool with the complete
-/// logical execution scope captured from the currently polling Harn task.
-///
-/// Host adapters must not execute process waits inline on the LocalSet: one
-/// synchronous wait would otherwise starve every sibling in `parallel`. The
-/// ambient scope still belongs to the Harn task, so install a copy around the
-/// blocking closure and restore the worker thread before it is reused.
-pub fn run_blocking_with_ambient<F, R>(
-    f: F,
-) -> impl Future<Output = Result<R, tokio::task::JoinError>>
-where
-    F: FnOnce() -> R + Send + 'static,
-    R: Send + 'static,
-{
-    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
-    tokio::task::spawn_blocking(move || {
-        scope.swap_in_place();
-        let _restore = RestoreGuard {
-            scope: &mut scope,
-            armed: true,
-        };
-        f()
-    })
 }
 
 /// Restores the outer scope (and saves the task's own scope back) on drop, so

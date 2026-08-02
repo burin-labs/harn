@@ -15,7 +15,6 @@
 //! shaped request the tool would have run.
 
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 const PROCESS_FIXTURE_LEVEL: &str = "HARN_TEST_PARALLEL_HOST_COMMAND_LEVEL";
 const PROCESS_FIXTURE_RECEIPT: &str = "HARN_TEST_PARALLEL_HOST_COMMAND_RECEIPT";
@@ -98,7 +97,7 @@ fn parallel_host_command_process_fixture() {
     let level = level.to_string_lossy();
     let finished = std::env::var(PROCESS_FIXTURE_FINISHED).expect("fixture finished path");
     if level == "grandchild" {
-        std::thread::sleep(Duration::from_secs(10));
+        std::thread::park();
         std::fs::write(finished, "unexpected").expect("write forbidden completion marker");
         return;
     }
@@ -247,9 +246,11 @@ pipeline main(harness: Harness) {{
         2,
         "expected shell and grandchild PIDs: {pids:?}"
     );
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline && pids.iter().any(|pid| process_alive(*pid)) {
-        std::thread::sleep(Duration::from_millis(10));
+    for _ in 0..10_000 {
+        if pids.iter().all(|pid| !process_alive(*pid)) {
+            break;
+        }
+        std::thread::yield_now();
     }
     for pid in &pids {
         assert!(!process_alive(*pid), "cancelled process {pid} survived");
