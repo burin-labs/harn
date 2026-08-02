@@ -190,15 +190,22 @@ async fn run_drain(
     let mut acked = 0usize;
     let mut deferred = 0usize;
     let mut deferred_heartbeats = Vec::new();
+    let mut attempted_job_event_ids = BTreeSet::new();
 
     loop {
         let Some(claimed) = queue
-            .claim_next(&args.queue, &consumer_id, args.claim_ttl)
+            .claim_next_excluding(
+                &args.queue,
+                &consumer_id,
+                args.claim_ttl,
+                &attempted_job_event_ids,
+            )
             .await
             .map_err(|error| format!("failed to claim worker job: {error}"))?
         else {
             break;
         };
+        attempted_job_event_ids.insert(claimed.handle.job_event_id);
 
         let heartbeat =
             start_claim_heartbeat(queue.clone(), claimed.handle.clone(), args.claim_ttl);
@@ -270,13 +277,20 @@ async fn run_drain(
             // short TTL can expire between recording the response and the next
             // claim attempt, letting this invocation dispatch its own failed
             // job repeatedly instead of moving on to other ready work.
-            deferred_heartbeats.push(heartbeat);
+            deferred_heartbeats.push((heartbeat, claimed.handle.clone()));
             deferred += 1;
         }
         drained.push(response);
     }
 
-    for heartbeat in deferred_heartbeats {
+    for (heartbeat, handle) in deferred_heartbeats {
+        // Publish one final lease before stopping the background task. The
+        // terminal receipt can then prove the failed job remained claimed
+        // through this invocation without depending on timer scheduling.
+        queue
+            .renew_claim(&handle, args.claim_ttl)
+            .await
+            .map_err(|error| format!("failed to finalize deferred worker claim: {error}"))?;
         heartbeat.stop().await;
     }
 

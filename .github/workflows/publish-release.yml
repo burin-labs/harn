@@ -368,15 +368,7 @@ jobs:
       - name: Select publish ref
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/release-tools"
-          cp scripts/release_ship.sh "$RUNNER_TEMP/release-tools/release_ship.sh"
-          cp scripts/release_gate.sh "$RUNNER_TEMP/release-tools/release_gate.sh"
-          cp scripts/release_metadata.harn "$RUNNER_TEMP/release-tools/release_metadata.harn"
-          cp scripts/publish.sh "$RUNNER_TEMP/release-tools/publish.sh"
-          cp scripts/publish.harn "$RUNNER_TEMP/release-tools/publish.harn"
-          cp scripts/publish_plan.harn "$RUNNER_TEMP/release-tools/publish_plan.harn"
-          cp scripts/harn_bin.sh "$RUNNER_TEMP/release-tools/harn_bin.sh"
-          cp -R scripts/lib "$RUNNER_TEMP/release-tools/lib"
+          scripts/stage_release_tools.sh "$RUNNER_TEMP/release-tools"
           publish_ref="${{ needs.detect-drift.outputs.publish_ref }}"
           if [[ "$publish_ref" != "main" ]]; then
             git fetch --force --tags origin

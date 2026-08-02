@@ -520,6 +520,9 @@ import {
 Use `std/connectors/http` for outbound requests. Use
 `std/connectors/shared` for HMAC checks, JWT/JWKS verification, OAuth2 token
 refresh, package-local token buckets, cursor pagination, and forge events.
+The four `connector_http_*` names remain available from `std/connectors/shared`
+for compatibility with existing packages; new code should import them from
+`std/connectors/http` so HTTP policy has one visible owner.
 Existing providers that still sign with HMAC-SHA1 must call
 `verify_hmac_signature(..., "sha1", {allow_legacy_sha1: true})`; new
 connectors should use SHA-256 or a provider-specific verifier.

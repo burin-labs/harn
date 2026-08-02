@@ -51,6 +51,16 @@ harn_cargo_probe_timeout_seconds() {
   printf '%s\n' "$timeout_seconds"
 }
 
+harn_retry_without_wrapper() {
+  case "${HARN_BIN_RETRY_WITHOUT_WRAPPER:-0}" in
+    0|1) printf '%s\n' "${HARN_BIN_RETRY_WITHOUT_WRAPPER:-0}" ;;
+    *)
+      echo "error: HARN_BIN_RETRY_WITHOUT_WRAPPER must be 0 or 1" >&2
+      return 2
+      ;;
+  esac
+}
+
 harn_kill_process_group() {
   local signal="$1"
   local pid="$2"
@@ -164,6 +174,7 @@ harn_compiler_wrapper_configured() {
 harn_resolve_binary() {
   local mode="${1:-build}"
   local bin=""
+  local retry_without_wrapper=""
   local status=0
 
   if [[ -n "${HARN_BIN:-}" ]]; then
@@ -187,16 +198,26 @@ harn_resolve_binary() {
     return 1
   fi
 
+  retry_without_wrapper="$(harn_retry_without_wrapper)" || return $?
+
   harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
   if harn_worktree_unconfigured; then
     echo "warning: $(harn_repo_root) has no .cargo/config.toml; 'make setup' has not run here, so this build starts cold" >&2
   fi
   bin="$(harn_run_cargo_probe_with_deadline)" || status=$?
   if [[ "$status" -ne 0 ]]; then
-    if [[ "$status" -ne 124 ]] || ! harn_compiler_wrapper_configured; then
-      if [[ "$status" -eq 124 ]]; then
-        harn_print_probe_timeout_hints
-      fi
+    if [[ "$status" -ne 124 ]]; then
+      return "$status"
+    fi
+    if ! harn_compiler_wrapper_configured; then
+      harn_print_probe_timeout_hints
+      return "$status"
+    fi
+    if [[ "$retry_without_wrapper" != "1" ]]; then
+      harn_print_probe_timeout_hints
+      echo "hint: a compiler wrapper may be waiting behind active sibling builds." >&2
+      echo "hint: retry without it only when the wrapper is genuinely wedged:" >&2
+      echo "hint:   HARN_BIN_RETRY_WITHOUT_WRAPPER=1 <command>" >&2
       return "$status"
     fi
     echo "warning: retrying Cargo harn binary probe with the compiler wrapper disabled" >&2

@@ -159,6 +159,7 @@ struct ExecuteRunInputs<'a> {
     aux: RunAuxOptions,
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
+    defer_project_handlers: bool,
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -253,6 +254,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         aux,
         timing: None,
         harnpack,
+        defer_project_handlers: control.defer_project_handlers,
     })
     .await;
     if let Some(guard) = &deadline_guard {
@@ -548,6 +550,7 @@ async fn execute_run_with_harnpack_and_sandbox_options(
         aux: RunAuxOptions::default(),
         timing: None,
         harnpack,
+        defer_project_handlers: false,
     })
     .await
 }
@@ -585,6 +588,7 @@ pub async fn execute_run_json(
         aux: RunAuxOptions::default(),
         timing: None,
         harnpack: HarnpackRunOptions::default(),
+        defer_project_handlers: false,
     })
     .await
 }
@@ -613,6 +617,7 @@ pub(crate) async fn execute_run_with_timing(
         aux: RunAuxOptions::default(),
         timing,
         harnpack: HarnpackRunOptions::default(),
+        defer_project_handlers: false,
     })
     .await
 }
@@ -669,6 +674,7 @@ async fn execute_run_inner_scoped(
         aux,
         timing,
         harnpack,
+        defer_project_handlers,
     } = inputs;
     let RunAuxOptions {
         summary,
@@ -874,8 +880,8 @@ async fn execute_run_inner_scoped(
         .unwrap_or("default");
     harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
     vm.set_source_info(path, &source);
-    let lazy_manifest_handlers = !denied_builtins.is_empty();
-    if lazy_manifest_handlers {
+    let defer_manifest_handlers = defer_project_handlers || !denied_builtins.is_empty();
+    if !denied_builtins.is_empty() {
         vm.set_denied_builtins(denied_builtins);
     }
     if let Some(ref root) = project_root {
@@ -941,9 +947,12 @@ async fn execute_run_inner_scoped(
 
     // An explicit allow/deny policy belongs to the requested target. Defer
     // unrelated manifest handler graphs until they actually fire under this VM.
-    if let Err(error) =
-        manifest_runtime::install_manifest_runtime(Path::new(path), &mut vm, lazy_manifest_handlers)
-            .await
+    if let Err(error) = manifest_runtime::install_manifest_runtime(
+        Path::new(path),
+        &mut vm,
+        defer_manifest_handlers,
+    )
+    .await
     {
         stderr.push_str(&format!(
             "error: failed to install {}: {error}\n",

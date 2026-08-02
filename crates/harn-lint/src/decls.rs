@@ -11,6 +11,9 @@ pub(crate) struct Declaration {
     pub(crate) name: String,
     pub(crate) span: Span,
     pub(crate) is_mutable: bool,
+    /// Exported module bindings are reachable from importers even when this
+    /// source file does not reference them.
+    pub(crate) is_externally_reachable: bool,
     /// True for simple `let x = ...` / `const x = ...` bindings, false for
     /// destructuring patterns. The `unused-variable` autofix only rewrites
     /// identifiers when true, since destructuring renames would need

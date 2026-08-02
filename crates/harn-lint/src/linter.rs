@@ -943,10 +943,18 @@ impl<'a> Linter<'a> {
         pattern: &BindingPattern,
         span: Span,
         is_mutable: bool,
+        is_pub: bool,
     ) {
         let is_simple_ident = matches!(pattern, BindingPattern::Identifier(_));
+        let is_externally_reachable = is_pub && self.scopes.len() == 1;
         for name in Self::pattern_names(pattern) {
-            self.declare_variable(&name, span, is_mutable, is_simple_ident);
+            self.declare_variable(
+                &name,
+                span,
+                is_mutable,
+                is_simple_ident,
+                is_externally_reachable,
+            );
         }
     }
 
@@ -957,6 +965,7 @@ impl<'a> Linter<'a> {
         span: Span,
         is_mutable: bool,
         is_simple_ident: bool,
+        is_externally_reachable: bool,
     ) {
         if name == "_" {
             return;
@@ -991,6 +1000,7 @@ impl<'a> Linter<'a> {
             span,
             is_mutable,
             is_simple_ident,
+            is_externally_reachable,
         });
     }
 
@@ -1172,6 +1182,9 @@ impl<'a> Linter<'a> {
 
     fn finalize_core(&mut self) {
         for decl in &self.declarations {
+            if decl.is_externally_reachable {
+                continue;
+            }
             if !decl.is_simple_ident && decl.name.starts_with('_') {
                 continue;
             }
