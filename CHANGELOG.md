@@ -9,6 +9,82 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.51
+
+### Breaking
+
+- `harness.process.run` no longer returns the duplicate `exit_status` and
+  `legacy_status` fields. Read `exit_code` instead.
+
+### Added
+
+- Add `harn app run` as a standalone, loopback-only MCP Apps host. Harn scripts can
+  now serve stable MCP Apps tool and resource metadata, and `std/ui_resource`
+  projects validated HTML into the wire contract without hand-written adapters.
+- Flow invariant predicates can now opt into structural queries with an explicit
+  leading `HarnessAst` parameter. The executor injects only that narrow handle;
+  existing three-argument predicates and every other capability remain unchanged.
+- Add a typed `std/model_job` lifecycle for local and hosted image, audio, video,
+  embedding, and custom model work, with content-addressed media assets,
+  deterministic replay, a ComfyUI adapter, and a ready-to-run FLUX.2 Klein graph.
+  The same contract includes a hosted OpenAI Responses image adapter. A new
+  `harn-docs` corpus skill and Codex/Claude writing skill keep developer docs
+  task-shaped, linked, checked, and plain. `harn skill validate` checks a skill
+  bundle with the runtime's canonical parser and supports strict and JSON output.
+
+### Changed
+
+- **Flow predicate capability signatures are now exact (#5907).** Bare
+  `@invariant` functions may request only a literal leading `HarnessAst`,
+  matching the evaluator's injected argument contract.
+  Capability aliases, nested bundles, and root authority are rejected during
+  typechecking instead of producing shifted runtime arguments.
+
+### Fixed
+
+- `harn fix --capability-migrations-only` now repairs capability signatures and
+  their reachable cross-module call sites as one whole-program edit, widening an
+  existing Harness handle instead of introducing competing authority parameters.
+- ACP mode-policy tests no longer inherit ambient `HARN_EGRESS_*` overrides from the developer shell.
+- The reusable Harn runtime bump now applies the target runtime's deterministic
+  capability migrations before repository refresh and validation. Runtime bumps
+  therefore carry typed `Harness` source migrations in the same signed PR instead
+  of failing every consumer that still uses a removed ambient capability.
+- Package commands now read projects with pre-v5 Git hashes in `harn.lock`. They
+  use a current lock projection for the runtime package snapshot and leave the
+  project lock unchanged. Run `harn install` when you want to update the file.
+- Sandboxed scripts can now install `harness.net.egress_policy(...)` before they
+  receive network authority. Policy installation is a state change, not network
+  traffic; it still cannot grant network access or widen a host policy.
+  Matching `harness.testing.http_mock` calls are in-process and need no
+  network grant; unmatched calls still use the active network and egress policy.
+- `harness.process.run` now exposes its stable subprocess result as a closed typed
+  record, so callers can retain named result annotations and field-name checking.
+  Successful and blocked calls expose the same typed core fields.
+- Capability-only `harn fix` runs now thread newly required typed arguments
+  through the whole invocation graph, coalesce concurrent requirements into one
+  least-authority carrier, and format every edited Harn file. Reusable runtime
+  bumps can therefore migrate package sources without duplicate grants, stale
+  call arities, or formatter-only validation failures. Fix planning now consumes
+  structured unresolved-name and expected/actual-type diagnostics instead of
+  parsing human-readable messages. Formatting follows the owning project's
+  `[fmt]` policy, and flow predicates reject capabilities the evaluator cannot
+  inject. The type checker enforces the same authority boundary for manually
+  authored Flow predicate signatures.
+
+  Attributed non-function declarations no longer emit every attribute diagnostic
+  twice during typechecking.
+
+  `harn package verify` now labels warning-only stderr from passing gates as
+  diagnostics instead of incorrectly calling it failed output.
+- `harn fix` now tells callers where the HTTP mock family and the egress-policy
+  declaration went. `http_mock`, `http_mock_clear`, `http_mock_calls`, and
+  `egress_policy` are hand-written methods rather than registered builtins, so no
+  recipe derived for them and upgrading packages saw a bare "not defined" error on
+  every test file instead of a repair.
+- Linux process sandboxes now preserve Swift and other runtimes that inspect
+  their own memory maps across compiler subprocesses on Yama-hardened hosts.
+
 ## v0.10.50
 
 ### Added
