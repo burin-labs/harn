@@ -6,7 +6,7 @@ usage() {
 Usage: scripts/update_queued_pr.sh [options]
 
 Atomically replace the source revision of an open, queued pull request:
-  1. dequeue its exact merge-queue entry;
+  1. dequeue the exact pull request after proving its merge-queue entry;
   2. wait until GitHub reports the entry absent;
   3. push HEAD to the PR branch and prove the remote OID;
   4. wait for a pull_request workflow run on that exact OID;
@@ -99,11 +99,13 @@ fi
 [[ "$pr_number" =~ ^[1-9][0-9]*$ ]] || die "could not resolve a pull request number"
 
 pr_json="$($GH_BIN pr view "$pr_number" --repo "$repo" \
-  --json number,state,headRefName,headRefOid,isCrossRepository)"
+  --json id,number,state,headRefName,headRefOid,isCrossRepository)"
+pr_id="$(jq -r '.id // ""' <<<"$pr_json")"
 pr_state="$(jq -r '.state // ""' <<<"$pr_json")"
 pr_branch="$(jq -r '.headRefName // ""' <<<"$pr_json")"
 is_cross_repo="$(jq -r '.isCrossRepository // false' <<<"$pr_json")"
 [[ "$pr_state" == "OPEN" ]] || die "PR #$pr_number is not open"
+[[ -n "$pr_id" ]] || die "could not resolve PR #$pr_number node ID"
 [[ "$is_cross_repo" == "false" ]] || die "cross-repository PRs are not supported"
 [[ "$pr_branch" == "$branch" ]] || die "current branch '$branch' is not PR #$pr_number head '$pr_branch'"
 
@@ -164,17 +166,20 @@ queue_or_auto_merge_present() {
 initial_entry_id="$(queue_entry_id)"
 [[ -n "$initial_entry_id" ]] || die "PR #$pr_number is not currently in the merge queue"
 
+# GitHub names this mutation after the queue operation, but its input is the
+# PullRequest node ID rather than the MergeQueueEntry node ID. Keep the entry
+# proof above so we still fail closed when the PR is not actually queued.
 # shellcheck disable=SC2016
-dequeue_mutation='mutation($entryId: ID!) {
-  dequeuePullRequest(input: {id: $entryId}) {
-    mergeQueueEntry { id }
+dequeue_mutation='mutation($pullRequestId: ID!) {
+  dequeuePullRequest(input: {id: $pullRequestId}) {
+    clientMutationId
   }
 }'
 
 printf 'dequeue: PR #%s entry %s\n' "$pr_number" "$initial_entry_id"
 "$GH_BIN" api graphql \
   -f query="$dequeue_mutation" \
-  -f entryId="$initial_entry_id" \
+  -f pullRequestId="$pr_id" \
   >/dev/null
 wait_until "merge-queue entry removal" queue_absent
 

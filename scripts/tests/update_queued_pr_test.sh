@@ -40,15 +40,17 @@ if [[ "$1 $2" == "pr view" ]]; then
     cat "$FIXTURE_STATE/remote-oid"
   else
     oid=$(cat "$FIXTURE_STATE/remote-oid")
-    printf '{"number":5949,"state":"OPEN","headRefName":"fix/5949-queued-pr-update","headRefOid":"%s","isCrossRepository":false}\n' "$oid"
+    printf '{"id":"PR_5949","number":5949,"state":"OPEN","headRefName":"fix/5949-queued-pr-update","headRefOid":"%s","isCrossRepository":false}\n' "$oid"
   fi
   exit 0
 fi
 
 if [[ "$1 $2" == "api graphql" ]]; then
   if [[ " $* " == *"dequeuePullRequest"* ]]; then
+    [[ " $* " == *" -f pullRequestId=PR_5949 "* ]]
+    [[ " $* " != *" -f entryId="* ]]
     printf 'dequeued\n' > "$FIXTURE_STATE/queue"
-    printf '{"data":{"dequeuePullRequest":{"mergeQueueEntry":{"id":"MQE_1"}}}}\n'
+    printf '{"data":{"dequeuePullRequest":{"clientMutationId":null}}}\n'
     exit 0
   fi
   queue=$(cat "$FIXTURE_STATE/queue")
@@ -145,7 +147,11 @@ if grep -Fq 'gh pr close' "$immediate/state/calls"; then
   exit 1
 fi
 grep -Fq 'dequeuePullRequest' "$immediate/state/calls"
-grep -Fq -- '-f entryId=MQE_1' "$immediate/state/calls"
+grep -Fq -- '-f pullRequestId=PR_5949' "$immediate/state/calls"
+if grep -Fq -- '-f entryId=' "$immediate/state/calls"; then
+  echo 'dequeue mutation must use the pull request node ID, not the queue entry ID' >&2
+  exit 1
+fi
 grep -Fq 'git push --no-verify origin HEAD:refs/heads/fix/5949-queued-pr-update' "$immediate/state/calls"
 
 dropped="$tmp_root/dropped"
