@@ -51,6 +51,7 @@ fn verify_with_policy(package: &std::path::Path, strict: bool) -> serde_json::Va
         .current_dir(package)
         .args(["package", "verify", "."]);
     if strict {
+        // Generated package and connector scaffolds are the public strict-policy baseline.
         command.arg("--strict");
     }
     let output = run(command.arg("--json").arg("--receipt-out").arg(&receipt));
@@ -67,6 +68,34 @@ fn verify_with_policy(package: &std::path::Path, strict: bool) -> serde_json::Va
             .expect("persisted receipt JSON");
     assert_eq!(persisted, stdout);
     stdout
+}
+
+fn recorded_command<'a>(receipt: &'a serde_json::Value, name: &str) -> Vec<&'a str> {
+    receipt["data"]["checks"]
+        .as_array()
+        .and_then(|checks| checks.iter().find(|check| check["name"] == name))
+        .and_then(|check| check["command"].as_array())
+        .map(|command| {
+            command
+                .iter()
+                .map(|argument| {
+                    argument
+                        .as_str()
+                        .unwrap_or_else(|| panic!("non-string argument in recorded {name} command"))
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| panic!("missing recorded command for {name}"))
+}
+
+fn assert_strict_source_gate_commands(receipt: &serde_json::Value) {
+    let check = recorded_command(receipt, "harn check");
+    assert_eq!(
+        check.get(1..4),
+        Some(["check", "--strict", "--strict-types"].as_slice())
+    );
+    let lint = recorded_command(receipt, "harn lint");
+    assert_eq!(lint.get(1..3), Some(["lint", "--strict"].as_slice()));
 }
 
 #[test]
@@ -99,31 +128,15 @@ fn strict_package_receipt_proves_both_source_gate_policies_fired() {
 
     assert_eq!(receipt["schemaVersion"], 2);
     assert_eq!(receipt["data"]["strict_requested"], true);
-    let checks = receipt["data"]["checks"].as_array().unwrap();
-    let command_for = |name: &str| {
-        checks
-            .iter()
-            .find(|check| check["name"] == name)
-            .and_then(|check| check["command"].as_array())
-            .map(|command| {
-                command
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_else(|| panic!("missing recorded command for {name}"))
-    };
-    let check = command_for("harn check");
-    assert_eq!(&check[1..4], ["check", "--strict", "--strict-types"]);
-    let lint = command_for("harn lint");
-    assert_eq!(&lint[1..3], ["lint", "--strict"]);
+    assert_strict_source_gate_commands(&receipt);
 }
 
 #[test]
-fn connector_package_receipt_proves_contract_and_fixture_gates_fired() {
+fn strict_connector_package_receipt_proves_all_gates_fired() {
     let (_temp, package) = scaffold_and_install("connector");
-    let receipt = verify(&package);
+    let receipt = verify_with_policy(&package, true);
 
+    assert_eq!(receipt["data"]["strict_requested"], true);
     assert_eq!(
         receipt["data"]["package_kinds"],
         serde_json::json!(["package", "connector"])
@@ -138,6 +151,8 @@ fn connector_package_receipt_proves_contract_and_fixture_gates_fired() {
     assert_eq!(connector["applicable"], true);
     assert_eq!(connector["reached"], true);
     assert_eq!(connector["status"], "pass");
+
+    assert_strict_source_gate_commands(&receipt);
 }
 
 #[test]

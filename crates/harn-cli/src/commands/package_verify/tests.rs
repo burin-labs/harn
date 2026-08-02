@@ -115,7 +115,7 @@ fn package_source_gate_commands_add_only_the_typed_strict_policy() {
 
 #[test]
 fn package_gate_header_projects_the_requested_strict_policy() {
-    let report = PackageVerifyReport {
+    let mut report = PackageVerifyReport {
         package: "contract-test".to_string(),
         package_kinds: vec!["package".to_string()],
         strict_requested: true,
@@ -133,6 +133,12 @@ fn package_gate_header_projects_the_requested_strict_policy() {
     assert_eq!(
         gate_report_header(&report),
         "Package verification pass for contract-test (package, strict_requested=true): 2 passed, 0 failed, 1 skipped."
+    );
+
+    report.strict_requested = false;
+    assert_eq!(
+        gate_report_header(&report),
+        "Package verification pass for contract-test (package, strict_requested=false): 2 passed, 0 failed, 1 skipped."
     );
 }
 
