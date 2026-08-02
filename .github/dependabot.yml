@@ -35,6 +35,10 @@ updates:
       time: "09:00"
       timezone: "America/Los_Angeles"
     groups:
+      react-runtime:
+        patterns:
+          - "react"
+          - "react-dom"
       npm:
         patterns:
           - "*"
