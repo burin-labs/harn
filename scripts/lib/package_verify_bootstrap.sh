@@ -23,14 +23,13 @@ package_verify_prepare_tools() {
 
   # shellcheck source=scripts/lib/cargo_env.sh
   source "$root_dir/scripts/lib/cargo_env.sh"
+  # shellcheck source=scripts/lib/harn_bin.sh
+  source "$root_dir/scripts/lib/harn_bin.sh"
   target_dir="${CARGO_TARGET_DIR:-}"
   if [[ -z "$target_dir" ]]; then
     target_dir="$(cd "$root_dir" && harn_cargo_metadata_target_dir)"
   fi
-  aot_generator="$target_dir/debug/harn-cli-aot-gen"
-  if [[ ! -x "$aot_generator" && -x "$aot_generator.exe" ]]; then
-    aot_generator+=".exe"
-  fi
+  aot_generator="$target_dir/debug/harn-cli-aot-gen$(harn_debug_bin_suffix)"
 
   if [[ "$no_build" == "1" ]]; then
     if [[ ! -x "$aot_generator" ]]; then

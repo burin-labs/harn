@@ -17,6 +17,16 @@ harn_cargo_metadata_target_dir() {
 }
 SH
 
+cat > "$fixture/scripts/lib/harn_bin.sh" <<'SH'
+#!/bin/sh
+harn_debug_bin_suffix() {
+  case "${OS:-$(uname -s)}" in
+    Windows_NT | MINGW* | MSYS* | CYGWIN*) printf '.exe' ;;
+    *) printf '' ;;
+  esac
+}
+SH
+
 fake_harn="$fixture/target/debug/harn"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_harn"
 chmod +x "$fake_harn"
@@ -34,6 +44,11 @@ cat > "$fixture/scripts/cargo_with_worktree_build_dir.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'cargo cwd=%s args=%s\n' "$PWD" "$*" >> "$CALLS_FILE"
+if [[ "${FAKE_CARGO_WINDOWS:-0}" == "1" ]]; then
+  cp "$AOT_GENERATOR_TEMPLATE" \
+    "$FIXTURE_ROOT/target/debug/harn-cli-aot-gen.exe"
+  chmod +x "$FIXTURE_ROOT/target/debug/harn-cli-aot-gen.exe"
+fi
 SH
 chmod +x "$fixture/scripts/cargo_with_worktree_build_dir.sh"
 
@@ -121,6 +136,24 @@ fi
 mv "$fixture/target/debug/harn-cli-aot-gen.not-built" \
   "$fixture/target/debug/harn-cli-aot-gen"
 
+# Platform suffix policy must select the artifact a cold Windows Cargo build
+# is about to produce, without probing for a not-yet-existing executable.
+: > "$CALLS_FILE"
+export AOT_GENERATOR_TEMPLATE="$fixture/target/debug/harn-cli-aot-gen"
+mv "$fixture/target/debug/harn-cli-aot-gen" "$AOT_GENERATOR_TEMPLATE.template"
+export AOT_GENERATOR_TEMPLATE="$AOT_GENERATOR_TEMPLATE.template"
+unset HARN_BIN HARN_BIN_NO_BUILD
+OS=Windows_NT FAKE_CARGO_WINDOWS=1 package_verify_prepare_tools "$fixture"
+expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
+resolve cwd=$fixture no_build=1 explicit= args=--print
+aot --workspace-root $fixture --check"
+actual="$(<"$CALLS_FILE")"
+if [[ "$actual" != "$expected" ]]; then
+  printf 'cold Windows package bootstrap contract drifted\nexpected:\n%s\nactual:\n%s\n' \
+    "$expected" "$actual" >&2
+  exit 1
+fi
+
 workflow="$repo_root/.github/workflows/ci.yml"
 if ! grep -Fq -- "- 'scripts/lib/package_verify_bootstrap.sh'" "$workflow"; then
   echo 'package bootstrap changes must route to the package-audit lane' >&2
@@ -130,7 +163,11 @@ if grep -Fq 'Generate release/package CLI AOT payload' "$workflow"; then
   echo 'package audit must not restore a separate pre-verifier AOT build' >&2
   exit 1
 fi
-package_audit_job="$(sed -n '/^  package-audit:/,/^  lint-md:/p' "$workflow")"
+package_audit_job="$(awk '
+  /^  package-audit:$/ { in_job = 1 }
+  in_job && /^  [[:alnum:]_-]+:$/ && $0 != "  package-audit:" { exit }
+  in_job { print }
+' "$workflow")"
 if ! grep -Fq 'HARN_BIN: ""' <<<"$package_audit_job"; then
   echo 'cold package-audit CI must keep the combined Harn/generator build path' >&2
   exit 1
