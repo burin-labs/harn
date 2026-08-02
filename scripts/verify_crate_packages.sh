@@ -46,13 +46,10 @@ trap 'rm -rf "$tmp" "$metadata_tmp"' EXIT
 metadata_file="$metadata_tmp/cargo-metadata.json"
 printf '%s\n' "$metadata" >"$metadata_file"
 
-# Resolve once and export the exact current-tree executable. Every typed plan
-# and package inspection below then reuses it without another Cargo probe.
-# On a cold worker this intentionally happens before AOT generation: harn-cli's
-# broader graph warms the harn-vm/harn-stdlib dependencies of harn-cli-aot-gen.
-package_verify_resolve_harn_bin "$ROOT_DIR"
+# Build Harn and the AOT generator in one Cargo feature-unification boundary,
+# generate/check the payload directly, and export the exact Harn executable.
+package_verify_prepare_tools "$ROOT_DIR"
 plan_rows="$("$HARN_BIN" run "$ROOT_DIR/scripts/verify_crate_packages_plan.harn" -- --metadata "$metadata_file" --root "$ROOT_DIR")"
-package_verify_ensure_cli_aot "$ROOT_DIR"
 target_dir=""
 publishable_crates=()
 publishable_package_rows=()

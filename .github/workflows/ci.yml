@@ -419,9 +419,8 @@ jobs:
           save: "true"
       - name: Check published crate packages
         id: release-audit-package
-        # The verifier resolves one exact current-tree Harn binary first, then
-        # generates/checks AOT against its warm dependency graph. Keeping both
-        # operations in one owner prevents two serial cold workspace builds.
+        # The verifier builds Harn and its AOT generator in one Cargo invocation
+        # so their shared feature graph compiles once, then runs both directly.
         run: ./scripts/verify_crate_packages.sh
       - name: Summarize and stop sccache
         if: always()

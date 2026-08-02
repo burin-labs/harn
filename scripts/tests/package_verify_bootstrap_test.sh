@@ -8,9 +8,9 @@ source "$repo_root/scripts/lib/package_verify_bootstrap.sh"
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/repo"
-mkdir -p "$fixture/scripts" "$fixture/crates/harn-cli/generated" "$tmp_root/bin"
+mkdir -p "$fixture/scripts" "$fixture/target/debug" "$tmp_root/bin"
 
-fake_harn="$tmp_root/bin/harn"
+fake_harn="$fixture/target/debug/harn"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_harn"
 chmod +x "$fake_harn"
 
@@ -22,31 +22,39 @@ printf '%s\n' "$FAKE_HARN"
 SH
 chmod +x "$fixture/scripts/harn_bin.sh"
 
-cat > "$tmp_root/bin/make" <<'SH'
+cat > "$fixture/scripts/cargo_with_worktree_build_dir.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'make %s\n' "$*" >> "$CALLS_FILE"
-if [[ " $* " == *" gen-cli-aot "* ]]; then
-  mkdir -p "$FIXTURE_ROOT/crates/harn-cli/generated"
+printf 'cargo %s\n' "$*" >> "$CALLS_FILE"
+SH
+chmod +x "$fixture/scripts/cargo_with_worktree_build_dir.sh"
+
+cat > "$fixture/target/debug/harn-cli-aot-gen" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'aot %s\n' "$*" >> "$CALLS_FILE"
+if [[ " ${*} " != *" --check "* ]]; then
+  mkdir -p "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode"
   printf '{}\n' > "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode-manifest.json"
+else
+  [[ -f "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode-manifest.json" ]]
+  [[ -d "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode" ]]
 fi
 SH
-chmod +x "$tmp_root/bin/make"
+chmod +x "$fixture/target/debug/harn-cli-aot-gen"
 
 export CALLS_FILE="$tmp_root/calls"
 export FAKE_HARN="$fake_harn"
 export FIXTURE_ROOT="$fixture"
 export PATH="$tmp_root/bin:$PATH"
 
-package_verify_resolve_harn_bin "$fixture"
+package_verify_prepare_tools "$fixture"
 [[ "$HARN_BIN" == "$fake_harn" ]]
-package_verify_ensure_cli_aot "$fixture"
-package_verify_ensure_cli_aot "$fixture"
 
-expected="resolve --print
-make --no-print-directory -C $fixture gen-cli-aot
-make --no-print-directory -C $fixture check-cli-aot
-make --no-print-directory -C $fixture check-cli-aot"
+expected="cargo build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
+resolve --print
+aot --workspace-root $fixture
+aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
 if [[ "$actual" != "$expected" ]]; then
   printf 'package bootstrap call order drifted\nexpected:\n%s\nactual:\n%s\n' \
