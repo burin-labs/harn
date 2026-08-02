@@ -59,6 +59,40 @@ struct ReceiverAccess {
     property: String,
 }
 
+#[derive(Debug, Default)]
+struct FileDiagnostics<'a> {
+    ambient_spans: BTreeSet<(Code, usize, usize)>,
+    missing_capability_arguments: Vec<&'a RepairCandidate>,
+    representative_ambient_code: Option<Code>,
+    undefined_harness_spans: BTreeSet<(usize, usize)>,
+}
+
+struct CanonicalPathCache<F> {
+    paths: BTreeMap<PathBuf, PathBuf>,
+    normalize: F,
+}
+
+impl<F> CanonicalPathCache<F>
+where
+    F: FnMut(&Path) -> PathBuf,
+{
+    fn new(normalize: F) -> Self {
+        Self {
+            paths: BTreeMap::new(),
+            normalize,
+        }
+    }
+
+    fn get(&mut self, path: &Path) -> PathBuf {
+        if let Some(normalized) = self.paths.get(path) {
+            return normalized.clone();
+        }
+        let normalized = (self.normalize)(path);
+        self.paths.insert(path.to_path_buf(), normalized.clone());
+        normalized
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ProgramEdge {
     caller: usize,
@@ -129,7 +163,8 @@ pub(super) fn plan(
         return Ok(Vec::new());
     }
 
-    seed_ambient_requirements(&program_files, &mut callables, diagnostics);
+    let diagnostics_by_file = diagnostic_index(diagnostics);
+    seed_ambient_requirements(&program_files, &mut callables, &diagnostics_by_file);
     let edges = resolve_edges(&program_files, &callables, module_graph);
     let mut requirements = callables
         .iter()
@@ -213,16 +248,14 @@ pub(super) fn plan(
                 &program_files[callable.file_idx].source,
                 callable,
                 desired,
-                diagnostics,
-                &program_files[callable.file_idx].path,
+                diagnostics_by_file.get(&program_files[callable.file_idx].path),
             ));
         edits_by_file.entry(callable.file_idx).or_default().extend(
             explicit_capability_argument_edits(
                 &program_files[callable.file_idx].source,
                 callable,
                 desired,
-                diagnostics,
-                &program_files[callable.file_idx].path,
+                diagnostics_by_file.get(&program_files[callable.file_idx].path),
             ),
         );
     }
@@ -276,7 +309,6 @@ pub(super) fn plan(
         edits_by_file.entry(caller.file_idx).or_default().push(edit);
     }
 
-    let ambient_by_file = ambient_diagnostic_codes(diagnostics);
     let mut planned = Vec::new();
     for (file_idx, edits) in edits_by_file {
         let edits = dedupe(edits);
@@ -284,9 +316,9 @@ pub(super) fn plan(
             continue;
         }
         let path = program_files[file_idx].path.to_string_lossy().into_owned();
-        let code = ambient_by_file
+        let code = diagnostics_by_file
             .get(&program_files[file_idx].path)
-            .copied()
+            .and_then(|diagnostics| diagnostics.representative_ambient_code)
             .unwrap_or(Code::LintBroadHarnessParameter);
         let signatures = callables
             .iter()
@@ -453,34 +485,15 @@ fn direct_requirements(
 fn seed_ambient_requirements(
     files: &[ProgramFile],
     callables: &mut [ProgramCallable],
-    diagnostics: &[RepairCandidate],
+    diagnostics_by_file: &BTreeMap<PathBuf, FileDiagnostics<'_>>,
 ) {
-    let undefined_harness_by_file = diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            diagnostic.code == Code::UndefinedVariable
-                && diagnostic.unresolved_name.as_deref() == Some("harness")
-        })
-        .filter_map(|diagnostic| {
-            diagnostic.span.map(|span| {
-                (
-                    canonical(Path::new(&diagnostic.file)),
-                    (span.start, span.end),
-                )
-            })
-        })
-        .fold(
-            BTreeMap::<PathBuf, BTreeSet<(usize, usize)>>::new(),
-            |mut by_file, (file, span)| {
-                by_file.entry(file).or_default().insert(span);
-                by_file
-            },
-        );
     for callable in callables
         .iter_mut()
         .filter(|callable| callable.carrier.is_none())
     {
-        let undefined = undefined_harness_by_file.get(&files[callable.file_idx].path);
+        let undefined = diagnostics_by_file
+            .get(&files[callable.file_idx].path)
+            .map(|diagnostics| &diagnostics.undefined_harness_spans);
         callable.receiver_accesses.retain(|access| {
             undefined.is_some_and(|spans| {
                 spans.contains(&(access.object_span.start, access.object_span.end))
@@ -494,73 +507,65 @@ fn seed_ambient_requirements(
         );
     }
 
-    for diagnostic in diagnostics {
-        if !is_ambient_code(diagnostic.code) {
-            continue;
-        }
-        let Some(span) = diagnostic.span else {
+    let mut file_indices = BTreeMap::new();
+    for (idx, file) in files.iter().enumerate() {
+        file_indices.entry(file.path.clone()).or_insert(idx);
+    }
+    let mut callable_indices_by_file = vec![Vec::new(); files.len()];
+    for (idx, callable) in callables.iter().enumerate() {
+        callable_indices_by_file[callable.file_idx].push(idx);
+    }
+    for (path, diagnostics) in diagnostics_by_file {
+        let Some(file_idx) = file_indices.get(path).copied() else {
             continue;
         };
-        let path = canonical(Path::new(&diagnostic.file));
-        let Some((file_idx, _)) = files.iter().enumerate().find(|(_, file)| file.path == path)
-        else {
-            continue;
-        };
-        for callable in callables
-            .iter_mut()
-            .filter(|callable| callable.file_idx == file_idx)
-        {
-            let Some(call) = callable.info.ambient_capability_calls.iter().find(|call| {
-                call.span.start == span.start
-                    && call.span.end == span.end
-                    && call.code == diagnostic.code
-            }) else {
-                continue;
-            };
-            let capability = ambient_capability_handle(call.code)
-                .filter(|field| !field.is_empty())
-                .and_then(CapabilityId::from_field_name)
-                .or_else(|| {
-                    harn_vm::stdlib::harness_migration_for_builtin(&call.name)
-                        .map(|migration| migration.capability)
-                });
-            if let Some(capability) = capability {
-                callable.direct_requirements.insert(capability);
+        for (code, start, end) in &diagnostics.ambient_spans {
+            for callable_idx in &callable_indices_by_file[file_idx] {
+                let callable = &mut callables[*callable_idx];
+                let Some(call) = callable.info.ambient_capability_calls.iter().find(|call| {
+                    call.span.start == *start && call.span.end == *end && call.code == *code
+                }) else {
+                    continue;
+                };
+                let capability = ambient_capability_handle(call.code)
+                    .filter(|field| !field.is_empty())
+                    .and_then(CapabilityId::from_field_name)
+                    .or_else(|| {
+                        harn_vm::stdlib::harness_migration_for_builtin(&call.name)
+                            .map(|migration| migration.capability)
+                    });
+                if let Some(capability) = capability {
+                    callable.direct_requirements.insert(capability);
+                }
             }
         }
-    }
-
-    for diagnostic in diagnostics {
-        if !is_missing_capability_argument(diagnostic) {
-            continue;
-        }
-        let Some(span) = diagnostic.span else {
-            continue;
-        };
-        let Some(capability) = diagnostic_capability(diagnostic) else {
-            continue;
-        };
-        let path = canonical(Path::new(&diagnostic.file));
-        let Some((file_idx, _)) = files.iter().enumerate().find(|(_, file)| file.path == path)
-        else {
-            continue;
-        };
-        if let Some(callable) = callables
-            .iter_mut()
-            .filter(|callable| {
-                callable.file_idx == file_idx
-                    && callable.info.span.start <= span.start
-                    && callable.info.span.end >= span.end
-            })
-            .min_by_key(|callable| {
-                callable
-                    .info
-                    .span
-                    .end
-                    .saturating_sub(callable.info.span.start)
-            })
-        {
-            callable.direct_requirements.insert(capability);
+        for diagnostic in &diagnostics.missing_capability_arguments {
+            let Some(span) = diagnostic.span else {
+                continue;
+            };
+            let Some(capability) = diagnostic_capability(diagnostic) else {
+                continue;
+            };
+            let callable_idx = callable_indices_by_file[file_idx]
+                .iter()
+                .copied()
+                .filter(|callable_idx| {
+                    let callable = &callables[*callable_idx];
+                    callable.info.span.start <= span.start && callable.info.span.end >= span.end
+                })
+                .min_by_key(|callable_idx| {
+                    let callable = &callables[*callable_idx];
+                    callable
+                        .info
+                        .span
+                        .end
+                        .saturating_sub(callable.info.span.start)
+                });
+            if let Some(callable_idx) = callable_idx {
+                callables[callable_idx]
+                    .direct_requirements
+                    .insert(capability);
+            }
         }
     }
 }
@@ -583,6 +588,7 @@ fn resolve_edges(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let mut canonical_paths = CanonicalPathCache::new(canonical);
     let mut edges = Vec::new();
     for (caller_idx, caller) in callables.iter().enumerate() {
         let caller_path = &files[caller.file_idx].path;
@@ -591,7 +597,7 @@ fn resolve_edges(
                 .definition_of(caller_path, &call.callee)
                 .and_then(|definition| {
                     by_file_name
-                        .get(&(canonical(&definition.file), definition.name))
+                        .get(&(canonical_paths.get(&definition.file), definition.name))
                         .copied()
                 });
             if let Some(callee) = target {
@@ -786,24 +792,19 @@ fn ambient_edits(
     source: &str,
     callable: &ProgramCallable,
     desired: &CarrierKind,
-    diagnostics: &[RepairCandidate],
-    file: &Path,
+    diagnostics: Option<&FileDiagnostics<'_>>,
 ) -> Vec<FixEdit> {
+    let Some(diagnostics) = diagnostics else {
+        return Vec::new();
+    };
     let binding = final_binding(callable).unwrap_or("harness");
-    let diagnostic_spans = diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            is_ambient_code(diagnostic.code) && canonical(Path::new(&diagnostic.file)) == file
-        })
-        .filter_map(|diagnostic| {
-            diagnostic
-                .span
-                .map(|span| (diagnostic.code, span.start, span.end))
-        })
-        .collect::<BTreeSet<_>>();
     let mut edits = Vec::new();
     for ambient in &callable.info.ambient_capability_calls {
-        if !diagnostic_spans.contains(&(ambient.code, ambient.span.start, ambient.span.end)) {
+        if !diagnostics.ambient_spans.contains(&(
+            ambient.code,
+            ambient.span.start,
+            ambient.span.end,
+        )) {
             continue;
         }
         let Some(mut replacement) = ambient_replacement(ambient.code, &ambient.name, Some(binding))
@@ -828,17 +829,17 @@ fn explicit_capability_argument_edits(
     source: &str,
     callable: &ProgramCallable,
     desired: &CarrierKind,
-    diagnostics: &[RepairCandidate],
-    file: &Path,
+    diagnostics: Option<&FileDiagnostics<'_>>,
 ) -> Vec<FixEdit> {
+    let Some(diagnostics) = diagnostics else {
+        return Vec::new();
+    };
     let Some(binding) = final_binding(callable) else {
         return Vec::new();
     };
     let mut edited_calls = BTreeSet::new();
     let mut edits = Vec::new();
-    for diagnostic in diagnostics.iter().filter(|diagnostic| {
-        is_missing_capability_argument(diagnostic) && canonical(Path::new(&diagnostic.file)) == file
-    }) {
+    for diagnostic in &diagnostics.missing_capability_arguments {
         let Some(span) = diagnostic.span else {
             continue;
         };
@@ -981,12 +982,45 @@ fn render_bundle_value(binding: &str, capabilities: &BTreeSet<CapabilityId>) -> 
     )
 }
 
-fn ambient_diagnostic_codes(diagnostics: &[RepairCandidate]) -> BTreeMap<PathBuf, Code> {
-    diagnostics
-        .iter()
-        .filter(|diagnostic| is_ambient_code(diagnostic.code))
-        .map(|diagnostic| (canonical(Path::new(&diagnostic.file)), diagnostic.code))
-        .collect()
+fn diagnostic_index(diagnostics: &[RepairCandidate]) -> BTreeMap<PathBuf, FileDiagnostics<'_>> {
+    diagnostic_index_with(diagnostics, canonical)
+}
+
+fn diagnostic_index_with<'a>(
+    diagnostics: &'a [RepairCandidate],
+    normalize_path: impl FnMut(&Path) -> PathBuf,
+) -> BTreeMap<PathBuf, FileDiagnostics<'a>> {
+    let mut by_file = BTreeMap::<PathBuf, FileDiagnostics<'a>>::new();
+    let mut canonical_paths = CanonicalPathCache::new(normalize_path);
+    for diagnostic in diagnostics {
+        let ambient = is_ambient_code(diagnostic.code);
+        let missing_capability = is_missing_capability_argument(diagnostic);
+        let undefined_harness = diagnostic.code == Code::UndefinedVariable
+            && diagnostic.unresolved_name.as_deref() == Some("harness");
+        if !ambient && !missing_capability && !undefined_harness {
+            continue;
+        }
+        let entry = by_file
+            .entry(canonical_paths.get(Path::new(&diagnostic.file)))
+            .or_default();
+        if ambient {
+            entry.representative_ambient_code = Some(diagnostic.code);
+            if let Some(span) = diagnostic.span {
+                entry
+                    .ambient_spans
+                    .insert((diagnostic.code, span.start, span.end));
+            }
+        }
+        if missing_capability {
+            entry.missing_capability_arguments.push(diagnostic);
+        }
+        if undefined_harness {
+            if let Some(span) = diagnostic.span {
+                entry.undefined_harness_spans.insert((span.start, span.end));
+            }
+        }
+    }
+    by_file
 }
 
 fn is_ambient_code(code: Code) -> bool {
@@ -1006,4 +1040,79 @@ fn dedupe(edits: Vec<FixEdit>) -> Vec<FixEdit> {
 
 fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    fn diagnostic(
+        file: &str,
+        code: Code,
+        repair_id: &str,
+        expected_type: Option<TypeExpr>,
+    ) -> RepairCandidate {
+        RepairCandidate {
+            file: file.to_string(),
+            source: "test",
+            severity: "warning",
+            code,
+            message: "test diagnostic".to_string(),
+            unresolved_name: None,
+            expected_type,
+            span: Some(Span::with_offsets(4, 8, 1, 5)),
+            repair: Repair {
+                id: harn_parser::RepairId::from_owned(repair_id.to_string()),
+                summary: "test repair".to_string(),
+                safety: RepairSafety::ScopeLocal,
+            },
+            impact: RepairImpactWire::generic(),
+            edits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn diagnostic_index_normalizes_each_relevant_file_once() {
+        let diagnostics = vec![
+            diagnostic(
+                "a.harn",
+                Code::LintAmbientFsBuiltin,
+                "bindings/thread-harness-fs",
+                None,
+            ),
+            diagnostic(
+                "a.harn",
+                Code::ArgumentTypeMismatch,
+                "bindings/prepend-capability-argument",
+                Some(TypeExpr::Named("HarnessFs".to_string())),
+            ),
+            diagnostic(
+                "b.harn",
+                Code::LintAmbientClockBuiltin,
+                "bindings/thread-harness-clock",
+                None,
+            ),
+            diagnostic(
+                "c.harn",
+                Code::FormatterWouldReformat,
+                "format/reformat",
+                None,
+            ),
+        ];
+        let normalizations = Cell::new(0);
+
+        let index = diagnostic_index_with(&diagnostics, |path| {
+            normalizations.set(normalizations.get() + 1);
+            path.to_path_buf()
+        });
+
+        assert_eq!(normalizations.get(), 2);
+        let indexed = index.get(Path::new("a.harn")).unwrap();
+        assert_eq!(indexed.ambient_spans.len(), 1);
+        assert_eq!(indexed.missing_capability_arguments.len(), 1);
+        assert_eq!(index[Path::new("b.harn")].ambient_spans.len(), 1);
+        assert!(!index.contains_key(Path::new("c.harn")));
+    }
 }
