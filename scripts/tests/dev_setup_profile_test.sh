@@ -52,9 +52,9 @@ run_setup() {
   local cargo_record="$4"
 
   mkdir -p "$tmp_root/tmp-$profile"
-  HARN_DEV_SETUP_STORAGE_ROOT= \
-  HARN_DEV_TARGET_DIR= \
-  HARN_DEV_BUILD_DIR= \
+  HARN_DEV_SETUP_STORAGE_ROOT='' \
+  HARN_DEV_TARGET_DIR='' \
+  HARN_DEV_BUILD_DIR='' \
   PATH="$repo/bin:/usr/bin:/bin" \
     HOME="$tmp_root/home-$profile" \
     XDG_CACHE_HOME="$tmp_root/cache-$profile" \
@@ -174,9 +174,9 @@ fi
 
 add_available_cargo_tools "$rust_repo"
 mkdir -p "$tmp_root/tmp-profile-switch"
-HARN_DEV_SETUP_STORAGE_ROOT= \
-HARN_DEV_TARGET_DIR= \
-HARN_DEV_BUILD_DIR= \
+HARN_DEV_SETUP_STORAGE_ROOT='' \
+HARN_DEV_TARGET_DIR='' \
+HARN_DEV_BUILD_DIR='' \
 PATH="$rust_repo/bin:/usr/bin:/bin" \
   HOME="$tmp_root/home-profile-switch" \
   TMPDIR="$tmp_root/tmp-profile-switch" \
@@ -186,12 +186,40 @@ PATH="$rust_repo/bin:/usr/bin:/bin" \
   HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-profile-switch" \
   DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/profile-switch-cargo.txt" \
   "$rust_repo/scripts/dev_setup.sh" > "$tmp_root/profile-switch-output.txt" 2>&1
-if grep -Eq '^[[:space:]]*target-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
-  echo "profile switch left a generated target directory in Cargo config" >&2
+profile_switch_target="$tmp_root/full-storage-root/harn-target/$(basename "$tmp_root")-rust"
+if ! grep -Fxq \
+  "target-dir = \"$profile_switch_target\" # harn-dev-setup-managed" \
+  "$rust_repo/.cargo/config.toml"; then
+  echo "plain full setup did not derive this checkout's private target directory" >&2
   exit 1
 fi
 if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
   echo "profile switch left a generated build directory in Cargo config" >&2
+  exit 1
+fi
+
+# Bootstrap and full are phases of one setup lifecycle, not competing storage
+# policies. With no explicit path or storage override, full setup must derive
+# the current checkout and preserve bootstrap's durable target exactly.
+bootstrap_full_cargo="$tmp_root/bootstrap-full-cargo.txt"
+HARN_DEV_SETUP_STORAGE_ROOT='' \
+HARN_DEV_TARGET_DIR='' \
+HARN_DEV_BUILD_DIR='' \
+HARN_DEV_TARGET_WORKTREE_PATH='' \
+CODEX_WORKTREE_PATH='' \
+PATH="$bootstrap_repo/bin:/usr/bin:/bin" \
+  HOME="$tmp_root/home-bootstrap" \
+  XDG_CACHE_HOME="$tmp_root/cache-bootstrap" \
+  TMPDIR="$tmp_root/tmp-bootstrap" \
+  HARN_DEV_SETUP_PROFILE=full \
+  HARN_DEV_SETUP_FORCE=1 \
+  HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-bootstrap-full" \
+  DEV_SETUP_TEST_CARGO_RECORD="$bootstrap_full_cargo" \
+  "$bootstrap_repo/scripts/dev_setup.sh" > "$tmp_root/bootstrap-full-output.txt" 2>&1
+if ! grep -Fxq \
+  "target-dir = \"$bootstrap_target_dir\" # harn-dev-setup-managed" \
+  "$bootstrap_repo/.cargo/config.toml"; then
+  echo "full setup discarded bootstrap's durable private target directory" >&2
   exit 1
 fi
 
@@ -225,9 +253,9 @@ printf '%s\n' \
   > "$user_repo/.cargo/config.toml"
 add_available_cargo_tools "$user_repo"
 mkdir -p "$tmp_root/tmp-user-config"
-HARN_DEV_SETUP_STORAGE_ROOT= \
-HARN_DEV_TARGET_DIR= \
-HARN_DEV_BUILD_DIR= \
+HARN_DEV_SETUP_STORAGE_ROOT='' \
+HARN_DEV_TARGET_DIR='' \
+HARN_DEV_BUILD_DIR='' \
 PATH="$user_repo/bin:/usr/bin:/bin" \
   HOME="$tmp_root/home-user-config" \
   TMPDIR="$tmp_root/tmp-user-config" \
@@ -248,15 +276,19 @@ if ! grep -Fxq 'SCCACHE_BASEDIRS = "/mnt/team/source"' "$user_repo/.cargo/config
   echo "setup rewrote a user-owned sccache base directory" >&2
   exit 1
 fi
+if ! grep -Fq 'Preserved user-owned Cargo target dir' "$tmp_root/user-config-output.txt"; then
+  echo "setup did not report that the user-owned target remains authoritative" >&2
+  exit 1
+fi
 
 legacy_repo=$(make_fixture_repo legacy-config)
 mkdir -p "$legacy_repo/.cargo"
 printf '%s\n' '[build]' 'target-dir = "/tmp/harn-target/legacy"' 'build-dir = "/tmp/cargo-build-shared"' > "$legacy_repo/.cargo/config.toml"
 add_available_cargo_tools "$legacy_repo"
 mkdir -p "$tmp_root/tmp-legacy-config"
-HARN_DEV_SETUP_STORAGE_ROOT= \
-HARN_DEV_TARGET_DIR= \
-HARN_DEV_BUILD_DIR= \
+HARN_DEV_SETUP_STORAGE_ROOT='' \
+HARN_DEV_TARGET_DIR='' \
+HARN_DEV_BUILD_DIR='' \
 PATH="$legacy_repo/bin:/usr/bin:/bin" \
   HOME="$tmp_root/home-legacy-config" \
   TMPDIR="$tmp_root/tmp-legacy-config" \
@@ -265,8 +297,15 @@ PATH="$legacy_repo/bin:/usr/bin:/bin" \
   HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-legacy-config" \
   DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/legacy-config-cargo.txt" \
   "$legacy_repo/scripts/dev_setup.sh" > "$tmp_root/legacy-config-output.txt" 2>&1
-if grep -Eq '^[[:space:]]*(target-dir|build-dir)[[:space:]]*=' "$legacy_repo/.cargo/config.toml"; then
-  echo "setup did not remove a legacy generated Cargo configuration" >&2
+legacy_target_dir="$tmp_root/home-legacy-config/.cache/harn/dev-setup/harn-target/$(basename "$tmp_root")-legacy-config"
+if ! grep -Fxq \
+  "target-dir = \"$legacy_target_dir\" # harn-dev-setup-managed" \
+  "$legacy_repo/.cargo/config.toml"; then
+  echo "setup did not migrate a legacy generated target to the durable worktree target" >&2
+  exit 1
+fi
+if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$legacy_repo/.cargo/config.toml"; then
+  echo "setup did not remove a legacy generated build directory" >&2
   exit 1
 fi
 
