@@ -143,7 +143,6 @@ impl CompilerOptions {
         self.legacy_ambient_capabilities
     }
 
-    #[cfg(test)]
     #[doc(hidden)]
     pub fn with_legacy_ambient_capabilities(mut self) -> Self {
         self.legacy_ambient_capabilities = true;

@@ -51,10 +51,7 @@ pub fn manifest() -> &'static [&'static BuiltinManifestEntry] {
     static MANIFEST: OnceLock<Vec<&'static BuiltinManifestEntry>> = OnceLock::new();
     MANIFEST
         .get_or_init(|| {
-            let mut defs = ALL_CAPABILITY_METHOD_DEFS
-                .iter()
-                .copied()
-                .collect::<Vec<_>>();
+            let mut defs = ALL_CAPABILITY_METHOD_DEFS.to_vec();
             defs.sort_by_key(|def| def.signature.name);
             defs.into_iter()
                 .map(|def| {

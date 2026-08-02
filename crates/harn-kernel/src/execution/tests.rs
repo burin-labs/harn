@@ -40,10 +40,10 @@ fn entry_parameter_types_are_enforced_at_the_host_boundary() {
 
 #[test]
 fn nested_calls_share_type_checks_and_rest_binding() {
-    let source = r#"
+    let source = r"
         fn collect(...values: int) -> list<int> { return values }
         fn reduce(input) -> list<int> { return collect(input, 2) }
-    "#;
+    ";
     let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
     let execution = start(&program, DataValue::Int(7), &GrantSet::pure());
     let reduce_chunk = program
@@ -59,11 +59,8 @@ fn nested_calls_share_type_checks_and_rest_binding() {
         Execution::Completed {
             value: DataValue::List(vec![DataValue::Int(7), DataValue::Int(2)])
         },
-        "{}",
-        format!(
-            "{}\n{reduce_chunk}",
-            program.image().disassemble("portable entry")
-        )
+        "{}\n{reduce_chunk}",
+        program.image().disassemble("portable entry")
     );
 
     let Execution::Failed { diagnostic } = start(
@@ -78,7 +75,7 @@ fn nested_calls_share_type_checks_and_rest_binding() {
 
 #[test]
 fn named_calls_support_recursion_and_mutual_recursion() {
-    let source = r#"
+    let source = r"
         fn fib(n: int) -> int {
             if n <= 1 { return n }
             return fib(n - 1) + fib(n - 2)
@@ -91,7 +88,7 @@ fn named_calls_support_recursion_and_mutual_recursion() {
             if n == 0 { return false }
             return even(n - 1)
         }
-    "#;
+    ";
     let fib = compile_program(source, "fib", EntryKind::Function).unwrap();
     assert_eq!(
         start(&fib, DataValue::Int(7), &GrantSet::pure()),
@@ -111,10 +108,10 @@ fn named_calls_support_recursion_and_mutual_recursion() {
 
 #[test]
 fn spread_named_calls_resolve_lexical_functions_before_builtins() {
-    let source = r#"
+    let source = r"
         fn collect(...values: int) -> list<int> { return values }
         fn reduce(input: list<int>) -> list<int> { return collect(...input) }
-    "#;
+    ";
     let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
 
     assert_eq!(
@@ -155,7 +152,7 @@ fn closure_capture_arena_drops_without_rc_cycles() {
 
 #[test]
 fn escaping_closures_keep_their_environment_until_execution_ends() {
-    let source = r#"
+    let source = r"
         fn make_adder(increment: int) {
             fn add(value: int) -> int { return value + increment }
             return add
@@ -164,7 +161,7 @@ fn escaping_closures_keep_their_environment_until_execution_ends() {
             let add = make_adder(input)
             return add(2)
         }
-    "#;
+    ";
     let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
 
     assert_eq!(
@@ -177,7 +174,7 @@ fn escaping_closures_keep_their_environment_until_execution_ends() {
 
 #[test]
 fn shared_value_graphs_are_bounded_by_logical_work() {
-    let source = r#"
+    let source = r"
         fn reduce(input) {
             let value = [input]
             let index = 0
@@ -188,7 +185,7 @@ fn shared_value_graphs_are_bounded_by_logical_work() {
             let shared = [value]
             return shared + shared
         }
-    "#;
+    ";
     let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
     let Execution::Failed { diagnostic } = start(&program, DataValue::Int(1), &GrantSet::pure())
     else {
@@ -199,7 +196,7 @@ fn shared_value_graphs_are_bounded_by_logical_work() {
 
 #[test]
 fn recursive_equality_work_consumes_deterministic_fuel() {
-    let source = r#"
+    let source = r"
         fn reduce(input) {
             let value = [input]
             let index = 0
@@ -214,7 +211,7 @@ fn recursive_equality_work_consumes_deterministic_fuel() {
             }
             return true
         }
-    "#;
+    ";
     let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
     let Execution::Failed { diagnostic } = start(&program, DataValue::Int(1), &GrantSet::pure())
     else {

@@ -411,7 +411,7 @@ impl<'a> Machine<'a> {
         &mut self,
         op: Op,
         offset: usize,
-        frames: &mut Vec<Frame>,
+        frames: &mut [Frame],
     ) -> Result<OpStep, OpStep> {
         let frame = frames.last_mut().expect("active frame");
         macro_rules! pop {
@@ -562,7 +562,7 @@ impl<'a> Machine<'a> {
                 frame.stack.push(RuntimeValue::Bool(!value.truthy()));
             }
             Op::Equal | Op::EqualInt | Op::EqualFloat | Op::EqualBool | Op::EqualString => {
-                compare(self, frame, |value| value == 0)?
+                compare(self, frame, |value| value == 0)?;
             }
             Op::NotEqual
             | Op::NotEqualInt
@@ -571,13 +571,13 @@ impl<'a> Machine<'a> {
             | Op::NotEqualString => compare(self, frame, |value| value != 0)?,
             Op::Less | Op::LessInt | Op::LessFloat => compare(self, frame, |value| value < 0)?,
             Op::Greater | Op::GreaterInt | Op::GreaterFloat => {
-                compare(self, frame, |value| value > 0)?
+                compare(self, frame, |value| value > 0)?;
             }
             Op::LessEqual | Op::LessEqualInt | Op::LessEqualFloat => {
-                compare(self, frame, |value| value <= 0)?
+                compare(self, frame, |value| value <= 0)?;
             }
             Op::GreaterEqual | Op::GreaterEqualInt | Op::GreaterEqualFloat => {
-                compare(self, frame, |value| value >= 0)?
+                compare(self, frame, |value| value >= 0)?;
             }
             Op::Jump => frame.ip = read_u16(frame)?,
             Op::JumpIfFalse => {
@@ -623,7 +623,7 @@ impl<'a> Machine<'a> {
             Op::BuildList => {
                 let count = read_u16(frame)?;
                 let values = pop_args(frame, count)?;
-                let value = RuntimeValue::List(Arc::new(values));
+                let value = RuntimeValue::List(Rc::new(values));
                 self.charge_value_work(&value).map_err(OpStep::Error)?;
                 frame.stack.push(value);
             }
@@ -635,7 +635,7 @@ impl<'a> Machine<'a> {
                     let key = self.render_value(&pair[0]).map_err(OpStep::Error)?;
                     map.insert(key, pair[1].clone());
                 }
-                let value = RuntimeValue::Record(Arc::new(map));
+                let value = RuntimeValue::Record(Rc::new(map));
                 self.charge_value_work(&value).map_err(OpStep::Error)?;
                 frame.stack.push(value);
             }
@@ -748,7 +748,7 @@ impl<'a> Machine<'a> {
                     self,
                     &frame.env,
                     &name,
-                    Arc::unwrap_or_clone(args),
+                    Rc::unwrap_or_clone(args),
                     false,
                 ));
             }
@@ -932,7 +932,7 @@ impl<'a> Machine<'a> {
                         ),
                     )),
                     CapabilityResult::Err { code, message, .. } => {
-                        let value = RuntimeValue::Record(Arc::new(BTreeMap::from([
+                        let value = RuntimeValue::Record(Rc::new(BTreeMap::from([
                             ("code".to_string(), RuntimeValue::String(Arc::from(code))),
                             (
                                 "message".to_string(),
@@ -1117,7 +1117,7 @@ impl Frame {
             } else {
                 Vec::new()
             };
-            arguments.push(RuntimeValue::List(Arc::new(rest)));
+            arguments.push(RuntimeValue::List(Rc::new(rest)));
         } else {
             arguments.truncate(function.params.len());
         }
@@ -1342,7 +1342,7 @@ fn slice(
     match value {
         RuntimeValue::List(values) => {
             let (start, end) = slice_bounds(values.len(), start, end)?;
-            Ok(RuntimeValue::List(Arc::new(values[start..end].to_vec())))
+            Ok(RuntimeValue::List(Rc::new(values[start..end].to_vec())))
         }
         RuntimeValue::String(value) => {
             let chars: Vec<_> = value.chars().collect();

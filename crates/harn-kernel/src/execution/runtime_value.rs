@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::rc::Weak;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use super::resource::validate_runtime_value;
@@ -21,8 +21,8 @@ pub(super) enum RuntimeValue {
     Float(f64),
     String(Arc<str>),
     Bytes(Arc<[u8]>),
-    List(Arc<Vec<RuntimeValue>>),
-    Record(Arc<BTreeMap<String, RuntimeValue>>),
+    List(Rc<Vec<RuntimeValue>>),
+    Record(Rc<BTreeMap<String, RuntimeValue>>),
     Closure(Closure),
     Builtin(String),
     Harness(String),
@@ -98,9 +98,9 @@ impl From<DataValue> for RuntimeValue {
             DataValue::String(value) => Self::String(Arc::from(value)),
             DataValue::Bytes(value) => Self::Bytes(Arc::from(value)),
             DataValue::List(values) => {
-                Self::List(Arc::new(values.into_iter().map(Self::from).collect()))
+                Self::List(Rc::new(values.into_iter().map(Self::from).collect()))
             }
-            DataValue::Record(values) => Self::Record(Arc::new(
+            DataValue::Record(values) => Self::Record(Rc::new(
                 values
                     .into_iter()
                     .map(|(key, value)| (key, Self::from(value)))
@@ -142,13 +142,13 @@ impl DataValue {
             RuntimeValue::String(value) => Self::String(value.to_string()),
             RuntimeValue::Bytes(value) => Self::Bytes(value.to_vec()),
             RuntimeValue::List(values) => Self::List(
-                Arc::unwrap_or_clone(values)
+                Rc::unwrap_or_clone(values)
                     .into_iter()
                     .map(Self::try_from_validated)
                     .collect::<Result<_, _>>()?,
             ),
             RuntimeValue::Record(values) => Self::Record(
-                Arc::unwrap_or_clone(values)
+                Rc::unwrap_or_clone(values)
                     .into_iter()
                     .map(|(key, value)| Ok((key, Self::try_from_validated(value)?)))
                     .collect::<Result<_, Diagnostic>>()?,

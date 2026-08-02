@@ -28,7 +28,7 @@ pub const PURE_CASES: &[PureCase] = &[
     },
     PureCase {
         id: "closure-capture-and-control-flow",
-        source: r#"
+        source: r"
             fn transform(input) {
               const offset = input.offset
               const add_offset = {value -> value + offset}
@@ -37,50 +37,50 @@ pub const PURE_CASES: &[PureCase] = &[
               }
               return {value: input.value, enabled: false}
             }
-        "#,
+        ",
         entry: "transform",
         input_json: r#"{"value":7,"offset":4,"enabled":true}"#,
         expected_json: r#"{"enabled":true,"value":11}"#,
     },
     PureCase {
         id: "recursive-and-sibling-functions",
-        source: r#"
+        source: r"
             fn fib(n: int) -> int {
               if n <= 1 { return n }
               return fib(n - 1) + fib(n - 2)
             }
             fn solve(input: int) -> int { return fib(input) }
-        "#,
+        ",
         entry: "solve",
         input_json: "7",
         expected_json: "13",
     },
     PureCase {
         id: "forward-declared-capturing-function",
-        source: r#"
+        source: r"
             fn reduce(input: int) -> int {
               const offset = 3
               return add_offset(input)
               fn add_offset(value: int) -> int { return value + offset }
             }
-        "#,
+        ",
         entry: "reduce",
         input_json: "4",
         expected_json: "7",
     },
     PureCase {
         id: "typed-rest-and-sibling-call",
-        source: r#"
+        source: r"
             fn collect(...values: int) -> list<int> { return values }
             fn reduce(input: int) -> list<int> { return collect(input, 2) }
-        "#,
+        ",
         entry: "reduce",
         input_json: "7",
         expected_json: "[7,2]",
     },
     PureCase {
         id: "list-string-and-record-operations",
-        source: r#"
+        source: r"
             fn summarize(input) {
               return {
                 items: input.left + input.right,
@@ -89,14 +89,14 @@ pub const PURE_CASES: &[PureCase] = &[
                 fields: input.meta.count(),
               }
             }
-        "#,
+        ",
         entry: "summarize",
         input_json: r#"{"left":[1,2],"right":[3],"prefix":"Harn ","name":"Kernel","needle":2,"meta":{"a":1,"b":2}}"#,
         expected_json: r#"{"fields":2,"found":true,"items":[1,2,3],"title":"Harn Kernel"}"#,
     },
     PureCase {
         id: "list-ordering-runtime-and-constant-folding",
-        source: r#"
+        source: r"
             fn compare_lists(input) {
               return {
                 runtime_less: input.left < input.right,
@@ -105,7 +105,7 @@ pub const PURE_CASES: &[PureCase] = &[
                 constant_greater: [2] > [1, 9],
               }
             }
-        "#,
+        ",
         entry: "compare_lists",
         input_json: r#"{"left":[1,2],"right":[1,3]}"#,
         expected_json: r#"{"constant_greater":true,"constant_less":true,"runtime_equal":true,"runtime_less":true}"#,
@@ -130,7 +130,7 @@ pub const PURE_CASES: &[PureCase] = &[
     },
     PureCase {
         id: "negative-index-and-slice",
-        source: r#"
+        source: r"
             fn choose(input) {
               return {
                 last: input.values[-1],
@@ -138,7 +138,7 @@ pub const PURE_CASES: &[PureCase] = &[
                 suffix: input.text[-3:],
               }
             }
-        "#,
+        ",
         entry: "choose",
         input_json: r#"{"values":[1,2,3,4,5],"text":"kernel"}"#,
         expected_json: r#"{"last":5,"middle":[2,3,4],"suffix":"nel"}"#,
@@ -161,13 +161,13 @@ pub const INVALID_CASES: &[InvalidCase] = &[
     },
     InvalidCase {
         id: "invalid-mutable-local-program",
-        source: r#"
+        source: r"
             fn reduce(input) {
               var value = input
               value = value + 1
               return value
             }
-        "#,
+        ",
         entry: "reduce",
         expected_code: "compile_frontend",
     },

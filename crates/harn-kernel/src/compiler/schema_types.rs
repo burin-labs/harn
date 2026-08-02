@@ -152,12 +152,7 @@ impl SchemaFragment {
 /// Count the construction nodes a folded constant expands to at emission.
 fn vm_value_node_count(value: &VmValue) -> usize {
     match value {
-        VmValue::Dict(entries) => {
-            1 + entries
-                .iter()
-                .map(|(_, v)| vm_value_node_count(v))
-                .sum::<usize>()
-        }
+        VmValue::Dict(entries) => 1 + entries.values().map(vm_value_node_count).sum::<usize>(),
         VmValue::List(items) => 1 + items.iter().map(vm_value_node_count).sum::<usize>(),
         _ => 1,
     }

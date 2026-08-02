@@ -292,7 +292,7 @@ fn value_to_snode(value: VmValue, span: harn_lexer::Span) -> Option<SNode> {
                 .map(|(key, value)| {
                     Some(DictEntry {
                         key: SNode {
-                            node: Node::StringLiteral(key.to_string()),
+                            node: Node::StringLiteral(key.clone()),
                             span,
                         },
                         value: value_to_snode(value.clone(), span)?,

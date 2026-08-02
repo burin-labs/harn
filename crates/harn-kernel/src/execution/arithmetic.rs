@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::sync::Arc;
 
 use super::resource::{MAX_VALUE_BYTES, MAX_VALUE_NODES};
@@ -62,7 +63,7 @@ pub(super) fn add(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diag
             let mut values = Vec::with_capacity(length);
             values.extend(a.iter().cloned());
             values.extend(b.iter().cloned());
-            Ok(RuntimeValue::List(Arc::new(values)))
+            Ok(RuntimeValue::List(Rc::new(values)))
         }
         (RuntimeValue::Record(a), RuntimeValue::Record(b)) => {
             if a.len().saturating_add(b.len()) > MAX_VALUE_NODES {
@@ -73,7 +74,7 @@ pub(super) fn add(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diag
             }
             let mut values = (*a).clone();
             values.extend(b.iter().map(|(key, value)| (key.clone(), value.clone())));
-            Ok(RuntimeValue::Record(Arc::new(values)))
+            Ok(RuntimeValue::Record(Rc::new(values)))
         }
         (a, b) => numeric(a, b, i64::checked_add, |a, b| a + b),
     }

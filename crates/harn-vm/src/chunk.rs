@@ -502,15 +502,6 @@ impl CompiledFunction {
     }
 }
 
-/// A snapshot of [`Chunk`]'s compile-time balance model, returned by
-/// [`Chunk::balance_probe`] and consumed by [`Chunk::balance_delta_since`].
-#[cfg(all(debug_assertions, test))]
-#[derive(Clone, Copy)]
-pub(crate) struct BalanceProbe {
-    depth: i32,
-    nonlinear: u32,
-}
-
 /// Net operand-stack effect (`pushes - pops`) of one emitted opcode, for
 /// the debug-build balance assertion (issue #2622). `count` is the opcode's
 /// variadic arity when that arity is the emit-call argument (`BuildList`
@@ -926,30 +917,6 @@ impl Chunk {
         match op_stack_delta(op, count) {
             Some(delta) => self.balance_depth += delta,
             None => self.balance_nonlinear += 1,
-        }
-    }
-
-    /// Snapshot the balance model before compiling a statement; pair with
-    /// [`Chunk::balance_delta_since`].
-    #[cfg(all(debug_assertions, test))]
-    pub(crate) fn balance_probe(&self) -> BalanceProbe {
-        BalanceProbe {
-            depth: self.balance_depth,
-            nonlinear: self.balance_nonlinear,
-        }
-    }
-
-    /// Net operand-stack effect emitted since `probe`, or `None` when any
-    /// non-linearly-modeled opcode was emitted in that span (which makes
-    /// the running sum untrustworthy, so callers must not assert on it).
-    /// The absolute `balance_depth` may be meaningless after a non-exact
-    /// span — only deltas over a fully-exact span are valid.
-    #[cfg(all(debug_assertions, test))]
-    pub(crate) fn balance_delta_since(&self, probe: BalanceProbe) -> Option<i32> {
-        if self.balance_nonlinear == probe.nonlinear {
-            Some(self.balance_depth - probe.depth)
-        } else {
-            None
         }
     }
 
